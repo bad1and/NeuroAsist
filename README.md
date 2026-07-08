@@ -52,6 +52,7 @@ Frontend window:
 
 ```powershell
 cd B:\NeuroAsist\apps\web
+npm install
 npm run dev
 ```
 
