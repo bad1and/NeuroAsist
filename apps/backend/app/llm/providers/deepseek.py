@@ -14,9 +14,9 @@ logger = logging.getLogger(__name__)
 
 
 class DeepSeekProvider(LLMProvider):
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, model: str | None = None) -> None:
         self._api_key = settings.llm_api_key
-        self._model = settings.deepseek_model
+        self._model = model or settings.deepseek_model
         self._client: AsyncOpenAI | None = None
 
         if self._api_key:

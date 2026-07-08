@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_to_file: bool = False
     log_file_path: str = "logs/app.log"
+    cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
+    cors_origin_regex: str = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
 
     @property
     def llm_api_key(self) -> str | None:
@@ -35,6 +37,14 @@ class Settings(BaseSettings):
         if path.is_absolute():
             return path
         return ROOT_DIR / path
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [
+            origin.strip()
+            for origin in self.cors_origins.split(",")
+            if origin.strip()
+        ]
 
 
 @lru_cache

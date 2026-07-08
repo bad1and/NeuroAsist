@@ -9,16 +9,18 @@ from apps.backend.main import app
 
 
 class FailingLLMProvider:
-    def __init__(self, settings):
+    def __init__(self, settings, model=None):
         self.settings = settings
+        self.model = model
 
     async def generate(self, messages):
         raise LLMProviderError("provider failed")
 
 
 class UnexpectedFailingProvider:
-    def __init__(self, settings):
+    def __init__(self, settings, model=None):
         self.settings = settings
+        self.model = model
 
     async def generate(self, messages):
         raise RuntimeError("surprise failure")

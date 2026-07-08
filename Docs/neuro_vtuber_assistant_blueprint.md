@@ -1178,6 +1178,8 @@ Character Agent пользователю:
 
 ## v0.1 — минимальный текстовый ассистент + LLM abstraction
 
+Статус NeuroAsist: **реализовано** в ветке `codex/v0.1`.
+
 Цель: сделать надежный текстовый чат с Character Agent и заменяемыми LLM‑провайдерами.
 
 Функционал:
@@ -1202,6 +1204,8 @@ Character Agent пользователю:
 Риски: API‑ключи/лимиты, нестабильность бесплатных тарифов, разный формат ошибок у провайдеров.
 
 ## v0.2 — Web UI для задач, логов и настроек
+
+Статус NeuroAsist: **реализовано** в ветке `codex/v0.1`.
 
 Цель: сделать локальную панель управления.
 
@@ -1891,11 +1895,12 @@ local UI → desktop wrapper/cloud
 
 # 20. Что делать первым шагом после прочтения ответа
 
-Первый шаг — создать v0.1 skeleton, не трогая пока 3D, STT, TTS и dev‑агента.
+Статус NeuroAsist: v0.1 и v0.2 уже реализованы. Следующий фактический шаг —
+v0.3 voice pipeline, не трогая пока Unity/avatar bridge, Dev Agent и sandbox.
 
-## Конкретная задача №1
+## Уже реализовано в v0.1
 
-Сделать репозиторий:
+Репозиторий:
 
 ```text
 neuro-vtuber-assistant/
@@ -1904,16 +1909,35 @@ neuro-vtuber-assistant/
   docs
 ```
 
-И реализовать:
+Backend:
 
 ```text
 FastAPI backend
 POST /chat
 LLM Provider interface
-MistralProvider или DeepSeekProvider
+DeepSeekProvider через OpenAI-compatible API
 CharacterAgent
 SQLite message history
 .env config
+строгая JSON validation для LLM response
+backend logging
+```
+
+## Уже реализовано в v0.2
+
+```text
+React + TypeScript + Vite UI
+Chat page
+Events / Logs page
+Settings / Providers page
+GET /status
+GET /events
+GET /settings/public
+PATCH /settings/runtime
+WS /ws/events
+EventBus ring buffer
+local CORS config
+runtime model/personality selection
 ```
 
 ## Минимальный v0.1 endpoint
@@ -1957,8 +1981,8 @@ Response:
 Лучший путь:
 
 ```text
-v0.1 — текстовый Character Agent + LLM abstraction
-v0.2 — локальный Web UI
+v0.1 — текстовый Character Agent + LLM abstraction — done
+v0.2 — локальный Web UI — done
 v0.3 — STT/TTS
 v0.4 — 3D avatar bridge
 v0.5 — Dev Agent в project-folder sandbox
@@ -2010,4 +2034,3 @@ v1.0 — plugin-based multi-agent platform
 ```text
 Изучи приложенный blueprint проекта Neuro‑VTuber Assistant. Продолжи с разработки v0.1: помоги создать структуру репозитория, FastAPI backend, LLM provider abstraction, CharacterAgent, SQLite storage и /chat endpoint. Начни с пошагового плана и затем дай код файлов.
 ```
-

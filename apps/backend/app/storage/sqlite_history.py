@@ -57,6 +57,11 @@ class SQLiteMessageHistory:
             for row in reversed(rows)
         ]
 
+    def check_health(self) -> bool:
+        with self._connect() as connection:
+            connection.execute("SELECT 1").fetchone()
+        return True
+
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self._db_path)
         connection.row_factory = sqlite3.Row
