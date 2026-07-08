@@ -1,9 +1,13 @@
 import json
+import logging
 from typing import Any
 
 from apps.backend.app.agents.character.prompts import CHARACTER_SYSTEM_PROMPT
 from apps.backend.app.llm.base import ChatMessage, LLMProvider
+from apps.backend.app.schemas.character import CharacterLLMResponse
 from apps.backend.app.storage.sqlite_history import SQLiteMessageHistory
+
+logger = logging.getLogger(__name__)
 
 
 class CharacterAgent:
@@ -37,25 +41,26 @@ class CharacterAgent:
         try:
             payload: Any = json.loads(raw_content)
         except json.JSONDecodeError:
-            return {
-                "reply": raw_content.strip(),
-                "emotion": "neutral",
-                "intent": "casual_chat",
-            }
+            return self._fallback_response(raw_content, "json_decode_error")
 
         if not isinstance(payload, dict):
-            return {
-                "reply": str(payload),
-                "emotion": "neutral",
-                "intent": "casual_chat",
-            }
+            return self._fallback_response(raw_content, "non_object_payload")
 
-        reply = str(payload.get("reply") or "").strip()
-        if not reply:
-            reply = raw_content.strip()
+        try:
+            parsed = CharacterLLMResponse.model_validate(payload)
+        except ValueError:
+            return self._fallback_response(raw_content, "schema_validation_error")
 
+        return parsed.model_dump()
+
+    def _fallback_response(self, raw_content: str, reason: str) -> dict[str, str]:
+        logger.warning(
+            "Invalid LLM JSON response, using fallback: reason=%s raw_length=%s",
+            reason,
+            len(raw_content),
+        )
         return {
-            "reply": reply,
-            "emotion": str(payload.get("emotion") or "neutral"),
-            "intent": str(payload.get("intent") or "casual_chat"),
+            "reply": raw_content.strip() or "Не смог корректно разобрать ответ модели.",
+            "emotion": "neutral",
+            "intent": "unknown",
         }

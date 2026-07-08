@@ -1,3 +1,5 @@
+import logging
+
 from openai import APIStatusError, AsyncOpenAI, OpenAIError
 
 from apps.backend.app.core.config import Settings
@@ -7,6 +9,8 @@ from apps.backend.app.llm.base import (
     LLMProviderError,
     LLMResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class DeepSeekProvider(LLMProvider):
@@ -25,6 +29,12 @@ class DeepSeekProvider(LLMProvider):
         if self._client is None:
             raise ValueError("DeepSeek API key is not configured")
 
+        logger.debug(
+            "Sending LLM request: provider=deepseek model=%s messages_count=%s",
+            self._model,
+            len(messages),
+        )
+
         try:
             response = await self._client.chat.completions.create(
                 model=self._model,
@@ -35,13 +45,25 @@ class DeepSeekProvider(LLMProvider):
             content = response.choices[0].message.content
             model = response.model or self._model
         except APIStatusError as exc:
+            logger.error(
+                "DeepSeek API status error: status_code=%s model=%s",
+                exc.status_code,
+                self._model,
+            )
             raise LLMProviderError(
                 f"DeepSeek API returned HTTP {exc.status_code}"
             ) from exc
         except (OpenAIError, IndexError, TypeError, ValueError) as exc:
+            logger.error(
+                "DeepSeek API request failed: model=%s exception_type=%s",
+                self._model,
+                type(exc).__name__,
+            )
             raise LLMProviderError("DeepSeek API request failed") from exc
 
         if not content:
+            logger.error("DeepSeek API returned an empty response: model=%s", self._model)
             raise LLMProviderError("DeepSeek API returned an empty response")
 
+        logger.debug("Received LLM response: provider=deepseek model=%s", model)
         return LLMResponse(content=content, model=model)

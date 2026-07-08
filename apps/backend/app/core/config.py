@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     deepseek_model: str = "deepseek-v4-flash"
     sqlite_path: str = "data/neuroasist.sqlite3"
     chat_history_limit: int = 20
+    log_level: str = "INFO"
+    log_to_file: bool = False
+    log_file_path: str = "logs/app.log"
 
     @property
     def llm_api_key(self) -> str | None:
