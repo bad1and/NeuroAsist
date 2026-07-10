@@ -139,6 +139,52 @@ def test_edge_tts_rejects_empty_audio(tmp_path: Path) -> None:
     assert not output_path.exists()
 
 
+def test_edge_tts_falls_back_to_multilingual_edge_voice(tmp_path: Path) -> None:
+    provider = EdgeTTSProvider()
+    provider._CHUNK_RETRIES = 0
+    provider._probe_duration = lambda audio_path: None
+    fake_edge_tts = SimpleNamespace(
+        Communicate=_FakeCommunicateFactory(
+            [
+                _FakeStream([]),
+                _FakeStream([{"type": "audio", "data": b"fallback-audio"}]),
+            ]
+        )
+    )
+    output_path = tmp_path / "fallback.mp3"
+
+    duration, voice = asyncio.run(
+        provider._synthesize_chunk(
+            fake_edge_tts,
+            "Привет!",
+            "ru-RU-SvetlanaNeural",
+            output_path,
+        )
+    )
+
+    assert duration is None
+    assert voice == "en-US-EmmaMultilingualNeural"
+    assert output_path.read_bytes() == b"fallback-audio"
+
+
+def test_edge_tts_accepts_non_empty_audio_when_ffprobe_is_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = EdgeTTSProvider()
+    output_path = tmp_path / "without-ffprobe.mp3"
+    output_path.write_bytes(b"fake mp3 bytes")
+    monkeypatch.setattr("apps.backend.app.voice.providers.shutil.which", lambda name: None)
+
+    duration = provider._validate_chunk_audio_path(
+        output_path,
+        "Да.",
+        "edge-tts returned invalid audio for chunk",
+    )
+
+    assert duration is None
+
+
 def test_edge_tts_rejects_audio_that_is_too_short_for_text(tmp_path: Path) -> None:
     provider = EdgeTTSProvider()
     output_path = tmp_path / "short.mp3"
@@ -165,6 +211,7 @@ def test_edge_tts_strips_trailing_comma_before_synthesis(
     communicate_factory = _FakeCommunicateFactory(streams)
     fake_edge_tts = SimpleNamespace(Communicate=communicate_factory)
     monkeypatch.setitem(sys.modules, "edge_tts", fake_edge_tts)
+    monkeypatch.setattr("apps.backend.app.voice.providers.shutil.which", lambda name: "ffmpeg")
     provider._probe_duration = lambda audio_path: 2.0 if ".tmp" in audio_path.name else 1.0
     provider._concat_mp3_chunks = lambda chunk_paths, output_path: output_path.write_bytes(b"ok")
 
