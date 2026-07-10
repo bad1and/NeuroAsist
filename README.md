@@ -1,4 +1,4 @@
-# NeuroAsist
+# NeuroAsist V0.3
 
 NeuroAsist is an early local-first skeleton for a voice-capable neuro-VTuber
 assistant.
