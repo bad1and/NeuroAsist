@@ -110,7 +110,7 @@ class _FakeCommunicateFactory:
         return SimpleNamespace(stream=lambda: stream)
 
 
-def test_edge_tts_rejects_partial_audio_when_stream_stalls(tmp_path: Path) -> None:
+def test_edge_tts_accepts_valid_audio_when_stream_stalls_after_audio(tmp_path: Path) -> None:
     provider = EdgeTTSProvider()
     provider._STREAM_IDLE_TIMEOUT_SECONDS = 0.01
     provider._CHUNK_RETRIES = 0
@@ -121,10 +121,15 @@ def test_edge_tts_rejects_partial_audio_when_stream_stalls(tmp_path: Path) -> No
     )
     output_path = tmp_path / "partial.mp3"
 
-    with pytest.raises(RuntimeError, match="edge-tts returned no audio for chunk"):
-        asyncio.run(provider._synthesize_chunk(fake_edge_tts, "Привет, как дела?", "voice", output_path))
+    provider._probe_duration = lambda audio_path: 1.0
 
-    assert not output_path.exists()
+    duration, voice = asyncio.run(
+        provider._synthesize_chunk(fake_edge_tts, "Привет, как дела?", "voice", output_path)
+    )
+
+    assert duration == 1.0
+    assert voice == "voice"
+    assert output_path.read_bytes()
 
 
 def test_edge_tts_rejects_empty_audio(tmp_path: Path) -> None:

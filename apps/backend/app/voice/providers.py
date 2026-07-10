@@ -142,6 +142,7 @@ class FasterWhisperSTTProvider(STTProvider):
 
 class EdgeTTSProvider(TTSProvider):
     _STREAM_IDLE_TIMEOUT_SECONDS = 4
+    _POST_AUDIO_IDLE_TIMEOUT_SECONDS = 0.5
     _MAX_CHUNK_CHARS = 60
     _MAX_CHUNK_WORDS = 12
     _CHUNK_RETRIES = 2
@@ -237,14 +238,12 @@ class EdgeTTSProvider(TTSProvider):
             for _ in range(self._CHUNK_RETRIES + 1):
                 output_path.unlink(missing_ok=True)
                 try:
-                    audio_bytes, stream_completed = await self._write_stream_to_file(
+                    audio_bytes, _stream_completed = await self._write_stream_to_file(
                         edge_tts,
                         text,
                         candidate_voice,
                         output_path,
                     )
-                    if not stream_completed:
-                        raise RuntimeError("edge-tts returned incomplete audio stream")
                     audio_duration_seconds = await asyncio.to_thread(
                         self._validate_chunk_audio_path,
                         output_path,
@@ -282,12 +281,23 @@ class EdgeTTSProvider(TTSProvider):
                     try:
                         message = await asyncio.wait_for(
                             anext(stream),
-                            timeout=self._STREAM_IDLE_TIMEOUT_SECONDS,
+                            timeout=(
+                                self._POST_AUDIO_IDLE_TIMEOUT_SECONDS
+                                if audio_bytes > 0
+                                else self._STREAM_IDLE_TIMEOUT_SECONDS
+                            ),
                         )
                     except StopAsyncIteration:
                         stream_completed = True
                         break
                     except TimeoutError:
+                        # Some Edge endpoints deliver a complete MP3 and then leave the
+                        # websocket open instead of ending the async iterator.  The
+                        # audio validator below is the reliable completeness check;
+                        # treating the missing EOF as a hard failure discarded valid
+                        # audio and multiplied the delay through every retry/fallback.
+                        if audio_bytes > 0:
+                            break
                         raise
 
                     if message.get("type") != "audio":
@@ -298,7 +308,7 @@ class EdgeTTSProvider(TTSProvider):
                         audio_bytes += len(data)
         finally:
             with contextlib.suppress(Exception):
-                await stream.aclose()
+                await asyncio.wait_for(stream.aclose(), timeout=1.0)
 
         return audio_bytes, stream_completed
 
