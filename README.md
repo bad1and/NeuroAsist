@@ -25,7 +25,8 @@ dev-agent, screen context, long-term memory, embeddings, RAG, users, and auth.
 - Python 3.12+
 - Node.js 24+
 - DeepSeek API key
-- FFmpeg on PATH for real audio transcription
+- FFmpeg and FFprobe on PATH for real audio transcription, TTS validation, and
+  multi-chunk Edge TTS concatenation
 
 Install backend dependencies:
 
@@ -49,6 +50,9 @@ Backend window:
 ```powershell
 cd B:\NeuroAsist
 .\.venv\Scripts\Activate.ps1
+$env:Path = "C:\Users\OLEG\Tools\ffmpeg\bin;$env:Path"
+ffmpeg -version
+ffprobe -version
 python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
@@ -72,6 +76,13 @@ Find and stop the listener:
 ```powershell
 netstat -ano | Select-String ":8000"
 Stop-Process -Id <PID> -Force
+```
+
+If `ffmpeg` or `ffprobe` is not found after installation, restart PowerShell or
+prepend the FFmpeg bin directory in the same terminal before starting backend:
+
+```powershell
+$env:Path = "C:\Users\OLEG\Tools\ffmpeg\bin;$env:Path"
 ```
 
 ## Configuration
@@ -200,6 +211,16 @@ backend publishes a `voice.tts_ready` WebSocket event with `voice_request_id`
 and `audio_url`; the web UI attaches that audio to the matching assistant
 message.
 
+Edge TTS notes:
+
+- backend prefers Edge TTS audio over browser speech;
+- Russian Edge voices can fall back to Edge multilingual voices if a provider
+  returns no audio;
+- short comma-heavy phrases stay in one TTS chunk for more natural pacing;
+- Edge TTS is currently sent with `rate="+20%"`;
+- FFmpeg/FFprobe must be visible to the backend process for multi-chunk
+  concatenation and duration validation.
+
 ## Run Frontend
 
 From `apps/web`:
@@ -236,6 +257,8 @@ The local web panel includes:
 - Events: loads `GET /events` and receives live `WS /ws/events` events.
 - Settings: shows safe provider settings and updates runtime model/personality
   plus voice language/TTS voice.
+- TTS: background Edge TTS jobs report `queued` / `ready` / `failed`; ready
+  audio is attached to the assistant message and played from `/voice/audio`.
 
 The browser never receives or stores the DeepSeek API key.
 

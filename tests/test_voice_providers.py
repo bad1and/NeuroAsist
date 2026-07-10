@@ -16,35 +16,30 @@ def test_split_tts_chunks_keeps_short_reply_as_one_chunk() -> None:
     assert split_tts_chunks("Привет!") == ["Привет!"]
 
 
-def test_split_tts_chunks_splits_comma_phrases_before_edge_tts() -> None:
+def test_split_tts_chunks_keeps_short_comma_phrases_together() -> None:
     chunks = split_tts_chunks(
         "Привет, как дела? Я хотела спросить, почему фраза обрезается после запятой?"
     )
 
     assert chunks == [
-        "Привет,",
-        "как дела?",
-        "Я хотела спросить,",
-        "почему фраза обрезается после запятой?",
+        "Привет, как дела?",
+        "Я хотела спросить, почему фраза обрезается после запятой?",
     ]
-    assert chunks[0].endswith(",")
     assert chunks[-1].endswith("?")
 
 
 def test_split_tts_chunks_preserves_sentence_punctuation() -> None:
     chunks = split_tts_chunks("Да, конечно, сейчас проверю. Это может быть из-за паузы?")
 
-    assert chunks == ["Да,", "конечно,", "сейчас проверю.", "Это может быть из-за паузы?"]
-    assert chunks[0].endswith(",")
-    assert chunks[1].endswith(",")
-    assert chunks[2].endswith(".")
-    assert chunks[3].endswith("?")
+    assert chunks == ["Да, конечно, сейчас проверю.", "Это может быть из-за паузы?"]
+    assert chunks[0].endswith(".")
+    assert chunks[1].endswith("?")
 
 
 def test_split_tts_chunks_splits_regression_after_comma() -> None:
     chunks = split_tts_chunks("Привет! Отлично, а у тебя?")
 
-    assert chunks == ["Привет!", "Отлично,", "а у тебя?"]
+    assert chunks == ["Привет!", "Отлично, а у тебя?"]
 
 
 def test_split_tts_chunks_keeps_short_sentence_words_together() -> None:
@@ -103,9 +98,11 @@ class _FakeCommunicateFactory:
     def __init__(self, streams: list[_FakeStream]) -> None:
         self._streams = streams
         self.calls: list[tuple[str, str]] = []
+        self.call_kwargs: list[dict] = []
 
-    def __call__(self, text: str, voice: str):
+    def __call__(self, text: str, voice: str, **kwargs):
         self.calls.append((text, voice))
+        self.call_kwargs.append(kwargs)
         stream = self._streams.pop(0)
         return SimpleNamespace(stream=lambda: stream)
 
@@ -211,7 +208,6 @@ def test_edge_tts_strips_trailing_comma_before_synthesis(
     provider = EdgeTTSProvider()
     streams = [
         _FakeStream([{"type": "audio", "data": b"chunk-a"}]),
-        _FakeStream([{"type": "audio", "data": b"chunk-b"}]),
     ]
     communicate_factory = _FakeCommunicateFactory(streams)
     fake_edge_tts = SimpleNamespace(Communicate=communicate_factory)
@@ -229,9 +225,9 @@ def test_edge_tts_strips_trailing_comma_before_synthesis(
     )
 
     assert communicate_factory.calls == [
-        ("У меня всё хорошо", "voice"),
-        ("спасибо!", "voice"),
+        ("У меня всё хорошо, спасибо!", "voice"),
     ]
+    assert communicate_factory.call_kwargs == [{"rate": "+20%"}]
 
 
 def test_edge_tts_finishes_tiny_chunks_with_sentence_punctuation() -> None:

@@ -143,10 +143,11 @@ class FasterWhisperSTTProvider(STTProvider):
 class EdgeTTSProvider(TTSProvider):
     _STREAM_IDLE_TIMEOUT_SECONDS = 4
     _POST_AUDIO_IDLE_TIMEOUT_SECONDS = 0.5
-    _MAX_CHUNK_CHARS = 60
-    _MAX_CHUNK_WORDS = 12
+    _MAX_CHUNK_CHARS = 90
+    _MAX_CHUNK_WORDS = 18
     _CHUNK_RETRIES = 2
-    _CHUNK_PAUSE_SECONDS = 0.25
+    _CHUNK_PAUSE_SECONDS = 0.15
+    _RATE = "+20%"
     _VOICE_FALLBACKS = {
         "ru-RU-SvetlanaNeural": [
             "en-US-EmmaMultilingualNeural",
@@ -271,7 +272,7 @@ class EdgeTTSProvider(TTSProvider):
         voice: str,
         output_path: Path,
     ) -> tuple[int, bool]:
-        communicate = edge_tts.Communicate(text, voice)
+        communicate = edge_tts.Communicate(text, voice, rate=self._RATE)
         audio_bytes = 0
         stream_completed = False
         stream = communicate.stream()
@@ -501,14 +502,15 @@ def _is_tiny_tts_chunk(text: str) -> bool:
 
 
 def _split_tts_sentence(text: str, max_chars: int, max_words: int) -> list[str]:
+    if _tts_chunk_fits(text, max_chars, max_words):
+        return [text]
+
     clauses = [
         part.strip()
         for part in re.split(r"(?<=[,;:])\s+", text)
         if part.strip()
     ]
     if len(clauses) <= 1:
-        if _tts_chunk_fits(text, max_chars, max_words):
-            return [text]
         return _split_long_tts_text(text, max_chars, max_words)
 
     chunks: list[str] = []
