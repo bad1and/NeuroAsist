@@ -1,0 +1,128 @@
+import logging
+
+from fastapi import APIRouter, HTTPException, Request, status
+
+from apps.backend.app.agents.character.agent import CharacterAgent
+from apps.backend.app.llm.base import LLMProviderError
+from apps.backend.app.llm.providers.deepseek import DeepSeekProvider
+from apps.backend.app.schemas.chat import ChatRequest, ChatResponse
+
+router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+@router.post("/chat", response_model=ChatResponse)
+async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
+    settings = request.app.state.settings
+    history = request.app.state.history
+    event_bus = request.app.state.event_bus
+    runtime_settings = request.app.state.runtime_settings
+    event_bus.publish(
+        "chat.started",
+        "info",
+        "Chat request started",
+        {
+            "session_id": payload.session_id,
+            "message_length": len(payload.message),
+        },
+    )
+
+    try:
+        provider = DeepSeekProvider(settings, model=runtime_settings.model)
+        agent = CharacterAgent(
+            llm_provider=provider,
+            history=history,
+            history_limit=settings.chat_history_limit,
+            event_publisher=event_bus.publish,
+        )
+        result = await agent.handle_user_message(payload.session_id, payload.message)
+    except ValueError as exc:
+        logger.error(
+            "Chat request failed: session_id=%s message_length=%s",
+            payload.session_id,
+            len(payload.message),
+            exc_info=True,
+        )
+        event_bus.publish(
+            "chat.failed",
+            "error",
+            "Chat request failed",
+            {
+                "session_id": payload.session_id,
+                "message_length": len(payload.message),
+                "error_type": type(exc).__name__,
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+    except LLMProviderError as exc:
+        logger.error(
+            "LLM provider failed during chat request: session_id=%s message_length=%s",
+            payload.session_id,
+            len(payload.message),
+            exc_info=True,
+        )
+        event_bus.publish(
+            "llm.error",
+            "error",
+            "LLM provider failed during chat request",
+            {
+                "session_id": payload.session_id,
+                "message_length": len(payload.message),
+                "error_type": type(exc).__name__,
+            },
+        )
+        event_bus.publish(
+            "chat.failed",
+            "error",
+            "Chat request failed",
+            {
+                "session_id": payload.session_id,
+                "message_length": len(payload.message),
+                "error_type": type(exc).__name__,
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        logger.exception(
+            "Unexpected /chat failure: session_id=%s message_length=%s",
+            payload.session_id,
+            len(payload.message),
+        )
+        event_bus.publish(
+            "chat.failed",
+            "critical",
+            "Unexpected chat failure",
+            {
+                "session_id": payload.session_id,
+                "message_length": len(payload.message),
+                "error_type": type(exc).__name__,
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal chat error",
+        ) from exc
+
+    logger.info(
+        "Chat request complete: session_id=%s message_length=%s",
+        payload.session_id,
+        len(payload.message),
+    )
+    event_bus.publish(
+        "chat.completed",
+        "info",
+        "Chat request completed",
+        {
+            "session_id": payload.session_id,
+            "reply_length": len(result["reply"]),
+            "emotion": result["emotion"],
+            "intent": result["intent"],
+        },
+    )
+    return ChatResponse(**result)

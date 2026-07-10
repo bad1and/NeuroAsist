@@ -862,11 +862,14 @@ Avatar lipsync receives amplitude/phonemes
 Для MVP:
 
 ```text
-v0.3:
-  - push-to-talk или manual record button
-  - faster-whisper или cloud STT
-  - Edge TTS
-  - audio playback
+v0.3 реализовано:
+  - manual push-to-talk в Web UI
+  - browser MediaRecorder upload → POST /voice/chat
+  - faster-whisper STT
+  - DeepSeek → CharacterAgent
+  - background Edge TTS
+  - audio playback в React UI
+  - live события через WebSocket
 ```
 
 Потом:
@@ -1178,6 +1181,8 @@ Character Agent пользователю:
 
 ## v0.1 — минимальный текстовый ассистент + LLM abstraction
 
+Статус NeuroAsist: **реализовано** в ветке `codex/v0.1`.
+
 Цель: сделать надежный текстовый чат с Character Agent и заменяемыми LLM‑провайдерами.
 
 Функционал:
@@ -1203,6 +1208,8 @@ Character Agent пользователю:
 
 ## v0.2 — Web UI для задач, логов и настроек
 
+Статус NeuroAsist: **реализовано** в ветке `codex/v0.1`.
+
 Цель: сделать локальную панель управления.
 
 Функционал:
@@ -1227,30 +1234,83 @@ Character Agent пользователю:
 
 ## v0.3 — голосовое общение STT/TTS
 
-Цель: добавить голосовой цикл.
+Статус: реализовано как рабочий push-to-talk voice loop без avatar/lipsync и без streaming voice.
 
-Функционал:
+Фактический функционал:
 
-- запись микрофона;
-- push-to-talk;
-- STT provider interface;
-- TTS provider interface;
-- audio playback;
+- запись микрофона в React UI через `MediaRecorder`;
+- отправка browser audio в `POST /voice/chat` с нормализацией MIME (`audio/webm;codecs=opus`, `application/octet-stream` + audio extension);
+- `VoiceService` с provider-интерфейсами для STT/TTS;
+- STT через `faster-whisper`;
+- LLM через `DeepSeekProvider` и `CharacterAgent`;
+- TTS через `edge-tts` в background task;
+- Edge TTS voice fallback внутри Edge: русские voices пробуются первыми, затем multilingual Edge voices;
+- `GET /voice/tts/{voice_request_id}` для статуса TTS job;
+- `GET /voice/audio/{audio_id}` для готового audio file;
+- WebSocket events: `voice.upload_received`, `voice.transcribing_started`, `voice.transcribing_finished`, `voice.completed`, `voice.tts_started`, `voice.tts_ready`, `voice.tts_failed`;
 - русский/английский язык;
-- настройка голоса.
+- настройка TTS voice в runtime settings.
+
+Текущая конфигурация MVP:
+
+```env
+VOICE_STT_PROVIDER=faster_whisper
+VOICE_STT_MODEL=small
+VOICE_STT_DEVICE=cpu
+VOICE_STT_COMPUTE_TYPE=int8
+VOICE_TTS_PROVIDER=edge_tts
+VOICE_TTS_VOICE_RU=ru-RU-SvetlanaNeural
+VOICE_TTS_VOICE_EN=en-US-AriaNeural
+VOICE_TTS_BACKGROUND_TIMEOUT_SECONDS=20
+VOICE_TTS_MAX_CHARS=1200
+```
+
+Runtime dependency:
+
+- `ffmpeg` и `ffprobe` должны быть видны backend-процессу через `PATH`;
+- на Windows при уже открытом PowerShell нужно либо перезапустить терминал, либо добавить `C:\Users\OLEG\Tools\ffmpeg\bin` в `$env:Path` перед запуском backend.
+
+STT-детали:
+
+- используется `faster-whisper small` как более стабильный минимум для русского голоса, чем `base`;
+- включены `beam_size=5`, `best_of=5`;
+- включен VAD-фильтр с padding;
+- для русского языка добавлен prompt, чтобы модель не переводила и не выдумывала текст.
+
+TTS-детали:
+
+- `/voice/chat` возвращает текстовый ответ сразу, а TTS продолжает генерироваться в фоне;
+- готовность аудио приходит через `voice.tts_ready` и status endpoint;
+- Edge TTS режется на safe chunks только когда фраза не помещается в лимиты; короткие comma-heavy фразы больше не режутся по каждой запятой, чтобы не создавать неестественные паузы;
+- chunks дополнительно нормализуются: хвостовые `,`, `;`, `:` не отправляются в Edge как конец отдельного TTS-фрагмента;
+- между chunks добавляется короткая пауза, чтобы не съедались окончания слов;
+- итоговый MP3 собирается через FFmpeg audio filter concat с re-encode, а не простым byte/packet copy;
+- каждый chunk и итоговый файл проверяются через `ffprobe`;
+- текущий Edge TTS rate: `+20%`;
+- если TTS падает, текстовый ответ остается доступен, UI может использовать browser speech fallback.
 
 Критерии готовности:
 
-- пользователь говорит;
-- текст корректно распознается;
-- ответ генерируется;
-- ответ озвучивается.
+- пользователь говорит через push-to-talk;
+- backend сохраняет upload и распознает текст;
+- CharacterAgent генерирует JSON-ответ с `reply`, `emotion`, `intent`;
+- frontend показывает transcript/reply;
+- TTS job переходит из `queued` в `ready` или `failed`;
+- готовый audio URL воспроизводится без наложения нескольких дорожек.
 
-Риски: задержка, ошибки распознавания, сложность interruption/barge-in.
+Оставшиеся риски v0.3:
+
+- Edge TTS не является полноценным streaming/provider-grade решением и может иметь edge cases на пунктуации;
+- background TTS снижает perceived latency для текста, но аудио все еще появляется после генерации файла;
+- STT качество на CPU зависит от микрофона, шума и выбранной модели;
+- нет barge-in/interruption;
+- нет lipsync/avatar reaction.
 
 Пока не делать:
 
 - постоянное прослушивание;
+- streaming STT/LLM/TTS;
+- barge-in/interruption;
 - эмоциональный voice cloning;
 - идеальный real-time lip sync.
 
@@ -1804,6 +1864,16 @@ Rate limit handling
 сказал фразу → 8 секунд тишины → ответ
 ```
 
+Текущее состояние v0.3:
+
+```text
+сказал фразу
+→ STT/LLM
+→ текстовый ответ появляется сразу после LLM
+→ TTS генерируется background job
+→ UI получает voice.tts_ready и включает audio control
+```
+
 Как снизить:
 
 ```text
@@ -1811,6 +1881,16 @@ VAD
 streaming LLM
 sentence-by-sentence TTS
 partial avatar reactions
+```
+
+Для v0.4+ стоит перейти от batch MP3-файла к streaming playback:
+
+```text
+первые предложения LLM
+→ edge_tts.Communicate.stream()
+→ первые аудиобайты
+→ немедленное воспроизведение
+→ последующие chunks дозагружаются без ожидания полного ответа
 ```
 
 ## Риск 4. 3D‑модель съест слишком много времени
@@ -1891,11 +1971,12 @@ local UI → desktop wrapper/cloud
 
 # 20. Что делать первым шагом после прочтения ответа
 
-Первый шаг — создать v0.1 skeleton, не трогая пока 3D, STT, TTS и dev‑агента.
+Статус NeuroAsist: v0.1 и v0.2 уже реализованы. Следующий фактический шаг —
+v0.3 voice pipeline, не трогая пока Unity/avatar bridge, Dev Agent и sandbox.
 
-## Конкретная задача №1
+## Уже реализовано в v0.1
 
-Сделать репозиторий:
+Репозиторий:
 
 ```text
 neuro-vtuber-assistant/
@@ -1904,16 +1985,35 @@ neuro-vtuber-assistant/
   docs
 ```
 
-И реализовать:
+Backend:
 
 ```text
 FastAPI backend
 POST /chat
 LLM Provider interface
-MistralProvider или DeepSeekProvider
+DeepSeekProvider через OpenAI-compatible API
 CharacterAgent
 SQLite message history
 .env config
+строгая JSON validation для LLM response
+backend logging
+```
+
+## Уже реализовано в v0.2
+
+```text
+React + TypeScript + Vite UI
+Chat page
+Events / Logs page
+Settings / Providers page
+GET /status
+GET /events
+GET /settings/public
+PATCH /settings/runtime
+WS /ws/events
+EventBus ring buffer
+local CORS config
+runtime model/personality selection
 ```
 
 ## Минимальный v0.1 endpoint
@@ -1957,8 +2057,8 @@ Response:
 Лучший путь:
 
 ```text
-v0.1 — текстовый Character Agent + LLM abstraction
-v0.2 — локальный Web UI
+v0.1 — текстовый Character Agent + LLM abstraction — done
+v0.2 — локальный Web UI — done
 v0.3 — STT/TTS
 v0.4 — 3D avatar bridge
 v0.5 — Dev Agent в project-folder sandbox
@@ -2039,10 +2139,31 @@ v1.0 — plugin-based multi-agent platform
 Основной STT:
 - faster-whisper.
 
+Текущее решение v0.3:
+- модель по умолчанию: `small`;
+- CPU/int8 как baseline;
+- `beam_size=5`, `best_of=5`;
+- VAD включен;
+- для русского языка используется initial prompt.
+
 ## ADR-004 — TTS
 
 Основной TTS:
 - Edge TTS.
+
+Текущее решение v0.3:
+- TTS запускается background task после LLM;
+- ответ `/voice/chat` не ждет готового audio file;
+- статус доступен через `/voice/tts/{voice_request_id}`;
+- audio отдается через `/voice/audio/{audio_id}`;
+- chunks режутся по предложениям и punctuation boundaries;
+- короткие фразы с запятыми сохраняются одним TTS chunk для естественного темпа;
+- длинные chunks режутся по предложениям и punctuation boundaries;
+- chunks с хвостовыми `,`, `;`, `:` нормализуются перед отправкой в Edge;
+- Edge TTS вызывается с `rate="+20%"`;
+- русские Edge voices имеют multilingual Edge fallback voices;
+- итоговый MP3 собирается через FFmpeg audio filter concat + re-encode;
+- валидируется длительность chunk-файлов и финального файла.
 
 ## ADR-005 — Голосовой режим
 
@@ -2054,8 +2175,11 @@ User
 → Push-To-Talk
 → faster-whisper
 → DeepSeek V4 Flash
-→ Edge TTS
-→ Unity Avatar
+→ CharacterAgent
+→ background Edge TTS
+→ Web UI audio playback
+
+Unity Avatar/lipsync еще не подключены в v0.3.
 
 Streaming STT/LLM/TTS переносится на более поздние версии.
 
