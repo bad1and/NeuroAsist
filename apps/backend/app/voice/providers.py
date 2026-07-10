@@ -42,6 +42,10 @@ class TTSProvider:
         raise NotImplementedError
 
 
+class _IncompleteEdgeStreamError(RuntimeError):
+    """Edge returned a playable prefix but never confirmed the end of audio."""
+
+
 class MockSTTProvider(STTProvider):
     async def transcribe(self, audio_path: Path, language: str) -> STTResult:
         return STTResult(
@@ -142,10 +146,16 @@ class FasterWhisperSTTProvider(STTProvider):
 
 class EdgeTTSProvider(TTSProvider):
     _STREAM_IDLE_TIMEOUT_SECONDS = 4
-    _POST_AUDIO_IDLE_TIMEOUT_SECONDS = 0.5
+    _POST_AUDIO_IDLE_TIMEOUT_SECONDS = 0.2
+    _STREAM_CLOSE_TIMEOUT_SECONDS = 0.1
     _MAX_CHUNK_CHARS = 90
     _MAX_CHUNK_WORDS = 18
-    _CHUNK_RETRIES = 2
+    # A retry is a different voice, not another long wait with the same inputs.
+    # This caps the old 3 voices x 3 retries failure mode at three attempts.
+    _CHUNK_RETRIES = 0
+    _MAX_TOTAL_ATTEMPTS = 50
+    _MAX_SYNTHESIS_SECONDS = 18.0
+    _ADAPTIVE_WORD_LIMITS = (2, 1)
     _CHUNK_PAUSE_SECONDS = 0.15
     _RATE = "+20%"
     _VOICE_FALLBACKS = {
@@ -175,20 +185,24 @@ class EdgeTTSProvider(TTSProvider):
         )
         final_temp_path.unlink(missing_ok=True)
         selected_voice = voice
+        attempts = [0]
+        deadline = time.monotonic() + self._MAX_SYNTHESIS_SECONDS
         try:
-            for index, chunk in enumerate(chunks):
-                chunk_path = output_path.with_name(
-                    f"{output_path.stem}.part{index:03d}{output_path.suffix}"
+            for chunk in chunks:
+                completed = await self._synthesize_adaptive_chunk(
+                    edge_tts=edge_tts,
+                    text=chunk,
+                    requested_voice=voice,
+                    preferred_voice=selected_voice,
+                    output_path=output_path,
+                    start_index=len(chunk_paths),
+                    attempts=attempts,
+                    deadline=deadline,
+                    allow_split=shutil.which("ffmpeg") is not None,
                 )
-                tts_chunk = _prepare_edge_tts_chunk(chunk)
-                chunk_duration, selected_voice = await self._synthesize_chunk(
-                    edge_tts,
-                    tts_chunk,
-                    voice,
-                    chunk_path,
-                )
-                chunk_paths.append(chunk_path)
-                chunk_durations.append(chunk_duration)
+                for chunk_path, chunk_duration, selected_voice in completed:
+                    chunk_paths.append(chunk_path)
+                    chunk_durations.append(chunk_duration)
 
             if len(chunk_paths) == 1:
                 chunk_paths[0].replace(final_temp_path)
@@ -213,7 +227,7 @@ class EdgeTTSProvider(TTSProvider):
             duration_ms=int((time.perf_counter() - started) * 1000),
             provider="edge_tts",
             voice=selected_voice,
-            chunks_count=len(chunks),
+            chunks_count=len(chunk_durations),
             audio_duration_seconds=audio_duration_seconds,
         )
 
@@ -227,19 +241,89 @@ class EdgeTTSProvider(TTSProvider):
             return [text]
         return chunks
 
+    async def _synthesize_adaptive_chunk(
+        self,
+        *,
+        edge_tts,
+        text: str,
+        requested_voice: str,
+        preferred_voice: str,
+        output_path: Path,
+        start_index: int,
+        attempts: list[int],
+        deadline: float,
+        allow_split: bool,
+    ) -> list[tuple[Path, float | None, str]]:
+        """Synthesize a chunk, splitting only the fragment that Edge truncated."""
+        pending = [text]
+        completed: list[tuple[Path, float | None, str]] = []
+        while pending:
+            part = pending.pop(0)
+            part_path = output_path.with_name(
+                f"{output_path.stem}.part{start_index + len(completed):03d}{output_path.suffix}"
+            )
+            try:
+                duration, actual_voice = await self._synthesize_chunk(
+                    edge_tts,
+                    _prepare_edge_tts_chunk(part),
+                    preferred_voice,
+                    part_path,
+                    attempts=attempts,
+                    deadline=deadline,
+                    requested_voice=requested_voice,
+                )
+            except Exception:
+                part_path.unlink(missing_ok=True)
+                smaller = self._smaller_chunks(part) if allow_split else [part]
+                if len(smaller) <= 1:
+                    for path, _, _ in completed:
+                        path.unlink(missing_ok=True)
+                    raise
+                pending = [*smaller, *pending]
+                continue
+            preferred_voice = actual_voice
+            completed.append((part_path, duration, actual_voice))
+        return completed
+
+    def _smaller_chunks(self, text: str) -> list[str]:
+        words = text.split()
+        word_count = len(words)
+        for word_limit in self._ADAPTIVE_WORD_LIMITS:
+            if word_count > word_limit:
+                # Adaptive recovery must keep the final one/two words separate;
+                # the normal splitter intentionally merges a short tail.
+                return [
+                    " ".join(words[index : index + word_limit])
+                    for index in range(0, word_count, word_limit)
+                ]
+        return [text]
+
     async def _synthesize_chunk(
         self,
         edge_tts,
         text: str,
         voice: str,
         output_path: Path,
+        *,
+        attempts: list[int] | None = None,
+        deadline: float | None = None,
+        requested_voice: str | None = None,
     ) -> tuple[float | None, str]:
+        attempts = attempts if attempts is not None else [0]
+        deadline = deadline if deadline is not None else time.monotonic() + self._MAX_SYNTHESIS_SECONDS
         last_error: Exception | None = None
-        for candidate_voice in self._candidate_voices(voice):
+        candidates = self._candidate_voices(requested_voice or voice)
+        if voice in candidates:
+            candidates.remove(voice)
+        candidates.insert(0, voice)
+        for candidate_voice in candidates:
             for _ in range(self._CHUNK_RETRIES + 1):
+                if attempts[0] >= self._MAX_TOTAL_ATTEMPTS or time.monotonic() >= deadline:
+                    raise TimeoutError("edge-tts synthesis budget exhausted") from last_error
+                attempts[0] += 1
                 output_path.unlink(missing_ok=True)
                 try:
-                    audio_bytes, _stream_completed = await self._write_stream_to_file(
+                    audio_bytes, stream_completed = await self._write_stream_to_file(
                         edge_tts,
                         text,
                         candidate_voice,
@@ -251,6 +335,17 @@ class EdgeTTSProvider(TTSProvider):
                         text,
                         "edge-tts returned invalid audio for chunk",
                     )
+                    # ffprobe only proves that the prefix is a valid MP3.  A normal
+                    # fragment without Edge EOF is ambiguous and must be split.
+                    if not stream_completed and not _is_tiny_tts_chunk(text):
+                        raise _IncompleteEdgeStreamError(
+                            "edge-tts stream ended without EOF"
+                        )
+                except _IncompleteEdgeStreamError:
+                    output_path.unlink(missing_ok=True)
+                    # Another voice cannot repair a websocket that delivered only
+                    # a prefix; immediately hand this fragment to adaptive splitting.
+                    raise
                 except Exception as exc:
                     last_error = exc
                     output_path.unlink(missing_ok=True)
@@ -309,7 +404,10 @@ class EdgeTTSProvider(TTSProvider):
                         audio_bytes += len(data)
         finally:
             with contextlib.suppress(Exception):
-                await asyncio.wait_for(stream.aclose(), timeout=1.0)
+                await asyncio.wait_for(
+                    stream.aclose(),
+                    timeout=self._STREAM_CLOSE_TIMEOUT_SECONDS,
+                )
 
         return audio_bytes, stream_completed
 
@@ -498,7 +596,8 @@ def _prepare_edge_tts_chunk(text: str) -> str:
 
 
 def _is_tiny_tts_chunk(text: str) -> bool:
-    return len(text.split()) <= 2 and len(text) <= 16
+    words = len(text.split())
+    return words == 1 or (words == 2 and len(text) <= 16)
 
 
 def _split_tts_sentence(text: str, max_chars: int, max_words: int) -> list[str]:

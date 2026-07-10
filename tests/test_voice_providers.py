@@ -107,7 +107,7 @@ class _FakeCommunicateFactory:
         return SimpleNamespace(stream=lambda: stream)
 
 
-def test_edge_tts_accepts_valid_audio_when_stream_stalls_after_audio(tmp_path: Path) -> None:
+def test_edge_tts_rejects_ambiguous_audio_when_stream_stalls_without_eof(tmp_path: Path) -> None:
     provider = EdgeTTSProvider()
     provider._STREAM_IDLE_TIMEOUT_SECONDS = 0.01
     provider._CHUNK_RETRIES = 0
@@ -120,13 +120,72 @@ def test_edge_tts_accepts_valid_audio_when_stream_stalls_after_audio(tmp_path: P
 
     provider._probe_duration = lambda audio_path: 1.0
 
-    duration, voice = asyncio.run(
-        provider._synthesize_chunk(fake_edge_tts, "Привет, как дела?", "voice", output_path)
+    with pytest.raises(RuntimeError, match="without EOF"):
+        asyncio.run(
+            provider._synthesize_chunk(fake_edge_tts, "Привет, как дела?", "voice", output_path)
+        )
+
+    assert not output_path.exists()
+
+
+def test_edge_tts_adaptively_resynthesizes_only_truncated_regression_fragment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = EdgeTTSProvider()
+    provider._POST_AUDIO_IDLE_TIMEOUT_SECONDS = 0.01
+    streams = [
+        _FakeStream([{"type": "audio", "data": b"hello"}]),
+        _FakeStream([{"type": "audio", "data": b"truncated"}], stall_after_messages=True),
+        _FakeStream([{"type": "audio", "data": b"how-can"}]),
+        _FakeStream([{"type": "audio", "data": b"help"}]),
+    ]
+    communicate_factory = _FakeCommunicateFactory(streams)
+    monkeypatch.setitem(
+        sys.modules,
+        "edge_tts",
+        SimpleNamespace(Communicate=communicate_factory),
+    )
+    monkeypatch.setattr("apps.backend.app.voice.providers.shutil.which", lambda name: name)
+    provider._probe_duration = lambda path: 3.0 if ".tmp" in path.name else 0.8
+    provider._concat_mp3_chunks = lambda paths, target: target.write_bytes(b"complete")
+
+    result = asyncio.run(
+        provider.synthesize(
+            "Привет! Чем могу помочь?",
+            "voice",
+            tmp_path / "reply.mp3",
+        )
     )
 
-    assert duration == 1.0
-    assert voice == "voice"
-    assert output_path.read_bytes()
+    assert communicate_factory.calls == [
+        ("Привет!", "voice"),
+        ("Чем могу помочь?", "voice"),
+        ("Чем могу.", "voice"),
+        ("помочь?", "voice"),
+    ]
+    assert result.chunks_count == 3
+    assert result.audio_path.read_bytes() == b"complete"
+    assert list(tmp_path.glob("reply.part*.mp3")) == []
+    assert list(tmp_path.glob("reply.tmp.mp3")) == []
+
+
+def test_edge_tts_does_not_multiply_retries_by_fallback_voices(tmp_path: Path) -> None:
+    provider = EdgeTTSProvider()
+    communicate_factory = _FakeCommunicateFactory([_FakeStream([]) for _ in range(3)])
+    fake_edge_tts = SimpleNamespace(Communicate=communicate_factory)
+
+    with pytest.raises(RuntimeError, match="returned no audio"):
+        asyncio.run(
+            provider._synthesize_chunk(
+                fake_edge_tts,
+                "Привет!",
+                "ru-RU-SvetlanaNeural",
+                tmp_path / "reply.mp3",
+            )
+        )
+
+    assert len(communicate_factory.calls) == 3
 
 
 def test_edge_tts_rejects_empty_audio(tmp_path: Path) -> None:
@@ -185,6 +244,34 @@ def test_edge_tts_accepts_non_empty_audio_when_ffprobe_is_unavailable(
     )
 
     assert duration is None
+
+
+def test_edge_tts_uses_working_single_chunk_mode_without_ffmpeg(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = EdgeTTSProvider()
+    communicate_factory = _FakeCommunicateFactory(
+        [_FakeStream([{"type": "audio", "data": b"complete-single-stream"}])]
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "edge_tts",
+        SimpleNamespace(Communicate=communicate_factory),
+    )
+    monkeypatch.setattr("apps.backend.app.voice.providers.shutil.which", lambda name: None)
+
+    result = asyncio.run(
+        provider.synthesize(
+            "Это длинная фраза, которая без ffmpeg должна уйти одним запросом.",
+            "voice",
+            tmp_path / "single.mp3",
+        )
+    )
+
+    assert len(communicate_factory.calls) == 1
+    assert result.chunks_count == 1
+    assert result.audio_path.read_bytes() == b"complete-single-stream"
 
 
 def test_edge_tts_rejects_audio_that_is_too_short_for_text(tmp_path: Path) -> None:
