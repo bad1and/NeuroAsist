@@ -26,6 +26,24 @@ class Settings(BaseSettings):
     log_file_path: str = "logs/app.log"
     cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
     cors_origin_regex: str = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
+    voice_stt_provider: str = "faster_whisper"
+    voice_stt_model: str = "small"
+    voice_stt_device: str = "cpu"
+    voice_stt_compute_type: str = "int8"
+    voice_default_language: str = "ru"
+    voice_preload_stt_model: bool = True
+    voice_tts_enabled: bool = True
+    voice_tts_provider: str = "edge_tts"
+    voice_tts_voice_ru: str = "ru-RU-SvetlanaNeural"
+    voice_tts_voice_en: str = "en-US-AriaNeural"
+    voice_tts_background_timeout_seconds: int = 20
+    voice_tts_max_chars: int = 1200
+    voice_audio_dir: str = "data/audio"
+    voice_max_upload_mb: int = 25
+    voice_max_record_seconds: int = 60
+    voice_stt_timeout_seconds: int = 45
+    voice_llm_timeout_seconds: int = 45
+    voice_tts_timeout_seconds: int = 45
 
     @property
     def llm_api_key(self) -> str | None:
@@ -34,6 +52,13 @@ class Settings(BaseSettings):
     @property
     def database_path(self) -> Path:
         path = Path(self.sqlite_path)
+        if path.is_absolute():
+            return path
+        return ROOT_DIR / path
+
+    @property
+    def voice_audio_path(self) -> Path:
+        path = Path(self.voice_audio_dir)
         if path.is_absolute():
             return path
         return ROOT_DIR / path

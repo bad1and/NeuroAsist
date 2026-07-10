@@ -1,6 +1,6 @@
 # NeuroAsist
 
-NeuroAsist is an early local-first skeleton for a text-first neuro-VTuber
+NeuroAsist is an early local-first skeleton for a voice-capable neuro-VTuber
 assistant.
 
 Current scope:
@@ -13,8 +13,11 @@ Current scope:
 - `.env` configuration
 - React + TypeScript Web UI
 - backend runtime events over WebSocket
+- v0.3 push-to-talk voice chat with fast STT and optional TTS provider abstractions
+- `faster-whisper` STT and background `edge-tts` TTS provider
 
-Out of scope for v0.2: voice, avatar, STT/TTS, file access, command execution,
+Out of scope for v0.3: avatar, lipsync, always-on listening, streaming voice,
+file access, command execution,
 dev-agent, screen context, long-term memory, embeddings, RAG, users, and auth.
 
 ## Requirements
@@ -22,6 +25,7 @@ dev-agent, screen context, long-term memory, embeddings, RAG, users, and auth.
 - Python 3.12+
 - Node.js 24+
 - DeepSeek API key
+- FFmpeg on PATH for real audio transcription
 
 Install backend dependencies:
 
@@ -85,6 +89,24 @@ LOG_TO_FILE=true
 LOG_FILE_PATH=logs/app.log
 CORS_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
 CORS_ORIGIN_REGEX=^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$
+VOICE_STT_PROVIDER=faster_whisper
+VOICE_STT_MODEL=small
+VOICE_STT_DEVICE=cpu
+VOICE_STT_COMPUTE_TYPE=int8
+VOICE_DEFAULT_LANGUAGE=ru
+VOICE_PRELOAD_STT_MODEL=true
+VOICE_TTS_ENABLED=true
+VOICE_TTS_PROVIDER=edge_tts
+VOICE_TTS_VOICE_RU=ru-RU-SvetlanaNeural
+VOICE_TTS_VOICE_EN=en-US-AriaNeural
+VOICE_TTS_BACKGROUND_TIMEOUT_SECONDS=20
+VOICE_TTS_MAX_CHARS=1200
+VOICE_AUDIO_DIR=data/audio
+VOICE_MAX_UPLOAD_MB=25
+VOICE_MAX_RECORD_SECONDS=60
+VOICE_STT_TIMEOUT_SECONDS=45
+VOICE_LLM_TIMEOUT_SECONDS=45
+VOICE_TTS_TIMEOUT_SECONDS=45
 ```
 
 `.env` is local-only and must not be committed. `.env.example` documents the
@@ -142,6 +164,42 @@ Expected response shape:
 }
 ```
 
+Voice chat request:
+
+```powershell
+$form = @{
+  session_id = "default"
+  language = "ru"
+  audio = Get-Item .\sample.webm
+}
+
+Invoke-RestMethod `
+  -Uri http://127.0.0.1:8000/voice/chat `
+  -Method Post `
+  -Form $form
+```
+
+Expected voice response shape:
+
+```json
+{
+  "transcript": "string",
+  "reply": "string",
+  "emotion": "neutral",
+  "intent": "casual_chat",
+  "voice_request_id": "<id>",
+  "reply_audio_url": null,
+  "tts_status": "queued",
+  "stt": {"provider": "faster_whisper", "model": "small", "language": "ru", "duration_ms": 1200},
+  "tts": {"provider": "edge_tts", "voice": "ru-RU-SvetlanaNeural", "duration_ms": 0}
+}
+```
+
+The text response is returned before TTS completes. When audio is ready, the
+backend publishes a `voice.tts_ready` WebSocket event with `voice_request_id`
+and `audio_url`; the web UI attaches that audio to the matching assistant
+message.
+
 ## Run Frontend
 
 From `apps/web`:
@@ -169,13 +227,15 @@ Production build:
 npm run build
 ```
 
-## v0.2 Web UI
+## v0.3 Web UI
 
 The local web panel includes:
 
 - Chat: sends messages to `POST /chat` and shows `emotion` / `intent`.
+- Voice: toggle recording sends browser audio to `POST /voice/chat`.
 - Events: loads `GET /events` and receives live `WS /ws/events` events.
-- Settings: shows safe provider settings and updates runtime model/personality.
+- Settings: shows safe provider settings and updates runtime model/personality
+  plus voice language/TTS voice.
 
 The browser never receives or stores the DeepSeek API key.
 

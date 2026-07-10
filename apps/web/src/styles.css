@@ -158,7 +158,7 @@ button:disabled {
 
 .chat-panel {
   display: grid;
-  grid-template-rows: auto 1fr auto auto;
+  grid-template-rows: auto 1fr auto auto auto;
 }
 
 .message-list {
@@ -211,6 +211,26 @@ button:disabled {
   font-size: 12px;
 }
 
+.reply-audio {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.message-error {
+  margin-top: 10px;
+  color: #8a2e2e;
+  font-size: 13px;
+}
+
+.speak-button {
+  min-height: 30px;
+  margin-top: 10px;
+  padding: 5px 10px;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #172026;
+}
+
 .chat-form {
   display: grid;
   grid-template-columns: 1fr 120px;
@@ -225,6 +245,13 @@ button:disabled {
   max-height: 180px;
   padding: 10px;
   border: 1px solid #c9d2d7;
+  background: #ffffff;
+  color: #172026;
+  caret-color: #172026;
+}
+
+.chat-form textarea::placeholder {
+  color: #687982;
 }
 
 .chat-form button,
@@ -235,6 +262,32 @@ button:disabled {
   background: #2d5f78;
   border-color: #2d5f78;
   color: #ffffff;
+}
+
+.voice-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 18px 14px;
+}
+
+.voice-controls button {
+  min-height: 38px;
+  min-width: 140px;
+  padding: 8px 14px;
+  border-radius: 4px;
+}
+
+.voice-controls button.recording {
+  border-color: #bf3d3d;
+  background: #bf3d3d;
+  color: #ffffff;
+}
+
+.voice-controls span {
+  color: #63737c;
+  font-size: 13px;
 }
 
 .error-banner,

@@ -3,4 +3,7 @@ uvicorn[standard]==0.35.0
 openai==2.44.0
 pydantic-settings==2.10.1
 python-dotenv==1.2.2
+python-multipart==0.0.20
+faster-whisper==1.2.1
+edge-tts==7.2.3
 pytest==9.1.1

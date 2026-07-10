@@ -3,6 +3,8 @@ import type {
   ChatResponse,
   PublicSettings,
   StatusResponse,
+  VoiceChatResponse,
+  VoiceTtsStatusResponse,
 } from "./types";
 
 export const API_BASE_URL =
@@ -19,7 +21,7 @@ async function requestJson<T>(
     ...(options.headers as Record<string, string> | undefined),
   };
 
-  if (options.body) {
+  if (options.body && !(options.body instanceof FormData)) {
     headers["Content-Type"] = "application/json";
   }
 
@@ -55,6 +57,8 @@ export function getSettings(): Promise<PublicSettings> {
 export function updateRuntimeSettings(payload: {
   model?: string;
   personality?: string;
+  voice_language?: string;
+  voice_tts_voice?: string;
 }): Promise<PublicSettings> {
   return requestJson<PublicSettings>("/settings/runtime", {
     method: "PATCH",
@@ -64,6 +68,12 @@ export function updateRuntimeSettings(payload: {
 
 export function getEvents(limit = 100): Promise<{ events: BackendEvent[] }> {
   return requestJson<{ events: BackendEvent[] }>(`/events?limit=${limit}`);
+}
+
+export function getVoiceTtsStatus(
+  voiceRequestId: string,
+): Promise<VoiceTtsStatusResponse> {
+  return requestJson<VoiceTtsStatusResponse>(`/voice/tts/${voiceRequestId}`);
 }
 
 export function sendChatMessage(
@@ -77,4 +87,52 @@ export function sendChatMessage(
       message,
     }),
   });
+}
+
+export async function sendVoiceMessage(
+  sessionId: string,
+  audio: Blob,
+  language: string,
+): Promise<VoiceChatResponse> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 90000);
+  const form = new FormData();
+  form.append("session_id", sessionId);
+  form.append("language", language);
+  form.append("audio", audio, "voice-message.webm");
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/voice/chat`, {
+      method: "POST",
+      body: form,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Voice request timed out");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    let detail = `HTTP ${response.status}`;
+    try {
+      const payload = await response.json();
+      if (typeof payload.detail === "string") {
+        detail = payload.detail;
+      }
+    } catch {
+      // Keep the status-only error.
+    }
+    throw new Error(detail);
+  }
+
+  return response.json() as Promise<VoiceChatResponse>;
+}
+
+export function resolveApiUrl(path: string): string {
+  return path.startsWith("http") ? path : `${API_BASE_URL}${path}`;
 }

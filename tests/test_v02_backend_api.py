@@ -53,6 +53,12 @@ def test_public_settings_does_not_return_api_key(client: TestClient) -> None:
     assert body["provider"] == "deepseek"
     assert body["model"]
     assert body["available_personalities"] == ["default"]
+    assert body["voice_language"] == "ru"
+    assert body["voice_stt_model"] == "small"
+    assert body["voice_tts_enabled"] is True
+    assert body["voice_tts_voice"]
+    assert body["available_voice_languages"] == ["auto", "ru", "en"]
+    assert body["available_tts_voices"]
     assert "api_key" not in body
     assert "DEEPSEEK_API_KEY" not in response.text
 

@@ -7,12 +7,14 @@ from apps.backend.app.api.routes.chat import router as chat_router
 from apps.backend.app.api.routes.events import router as events_router
 from apps.backend.app.api.routes.settings import router as settings_router
 from apps.backend.app.api.routes.status import router as status_router
+from apps.backend.app.api.routes.voice import router as voice_router
 from apps.backend.app.api.websocket import router as websocket_router
 from apps.backend.app.core.config import get_settings
 from apps.backend.app.core.logging import configure_logging
 from apps.backend.app.events.bus import EventBus
 from apps.backend.app.runtime.settings import RuntimeSettings
 from apps.backend.app.storage.sqlite_history import SQLiteMessageHistory
+from apps.backend.app.voice.service import VoiceService
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +26,7 @@ def create_app() -> FastAPI:
     if not settings.llm_api_key:
         logger.warning("DeepSeek API key is not configured")
 
-    app = FastAPI(title=settings.app_name, version="0.2.0")
+    app = FastAPI(title=settings.app_name, version="0.3.0")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
@@ -36,10 +38,15 @@ def create_app() -> FastAPI:
 
     history = SQLiteMessageHistory(settings.database_path)
     event_bus = EventBus(max_events=300)
-    runtime_settings = RuntimeSettings(model=settings.deepseek_model)
+    runtime_settings = RuntimeSettings(
+        model=settings.deepseek_model,
+        voice_language=settings.voice_default_language,
+        voice_tts_voice=settings.voice_tts_voice_ru,
+    )
+    voice_service = VoiceService(settings)
 
     @app.on_event("startup")
-    def startup() -> None:
+    async def startup() -> None:
         try:
             history.init_db()
         except Exception:
@@ -51,6 +58,24 @@ def create_app() -> FastAPI:
                 {},
             )
             raise
+
+        if settings.voice_preload_stt_model:
+            try:
+                await voice_service.preload()
+                event_bus.publish(
+                    "voice.stt_preloaded",
+                    "info",
+                    "Voice STT model preloaded",
+                    {"provider": settings.voice_stt_provider, "model": settings.voice_stt_model},
+                )
+            except Exception:
+                logger.warning("Voice STT preload failed", exc_info=True)
+                event_bus.publish(
+                    "voice.stt_preload_failed",
+                    "warning",
+                    "Voice STT preload failed; first request will retry lazy load",
+                    {"provider": settings.voice_stt_provider, "model": settings.voice_stt_model},
+                )
 
         event_bus.publish(
             "backend.status",
@@ -68,10 +93,12 @@ def create_app() -> FastAPI:
     app.state.history = history
     app.state.event_bus = event_bus
     app.state.runtime_settings = runtime_settings
+    app.state.voice_service = voice_service
     app.include_router(chat_router)
     app.include_router(events_router)
     app.include_router(settings_router)
     app.include_router(status_router)
+    app.include_router(voice_router)
     app.include_router(websocket_router)
     return app
 
