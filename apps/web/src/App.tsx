@@ -26,20 +26,6 @@ type LevelFilter = "all" | EventLevel;
 type VoiceState = "idle" | "recording" | "transcribing" | "thinking";
 
 const SESSION_ID = "default";
-const RECORDING_MIME_TYPES = [
-  "audio/webm;codecs=opus",
-  "audio/webm",
-  "audio/ogg;codecs=opus",
-  "audio/ogg",
-  "audio/mp4",
-];
-
-function getRecordingMimeType(): string | undefined {
-  if (typeof MediaRecorder === "undefined") {
-    return undefined;
-  }
-  return RECORDING_MIME_TYPES.find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
-}
 
 function dedupeEvents(events: BackendEvent[]): BackendEvent[] {
   const map = new Map<string, BackendEvent>();
@@ -557,8 +543,7 @@ function ChatPage({
     setError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimeType = getRecordingMimeType();
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const recorder = new MediaRecorder(stream);
       chunksRef.current = [];
 
       recorder.ondataavailable = (event) => {

@@ -142,22 +142,10 @@ class FasterWhisperSTTProvider(STTProvider):
 
 class EdgeTTSProvider(TTSProvider):
     _STREAM_IDLE_TIMEOUT_SECONDS = 4
-    _POST_AUDIO_IDLE_TIMEOUT_SECONDS = 0.5
-    _MAX_CHUNK_CHARS = 90
-    _MAX_CHUNK_WORDS = 18
-    _CHUNK_RETRIES = 2
-    _CHUNK_PAUSE_SECONDS = 0.15
-    _RATE = "+20%"
-    _VOICE_FALLBACKS = {
-        "ru-RU-SvetlanaNeural": [
-            "en-US-EmmaMultilingualNeural",
-            "en-US-AvaMultilingualNeural",
-        ],
-        "ru-RU-DmitryNeural": [
-            "en-US-AndrewMultilingualNeural",
-            "en-US-BrianMultilingualNeural",
-        ],
-    }
+    _MAX_CHUNK_CHARS = 60
+    _MAX_CHUNK_WORDS = 12
+    _CHUNK_RETRIES = 1
+    _CHUNK_PAUSE_SECONDS = 0.25
 
     async def synthesize(self, text: str, voice: str, output_path: Path) -> TTSResult:
         started = time.perf_counter()
@@ -167,26 +155,24 @@ class EdgeTTSProvider(TTSProvider):
         except ImportError as exc:
             raise RuntimeError("edge-tts is not installed") from exc
 
-        chunks = self._prepare_chunks(text)
+        chunks = split_tts_chunks(
+            text,
+            max_chars=self._MAX_CHUNK_CHARS,
+            max_words=self._MAX_CHUNK_WORDS,
+        )
         chunk_paths: list[Path] = []
-        chunk_durations: list[float | None] = []
+        chunk_durations: list[float] = []
         final_temp_path = output_path.with_name(
             f"{output_path.stem}.tmp{output_path.suffix}"
         )
         final_temp_path.unlink(missing_ok=True)
-        selected_voice = voice
         try:
             for index, chunk in enumerate(chunks):
                 chunk_path = output_path.with_name(
                     f"{output_path.stem}.part{index:03d}{output_path.suffix}"
                 )
                 tts_chunk = _prepare_edge_tts_chunk(chunk)
-                chunk_duration, selected_voice = await self._synthesize_chunk(
-                    edge_tts,
-                    tts_chunk,
-                    voice,
-                    chunk_path,
-                )
+                chunk_duration = await self._synthesize_chunk(edge_tts, tts_chunk, voice, chunk_path)
                 chunk_paths.append(chunk_path)
                 chunk_durations.append(chunk_duration)
 
@@ -212,20 +198,10 @@ class EdgeTTSProvider(TTSProvider):
             audio_path=output_path,
             duration_ms=int((time.perf_counter() - started) * 1000),
             provider="edge_tts",
-            voice=selected_voice,
+            voice=voice,
             chunks_count=len(chunks),
             audio_duration_seconds=audio_duration_seconds,
         )
-
-    def _prepare_chunks(self, text: str) -> list[str]:
-        chunks = split_tts_chunks(
-            text,
-            max_chars=self._MAX_CHUNK_CHARS,
-            max_words=self._MAX_CHUNK_WORDS,
-        )
-        if len(chunks) > 1 and shutil.which("ffmpeg") is None:
-            return [text]
-        return chunks
 
     async def _synthesize_chunk(
         self,
@@ -233,48 +209,32 @@ class EdgeTTSProvider(TTSProvider):
         text: str,
         voice: str,
         output_path: Path,
-    ) -> tuple[float | None, str]:
+    ) -> float:
         last_error: Exception | None = None
-        for candidate_voice in self._candidate_voices(voice):
-            for _ in range(self._CHUNK_RETRIES + 1):
+        for _ in range(self._CHUNK_RETRIES + 1):
+            output_path.unlink(missing_ok=True)
+            try:
+                audio_bytes = await self._write_stream_to_file(edge_tts, text, voice, output_path)
+                audio_duration_seconds = await asyncio.to_thread(
+                    self._validate_chunk_audio_path,
+                    output_path,
+                    text,
+                    "edge-tts returned invalid audio for chunk",
+                )
+            except Exception as exc:
+                last_error = exc
                 output_path.unlink(missing_ok=True)
-                try:
-                    audio_bytes, _stream_completed = await self._write_stream_to_file(
-                        edge_tts,
-                        text,
-                        candidate_voice,
-                        output_path,
-                    )
-                    audio_duration_seconds = await asyncio.to_thread(
-                        self._validate_chunk_audio_path,
-                        output_path,
-                        text,
-                        "edge-tts returned invalid audio for chunk",
-                    )
-                except Exception as exc:
-                    last_error = exc
-                    output_path.unlink(missing_ok=True)
-                    continue
+                continue
 
-                if audio_bytes > 0:
-                    return audio_duration_seconds, candidate_voice
+            if audio_bytes > 0:
+                return audio_duration_seconds
 
         output_path.unlink(missing_ok=True)
         raise RuntimeError("edge-tts returned no audio for chunk") from last_error
 
-    def _candidate_voices(self, voice: str) -> list[str]:
-        return [voice, *self._VOICE_FALLBACKS.get(voice, [])]
-
-    async def _write_stream_to_file(
-        self,
-        edge_tts,
-        text: str,
-        voice: str,
-        output_path: Path,
-    ) -> tuple[int, bool]:
-        communicate = edge_tts.Communicate(text, voice, rate=self._RATE)
+    async def _write_stream_to_file(self, edge_tts, text: str, voice: str, output_path: Path) -> int:
+        communicate = edge_tts.Communicate(text, voice)
         audio_bytes = 0
-        stream_completed = False
         stream = communicate.stream()
         try:
             with output_path.open("wb") as output:
@@ -282,21 +242,11 @@ class EdgeTTSProvider(TTSProvider):
                     try:
                         message = await asyncio.wait_for(
                             anext(stream),
-                            timeout=(
-                                self._POST_AUDIO_IDLE_TIMEOUT_SECONDS
-                                if audio_bytes > 0
-                                else self._STREAM_IDLE_TIMEOUT_SECONDS
-                            ),
+                            timeout=self._STREAM_IDLE_TIMEOUT_SECONDS,
                         )
                     except StopAsyncIteration:
-                        stream_completed = True
                         break
                     except TimeoutError:
-                        # Some Edge endpoints deliver a complete MP3 and then leave the
-                        # websocket open instead of ending the async iterator.  The
-                        # audio validator below is the reliable completeness check;
-                        # treating the missing EOF as a hard failure discarded valid
-                        # audio and multiplied the delay through every retry/fallback.
                         if audio_bytes > 0:
                             break
                         raise
@@ -309,15 +259,15 @@ class EdgeTTSProvider(TTSProvider):
                         audio_bytes += len(data)
         finally:
             with contextlib.suppress(Exception):
-                await asyncio.wait_for(stream.aclose(), timeout=1.0)
+                await stream.aclose()
 
-        return audio_bytes, stream_completed
+        return audio_bytes
 
-    def _validate_audio_path(self, audio_path: Path, error_message: str) -> float | None:
+    def _validate_audio_path(self, audio_path: Path, error_message: str) -> float:
         if audio_path.stat().st_size <= 0:
             raise RuntimeError(error_message)
         audio_duration_seconds = self._probe_duration(audio_path)
-        if audio_duration_seconds is not None and audio_duration_seconds <= 0:
+        if audio_duration_seconds <= 0:
             raise RuntimeError(error_message)
         return audio_duration_seconds
 
@@ -326,10 +276,8 @@ class EdgeTTSProvider(TTSProvider):
         audio_path: Path,
         text: str,
         error_message: str,
-    ) -> float | None:
+    ) -> float:
         audio_duration_seconds = self._validate_audio_path(audio_path, error_message)
-        if audio_duration_seconds is None:
-            return None
         minimum_duration_seconds = _minimum_tts_duration_seconds(text)
         if audio_duration_seconds < minimum_duration_seconds:
             raise RuntimeError(
@@ -340,12 +288,10 @@ class EdgeTTSProvider(TTSProvider):
 
     def _validate_concatenated_duration(
         self,
-        audio_duration_seconds: float | None,
-        chunk_durations: list[float | None],
+        audio_duration_seconds: float,
+        chunk_durations: list[float],
     ) -> None:
-        if audio_duration_seconds is None or any(duration is None for duration in chunk_durations):
-            return
-        expected_duration_seconds = sum(duration for duration in chunk_durations if duration is not None)
+        expected_duration_seconds = sum(chunk_durations)
         if expected_duration_seconds <= 0:
             return
         if audio_duration_seconds < expected_duration_seconds * 0.85:
@@ -436,9 +382,9 @@ class EdgeTTSProvider(TTSProvider):
             text=True,
         )
 
-    def _probe_duration(self, audio_path: Path) -> float | None:
+    def _probe_duration(self, audio_path: Path) -> float:
         if shutil.which("ffprobe") is None:
-            return None
+            return 0.001 if audio_path.stat().st_size > 0 else 0.0
 
         completed = subprocess.run(
             [
@@ -492,25 +438,18 @@ def _minimum_tts_duration_seconds(text: str) -> float:
 
 def _prepare_edge_tts_chunk(text: str) -> str:
     prepared = re.sub(r"[,;:]+\s*$", "", text).strip()
-    if prepared and _is_tiny_tts_chunk(prepared) and not re.search(r"[.!?…。！？]$", prepared):
-        return f"{prepared}."
     return prepared or text
 
 
-def _is_tiny_tts_chunk(text: str) -> bool:
-    return len(text.split()) <= 2 and len(text) <= 16
-
-
 def _split_tts_sentence(text: str, max_chars: int, max_words: int) -> list[str]:
-    if _tts_chunk_fits(text, max_chars, max_words):
-        return [text]
-
     clauses = [
         part.strip()
         for part in re.split(r"(?<=[,;:])\s+", text)
         if part.strip()
     ]
     if len(clauses) <= 1:
+        if _tts_chunk_fits(text, max_chars, max_words):
+            return [text]
         return _split_long_tts_text(text, max_chars, max_words)
 
     chunks: list[str] = []

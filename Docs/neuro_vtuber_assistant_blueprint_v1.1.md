@@ -494,7 +494,7 @@ personality:
 
 Плохой стиль:
 
-> “Ты тупой, бросай программирование нахуй.”
+> “Ты тупой, бросай программирование.”
 
 ---
 
@@ -1239,12 +1239,11 @@ Character Agent пользователю:
 Фактический функционал:
 
 - запись микрофона в React UI через `MediaRecorder`;
-- отправка browser audio в `POST /voice/chat` с нормализацией MIME (`audio/webm;codecs=opus`, `application/octet-stream` + audio extension);
+- отправка browser audio в `POST /voice/chat`;
 - `VoiceService` с provider-интерфейсами для STT/TTS;
 - STT через `faster-whisper`;
 - LLM через `DeepSeekProvider` и `CharacterAgent`;
 - TTS через `edge-tts` в background task;
-- Edge TTS voice fallback внутри Edge: русские voices пробуются первыми, затем multilingual Edge voices;
 - `GET /voice/tts/{voice_request_id}` для статуса TTS job;
 - `GET /voice/audio/{audio_id}` для готового audio file;
 - WebSocket events: `voice.upload_received`, `voice.transcribing_started`, `voice.transcribing_finished`, `voice.completed`, `voice.tts_started`, `voice.tts_ready`, `voice.tts_failed`;
@@ -1265,11 +1264,6 @@ VOICE_TTS_BACKGROUND_TIMEOUT_SECONDS=20
 VOICE_TTS_MAX_CHARS=1200
 ```
 
-Runtime dependency:
-
-- `ffmpeg` и `ffprobe` должны быть видны backend-процессу через `PATH`;
-- на Windows при уже открытом PowerShell нужно либо перезапустить терминал, либо добавить `C:\Users\OLEG\Tools\ffmpeg\bin` в `$env:Path` перед запуском backend.
-
 STT-детали:
 
 - используется `faster-whisper small` как более стабильный минимум для русского голоса, чем `base`;
@@ -1281,12 +1275,11 @@ TTS-детали:
 
 - `/voice/chat` возвращает текстовый ответ сразу, а TTS продолжает генерироваться в фоне;
 - готовность аудио приходит через `voice.tts_ready` и status endpoint;
-- Edge TTS режется на safe chunks только когда фраза не помещается в лимиты; короткие comma-heavy фразы больше не режутся по каждой запятой, чтобы не создавать неестественные паузы;
+- Edge TTS режется на небольшие safe chunks, потому что длинные или comma-heavy chunks могут обрезать хвост фразы;
 - chunks дополнительно нормализуются: хвостовые `,`, `;`, `:` не отправляются в Edge как конец отдельного TTS-фрагмента;
 - между chunks добавляется короткая пауза, чтобы не съедались окончания слов;
 - итоговый MP3 собирается через FFmpeg audio filter concat с re-encode, а не простым byte/packet copy;
 - каждый chunk и итоговый файл проверяются через `ffprobe`;
-- текущий Edge TTS rate: `+20%`;
 - если TTS падает, текстовый ответ остается доступен, UI может использовать browser speech fallback.
 
 Критерии готовности:
@@ -2157,11 +2150,7 @@ v1.0 — plugin-based multi-agent platform
 - статус доступен через `/voice/tts/{voice_request_id}`;
 - audio отдается через `/voice/audio/{audio_id}`;
 - chunks режутся по предложениям и punctuation boundaries;
-- короткие фразы с запятыми сохраняются одним TTS chunk для естественного темпа;
-- длинные chunks режутся по предложениям и punctuation boundaries;
 - chunks с хвостовыми `,`, `;`, `:` нормализуются перед отправкой в Edge;
-- Edge TTS вызывается с `rate="+20%"`;
-- русские Edge voices имеют multilingual Edge fallback voices;
 - итоговый MP3 собирается через FFmpeg audio filter concat + re-encode;
 - валидируется длительность chunk-файлов и финального файла.
 
