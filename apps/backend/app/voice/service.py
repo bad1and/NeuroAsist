@@ -1,8 +1,7 @@
-import logging
 import shutil
 from collections import OrderedDict
-from pathlib import Path
 from typing import Any
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile, status
@@ -17,40 +16,15 @@ from apps.backend.app.voice.providers import (
     TTSProvider,
 )
 
-logger = logging.getLogger(__name__)
-
 ALLOWED_AUDIO_TYPES = {
     "audio/webm": ".webm",
-    "audio/ogg": ".ogg",
-    "audio/opus": ".opus",
     "audio/wav": ".wav",
     "audio/x-wav": ".wav",
     "audio/mpeg": ".mp3",
     "audio/mp4": ".m4a",
     "audio/x-m4a": ".m4a",
-    "application/ogg": ".ogg",
     "application/octet-stream": ".webm",
 }
-
-ALLOWED_AUDIO_EXTENSIONS = {".webm", ".ogg", ".opus", ".wav", ".mp3", ".m4a", ".mp4"}
-FALLBACK_FILENAME_TYPES = {"application/octet-stream", "binary/octet-stream"}
-
-
-def _normalize_content_type(content_type: str | None) -> str:
-    return (content_type or "application/octet-stream").split(";", 1)[0].strip().lower()
-
-
-def _resolve_audio_suffix(upload: UploadFile) -> str | None:
-    content_type = _normalize_content_type(upload.content_type)
-    filename_suffix = Path(upload.filename or "").suffix.lower()
-    if content_type in FALLBACK_FILENAME_TYPES and filename_suffix in ALLOWED_AUDIO_EXTENSIONS:
-        return filename_suffix
-
-    suffix = ALLOWED_AUDIO_TYPES.get(content_type)
-    if suffix is not None:
-        return suffix
-
-    return None
 
 
 class VoiceService:
@@ -89,14 +63,9 @@ class VoiceService:
         return dict(job)
 
     async def save_upload(self, upload: UploadFile) -> Path:
-        content_type = _normalize_content_type(upload.content_type)
-        suffix = _resolve_audio_suffix(upload)
+        content_type = upload.content_type or "application/octet-stream"
+        suffix = ALLOWED_AUDIO_TYPES.get(content_type)
         if suffix is None:
-            logger.warning(
-                "Unsupported audio upload type: content_type=%s filename_suffix=%s",
-                content_type,
-                Path(upload.filename or "").suffix.lower(),
-            )
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Unsupported audio type",
