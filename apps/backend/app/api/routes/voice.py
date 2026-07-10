@@ -270,14 +270,9 @@ async def _run_tts_background(
         },
     )
     try:
-        chunks_count = len(split_tts_chunks(text))
-        timeout_seconds = max(
-            settings.voice_tts_background_timeout_seconds,
-            chunks_count * 7 + 10,
-        )
         tts_result = await asyncio.wait_for(
             voice_service.tts_provider.synthesize(text, voice, output_path),
-            timeout=timeout_seconds,
+            timeout=settings.voice_tts_background_timeout_seconds,
         )
     except TimeoutError:
         logger.info(
