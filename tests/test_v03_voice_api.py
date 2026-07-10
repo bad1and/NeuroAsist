@@ -1,5 +1,6 @@
 from pathlib import Path
 import asyncio
+import logging
 import time
 
 from fastapi.testclient import TestClient
@@ -121,6 +122,28 @@ def test_voice_chat_rejects_unsupported_audio_type(client: TestClient) -> None:
     assert response.json()["detail"] == "Unsupported audio type"
 
 
+def test_voice_chat_accepts_webm_with_codec_parameter(client: TestClient) -> None:
+    response = client.post(
+        "/voice/chat",
+        data={"session_id": "voice-webm-codec", "language": "ru"},
+        files={"audio": ("voice.webm", b"fake audio", "audio/webm;codecs=opus")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["transcript"] == "Тестовое голосовое сообщение"
+
+
+def test_voice_chat_accepts_octet_stream_with_audio_extension(client: TestClient) -> None:
+    response = client.post(
+        "/voice/chat",
+        data={"session_id": "voice-octet-stream", "language": "ru"},
+        files={"audio": ("voice.webm", b"fake audio", "application/octet-stream")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["transcript"] == "Тестовое голосовое сообщение"
+
+
 def test_voice_chat_publishes_voice_events(client: TestClient) -> None:
     session_id = "voice-events"
 
@@ -209,19 +232,24 @@ def test_voice_chat_returns_502_on_llm_error(
     assert response.json()["detail"] == "provider failed"
 
 
-def test_voice_chat_returns_text_when_background_tts_fails(client: TestClient) -> None:
+def test_voice_chat_returns_text_when_background_tts_fails(
+    client: TestClient,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     original_tts_provider = app.state.voice_service._tts_provider
     app.state.voice_service._tts_provider = FailingTTSProvider()
     session_id = "voice-tts-fail"
 
     try:
-        response = client.post(
-            "/voice/chat",
-            data={"session_id": session_id, "language": "ru"},
-            files={"audio": ("voice.webm", b"fake audio", "audio/webm")},
-        )
+        with caplog.at_level(logging.INFO):
+            response = client.post(
+                "/voice/chat",
+                data={"session_id": session_id, "language": "ru"},
+                files={"audio": ("voice.webm", b"fake audio", "audio/webm")},
+            )
+            failed_event = wait_for_event(client, session_id, "voice.tts_failed")
     finally:
-        pass
+        app.state.voice_service._tts_provider = original_tts_provider
 
     assert response.status_code == 200
     body = response.json()
@@ -230,12 +258,9 @@ def test_voice_chat_returns_text_when_background_tts_fails(client: TestClient) -
     assert body["tts_status"] == "queued"
     assert body["tts"]["duration_ms"] == 0
 
-    try:
-        failed_event = wait_for_event(client, session_id, "voice.tts_failed")
-    finally:
-        app.state.voice_service._tts_provider = original_tts_provider
-
     assert failed_event["metadata"]["voice_request_id"] == body["voice_request_id"]
+    assert "Voice synthesis fallback activated" in caplog.text
+    assert "Traceback" not in caplog.text
 
     status_response = client.get(f"/voice/tts/{body['voice_request_id']}")
     assert status_response.status_code == 200

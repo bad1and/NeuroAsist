@@ -5,7 +5,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from apps.backend.app.voice.providers import EdgeTTSProvider, split_tts_chunks
+from apps.backend.app.voice.providers import (
+    EdgeTTSProvider,
+    _prepare_edge_tts_chunk,
+    split_tts_chunks,
+)
 
 
 def test_split_tts_chunks_keeps_short_reply_as_one_chunk() -> None:
@@ -176,6 +180,12 @@ def test_edge_tts_strips_trailing_comma_before_synthesis(
         ("У меня всё хорошо", "voice"),
         ("спасибо!", "voice"),
     ]
+
+
+def test_edge_tts_finishes_tiny_chunks_with_sentence_punctuation() -> None:
+    assert _prepare_edge_tts_chunk("Да,") == "Да."
+    assert _prepare_edge_tts_chunk("Окей") == "Окей."
+    assert _prepare_edge_tts_chunk("Спасибо!") == "Спасибо!"
 
 
 def test_edge_tts_synthesize_cleans_temp_files_when_final_audio_is_invalid(

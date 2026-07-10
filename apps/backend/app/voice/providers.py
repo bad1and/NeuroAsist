@@ -144,7 +144,7 @@ class EdgeTTSProvider(TTSProvider):
     _STREAM_IDLE_TIMEOUT_SECONDS = 4
     _MAX_CHUNK_CHARS = 60
     _MAX_CHUNK_WORDS = 12
-    _CHUNK_RETRIES = 1
+    _CHUNK_RETRIES = 2
     _CHUNK_PAUSE_SECONDS = 0.25
 
     async def synthesize(self, text: str, voice: str, output_path: Path) -> TTSResult:
@@ -438,7 +438,13 @@ def _minimum_tts_duration_seconds(text: str) -> float:
 
 def _prepare_edge_tts_chunk(text: str) -> str:
     prepared = re.sub(r"[,;:]+\s*$", "", text).strip()
+    if prepared and _is_tiny_tts_chunk(prepared) and not re.search(r"[.!?…。！？]$", prepared):
+        return f"{prepared}."
     return prepared or text
+
+
+def _is_tiny_tts_chunk(text: str) -> bool:
+    return len(text.split()) <= 2 and len(text) <= 16
 
 
 def _split_tts_sentence(text: str, max_chars: int, max_words: int) -> list[str]:

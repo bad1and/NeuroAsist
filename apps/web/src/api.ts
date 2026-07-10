@@ -13,6 +13,23 @@ export const API_BASE_URL =
 export const WS_EVENTS_URL =
   import.meta.env.VITE_WS_EVENTS_URL ?? "ws://127.0.0.1:8000/ws/events";
 
+function audioExtensionForMime(mimeType: string): string {
+  const normalized = mimeType.split(";")[0].trim().toLowerCase();
+  if (normalized === "audio/ogg" || normalized === "application/ogg") {
+    return ".ogg";
+  }
+  if (normalized === "audio/mp4" || normalized === "audio/x-m4a") {
+    return ".m4a";
+  }
+  if (normalized === "audio/wav" || normalized === "audio/x-wav") {
+    return ".wav";
+  }
+  if (normalized === "audio/mpeg") {
+    return ".mp3";
+  }
+  return ".webm";
+}
+
 async function requestJson<T>(
   path: string,
   options: RequestInit = {},
@@ -99,7 +116,7 @@ export async function sendVoiceMessage(
   const form = new FormData();
   form.append("session_id", sessionId);
   form.append("language", language);
-  form.append("audio", audio, "voice-message.webm");
+  form.append("audio", audio, `voice-message${audioExtensionForMime(audio.type)}`);
 
   let response: Response;
   try {

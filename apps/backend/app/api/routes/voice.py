@@ -280,7 +280,11 @@ async def _run_tts_background(
             timeout=timeout_seconds,
         )
     except TimeoutError:
-        logger.warning("Background voice synthesis timed out")
+        logger.info(
+            "Voice synthesis fallback activated: voice_request_id=%s voice=%s error_type=TimeoutError",
+            voice_request_id,
+            voice,
+        )
         voice_service.set_tts_job(
             voice_request_id,
             {
@@ -308,7 +312,13 @@ async def _run_tts_background(
             },
         )
     except Exception as exc:
-        logger.warning("Background voice synthesis failed", exc_info=True)
+        logger.info(
+            "Voice synthesis fallback activated: voice_request_id=%s voice=%s error_type=%s",
+            voice_request_id,
+            voice,
+            type(exc).__name__,
+        )
+        logger.debug("Voice synthesis fallback details", exc_info=True)
         voice_service.set_tts_job(
             voice_request_id,
             {
