@@ -11,9 +11,7 @@ from apps.backend.app.storage.sqlite_history import SQLiteMessageHistory
 from apps.backend.app.voice.text import TextChunker, TextNormalizer
 from apps.backend.app.voice.live import VoiceSessionManager
 from apps.backend.app.voice.live import UtteranceContext
-from apps.backend.app.voice.providers import (
-    AudioChunk, EdgeTTSProvider, TTSRequest, _IncompleteEdgeStreamError,
-)
+from apps.backend.app.voice.providers import AudioChunk, MockTTSProvider
 from apps.backend.main import app
 from apps.backend.app.api.routes import voice as voice_route
 from apps.backend.app.voice.service import VoiceService
@@ -69,7 +67,7 @@ def test_live_chunker_enforces_character_and_word_limits() -> None:
     assert all(len(chunk.split()) <= 18 for chunk in chunks)
 
 
-def test_short_sentences_are_emitted_individually_for_edge() -> None:
+def test_short_sentences_are_emitted_individually() -> None:
     chunker = TextChunker(first_target=30, max_chars=90)
     assert chunker.feed("Да. ") == ["Да."]
     assert chunker.feed("Всё хорошо. ") == ["Всё хорошо."]
@@ -82,7 +80,7 @@ def test_tiny_complete_sentence_is_released_on_idle() -> None:
     assert chunker.flush_idle() == []
 
 
-def test_live_chunker_does_not_merge_multiple_sentences_for_edge() -> None:
+def test_live_chunker_does_not_merge_multiple_sentences() -> None:
     text = "Привет. Нормально, всё как обычно — копчусь потихоньку. А у тебя как?"
     chunker = TextChunker(first_target=50, next_target=80, max_chars=90, max_words=18)
     chunks = chunker.feed(TextNormalizer().normalize(text))
@@ -94,73 +92,31 @@ def test_live_chunker_does_not_merge_multiple_sentences_for_edge() -> None:
     ]
 
 
-def test_live_tts_safe_jobs_smooth_soft_punctuation() -> None:
-    manager = VoiceSessionManager(EdgeTTSProvider(), safe_segment_words=2)
-    assert manager._split_tts_jobs(
-        "Привет, да всё норм, потихоньку."
-    ) == [
+def test_live_tts_safe_jobs_keep_short_sentence_whole() -> None:
+    manager = VoiceSessionManager(MockTTSProvider(), safe_segment_words=10)
+    assert manager._split_tts_jobs("Привет, да всё норм, потихоньку.") == [
         "Привет, да всё норм, потихоньку.",
     ]
     assert manager._split_tts_jobs("Ты как?") == ["Ты как?"]
     assert manager._split_tts_jobs("Давно не виделись") == ["Давно не виделись"]
 
 
-@pytest.mark.anyio
-async def test_edge_live_stream_waits_for_delayed_audio_and_eof(monkeypatch) -> None:
-    class DelayedStream:
-        def __init__(self):
-            self.index = 0
+def test_live_tts_jobs_split_long_text_without_tiny_tail() -> None:
+    manager = VoiceSessionManager(MockTTSProvider(), safe_segment_words=10)
+    text = (
+        "Первый длинный фрагмент нужно произнести достаточно быстро, чтобы пользователь "
+        "услышал начало ответа без задержки, а короткий хвост не должен остаться отдельно."
+    )
+    jobs = manager._split_tts_jobs(text)
 
-        async def __anext__(self):
-            self.index += 1
-            if self.index == 1:
-                return {"type": "audio", "data": b"first"}
-            if self.index == 2:
-                await __import__("asyncio").sleep(0.25)
-                return {"type": "audio", "data": b"second"}
-            raise StopAsyncIteration
-
-        async def aclose(self):
-            return None
-
-    stream = DelayedStream()
-    factory = lambda *args, **kwargs: type("Communicate", (), {"stream": lambda self: stream})()
-    monkeypatch.setitem(__import__("sys").modules, "edge_tts", type("Edge", (), {"Communicate": factory}))
-    provider = EdgeTTSProvider()
-    provider._POST_AUDIO_IDLE_TIMEOUT_SECONDS = 0.5
-    chunks = [
-        chunk.data async for chunk in provider.stream(TTSRequest("Длинная фраза", "ru", "voice"))
-        if chunk.data
-    ]
-    assert b"".join(chunks) == b"firstsecond"
+    assert len(jobs) > 1
+    assert " ".join(jobs) == text
+    assert all(len(job.split()) <= 18 for job in jobs)
+    assert len(jobs[-1].split()) > 3
 
 
 @pytest.mark.anyio
-async def test_edge_live_stream_rejects_prefix_without_eof(monkeypatch) -> None:
-    class StalledStream:
-        def __init__(self):
-            self.sent = False
-
-        async def __anext__(self):
-            if not self.sent:
-                self.sent = True
-                return {"type": "audio", "data": b"partial"}
-            await __import__("asyncio").sleep(1)
-
-        async def aclose(self):
-            return None
-
-    stream = StalledStream()
-    factory = lambda *args, **kwargs: type("Communicate", (), {"stream": lambda self: stream})()
-    monkeypatch.setitem(__import__("sys").modules, "edge_tts", type("Edge", (), {"Communicate": factory}))
-    provider = EdgeTTSProvider()
-    provider._POST_AUDIO_IDLE_TIMEOUT_SECONDS = 0.01
-    with pytest.raises(RuntimeError, match="without EOF"):
-        _ = [chunk async for chunk in provider.stream(TTSRequest("Длинная фраза", "ru", "voice"))]
-
-
-@pytest.mark.anyio
-async def test_adaptive_split_retries_only_unsent_text(monkeypatch) -> None:
+async def test_adaptive_split_retries_unsent_text(monkeypatch) -> None:
     class AdaptiveProvider:
         def __init__(self):
             self.calls: list[str] = []
@@ -169,12 +125,12 @@ async def test_adaptive_split_retries_only_unsent_text(monkeypatch) -> None:
             self.calls.append(request.text)
             if len(request.text.split()) > 2:
                 raise RuntimeError("incomplete")
-            yield AudioChunk(b"valid", "mp3", 0, is_final=True)
+            yield AudioChunk(b"valid", "wav", 0, is_final=True)
 
     provider = AdaptiveProvider()
     manager = VoiceSessionManager(provider, retry_count=1)
     monkeypatch.setattr(manager, "_validate_audio", lambda *args: 1.0)
-    parts = await manager._synthesize_parts("один два три четыре", "ru", "voice")
+    parts = await manager._synthesize_parts("один два три четыре", "ru", "xenia")
     assert [part[0] for part in parts] == ["один два", "три четыре"]
     assert provider.calls == [
         "один два три четыре", "один два три четыре", "один два", "три четыре"
@@ -186,7 +142,7 @@ async def test_tts_worker_synthesizes_concurrently_but_sends_in_order(monkeypatc
     class DelayedProvider:
         async def stream(self, request):
             await asyncio.sleep(0.08 if request.text == "slow" else 0.01)
-            yield AudioChunk(request.text.encode(), "mp3", 0, is_final=True)
+            yield AudioChunk(request.text.encode(), "wav", 0, is_final=True)
 
     manager = VoiceSessionManager(
         DelayedProvider(),
@@ -203,7 +159,7 @@ async def test_tts_worker_synthesizes_concurrently_but_sends_in_order(monkeypatc
     await queue.put("fast")
     await queue.put(None)
     started = time.perf_counter()
-    await manager._tts_worker(UtteranceContext("s", "u"), queue, "ru", "voice")
+    await manager._tts_worker(UtteranceContext("s", "u"), queue, "ru", "xenia")
     elapsed = time.perf_counter() - started
     assert elapsed < 0.14
     assert [audio.decode() for _, audio, _ in connection.segments] == ["slow", "fast"]
@@ -218,119 +174,14 @@ async def test_safe_segment_words_keeps_successful_sentence_whole(monkeypatch) -
 
         async def stream(self, request):
             self.calls.append(request.text)
-            yield AudioChunk(request.text.encode(), "mp3", 0, is_final=True)
+            yield AudioChunk(request.text.encode(), "wav", 0, is_final=True)
 
     provider = RecordingProvider()
     manager = VoiceSessionManager(provider, safe_segment_words=2)
     monkeypatch.setattr(manager, "_validate_audio", lambda *args: 1.0)
-    parts = await manager._synthesize_parts("один два три четыре", "ru", "voice")
+    parts = await manager._synthesize_parts("один два три четыре", "ru", "xenia")
     assert [part[0] for part in parts] == ["один два три четыре"]
     assert provider.calls == ["один два три четыре"]
-
-
-@pytest.mark.anyio
-async def test_incomplete_sentence_adaptively_splits_without_presplitting(monkeypatch) -> None:
-    class RecordingProvider:
-        def __init__(self):
-            self.calls: list[str] = []
-
-        async def stream(self, request):
-            self.calls.append(request.text)
-            if request.text == "Привет, да всё норм, потихоньку.":
-                yield AudioChunk(b"partial", "mp3", 0)
-                raise _IncompleteEdgeStreamError("missing EOF")
-            yield AudioChunk(request.text.encode(), "mp3", 0, is_final=True)
-
-    provider = RecordingProvider()
-    manager = VoiceSessionManager(provider, safe_segment_words=2)
-    monkeypatch.setattr(manager, "_validate_audio", lambda *args: 1.0)
-
-    parts = await manager._synthesize_parts("Привет, да всё норм, потихоньку.", "ru", "voice")
-
-    assert [part[0] for part in parts] == ["Привет да", "всё норм потихоньку."]
-    assert provider.calls == [
-        "Привет, да всё норм, потихоньку.",
-        "Привет да",
-        "всё норм потихоньку.",
-    ]
-
-
-@pytest.mark.anyio
-async def test_validated_tiny_prefix_may_complete_adaptive_recovery(monkeypatch) -> None:
-    class TinyPrefixProvider:
-        async def stream(self, request):
-            yield AudioChunk(b"complete-tiny-audio", "mp3", 0)
-            raise _IncompleteEdgeStreamError("missing EOF")
-
-    manager = VoiceSessionManager(TinyPrefixProvider(), retry_count=1)
-    monkeypatch.setattr(manager, "_validate_audio", lambda *args: 0.8)
-    parts = await manager._synthesize_parts("два слова", "ru", "voice")
-    assert [(part[0], part[1]) for part in parts] == [
-        ("два слова", b"complete-tiny-audio")
-    ]
-
-
-@pytest.mark.anyio
-async def test_validated_non_tiny_audio_without_eof_is_split(monkeypatch) -> None:
-    class CompleteNoEofProvider:
-        def __init__(self):
-            self.calls: list[str] = []
-
-        async def stream(self, request):
-            self.calls.append(request.text)
-            yield AudioChunk(b"complete-audio", "mp3", 0)
-            raise _IncompleteEdgeStreamError("missing EOF")
-
-    provider = CompleteNoEofProvider()
-    manager = VoiceSessionManager(provider, retry_count=1)
-
-    def validate(audio, audio_format, text, enforce_min_duration=True):
-        assert enforce_min_duration is False
-        return 2.0
-
-    monkeypatch.setattr(manager, "_validate_audio", validate)
-    parts = await manager._synthesize_parts("один два три четыре", "ru", "voice")
-    assert [part[0] for part in parts] == ["один два", "три четыре"]
-    assert provider.calls == ["один два три четыре", "один два", "три четыре"]
-
-
-@pytest.mark.anyio
-async def test_short_non_tiny_audio_without_eof_still_splits(monkeypatch) -> None:
-    class ShortNoEofProvider:
-        async def stream(self, request):
-            yield AudioChunk(f"short:{request.text}".encode(), "mp3", 0)
-            raise _IncompleteEdgeStreamError("missing EOF")
-
-    manager = VoiceSessionManager(ShortNoEofProvider(), retry_count=0)
-
-    def validate(audio, audio_format, text, enforce_min_duration=True):
-        if enforce_min_duration:
-            raise RuntimeError("TTS provider returned suspiciously short audio")
-        return 0.4
-
-    monkeypatch.setattr(manager, "_validate_audio", validate)
-    parts = await manager._synthesize_parts("один два три четыре", "ru", "voice")
-    assert [part[0] for part in parts] == ["один два", "три четыре"]
-
-
-@pytest.mark.anyio
-async def test_live_tiny_recovery_allows_two_long_words(monkeypatch) -> None:
-    class TinyPrefixProvider:
-        async def stream(self, request):
-            yield AudioChunk(b"complete-tiny-audio", "mp3", 0)
-            raise _IncompleteEdgeStreamError("missing EOF")
-
-    manager = VoiceSessionManager(TinyPrefixProvider(), retry_count=0)
-
-    def validate(audio, audio_format, text, enforce_min_duration=True):
-        assert enforce_min_duration is False
-        return 0.2
-
-    monkeypatch.setattr(manager, "_validate_audio", validate)
-    parts = await manager._synthesize_parts("девяностосимвольный сегмент", "ru", "voice")
-    assert [(part[0], part[1]) for part in parts] == [
-        ("девяностосимвольный сегмент", b"complete-tiny-audio")
-    ]
 
 
 @pytest.mark.anyio

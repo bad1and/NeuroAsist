@@ -12,7 +12,7 @@ AVAILABLE_VOICE_LANGUAGES = ["auto", "ru", "en"]
 
 
 def _available_tts_voices(settings) -> list[str]:
-    return [settings.voice_tts_voice_ru, settings.voice_tts_voice_en]
+    return [settings.voice_silero_speaker_ru]
 
 
 @router.get("/settings/public", response_model=PublicSettingsResponse)
@@ -27,7 +27,7 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         voice_language=runtime_settings.voice_language,
         voice_stt_model=settings.voice_stt_model,
         voice_tts_enabled=settings.voice_tts_enabled,
-        voice_tts_voice=runtime_settings.voice_tts_voice or settings.voice_tts_voice_ru,
+        voice_tts_voice=runtime_settings.voice_tts_voice or settings.voice_silero_speaker_ru,
         voice_live_playback_prebuffer_segments=settings.voice_live_playback_prebuffer_segments,
         voice_live_playback_prebuffer_ms=settings.voice_live_playback_prebuffer_ms,
         chat_history_limit=settings.chat_history_limit,

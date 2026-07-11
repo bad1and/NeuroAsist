@@ -13,7 +13,6 @@ from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.voice.providers import (
     TTSProvider,
     TTSRequest,
-    _IncompleteEdgeStreamError,
     _minimum_tts_duration_seconds,
 )
 from apps.backend.app.voice.text import TextChunker, TextNormalizer
@@ -324,8 +323,6 @@ class VoiceSessionManager:
         if connection is None or context.cancelled:
             raise asyncio.CancelledError
         base = self._event(context, segment_id=segment_id, format=audio_format)
-        if audio_format == "pcm_s16le":
-            base.update(sample_rate=24000, channels=1)
         started = {
             **base,
             "type": "tts.segment.started",
@@ -393,42 +390,9 @@ class VoiceSessionManager:
                 duration = await asyncio.to_thread(
                     self._validate_audio, audio, audio_format, text
                 )
-                if audio_format == "mp3":
-                    try:
-                        audio, duration = await asyncio.to_thread(self._decode_mp3_to_pcm, audio)
-                        audio_format = "pcm_s16le"
-                    except Exception:
-                        # Custom/legacy providers sometimes label opaque test or
-                        # browser-compatible payloads as MP3. Keep wire compatibility.
-                        logger.warning("Live PCM conversion failed; sending MP3 fallback")
                 yield (text, audio, audio_format, duration, attempt)
                 return
             except Exception as exc:
-                if isinstance(exc, _IncompleteEdgeStreamError) and chunks:
-                    if self._is_tiny_recovery_text(text):
-                        audio = b"".join(chunks)
-                        try:
-                            duration = await asyncio.to_thread(
-                                self._validate_audio,
-                                audio,
-                                audio_format,
-                                text,
-                                False,
-                            )
-                            logger.warning(
-                                "Accepted validated tiny Edge audio without EOF: "
-                                "text_length=%s words=%s audio_bytes=%s duration=%.3f",
-                                len(text),
-                                len(text.split()),
-                                len(audio),
-                                duration,
-                            )
-                            yield (text, audio, audio_format, duration, attempt)
-                            return
-                        except Exception:
-                            pass
-                    last_error = exc
-                    break
                 last_error = exc
                 if attempt <= self._retry_count:
                     await asyncio.sleep(0.1)
@@ -478,7 +442,71 @@ class VoiceSessionManager:
         text = self._SPACE_RE.sub(" ", text).strip()
         if not text:
             return []
-        return [self._cleanup_tts_job_text(text, keep_final_punctuation=True)]
+        words = text.split()
+        if len(words) <= min(self._chunker_options["max_words"], self._safe_segment_words or 18):
+            return [self._cleanup_tts_job_text(text, keep_final_punctuation=True)]
+
+        jobs: list[str] = []
+        remaining = text
+        first = True
+        while remaining:
+            remaining_words = remaining.split()
+            if len(remaining_words) <= 18:
+                jobs.append(self._cleanup_tts_job_text(remaining, keep_final_punctuation=True))
+                break
+            target = 7 if first else (self._safe_segment_words or 10)
+            split_at = self._preferred_split_offset(remaining, target_words=target, max_words=18)
+            left = self._cleanup_tts_job_text(
+                remaining[:split_at],
+                keep_final_punctuation=True,
+            )
+            right = self._cleanup_tts_job_text(
+                remaining[split_at:],
+                keep_final_punctuation=True,
+            )
+            if not left or not right:
+                break
+            jobs.append(left)
+            remaining = right
+            first = False
+
+        if len(jobs) >= 2 and len(jobs[-1].split()) <= 3:
+            candidate = f"{jobs[-2]} {jobs[-1]}"
+            if len(candidate.split()) <= 18:
+                jobs[-2] = candidate
+                jobs.pop()
+        return jobs or [text]
+
+    def _preferred_split_offset(self, text: str, *, target_words: int, max_words: int) -> int:
+        words = text.split()
+        min_words = 4
+        best: tuple[int, int] | None = None
+        patterns = (
+            r"[.!?…]\s+",
+            r"[;:]\s+",
+            r",\s+",
+        )
+        for priority, pattern in enumerate(patterns):
+            for match in re.finditer(pattern, text):
+                prefix_words = text[: match.end()].split()
+                word_count = len(prefix_words)
+                if min_words <= word_count <= max_words:
+                    score = priority * 100 + abs(word_count - target_words)
+                    if best is None or score < best[0]:
+                        best = (score, match.end())
+            if best is not None and best[0] < 100:
+                return best[1]
+        if best is not None:
+            return best[1]
+
+        split_words = min(max(target_words, min_words), max_words, len(words) - 1)
+        offset = 0
+        for index, word in enumerate(words[:split_words]):
+            found_at = text.find(word, offset)
+            offset = found_at + len(word)
+            if index < split_words - 1:
+                offset = text.find(" ", offset) + 1
+        return offset
 
     def _adaptive_split_index(self, text: str, words: list[str]) -> int:
         if len(words) <= 2:
@@ -504,6 +532,8 @@ class VoiceSessionManager:
             return ""
         if not keep_final_punctuation:
             text = re.sub(r"\s*[,;:—–-]+\s*$", "", text).strip()
+        if keep_final_punctuation:
+            return text
         if not self._FINAL_PUNCTUATION_RE.search(text):
             text = self._SOFT_PAUSE_RE.sub(" ", text)
             text = self._SPACE_RE.sub(" ", text).strip()
@@ -518,10 +548,6 @@ class VoiceSessionManager:
     ) -> float:
         if not audio:
             raise RuntimeError("TTS provider returned empty audio")
-        if audio_format == "pcm_s16le":
-            if len(audio) % 2:
-                raise RuntimeError("TTS provider returned invalid PCM audio")
-            return len(audio) / (24000 * 2)
         try:
             import av
 
@@ -537,26 +563,6 @@ class VoiceSessionManager:
         if enforce_min_duration and audio_format == "mp3" and duration < _minimum_tts_duration_seconds(text):
             raise RuntimeError("TTS provider returned suspiciously short audio")
         return duration
-
-    @staticmethod
-    def _decode_mp3_to_pcm(audio: bytes) -> tuple[bytes, float]:
-        """Decode one complete Edge segment to the stable live wire format."""
-        import av
-
-        output = bytearray()
-        resampler = av.AudioResampler(format="s16", layout="mono", rate=24000)
-        with av.open(io.BytesIO(audio), mode="r") as container:
-            for frame in container.decode(audio=0):
-                converted = resampler.resample(frame)
-                for pcm_frame in converted if isinstance(converted, list) else [converted]:
-                    if pcm_frame is not None:
-                        output.extend(bytes(pcm_frame.planes[0]))
-        flushed = resampler.resample(None) or []
-        for pcm_frame in flushed if isinstance(flushed, list) else [flushed]:
-            output.extend(bytes(pcm_frame.planes[0]))
-        if not output:
-            raise RuntimeError("TTS provider returned undecodable audio")
-        return bytes(output), len(output) / (24000 * 2)
 
     @staticmethod
     def _is_tiny_recovery_text(text: str) -> bool:

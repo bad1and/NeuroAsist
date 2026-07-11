@@ -9,8 +9,6 @@ from fastapi import HTTPException, UploadFile, status
 
 from apps.backend.app.core.config import Settings
 from apps.backend.app.voice.providers import (
-    EdgeTTSProvider,
-    CircuitBreakerTTSProvider,
     FasterWhisperSTTProvider,
     MockSTTProvider,
     MockTTSProvider,
@@ -72,7 +70,13 @@ class VoiceService:
         return self._tts_provider
 
     async def preload(self) -> None:
+        await self.preload_stt()
+
+    async def preload_stt(self) -> None:
         await self._stt_provider.preload()
+
+    async def preload_tts(self) -> None:
+        await self._tts_provider.preload()
 
     def set_tts_job(self, voice_request_id: str, payload: dict[str, Any]) -> None:
         self._tts_jobs[voice_request_id] = {
@@ -126,10 +130,16 @@ class VoiceService:
         return output_path
 
     def next_tts_path(self, provider_name: str) -> Path:
-        suffix = ".wav" if provider_name == "mock" else ".mp3"
+        suffix = getattr(self._tts_provider, "file_extension", ".wav")
         output_dir = self._settings.voice_audio_path / "tts"
         output_dir.mkdir(parents=True, exist_ok=True)
         return output_dir / f"{uuid4().hex}{suffix}"
+
+    def resolve_tts_voice(self, language: str, requested_voice: str | None = None) -> str:
+        resolver = getattr(self._tts_provider, "resolve_voice", None)
+        if resolver is None:
+            return requested_voice or language
+        return resolver(language, requested_voice)
 
     def resolve_audio_path(self, audio_id: str) -> Path:
         if "/" in audio_id or "\\" in audio_id or ".." in audio_id:
@@ -170,22 +180,14 @@ class VoiceService:
     def _build_tts_provider(self, settings: Settings) -> TTSProvider:
         if settings.voice_tts_provider == "mock":
             return MockTTSProvider()
-        if settings.voice_tts_provider in {"edge_tts", "auto"}:
-            provider = EdgeTTSProvider()
-            provider._STREAM_IDLE_TIMEOUT_SECONDS = (
-                settings.voice_live_edge_first_byte_timeout_seconds
+        if settings.voice_tts_provider == "silero":
+            return SileroTTSProvider(
+                model=settings.voice_silero_model,
+                speaker=settings.voice_silero_speaker_ru,
+                sample_rate=settings.voice_silero_sample_rate,
+                device=settings.voice_silero_device,
+                cpu_threads=settings.voice_silero_cpu_threads,
+                warmup=settings.voice_silero_warmup,
+                timeout_seconds=settings.voice_silero_timeout_seconds,
             )
-            provider._POST_AUDIO_IDLE_TIMEOUT_SECONDS = (
-                settings.voice_live_edge_idle_timeout_seconds
-            )
-            if settings.voice_tts_provider == "edge_tts":
-                return provider
-            fallback = None
-            if settings.voice_tts_fallback_provider == "silero":
-                fallback = SileroTTSProvider(
-                    settings.voice_silero_model,
-                    settings.voice_silero_speaker,
-                    settings.voice_silero_sample_rate,
-                )
-            return CircuitBreakerTTSProvider(provider, fallback)
         raise ValueError(f"Unsupported TTS provider: {settings.voice_tts_provider}")

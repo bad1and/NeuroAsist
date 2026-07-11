@@ -61,9 +61,7 @@ export class TTSStreamPlayer {
     const decode = async () => {
       await this.unlock();
       const context = this.context!;
-      const buffer = audio.format === "pcm_s16le"
-        ? this.pcmBuffer(data, audio.sample_rate ?? 24000, audio.channels ?? 1)
-        : await context.decodeAudioData(data.slice(0));
+      const buffer = await context.decodeAudioData(data.slice(0));
       if (generation !== this.generation || utteranceId !== this.activeUtteranceId) return;
       if (!this.started) {
         this.readyBuffers.push(buffer);
@@ -178,19 +176,6 @@ export class TTSStreamPlayer {
     }
   }
 
-  private pcmBuffer(data: ArrayBuffer, sampleRate: number, channels: number): AudioBuffer {
-    const context = this.context!;
-    const samples = new Int16Array(data);
-    const frames = Math.floor(samples.length / channels);
-    const buffer = context.createBuffer(channels, frames, sampleRate);
-    for (let channel = 0; channel < channels; channel += 1) {
-      const output = buffer.getChannelData(channel);
-      for (let frame = 0; frame < frames; frame += 1) {
-        output[frame] = samples[frame * channels + channel] / 32768;
-      }
-    }
-    return buffer;
-  }
 }
 
 export class VoiceSocketClient {
