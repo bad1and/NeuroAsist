@@ -55,6 +55,9 @@ export type VoiceServerEvent = {
   session_id: string;
   utterance_id: string;
   segment_id?: number;
+  format?: string;
+  sample_rate?: number;
+  channels?: number;
   delta?: string;
   reply?: string;
   emotion?: string;

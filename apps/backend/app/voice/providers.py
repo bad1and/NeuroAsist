@@ -71,6 +71,10 @@ class TTSProvider:
 class _IncompleteEdgeStreamError(RuntimeError):
     """Edge returned a playable prefix but never confirmed the end of audio."""
 
+    def __init__(self, message: str, stats: dict | None = None) -> None:
+        super().__init__(message)
+        self.stats = stats or {}
+
 
 class MockSTTProvider(STTProvider):
     async def transcribe(self, audio_path: Path, language: str) -> STTResult:
@@ -240,8 +244,8 @@ class FasterWhisperSTTProvider(STTProvider):
 
 
 class EdgeTTSProvider(TTSProvider):
-    _STREAM_IDLE_TIMEOUT_SECONDS = 4
-    _POST_AUDIO_IDLE_TIMEOUT_SECONDS = 1.2
+    _STREAM_IDLE_TIMEOUT_SECONDS = 8.0
+    _POST_AUDIO_IDLE_TIMEOUT_SECONDS = 3.0
     _STREAM_CLOSE_TIMEOUT_SECONDS = 0.1
     _MAX_CHUNK_CHARS = 90
     _MAX_CHUNK_WORDS = 18
@@ -250,7 +254,7 @@ class EdgeTTSProvider(TTSProvider):
     _CHUNK_RETRIES = 0
     _MAX_TOTAL_ATTEMPTS = 50
     _MAX_SYNTHESIS_SECONDS = 18.0
-    _ADAPTIVE_WORD_LIMITS = (2, 1)
+    _ADAPTIVE_WORD_LIMITS = (8, 5, 2)
     _CHUNK_PAUSE_SECONDS = 0.15
     _RATE = "+20%"
     _VOICE_FALLBACKS = {
@@ -326,6 +330,7 @@ class EdgeTTSProvider(TTSProvider):
             audio_duration_seconds=audio_duration_seconds,
         )
 
+
     async def stream(self, request: TTSRequest):
         try:
             import edge_tts
@@ -341,6 +346,9 @@ class EdgeTTSProvider(TTSProvider):
         sequence = 0
         iterator = communicate.stream()
         audio_received = False
+        words_expected = len(re.findall(r"\w+", request.text, re.UNICODE))
+        words_confirmed = 0
+        last_boundary_offset = 0
         try:
             while True:
                 try:
@@ -356,8 +364,20 @@ class EdgeTTSProvider(TTSProvider):
                     break
                 except TimeoutError:
                     if audio_received:
+                        coverage = words_confirmed / max(1, words_expected)
+                        stats = {
+                            "words_expected": words_expected,
+                            "words_confirmed": words_confirmed,
+                            "last_boundary_offset": last_boundary_offset,
+                            "stream_completed": False,
+                            "audio_bytes": None,
+                            "audio_duration": None,
+                        }
+                        if coverage >= 0.9:
+                            logger.warning("Accepting Edge stream without EOF: stats=%s", stats)
+                            break
                         raise _IncompleteEdgeStreamError(
-                            "edge-tts stream stalled after partial audio without EOF"
+                            "edge-tts stream stalled after partial audio without EOF", stats
                         )
                     raise
                 if message.get("type") == "audio" and message.get("data"):
@@ -365,6 +385,8 @@ class EdgeTTSProvider(TTSProvider):
                     sequence += 1
                     audio_received = True
                 elif message.get("type") == "WordBoundary":
+                    words_confirmed += 1
+                    last_boundary_offset = int(message.get("offset", last_boundary_offset) or 0)
                     yield AudioChunk(b"", "mp3", sequence, metadata=dict(message))
         finally:
             with contextlib.suppress(Exception):
@@ -431,12 +453,14 @@ class EdgeTTSProvider(TTSProvider):
         word_count = len(words)
         for word_limit in self._ADAPTIVE_WORD_LIMITS:
             if word_count > word_limit:
-                # Adaptive recovery must keep the final one/two words separate;
-                # the normal splitter intentionally merges a short tail.
-                return [
+                chunks = [
                     " ".join(words[index : index + word_limit])
                     for index in range(0, word_count, word_limit)
                 ]
+                if word_count > 8 and len(chunks) >= 2 and len(chunks[-1].split()) < 5:
+                    chunks[-2] = f"{chunks[-2]} {chunks[-1]}"
+                    chunks.pop()
+                return chunks
         return [text]
 
     async def _synthesize_chunk(
@@ -476,12 +500,19 @@ class EdgeTTSProvider(TTSProvider):
                         text,
                         "edge-tts returned invalid audio for chunk",
                     )
-                    # ffprobe only proves that the prefix is a valid MP3.  A normal
-                    # fragment without Edge EOF is ambiguous and must be split.
-                    if not stream_completed and not _is_tiny_tts_chunk(text):
+                    stats = dict(getattr(self, "_last_stream_stats", {}))
+                    stats["audio_duration"] = audio_duration_seconds
+                    coverage = stats.get("words_confirmed", 0) / max(
+                        1, stats.get("words_expected", len(text.split()))
+                    )
+                    # Missing iterator EOF is common after a complete Edge payload.
+                    # Accept only when decoding/duration validation succeeded and
+                    # WordBoundary confirms nearly all requested words.
+                    if not stream_completed and coverage < 0.9 and not _is_tiny_tts_chunk(text):
                         raise _IncompleteEdgeStreamError(
-                            "edge-tts stream ended without EOF"
+                            "edge-tts stream ended without EOF", stats
                         )
+                    logger.info("Edge TTS stream stats: %s", stats)
                 except _IncompleteEdgeStreamError:
                     output_path.unlink(missing_ok=True)
                     # Another voice cannot repair a websocket that delivered only
@@ -511,6 +542,9 @@ class EdgeTTSProvider(TTSProvider):
         communicate = edge_tts.Communicate(text, voice, rate=self._RATE)
         audio_bytes = 0
         stream_completed = False
+        words_expected = len(re.findall(r"\w+", text, re.UNICODE))
+        words_confirmed = 0
+        last_boundary_offset = 0
         stream = communicate.stream()
         try:
             with output_path.open("wb") as output:
@@ -537,6 +571,10 @@ class EdgeTTSProvider(TTSProvider):
                             break
                         raise
 
+                    if message.get("type") == "WordBoundary":
+                        words_confirmed += 1
+                        last_boundary_offset = int(message.get("offset", last_boundary_offset) or 0)
+                        continue
                     if message.get("type") != "audio":
                         continue
                     data = message.get("data", b"")
@@ -550,6 +588,14 @@ class EdgeTTSProvider(TTSProvider):
                     timeout=self._STREAM_CLOSE_TIMEOUT_SECONDS,
                 )
 
+        self._last_stream_stats = {
+            "words_expected": words_expected,
+            "words_confirmed": words_confirmed,
+            "last_boundary_offset": last_boundary_offset,
+            "stream_completed": stream_completed,
+            "audio_bytes": audio_bytes,
+            "audio_duration": None,
+        }
         return audio_bytes, stream_completed
 
     def _validate_audio_path(self, audio_path: Path, error_message: str) -> float | None:
@@ -696,6 +742,88 @@ class EdgeTTSProvider(TTSProvider):
         )
         payload = json.loads(completed.stdout)
         return float(payload["format"]["duration"])
+
+
+class CircuitBreakerTTSProvider(TTSProvider):
+    def __init__(self, primary: TTSProvider, fallback: TTSProvider | None, *, threshold: int = 2, cooldown: float = 60) -> None:
+        self.primary, self.fallback = primary, fallback
+        self.threshold, self.cooldown = threshold, cooldown
+        self._failures, self._open_until = 0, 0.0
+
+    def _failed(self) -> None:
+        self._failures += 1
+        if self._failures >= self.threshold:
+            self._open_until = time.monotonic() + self.cooldown
+            logger.warning("TTS circuit breaker opened: cooldown_seconds=%s", self.cooldown)
+
+    def _succeeded(self) -> None:
+        self._failures, self._open_until = 0, 0.0
+
+    async def stream(self, request: TTSRequest):
+        provider = self.fallback if time.monotonic() < self._open_until and self.fallback else self.primary
+        try:
+            async for chunk in provider.stream(request):
+                yield chunk
+            if provider is self.primary:
+                self._succeeded()
+        except Exception:
+            if provider is self.primary:
+                self._failed()
+                if time.monotonic() < self._open_until and self.fallback:
+                    async for chunk in self.fallback.stream(request):
+                        yield chunk
+                    return
+            raise
+
+    async def synthesize(self, text: str, voice: str, output_path: Path) -> TTSResult:
+        provider = self.fallback if time.monotonic() < self._open_until and self.fallback else self.primary
+        try:
+            result = await provider.synthesize(text, voice, output_path)
+            if provider is self.primary:
+                self._succeeded()
+            return result
+        except Exception:
+            if provider is self.primary:
+                self._failed()
+                if time.monotonic() < self._open_until and self.fallback:
+                    return await self.fallback.synthesize(text, voice, output_path)
+            raise
+
+
+class SileroTTSProvider(TTSProvider):
+    def __init__(self, model: str = "v5_5_ru", speaker: str = "xenia", sample_rate: int = 24000) -> None:
+        self.model_name, self.speaker, self.sample_rate = model, speaker, sample_rate
+        self._model, self._load_lock = None, asyncio.Lock()
+
+    async def _ensure_model(self):
+        async with self._load_lock:
+            if self._model is None:
+                try:
+                    import torch
+                except ImportError as exc:
+                    raise RuntimeError("Silero fallback requires optional torch dependency") from exc
+                self._model, _ = await asyncio.to_thread(
+                    torch.hub.load, repo_or_dir="snakers4/silero-models", model="silero_tts",
+                    language="ru", speaker=self.model_name,
+                )
+        return self._model
+
+    async def _pcm(self, text: str) -> bytes:
+        model = await self._ensure_model()
+        audio = await asyncio.to_thread(model.apply_tts, text=text, speaker=self.speaker, sample_rate=self.sample_rate)
+        import torch
+        return audio.detach().cpu().clamp(-1, 1).mul(32767).to(dtype=torch.int16).numpy().tobytes()
+
+    async def stream(self, request: TTSRequest):
+        yield AudioChunk(await self._pcm(request.text), "pcm_s16le", 0, is_final=True)
+
+    async def synthesize(self, text: str, voice: str, output_path: Path) -> TTSResult:
+        started, pcm = time.perf_counter(), await self._pcm(text)
+        output_path = output_path.with_suffix(".wav")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with wave.open(str(output_path), "wb") as audio:
+            audio.setnchannels(1); audio.setsampwidth(2); audio.setframerate(self.sample_rate); audio.writeframes(pcm)
+        return TTSResult(output_path, int((time.perf_counter() - started) * 1000), "silero", self.speaker, audio_duration_seconds=len(pcm) / (2 * self.sample_rate))
 
 
 def split_tts_chunks(text: str, max_chars: int = 60, max_words: int = 12) -> list[str]:

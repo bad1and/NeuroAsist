@@ -284,3 +284,21 @@ apps/
 The backend keeps LLM access behind a provider interface so another
 OpenAI-compatible model can replace DeepSeek without changing the route or
 agent logic.
+# Live TTS stability (v0.3.1)
+
+Live voice uses Edge TTS as the primary provider, validates complete segments and
+converts Edge MP3 to mono 24 kHz signed 16-bit PCM before sending it over the
+existing WebSocket protocol. The browser still accepts MP3 segments for backward
+compatibility. Playback starts after either two decoded segments or about one
+second of decoded audio and schedules buffers continuously.
+
+`VOICE_TTS_PROVIDER=auto` enables the circuit breaker. Two consecutive Edge
+failures open it for 60 seconds and route speech to the optional lazy-loaded
+Silero model (`VOICE_TTS_FALLBACK_PROVIDER=silero`). Silero requires `torch`, but
+it is deliberately not a mandatory dependency; when unavailable the existing
+browser SpeechSynthesis fallback is used. Set `VOICE_TTS_PROVIDER=edge_tts` to
+disable local fallback. Live Edge concurrency defaults to `1`, may be explicitly
+set to `2`, and is capped at two requests.
+
+The complete set of segment sizes, first-byte/idle timeouts, playback prebuffer,
+Silero model and provider settings is documented in `.env.example`.

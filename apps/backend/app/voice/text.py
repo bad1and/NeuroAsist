@@ -17,7 +17,8 @@ class TextNormalizer:
 
 
 class TextChunker:
-    _BOUNDARY = re.compile(r"[.!?;](?:[\"'»)]*)\s+")
+    _HARD_BOUNDARY = re.compile(r"[.!?…](?:[\"'»)]*)(?:\s+|$)")
+    _SOFT_BOUNDARY = re.compile(r"[;:](?:[\"'»)]*)(?:\s+|$)")
     _ABBREVIATIONS = ("т. д.", "т. п.", "т. е.")
 
     def __init__(
@@ -45,7 +46,11 @@ class TextChunker:
         boundary = self._find_boundary()
         if boundary is not None:
             return [self._take(boundary)]
-        if len(self._buffer.strip()) < minimum or not re.search(r"\w\s*$", self._buffer):
+        # A delta ending in a letter may be the middle of a token.  Idle flushes
+        # are only safe after whitespace/punctuation and never for a tiny tail.
+        if len(self._buffer.strip()) < minimum or not re.search(r"(?:\s|[.!?…;:,])$", self._buffer):
+            return []
+        if len(self._buffer.split()) < 4:
             return []
         return [self._take(len(self._buffer))]
 
@@ -53,7 +58,12 @@ class TextChunker:
         chunks = self._drain_complete()
         while self._buffer.strip():
             chunks.append(self._take(self._split_at_limit(self._buffer)))
-        return [chunk for chunk in chunks if re.search(r"\w", chunk)]
+        chunks = [chunk for chunk in chunks if re.search(r"\w", chunk)]
+        if len(chunks) >= 2 and len(chunks[-1].split()) <= 3:
+            combined = f"{chunks[-2]} {chunks[-1]}".strip()
+            if len(combined) <= self._max_chars and len(combined.split()) <= self._max_words:
+                chunks[-2:] = [combined]
+        return chunks
 
     def _drain_complete(self) -> list[str]:
         chunks: list[str] = []
@@ -72,18 +82,28 @@ class TextChunker:
         for abbreviation in self._ABBREVIATIONS:
             protected = protected.replace(abbreviation, abbreviation.replace(".", "∯"))
         protected = re.sub(r"(?<=\d)\.(?=\d)", "∯", protected)
-        match = self._BOUNDARY.search(protected, pos=start)
-        return match.end() if match else None
+        target = self._first_target if not self._emitted else self._next_target
+        hard = self._HARD_BOUNDARY.search(protected, pos=start)
+        if hard:
+            return hard.end()
+        matches = []
+        for priority, pattern in enumerate((self._SOFT_BOUNDARY,)):
+            for match in pattern.finditer(protected, pos=start):
+                matches.append((priority, abs(match.end() - target), match.end()))
+        eligible = [item for item in matches if item[2] >= min(target, 30)]
+        if eligible:
+            return min(eligible, key=lambda item: (item[0], item[1]))[2]
+        return min(matches, key=lambda item: (item[0], item[1]))[2] if matches else None
 
     def _split_at_limit(self, text: str) -> int:
         if self._fits(text):
             return len(text)
         char_limit = min(self._max_chars, self._word_limit_index(text))
         prefix = text[: char_limit + 1]
-        for separator in (",", " "):
+        for separator in (";", ":", ",", " "):
             index = prefix.rfind(separator)
             if index >= max(1, char_limit // 2):
-                return index + (1 if separator == "," else 0)
+                return index + (1 if separator != " " else 0)
         return char_limit
 
     def _fits(self, text: str) -> bool:
