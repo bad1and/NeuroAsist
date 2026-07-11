@@ -406,6 +406,33 @@ python scripts/benchmark_tts.py --provider silero --device cuda --runs 5
 
 Benchmark записывает результат в `data/tts_benchmark.json` и выводит P50/P95 задержку синтеза и real-time factor.
 
+## Устранение проблем
+
+### Silero при запуске останавливается на `Using cache found ... snakers4_silero-models_master`
+
+Эта строка не означает успешную загрузку модели. Она говорит только о том, что PyTorch Hub нашёл кэш репозитория Silero. При свежей или неполной установке после этого всё равно может докачиваться сам checkpoint модели.
+
+Если в `app.log` есть `CERTIFICATE_VERIFY_FAILED` или `certificate has expired`, скачивание модели упало на HTTPS-проверке сертификата. На проблемной Windows-машине:
+
+```powershell
+# 1. Проверь дату, время, часовой пояс Windows и установи обновления корневых сертификатов через Windows Update.
+
+# 2. Обнови certificate-related Python-пакеты внутри venv проекта.
+.\.venv\Scripts\python.exe -m pip install --upgrade pip certifi requests urllib3
+
+# 3. Укажи OpenSSL/Python использовать certifi в текущей сессии терминала.
+$env:SSL_CERT_FILE = (& .\.venv\Scripts\python.exe -c "import certifi; print(certifi.where())")
+
+# 4. Удали возможный неполный кэш Torch Hub.
+Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\torch\hub\snakers4_silero-models_master" -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\torch\hub\checkpoints" -ErrorAction SilentlyContinue
+
+# 5. Запусти backend снова.
+.\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Если на машине есть корпоративная сеть, антивирус или HTTPS inspection, нужно разрешить Python доступ к GitHub/PyTorch downloads или подготовить Torch cache на другой машине и скопировать `%USERPROFILE%\.cache\torch` в профиль нужного пользователя.
+
 ## Текущие ограничения
 
 NeuroAsist v0.3.1 пока не умеет:

@@ -395,12 +395,22 @@ class SileroTTSProvider(TTSProvider):
         if self._model_loader is not None:
             model = self._model_loader()
         else:
-            model, _ = torch.hub.load(
-                repo_or_dir="snakers4/silero-models",
-                model="silero_tts",
-                language="ru",
-                speaker=self.model_name,
-            )
+            try:
+                model, _ = torch.hub.load(
+                    repo_or_dir="snakers4/silero-models",
+                    model="silero_tts",
+                    language="ru",
+                    speaker=self.model_name,
+                )
+            except Exception as exc:
+                message = str(exc)
+                if "CERTIFICATE_VERIFY_FAILED" in message or "[SSL:" in message:
+                    raise RuntimeError(
+                        "Silero TTS model download failed because HTTPS certificate verification failed. "
+                        "Check Windows date/time, update trusted root certificates, update certifi in the "
+                        "virtual environment, and remove the incomplete torch hub cache before retrying."
+                    ) from exc
+                raise
         if hasattr(model, "to"):
             moved_model = model.to(selected_device)
             if moved_model is not None:
