@@ -417,6 +417,10 @@ Benchmark записывает результат в `data/tts_benchmark.json` �
 ```powershell
 # 1. Проверь дату, время, часовой пояс Windows и установи обновления корневых сертификатов через Windows Update.
 
+# Временный обход для запуска backend, пока чинишь первую загрузку Silero.
+# TTS повторит lazy-load при первом использовании.
+$env:VOICE_PRELOAD_TTS_MODEL = "false"
+
 # 2. Обнови certificate-related Python-пакеты внутри venv проекта.
 .\.venv\Scripts\python.exe -m pip install --upgrade pip certifi requests urllib3
 
@@ -432,6 +436,56 @@ Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\torch\hub\checkpoints" -Err
 ```
 
 Если на машине есть корпоративная сеть, антивирус или HTTPS inspection, нужно разрешить Python доступ к GitHub/PyTorch downloads или подготовить Torch cache на другой машине и скопировать `%USERPROFILE%\.cache\torch` в профиль нужного пользователя.
+
+### faster-whisper уходит на CPU на Windows
+
+Если в логах есть:
+
+```text
+FasterWhisper CUDA runtime failed, retrying on CPU
+```
+
+значит драйвер NVIDIA видит видеокарту, но CTranslate2 не находит CUDA runtime DLL, которые нужны `faster-whisper` (`cuBLAS` и `cuDNN`). Локальный фикс только для этого проекта: скачать CUDA 12 bundle и положить DLL рядом с Python из venv:
+
+```powershell
+# 1. Скачай CUDA 12 cuBLAS/cuDNN bundle. Архив большой.
+New-Item -ItemType Directory -Force -Path .cache\ct2-cuda
+Invoke-WebRequest -Uri "https://github.com/Purfview/whisper-standalone-win/releases/download/libs/cuBLAS.and.cuDNN_CUDA12_win_v3.7z" -OutFile ".cache\ct2-cuda\cuBLAS.and.cuDNN_CUDA12_win_v3.7z"
+
+# 2. Скачай маленький standalone-распаковщик 7-Zip.
+New-Item -ItemType Directory -Force -Path .cache\7zip
+Invoke-WebRequest -Uri "https://www.7-zip.org/a/7za920.zip" -OutFile ".cache\7zip\7za920.zip"
+Expand-Archive -Force ".cache\7zip\7za920.zip" ".cache\7zip"
+
+# 3. Проверь и распакуй CUDA DLL archive.
+.\.cache\7zip\7za.exe t .cache\ct2-cuda\cuBLAS.and.cuDNN_CUDA12_win_v3.7z
+$out = (Resolve-Path .cache\ct2-cuda).Path + "\extracted"
+New-Item -ItemType Directory -Force -Path $out
+.\.cache\7zip\7za.exe x .cache\ct2-cuda\cuBLAS.and.cuDNN_CUDA12_win_v3.7z "-o$out" -y
+
+# 4. Сделай DLL видимыми для venv проекта.
+Copy-Item -Force .cache\ct2-cuda\extracted\*.dll .venv\Scripts\
+
+# 5. Проверь прямую CUDA-загрузку faster-whisper.
+.\.venv\Scripts\python.exe -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cuda', compute_type='int8_float16'); print('cuda ok')"
+
+# 6. Проверь, что backend provider в auto-режиме выбирает CUDA.
+.\.venv\Scripts\python.exe -c "from apps.backend.app.voice.providers import FasterWhisperSTTProvider; p=FasterWhisperSTTProvider('small','auto','int8'); p._ensure_model(); print('provider ok', p._selected_device, p._selected_compute_type)"
+```
+
+Ожидаемый результат:
+
+```text
+cuda ok
+provider ok cuda int8_float16
+```
+
+При `VOICE_STT_DEVICE=auto` backend сначала пробует `cuda/int8_float16` и уходит на `cpu/int8` только если CUDA-загрузка не удалась. Чтобы жестко закрепить GPU:
+
+```env
+VOICE_STT_DEVICE=cuda
+VOICE_STT_COMPUTE_TYPE=int8_float16
+```
 
 ## Текущие ограничения
 

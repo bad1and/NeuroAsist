@@ -1,5 +1,7 @@
 import asyncio
 import contextlib
+import logging
+import os
 import sys
 import wave
 from pathlib import Path
@@ -45,6 +47,7 @@ def test_split_tts_chunks_limits_words_without_punctuation() -> None:
 def test_faster_whisper_auto_retries_cpu_on_cuda_runtime_dll_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     calls: list[tuple[str, str]] = []
 
@@ -67,12 +70,15 @@ def test_faster_whisper_auto_retries_cpu_on_cuda_runtime_dll_error(
     audio_path.write_bytes(b"fake")
 
     provider = FasterWhisperSTTProvider("small", "auto", "int8")
-    result = asyncio.run(provider.transcribe(audio_path, "ru"))
+    with caplog.at_level(logging.INFO):
+        result = asyncio.run(provider.transcribe(audio_path, "ru"))
 
     assert result.text == "Привет"
     assert provider._selected_device == "cpu"
     assert provider._selected_compute_type == "int8"
     assert calls == [("cuda", "int8_float16"), ("cpu", "int8")]
+    assert "FasterWhisper CUDA runtime failed, retrying on CPU" in caplog.text
+    assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
 
 
 def test_waveform_to_wav_bytes_clamps_and_writes_pcm16_wav() -> None:
@@ -141,6 +147,17 @@ def test_silero_model_loads_only_once(monkeypatch: pytest.MonkeyPatch) -> None:
     asyncio.run(provider.preload())
 
     assert loads == 1
+
+
+def test_silero_configures_certifi_ca_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
+    import certifi
+
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    provider = SileroTTSProvider(model_loader=FakeSileroModel, warmup=False)
+
+    provider._configure_certifi_ca_bundle()
+
+    assert os.environ["SSL_CERT_FILE"] == certifi.where()
 
 
 def test_parallel_silero_preload_loads_model_once(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -417,6 +417,10 @@ If `app.log` contains `CERTIFICATE_VERIFY_FAILED` or `certificate has expired`, 
 ```powershell
 # 1. Check Windows date, time, timezone, and run Windows Update for root certificates.
 
+# Optional temporary startup workaround: let the backend start while you fix the
+# first Silero download. TTS will retry lazy loading on first use.
+$env:VOICE_PRELOAD_TTS_MODEL = "false"
+
 # 2. Update certificate-related Python packages inside the project venv.
 .\.venv\Scripts\python.exe -m pip install --upgrade pip certifi requests urllib3
 
@@ -432,6 +436,56 @@ Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\torch\hub\checkpoints" -Err
 ```
 
 If the machine has restricted corporate or antivirus HTTPS inspection, allow Python to access GitHub/PyTorch downloads or prepare the Torch cache on another machine and copy `%USERPROFILE%\.cache\torch` to the target user profile.
+
+### faster-whisper falls back to CPU on Windows
+
+If logs contain:
+
+```text
+FasterWhisper CUDA runtime failed, retrying on CPU
+```
+
+the NVIDIA driver can see the GPU, but CTranslate2 cannot find the CUDA runtime DLLs needed by `faster-whisper` (`cuBLAS` and `cuDNN`). For a local project-only fix on Windows, download the CUDA 12 library bundle used by faster-whisper and put the DLLs next to the venv Python executable:
+
+```powershell
+# 1. Download the CUDA 12 cuBLAS/cuDNN bundle. The archive is large.
+New-Item -ItemType Directory -Force -Path .cache\ct2-cuda
+Invoke-WebRequest -Uri "https://github.com/Purfview/whisper-standalone-win/releases/download/libs/cuBLAS.and.cuDNN_CUDA12_win_v3.7z" -OutFile ".cache\ct2-cuda\cuBLAS.and.cuDNN_CUDA12_win_v3.7z"
+
+# 2. Download the small standalone 7-Zip extractor.
+New-Item -ItemType Directory -Force -Path .cache\7zip
+Invoke-WebRequest -Uri "https://www.7-zip.org/a/7za920.zip" -OutFile ".cache\7zip\7za920.zip"
+Expand-Archive -Force ".cache\7zip\7za920.zip" ".cache\7zip"
+
+# 3. Verify and extract the CUDA DLL archive.
+.\.cache\7zip\7za.exe t .cache\ct2-cuda\cuBLAS.and.cuDNN_CUDA12_win_v3.7z
+$out = (Resolve-Path .cache\ct2-cuda).Path + "\extracted"
+New-Item -ItemType Directory -Force -Path $out
+.\.cache\7zip\7za.exe x .cache\ct2-cuda\cuBLAS.and.cuDNN_CUDA12_win_v3.7z "-o$out" -y
+
+# 4. Make the DLLs visible to the project venv.
+Copy-Item -Force .cache\ct2-cuda\extracted\*.dll .venv\Scripts\
+
+# 5. Verify direct faster-whisper CUDA loading.
+.\.venv\Scripts\python.exe -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cuda', compute_type='int8_float16'); print('cuda ok')"
+
+# 6. Verify the backend provider chooses CUDA in auto mode.
+.\.venv\Scripts\python.exe -c "from apps.backend.app.voice.providers import FasterWhisperSTTProvider; p=FasterWhisperSTTProvider('small','auto','int8'); p._ensure_model(); print('provider ok', p._selected_device, p._selected_compute_type)"
+```
+
+Expected result:
+
+```text
+cuda ok
+provider ok cuda int8_float16
+```
+
+With `VOICE_STT_DEVICE=auto`, the backend tries `cuda/int8_float16` first and falls back to `cpu/int8` only if CUDA loading fails. To force GPU mode explicitly:
+
+```env
+VOICE_STT_DEVICE=cuda
+VOICE_STT_COMPUTE_TYPE=int8_float16
+```
 
 ## Current limitations
 

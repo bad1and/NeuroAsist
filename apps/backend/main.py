@@ -149,8 +149,6 @@ def create_app() -> FastAPI:
                         "device": settings.voice_silero_device,
                     },
                 )
-                if settings.voice_tts_provider == "silero":
-                    raise
 
         event_bus.publish(
             "backend.status",
