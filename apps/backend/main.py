@@ -15,6 +15,7 @@ from apps.backend.app.events.bus import EventBus
 from apps.backend.app.runtime.settings import RuntimeSettings
 from apps.backend.app.storage.sqlite_history import SQLiteMessageHistory
 from apps.backend.app.voice.service import VoiceService
+from apps.backend.app.voice.live import VoiceSessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ def create_app() -> FastAPI:
     if not settings.llm_api_key:
         logger.warning("DeepSeek API key is not configured")
 
-    app = FastAPI(title=settings.app_name, version="0.3.0")
+    app = FastAPI(title=settings.app_name, version="0.3.1")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
@@ -44,6 +45,21 @@ def create_app() -> FastAPI:
         voice_tts_voice=settings.voice_tts_voice_ru,
     )
     voice_service = VoiceService(settings)
+    voice_session_manager = VoiceSessionManager(
+        voice_service.tts_provider,
+        queue_size=settings.voice_live_queue_size,
+        tts_timeout=settings.voice_tts_timeout_seconds,
+        retry_count=settings.voice_live_tts_retry_count,
+        idle_flush_ms=settings.voice_live_idle_flush_ms,
+        first_segment_chars=settings.voice_live_first_segment_chars,
+        next_segment_chars=settings.voice_live_next_segment_chars,
+        max_segment_chars=settings.voice_live_max_segment_chars,
+        max_segment_words=settings.voice_live_max_segment_words,
+        safe_segment_words=settings.voice_live_safe_segment_words,
+        tts_concurrency_mode=settings.voice_live_tts_concurrency_mode,
+        tts_concurrency_min=settings.voice_live_tts_concurrency_min,
+        tts_concurrency_max=settings.voice_live_tts_concurrency_max,
+    )
 
     @app.on_event("startup")
     async def startup() -> None:
@@ -94,6 +110,7 @@ def create_app() -> FastAPI:
     app.state.event_bus = event_bus
     app.state.runtime_settings = runtime_settings
     app.state.voice_service = voice_service
+    app.state.voice_session_manager = voice_session_manager
     app.include_router(chat_router)
     app.include_router(events_router)
     app.include_router(settings_router)

@@ -41,6 +41,28 @@ export type VoiceChatResponse = ChatResponse & {
   };
 };
 
+export type VoiceLiveResponse = {
+  session_id: string;
+  utterance_id: string;
+  voice_request_id: string;
+  transcript: string;
+  status: "streaming";
+};
+
+export type VoiceServerEvent = {
+  version: 1;
+  type: string;
+  session_id: string;
+  utterance_id: string;
+  segment_id?: number;
+  delta?: string;
+  reply?: string;
+  emotion?: string;
+  intent?: string;
+  code?: string;
+  message?: string;
+};
+
 export type VoiceTtsStatusResponse = {
   voice_request_id: string;
   status: VoiceTtsStatus;
@@ -73,6 +95,8 @@ export type PublicSettings = {
   voice_stt_model: string;
   voice_tts_enabled: boolean;
   voice_tts_voice: string;
+  voice_live_playback_prebuffer_segments: number;
+  voice_live_playback_prebuffer_ms: number;
   chat_history_limit: number;
   log_level: string;
   api_key_configured: boolean;
@@ -90,6 +114,7 @@ export type ChatMessage = {
   intent?: string;
   audioUrl?: string;
   voiceRequestId?: string;
+  utteranceId?: string;
   ttsStatus?: VoiceTtsStatus;
   ttsError?: string;
 };

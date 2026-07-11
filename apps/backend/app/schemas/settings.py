@@ -9,6 +9,8 @@ class PublicSettingsResponse(BaseModel):
     voice_stt_model: str
     voice_tts_enabled: bool
     voice_tts_voice: str
+    voice_live_playback_prebuffer_segments: int
+    voice_live_playback_prebuffer_ms: int
     chat_history_limit: int
     log_level: str
     api_key_configured: bool

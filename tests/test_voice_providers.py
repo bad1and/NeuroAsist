@@ -7,6 +7,7 @@ import pytest
 
 from apps.backend.app.voice.providers import (
     EdgeTTSProvider,
+    FasterWhisperSTTProvider,
     _prepare_edge_tts_chunk,
     split_tts_chunks,
 )
@@ -74,6 +75,39 @@ def test_split_tts_chunks_limits_words_without_punctuation() -> None:
     assert all(len(chunk) <= 80 for chunk in chunks)
 
 
+def test_faster_whisper_auto_retries_cpu_on_cuda_runtime_dll_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str]] = []
+
+    class FakeWhisperModel:
+        def __init__(self, model_name: str, *, device: str, compute_type: str) -> None:
+            calls.append((device, compute_type))
+            self.device = device
+
+        def transcribe(self, *args, **kwargs):
+            if self.device == "cuda":
+                raise RuntimeError("Library cublas64_12.dll is not found or cannot be loaded")
+            return [SimpleNamespace(text="Привет")], SimpleNamespace(language="ru")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "faster_whisper",
+        SimpleNamespace(WhisperModel=FakeWhisperModel),
+    )
+    audio_path = tmp_path / "input.wav"
+    audio_path.write_bytes(b"fake")
+
+    provider = FasterWhisperSTTProvider("small", "auto", "int8")
+    result = asyncio.run(provider.transcribe(audio_path, "ru"))
+
+    assert result.text == "Привет"
+    assert provider._selected_device == "cpu"
+    assert provider._selected_compute_type == "int8"
+    assert calls == [("cuda", "int8_float16"), ("cpu", "int8")]
+
+
 class _FakeStream:
     def __init__(self, messages, *, stall_after_messages: bool = False) -> None:
         self._messages = list(messages)
@@ -110,6 +144,7 @@ class _FakeCommunicateFactory:
 def test_edge_tts_rejects_ambiguous_audio_when_stream_stalls_without_eof(tmp_path: Path) -> None:
     provider = EdgeTTSProvider()
     provider._STREAM_IDLE_TIMEOUT_SECONDS = 0.01
+    provider._POST_AUDIO_IDLE_TIMEOUT_SECONDS = 0.01
     provider._CHUNK_RETRIES = 0
     fake_edge_tts = SimpleNamespace(
         Communicate=_FakeCommunicateFactory(

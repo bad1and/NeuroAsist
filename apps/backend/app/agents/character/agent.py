@@ -2,6 +2,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
+from collections.abc import AsyncIterator
 from typing import Any, Callable
 
 from apps.backend.app.agents.character.prompts import (
@@ -84,6 +85,50 @@ class CharacterAgent:
             self._history.save_message(session_id, "assistant", parsed.payload["reply"])
 
         return parsed.payload
+
+    async def stream_user_message(
+        self, session_id: str, user_text: str
+    ) -> AsyncIterator[str]:
+        """Stream plain reply text and commit history only after clean completion."""
+        context = self._history.get_recent_messages(session_id, limit=self._history_limit)
+        messages = [
+            ChatMessage(
+                role="system",
+                content=(
+                    "Ты дружелюбный персонаж NeuroAsist. Отвечай естественным обычным "
+                    "текстом без JSON. Не добавляй emotion или intent в ответ."
+                ),
+            ),
+            *context,
+            ChatMessage(role="user", content=user_text),
+        ]
+        chunks: list[str] = []
+        async for delta in self._llm_provider.stream(messages):
+            if not delta:
+                continue
+            chunks.append(delta)
+            yield delta
+        reply = "".join(chunks).strip()
+        if not reply:
+            reply = self._empty_model_fallback(user_text)
+            yield reply
+        self._history.save_message(session_id, "user", user_text)
+        self._history.save_message(session_id, "assistant", reply)
+
+    @staticmethod
+    def classify_intent(user_text: str) -> str:
+        text = user_text.strip().lower()
+        if not text:
+            return "unknown"
+        task_markers = (
+            "сделай", "создай", "запусти", "открой", "покажи", "напиши",
+            "помоги", "please", "create", "make", "run", "open", "write",
+        )
+        if any(marker in text for marker in task_markers):
+            return "task_request"
+        if "?" in text or text.startswith(("кто ", "что ", "где ", "когда ", "как ", "почему ", "why ", "how ", "what ", "who ")):
+            return "question"
+        return "casual_chat"
 
     def _parse_response(
         self,
