@@ -198,6 +198,35 @@ async def test_streaming_agent_commits_complete_history(tmp_path: Path) -> None:
     ]
 
 
+@pytest.mark.anyio
+async def test_streaming_agent_uses_character_persona_prompt(tmp_path: Path) -> None:
+    class RecordingStreamingProvider(StreamingProvider):
+        def __init__(self):
+            self.messages: list[ChatMessage] = []
+
+        async def stream(self, messages: list[ChatMessage]):
+            self.messages = messages
+            yield "Окей."
+
+    provider = RecordingStreamingProvider()
+    history = SQLiteMessageHistory(tmp_path / "history.sqlite3")
+    history.init_db()
+    agent = CharacterAgent(provider, history, history_limit=10)
+
+    result = [delta async for delta in agent.stream_user_message("s", "Привет")]
+
+    assert result == ["Окей."]
+    system_prompt = provider.messages[0].content
+    assert "Нейро Пизда" in system_prompt
+    assert "NeuroAsist" not in system_prompt
+    assert "дружелюбный персонаж" not in system_prompt
+    assert "Не возвращай JSON" in system_prompt
+    assert "верни только один валидный JSON" not in system_prompt
+    assert '"reply"' not in system_prompt
+    assert '"emotion"' not in system_prompt
+    assert '"intent"' not in system_prompt
+
+
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
