@@ -1,6 +1,7 @@
 import asyncio
 import io
 import logging
+import os
 import re
 import time
 import wave
@@ -186,7 +187,7 @@ class FasterWhisperSTTProvider(STTProvider):
         except Exception as exc:
             if not self._should_retry_stt_on_cpu(exc):
                 raise
-            logger.warning(
+            logger.info(
                 "FasterWhisper CUDA runtime failed, retrying on CPU: model=%s "
                 "device=%s compute_type=%s error_type=%s",
                 self._model_name,
@@ -395,6 +396,7 @@ class SileroTTSProvider(TTSProvider):
         if self._model_loader is not None:
             model = self._model_loader()
         else:
+            self._configure_certifi_ca_bundle()
             try:
                 model, _ = torch.hub.load(
                     repo_or_dir="snakers4/silero-models",
@@ -416,6 +418,15 @@ class SileroTTSProvider(TTSProvider):
             if moved_model is not None:
                 model = moved_model
         return model, torch, selected_device
+
+    def _configure_certifi_ca_bundle(self) -> None:
+        if os.environ.get("SSL_CERT_FILE"):
+            return
+        try:
+            import certifi
+        except ImportError:
+            return
+        os.environ["SSL_CERT_FILE"] = certifi.where()
 
     def _select_device(self, torch_module) -> str:
         if self.requested_device == "cpu":
