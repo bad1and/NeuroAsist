@@ -201,6 +201,21 @@ async def test_silero_stream_returns_single_final_wav_chunk(monkeypatch: pytest.
 
 
 @pytest.mark.anyio
+async def test_silero_uses_requested_valid_speaker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    install_fake_torch(monkeypatch)
+    model = FakeSileroModel()
+    provider = SileroTTSProvider(model_loader=lambda: model, warmup=False)
+
+    result = await provider.synthesize("Привет", "baya", tmp_path / "reply.wav")
+
+    assert result.voice == "baya"
+    assert model.calls == ["Привет"]
+
+
+@pytest.mark.anyio
 async def test_silero_synthesize_atomically_creates_wav(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     install_fake_torch(monkeypatch)
     provider = SileroTTSProvider(model_loader=FakeSileroModel, warmup=False)

@@ -321,6 +321,8 @@ class SileroTTSProvider(TTSProvider):
         return "silero"
 
     def resolve_voice(self, language: str, requested_voice: str | None = None) -> str:
+        if requested_voice and requested_voice in self.available_speakers:
+            return requested_voice
         return self.speaker
 
     @property
@@ -332,6 +334,14 @@ class SileroTTSProvider(TTSProvider):
             "device": self._selected_device or self.requested_device,
             "sample_rate": self.sample_rate,
         }
+
+    @property
+    def available_speakers(self) -> list[str]:
+        if self._available_speakers is not None:
+            return sorted(self._available_speakers)
+        if self.model_name == "v5_5_ru":
+            return ["aidar", "baya", "kseniya", "xenia", "eugene", "random"]
+        return [self.speaker]
 
     async def preload(self) -> None:
         await self._ensure_model()
@@ -360,7 +370,7 @@ class SileroTTSProvider(TTSProvider):
             )
             if self.warmup_enabled and not self._warmed_up:
                 warmup_started = time.perf_counter()
-                await asyncio.to_thread(self._apply_tts_sync, "Привет.")
+                await asyncio.to_thread(self._apply_tts_sync, "Привет.", self.speaker)
                 self._warmed_up = True
                 logger.info(
                     "Silero TTS model warmed up: tts_warmup_ms=%s device=%s model=%s speaker=%s sample_rate=%s",
@@ -424,23 +434,23 @@ class SileroTTSProvider(TTSProvider):
         )
         raise RuntimeError(f"Unknown Silero speaker: {speaker}")
 
-    def _apply_tts_sync(self, text: str):
+    def _apply_tts_sync(self, text: str, speaker: str):
         if self._model is None or self._torch is None:
             raise RuntimeError("Silero model is not loaded")
         with self._torch.inference_mode():
             return self._model.apply_tts(
                 text=text,
-                speaker=self.speaker,
+                speaker=speaker,
                 sample_rate=self.sample_rate,
             )
 
-    async def _synthesize_wav_bytes(self, text: str) -> tuple[bytes, float, int]:
+    async def _synthesize_wav_bytes(self, text: str, speaker: str) -> tuple[bytes, float, int]:
         await self._ensure_model()
-        self._validate_speaker(self.speaker)
+        self._validate_speaker(speaker)
         started = time.perf_counter()
         async with self._infer_lock:
             waveform = await asyncio.wait_for(
-                asyncio.to_thread(self._apply_tts_sync, text),
+                asyncio.to_thread(self._apply_tts_sync, text, speaker),
                 timeout=self.timeout_seconds,
             )
         synthesis_ms = int((time.perf_counter() - started) * 1000)
@@ -450,7 +460,7 @@ class SileroTTSProvider(TTSProvider):
             "Silero TTS segment synthesized: provider=silero model=%s speaker=%s device=%s "
             "text_length=%s word_count=%s synthesis_ms=%s audio_duration_ms=%s RTF=%.3f audio_bytes=%s",
             self.model_name,
-            self.speaker,
+            speaker,
             self._selected_device,
             len(text),
             len(text.split()),
@@ -465,7 +475,8 @@ class SileroTTSProvider(TTSProvider):
         text = " ".join(request.text.strip().split())
         if not text:
             raise ValueError("TTS text is empty")
-        wav_bytes, _, _ = await self._synthesize_wav_bytes(text)
+        speaker = self.resolve_voice(request.language, request.voice)
+        wav_bytes, _, _ = await self._synthesize_wav_bytes(text, speaker)
         yield AudioChunk(
             data=wav_bytes,
             format="wav",
@@ -475,7 +486,7 @@ class SileroTTSProvider(TTSProvider):
                 "sample_rate": self.sample_rate,
                 "channels": 1,
                 "sample_width": 2,
-                "speaker": self.speaker,
+                "speaker": speaker,
                 "model": self.model_name,
                 "device": self._selected_device,
             },
@@ -485,13 +496,14 @@ class SileroTTSProvider(TTSProvider):
         normalized = " ".join(text.strip().split())
         if not normalized:
             raise ValueError("TTS text is empty")
+        speaker = self.resolve_voice("ru", voice)
         started = time.perf_counter()
         output_path = output_path.with_suffix(self.file_extension)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = output_path.with_name(f"{output_path.stem}.tmp{output_path.suffix}")
         temp_path.unlink(missing_ok=True)
         try:
-            wav_bytes, audio_duration_seconds, _ = await self._synthesize_wav_bytes(normalized)
+            wav_bytes, audio_duration_seconds, _ = await self._synthesize_wav_bytes(normalized, speaker)
             temp_path.write_bytes(wav_bytes)
             if wav_duration_seconds(temp_path.read_bytes()) <= 0:
                 raise RuntimeError("Silero TTS returned zero-duration audio")
@@ -507,7 +519,7 @@ class SileroTTSProvider(TTSProvider):
             audio_path=output_path,
             duration_ms=int((time.perf_counter() - started) * 1000),
             provider="silero",
-            voice=self.speaker,
+            voice=speaker,
             chunks_count=1,
             audio_duration_seconds=audio_duration_seconds,
         )

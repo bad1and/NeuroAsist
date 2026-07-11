@@ -3,6 +3,7 @@ import type { VoiceServerEvent } from "./types";
 export type TTSStreamPlayerOptions = {
   prebufferSegments?: number;
   prebufferMs?: number;
+  playbackRate?: number;
 };
 
 export class TTSStreamPlayer {
@@ -18,8 +19,9 @@ export class TTSStreamPlayer {
   private lastQueuedSegment = -1;
   private serverFinished = false;
   private prebufferTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
-  private readonly prebufferSegments: number;
-  private readonly prebufferMs: number;
+  private prebufferSegments: number;
+  private prebufferMs: number;
+  private playbackRate: number;
 
   constructor(
     private readonly onStarted: () => void,
@@ -30,6 +32,13 @@ export class TTSStreamPlayer {
   ) {
     this.prebufferSegments = Math.max(1, options.prebufferSegments ?? 2);
     this.prebufferMs = Math.max(0, options.prebufferMs ?? 700);
+    this.playbackRate = this.normalizePlaybackRate(options.playbackRate ?? 1);
+  }
+
+  updateOptions(options: TTSStreamPlayerOptions): void {
+    this.prebufferSegments = Math.max(1, options.prebufferSegments ?? this.prebufferSegments);
+    this.prebufferMs = Math.max(0, options.prebufferMs ?? this.prebufferMs);
+    this.playbackRate = this.normalizePlaybackRate(options.playbackRate ?? this.playbackRate);
   }
 
   async unlock(): Promise<void> {
@@ -160,6 +169,7 @@ export class TTSStreamPlayer {
     if (gapMs > 50) this.onUnderrun(Math.round(gapMs));
     const source = context.createBufferSource();
     source.buffer = buffer;
+    source.playbackRate.value = this.playbackRate;
     source.connect(context.destination);
     const startAt = Math.max(context.currentTime + 0.075, this.scheduledUntil);
     this.scheduledUntil = startAt + buffer.duration;
@@ -174,6 +184,10 @@ export class TTSStreamPlayer {
       this.started = true;
       globalThis.setTimeout(this.onStarted, Math.max(0, (startAt - context.currentTime) * 1000));
     }
+  }
+
+  private normalizePlaybackRate(value: number): number {
+    return Math.max(0.75, Math.min(1.25, value));
   }
 
 }

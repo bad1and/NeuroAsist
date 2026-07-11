@@ -314,6 +314,7 @@ function ChatPage({
     async (audioUrl: string): Promise<boolean> => {
       stopVoicePlayback();
       const audio = new Audio(audioUrl);
+      audio.playbackRate = settings?.voice_playback_rate ?? 1;
       activeAudioRef.current = audio;
       audio.onended = () => {
         if (activeAudioRef.current === audio) {
@@ -336,7 +337,7 @@ function ChatPage({
         return false;
       }
     },
-    [stopVoicePlayback],
+    [settings?.voice_playback_rate, stopVoicePlayback],
   );
 
   const playMessageAudioTrack = useCallback(
@@ -347,6 +348,7 @@ function ChatPage({
         ) ?? new Audio(fallbackAudioUrl);
 
       stopVoicePlayback(audio);
+      audio.playbackRate = settings?.voice_playback_rate ?? 1;
       activeAudioRef.current = audio;
       audio.onended = () => {
         if (activeAudioRef.current === audio) {
@@ -365,7 +367,7 @@ function ChatPage({
         return false;
       }
     },
-    [stopVoicePlayback],
+    [settings?.voice_playback_rate, stopVoicePlayback],
   );
 
   const speakTextInBrowser = useCallback(
@@ -376,10 +378,11 @@ function ChatPage({
       stopVoicePlayback();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = settings?.voice_language === "en" ? "en-US" : "ru-RU";
+      utterance.rate = settings?.voice_playback_rate ?? 1;
       window.speechSynthesis.speak(utterance);
       return true;
     },
-    [browserSpeechSupported, settings?.voice_language, stopVoicePlayback],
+    [browserSpeechSupported, settings?.voice_language, settings?.voice_playback_rate, stopVoicePlayback],
   );
 
   const ensureLivePlayer = useCallback(() => {
@@ -406,14 +409,24 @@ function ChatPage({
         {
           prebufferSegments: settings?.voice_live_playback_prebuffer_segments ?? 2,
           prebufferMs: settings?.voice_live_playback_prebuffer_ms ?? 700,
+          playbackRate: settings?.voice_playback_rate ?? 1,
         },
         (gapMs) => {
           liveSocketRef.current?.send("playback.underrun", { underrun_ms: gapMs });
         },
       );
     }
+    livePlayerRef.current.updateOptions({
+      prebufferSegments: settings?.voice_live_playback_prebuffer_segments ?? 2,
+      prebufferMs: settings?.voice_live_playback_prebuffer_ms ?? 700,
+      playbackRate: settings?.voice_playback_rate ?? 1,
+    });
     return livePlayerRef.current;
-  }, [settings?.voice_live_playback_prebuffer_ms, settings?.voice_live_playback_prebuffer_segments]);
+  }, [
+    settings?.voice_live_playback_prebuffer_ms,
+    settings?.voice_live_playback_prebuffer_segments,
+    settings?.voice_playback_rate,
+  ]);
 
   const ensureLiveVoice = useCallback(async () => {
     const player = ensureLivePlayer();
@@ -868,6 +881,7 @@ function ChatPage({
                 controls
                 data-message-id={message.id}
                 onPlay={(event) => {
+                  event.currentTarget.playbackRate = settings?.voice_playback_rate ?? 1;
                   stopVoicePlayback(event.currentTarget);
                 }}
                 src={message.audioUrl}
@@ -1057,19 +1071,23 @@ function SettingsPage({
   settings: PublicSettings | null;
   onSettingsChanged: (settings: PublicSettings) => void;
 }) {
-  const [model, setModel] = useState("");
   const [personality, setPersonality] = useState("");
   const [voiceLanguage, setVoiceLanguage] = useState("ru");
   const [voiceTtsVoice, setVoiceTtsVoice] = useState("");
+  const [voicePlaybackRate, setVoicePlaybackRate] = useState(1);
+  const [prebufferSegments, setPrebufferSegments] = useState(2);
+  const [prebufferMs, setPrebufferMs] = useState(1000);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (settings) {
-      setModel(settings.model);
       setPersonality(settings.personality);
       setVoiceLanguage(settings.voice_language);
       setVoiceTtsVoice(settings.voice_tts_voice);
+      setVoicePlaybackRate(settings.voice_playback_rate);
+      setPrebufferSegments(settings.voice_live_playback_prebuffer_segments);
+      setPrebufferMs(settings.voice_live_playback_prebuffer_ms);
     }
   }, [settings]);
 
@@ -1078,10 +1096,12 @@ function SettingsPage({
     setMessage(null);
     try {
       const nextSettings = await updateRuntimeSettings({
-        model,
         personality,
         voice_language: voiceLanguage,
         voice_tts_voice: voiceTtsVoice,
+        voice_playback_rate: voicePlaybackRate,
+        voice_live_playback_prebuffer_segments: prebufferSegments,
+        voice_live_playback_prebuffer_ms: prebufferMs,
       });
       onSettingsChanged(nextSettings);
       setMessage("Runtime settings saved.");
@@ -1109,69 +1129,110 @@ function SettingsPage({
 
       <div className="settings-grid">
         <InfoRow label="API key configured" value={boolLabel(settings.api_key_configured)} />
+        <InfoRow label="Provider" value={settings.provider} />
+        <InfoRow label="Fixed model" value={settings.model} />
         <InfoRow label="Chat history limit" value={String(settings.chat_history_limit)} />
         <InfoRow label="Log level" value={settings.log_level} />
         <InfoRow
           label="Voice"
-          value={`${settings.voice_language} / STT ${settings.voice_stt_model} / TTS ${settings.voice_tts_enabled ? "on" : "off"}`}
+          value={`${settings.voice_language} / ${settings.voice_tts_voice} / ${settings.voice_playback_rate.toFixed(2)}x`}
         />
       </div>
 
       <div className="form-grid">
-        <label>
-          Model
-          <select value={model} onChange={(event) => setModel(event.target.value)}>
-            {settings.available_models.map((availableModel) => (
-              <option key={availableModel} value={availableModel}>
-                {availableModel}
-              </option>
-            ))}
-          </select>
-        </label>
+        <fieldset className="settings-group">
+          <legend>Assistant</legend>
+          <label>
+            Personality
+            <select
+              value={personality}
+              onChange={(event) => setPersonality(event.target.value)}
+            >
+              {settings.available_personalities.map((availablePersonality) => (
+                <option key={availablePersonality} value={availablePersonality}>
+                  {availablePersonality}
+                </option>
+              ))}
+            </select>
+          </label>
+        </fieldset>
 
-        <label>
-          Personality
-          <select
-            value={personality}
-            onChange={(event) => setPersonality(event.target.value)}
-          >
-            {settings.available_personalities.map((availablePersonality) => (
-              <option key={availablePersonality} value={availablePersonality}>
-                {availablePersonality}
-              </option>
-            ))}
-          </select>
-        </label>
+        <fieldset className="settings-group">
+          <legend>Voice</legend>
+          <label>
+            Voice language
+            <select
+              value={voiceLanguage}
+              onChange={(event) => setVoiceLanguage(event.target.value)}
+            >
+              {settings.available_voice_languages.map((availableLanguage) => (
+                <option key={availableLanguage} value={availableLanguage}>
+                  {availableLanguage}
+                </option>
+              ))}
+            </select>
+          </label>
 
-        <label>
-          Voice language
-          <select
-            value={voiceLanguage}
-            onChange={(event) => setVoiceLanguage(event.target.value)}
-          >
-            {settings.available_voice_languages.map((availableLanguage) => (
-              <option key={availableLanguage} value={availableLanguage}>
-                {availableLanguage}
-              </option>
-            ))}
-          </select>
-        </label>
+          <label>
+            Silero speaker
+            <select
+              value={voiceTtsVoice}
+              onChange={(event) => setVoiceTtsVoice(event.target.value)}
+            >
+              {settings.available_tts_voices.map((availableVoice) => (
+                <option key={availableVoice} value={availableVoice}>
+                  {availableVoice}
+                </option>
+              ))}
+            </select>
+          </label>
 
-        <label>
-          TTS voice
-          <select
-            value={voiceTtsVoice}
-            onChange={(event) => setVoiceTtsVoice(event.target.value)}
-          >
-            {settings.available_tts_voices.map((availableVoice) => (
-              <option key={availableVoice} value={availableVoice}>
-                {availableVoice}
-              </option>
-            ))}
-          </select>
-        </label>
+          <label>
+            Playback speed <strong>{voicePlaybackRate.toFixed(2)}x</strong>
+            <input
+              min="0.75"
+              max="1.25"
+              step="0.05"
+              type="range"
+              value={voicePlaybackRate}
+              onChange={(event) => setVoicePlaybackRate(Number(event.target.value))}
+            />
+          </label>
 
-        <button onClick={saveSettings} disabled={saving}>
+          <div className="readonly-setting">
+            <span>Tone / pitch</span>
+            <strong>Not supported by current Silero backend</strong>
+          </div>
+        </fieldset>
+
+        <fieldset className="settings-group">
+          <legend>Live playback</legend>
+          <label>
+            Prebuffer segments
+            <input
+              min="1"
+              max="4"
+              step="1"
+              type="number"
+              value={prebufferSegments}
+              onChange={(event) => setPrebufferSegments(Number(event.target.value))}
+            />
+          </label>
+
+          <label>
+            Prebuffer ms
+            <input
+              min="0"
+              max="1500"
+              step="50"
+              type="number"
+              value={prebufferMs}
+              onChange={(event) => setPrebufferMs(Number(event.target.value))}
+            />
+          </label>
+        </fieldset>
+
+        <button className="settings-save" onClick={saveSettings} disabled={saving}>
           {saving ? "Saving" : "Save runtime settings"}
         </button>
       </div>
