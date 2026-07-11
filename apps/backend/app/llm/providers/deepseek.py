@@ -1,4 +1,5 @@
 import logging
+from collections.abc import AsyncIterator
 
 from openai import APIStatusError, AsyncOpenAI, OpenAIError
 
@@ -67,3 +68,27 @@ class DeepSeekProvider(LLMProvider):
 
         logger.debug("Received LLM response: provider=deepseek model=%s", model)
         return LLMResponse(content=content, model=model)
+
+    async def stream(self, messages: list[ChatMessage]) -> AsyncIterator[str]:
+        if self._client is None:
+            raise ValueError("DeepSeek API key is not configured")
+        try:
+            response = await self._client.chat.completions.create(
+                model=self._model,
+                messages=[message.model_dump() for message in messages],
+                temperature=0.7,
+                stream=True,
+            )
+            async for chunk in response:
+                try:
+                    content = chunk.choices[0].delta.content
+                except (IndexError, AttributeError, TypeError):
+                    continue
+                if content:
+                    yield content
+        except APIStatusError as exc:
+            raise LLMProviderError(
+                f"DeepSeek API returned HTTP {exc.status_code}"
+            ) from exc
+        except OpenAIError as exc:
+            raise LLMProviderError("DeepSeek API streaming request failed") from exc

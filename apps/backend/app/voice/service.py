@@ -169,5 +169,12 @@ class VoiceService:
         if settings.voice_tts_provider == "mock":
             return MockTTSProvider()
         if settings.voice_tts_provider == "edge_tts":
-            return EdgeTTSProvider()
+            provider = EdgeTTSProvider()
+            provider._STREAM_IDLE_TIMEOUT_SECONDS = (
+                settings.voice_live_edge_first_byte_timeout_seconds
+            )
+            provider._POST_AUDIO_IDLE_TIMEOUT_SECONDS = (
+                settings.voice_live_edge_idle_timeout_seconds
+            )
+            return provider
         raise ValueError(f"Unsupported TTS provider: {settings.voice_tts_provider}")

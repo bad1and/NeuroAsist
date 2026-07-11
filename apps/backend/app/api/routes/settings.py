@@ -28,6 +28,8 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         voice_stt_model=settings.voice_stt_model,
         voice_tts_enabled=settings.voice_tts_enabled,
         voice_tts_voice=runtime_settings.voice_tts_voice or settings.voice_tts_voice_ru,
+        voice_live_playback_prebuffer_segments=settings.voice_live_playback_prebuffer_segments,
+        voice_live_playback_prebuffer_ms=settings.voice_live_playback_prebuffer_ms,
         chat_history_limit=settings.chat_history_limit,
         log_level=settings.log_level,
         api_key_configured=bool(settings.llm_api_key),

@@ -11,6 +11,7 @@ from apps.backend.app.llm.base import LLMProviderError
 from apps.backend.app.llm.providers.deepseek import DeepSeekProvider
 from apps.backend.app.schemas.voice import (
     VoiceChatResponse,
+    VoiceLiveResponse,
     VoiceProviderStats,
     VoiceTTSStatusResponse,
 )
@@ -20,13 +21,14 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.post("/voice/chat", response_model=VoiceChatResponse)
+@router.post("/voice/chat", response_model=VoiceChatResponse | VoiceLiveResponse)
 async def voice_chat(
     request: Request,
     audio: UploadFile = File(...),
     session_id: str = Form(default="default"),
     language: str = Form(default="auto"),
-) -> VoiceChatResponse:
+    live: bool = Form(default=False),
+) -> VoiceChatResponse | VoiceLiveResponse:
     request_started = time.perf_counter()
     voice_request_id = uuid4().hex
     settings = request.app.state.settings
@@ -90,6 +92,39 @@ async def voice_chat(
             history_limit=settings.chat_history_limit,
             event_publisher=event_bus.publish,
         )
+        voice = runtime_settings.voice_tts_voice or _default_voice(settings, stt_result.language)
+        if live:
+            utterance_id = uuid4().hex
+            manager = request.app.state.voice_session_manager
+            if not manager.connected(session_id):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Voice WebSocket must be connected before live request",
+                )
+            await manager.start(
+                session_id=session_id,
+                utterance_id=utterance_id,
+                transcript=stt_result.text,
+                language=stt_result.language,
+                voice=voice,
+                agent=agent,
+            )
+            event_bus.publish(
+                "voice.live_started",
+                "info",
+                "Live voice response started",
+                {
+                    "session_id": session_id,
+                    "utterance_id": utterance_id,
+                    "voice_request_id": voice_request_id,
+                },
+            )
+            return VoiceLiveResponse(
+                session_id=session_id,
+                utterance_id=utterance_id,
+                voice_request_id=voice_request_id,
+                transcript=stt_result.text,
+            )
         event_bus.publish(
             "chat.started",
             "info",
@@ -102,7 +137,6 @@ async def voice_chat(
             timeout=settings.voice_llm_timeout_seconds,
         )
         llm_duration_ms = int((time.perf_counter() - llm_started) * 1000)
-        voice = runtime_settings.voice_tts_voice or _default_voice(settings, stt_result.language)
         tts_status = "disabled"
         if settings.voice_tts_enabled and result["reply"].strip():
             tts_status = "queued"

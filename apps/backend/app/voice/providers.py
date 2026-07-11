@@ -1,6 +1,8 @@
 import asyncio
 import contextlib
+import io
 import json
+import logging
 import re
 import shutil
 import subprocess
@@ -8,6 +10,8 @@ import time
 import wave
 from dataclasses import dataclass
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -29,6 +33,25 @@ class TTSResult:
     audio_duration_seconds: float | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class TTSRequest:
+    text: str
+    language: str
+    voice: str
+    rate: str = "+0%"
+    pitch: str = "+0Hz"
+    volume: str = "+0%"
+
+
+@dataclass(frozen=True, slots=True)
+class AudioChunk:
+    data: bytes
+    format: str
+    sequence: int
+    is_final: bool = False
+    metadata: dict | None = None
+
+
 class STTProvider:
     async def transcribe(self, audio_path: Path, language: str) -> STTResult:
         raise NotImplementedError
@@ -39,6 +62,9 @@ class STTProvider:
 
 class TTSProvider:
     async def synthesize(self, text: str, voice: str, output_path: Path) -> TTSResult:
+        raise NotImplementedError
+
+    async def stream(self, request: TTSRequest):
         raise NotImplementedError
 
 
@@ -58,6 +84,15 @@ class MockSTTProvider(STTProvider):
 
 
 class MockTTSProvider(TTSProvider):
+    async def stream(self, request: TTSRequest):
+        output = io.BytesIO()
+        with wave.open(output, "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(16000)
+            audio.writeframes(b"\x00\x00" * 1600)
+        yield AudioChunk(output.getvalue(), "wav", 0, is_final=True)
+
     async def synthesize(self, text: str, voice: str, output_path: Path) -> TTSResult:
         started = time.perf_counter()
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -86,6 +121,8 @@ class FasterWhisperSTTProvider(STTProvider):
         self._device = device
         self._compute_type = compute_type
         self._model = None
+        self._selected_device: str | None = None
+        self._selected_compute_type: str | None = None
 
     async def transcribe(self, audio_path: Path, language: str) -> STTResult:
         started = time.perf_counter()
@@ -101,14 +138,55 @@ class FasterWhisperSTTProvider(STTProvider):
             raise RuntimeError("faster-whisper is not installed") from exc
 
         if self._model is None:
-            self._model = WhisperModel(
-                self._model_name,
-                device=self._device,
-                compute_type=self._compute_type,
-            )
+            candidates = [(self._device, self._compute_type)]
+            if self._device == "auto":
+                candidates = [("cuda", "int8_float16"), ("cpu", "int8")]
+            last_error: Exception | None = None
+            for device, compute_type in candidates:
+                try:
+                    self._model = WhisperModel(
+                        self._model_name,
+                        device=device,
+                        compute_type=compute_type,
+                    )
+                    self._selected_device = device
+                    self._selected_compute_type = compute_type
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    logger.warning(
+                        "FasterWhisper model load failed: model=%s device=%s compute_type=%s error_type=%s",
+                        self._model_name,
+                        device,
+                        compute_type,
+                        type(exc).__name__,
+                    )
+            if self._model is None:
+                raise RuntimeError("faster-whisper model could not be loaded") from last_error
         return self._model
 
     def _transcribe_sync(self, audio_path: Path, language: str, started: float) -> STTResult:
+        try:
+            return self._transcribe_with_current_model(audio_path, language, started)
+        except Exception as exc:
+            if not self._should_retry_stt_on_cpu(exc):
+                raise
+            logger.warning(
+                "FasterWhisper CUDA runtime failed, retrying on CPU: model=%s "
+                "device=%s compute_type=%s error_type=%s",
+                self._model_name,
+                self._selected_device,
+                self._selected_compute_type,
+                type(exc).__name__,
+            )
+            self._model = None
+            self._device = "cpu"
+            self._compute_type = "int8"
+            self._selected_device = None
+            self._selected_compute_type = None
+            return self._transcribe_with_current_model(audio_path, language, started)
+
+    def _transcribe_with_current_model(self, audio_path: Path, language: str, started: float) -> STTResult:
         model = self._ensure_model()
         selected_language = None if language == "auto" else language
         segments, info = model.transcribe(
@@ -143,10 +221,27 @@ class FasterWhisperSTTProvider(STTProvider):
             return self._RUSSIAN_PROMPT
         return None
 
+    def _should_retry_stt_on_cpu(self, exc: Exception) -> bool:
+        if self._device != "auto" or self._selected_device != "cuda":
+            return False
+        message = str(exc).lower()
+        cuda_markers = (
+            "cuda",
+            "cublas",
+            "cudnn",
+            "cufft",
+            "curand",
+            "cusolver",
+            "cusparse",
+            ".dll",
+            "library",
+        )
+        return any(marker in message for marker in cuda_markers)
+
 
 class EdgeTTSProvider(TTSProvider):
     _STREAM_IDLE_TIMEOUT_SECONDS = 4
-    _POST_AUDIO_IDLE_TIMEOUT_SECONDS = 0.2
+    _POST_AUDIO_IDLE_TIMEOUT_SECONDS = 1.2
     _STREAM_CLOSE_TIMEOUT_SECONDS = 0.1
     _MAX_CHUNK_CHARS = 90
     _MAX_CHUNK_WORDS = 18
@@ -230,6 +325,52 @@ class EdgeTTSProvider(TTSProvider):
             chunks_count=len(chunk_durations),
             audio_duration_seconds=audio_duration_seconds,
         )
+
+    async def stream(self, request: TTSRequest):
+        try:
+            import edge_tts
+        except ImportError as exc:
+            raise RuntimeError("edge-tts is not installed") from exc
+        communicate = edge_tts.Communicate(
+            request.text,
+            request.voice,
+            rate=request.rate if request.rate != "+0%" else self._RATE,
+            pitch=request.pitch,
+            volume=request.volume,
+        )
+        sequence = 0
+        iterator = communicate.stream()
+        audio_received = False
+        try:
+            while True:
+                try:
+                    message = await asyncio.wait_for(
+                        anext(iterator),
+                        timeout=(
+                            self._POST_AUDIO_IDLE_TIMEOUT_SECONDS
+                            if audio_received
+                            else self._STREAM_IDLE_TIMEOUT_SECONDS
+                        ),
+                    )
+                except StopAsyncIteration:
+                    break
+                except TimeoutError:
+                    if audio_received:
+                        raise _IncompleteEdgeStreamError(
+                            "edge-tts stream stalled after partial audio without EOF"
+                        )
+                    raise
+                if message.get("type") == "audio" and message.get("data"):
+                    yield AudioChunk(message["data"], "mp3", sequence)
+                    sequence += 1
+                    audio_received = True
+                elif message.get("type") == "WordBoundary":
+                    yield AudioChunk(b"", "mp3", sequence, metadata=dict(message))
+        finally:
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(iterator.aclose(), self._STREAM_CLOSE_TIMEOUT_SECONDS)
+        if sequence == 0:
+            raise RuntimeError("edge-tts returned no audio")
 
     def _prepare_chunks(self, text: str) -> list[str]:
         chunks = split_tts_chunks(

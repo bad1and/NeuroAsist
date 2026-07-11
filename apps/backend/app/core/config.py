@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     cors_origin_regex: str = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
     voice_stt_provider: str = "faster_whisper"
     voice_stt_model: str = "small"
-    voice_stt_device: str = "cpu"
+    voice_stt_device: str = "auto"
     voice_stt_compute_type: str = "int8"
     voice_default_language: str = "ru"
     voice_preload_stt_model: bool = True
@@ -44,6 +44,21 @@ class Settings(BaseSettings):
     voice_stt_timeout_seconds: int = 45
     voice_llm_timeout_seconds: int = 45
     voice_tts_timeout_seconds: int = 45
+    voice_live_queue_size: int = 2
+    voice_live_idle_flush_ms: int = 300
+    voice_live_first_segment_chars: int = 50
+    voice_live_next_segment_chars: int = 80
+    voice_live_max_segment_chars: int = 90
+    voice_live_max_segment_words: int = 18
+    voice_live_safe_segment_words: int = 2
+    voice_live_edge_first_byte_timeout_seconds: float = 4.0
+    voice_live_edge_idle_timeout_seconds: float = 1.2
+    voice_live_tts_retry_count: int = 1
+    voice_live_tts_concurrency_mode: str = "auto"
+    voice_live_tts_concurrency_min: int = 2
+    voice_live_tts_concurrency_max: int = 3
+    voice_live_playback_prebuffer_segments: int = 2
+    voice_live_playback_prebuffer_ms: int = 700
 
     @property
     def llm_api_key(self) -> str | None:

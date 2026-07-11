@@ -9,6 +9,7 @@ import {
   sendChatMessage,
   sendVoiceMessage,
   updateRuntimeSettings,
+  voiceWebSocketUrl,
   WS_EVENTS_URL,
 } from "./api";
 import type {
@@ -17,13 +18,16 @@ import type {
   EventLevel,
   PublicSettings,
   StatusResponse,
+  VoiceChatResponse,
   VoiceTtsStatusResponse,
 } from "./types";
+import type { VoiceServerEvent } from "./types";
+import { TTSStreamPlayer, VoiceSocketClient } from "./voice-live";
 
 type Tab = "chat" | "events" | "settings";
 type WsState = "connected" | "disconnected" | "reconnecting";
 type LevelFilter = "all" | EventLevel;
-type VoiceState = "idle" | "recording" | "transcribing" | "thinking";
+type VoiceState = "idle" | "recording" | "transcribing" | "thinking" | "speaking" | "stopping" | "error";
 
 const SESSION_ID = "default";
 const RECORDING_MIME_TYPES = [
@@ -59,6 +63,14 @@ function formatTime(value: string): string {
 
 function boolLabel(value: boolean): string {
   return value ? "yes" : "no";
+}
+
+function isLiveVoiceTransportError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.message.includes("Live voice connection failed") ||
+    error.message.includes("Voice WebSocket must be connected")
+  );
 }
 
 export default function App() {
@@ -271,6 +283,10 @@ function ChatPage({
   const recordTimeoutRef = useRef<number | null>(null);
   const handledVoiceEventIdsRef = useRef<Set<string>>(new Set());
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const liveSocketRef = useRef<VoiceSocketClient | null>(null);
+  const livePlayerRef = useRef<TTSStreamPlayer | null>(null);
+  const liveAudioStartedRef = useRef(false);
+  const liveMetadataRef = useRef({ emotion: "neutral", intent: "unknown" });
 
   const voiceSupported =
     typeof navigator !== "undefined" &&
@@ -366,6 +382,116 @@ function ChatPage({
     [browserSpeechSupported, settings?.voice_language, stopVoicePlayback],
   );
 
+  const ensureLivePlayer = useCallback(() => {
+    if (!livePlayerRef.current) {
+      livePlayerRef.current = new TTSStreamPlayer(
+        () => {
+          liveAudioStartedRef.current = true;
+          liveSocketRef.current?.send("playback.started");
+          setVoiceState("speaking");
+        },
+        () => {
+          liveSocketRef.current?.send("playback.finished");
+          liveSocketRef.current?.clearActive();
+          setLoading(false);
+          setVoiceState("idle");
+        },
+        (playerError) => {
+          livePlayerRef.current?.stop();
+          liveSocketRef.current?.cancel();
+          setError(playerError.message);
+          setLoading(false);
+          setVoiceState("error");
+        },
+        {
+          prebufferSegments: settings?.voice_live_playback_prebuffer_segments ?? 2,
+          prebufferMs: settings?.voice_live_playback_prebuffer_ms ?? 700,
+        },
+        (gapMs) => {
+          liveSocketRef.current?.send("playback.underrun", { underrun_ms: gapMs });
+        },
+      );
+    }
+    return livePlayerRef.current;
+  }, [settings?.voice_live_playback_prebuffer_ms, settings?.voice_live_playback_prebuffer_segments]);
+
+  const ensureLiveVoice = useCallback(async () => {
+    const player = ensureLivePlayer();
+    if (!liveSocketRef.current) {
+      const onEvent = (event: VoiceServerEvent) => {
+        if (event.type === "voice.utterance.started") {
+          liveSocketRef.current?.activate(event.utterance_id);
+          livePlayerRef.current?.begin(event.utterance_id);
+          setVoiceState("thinking");
+        } else if (event.type === "voice.metadata") {
+          liveMetadataRef.current = {
+            emotion: event.emotion ?? "neutral",
+            intent: event.intent ?? "unknown",
+          };
+          setMessages((current) => current.map((message) =>
+            message.utteranceId === event.utterance_id
+              ? { ...message, emotion: event.emotion, intent: event.intent }
+              : message,
+          ));
+        } else if (event.type === "voice.text.delta" && event.delta) {
+          setMessages((current) => {
+            const index = current.findIndex((message) => message.utteranceId === event.utterance_id);
+            if (index < 0) {
+              return [...current, {
+                id: crypto.randomUUID(), role: "assistant", content: event.delta!,
+                utteranceId: event.utterance_id,
+                emotion: liveMetadataRef.current.emotion,
+                intent: liveMetadataRef.current.intent,
+              }];
+            }
+            return current.map((message, messageIndex) => messageIndex === index
+              ? { ...message, content: message.content + event.delta }
+              : message);
+          });
+        } else if (event.type === "tts.segment.started") {
+          setVoiceState("speaking");
+        } else if (event.type === "voice.utterance.finished") {
+          livePlayerRef.current?.finish(event.utterance_id);
+        } else if (event.type === "voice.utterance.cancelled") {
+          liveSocketRef.current?.clearActive();
+          setLoading(false);
+          setVoiceState("idle");
+        } else if (event.type === "voice.error") {
+          livePlayerRef.current?.stop();
+          liveSocketRef.current?.clearActive();
+          setError(event.message ?? event.code ?? "Live voice failed");
+          setLoading(false);
+          setVoiceState("error");
+          if (!liveAudioStartedRef.current) {
+            setMessages((current) => {
+              const message = current.find((item) => item.utteranceId === event.utterance_id);
+              if (message) speakTextInBrowser(message.content);
+              return current;
+            });
+          }
+        }
+      };
+      liveSocketRef.current = new VoiceSocketClient(
+        voiceWebSocketUrl(SESSION_ID),
+        onEvent,
+        (audio, segment) => {
+          if (segment.segment_id !== undefined) {
+            void livePlayerRef.current?.enqueue(
+              segment.utterance_id, segment.segment_id, audio,
+            ).catch(() => undefined);
+          }
+        },
+      );
+    }
+    await player.unlock();
+    await liveSocketRef.current.connect();
+  }, [ensureLivePlayer, speakTextInBrowser]);
+
+  useEffect(() => () => {
+    livePlayerRef.current?.stop();
+    liveSocketRef.current?.close();
+  }, []);
+
   useEffect(() => () => stopVoicePlayback(), [stopVoicePlayback]);
 
   const applyTtsStatus = useCallback((status: VoiceTtsStatusResponse) => {
@@ -442,6 +568,35 @@ function ChatPage({
       }
     },
     [syncVoiceTtsStatus],
+  );
+
+  const appendBatchVoiceResponse = useCallback(
+    (response: VoiceChatResponse) => {
+      setMessages((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          role: "user",
+          content: response.transcript,
+        },
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: response.reply,
+          emotion: response.emotion,
+          intent: response.intent,
+          voiceRequestId: response.voice_request_id,
+          ttsStatus: response.tts_status,
+          audioUrl: response.reply_audio_url
+            ? resolveApiUrl(response.reply_audio_url)
+            : undefined,
+        },
+      ]);
+      if (response.tts_status === "queued") {
+        void pollVoiceTtsStatus(response.voice_request_id);
+      }
+    },
+    [pollVoiceTtsStatus],
   );
 
   useEffect(() => {
@@ -556,6 +711,7 @@ function ChatPage({
 
     setError(null);
     try {
+      await ensureLivePlayer().unlock();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mimeType = getRecordingMimeType();
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
@@ -604,6 +760,12 @@ function ChatPage({
       stopRecording();
       return;
     }
+    if (voiceState === "thinking" || voiceState === "speaking") {
+      setVoiceState("stopping");
+      livePlayerRef.current?.stop();
+      liveSocketRef.current?.cancel();
+      return;
+    }
     await startRecording();
   };
 
@@ -626,41 +788,54 @@ function ChatPage({
       setVoiceState("thinking");
     }, 500);
     try {
-      const response = await sendVoiceMessage(
-        SESSION_ID,
-        audio,
-        settings?.voice_language ?? "ru",
-      );
-      setMessages((current) => [
-        ...current,
-        {
-          id: crypto.randomUUID(),
-          role: "user",
-          content: response.transcript,
-        },
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: response.reply,
-          emotion: response.emotion,
-          intent: response.intent,
-          voiceRequestId: response.voice_request_id,
-          ttsStatus: response.tts_status,
-          audioUrl: response.reply_audio_url
-            ? resolveApiUrl(response.reply_audio_url)
-            : undefined,
-        },
-      ]);
-      if (response.tts_status === "queued") {
-        void pollVoiceTtsStatus(response.voice_request_id);
+      let response;
+      try {
+        await ensureLiveVoice();
+        liveSocketRef.current?.clearActive();
+        liveAudioStartedRef.current = false;
+        response = await sendVoiceMessage(
+          SESSION_ID,
+          audio,
+          settings?.voice_language ?? "ru",
+          true,
+        );
+      } catch (liveError) {
+        if (!isLiveVoiceTransportError(liveError)) {
+          throw liveError;
+        }
+        liveSocketRef.current?.close();
+        liveSocketRef.current = null;
+        response = await sendVoiceMessage(
+          SESSION_ID,
+          audio,
+          settings?.voice_language ?? "ru",
+          false,
+        );
+        setError("Live voice stream is unavailable; used legacy voice response.");
       }
+      if ("status" in response) {
+        liveSocketRef.current?.activate(response.utterance_id);
+        setMessages((current) => [
+          ...current,
+          {
+            id: crypto.randomUUID(),
+            role: "user",
+            content: response.transcript,
+          },
+        ]);
+        setVoiceState("thinking");
+        return;
+      }
+      appendBatchVoiceResponse(response);
       await onRefreshEvents();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Voice chat failed");
     } finally {
       window.clearTimeout(thinkingTimer);
-      setLoading(false);
-      setVoiceState("idle");
+      if (!liveSocketRef.current?.activeUtteranceId) {
+        setLoading(false);
+        setVoiceState("idle");
+      }
     }
   };
 
@@ -770,7 +945,7 @@ function ChatPage({
       <div className="voice-controls">
         <button
           className={voiceState === "recording" ? "recording" : ""}
-          disabled={!voiceSupported || loading || voiceState === "transcribing" || voiceState === "thinking"}
+          disabled={!voiceSupported || voiceState === "transcribing" || voiceState === "stopping"}
           onClick={() => void toggleRecording()}
           type="button"
         >
@@ -794,7 +969,16 @@ function voiceButtonLabel(voiceState: VoiceState): string {
     return "Transcribing";
   }
   if (voiceState === "thinking") {
-    return "Thinking";
+    return "Stop";
+  }
+  if (voiceState === "speaking") {
+    return "Stop speaking";
+  }
+  if (voiceState === "stopping") {
+    return "Stopping";
+  }
+  if (voiceState === "error") {
+    return "Try again";
   }
   return "Start recording";
 }
