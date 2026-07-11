@@ -38,6 +38,13 @@ class FakeAudioContext {
     this.sources.push(source);
     return source as unknown as AudioBufferSourceNode;
   });
+  createBuffer = vi.fn((channels: number, frames: number, sampleRate: number) => {
+    const data = Array.from({ length: channels }, () => new Float32Array(frames));
+    return {
+      duration: frames / sampleRate,
+      getChannelData: (channel: number) => data[channel],
+    } as unknown as AudioBuffer;
+  });
 }
 
 const audio = () => new ArrayBuffer(8);
@@ -68,13 +75,13 @@ describe("TTSStreamPlayer", () => {
     expect(context.decodeAudioData).toHaveBeenCalledTimes(1);
     context.deferred[0].resolve(buffer(1));
     await first;
-    expect(context.createBufferSource).not.toHaveBeenCalled();
+    expect(context.createBufferSource).toHaveBeenCalledTimes(1);
     await tick();
     expect(context.decodeAudioData).toHaveBeenCalledTimes(2);
     context.deferred[1].resolve(buffer(0.5));
     await second;
-    expect(context.sources[0].start).toHaveBeenCalledWith(1.03);
-    expect(context.sources[1].start.mock.calls[0][0]).toBeCloseTo(2.03);
+    expect(context.sources[0].start).toHaveBeenCalledWith(1.075);
+    expect(context.sources[1].start.mock.calls[0][0]).toBeCloseTo(2.075);
   });
 
   it("starts prebuffer after timeout when only one buffer is ready", async () => {
@@ -89,7 +96,7 @@ describe("TTSStreamPlayer", () => {
     await Promise.resolve();
     await Promise.resolve();
     const context = FakeAudioContext.instance;
-    context.deferred[0].resolve(buffer(1));
+    context.deferred[0].resolve(buffer(0.5));
     await first;
     expect(context.createBufferSource).not.toHaveBeenCalled();
     vi.advanceTimersByTime(700);
@@ -104,6 +111,18 @@ describe("TTSStreamPlayer", () => {
       "Unexpected TTS segment order",
     );
     expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it("creates an AudioBuffer directly from mono PCM", async () => {
+    const player = new TTSStreamPlayer(vi.fn(), vi.fn(), vi.fn());
+    player.begin("utterance");
+    const pcm = new Int16Array([0, 16384, -16384, 32767]).buffer;
+    await player.enqueue("utterance", 0, pcm, {
+      format: "pcm_s16le", sample_rate: 24000, channels: 1,
+    });
+    const context = FakeAudioContext.instance;
+    expect(context.decodeAudioData).not.toHaveBeenCalled();
+    expect(context.createBuffer).toHaveBeenCalledWith(1, 4, 24000);
   });
 
   it("invalidates an unfinished decode on stop", async () => {

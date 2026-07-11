@@ -63,18 +63,18 @@ class VoiceSessionManager:
     def __init__(
         self,
         tts_provider: TTSProvider,
-        queue_size: int = 2,
+        queue_size: int = 3,
         tts_timeout: float = 20,
-        retry_count: int = 1,
-        idle_flush_ms: int = 300,
-        first_segment_chars: int = 50,
-        next_segment_chars: int = 80,
-        max_segment_chars: int = 90,
+        retry_count: int = 0,
+        idle_flush_ms: int = 500,
+        first_segment_chars: int = 40,
+        next_segment_chars: int = 75,
+        max_segment_chars: int = 110,
         max_segment_words: int = 18,
         safe_segment_words: int | None = None,
-        tts_concurrency_mode: str = "auto",
-        tts_concurrency_min: int = 2,
-        tts_concurrency_max: int = 3,
+        tts_concurrency_mode: str = "1",
+        tts_concurrency_min: int = 1,
+        tts_concurrency_max: int = 2,
     ) -> None:
         self._tts_provider = tts_provider
         self._queue_size = queue_size
@@ -324,6 +324,8 @@ class VoiceSessionManager:
         if connection is None or context.cancelled:
             raise asyncio.CancelledError
         base = self._event(context, segment_id=segment_id, format=audio_format)
+        if audio_format == "pcm_s16le":
+            base.update(sample_rate=24000, channels=1)
         started = {
             **base,
             "type": "tts.segment.started",
@@ -391,6 +393,14 @@ class VoiceSessionManager:
                 duration = await asyncio.to_thread(
                     self._validate_audio, audio, audio_format, text
                 )
+                if audio_format == "mp3":
+                    try:
+                        audio, duration = await asyncio.to_thread(self._decode_mp3_to_pcm, audio)
+                        audio_format = "pcm_s16le"
+                    except Exception:
+                        # Custom/legacy providers sometimes label opaque test or
+                        # browser-compatible payloads as MP3. Keep wire compatibility.
+                        logger.warning("Live PCM conversion failed; sending MP3 fallback")
                 yield (text, audio, audio_format, duration, attempt)
                 return
             except Exception as exc:
@@ -423,7 +433,7 @@ class VoiceSessionManager:
                 if attempt <= self._retry_count:
                     await asyncio.sleep(0.1)
 
-        if len(words) <= 2 or depth >= 6:
+        if len(words) <= 2 or depth >= 4:
             raise RuntimeError("Live TTS could not produce a complete audio segment") from last_error
         logger.warning(
             "Adaptive live TTS split: text_length=%s words=%s depth=%s error_type=%s",
@@ -435,7 +445,8 @@ class VoiceSessionManager:
     async def _split_and_synthesize(self, text: str, language: str, voice: str, depth: int):
         words = self._SOFT_PAUSE_RE.sub(" ", text).split()
         split_at = self._adaptive_split_index(text, words)
-        split_at = max(1, min(split_at, len(words) - 1))
+        minimum = min(5, max(1, len(words) // 2))
+        split_at = max(minimum, min(split_at, len(words) - minimum))
         final_punctuation = text[-1] if self._FINAL_PUNCTUATION_RE.search(text.strip()) else ""
         left = self._cleanup_tts_job_text(
             " ".join(words[:split_at]),
@@ -507,6 +518,10 @@ class VoiceSessionManager:
     ) -> float:
         if not audio:
             raise RuntimeError("TTS provider returned empty audio")
+        if audio_format == "pcm_s16le":
+            if len(audio) % 2:
+                raise RuntimeError("TTS provider returned invalid PCM audio")
+            return len(audio) / (24000 * 2)
         try:
             import av
 
@@ -522,6 +537,26 @@ class VoiceSessionManager:
         if enforce_min_duration and audio_format == "mp3" and duration < _minimum_tts_duration_seconds(text):
             raise RuntimeError("TTS provider returned suspiciously short audio")
         return duration
+
+    @staticmethod
+    def _decode_mp3_to_pcm(audio: bytes) -> tuple[bytes, float]:
+        """Decode one complete Edge segment to the stable live wire format."""
+        import av
+
+        output = bytearray()
+        resampler = av.AudioResampler(format="s16", layout="mono", rate=24000)
+        with av.open(io.BytesIO(audio), mode="r") as container:
+            for frame in container.decode(audio=0):
+                converted = resampler.resample(frame)
+                for pcm_frame in converted if isinstance(converted, list) else [converted]:
+                    if pcm_frame is not None:
+                        output.extend(bytes(pcm_frame.planes[0]))
+        flushed = resampler.resample(None) or []
+        for pcm_frame in flushed if isinstance(flushed, list) else [flushed]:
+            output.extend(bytes(pcm_frame.planes[0]))
+        if not output:
+            raise RuntimeError("TTS provider returned undecodable audio")
+        return bytes(output), len(output) / (24000 * 2)
 
     @staticmethod
     def _is_tiny_recovery_text(text: str) -> bool:
@@ -581,8 +616,8 @@ class VoiceSessionManager:
         minimum = max(1, minimum)
         maximum = max(minimum, maximum)
         if mode == "auto":
-            return min(maximum, 3)
+            return 1
         try:
-            return max(minimum, min(maximum, int(mode)))
+            return max(minimum, min(min(maximum, 2), int(mode)))
         except ValueError:
             return minimum

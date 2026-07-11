@@ -477,7 +477,7 @@ function ChatPage({
         (audio, segment) => {
           if (segment.segment_id !== undefined) {
             void livePlayerRef.current?.enqueue(
-              segment.utterance_id, segment.segment_id, audio,
+              segment.utterance_id, segment.segment_id, audio, segment,
             ).catch(() => undefined);
           }
         },

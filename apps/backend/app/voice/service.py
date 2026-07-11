@@ -10,9 +10,11 @@ from fastapi import HTTPException, UploadFile, status
 from apps.backend.app.core.config import Settings
 from apps.backend.app.voice.providers import (
     EdgeTTSProvider,
+    CircuitBreakerTTSProvider,
     FasterWhisperSTTProvider,
     MockSTTProvider,
     MockTTSProvider,
+    SileroTTSProvider,
     STTProvider,
     TTSProvider,
 )
@@ -168,7 +170,7 @@ class VoiceService:
     def _build_tts_provider(self, settings: Settings) -> TTSProvider:
         if settings.voice_tts_provider == "mock":
             return MockTTSProvider()
-        if settings.voice_tts_provider == "edge_tts":
+        if settings.voice_tts_provider in {"edge_tts", "auto"}:
             provider = EdgeTTSProvider()
             provider._STREAM_IDLE_TIMEOUT_SECONDS = (
                 settings.voice_live_edge_first_byte_timeout_seconds
@@ -176,5 +178,14 @@ class VoiceService:
             provider._POST_AUDIO_IDLE_TIMEOUT_SECONDS = (
                 settings.voice_live_edge_idle_timeout_seconds
             )
-            return provider
+            if settings.voice_tts_provider == "edge_tts":
+                return provider
+            fallback = None
+            if settings.voice_tts_fallback_provider == "silero":
+                fallback = SileroTTSProvider(
+                    settings.voice_silero_model,
+                    settings.voice_silero_speaker,
+                    settings.voice_silero_sample_rate,
+                )
+            return CircuitBreakerTTSProvider(provider, fallback)
         raise ValueError(f"Unsupported TTS provider: {settings.voice_tts_provider}")

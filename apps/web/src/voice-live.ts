@@ -43,7 +43,12 @@ export class TTSStreamPlayer {
     this.serverFinished = false;
   }
 
-  enqueue(utteranceId: string, segmentId: number, data: ArrayBuffer): Promise<void> {
+  enqueue(
+    utteranceId: string,
+    segmentId: number,
+    data: ArrayBuffer,
+    audio: Pick<VoiceServerEvent, "format" | "sample_rate" | "channels"> = {},
+  ): Promise<void> {
     if (utteranceId !== this.activeUtteranceId) return Promise.resolve();
     if (segmentId !== this.lastQueuedSegment + 1) {
       const error = new Error(`Unexpected TTS segment order: ${segmentId}`);
@@ -56,12 +61,19 @@ export class TTSStreamPlayer {
     const decode = async () => {
       await this.unlock();
       const context = this.context!;
-      const buffer = await context.decodeAudioData(data.slice(0));
+      const buffer = audio.format === "pcm_s16le"
+        ? this.pcmBuffer(data, audio.sample_rate ?? 24000, audio.channels ?? 1)
+        : await context.decodeAudioData(data.slice(0));
       if (generation !== this.generation || utteranceId !== this.activeUtteranceId) return;
       if (!this.started) {
         this.readyBuffers.push(buffer);
         this.armPrebufferTimer();
-        if (this.readyBuffers.length >= this.prebufferSegments || this.serverFinished) {
+        const bufferedSeconds = this.readyBuffers.reduce((sum, item) => sum + item.duration, 0);
+        if (
+          this.readyBuffers.length >= this.prebufferSegments
+          || bufferedSeconds >= this.prebufferMs / 1000
+          || this.serverFinished
+        ) {
           this.flushPrebuffer();
         }
       } else {
@@ -151,7 +163,7 @@ export class TTSStreamPlayer {
     const source = context.createBufferSource();
     source.buffer = buffer;
     source.connect(context.destination);
-    const startAt = Math.max(context.currentTime + 0.03, this.scheduledUntil);
+    const startAt = Math.max(context.currentTime + 0.075, this.scheduledUntil);
     this.scheduledUntil = startAt + buffer.duration;
     this.sources.add(source);
     source.onended = () => {
@@ -164,6 +176,20 @@ export class TTSStreamPlayer {
       this.started = true;
       globalThis.setTimeout(this.onStarted, Math.max(0, (startAt - context.currentTime) * 1000));
     }
+  }
+
+  private pcmBuffer(data: ArrayBuffer, sampleRate: number, channels: number): AudioBuffer {
+    const context = this.context!;
+    const samples = new Int16Array(data);
+    const frames = Math.floor(samples.length / channels);
+    const buffer = context.createBuffer(channels, frames, sampleRate);
+    for (let channel = 0; channel < channels; channel += 1) {
+      const output = buffer.getChannelData(channel);
+      for (let frame = 0; frame < frames; frame += 1) {
+        output[frame] = samples[frame * channels + channel] / 32768;
+      }
+    }
+    return buffer;
   }
 }
 

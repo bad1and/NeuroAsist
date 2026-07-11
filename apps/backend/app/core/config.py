@@ -33,7 +33,12 @@ class Settings(BaseSettings):
     voice_default_language: str = "ru"
     voice_preload_stt_model: bool = True
     voice_tts_enabled: bool = True
-    voice_tts_provider: str = "edge_tts"
+    voice_tts_provider: str = "auto"
+    voice_tts_primary_provider: str = "edge_tts"
+    voice_tts_fallback_provider: str = "silero"
+    voice_silero_model: str = "v5_5_ru"
+    voice_silero_speaker: str = "xenia"
+    voice_silero_sample_rate: int = 24000
     voice_tts_voice_ru: str = "ru-RU-SvetlanaNeural"
     voice_tts_voice_en: str = "en-US-AriaNeural"
     voice_tts_background_timeout_seconds: int = 20
@@ -44,21 +49,21 @@ class Settings(BaseSettings):
     voice_stt_timeout_seconds: int = 45
     voice_llm_timeout_seconds: int = 45
     voice_tts_timeout_seconds: int = 45
-    voice_live_queue_size: int = 2
-    voice_live_idle_flush_ms: int = 300
-    voice_live_first_segment_chars: int = 50
-    voice_live_next_segment_chars: int = 80
-    voice_live_max_segment_chars: int = 90
+    voice_live_queue_size: int = 3
+    voice_live_idle_flush_ms: int = 500
+    voice_live_first_segment_chars: int = 40
+    voice_live_next_segment_chars: int = 75
+    voice_live_max_segment_chars: int = 110
     voice_live_max_segment_words: int = 18
-    voice_live_safe_segment_words: int = 2
-    voice_live_edge_first_byte_timeout_seconds: float = 4.0
-    voice_live_edge_idle_timeout_seconds: float = 1.2
-    voice_live_tts_retry_count: int = 1
-    voice_live_tts_concurrency_mode: str = "auto"
-    voice_live_tts_concurrency_min: int = 2
-    voice_live_tts_concurrency_max: int = 3
+    voice_live_safe_segment_words: int = 10
+    voice_live_edge_first_byte_timeout_seconds: float = 8.0
+    voice_live_edge_idle_timeout_seconds: float = 3.0
+    voice_live_tts_retry_count: int = 0
+    voice_live_tts_concurrency_mode: str = "1"
+    voice_live_tts_concurrency_min: int = 1
+    voice_live_tts_concurrency_max: int = 2
     voice_live_playback_prebuffer_segments: int = 2
-    voice_live_playback_prebuffer_ms: int = 700
+    voice_live_playback_prebuffer_ms: int = 1000
 
     @property
     def llm_api_key(self) -> str | None:
