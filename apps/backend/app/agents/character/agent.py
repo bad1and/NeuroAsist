@@ -6,8 +6,9 @@ from collections.abc import AsyncIterator
 from typing import Any, Callable
 
 from apps.backend.app.agents.character.prompts import (
+    CHARACTER_JSON_PROMPT,
+    CHARACTER_LIVE_PROMPT,
     CHARACTER_REPAIR_PROMPT,
-    CHARACTER_SYSTEM_PROMPT,
 )
 from apps.backend.app.llm.base import ChatMessage, LLMProvider
 from apps.backend.app.schemas.character import CharacterLLMResponse
@@ -39,7 +40,7 @@ class CharacterAgent:
     async def handle_user_message(self, session_id: str, user_text: str) -> dict[str, str]:
         context = self._history.get_recent_messages(session_id, limit=self._history_limit)
         messages = [
-            ChatMessage(role="system", content=CHARACTER_SYSTEM_PROMPT),
+            ChatMessage(role="system", content=CHARACTER_JSON_PROMPT),
             *context,
             ChatMessage(role="user", content=user_text),
         ]
@@ -92,13 +93,7 @@ class CharacterAgent:
         """Stream plain reply text and commit history only after clean completion."""
         context = self._history.get_recent_messages(session_id, limit=self._history_limit)
         messages = [
-            ChatMessage(
-                role="system",
-                content=(
-                    "Ты дружелюбный персонаж NeuroAsist. Отвечай естественным обычным "
-                    "текстом без JSON. Не добавляй emotion или intent в ответ."
-                ),
-            ),
+            ChatMessage(role="system", content=CHARACTER_LIVE_PROMPT),
             *context,
             ChatMessage(role="user", content=user_text),
         ]
