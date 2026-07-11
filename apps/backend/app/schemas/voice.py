@@ -33,3 +33,11 @@ class VoiceTTSStatusResponse(BaseModel):
     error_type: str | None = None
     recoverable: bool | None = None
     fallback: str | None = None
+
+
+class VoiceLiveResponse(BaseModel):
+    session_id: str
+    utterance_id: str
+    voice_request_id: str
+    transcript: str
+    status: str = "streaming"

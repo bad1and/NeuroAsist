@@ -9,6 +9,7 @@ import {
   sendChatMessage,
   sendVoiceMessage,
   updateRuntimeSettings,
+  voiceWebSocketUrl,
   WS_EVENTS_URL,
 } from "./api";
 import type {
@@ -17,13 +18,16 @@ import type {
   EventLevel,
   PublicSettings,
   StatusResponse,
+  VoiceChatResponse,
   VoiceTtsStatusResponse,
 } from "./types";
+import type { VoiceServerEvent } from "./types";
+import { TTSStreamPlayer, VoiceSocketClient } from "./voice-live";
 
 type Tab = "chat" | "events" | "settings";
 type WsState = "connected" | "disconnected" | "reconnecting";
 type LevelFilter = "all" | EventLevel;
-type VoiceState = "idle" | "recording" | "transcribing" | "thinking";
+type VoiceState = "idle" | "recording" | "transcribing" | "thinking" | "speaking" | "stopping" | "error";
 
 const SESSION_ID = "default";
 const RECORDING_MIME_TYPES = [
@@ -59,6 +63,14 @@ function formatTime(value: string): string {
 
 function boolLabel(value: boolean): string {
   return value ? "yes" : "no";
+}
+
+function isLiveVoiceTransportError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.message.includes("Live voice connection failed") ||
+    error.message.includes("Voice WebSocket must be connected")
+  );
 }
 
 export default function App() {
@@ -271,6 +283,10 @@ function ChatPage({
   const recordTimeoutRef = useRef<number | null>(null);
   const handledVoiceEventIdsRef = useRef<Set<string>>(new Set());
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const liveSocketRef = useRef<VoiceSocketClient | null>(null);
+  const livePlayerRef = useRef<TTSStreamPlayer | null>(null);
+  const liveAudioStartedRef = useRef(false);
+  const liveMetadataRef = useRef({ emotion: "neutral", intent: "unknown" });
 
   const voiceSupported =
     typeof navigator !== "undefined" &&
@@ -298,6 +314,7 @@ function ChatPage({
     async (audioUrl: string): Promise<boolean> => {
       stopVoicePlayback();
       const audio = new Audio(audioUrl);
+      audio.playbackRate = settings?.voice_playback_rate ?? 1;
       activeAudioRef.current = audio;
       audio.onended = () => {
         if (activeAudioRef.current === audio) {
@@ -320,7 +337,7 @@ function ChatPage({
         return false;
       }
     },
-    [stopVoicePlayback],
+    [settings?.voice_playback_rate, stopVoicePlayback],
   );
 
   const playMessageAudioTrack = useCallback(
@@ -331,6 +348,7 @@ function ChatPage({
         ) ?? new Audio(fallbackAudioUrl);
 
       stopVoicePlayback(audio);
+      audio.playbackRate = settings?.voice_playback_rate ?? 1;
       activeAudioRef.current = audio;
       audio.onended = () => {
         if (activeAudioRef.current === audio) {
@@ -349,7 +367,7 @@ function ChatPage({
         return false;
       }
     },
-    [stopVoicePlayback],
+    [settings?.voice_playback_rate, stopVoicePlayback],
   );
 
   const speakTextInBrowser = useCallback(
@@ -360,11 +378,132 @@ function ChatPage({
       stopVoicePlayback();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = settings?.voice_language === "en" ? "en-US" : "ru-RU";
+      utterance.rate = settings?.voice_playback_rate ?? 1;
       window.speechSynthesis.speak(utterance);
       return true;
     },
-    [browserSpeechSupported, settings?.voice_language, stopVoicePlayback],
+    [browserSpeechSupported, settings?.voice_language, settings?.voice_playback_rate, stopVoicePlayback],
   );
+
+  const ensureLivePlayer = useCallback(() => {
+    if (!livePlayerRef.current) {
+      livePlayerRef.current = new TTSStreamPlayer(
+        () => {
+          liveAudioStartedRef.current = true;
+          liveSocketRef.current?.send("playback.started");
+          setVoiceState("speaking");
+        },
+        () => {
+          liveSocketRef.current?.send("playback.finished");
+          liveSocketRef.current?.clearActive();
+          setLoading(false);
+          setVoiceState("idle");
+        },
+        (playerError) => {
+          livePlayerRef.current?.stop();
+          liveSocketRef.current?.cancel();
+          setError(playerError.message);
+          setLoading(false);
+          setVoiceState("error");
+        },
+        {
+          prebufferSegments: settings?.voice_live_playback_prebuffer_segments ?? 2,
+          prebufferMs: settings?.voice_live_playback_prebuffer_ms ?? 700,
+          playbackRate: settings?.voice_playback_rate ?? 1,
+        },
+        (gapMs) => {
+          liveSocketRef.current?.send("playback.underrun", { underrun_ms: gapMs });
+        },
+      );
+    }
+    livePlayerRef.current.updateOptions({
+      prebufferSegments: settings?.voice_live_playback_prebuffer_segments ?? 2,
+      prebufferMs: settings?.voice_live_playback_prebuffer_ms ?? 700,
+      playbackRate: settings?.voice_playback_rate ?? 1,
+    });
+    return livePlayerRef.current;
+  }, [
+    settings?.voice_live_playback_prebuffer_ms,
+    settings?.voice_live_playback_prebuffer_segments,
+    settings?.voice_playback_rate,
+  ]);
+
+  const ensureLiveVoice = useCallback(async () => {
+    const player = ensureLivePlayer();
+    if (!liveSocketRef.current) {
+      const onEvent = (event: VoiceServerEvent) => {
+        if (event.type === "voice.utterance.started") {
+          liveSocketRef.current?.activate(event.utterance_id);
+          livePlayerRef.current?.begin(event.utterance_id);
+          setVoiceState("thinking");
+        } else if (event.type === "voice.metadata") {
+          liveMetadataRef.current = {
+            emotion: event.emotion ?? "neutral",
+            intent: event.intent ?? "unknown",
+          };
+          setMessages((current) => current.map((message) =>
+            message.utteranceId === event.utterance_id
+              ? { ...message, emotion: event.emotion, intent: event.intent }
+              : message,
+          ));
+        } else if (event.type === "voice.text.delta" && event.delta) {
+          setMessages((current) => {
+            const index = current.findIndex((message) => message.utteranceId === event.utterance_id);
+            if (index < 0) {
+              return [...current, {
+                id: crypto.randomUUID(), role: "assistant", content: event.delta!,
+                utteranceId: event.utterance_id,
+                emotion: liveMetadataRef.current.emotion,
+                intent: liveMetadataRef.current.intent,
+              }];
+            }
+            return current.map((message, messageIndex) => messageIndex === index
+              ? { ...message, content: message.content + event.delta }
+              : message);
+          });
+        } else if (event.type === "tts.segment.started") {
+          setVoiceState("speaking");
+        } else if (event.type === "voice.utterance.finished") {
+          livePlayerRef.current?.finish(event.utterance_id);
+        } else if (event.type === "voice.utterance.cancelled") {
+          liveSocketRef.current?.clearActive();
+          setLoading(false);
+          setVoiceState("idle");
+        } else if (event.type === "voice.error") {
+          livePlayerRef.current?.stop();
+          liveSocketRef.current?.clearActive();
+          setError(event.message ?? event.code ?? "Live voice failed");
+          setLoading(false);
+          setVoiceState("error");
+          if (!liveAudioStartedRef.current) {
+            setMessages((current) => {
+              const message = current.find((item) => item.utteranceId === event.utterance_id);
+              if (message) speakTextInBrowser(message.content);
+              return current;
+            });
+          }
+        }
+      };
+      liveSocketRef.current = new VoiceSocketClient(
+        voiceWebSocketUrl(SESSION_ID),
+        onEvent,
+        (audio, segment) => {
+          if (segment.segment_id !== undefined) {
+            void livePlayerRef.current?.enqueue(
+              segment.utterance_id, segment.segment_id, audio, segment,
+            ).catch(() => undefined);
+          }
+        },
+      );
+    }
+    await player.unlock();
+    await liveSocketRef.current.connect();
+  }, [ensureLivePlayer, speakTextInBrowser]);
+
+  useEffect(() => () => {
+    livePlayerRef.current?.stop();
+    liveSocketRef.current?.close();
+  }, []);
 
   useEffect(() => () => stopVoicePlayback(), [stopVoicePlayback]);
 
@@ -442,6 +581,35 @@ function ChatPage({
       }
     },
     [syncVoiceTtsStatus],
+  );
+
+  const appendBatchVoiceResponse = useCallback(
+    (response: VoiceChatResponse) => {
+      setMessages((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          role: "user",
+          content: response.transcript,
+        },
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: response.reply,
+          emotion: response.emotion,
+          intent: response.intent,
+          voiceRequestId: response.voice_request_id,
+          ttsStatus: response.tts_status,
+          audioUrl: response.reply_audio_url
+            ? resolveApiUrl(response.reply_audio_url)
+            : undefined,
+        },
+      ]);
+      if (response.tts_status === "queued") {
+        void pollVoiceTtsStatus(response.voice_request_id);
+      }
+    },
+    [pollVoiceTtsStatus],
   );
 
   useEffect(() => {
@@ -556,6 +724,7 @@ function ChatPage({
 
     setError(null);
     try {
+      await ensureLivePlayer().unlock();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mimeType = getRecordingMimeType();
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
@@ -604,6 +773,12 @@ function ChatPage({
       stopRecording();
       return;
     }
+    if (voiceState === "thinking" || voiceState === "speaking") {
+      setVoiceState("stopping");
+      livePlayerRef.current?.stop();
+      liveSocketRef.current?.cancel();
+      return;
+    }
     await startRecording();
   };
 
@@ -626,41 +801,54 @@ function ChatPage({
       setVoiceState("thinking");
     }, 500);
     try {
-      const response = await sendVoiceMessage(
-        SESSION_ID,
-        audio,
-        settings?.voice_language ?? "ru",
-      );
-      setMessages((current) => [
-        ...current,
-        {
-          id: crypto.randomUUID(),
-          role: "user",
-          content: response.transcript,
-        },
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: response.reply,
-          emotion: response.emotion,
-          intent: response.intent,
-          voiceRequestId: response.voice_request_id,
-          ttsStatus: response.tts_status,
-          audioUrl: response.reply_audio_url
-            ? resolveApiUrl(response.reply_audio_url)
-            : undefined,
-        },
-      ]);
-      if (response.tts_status === "queued") {
-        void pollVoiceTtsStatus(response.voice_request_id);
+      let response;
+      try {
+        await ensureLiveVoice();
+        liveSocketRef.current?.clearActive();
+        liveAudioStartedRef.current = false;
+        response = await sendVoiceMessage(
+          SESSION_ID,
+          audio,
+          settings?.voice_language ?? "ru",
+          true,
+        );
+      } catch (liveError) {
+        if (!isLiveVoiceTransportError(liveError)) {
+          throw liveError;
+        }
+        liveSocketRef.current?.close();
+        liveSocketRef.current = null;
+        response = await sendVoiceMessage(
+          SESSION_ID,
+          audio,
+          settings?.voice_language ?? "ru",
+          false,
+        );
+        setError("Live voice stream is unavailable; used legacy voice response.");
       }
+      if ("status" in response) {
+        liveSocketRef.current?.activate(response.utterance_id);
+        setMessages((current) => [
+          ...current,
+          {
+            id: crypto.randomUUID(),
+            role: "user",
+            content: response.transcript,
+          },
+        ]);
+        setVoiceState("thinking");
+        return;
+      }
+      appendBatchVoiceResponse(response);
       await onRefreshEvents();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Voice chat failed");
     } finally {
       window.clearTimeout(thinkingTimer);
-      setLoading(false);
-      setVoiceState("idle");
+      if (!liveSocketRef.current?.activeUtteranceId) {
+        setLoading(false);
+        setVoiceState("idle");
+      }
     }
   };
 
@@ -693,6 +881,7 @@ function ChatPage({
                 controls
                 data-message-id={message.id}
                 onPlay={(event) => {
+                  event.currentTarget.playbackRate = settings?.voice_playback_rate ?? 1;
                   stopVoicePlayback(event.currentTarget);
                 }}
                 src={message.audioUrl}
@@ -770,7 +959,7 @@ function ChatPage({
       <div className="voice-controls">
         <button
           className={voiceState === "recording" ? "recording" : ""}
-          disabled={!voiceSupported || loading || voiceState === "transcribing" || voiceState === "thinking"}
+          disabled={!voiceSupported || voiceState === "transcribing" || voiceState === "stopping"}
           onClick={() => void toggleRecording()}
           type="button"
         >
@@ -794,7 +983,16 @@ function voiceButtonLabel(voiceState: VoiceState): string {
     return "Transcribing";
   }
   if (voiceState === "thinking") {
-    return "Thinking";
+    return "Stop";
+  }
+  if (voiceState === "speaking") {
+    return "Stop speaking";
+  }
+  if (voiceState === "stopping") {
+    return "Stopping";
+  }
+  if (voiceState === "error") {
+    return "Try again";
   }
   return "Start recording";
 }
@@ -873,19 +1071,23 @@ function SettingsPage({
   settings: PublicSettings | null;
   onSettingsChanged: (settings: PublicSettings) => void;
 }) {
-  const [model, setModel] = useState("");
   const [personality, setPersonality] = useState("");
   const [voiceLanguage, setVoiceLanguage] = useState("ru");
   const [voiceTtsVoice, setVoiceTtsVoice] = useState("");
+  const [voicePlaybackRate, setVoicePlaybackRate] = useState(1);
+  const [prebufferSegments, setPrebufferSegments] = useState(2);
+  const [prebufferMs, setPrebufferMs] = useState(1000);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (settings) {
-      setModel(settings.model);
       setPersonality(settings.personality);
       setVoiceLanguage(settings.voice_language);
       setVoiceTtsVoice(settings.voice_tts_voice);
+      setVoicePlaybackRate(settings.voice_playback_rate);
+      setPrebufferSegments(settings.voice_live_playback_prebuffer_segments);
+      setPrebufferMs(settings.voice_live_playback_prebuffer_ms);
     }
   }, [settings]);
 
@@ -894,10 +1096,12 @@ function SettingsPage({
     setMessage(null);
     try {
       const nextSettings = await updateRuntimeSettings({
-        model,
         personality,
         voice_language: voiceLanguage,
         voice_tts_voice: voiceTtsVoice,
+        voice_playback_rate: voicePlaybackRate,
+        voice_live_playback_prebuffer_segments: prebufferSegments,
+        voice_live_playback_prebuffer_ms: prebufferMs,
       });
       onSettingsChanged(nextSettings);
       setMessage("Runtime settings saved.");
@@ -925,69 +1129,110 @@ function SettingsPage({
 
       <div className="settings-grid">
         <InfoRow label="API key configured" value={boolLabel(settings.api_key_configured)} />
+        <InfoRow label="Provider" value={settings.provider} />
+        <InfoRow label="Fixed model" value={settings.model} />
         <InfoRow label="Chat history limit" value={String(settings.chat_history_limit)} />
         <InfoRow label="Log level" value={settings.log_level} />
         <InfoRow
           label="Voice"
-          value={`${settings.voice_language} / STT ${settings.voice_stt_model} / TTS ${settings.voice_tts_enabled ? "on" : "off"}`}
+          value={`${settings.voice_language} / ${settings.voice_tts_voice} / ${settings.voice_playback_rate.toFixed(2)}x`}
         />
       </div>
 
       <div className="form-grid">
-        <label>
-          Model
-          <select value={model} onChange={(event) => setModel(event.target.value)}>
-            {settings.available_models.map((availableModel) => (
-              <option key={availableModel} value={availableModel}>
-                {availableModel}
-              </option>
-            ))}
-          </select>
-        </label>
+        <fieldset className="settings-group">
+          <legend>Assistant</legend>
+          <label>
+            Personality
+            <select
+              value={personality}
+              onChange={(event) => setPersonality(event.target.value)}
+            >
+              {settings.available_personalities.map((availablePersonality) => (
+                <option key={availablePersonality} value={availablePersonality}>
+                  {availablePersonality}
+                </option>
+              ))}
+            </select>
+          </label>
+        </fieldset>
 
-        <label>
-          Personality
-          <select
-            value={personality}
-            onChange={(event) => setPersonality(event.target.value)}
-          >
-            {settings.available_personalities.map((availablePersonality) => (
-              <option key={availablePersonality} value={availablePersonality}>
-                {availablePersonality}
-              </option>
-            ))}
-          </select>
-        </label>
+        <fieldset className="settings-group">
+          <legend>Voice</legend>
+          <label>
+            Voice language
+            <select
+              value={voiceLanguage}
+              onChange={(event) => setVoiceLanguage(event.target.value)}
+            >
+              {settings.available_voice_languages.map((availableLanguage) => (
+                <option key={availableLanguage} value={availableLanguage}>
+                  {availableLanguage}
+                </option>
+              ))}
+            </select>
+          </label>
 
-        <label>
-          Voice language
-          <select
-            value={voiceLanguage}
-            onChange={(event) => setVoiceLanguage(event.target.value)}
-          >
-            {settings.available_voice_languages.map((availableLanguage) => (
-              <option key={availableLanguage} value={availableLanguage}>
-                {availableLanguage}
-              </option>
-            ))}
-          </select>
-        </label>
+          <label>
+            Silero speaker
+            <select
+              value={voiceTtsVoice}
+              onChange={(event) => setVoiceTtsVoice(event.target.value)}
+            >
+              {settings.available_tts_voices.map((availableVoice) => (
+                <option key={availableVoice} value={availableVoice}>
+                  {availableVoice}
+                </option>
+              ))}
+            </select>
+          </label>
 
-        <label>
-          TTS voice
-          <select
-            value={voiceTtsVoice}
-            onChange={(event) => setVoiceTtsVoice(event.target.value)}
-          >
-            {settings.available_tts_voices.map((availableVoice) => (
-              <option key={availableVoice} value={availableVoice}>
-                {availableVoice}
-              </option>
-            ))}
-          </select>
-        </label>
+          <label>
+            Playback speed <strong>{voicePlaybackRate.toFixed(2)}x</strong>
+            <input
+              min="0.75"
+              max="1.25"
+              step="0.05"
+              type="range"
+              value={voicePlaybackRate}
+              onChange={(event) => setVoicePlaybackRate(Number(event.target.value))}
+            />
+          </label>
 
-        <button onClick={saveSettings} disabled={saving}>
+          <div className="readonly-setting">
+            <span>Tone / pitch</span>
+            <strong>Not supported by current Silero backend</strong>
+          </div>
+        </fieldset>
+
+        <fieldset className="settings-group">
+          <legend>Live playback</legend>
+          <label>
+            Prebuffer segments
+            <input
+              min="1"
+              max="4"
+              step="1"
+              type="number"
+              value={prebufferSegments}
+              onChange={(event) => setPrebufferSegments(Number(event.target.value))}
+            />
+          </label>
+
+          <label>
+            Prebuffer ms
+            <input
+              min="0"
+              max="1500"
+              step="50"
+              type="number"
+              value={prebufferMs}
+              onChange={(event) => setPrebufferMs(Number(event.target.value))}
+            />
+          </label>
+        </fieldset>
+
+        <button className="settings-save" onClick={saveSettings} disabled={saving}>
           {saving ? "Saving" : "Save runtime settings"}
         </button>
       </div>
