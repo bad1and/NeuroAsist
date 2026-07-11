@@ -370,10 +370,6 @@ class VoiceSessionManager:
         self, text: str, language: str, voice: str, depth: int = 0
     ):
         words = text.split()
-        if self._safe_segment_words and len(words) > self._safe_segment_words and depth < 6:
-            async for part in self._split_and_synthesize(text, language, voice, depth):
-                yield part
-            return
         request = TTSRequest(text=text, language=language, voice=voice)
         last_error: Exception | None = None
         for attempt in range(1, self._retry_count + 2):
@@ -437,11 +433,21 @@ class VoiceSessionManager:
             yield part
 
     async def _split_and_synthesize(self, text: str, language: str, voice: str, depth: int):
-        words = text.split()
-        split_at = self._safe_segment_words or max(1, len(words) // 2)
+        words = self._SOFT_PAUSE_RE.sub(" ", text).split()
+        split_at = self._adaptive_split_index(text, words)
         split_at = max(1, min(split_at, len(words) - 1))
-        left = " ".join(words[:split_at])
+        final_punctuation = text[-1] if self._FINAL_PUNCTUATION_RE.search(text.strip()) else ""
+        left = self._cleanup_tts_job_text(
+            " ".join(words[:split_at]),
+            keep_final_punctuation=False,
+        )
         right = " ".join(words[split_at:])
+        if final_punctuation and not self._FINAL_PUNCTUATION_RE.search(right):
+            right = f"{right}{final_punctuation}"
+        right = self._cleanup_tts_job_text(
+            right,
+            keep_final_punctuation=bool(final_punctuation),
+        )
         right_task = asyncio.create_task(
             self._synthesize_parts(right, language, voice, depth + 1),
             name=f"tts-adaptive-right-{depth + 1}",
@@ -461,32 +467,25 @@ class VoiceSessionManager:
         text = self._SPACE_RE.sub(" ", text).strip()
         if not text:
             return []
+        return [self._cleanup_tts_job_text(text, keep_final_punctuation=True)]
 
-        max_words = self._safe_segment_words
-        if not max_words or len(text.split()) <= max_words:
-            return [self._cleanup_tts_job_text(text, keep_final_punctuation=True)]
+    def _adaptive_split_index(self, text: str, words: list[str]) -> int:
+        if len(words) <= 2:
+            return 1
 
-        final_punctuation = text[-1] if self._FINAL_PUNCTUATION_RE.search(text) else ""
-        core = text[:-1] if final_punctuation else text
-        core = self._SOFT_PAUSE_RE.sub(" ", core)
-        core = self._SPACE_RE.sub(" ", core).strip()
-        if not core:
-            return []
+        midpoint = len(text) // 2
+        candidates: list[tuple[int, int]] = []
+        for match in re.finditer(r"[,;:—–-]\s+", text):
+            prefix_words = self._SOFT_PAUSE_RE.sub(" ", text[: match.end()]).split()
+            index = len(prefix_words)
+            if 2 <= index <= len(words) - 2:
+                candidates.append((abs(match.end() - midpoint), index))
+        if candidates:
+            return min(candidates)[1]
 
-        words = core.split()
-        jobs: list[str] = []
-        for index in range(0, len(words), max_words):
-            part = " ".join(words[index : index + max_words])
-            is_last = index + max_words >= len(words)
-            if is_last and final_punctuation:
-                part = f"{part}{final_punctuation}"
-            cleaned = self._cleanup_tts_job_text(
-                part,
-                keep_final_punctuation=is_last and bool(final_punctuation),
-            )
-            if cleaned:
-                jobs.append(cleaned)
-        return jobs
+        if self._safe_segment_words and len(words) <= self._safe_segment_words * 2:
+            return min(self._safe_segment_words, len(words) - 1)
+        return max(1, len(words) // 2)
 
     def _cleanup_tts_job_text(self, text: str, *, keep_final_punctuation: bool) -> str:
         text = self._SPACE_RE.sub(" ", text).strip()
