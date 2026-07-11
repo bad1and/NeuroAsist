@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
@@ -14,6 +16,7 @@ async def websocket_voice(websocket: WebSocket, session_id: str, version: int = 
     await websocket.accept()
     manager = websocket.app.state.voice_session_manager
     connection = await manager.register(session_id, websocket)
+    shutdown_cancelled = False
     try:
         while True:
             message = await websocket.receive_json()
@@ -26,10 +29,17 @@ async def websocket_voice(websocket: WebSocket, session_id: str, version: int = 
                     message.get("utterance_id"),
                     message.get("underrun_ms"),
                 )
+    except asyncio.CancelledError:
+        shutdown_cancelled = True
+        logger.info("Voice WebSocket closed during backend shutdown")
     except (WebSocketDisconnect, RuntimeError):
         pass
     finally:
-        await manager.unregister(session_id, connection)
+        unregister = manager.unregister(session_id, connection)
+        if shutdown_cancelled:
+            unregister = asyncio.wait_for(unregister, timeout=1.0)
+        with contextlib.suppress(asyncio.CancelledError, RuntimeError, TimeoutError):
+            await unregister
 
 
 @router.websocket("/ws/events")
@@ -48,6 +58,8 @@ async def websocket_events(websocket: WebSocket) -> None:
         while True:
             event = await queue.get()
             await websocket.send_json(event.model_dump())
+    except asyncio.CancelledError:
+        logger.info("Events WebSocket closed during backend shutdown")
     except WebSocketDisconnect:
         pass
     finally:
