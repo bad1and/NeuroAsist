@@ -1,6 +1,6 @@
 # NeuroAsist v0.3.1
 
-English | [Русский](README.ru.md)
+🇺🇸 [English](README.md) | 🇷🇺 [Русский](README.ru.md)
 
 NeuroAsist is a local-first voice assistant prototype for a future neuro-VTuber workflow. The current version includes a FastAPI backend, React/Vite web UI, DeepSeek-compatible LLM access, local STT through `faster-whisper`, and local Russian TTS through Silero.
 
