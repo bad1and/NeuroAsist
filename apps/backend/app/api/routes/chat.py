@@ -16,7 +16,6 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
     settings = request.app.state.settings
     history = request.app.state.history
     event_bus = request.app.state.event_bus
-    runtime_settings = request.app.state.runtime_settings
     event_bus.publish(
         "chat.started",
         "info",
@@ -28,7 +27,7 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
     )
 
     try:
-        provider = DeepSeekProvider(settings, model=runtime_settings.model)
+        provider = DeepSeekProvider(settings)
         agent = CharacterAgent(
             llm_provider=provider,
             history=history,

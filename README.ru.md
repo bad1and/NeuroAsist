@@ -47,7 +47,7 @@ flowchart LR
 | Локальная русская озвучка | ✅ | Silero `v5_5_ru` |
 | История диалога | ✅ | SQLite |
 | Runtime-события | ✅ | REST и WebSocket |
-| Настройка модели и голоса | ✅ | Локальная React-панель |
+| Настройка голоса и runtime | ✅ | Локальная React-панель |
 | Browser speech fallback | ✅ | При ошибке backend TTS |
 | Аватар и lipsync | 🧭 | Планируется |
 | Dev-agent и sandbox | 🧭 | Планируется |
@@ -68,9 +68,9 @@ flowchart LR
 
 - **Chat** — текстовые сообщения, запись микрофона, распознанная фраза, ответ и воспроизведение.
 - **Events** — события backend, LLM, STT, TTS и соединений в реальном времени.
-- **Settings** — выбор поддерживаемой модели, языка и TTS-голоса.
+- **Settings** — язык голоса, speaker Silero, скорость воспроизведения, live prebuffer и runtime-настройки.
 
-В шапке отображаются состояние backend, подключение WebSocket, наличие API-ключа и текущая модель.
+В шапке отображаются состояние backend, подключение WebSocket, наличие API-ключа и фиксированная LLM-модель.
 
 ## Технологический стек
 
@@ -168,6 +168,83 @@ VOICE_SILERO_DEVICE=cpu
 VOICE_SILERO_CPU_THREADS=4
 VOICE_SILERO_WARMUP=true
 ```
+
+### Справочник параметров окружения
+
+`.env` читается при запуске backend. Если меняешь `.env`, перезапусти backend. Настройки, изменённые через UI, действуют только в текущем runtime и сбрасываются после перезапуска backend.
+
+#### Основной backend
+
+| Параметр | За что отвечает |
+|---|---|
+| `DEEPSEEK_API_KEY` | API-ключ DeepSeek-совместимого сервиса. Нужен для реальных ответов LLM. |
+| `DEEPSEEK_BASE_URL` | Базовый URL DeepSeek-совместимого API. |
+| `DEEPSEEK_MODEL` | Фиксированная LLM-модель для backend routes. UI не меняет её в runtime. |
+| `SQLITE_PATH` | Путь к SQLite-базе с сессиями и историей диалога. |
+| `CHAT_HISTORY_LIMIT` | Сколько последних сообщений передаётся обратно в контекст чата. |
+| `LOG_LEVEL` | Детальность логов backend, например `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
+| `LOG_TO_FILE` | Включает запись логов backend в файл. |
+| `LOG_FILE_PATH` | Путь к файлу логов, если `LOG_TO_FILE=true`. |
+| `CORS_ORIGINS` | Список разрешённых frontend origin через запятую. |
+| `CORS_ORIGIN_REGEX` | Regex для разрешённых локальных development origin. |
+
+#### Speech-to-text
+
+| Параметр | За что отвечает |
+|---|---|
+| `VOICE_STT_PROVIDER` | STT-провайдер. Для локального распознавания используй `faster_whisper`; `mock` нужен для тестов. |
+| `VOICE_STT_MODEL` | Размер Whisper-модели, например `small`. Модели крупнее могут распознавать лучше, но требуют больше ресурсов. |
+| `VOICE_STT_DEVICE` | Где запускать STT: `cpu`, `cuda` или `auto`. |
+| `VOICE_STT_COMPUTE_TYPE` | Тип вычислений faster-whisper, например `int8` для экономного CPU-режима. |
+| `VOICE_DEFAULT_LANGUAGE` | Язык по умолчанию для STT и голосового UI, например `ru`. |
+| `VOICE_PRELOAD_STT_MODEL` | Загружает STT-модель при старте backend, а не при первой записи. |
+| `VOICE_STT_TIMEOUT_SECONDS` | Максимальное время на один STT-запрос. |
+| `VOICE_MAX_UPLOAD_MB` | Максимальный размер загружаемого аудио. |
+| `VOICE_MAX_RECORD_SECONDS` | Максимальная длительность принимаемой записи. |
+
+#### Text-to-speech / Silero
+
+| Параметр | За что отвечает |
+|---|---|
+| `VOICE_TTS_ENABLED` | Включает backend-озвучку. Если она выключена или упала, frontend может использовать browser SpeechSynthesis fallback. |
+| `VOICE_TTS_PROVIDER` | Backend TTS-провайдер. Рабочее значение — `silero`; `mock` только для тестов. Edge TTS не поддерживается. |
+| `VOICE_PRELOAD_TTS_MODEL` | Загружает и прогревает Silero при старте backend. Первый запуск может быть дольше. |
+| `VOICE_SILERO_MODEL` | Имя модели Silero. Текущее значение по умолчанию — `v5_5_ru`. |
+| `VOICE_SILERO_SPEAKER_RU` | Русский speaker Silero по умолчанию, например `xenia`. Можно менять в runtime через Settings. |
+| `VOICE_SILERO_SAMPLE_RATE` | Sample rate WAV-файлов Silero. Текущее значение — `24000`; изменение требует перезапуска backend. |
+| `VOICE_SILERO_DEVICE` | Где запускать Silero: `cpu`, `cuda` или `auto`. |
+| `VOICE_SILERO_CPU_THREADS` | Сколько CPU-потоков PyTorch использует для Silero inference. |
+| `VOICE_SILERO_WARMUP` | Запускает короткую warmup-фразу после загрузки Silero, чтобы первый реальный TTS был быстрее. |
+| `VOICE_SILERO_TIMEOUT_SECONDS` | Timeout на синтез одной фразы. |
+| `VOICE_TTS_BACKGROUND_TIMEOUT_SECONDS` | Timeout фоновых batch TTS jobs, которые создаёт `/voice/chat`. |
+| `VOICE_TTS_TIMEOUT_SECONDS` | Общий timeout TTS для voice API flow. |
+| `VOICE_TTS_MAX_CHARS` | Максимальная длина текста для одного backend TTS-запроса. |
+| `VOICE_AUDIO_DIR` | Папка, куда сохраняются сгенерированные аудиофайлы. |
+
+#### Live voice playback
+
+| Параметр | За что отвечает |
+|---|---|
+| `VOICE_LIVE_QUEUE_SIZE` | Размер внутренней очереди live-ответа. |
+| `VOICE_LIVE_IDLE_FLUSH_MS` | Задержка перед отправкой последнего неполного live-сегмента. |
+| `VOICE_LIVE_FIRST_SEGMENT_CHARS` | Целевой размер первого live TTS-сегмента. |
+| `VOICE_LIVE_NEXT_SEGMENT_CHARS` | Целевой размер следующих live TTS-сегментов. |
+| `VOICE_LIVE_MAX_SEGMENT_CHARS` | Жёсткий лимит символов для одного live TTS-сегмента. |
+| `VOICE_LIVE_MAX_SEGMENT_WORDS` | Жёсткий лимит слов для одного live TTS-сегмента. |
+| `VOICE_LIVE_SAFE_SEGMENT_WORDS` | Желательное число слов перед тем, как сегментатор начнёт искать естественное место разреза. |
+| `VOICE_LIVE_TTS_RETRY_COUNT` | Сколько раз повторять генерацию упавшего live TTS-сегмента. |
+| `VOICE_LIVE_TTS_CONCURRENCY_MODE` | Режим параллельности live TTS. Значение `1` по умолчанию сохраняет простой и стабильный порядок сегментов. |
+| `VOICE_LIVE_TTS_CONCURRENCY_MIN` | Нижняя граница параллельности live TTS. |
+| `VOICE_LIVE_TTS_CONCURRENCY_MAX` | Верхняя граница параллельности live TTS. |
+| `VOICE_LIVE_PLAYBACK_PREBUFFER_SEGMENTS` | Сколько декодированных live-сегментов буферизовать перед стартом воспроизведения. Можно менять в runtime через Settings. |
+| `VOICE_LIVE_PLAYBACK_PREBUFFER_MS` | Дополнительная задержка live prebuffer в миллисекундах. Можно менять в runtime через Settings. |
+
+#### Frontend
+
+| Параметр | За что отвечает |
+|---|---|
+| `VITE_API_BASE_URL` | HTTP URL backend, который использует React-приложение. |
+| `VITE_WS_EVENTS_URL` | WebSocket URL backend для событий и live voice. |
 
 ### 5. Проверка FFmpeg
 

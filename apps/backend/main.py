@@ -41,9 +41,10 @@ def create_app() -> FastAPI:
     history = SQLiteMessageHistory(settings.database_path)
     event_bus = EventBus(max_events=300)
     runtime_settings = RuntimeSettings(
-        model=settings.deepseek_model,
         voice_language=settings.voice_default_language,
         voice_tts_voice=settings.voice_silero_speaker_ru,
+        voice_live_playback_prebuffer_segments=settings.voice_live_playback_prebuffer_segments,
+        voice_live_playback_prebuffer_ms=settings.voice_live_playback_prebuffer_ms,
     )
     voice_service = VoiceService(settings)
     voice_session_manager = VoiceSessionManager(

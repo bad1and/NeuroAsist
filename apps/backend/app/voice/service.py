@@ -141,6 +141,14 @@ class VoiceService:
             return requested_voice or language
         return resolver(language, requested_voice)
 
+    def available_tts_voices(self) -> list[str]:
+        voices = getattr(self._tts_provider, "available_speakers", None)
+        if voices is not None:
+            return list(voices)
+        if self._settings.voice_tts_provider == "silero" and self._settings.voice_silero_model == "v5_5_ru":
+            return ["aidar", "baya", "kseniya", "xenia", "eugene", "random"]
+        return [self._settings.voice_silero_speaker_ru]
+
     def resolve_audio_path(self, audio_id: str) -> Path:
         if "/" in audio_id or "\\" in audio_id or ".." in audio_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audio not found")

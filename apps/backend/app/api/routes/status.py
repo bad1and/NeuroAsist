@@ -8,7 +8,6 @@ router = APIRouter()
 @router.get("/status", response_model=StatusResponse)
 def get_status(request: Request) -> StatusResponse:
     settings = request.app.state.settings
-    runtime_settings = request.app.state.runtime_settings
     history = request.app.state.history
 
     try:
@@ -22,7 +21,7 @@ def get_status(request: Request) -> StatusResponse:
         version=request.app.version,
         backend="ok",
         llm_provider="deepseek",
-        llm_model=runtime_settings.model,
+        llm_model=settings.deepseek_model,
         api_key_configured=bool(settings.llm_api_key),
         database=database_status,
     )

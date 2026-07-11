@@ -78,10 +78,12 @@ export function getSettings(): Promise<PublicSettings> {
 }
 
 export function updateRuntimeSettings(payload: {
-  model?: string;
   personality?: string;
   voice_language?: string;
   voice_tts_voice?: string;
+  voice_playback_rate?: number;
+  voice_live_playback_prebuffer_segments?: number;
+  voice_live_playback_prebuffer_ms?: number;
 }): Promise<PublicSettings> {
   return requestJson<PublicSettings>("/settings/runtime", {
     method: "PATCH",

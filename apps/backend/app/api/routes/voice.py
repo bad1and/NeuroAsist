@@ -85,7 +85,7 @@ async def voice_chat(
             },
         )
 
-        provider = DeepSeekProvider(settings, model=runtime_settings.model)
+        provider = DeepSeekProvider(settings)
         agent = CharacterAgent(
             llm_provider=provider,
             history=history,

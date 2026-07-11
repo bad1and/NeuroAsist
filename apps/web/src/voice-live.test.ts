@@ -10,6 +10,7 @@ type Deferred = {
 class FakeSource {
   buffer: AudioBuffer | null = null;
   onended: (() => void) | null = null;
+  playbackRate = { value: 1 };
   connect = vi.fn();
   disconnect = vi.fn();
   stop = vi.fn();
@@ -117,6 +118,20 @@ describe("TTSStreamPlayer", () => {
     player.finish("utterance");
     await pending;
     expect(context.createBufferSource).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies playback rate to scheduled live buffers", async () => {
+    const player = new TTSStreamPlayer(vi.fn(), vi.fn(), vi.fn(), {
+      playbackRate: 1.15,
+    });
+    player.begin("utterance");
+    const pending = player.enqueue("utterance", 0, audio());
+    await tick();
+    const context = FakeAudioContext.instance;
+    context.deferred[0].resolve(buffer(0.25));
+    player.finish("utterance");
+    await pending;
+    expect(context.sources[0].playbackRate.value).toBe(1.15);
   });
 
   it("invalidates an unfinished decode on stop", async () => {

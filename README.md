@@ -47,7 +47,7 @@ The long-term goal is to turn this foundation into a modular neuro‑VTuber plat
 | Local Russian text-to-speech | ✅ | Silero `v5_5_ru` |
 | Conversation history | ✅ | SQLite |
 | Runtime events | ✅ | REST and WebSocket |
-| Model and voice settings | ✅ | Local React control panel |
+| Voice and runtime settings | ✅ | Local React control panel |
 | Browser speech fallback | ✅ | Used when backend TTS fails |
 | Avatar and lip sync | 🧭 | Planned |
 | Development agent and sandbox | 🧭 | Planned |
@@ -68,9 +68,9 @@ The React control panel contains three main sections:
 
 - **Chat** — text messages, microphone recording, transcription, AI replies, and audio playback.
 - **Events** — live backend, LLM, STT, TTS, and connection events.
-- **Settings** — model, language, and available TTS voice selection.
+- **Settings** — voice language, Silero speaker, playback speed, live prebuffer, and runtime options.
 
-The header displays backend status, WebSocket connection state, API-key availability, and the currently selected model.
+The header displays backend status, WebSocket connection state, API-key availability, and the fixed LLM model.
 
 ## Technology stack
 
@@ -168,6 +168,83 @@ VOICE_SILERO_DEVICE=cpu
 VOICE_SILERO_CPU_THREADS=4
 VOICE_SILERO_WARMUP=true
 ```
+
+### Environment variable reference
+
+`.env` is read when the backend starts. If you change `.env`, restart the backend. Settings changed in the UI are runtime-only and are reset after backend restart.
+
+#### Core backend
+
+| Variable | What it controls |
+|---|---|
+| `DEEPSEEK_API_KEY` | DeepSeek-compatible API key. Required for real LLM replies. |
+| `DEEPSEEK_BASE_URL` | Base URL for the DeepSeek-compatible API. |
+| `DEEPSEEK_MODEL` | Fixed LLM model used by backend routes. The UI does not change it at runtime. |
+| `SQLITE_PATH` | Path to the SQLite database with sessions and chat history. |
+| `CHAT_HISTORY_LIMIT` | Number of recent messages passed back into the chat context. |
+| `LOG_LEVEL` | Backend logging verbosity, for example `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
+| `LOG_TO_FILE` | Enables writing backend logs to a file. |
+| `LOG_FILE_PATH` | Log file path used when `LOG_TO_FILE=true`. |
+| `CORS_ORIGINS` | Comma-separated list of allowed frontend origins. |
+| `CORS_ORIGIN_REGEX` | Regex for allowed local development origins. |
+
+#### Speech-to-text
+
+| Variable | What it controls |
+|---|---|
+| `VOICE_STT_PROVIDER` | STT provider. Use `faster_whisper` for real local recognition; `mock` is for tests. |
+| `VOICE_STT_MODEL` | Whisper model size, for example `small`. Larger models can improve quality but need more resources. |
+| `VOICE_STT_DEVICE` | STT device policy: `cpu`, `cuda`, or `auto`. |
+| `VOICE_STT_COMPUTE_TYPE` | faster-whisper compute type, for example `int8` for CPU-friendly inference. |
+| `VOICE_DEFAULT_LANGUAGE` | Default language hint for STT and voice UI, for example `ru`. |
+| `VOICE_PRELOAD_STT_MODEL` | Loads the STT model during backend startup instead of on first recording. |
+| `VOICE_STT_TIMEOUT_SECONDS` | Maximum time allowed for one STT request. |
+| `VOICE_MAX_UPLOAD_MB` | Maximum uploaded audio size. |
+| `VOICE_MAX_RECORD_SECONDS` | Maximum accepted recording duration. |
+
+#### Text-to-speech / Silero
+
+| Variable | What it controls |
+|---|---|
+| `VOICE_TTS_ENABLED` | Enables backend TTS generation. If disabled or failed, the frontend can fall back to browser SpeechSynthesis. |
+| `VOICE_TTS_PROVIDER` | Backend TTS provider. Production value is `silero`; `mock` is only for tests. Edge TTS is not supported. |
+| `VOICE_PRELOAD_TTS_MODEL` | Loads and warms up Silero during backend startup. First startup can take longer. |
+| `VOICE_SILERO_MODEL` | Silero model name. Current default is `v5_5_ru`. |
+| `VOICE_SILERO_SPEAKER_RU` | Default Russian Silero speaker, for example `xenia`. Can be changed at runtime from Settings. |
+| `VOICE_SILERO_SAMPLE_RATE` | WAV sample rate produced by Silero. Current default is `24000`; changing it requires backend restart. |
+| `VOICE_SILERO_DEVICE` | Silero device policy: `cpu`, `cuda`, or `auto`. |
+| `VOICE_SILERO_CPU_THREADS` | Number of CPU threads used by PyTorch for Silero inference. |
+| `VOICE_SILERO_WARMUP` | Runs a short warmup phrase after loading Silero to reduce first real TTS latency. |
+| `VOICE_SILERO_TIMEOUT_SECONDS` | Timeout for synthesizing one phrase. |
+| `VOICE_TTS_BACKGROUND_TIMEOUT_SECONDS` | Timeout for background batch TTS jobs created by `/voice/chat`. |
+| `VOICE_TTS_TIMEOUT_SECONDS` | General TTS timeout used by voice API flows. |
+| `VOICE_TTS_MAX_CHARS` | Maximum text length accepted for one backend TTS request. |
+| `VOICE_AUDIO_DIR` | Directory where generated audio files are stored. |
+
+#### Live voice playback
+
+| Variable | What it controls |
+|---|---|
+| `VOICE_LIVE_QUEUE_SIZE` | Internal live-response queue size. |
+| `VOICE_LIVE_IDLE_FLUSH_MS` | Flush delay for the last partial live segment. |
+| `VOICE_LIVE_FIRST_SEGMENT_CHARS` | Target size for the first live TTS segment. |
+| `VOICE_LIVE_NEXT_SEGMENT_CHARS` | Target size for following live TTS segments. |
+| `VOICE_LIVE_MAX_SEGMENT_CHARS` | Hard character limit for one live TTS segment. |
+| `VOICE_LIVE_MAX_SEGMENT_WORDS` | Hard word limit for one live TTS segment. |
+| `VOICE_LIVE_SAFE_SEGMENT_WORDS` | Preferred word count before the segmenter starts looking for a natural split. |
+| `VOICE_LIVE_TTS_RETRY_COUNT` | Number of retries for a failed live TTS segment. |
+| `VOICE_LIVE_TTS_CONCURRENCY_MODE` | Live TTS concurrency mode. Default `1` keeps segment order simple and stable. |
+| `VOICE_LIVE_TTS_CONCURRENCY_MIN` | Lower live TTS concurrency bound. |
+| `VOICE_LIVE_TTS_CONCURRENCY_MAX` | Upper live TTS concurrency bound. |
+| `VOICE_LIVE_PLAYBACK_PREBUFFER_SEGMENTS` | Number of decoded live audio segments buffered before playback starts. Runtime-editable in Settings. |
+| `VOICE_LIVE_PLAYBACK_PREBUFFER_MS` | Additional live playback prebuffer delay in milliseconds. Runtime-editable in Settings. |
+
+#### Frontend
+
+| Variable | What it controls |
+|---|---|
+| `VITE_API_BASE_URL` | Backend HTTP base URL used by the React app. |
+| `VITE_WS_EVENTS_URL` | Backend WebSocket URL used for events and live voice. |
 
 ### 5. Verify FFmpeg
 
