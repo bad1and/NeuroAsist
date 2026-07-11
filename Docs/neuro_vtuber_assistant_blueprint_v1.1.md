@@ -2,6 +2,8 @@
 
 **Назначение файла:** это самодостаточный проектный blueprint, который можно загрузить в новый чат и продолжить разработку без потери контекста.
 
+**Текущий статус проекта:** NeuroAsist v0.3.1 завершен как локальный voice-first прототип. Реализованы текстовый чат, Web UI, события, runtime settings, push-to-talk, faster-whisper STT, Silero TTS, background TTS jobs, live voice playback через WebSocket WAV-сегменты и browser speech fallback. Следующий этап разработки — v0.4: 3D/VTuber avatar bridge, базовые эмоции и lipsync.
+
 ## Контекст проекта и вводные
 
 Проект делается для себя, но с возможностью перерасти в стартап‑продукт, который можно продвигать или продавать. Нужен рабочий MVP с архитектурой, которую можно расширять. Главный ранний приоритет: корректная базовая работа голосового ассистента: пользователь говорит, STT распознает речь, текст уходит через LLM API, ответ возвращается, озвучивается через TTS и синхронизируется с 3D‑моделью.
@@ -849,6 +851,8 @@ BaseSTTProvider
 
 ## Voice pipeline
 
+Целевой pipeline для будущего avatar-first режима:
+
 ```text
 Microphone
   ↓
@@ -887,11 +891,13 @@ v0.3.1 реализовано:
 
 ```text
 v0.4+:
+  - avatar bridge
+  - базовые эмоции
+  - lipsync по amplitude
   - VAD
   - interrupt/barge-in
   - streaming STT
-  - streaming TTS
-  - emotions/lipsync
+  - более ранние avatar reactions
 ```
 
 ---
@@ -1345,24 +1351,53 @@ TTS-детали:
 
 ## v0.4 — 3D/VTuber avatar
 
-Цель: добавить визуального персонажа.
+Статус: следующий этап после закрытия v0.3.1.
+
+Цель: добавить визуального персонажа поверх уже работающего voice loop, не ломая текущий Web UI и backend voice pipeline.
 
 Функционал:
 
-- Unity/VRM avatar app;
-- WebSocket bridge backend ↔ avatar;
-- базовые эмоции: neutral, happy, annoyed, smug, thinking;
-- lipsync по audio amplitude;
-- trigger animations.
+- выбрать первый avatar runtime: Unity + VRM как основной путь, либо легкий placeholder bridge для быстрого smoke-test;
+- создать отдельный avatar-клиент или `apps/avatar-*` workspace;
+- описать и реализовать WebSocket bridge backend ↔ avatar;
+- передавать avatar-события из backend: `speak`, `emotion`, `animation`, `idle`, `stop`;
+- связать `reply`, `emotion`, `intent` из CharacterAgent с avatar-командами;
+- подключить audio playback к lipsync по amplitude как минимальный надежный вариант;
+- поддержать базовые эмоции: `neutral`, `happy`, `annoyed`, `smug`, `thinking`;
+- добавить idle animation и простые trigger animations;
+- показывать статус avatar bridge в Events/Settings UI;
+- покрыть protocol unit-тестами и хотя бы одним ручным smoke-test сценарием.
+
+Минимальный protocol v0.4:
+
+```json
+{
+  "type": "avatar.speak",
+  "session_id": "default",
+  "utterance_id": "abc123",
+  "text": "Голос уже есть. Теперь мне нужно лицо.",
+  "audio_url": "/voice/audio/example.wav",
+  "emotion": "smirk",
+  "intent": "casual_chat"
+}
+```
 
 Критерии готовности:
 
 - модель отображается;
-- при ответе двигает губами;
-- меняет эмоции по команде backend;
+- avatar-клиент подключается к backend и виден в runtime-событиях;
+- при текстовом и голосовом ответе backend отправляет avatar-команду;
+- при ответе двигает губами хотя бы по amplitude audio;
+- меняет эмоции по команде backend/CharacterAgent;
 - есть idle animation.
 
-Риски: Unity займет много времени, нет своей модели, lipsync может выглядеть криво.
+Риски:
+
+- Unity может занять много времени;
+- нет своей финальной модели персонажа;
+- lipsync по amplitude будет выглядеть грубо, но достаточно для MVP;
+- синхронизация live WAV-сегментов и анимации может потребовать отдельного буфера;
+- avatar runtime не должен блокировать текущий backend voice loop.
 
 Временное решение: использовать placeholder VRM‑модель.
 
@@ -1893,14 +1928,15 @@ Rate limit handling
 сказал фразу → 8 секунд тишины → ответ
 ```
 
-Текущее состояние v0.3:
+Текущее состояние v0.3.1:
 
 ```text
 сказал фразу
 → STT/LLM
-→ текстовый ответ появляется сразу после LLM
-→ TTS генерируется background job
-→ UI получает voice.tts_ready и включает audio control
+→ текстовый ответ появляется после LLM
+→ TTS генерируется background job или live WAV-сегментами
+→ UI получает voice.tts_ready или live audio chunks
+→ browser воспроизводит WAV или включает speech fallback при ошибке backend TTS
 ```
 
 Как снизить:
@@ -1912,15 +1948,14 @@ sentence-by-sentence TTS
 partial avatar reactions
 ```
 
-Для v0.3.1 уже используется live playback WAV-сегментов. Следующий шаг для v0.4+ — streaming STT и более ранние avatar reactions:
+Для v0.3.1 уже используется live playback WAV-сегментов. Следующий практический шаг v0.4 — не переписывать voice pipeline, а подключить avatar reaction layer поверх него:
 
 ```text
-первые предложения LLM
-→ TextChunker
-→ SileroTTSProvider
-→ WAV segment
-→ немедленное воспроизведение
-→ последующие chunks дозагружаются без ожидания полного ответа
+CharacterAgent reply/emotion/intent
+→ AvatarEventMapper
+→ WebSocket avatar bridge
+→ avatar emotion/animation
+→ lipsync по WAV audio/amplitude
 ```
 
 ## Риск 4. 3D‑модель съест слишком много времени
@@ -2001,8 +2036,7 @@ local UI → desktop wrapper/cloud
 
 # 20. Что делать первым шагом после прочтения ответа
 
-Статус NeuroAsist: v0.1 и v0.2 уже реализованы. Следующий фактический шаг —
-v0.3 voice pipeline, не трогая пока Unity/avatar bridge, Dev Agent и sandbox.
+Статус NeuroAsist: v0.1, v0.2 и v0.3.1 уже реализованы. README и текущий код описывают локальный voice-first прототип. Следующий фактический шаг — v0.4 avatar bridge, не трогая пока Dev Agent, sandbox и полный desktop context.
 
 ## Уже реализовано в v0.1
 
@@ -2045,6 +2079,39 @@ EventBus ring buffer
 local CORS config
 runtime model/personality selection
 ```
+
+## Уже реализовано в v0.3.1
+
+```text
+Push-to-talk voice UI
+POST /voice/chat
+GET /voice/tts/{voice_request_id}
+GET /voice/audio/{audio_id}
+WS /ws/voice/{session_id}
+faster-whisper STT
+Silero TTS v5_5_ru
+background TTS jobs
+live WAV voice segments
+runtime voice settings
+browser SpeechSynthesis fallback
+voice events and logging
+Silero benchmark script
+```
+
+## Следующий шаг v0.4
+
+```text
+Avatar bridge protocol
+Avatar client/runtime skeleton
+avatar connection status in backend events
+mapping CharacterAgent emotion/intent → avatar commands
+audio amplitude lipsync baseline
+idle animation
+basic emotion set
+manual smoke-test scenario
+```
+
+Главное ограничение v0.4: avatar layer должен подключаться поверх текущего voice pipeline. Если avatar-клиент отключен или упал, текстовый чат, push-to-talk и live voice должны продолжать работать.
 
 ## Минимальный v0.1 endpoint
 
@@ -2089,8 +2156,8 @@ Response:
 ```text
 v0.1 — текстовый Character Agent + LLM abstraction — done
 v0.2 — локальный Web UI — done
-v0.3 — STT/TTS
-v0.4 — 3D avatar bridge
+v0.3.1 — STT/TTS + live voice playback — done
+v0.4 — 3D avatar bridge + basic lipsync/emotions — next
 v0.5 — Dev Agent в project-folder sandbox
 v0.6 — screen context
 v1.0 — plugin-based multi-agent platform
@@ -2138,7 +2205,7 @@ v1.0 — plugin-based multi-agent platform
 Можно отправить в новый чат этот файл и написать:
 
 ```text
-Изучи приложенный blueprint проекта Neuro‑VTuber Assistant. Продолжи с разработки v0.1: помоги создать структуру репозитория, FastAPI backend, LLM provider abstraction, CharacterAgent, SQLite storage и /chat endpoint. Начни с пошагового плана и затем дай код файлов.
+Изучи приложенный blueprint проекта Neuro‑VTuber Assistant. Текущий код уже на v0.3.1: текстовый чат, Web UI, push-to-talk, faster-whisper STT, Silero TTS и live voice playback реализованы. Продолжи с v0.4: спроектируй и реализуй avatar bridge protocol, runtime-события подключения avatar-клиента, mapping emotion/intent в avatar-команды и минимальный lipsync по audio amplitude. Начни со сверки текущего кода и короткого плана, затем вноси изменения.
 ```
 
 
@@ -2169,7 +2236,7 @@ v1.0 — plugin-based multi-agent platform
 Основной STT:
 - faster-whisper.
 
-Текущее решение v0.3:
+Текущее решение v0.3.1:
 - модель по умолчанию: `small`;
 - CPU/int8 как baseline;
 - `beam_size=5`, `best_of=5`;
@@ -2201,7 +2268,7 @@ v1.0 — plugin-based multi-agent platform
 
 ## ADR-005 — Голосовой режим
 
-Для v0.1–v0.3 используется Push-To-Talk.
+Для v0.1–v0.3.1 используется Push-To-Talk.
 
 Pipeline:
 
@@ -2210,12 +2277,12 @@ User
 → faster-whisper
 → DeepSeek V4 Flash
 → CharacterAgent
-→ background Silero TTS
-→ Web UI audio playback
+→ background Silero TTS или live WAV-сегменты
+→ Web UI audio playback / browser fallback
 
-Unity Avatar/lipsync еще не подключены в v0.3.
+Unity Avatar/lipsync еще не подключены в v0.3.1.
 
-Live LLM/TTS уже работает через WebSocket WAV-сегменты. Streaming STT и avatar/lipsync переносятся на более поздние версии.
+Live LLM/TTS уже работает через WebSocket WAV-сегменты. Avatar bridge, emotion mapping и baseline lipsync являются задачами v0.4. Streaming STT и полноценный barge-in переносятся на более поздние версии.
 
 ## ADR-006 — Хранение данных
 
@@ -2260,3 +2327,22 @@ SQLite:
 - долговременная память;
 - Dev Agent;
 - Sandbox.
+
+## ADR-010 — v0.4 Avatar Bridge
+
+Первый avatar runtime должен быть подключаемым слоем поверх текущего backend, а не заменой voice pipeline.
+
+Решения:
+- транспорт backend ↔ avatar: WebSocket;
+- базовые события: `avatar.connected`, `avatar.disconnected`, `avatar.speak`, `avatar.emotion`, `avatar.animation`, `avatar.idle`, `avatar.stop`;
+- источник эмоций: поля `emotion` и `intent` из `CharacterAgent`;
+- минимальный lipsync: audio amplitude, без phoneme extraction на первом шаге;
+- fallback: при отсутствии avatar-клиента backend продолжает обслуживать chat/voice без ошибки;
+- первая модель: placeholder VRM или минимальный тестовый avatar runtime.
+
+Не входит в v0.4:
+- собственная финальная VRM-модель;
+- сложный emotion engine;
+- phoneme-level lipsync;
+- desktop control;
+- Dev Agent и sandbox.
