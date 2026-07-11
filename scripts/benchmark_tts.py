@@ -1,9 +1,10 @@
-"""Repeatable Edge/Silero TTS smoke benchmark for Russian live-voice phrases."""
+"""Repeatable Silero TTS benchmark for Russian live-voice phrases."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import statistics
 import tempfile
 import time
@@ -12,7 +13,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from apps.backend.app.voice.providers import EdgeTTSProvider, SileroTTSProvider
+from apps.backend.app.voice.providers import SileroTTSProvider
 
 
 PHRASES = [
@@ -36,36 +37,93 @@ PHRASES = [
 ]
 
 
-async def run(provider_name: str, runs: int) -> None:
-    provider = EdgeTTSProvider() if provider_name == "edge_tts" else SileroTTSProvider()
+def percentile(values: list[float], pct: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    index = min(len(ordered) - 1, round((len(ordered) - 1) * pct))
+    return ordered[index]
+
+
+async def run(device: str, runs: int, output: Path) -> None:
+    provider = SileroTTSProvider(device=device)
     rows: list[dict] = []
+    preload_started = time.perf_counter()
+    try:
+        await provider.preload()
+        model_load_ms = int((time.perf_counter() - preload_started) * 1000)
+    except Exception as exc:
+        payload = {
+            "provider": "silero",
+            "device": device,
+            "success": False,
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
+        output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        raise
+
     with tempfile.TemporaryDirectory() as directory:
         for run_index in range(runs):
             for index, phrase in enumerate(PHRASES):
-                path = Path(directory) / f"{run_index}-{index}.mp3"
+                path = Path(directory) / f"{run_index}-{index}.wav"
                 started = time.perf_counter()
                 try:
-                    result = await provider.synthesize(phrase, "ru-RU-SvetlanaNeural", path)
-                    elapsed = time.perf_counter() - started
-                    duration = result.audio_duration_seconds or 0.0
-                    rows.append({"ok": True, "ttfb": elapsed, "total": elapsed, "duration": duration,
-                                 "rtf": elapsed / duration if duration else 0, "requests": result.chunks_count,
-                                 "retries": 0, "adaptive_splits": max(0, result.chunks_count - 1)})
+                    result = await provider.synthesize(phrase, "xenia", path)
+                    elapsed_ms = (time.perf_counter() - started) * 1000
+                    audio_ms = (result.audio_duration_seconds or 0.0) * 1000
+                    rtf = elapsed_ms / audio_ms if audio_ms else 0.0
+                    rows.append({
+                        "model_load_ms": model_load_ms if run_index == 0 and index == 0 else 0,
+                        "warmup_ms": 0,
+                        "synthesis_ms": elapsed_ms,
+                        "audio_duration_ms": audio_ms,
+                        "RTF": rtf,
+                        "inverse_RTF": 1 / rtf if rtf else 0.0,
+                        "output_bytes": path.stat().st_size,
+                        "provider": "silero",
+                        "device": provider.metadata["device"],
+                        "speaker": provider.speaker,
+                        "success": True,
+                        "error_type": None,
+                    })
                 except Exception as exc:
-                    rows.append({"ok": False})
+                    rows.append({
+                        "provider": "silero",
+                        "device": device,
+                        "speaker": provider.speaker,
+                        "success": False,
+                        "error_type": type(exc).__name__,
+                    })
                     print(f"FAIL run={run_index + 1} phrase={index + 1} error={type(exc).__name__}: {exc}")
-    good = [row for row in rows if row["ok"]]
+
+    good = [row for row in rows if row["success"]]
     failures = len(rows) - len(good)
-    print(f"provider={provider_name} phrases={len(PHRASES)} runs={runs} errors={failures / len(rows):.1%}")
-    if good:
-        for key in ("ttfb", "total", "duration", "rtf"):
-            print(f"{key}: p50={statistics.median(row[key] for row in good):.3f} mean={statistics.mean(row[key] for row in good):.3f}")
-        print(f"requests={sum(row['requests'] for row in good)} retries=0 adaptive_splits={sum(row['adaptive_splits'] for row in good)}")
+    summary = {
+        "provider": "silero",
+        "device": device,
+        "runs": runs,
+        "phrases": len(PHRASES),
+        "error_rate": failures / len(rows) if rows else 0.0,
+        "p50_synthesis_ms": statistics.median(row["synthesis_ms"] for row in good) if good else 0.0,
+        "p95_synthesis_ms": percentile([row["synthesis_ms"] for row in good], 0.95),
+        "p50_RTF": statistics.median(row["RTF"] for row in good) if good else 0.0,
+        "p95_RTF": percentile([row["RTF"] for row in good], 0.95),
+        "rows": rows,
+    }
+    output.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"provider=silero device={device} phrases={len(PHRASES)} runs={runs} error_rate={summary['error_rate']:.1%}")
+    print(f"P50 synthesis={summary['p50_synthesis_ms']:.1f}ms P95 synthesis={summary['p95_synthesis_ms']:.1f}ms")
+    print(f"P50 RTF={summary['p50_RTF']:.3f} P95 RTF={summary['p95_RTF']:.3f}")
+    print(f"json={output}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--provider", choices=("edge_tts", "silero"), default="edge_tts")
+    parser.add_argument("--provider", choices=("silero",), default="silero")
+    parser.add_argument("--device", choices=("cpu", "cuda", "auto"), default="cpu")
     parser.add_argument("--runs", type=int, default=3)
+    parser.add_argument("--output", type=Path, default=Path("data/tts_benchmark.json"))
     args = parser.parse_args()
-    asyncio.run(run(args.provider, max(1, args.runs)))
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    asyncio.run(run(args.device, max(1, args.runs), args.output))

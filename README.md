@@ -14,7 +14,7 @@ Current scope:
 - React + TypeScript Web UI
 - backend runtime events over WebSocket
 - v0.3 push-to-talk voice chat with fast STT and optional TTS provider abstractions
-- `faster-whisper` STT and background `edge-tts` TTS provider
+- `faster-whisper` STT and local Silero TTS provider
 
 Out of scope for v0.3: avatar, lipsync, always-on listening, streaming voice,
 file access, command execution,
@@ -25,14 +25,24 @@ dev-agent, screen context, long-term memory, embeddings, RAG, users, and auth.
 - Python 3.12+
 - Node.js 24+
 - DeepSeek API key
-- FFmpeg and FFprobe on PATH for real audio transcription, TTS validation, and
-  multi-chunk Edge TTS concatenation
+- FFmpeg and FFprobe on PATH for real audio transcription and validation
 
 Install backend dependencies:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
+
+Install local Silero TTS dependencies. Use the CPU PyTorch command by default:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+.\.venv\Scripts\python.exe -m pip install silero
+```
+
+For CUDA, install the PyTorch build matching your driver from the official
+PyTorch selector, then install `silero`. Do not install a CUDA wheel into the
+shared `requirements.txt`; CPU and CUDA installs differ by machine.
 
 Install frontend dependencies:
 
@@ -106,10 +116,16 @@ VOICE_STT_DEVICE=cpu
 VOICE_STT_COMPUTE_TYPE=int8
 VOICE_DEFAULT_LANGUAGE=ru
 VOICE_PRELOAD_STT_MODEL=true
+VOICE_PRELOAD_TTS_MODEL=true
 VOICE_TTS_ENABLED=true
-VOICE_TTS_PROVIDER=edge_tts
-VOICE_TTS_VOICE_RU=ru-RU-SvetlanaNeural
-VOICE_TTS_VOICE_EN=en-US-AriaNeural
+VOICE_TTS_PROVIDER=silero
+VOICE_SILERO_MODEL=v5_5_ru
+VOICE_SILERO_SPEAKER_RU=xenia
+VOICE_SILERO_SAMPLE_RATE=24000
+VOICE_SILERO_DEVICE=cpu
+VOICE_SILERO_CPU_THREADS=4
+VOICE_SILERO_WARMUP=true
+VOICE_SILERO_TIMEOUT_SECONDS=10
 VOICE_TTS_BACKGROUND_TIMEOUT_SECONDS=20
 VOICE_TTS_MAX_CHARS=1200
 VOICE_AUDIO_DIR=data/audio
@@ -202,7 +218,7 @@ Expected voice response shape:
   "reply_audio_url": null,
   "tts_status": "queued",
   "stt": {"provider": "faster_whisper", "model": "small", "language": "ru", "duration_ms": 1200},
-  "tts": {"provider": "edge_tts", "voice": "ru-RU-SvetlanaNeural", "duration_ms": 0}
+  "tts": {"provider": "silero", "voice": "xenia", "duration_ms": 0}
 }
 ```
 
@@ -211,15 +227,25 @@ backend publishes a `voice.tts_ready` WebSocket event with `voice_request_id`
 and `audio_url`; the web UI attaches that audio to the matching assistant
 message.
 
-Edge TTS notes:
+Silero TTS notes:
 
-- backend prefers Edge TTS audio over browser speech;
-- Russian Edge voices can fall back to Edge multilingual voices if a provider
-  returns no audio;
-- short comma-heavy phrases stay in one TTS chunk for more natural pacing;
-- Edge TTS is currently sent with `rate="+20%"`;
-- FFmpeg/FFprobe must be visible to the backend process for multi-chunk
-  concatenation and duration validation.
+- backend TTS is fully local after the model is downloaded and cached;
+- default model is `v5_5_ru`, speaker `xenia`, sample rate `24000 Hz`, device `cpu`;
+- `VOICE_SILERO_DEVICE=cpu` never selects CUDA automatically;
+- `VOICE_SILERO_DEVICE=cuda` requires available CUDA and fails clearly otherwise;
+- `VOICE_SILERO_DEVICE=auto` tries CUDA and falls back to CPU;
+- the first run downloads the model through PyTorch Hub into the Torch cache;
+- for fully offline use, start once with internet access and preload the model;
+- clear the model cache from the Torch hub cache directory, usually
+  `%USERPROFILE%\.cache\torch\hub` on Windows;
+- check the selected Silero model license before commercial use.
+
+Benchmark local TTS:
+
+```powershell
+python scripts/benchmark_tts.py --provider silero --device cpu --runs 5
+python scripts/benchmark_tts.py --provider silero --device cuda --runs 5
+```
 
 ## Run Frontend
 
@@ -257,7 +283,7 @@ The local web panel includes:
 - Events: loads `GET /events` and receives live `WS /ws/events` events.
 - Settings: shows safe provider settings and updates runtime model/personality
   plus voice language/TTS voice.
-- TTS: background Edge TTS jobs report `queued` / `ready` / `failed`; ready
+- TTS: background Silero TTS jobs report `queued` / `ready` / `failed`; ready
   audio is attached to the assistant message and played from `/voice/audio`.
 
 The browser never receives or stores the DeepSeek API key.
@@ -286,19 +312,13 @@ OpenAI-compatible model can replace DeepSeek without changing the route or
 agent logic.
 # Live TTS stability (v0.3.1)
 
-Live voice uses Edge TTS as the primary provider, validates complete segments and
-converts Edge MP3 to mono 24 kHz signed 16-bit PCM before sending it over the
-existing WebSocket protocol. The browser still accepts MP3 segments for backward
-compatibility. Playback starts after either two decoded segments or about one
-second of decoded audio and schedules buffers continuously.
+Live voice uses Silero as the backend provider and sends complete WAV segments
+over the existing WebSocket protocol. Playback starts after the configured
+prebuffer and schedules decoded buffers continuously. If backend TTS fails, the
+web UI keeps the text response and can use browser SpeechSynthesis fallback.
 
-`VOICE_TTS_PROVIDER=auto` enables the circuit breaker. Two consecutive Edge
-failures open it for 60 seconds and route speech to the optional lazy-loaded
-Silero model (`VOICE_TTS_FALLBACK_PROVIDER=silero`). Silero requires `torch`, but
-it is deliberately not a mandatory dependency; when unavailable the existing
-browser SpeechSynthesis fallback is used. Set `VOICE_TTS_PROVIDER=edge_tts` to
-disable local fallback. Live Edge concurrency defaults to `1`, may be explicitly
-set to `2`, and is capped at two requests.
+Live Silero concurrency defaults to `1`. Do not raise it until a local benchmark
+shows the selected model/device is safe and faster with parallel inference.
 
-The complete set of segment sizes, first-byte/idle timeouts, playback prebuffer,
-Silero model and provider settings is documented in `.env.example`.
+The complete set of segment sizes, playback prebuffer and Silero provider
+settings is documented in `.env.example`.

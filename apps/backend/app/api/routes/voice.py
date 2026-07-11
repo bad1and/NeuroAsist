@@ -92,7 +92,10 @@ async def voice_chat(
             history_limit=settings.chat_history_limit,
             event_publisher=event_bus.publish,
         )
-        voice = runtime_settings.voice_tts_voice or _default_voice(settings, stt_result.language)
+        voice = voice_service.resolve_tts_voice(
+            stt_result.language,
+            runtime_settings.voice_tts_voice,
+        )
         if live:
             utterance_id = uuid4().hex
             manager = request.app.state.voice_session_manager
@@ -404,4 +407,4 @@ async def _run_tts_background(
 
 
 def _default_voice(settings, language: str) -> str:
-    return settings.voice_tts_voice_en if language == "en" else settings.voice_tts_voice_ru
+    return settings.voice_silero_speaker_ru

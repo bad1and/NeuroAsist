@@ -1,4 +1,5 @@
 import logging
+import time
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,7 +43,7 @@ def create_app() -> FastAPI:
     runtime_settings = RuntimeSettings(
         model=settings.deepseek_model,
         voice_language=settings.voice_default_language,
-        voice_tts_voice=settings.voice_tts_voice_ru,
+        voice_tts_voice=settings.voice_silero_speaker_ru,
     )
     voice_service = VoiceService(settings)
     voice_session_manager = VoiceSessionManager(
@@ -77,7 +78,7 @@ def create_app() -> FastAPI:
 
         if settings.voice_preload_stt_model:
             try:
-                await voice_service.preload()
+                await voice_service.preload_stt()
                 event_bus.publish(
                     "voice.stt_preloaded",
                     "info",
@@ -92,6 +93,63 @@ def create_app() -> FastAPI:
                     "Voice STT preload failed; first request will retry lazy load",
                     {"provider": settings.voice_stt_provider, "model": settings.voice_stt_model},
                 )
+
+        if settings.voice_preload_tts_model and settings.voice_tts_enabled:
+            event_bus.publish(
+                "voice.tts_preloading_started",
+                "info",
+                "Voice TTS model preloading started",
+                {
+                    "provider": voice_service.tts_provider.name,
+                    "model": settings.voice_silero_model,
+                    "speaker": settings.voice_silero_speaker_ru,
+                    "device": settings.voice_silero_device,
+                },
+            )
+            preload_started = time.perf_counter()
+            try:
+                await voice_service.preload_tts()
+                duration_ms = int((time.perf_counter() - preload_started) * 1000)
+                event_bus.publish(
+                    "voice.tts_preloaded",
+                    "info",
+                    "Voice TTS model preloaded",
+                    {
+                        "provider": voice_service.tts_provider.name,
+                        "model": settings.voice_silero_model,
+                        "speaker": settings.voice_silero_speaker_ru,
+                        "device": settings.voice_silero_device,
+                        "duration_ms": duration_ms,
+                    },
+                )
+                if settings.voice_silero_warmup:
+                    event_bus.publish(
+                        "voice.tts_warmed_up",
+                        "info",
+                        "Voice TTS model warmed up",
+                        {
+                            "provider": voice_service.tts_provider.name,
+                            "model": settings.voice_silero_model,
+                            "speaker": settings.voice_silero_speaker_ru,
+                            "device": settings.voice_silero_device,
+                            "duration_ms": duration_ms,
+                        },
+                    )
+            except Exception:
+                logger.warning("Voice TTS preload failed", exc_info=True)
+                event_bus.publish(
+                    "voice.tts_preload_failed",
+                    "warning",
+                    "Voice TTS preload failed; browser speech fallback remains available",
+                    {
+                        "provider": voice_service.tts_provider.name,
+                        "model": settings.voice_silero_model,
+                        "speaker": settings.voice_silero_speaker_ru,
+                        "device": settings.voice_silero_device,
+                    },
+                )
+                if settings.voice_tts_provider == "silero":
+                    raise
 
         event_bus.publish(
             "backend.status",
