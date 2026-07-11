@@ -107,7 +107,7 @@ def test_voice_chat_returns_transcript_reply_and_queues_tts(client: TestClient) 
     assert body["tts_status"] == "queued"
     assert body["stt"]["provider"] == "mock"
     assert body["tts"]["provider"] == "mock"
-    assert body["tts"]["voice"] == "ru-RU-SvetlanaNeural"
+    assert body["tts"]["voice"] == "xenia"
     assert body["tts"]["duration_ms"] == 0
 
 

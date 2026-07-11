@@ -151,7 +151,7 @@ voice/
     cloud_stt.py
   tts/
     base.py
-    edge_tts.py
+    silero_tts.py
     elevenlabs_tts.py
     piper_tts.py
   vad.py
@@ -283,7 +283,7 @@ Character Agent:
 | Очередь задач | asyncio.Queue / SQLite task queue | Redis/Celery позже |
 | LLM слой | Своя абстракция + LiteLLM как опция | Своя логика важна, LiteLLM может помочь с провайдерами |
 | STT | faster-whisper | Основной STT для MVP: бесплатно, локально, хорошее качество |
-| TTS | Edge TTS | Основной TTS для MVP. Позже можно заменить на ElevenLabs без изменения архитектуры |
+| TTS | Silero TTS | Основной TTS для MVP: локально, приватно, работает после скачивания модели без интернета |
 | 3D avatar | Unity + VRM или готовый VTuber tool | Не писать 3D‑движок самому |
 | Avatar protocol | WebSocket/HTTP bridge | Backend управляет эмоциями, lipsync, событиями |
 | Sandbox | Сначала проектная папка, потом Docker | Безопасно и реалистично |
@@ -819,11 +819,21 @@ BaseSTTProvider
 
 ## TTS варианты
 
-### Edge TTS
+### Silero TTS
 
-Плюсы: быстро, дешево/бесплатно, есть русские и английские голоса, хорошо для MVP.
+Плюсы: локально, приватно, не требует интернета после скачивания модели, хорошо подходит для русского MVP.
 
-Минусы: не самый “аниме‑VTuber” голос, меньше кастомизации.
+Минусы: нужен PyTorch, первый запуск скачивает модель, качество и скорость зависят от модели и CPU/GPU.
+
+Текущее решение v0.3.1:
+
+- основной backend TTS: Silero;
+- модель: `v5_5_ru`;
+- speaker: `xenia`;
+- sample rate: `24000 Hz`;
+- формат backend audio: WAV PCM 16-bit mono;
+- устройство по умолчанию: CPU;
+- CUDA является необязательной оптимизацией.
 
 ### Piper
 
@@ -862,12 +872,13 @@ Avatar lipsync receives amplitude/phonemes
 Для MVP:
 
 ```text
-v0.3 реализовано:
+v0.3.1 реализовано:
   - manual push-to-talk в Web UI
   - browser MediaRecorder upload → POST /voice/chat
   - faster-whisper STT
   - DeepSeek → CharacterAgent
-  - background Edge TTS
+  - local Silero TTS
+  - live WAV TTS segments через WebSocket
   - audio playback в React UI
   - live события через WebSocket
 ```
@@ -1232,9 +1243,9 @@ Character Agent пользователю:
 
 Риски: слишком рано добавить много UI; настройки API‑ключей могут быть небезопасны.
 
-## v0.3 — голосовое общение STT/TTS
+## v0.3.1 — голосовое общение STT/TTS
 
-Статус: реализовано как рабочий push-to-talk voice loop без avatar/lipsync и без streaming voice.
+Статус: реализовано как рабочий push-to-talk voice loop и live voice WebSocket без avatar/lipsync. Backend TTS переведен на локальный Silero.
 
 Фактический функционал:
 
@@ -1243,32 +1254,45 @@ Character Agent пользователю:
 - `VoiceService` с provider-интерфейсами для STT/TTS;
 - STT через `faster-whisper`;
 - LLM через `DeepSeekProvider` и `CharacterAgent`;
-- TTS через `edge-tts` в background task;
-- Edge TTS voice fallback внутри Edge: русские voices пробуются первыми, затем multilingual Edge voices;
+- TTS через локальный `SileroTTSProvider`;
+- Silero preload/warmup на startup через `VOICE_PRELOAD_TTS_MODEL`;
+- Silero live TTS отдает WAV-сегменты через существующий WebSocket;
 - `GET /voice/tts/{voice_request_id}` для статуса TTS job;
 - `GET /voice/audio/{audio_id}` для готового audio file;
-- WebSocket events: `voice.upload_received`, `voice.transcribing_started`, `voice.transcribing_finished`, `voice.completed`, `voice.tts_started`, `voice.tts_ready`, `voice.tts_failed`;
+- WebSocket events: `voice.upload_received`, `voice.transcribing_started`, `voice.transcribing_finished`, `voice.completed`, `voice.tts_started`, `voice.tts_ready`, `voice.tts_failed`, `voice.tts_preloading_started`, `voice.tts_preloaded`, `voice.tts_preload_failed`, `voice.tts_warmed_up`;
 - русский/английский язык;
-- настройка TTS voice в runtime settings.
+- настройка TTS speaker в runtime settings.
 
 Текущая конфигурация MVP:
 
 ```env
 VOICE_STT_PROVIDER=faster_whisper
 VOICE_STT_MODEL=small
-VOICE_STT_DEVICE=cpu
+VOICE_STT_DEVICE=auto
 VOICE_STT_COMPUTE_TYPE=int8
-VOICE_TTS_PROVIDER=edge_tts
-VOICE_TTS_VOICE_RU=ru-RU-SvetlanaNeural
-VOICE_TTS_VOICE_EN=en-US-AriaNeural
+VOICE_PRELOAD_STT_MODEL=true
+VOICE_PRELOAD_TTS_MODEL=true
+VOICE_TTS_PROVIDER=silero
+VOICE_SILERO_MODEL=v5_5_ru
+VOICE_SILERO_SPEAKER_RU=xenia
+VOICE_SILERO_SAMPLE_RATE=24000
+VOICE_SILERO_DEVICE=cpu
+VOICE_SILERO_CPU_THREADS=4
+VOICE_SILERO_WARMUP=true
+VOICE_SILERO_TIMEOUT_SECONDS=10
 VOICE_TTS_BACKGROUND_TIMEOUT_SECONDS=20
 VOICE_TTS_MAX_CHARS=1200
+VOICE_LIVE_SAFE_SEGMENT_WORDS=10
+VOICE_LIVE_TTS_CONCURRENCY_MODE=1
 ```
 
 Runtime dependency:
 
 - `ffmpeg` и `ffprobe` должны быть видны backend-процессу через `PATH`;
-- на Windows при уже открытом PowerShell нужно либо перезапустить терминал, либо добавить `C:\Users\OLEG\Tools\ffmpeg\bin` в `$env:Path` перед запуском backend.
+- PyTorch ставится отдельно от `requirements.txt`, потому что CPU и CUDA wheel отличаются;
+- для CPU: `python -m pip install torch --index-url https://download.pytorch.org/whl/cpu`;
+- затем: `python -m pip install silero`;
+- на Windows при уже открытом PowerShell нужно либо перезапустить терминал, либо добавить FFmpeg `bin` директорию в `$env:Path` перед запуском backend.
 
 STT-детали:
 
@@ -1281,13 +1305,15 @@ TTS-детали:
 
 - `/voice/chat` возвращает текстовый ответ сразу, а TTS продолжает генерироваться в фоне;
 - готовность аудио приходит через `voice.tts_ready` и status endpoint;
-- Edge TTS режется на safe chunks только когда фраза не помещается в лимиты; короткие comma-heavy фразы больше не режутся по каждой запятой, чтобы не создавать неестественные паузы;
-- chunks дополнительно нормализуются: хвостовые `,`, `;`, `:` не отправляются в Edge как конец отдельного TTS-фрагмента;
-- между chunks добавляется короткая пауза, чтобы не съедались окончания слов;
-- итоговый MP3 собирается через FFmpeg audio filter concat с re-encode, а не простым byte/packet copy;
-- каждый chunk и итоговый файл проверяются через `ffprobe`;
-- текущий Edge TTS rate: `+20%`;
-- если TTS падает, текстовый ответ остается доступен, UI может использовать browser speech fallback.
+- Silero модель загружается один раз и хранится в экземпляре провайдера;
+- warmup выполняется короткой фразой `Привет.`;
+- Silero inference выполняется в отдельном thread через `asyncio.to_thread`;
+- один экземпляр модели защищен `asyncio.Lock`;
+- waveform конвертируется в WAV PCM signed 16-bit / 24000 Hz / mono;
+- live voice получает один WAV chunk на один TTS request;
+- первый live-сегмент держится примерно в диапазоне 4–8 слов, следующие — 8–14 слов, максимум 18 слов;
+- короткий хвост до трех слов присоединяется к предыдущему сегменту, если лимиты не превышены;
+- если backend TTS падает, текстовый ответ остается доступен, UI может использовать browser speech fallback.
 
 Критерии готовности:
 
@@ -1296,12 +1322,15 @@ TTS-детали:
 - CharacterAgent генерирует JSON-ответ с `reply`, `emotion`, `intent`;
 - frontend показывает transcript/reply;
 - TTS job переходит из `queued` в `ready` или `failed`;
-- готовый audio URL воспроизводится без наложения нескольких дорожек.
+- готовый WAV audio URL воспроизводится без наложения нескольких дорожек;
+- live WAV-сегменты декодируются в браузере через `AudioContext.decodeAudioData()`.
 
 Оставшиеся риски v0.3:
 
-- Edge TTS не является полноценным streaming/provider-grade решением и может иметь edge cases на пунктуации;
-- background TTS снижает perceived latency для текста, но аудио все еще появляется после генерации файла;
+- первый Silero startup скачивает модель и может быть долгим;
+- для полностью офлайн-запуска модель должна быть заранее скачана и закэширована;
+- скорость Silero на CPU зависит от процессора и длины сегментов;
+- background TTS снижает perceived latency для текста, но audio file все еще появляется после генерации файла;
 - STT качество на CPU зависит от микрофона, шума и выбранной модели;
 - нет barge-in/interruption;
 - нет lipsync/avatar reaction.
@@ -1484,7 +1513,7 @@ neuro-vtuber-assistant/
             faster_whisper.py
           tts/
             base.py
-            edge_tts.py
+            silero.py
             piper.py
           audio.py
           vad.py
@@ -1769,7 +1798,7 @@ cloud STT provider later
 ## TTS
 
 ```text
-edge-tts
+silero
 piper
 ElevenLabs SDK
 Coqui TTS, если будет удобно
@@ -1883,12 +1912,13 @@ sentence-by-sentence TTS
 partial avatar reactions
 ```
 
-Для v0.4+ стоит перейти от batch MP3-файла к streaming playback:
+Для v0.3.1 уже используется live playback WAV-сегментов. Следующий шаг для v0.4+ — streaming STT и более ранние avatar reactions:
 
 ```text
 первые предложения LLM
-→ edge_tts.Communicate.stream()
-→ первые аудиобайты
+→ TextChunker
+→ SileroTTSProvider
+→ WAV segment
 → немедленное воспроизведение
 → последующие chunks дозагружаются без ожидания полного ответа
 ```
@@ -2149,21 +2179,25 @@ v1.0 — plugin-based multi-agent platform
 ## ADR-004 — TTS
 
 Основной TTS:
-- Edge TTS.
+- Silero TTS.
 
-Текущее решение v0.3:
+Текущее решение v0.3.1:
 - TTS запускается background task после LLM;
 - ответ `/voice/chat` не ждет готового audio file;
 - статус доступен через `/voice/tts/{voice_request_id}`;
 - audio отдается через `/voice/audio/{audio_id}`;
-- chunks режутся по предложениям и punctuation boundaries;
-- короткие фразы с запятыми сохраняются одним TTS chunk для естественного темпа;
-- длинные chunks режутся по предложениям и punctuation boundaries;
-- chunks с хвостовыми `,`, `;`, `:` нормализуются перед отправкой в Edge;
-- Edge TTS вызывается с `rate="+20%"`;
-- русские Edge voices имеют multilingual Edge fallback voices;
-- итоговый MP3 собирается через FFmpeg audio filter concat + re-encode;
-- валидируется длительность chunk-файлов и финального файла.
+- основной backend provider: `SileroTTSProvider`;
+- модель: `v5_5_ru`;
+- speaker: `xenia`;
+- sample rate: `24000 Hz`;
+- формат audio: WAV PCM 16-bit mono;
+- устройство по умолчанию: CPU;
+- CUDA включается только явно через `VOICE_SILERO_DEVICE=cuda` или `auto`;
+- модель загружается один раз, поддерживает preload и lazy load;
+- warmup управляется `VOICE_SILERO_WARMUP`;
+- inference выполняется через `asyncio.to_thread` и защищен lock;
+- voice selection provider-aware: runtime voices от других провайдеров не передаются напрямую в Silero;
+- при backend TTS failure текст остается доступен, UI может использовать browser SpeechSynthesis fallback.
 
 ## ADR-005 — Голосовой режим
 
@@ -2176,12 +2210,12 @@ User
 → faster-whisper
 → DeepSeek V4 Flash
 → CharacterAgent
-→ background Edge TTS
+→ background Silero TTS
 → Web UI audio playback
 
 Unity Avatar/lipsync еще не подключены в v0.3.
 
-Streaming STT/LLM/TTS переносится на более поздние версии.
+Live LLM/TTS уже работает через WebSocket WAV-сегменты. Streaming STT и avatar/lipsync переносятся на более поздние версии.
 
 ## ADR-006 — Хранение данных
 

@@ -51,16 +51,82 @@ def test_public_settings_does_not_return_api_key(client: TestClient) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["provider"] == "deepseek"
-    assert body["model"]
+    assert body["model"] == app.state.settings.deepseek_model
+    assert "available_models" not in body
     assert body["available_personalities"] == ["default"]
     assert body["voice_language"] == "ru"
     assert body["voice_stt_model"] == "small"
     assert body["voice_tts_enabled"] is True
     assert body["voice_tts_voice"]
+    assert body["voice_playback_rate"] == 1.0
+    assert 1 <= body["voice_live_playback_prebuffer_segments"] <= 4
+    assert 0 <= body["voice_live_playback_prebuffer_ms"] <= 1500
     assert body["available_voice_languages"] == ["auto", "ru", "en"]
     assert body["available_tts_voices"]
     assert "api_key" not in body
     assert "DEEPSEEK_API_KEY" not in response.text
+
+
+def test_runtime_settings_rejects_model_patch(client: TestClient) -> None:
+    response = client.patch(
+        "/settings/runtime",
+        json={"model": "deepseek-v4-pro"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_runtime_voice_settings_can_be_updated(client: TestClient) -> None:
+    original = client.get("/settings/public").json()
+    target_voice = "baya" if "baya" in original["available_tts_voices"] else original["voice_tts_voice"]
+
+    try:
+        response = client.patch(
+            "/settings/runtime",
+            json={
+                "voice_language": "ru",
+                "voice_tts_voice": target_voice,
+                "voice_playback_rate": 1.15,
+                "voice_live_playback_prebuffer_segments": 3,
+                "voice_live_playback_prebuffer_ms": 500,
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["voice_tts_voice"] == target_voice
+        assert body["voice_playback_rate"] == 1.15
+        assert body["voice_live_playback_prebuffer_segments"] == 3
+        assert body["voice_live_playback_prebuffer_ms"] == 500
+    finally:
+        client.patch(
+            "/settings/runtime",
+            json={
+                "voice_language": original["voice_language"],
+                "voice_tts_voice": original["voice_tts_voice"],
+                "voice_playback_rate": original["voice_playback_rate"],
+                "voice_live_playback_prebuffer_segments": original["voice_live_playback_prebuffer_segments"],
+                "voice_live_playback_prebuffer_ms": original["voice_live_playback_prebuffer_ms"],
+            },
+        )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"voice_tts_voice": "unknown"},
+        {"voice_playback_rate": 0.5},
+        {"voice_playback_rate": 1.5},
+        {"voice_live_playback_prebuffer_segments": 0},
+        {"voice_live_playback_prebuffer_segments": 5},
+        {"voice_live_playback_prebuffer_ms": -1},
+        {"voice_live_playback_prebuffer_ms": 2000},
+    ],
+)
+def test_runtime_voice_settings_validate_ranges(client: TestClient, payload: dict) -> None:
+    response = client.patch("/settings/runtime", json=payload)
+
+    assert response.status_code == 400
 
 
 def test_events_returns_event_list(client: TestClient) -> None:

@@ -1,13 +1,15 @@
 import asyncio
-import contextlib
-import json
+import io
+import logging
+import os
 import re
-import shutil
-import subprocess
 import time
 import wave
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -29,6 +31,25 @@ class TTSResult:
     audio_duration_seconds: float | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class TTSRequest:
+    text: str
+    language: str
+    voice: str
+    rate: str = "+0%"
+    pitch: str = "+0Hz"
+    volume: str = "+0%"
+
+
+@dataclass(frozen=True, slots=True)
+class AudioChunk:
+    data: bytes
+    format: str
+    sequence: int
+    is_final: bool = False
+    metadata: dict | None = None
+
+
 class STTProvider:
     async def transcribe(self, audio_path: Path, language: str) -> STTResult:
         raise NotImplementedError
@@ -38,12 +59,29 @@ class STTProvider:
 
 
 class TTSProvider:
+    @property
+    def name(self) -> str:
+        return self.__class__.__name__.removesuffix("Provider").lower()
+
+    @property
+    def output_format(self) -> str:
+        return "wav"
+
+    @property
+    def file_extension(self) -> str:
+        return ".wav"
+
+    async def preload(self) -> None:
+        return None
+
+    def resolve_voice(self, language: str, requested_voice: str | None = None) -> str:
+        return requested_voice or language
+
     async def synthesize(self, text: str, voice: str, output_path: Path) -> TTSResult:
         raise NotImplementedError
 
-
-class _IncompleteEdgeStreamError(RuntimeError):
-    """Edge returned a playable prefix but never confirmed the end of audio."""
+    async def stream(self, request: TTSRequest):
+        raise NotImplementedError
 
 
 class MockSTTProvider(STTProvider):
@@ -58,6 +96,19 @@ class MockSTTProvider(STTProvider):
 
 
 class MockTTSProvider(TTSProvider):
+    @property
+    def name(self) -> str:
+        return "mock"
+
+    async def stream(self, request: TTSRequest):
+        output = io.BytesIO()
+        with wave.open(output, "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(16000)
+            audio.writeframes(b"\x00\x00" * 1600)
+        yield AudioChunk(output.getvalue(), "wav", 0, is_final=True)
+
     async def synthesize(self, text: str, voice: str, output_path: Path) -> TTSResult:
         started = time.perf_counter()
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -86,6 +137,8 @@ class FasterWhisperSTTProvider(STTProvider):
         self._device = device
         self._compute_type = compute_type
         self._model = None
+        self._selected_device: str | None = None
+        self._selected_compute_type: str | None = None
 
     async def transcribe(self, audio_path: Path, language: str) -> STTResult:
         started = time.perf_counter()
@@ -101,14 +154,55 @@ class FasterWhisperSTTProvider(STTProvider):
             raise RuntimeError("faster-whisper is not installed") from exc
 
         if self._model is None:
-            self._model = WhisperModel(
-                self._model_name,
-                device=self._device,
-                compute_type=self._compute_type,
-            )
+            candidates = [(self._device, self._compute_type)]
+            if self._device == "auto":
+                candidates = [("cuda", "int8_float16"), ("cpu", "int8")]
+            last_error: Exception | None = None
+            for device, compute_type in candidates:
+                try:
+                    self._model = WhisperModel(
+                        self._model_name,
+                        device=device,
+                        compute_type=compute_type,
+                    )
+                    self._selected_device = device
+                    self._selected_compute_type = compute_type
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    logger.warning(
+                        "FasterWhisper model load failed: model=%s device=%s compute_type=%s error_type=%s",
+                        self._model_name,
+                        device,
+                        compute_type,
+                        type(exc).__name__,
+                    )
+            if self._model is None:
+                raise RuntimeError("faster-whisper model could not be loaded") from last_error
         return self._model
 
     def _transcribe_sync(self, audio_path: Path, language: str, started: float) -> STTResult:
+        try:
+            return self._transcribe_with_current_model(audio_path, language, started)
+        except Exception as exc:
+            if not self._should_retry_stt_on_cpu(exc):
+                raise
+            logger.info(
+                "FasterWhisper CUDA runtime failed, retrying on CPU: model=%s "
+                "device=%s compute_type=%s error_type=%s",
+                self._model_name,
+                self._selected_device,
+                self._selected_compute_type,
+                type(exc).__name__,
+            )
+            self._model = None
+            self._device = "cpu"
+            self._compute_type = "int8"
+            self._selected_device = None
+            self._selected_compute_type = None
+            return self._transcribe_with_current_model(audio_path, language, started)
+
+    def _transcribe_with_current_model(self, audio_path: Path, language: str, started: float) -> STTResult:
         model = self._ensure_model()
         selected_language = None if language == "auto" else language
         segments, info = model.transcribe(
@@ -143,436 +237,328 @@ class FasterWhisperSTTProvider(STTProvider):
             return self._RUSSIAN_PROMPT
         return None
 
+    def _should_retry_stt_on_cpu(self, exc: Exception) -> bool:
+        if self._device != "auto" or self._selected_device != "cuda":
+            return False
+        message = str(exc).lower()
+        cuda_markers = (
+            "cuda",
+            "cublas",
+            "cudnn",
+            "cufft",
+            "curand",
+            "cusolver",
+            "cusparse",
+            ".dll",
+            "library",
+        )
+        return any(marker in message for marker in cuda_markers)
 
-class EdgeTTSProvider(TTSProvider):
-    _STREAM_IDLE_TIMEOUT_SECONDS = 4
-    _POST_AUDIO_IDLE_TIMEOUT_SECONDS = 0.2
-    _STREAM_CLOSE_TIMEOUT_SECONDS = 0.1
-    _MAX_CHUNK_CHARS = 90
-    _MAX_CHUNK_WORDS = 18
-    # A retry is a different voice, not another long wait with the same inputs.
-    # This caps the old 3 voices x 3 retries failure mode at three attempts.
-    _CHUNK_RETRIES = 0
-    _MAX_TOTAL_ATTEMPTS = 50
-    _MAX_SYNTHESIS_SECONDS = 18.0
-    _ADAPTIVE_WORD_LIMITS = (2, 1)
-    _CHUNK_PAUSE_SECONDS = 0.15
-    _RATE = "+20%"
-    _VOICE_FALLBACKS = {
-        "ru-RU-SvetlanaNeural": [
-            "en-US-EmmaMultilingualNeural",
-            "en-US-AvaMultilingualNeural",
-        ],
-        "ru-RU-DmitryNeural": [
-            "en-US-AndrewMultilingualNeural",
-            "en-US-BrianMultilingualNeural",
-        ],
-    }
+
+def waveform_to_wav_bytes(waveform: Any, sample_rate: int) -> bytes:
+    import numpy as np
+
+    value = waveform
+    if hasattr(value, "detach"):
+        value = value.detach()
+    if hasattr(value, "cpu"):
+        value = value.cpu()
+    if hasattr(value, "numpy"):
+        samples = value.numpy()
+    else:
+        samples = np.asarray(value)
+    samples = np.asarray(samples, dtype=np.float32).reshape(-1)
+    pcm = (np.clip(samples, -1.0, 1.0) * 32767.0).astype("<i2")
+    output = io.BytesIO()
+    with wave.open(output, "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(sample_rate)
+        audio.writeframes(pcm.tobytes())
+    return output.getvalue()
+
+
+def wav_duration_seconds(wav_bytes: bytes) -> float:
+    with wave.open(io.BytesIO(wav_bytes), "rb") as audio:
+        frames = audio.getnframes()
+        rate = audio.getframerate()
+        if frames <= 0 or rate <= 0:
+            raise RuntimeError("TTS provider returned zero-duration audio")
+        return frames / rate
+
+
+class SileroTTSProvider(TTSProvider):
+    def __init__(
+        self,
+        model: str = "v5_5_ru",
+        speaker: str = "xenia",
+        sample_rate: int = 24000,
+        device: str = "cpu",
+        cpu_threads: int = 4,
+        warmup: bool = True,
+        timeout_seconds: float = 10.0,
+        model_loader: Callable[[], Any] | None = None,
+    ) -> None:
+        if device not in {"cpu", "cuda", "auto"}:
+            raise ValueError("VOICE_SILERO_DEVICE must be one of: cpu, cuda, auto")
+        self.model_name = model
+        self.speaker = speaker
+        self.sample_rate = sample_rate
+        self.requested_device = device
+        self.cpu_threads = cpu_threads
+        self.warmup_enabled = warmup
+        self.timeout_seconds = timeout_seconds
+        self._model_loader = model_loader
+        self._model = None
+        self._torch = None
+        self._selected_device: str | None = None
+        self._available_speakers: set[str] | None = None
+        self._load_lock = asyncio.Lock()
+        self._infer_lock = asyncio.Lock()
+        self._warmed_up = False
+
+    @property
+    def name(self) -> str:
+        return "silero"
+
+    def resolve_voice(self, language: str, requested_voice: str | None = None) -> str:
+        if requested_voice and requested_voice in self.available_speakers:
+            return requested_voice
+        return self.speaker
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return {
+            "provider": self.name,
+            "model": self.model_name,
+            "speaker": self.speaker,
+            "device": self._selected_device or self.requested_device,
+            "sample_rate": self.sample_rate,
+        }
+
+    @property
+    def available_speakers(self) -> list[str]:
+        if self._available_speakers is not None:
+            return sorted(self._available_speakers)
+        if self.model_name == "v5_5_ru":
+            return ["aidar", "baya", "kseniya", "xenia", "eugene", "random"]
+        return [self.speaker]
+
+    async def preload(self) -> None:
+        await self._ensure_model()
+
+    async def _ensure_model(self):
+        if self._model is not None:
+            return self._model
+        async with self._load_lock:
+            if self._model is not None:
+                return self._model
+            started = time.perf_counter()
+            model, torch_module, selected_device = await asyncio.to_thread(self._load_model_sync)
+            self._model = model
+            self._torch = torch_module
+            self._selected_device = selected_device
+            self._available_speakers = self._extract_speakers(model)
+            self._validate_speaker(self.speaker)
+            load_ms = int((time.perf_counter() - started) * 1000)
+            logger.info(
+                "Silero TTS model loaded: tts_model_load_ms=%s device=%s model=%s speaker=%s sample_rate=%s",
+                load_ms,
+                selected_device,
+                self.model_name,
+                self.speaker,
+                self.sample_rate,
+            )
+            if self.warmup_enabled and not self._warmed_up:
+                warmup_started = time.perf_counter()
+                await asyncio.to_thread(self._apply_tts_sync, "Привет.", self.speaker)
+                self._warmed_up = True
+                logger.info(
+                    "Silero TTS model warmed up: tts_warmup_ms=%s device=%s model=%s speaker=%s sample_rate=%s",
+                    int((time.perf_counter() - warmup_started) * 1000),
+                    selected_device,
+                    self.model_name,
+                    self.speaker,
+                    self.sample_rate,
+                )
+            return self._model
+
+    def _load_model_sync(self):
+        try:
+            import torch
+        except ImportError as exc:
+            raise RuntimeError(
+                "Silero TTS requires torch. Install CPU PyTorch and silero before using VOICE_TTS_PROVIDER=silero."
+            ) from exc
+        if self.cpu_threads > 0:
+            torch.set_num_threads(self.cpu_threads)
+        selected_device = self._select_device(torch)
+        if self._model_loader is not None:
+            model = self._model_loader()
+        else:
+            self._configure_certifi_ca_bundle()
+            try:
+                model, _ = torch.hub.load(
+                    repo_or_dir="snakers4/silero-models",
+                    model="silero_tts",
+                    language="ru",
+                    speaker=self.model_name,
+                )
+            except Exception as exc:
+                message = str(exc)
+                if "CERTIFICATE_VERIFY_FAILED" in message or "[SSL:" in message:
+                    raise RuntimeError(
+                        "Silero TTS model download failed because HTTPS certificate verification failed. "
+                        "Check Windows date/time, update trusted root certificates, update certifi in the "
+                        "virtual environment, and remove the incomplete torch hub cache before retrying."
+                    ) from exc
+                raise
+        if hasattr(model, "to"):
+            moved_model = model.to(selected_device)
+            if moved_model is not None:
+                model = moved_model
+        return model, torch, selected_device
+
+    def _configure_certifi_ca_bundle(self) -> None:
+        if os.environ.get("SSL_CERT_FILE"):
+            return
+        try:
+            import certifi
+        except ImportError:
+            return
+        os.environ["SSL_CERT_FILE"] = certifi.where()
+
+    def _select_device(self, torch_module) -> str:
+        if self.requested_device == "cpu":
+            return "cpu"
+        cuda_available = bool(torch_module.cuda.is_available())
+        if self.requested_device == "cuda":
+            if not cuda_available:
+                raise RuntimeError("VOICE_SILERO_DEVICE=cuda was requested, but CUDA is not available")
+            return "cuda"
+        return "cuda" if cuda_available else "cpu"
+
+    def _extract_speakers(self, model) -> set[str] | None:
+        for attr in ("speakers", "speaker_names"):
+            speakers = getattr(model, attr, None)
+            if speakers:
+                return {str(item) for item in speakers}
+        return None
+
+    def _validate_speaker(self, speaker: str) -> None:
+        if self._available_speakers is None or speaker in self._available_speakers:
+            return
+        logger.debug(
+            "Unknown Silero speaker requested: speaker=%s available_speakers=%s",
+            speaker,
+            sorted(self._available_speakers),
+        )
+        raise RuntimeError(f"Unknown Silero speaker: {speaker}")
+
+    def _apply_tts_sync(self, text: str, speaker: str):
+        if self._model is None or self._torch is None:
+            raise RuntimeError("Silero model is not loaded")
+        with self._torch.inference_mode():
+            return self._model.apply_tts(
+                text=text,
+                speaker=speaker,
+                sample_rate=self.sample_rate,
+            )
+
+    async def _synthesize_wav_bytes(self, text: str, speaker: str) -> tuple[bytes, float, int]:
+        await self._ensure_model()
+        self._validate_speaker(speaker)
+        started = time.perf_counter()
+        async with self._infer_lock:
+            waveform = await asyncio.wait_for(
+                asyncio.to_thread(self._apply_tts_sync, text, speaker),
+                timeout=self.timeout_seconds,
+            )
+        synthesis_ms = int((time.perf_counter() - started) * 1000)
+        wav_bytes = waveform_to_wav_bytes(waveform, self.sample_rate)
+        duration = wav_duration_seconds(wav_bytes)
+        logger.info(
+            "Silero TTS segment synthesized: provider=silero model=%s speaker=%s device=%s "
+            "text_length=%s word_count=%s synthesis_ms=%s audio_duration_ms=%s RTF=%.3f audio_bytes=%s",
+            self.model_name,
+            speaker,
+            self._selected_device,
+            len(text),
+            len(text.split()),
+            synthesis_ms,
+            int(duration * 1000),
+            (synthesis_ms / 1000) / duration if duration else 0.0,
+            len(wav_bytes),
+        )
+        return wav_bytes, duration, synthesis_ms
+
+    async def stream(self, request: TTSRequest):
+        text = " ".join(request.text.strip().split())
+        if not text:
+            raise ValueError("TTS text is empty")
+        speaker = self.resolve_voice(request.language, request.voice)
+        wav_bytes, _, _ = await self._synthesize_wav_bytes(text, speaker)
+        yield AudioChunk(
+            data=wav_bytes,
+            format="wav",
+            sequence=0,
+            is_final=True,
+            metadata={
+                "sample_rate": self.sample_rate,
+                "channels": 1,
+                "sample_width": 2,
+                "speaker": speaker,
+                "model": self.model_name,
+                "device": self._selected_device,
+            },
+        )
 
     async def synthesize(self, text: str, voice: str, output_path: Path) -> TTSResult:
+        normalized = " ".join(text.strip().split())
+        if not normalized:
+            raise ValueError("TTS text is empty")
+        speaker = self.resolve_voice("ru", voice)
         started = time.perf_counter()
+        output_path = output_path.with_suffix(self.file_extension)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = output_path.with_name(f"{output_path.stem}.tmp{output_path.suffix}")
+        temp_path.unlink(missing_ok=True)
         try:
-            import edge_tts
-        except ImportError as exc:
-            raise RuntimeError("edge-tts is not installed") from exc
-
-        chunks = self._prepare_chunks(text)
-        chunk_paths: list[Path] = []
-        chunk_durations: list[float | None] = []
-        final_temp_path = output_path.with_name(
-            f"{output_path.stem}.tmp{output_path.suffix}"
-        )
-        final_temp_path.unlink(missing_ok=True)
-        selected_voice = voice
-        attempts = [0]
-        deadline = time.monotonic() + self._MAX_SYNTHESIS_SECONDS
-        try:
-            for chunk in chunks:
-                completed = await self._synthesize_adaptive_chunk(
-                    edge_tts=edge_tts,
-                    text=chunk,
-                    requested_voice=voice,
-                    preferred_voice=selected_voice,
-                    output_path=output_path,
-                    start_index=len(chunk_paths),
-                    attempts=attempts,
-                    deadline=deadline,
-                    allow_split=shutil.which("ffmpeg") is not None,
-                )
-                for chunk_path, chunk_duration, selected_voice in completed:
-                    chunk_paths.append(chunk_path)
-                    chunk_durations.append(chunk_duration)
-
-            if len(chunk_paths) == 1:
-                chunk_paths[0].replace(final_temp_path)
-                chunk_paths = []
-            else:
-                await asyncio.to_thread(self._concat_mp3_chunks, chunk_paths, final_temp_path)
-
-            audio_duration_seconds = await asyncio.to_thread(
-                self._validate_audio_path,
-                final_temp_path,
-                "edge-tts returned invalid audio",
-            )
-            self._validate_concatenated_duration(audio_duration_seconds, chunk_durations)
-            final_temp_path.replace(output_path)
-        finally:
-            for chunk_path in chunk_paths:
-                chunk_path.unlink(missing_ok=True)
-            final_temp_path.unlink(missing_ok=True)
-
+            wav_bytes, audio_duration_seconds, _ = await self._synthesize_wav_bytes(normalized, speaker)
+            temp_path.write_bytes(wav_bytes)
+            if wav_duration_seconds(temp_path.read_bytes()) <= 0:
+                raise RuntimeError("Silero TTS returned zero-duration audio")
+            temp_path.replace(output_path)
+        except asyncio.CancelledError:
+            temp_path.unlink(missing_ok=True)
+            raise
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            output_path.unlink(missing_ok=True)
+            raise
         return TTSResult(
             audio_path=output_path,
             duration_ms=int((time.perf_counter() - started) * 1000),
-            provider="edge_tts",
-            voice=selected_voice,
-            chunks_count=len(chunk_durations),
+            provider="silero",
+            voice=speaker,
+            chunks_count=1,
             audio_duration_seconds=audio_duration_seconds,
         )
 
-    def _prepare_chunks(self, text: str) -> list[str]:
-        chunks = split_tts_chunks(
-            text,
-            max_chars=self._MAX_CHUNK_CHARS,
-            max_words=self._MAX_CHUNK_WORDS,
-        )
-        if len(chunks) > 1 and shutil.which("ffmpeg") is None:
-            return [text]
-        return chunks
 
-    async def _synthesize_adaptive_chunk(
-        self,
-        *,
-        edge_tts,
-        text: str,
-        requested_voice: str,
-        preferred_voice: str,
-        output_path: Path,
-        start_index: int,
-        attempts: list[int],
-        deadline: float,
-        allow_split: bool,
-    ) -> list[tuple[Path, float | None, str]]:
-        """Synthesize a chunk, splitting only the fragment that Edge truncated."""
-        pending = [text]
-        completed: list[tuple[Path, float | None, str]] = []
-        while pending:
-            part = pending.pop(0)
-            part_path = output_path.with_name(
-                f"{output_path.stem}.part{start_index + len(completed):03d}{output_path.suffix}"
-            )
-            try:
-                duration, actual_voice = await self._synthesize_chunk(
-                    edge_tts,
-                    _prepare_edge_tts_chunk(part),
-                    preferred_voice,
-                    part_path,
-                    attempts=attempts,
-                    deadline=deadline,
-                    requested_voice=requested_voice,
-                )
-            except Exception:
-                part_path.unlink(missing_ok=True)
-                smaller = self._smaller_chunks(part) if allow_split else [part]
-                if len(smaller) <= 1:
-                    for path, _, _ in completed:
-                        path.unlink(missing_ok=True)
-                    raise
-                pending = [*smaller, *pending]
-                continue
-            preferred_voice = actual_voice
-            completed.append((part_path, duration, actual_voice))
-        return completed
-
-    def _smaller_chunks(self, text: str) -> list[str]:
-        words = text.split()
-        word_count = len(words)
-        for word_limit in self._ADAPTIVE_WORD_LIMITS:
-            if word_count > word_limit:
-                # Adaptive recovery must keep the final one/two words separate;
-                # the normal splitter intentionally merges a short tail.
-                return [
-                    " ".join(words[index : index + word_limit])
-                    for index in range(0, word_count, word_limit)
-                ]
-        return [text]
-
-    async def _synthesize_chunk(
-        self,
-        edge_tts,
-        text: str,
-        voice: str,
-        output_path: Path,
-        *,
-        attempts: list[int] | None = None,
-        deadline: float | None = None,
-        requested_voice: str | None = None,
-    ) -> tuple[float | None, str]:
-        attempts = attempts if attempts is not None else [0]
-        deadline = deadline if deadline is not None else time.monotonic() + self._MAX_SYNTHESIS_SECONDS
-        last_error: Exception | None = None
-        candidates = self._candidate_voices(requested_voice or voice)
-        if voice in candidates:
-            candidates.remove(voice)
-        candidates.insert(0, voice)
-        for candidate_voice in candidates:
-            for _ in range(self._CHUNK_RETRIES + 1):
-                if attempts[0] >= self._MAX_TOTAL_ATTEMPTS or time.monotonic() >= deadline:
-                    raise TimeoutError("edge-tts synthesis budget exhausted") from last_error
-                attempts[0] += 1
-                output_path.unlink(missing_ok=True)
-                try:
-                    audio_bytes, stream_completed = await self._write_stream_to_file(
-                        edge_tts,
-                        text,
-                        candidate_voice,
-                        output_path,
-                    )
-                    audio_duration_seconds = await asyncio.to_thread(
-                        self._validate_chunk_audio_path,
-                        output_path,
-                        text,
-                        "edge-tts returned invalid audio for chunk",
-                    )
-                    # ffprobe only proves that the prefix is a valid MP3.  A normal
-                    # fragment without Edge EOF is ambiguous and must be split.
-                    if not stream_completed and not _is_tiny_tts_chunk(text):
-                        raise _IncompleteEdgeStreamError(
-                            "edge-tts stream ended without EOF"
-                        )
-                except _IncompleteEdgeStreamError:
-                    output_path.unlink(missing_ok=True)
-                    # Another voice cannot repair a websocket that delivered only
-                    # a prefix; immediately hand this fragment to adaptive splitting.
-                    raise
-                except Exception as exc:
-                    last_error = exc
-                    output_path.unlink(missing_ok=True)
-                    continue
-
-                if audio_bytes > 0:
-                    return audio_duration_seconds, candidate_voice
-
-        output_path.unlink(missing_ok=True)
-        raise RuntimeError("edge-tts returned no audio for chunk") from last_error
-
-    def _candidate_voices(self, voice: str) -> list[str]:
-        return [voice, *self._VOICE_FALLBACKS.get(voice, [])]
-
-    async def _write_stream_to_file(
-        self,
-        edge_tts,
-        text: str,
-        voice: str,
-        output_path: Path,
-    ) -> tuple[int, bool]:
-        communicate = edge_tts.Communicate(text, voice, rate=self._RATE)
-        audio_bytes = 0
-        stream_completed = False
-        stream = communicate.stream()
-        try:
-            with output_path.open("wb") as output:
-                while True:
-                    try:
-                        message = await asyncio.wait_for(
-                            anext(stream),
-                            timeout=(
-                                self._POST_AUDIO_IDLE_TIMEOUT_SECONDS
-                                if audio_bytes > 0
-                                else self._STREAM_IDLE_TIMEOUT_SECONDS
-                            ),
-                        )
-                    except StopAsyncIteration:
-                        stream_completed = True
-                        break
-                    except TimeoutError:
-                        # Some Edge endpoints deliver a complete MP3 and then leave the
-                        # websocket open instead of ending the async iterator.  The
-                        # audio validator below is the reliable completeness check;
-                        # treating the missing EOF as a hard failure discarded valid
-                        # audio and multiplied the delay through every retry/fallback.
-                        if audio_bytes > 0:
-                            break
-                        raise
-
-                    if message.get("type") != "audio":
-                        continue
-                    data = message.get("data", b"")
-                    if data:
-                        output.write(data)
-                        audio_bytes += len(data)
-        finally:
-            with contextlib.suppress(Exception):
-                await asyncio.wait_for(
-                    stream.aclose(),
-                    timeout=self._STREAM_CLOSE_TIMEOUT_SECONDS,
-                )
-
-        return audio_bytes, stream_completed
-
-    def _validate_audio_path(self, audio_path: Path, error_message: str) -> float | None:
-        if audio_path.stat().st_size <= 0:
-            raise RuntimeError(error_message)
-        audio_duration_seconds = self._probe_duration(audio_path)
-        if audio_duration_seconds is not None and audio_duration_seconds <= 0:
-            raise RuntimeError(error_message)
-        return audio_duration_seconds
-
-    def _validate_chunk_audio_path(
-        self,
-        audio_path: Path,
-        text: str,
-        error_message: str,
-    ) -> float | None:
-        audio_duration_seconds = self._validate_audio_path(audio_path, error_message)
-        if audio_duration_seconds is None:
-            return None
-        minimum_duration_seconds = _minimum_tts_duration_seconds(text)
-        if audio_duration_seconds < minimum_duration_seconds:
-            raise RuntimeError(
-                f"{error_message}: audio duration {audio_duration_seconds:.2f}s "
-                f"is shorter than expected {minimum_duration_seconds:.2f}s"
-            )
-        return audio_duration_seconds
-
-    def _validate_concatenated_duration(
-        self,
-        audio_duration_seconds: float | None,
-        chunk_durations: list[float | None],
-    ) -> None:
-        if audio_duration_seconds is None or any(duration is None for duration in chunk_durations):
-            return
-        expected_duration_seconds = sum(duration for duration in chunk_durations if duration is not None)
-        if expected_duration_seconds <= 0:
-            return
-        if audio_duration_seconds < expected_duration_seconds * 0.85:
-            raise RuntimeError(
-                "edge-tts returned incomplete concatenated audio: "
-                f"final duration {audio_duration_seconds:.2f}s, "
-                f"chunks duration {expected_duration_seconds:.2f}s"
-            )
-
-    def _concat_mp3_chunks(self, chunk_paths: list[Path], output_path: Path) -> None:
-        if shutil.which("ffmpeg") is None:
-            raise RuntimeError("ffmpeg is required to concatenate TTS chunks")
-
-        silence_path = output_path.with_suffix(".silence.mp3")
-        try:
-            self._write_silence_chunk(silence_path)
-            concat_paths: list[Path] = []
-            for index, chunk_path in enumerate(chunk_paths):
-                concat_paths.append(chunk_path)
-                if index < len(chunk_paths) - 1:
-                    concat_paths.append(silence_path)
-
-            inputs: list[str] = []
-            filter_inputs: list[str] = []
-            for index, chunk_path in enumerate(concat_paths):
-                inputs.extend(["-i", str(chunk_path)])
-                filter_inputs.append(f"[{index}:a]")
-            filter_complex = (
-                "".join(filter_inputs)
-                + f"concat=n={len(concat_paths)}:v=0:a=1[a]"
-            )
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-hide_banner",
-                    "-loglevel",
-                    "error",
-                    *inputs,
-                    "-filter_complex",
-                    filter_complex,
-                    "-map",
-                    "[a]",
-                    "-vn",
-                    "-acodec",
-                    "libmp3lame",
-                    "-b:a",
-                    "48k",
-                    "-ar",
-                    "24000",
-                    "-ac",
-                    "1",
-                    str(output_path),
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        finally:
-            silence_path.unlink(missing_ok=True)
-
-    def _write_silence_chunk(self, output_path: Path) -> None:
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-f",
-                "lavfi",
-                "-i",
-                "anullsrc=r=24000:cl=mono",
-                "-t",
-                str(self._CHUNK_PAUSE_SECONDS),
-                "-acodec",
-                "libmp3lame",
-                "-b:a",
-                "48k",
-                "-ar",
-                "24000",
-                "-ac",
-                "1",
-                str(output_path),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-
-    def _probe_duration(self, audio_path: Path) -> float | None:
-        if shutil.which("ffprobe") is None:
-            return None
-
-        completed = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "json",
-                str(audio_path),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        payload = json.loads(completed.stdout)
-        return float(payload["format"]["duration"])
-
-
-def split_tts_chunks(text: str, max_chars: int = 60, max_words: int = 12) -> list[str]:
+def split_tts_chunks(text: str, max_chars: int = 90, max_words: int = 18) -> list[str]:
     normalized = " ".join(text.strip().split())
     if not normalized:
         return []
-
     sentences = [
         part.strip()
         for part in re.split(r"(?<=[.!?…。！？])\s+", normalized)
         if part.strip()
     ]
     chunks: list[str] = []
-
     for sentence in sentences or [normalized]:
         chunks.extend(_split_tts_sentence(sentence, max_chars, max_words))
-
-    return chunks or [normalized]
+    return _merge_short_tail(chunks, max_chars, max_words) or [normalized]
 
 
 def _tts_chunk_fits(text: str, max_chars: int, max_words: int) -> bool:
@@ -588,37 +574,20 @@ def _minimum_tts_duration_seconds(text: str) -> float:
     return estimated_duration * 0.85
 
 
-def _prepare_edge_tts_chunk(text: str) -> str:
-    prepared = re.sub(r"[,;:]+\s*$", "", text).strip()
-    if prepared and _is_tiny_tts_chunk(prepared) and not re.search(r"[.!?…。！？]$", prepared):
-        return f"{prepared}."
-    return prepared or text
-
-
-def _is_tiny_tts_chunk(text: str) -> bool:
-    words = len(text.split())
-    return words == 1 or (words == 2 and len(text) <= 16)
-
-
 def _split_tts_sentence(text: str, max_chars: int, max_words: int) -> list[str]:
     if _tts_chunk_fits(text, max_chars, max_words):
         return [text]
-
-    clauses = [
-        part.strip()
-        for part in re.split(r"(?<=[,;:])\s+", text)
-        if part.strip()
-    ]
-    if len(clauses) <= 1:
-        return _split_long_tts_text(text, max_chars, max_words)
-
-    chunks: list[str] = []
-    for clause in clauses:
-        if not _tts_chunk_fits(clause, max_chars, max_words):
-            chunks.extend(_split_long_tts_text(clause, max_chars, max_words))
-            continue
-        chunks.append(clause)
-    return chunks
+    for pattern in (r"(?<=[;:])\s+", r"(?<=,)\s+"):
+        parts = [part.strip() for part in re.split(pattern, text) if part.strip()]
+        if len(parts) > 1:
+            chunks: list[str] = []
+            for part in parts:
+                if _tts_chunk_fits(part, max_chars, max_words):
+                    chunks.append(part)
+                else:
+                    chunks.extend(_split_long_tts_text(part, max_chars, max_words))
+            return _merge_short_tail(chunks, max_chars, max_words)
+    return _split_long_tts_text(text, max_chars, max_words)
 
 
 def _split_long_tts_text(text: str, max_chars: int, max_words: int) -> list[str]:
@@ -632,12 +601,15 @@ def _split_long_tts_text(text: str, max_chars: int, max_words: int) -> list[str]
             current_words = [word]
         else:
             current_words = candidate_words
-
     if current_words:
         chunks.append(" ".join(current_words))
-    if len(chunks) >= 2 and len(chunks[-1].split()) <= 2:
+    return _merge_short_tail(chunks, max_chars, max_words)
+
+
+def _merge_short_tail(chunks: list[str], max_chars: int, max_words: int) -> list[str]:
+    if len(chunks) >= 2 and len(chunks[-1].split()) <= 3:
         candidate = f"{chunks[-2]} {chunks[-1]}"
-        if _tts_chunk_fits(candidate, int(max_chars * 1.25), max_words + 3):
+        if _tts_chunk_fits(candidate, int(max_chars * 1.25), max_words):
             chunks[-2] = candidate
             chunks.pop()
     return chunks

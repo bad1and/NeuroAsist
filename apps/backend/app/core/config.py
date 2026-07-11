@@ -28,14 +28,20 @@ class Settings(BaseSettings):
     cors_origin_regex: str = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
     voice_stt_provider: str = "faster_whisper"
     voice_stt_model: str = "small"
-    voice_stt_device: str = "cpu"
+    voice_stt_device: str = "auto"
     voice_stt_compute_type: str = "int8"
     voice_default_language: str = "ru"
     voice_preload_stt_model: bool = True
+    voice_preload_tts_model: bool = True
     voice_tts_enabled: bool = True
-    voice_tts_provider: str = "edge_tts"
-    voice_tts_voice_ru: str = "ru-RU-SvetlanaNeural"
-    voice_tts_voice_en: str = "en-US-AriaNeural"
+    voice_tts_provider: str = "silero"
+    voice_silero_model: str = "v5_5_ru"
+    voice_silero_speaker_ru: str = "xenia"
+    voice_silero_sample_rate: int = 24000
+    voice_silero_device: str = "cpu"
+    voice_silero_cpu_threads: int = 4
+    voice_silero_warmup: bool = True
+    voice_silero_timeout_seconds: float = 10.0
     voice_tts_background_timeout_seconds: int = 20
     voice_tts_max_chars: int = 1200
     voice_audio_dir: str = "data/audio"
@@ -44,6 +50,19 @@ class Settings(BaseSettings):
     voice_stt_timeout_seconds: int = 45
     voice_llm_timeout_seconds: int = 45
     voice_tts_timeout_seconds: int = 45
+    voice_live_queue_size: int = 3
+    voice_live_idle_flush_ms: int = 500
+    voice_live_first_segment_chars: int = 40
+    voice_live_next_segment_chars: int = 75
+    voice_live_max_segment_chars: int = 110
+    voice_live_max_segment_words: int = 18
+    voice_live_safe_segment_words: int = 10
+    voice_live_tts_retry_count: int = 0
+    voice_live_tts_concurrency_mode: str = "1"
+    voice_live_tts_concurrency_min: int = 1
+    voice_live_tts_concurrency_max: int = 2
+    voice_live_playback_prebuffer_segments: int = 2
+    voice_live_playback_prebuffer_ms: int = 1000
 
     @property
     def llm_api_key(self) -> str | None:

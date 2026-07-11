@@ -365,16 +365,24 @@ button:disabled {
   font-size: 12px;
 }
 
-.settings-grid,
-.form-grid {
+.settings-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   padding: 18px;
 }
 
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 18px;
+  align-items: start;
+}
+
 .info-row,
-.form-grid label {
+.form-grid label,
+.readonly-setting {
   display: grid;
   gap: 8px;
   min-height: 82px;
@@ -384,23 +392,50 @@ button:disabled {
 }
 
 .info-row span,
-.form-grid label {
+.form-grid label,
+.readonly-setting span {
   color: #63737c;
   font-size: 13px;
 }
 
-.info-row strong {
+.info-row strong,
+.readonly-setting strong {
   color: #172026;
   font-size: 15px;
 }
 
-.form-grid select {
+.form-grid select,
+.form-grid input[type="number"] {
   width: 100%;
   min-height: 38px;
   padding: 6px 8px;
   border: 1px solid #c9d2d7;
   background: #ffffff;
   color: #172026;
+}
+
+.form-grid input[type="range"] {
+  width: 100%;
+}
+
+.settings-group {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #d8dee2;
+  background: #ffffff;
+}
+
+.settings-group legend {
+  padding: 0 6px;
+  color: #344b57;
+  font-weight: 700;
+}
+
+.settings-save {
+  min-height: 54px;
+  align-self: stretch;
 }
 
 .secondary {

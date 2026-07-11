@@ -80,8 +80,10 @@ class SequencedLLMProvider:
     def __init__(self, responses: list[str]) -> None:
         self.responses = responses
         self.calls = 0
+        self.messages = []
 
     async def generate(self, messages):
+        self.messages = messages
         content = self.responses[self.calls]
         self.calls += 1
         return LLMResponse(content=content, model="test-model")
@@ -120,6 +122,29 @@ def test_handle_user_message_retries_invalid_json_once() -> None:
         ("s1", "user", "Привет"),
         ("s1", "assistant", "Исправлено"),
     ]
+
+
+def test_handle_user_message_uses_json_persona_prompt() -> None:
+    provider = SequencedLLMProvider(
+        ['{"reply":"Окей","emotion":"smirk","intent":"casual_chat"}']
+    )
+    history = InMemoryHistory()
+    agent = CharacterAgent(provider, history, history_limit=0)
+
+    result = anyio.run(agent.handle_user_message, "s1", "Привет")
+
+    assert result == {
+        "reply": "Окей",
+        "emotion": "smirk",
+        "intent": "casual_chat",
+    }
+    system_prompt = provider.messages[0].content
+    assert "Нейро Пизда" in system_prompt
+    assert "верни только один валидный JSON" in system_prompt
+    assert '"reply"' in system_prompt
+    assert '"emotion"' in system_prompt
+    assert '"intent"' in system_prompt
+    assert "Не возвращай JSON" not in system_prompt
 
 
 def test_handle_user_message_uses_deterministic_fallback_for_empty_model_response() -> None:
