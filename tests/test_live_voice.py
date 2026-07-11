@@ -99,12 +99,10 @@ def test_live_tts_safe_jobs_smooth_soft_punctuation() -> None:
     assert manager._split_tts_jobs(
         "Привет, да всё норм, потихоньку."
     ) == [
-        "Привет да",
-        "всё норм",
-        "потихоньку.",
+        "Привет, да всё норм, потихоньку.",
     ]
     assert manager._split_tts_jobs("Ты как?") == ["Ты как?"]
-    assert manager._split_tts_jobs("Давно не виделись") == ["Давно не", "виделись"]
+    assert manager._split_tts_jobs("Давно не виделись") == ["Давно не виделись"]
 
 
 @pytest.mark.anyio
@@ -213,7 +211,7 @@ async def test_tts_worker_synthesizes_concurrently_but_sends_in_order(monkeypatc
 
 
 @pytest.mark.anyio
-async def test_safe_segment_words_presplits_before_provider(monkeypatch) -> None:
+async def test_safe_segment_words_keeps_successful_sentence_whole(monkeypatch) -> None:
     class RecordingProvider:
         def __init__(self):
             self.calls: list[str] = []
@@ -226,8 +224,35 @@ async def test_safe_segment_words_presplits_before_provider(monkeypatch) -> None
     manager = VoiceSessionManager(provider, safe_segment_words=2)
     monkeypatch.setattr(manager, "_validate_audio", lambda *args: 1.0)
     parts = await manager._synthesize_parts("один два три четыре", "ru", "voice")
-    assert [part[0] for part in parts] == ["один два", "три четыре"]
-    assert sorted(provider.calls) == ["один два", "три четыре"]
+    assert [part[0] for part in parts] == ["один два три четыре"]
+    assert provider.calls == ["один два три четыре"]
+
+
+@pytest.mark.anyio
+async def test_incomplete_sentence_adaptively_splits_without_presplitting(monkeypatch) -> None:
+    class RecordingProvider:
+        def __init__(self):
+            self.calls: list[str] = []
+
+        async def stream(self, request):
+            self.calls.append(request.text)
+            if request.text == "Привет, да всё норм, потихоньку.":
+                yield AudioChunk(b"partial", "mp3", 0)
+                raise _IncompleteEdgeStreamError("missing EOF")
+            yield AudioChunk(request.text.encode(), "mp3", 0, is_final=True)
+
+    provider = RecordingProvider()
+    manager = VoiceSessionManager(provider, safe_segment_words=2)
+    monkeypatch.setattr(manager, "_validate_audio", lambda *args: 1.0)
+
+    parts = await manager._synthesize_parts("Привет, да всё норм, потихоньку.", "ru", "voice")
+
+    assert [part[0] for part in parts] == ["Привет да", "всё норм потихоньку."]
+    assert provider.calls == [
+        "Привет, да всё норм, потихоньку.",
+        "Привет да",
+        "всё норм потихоньку.",
+    ]
 
 
 @pytest.mark.anyio
