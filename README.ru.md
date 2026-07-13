@@ -68,7 +68,7 @@ flowchart LR
 
 - **Chat** — текстовые сообщения, запись микрофона, распознанная фраза, ответ и воспроизведение.
 - **Events** — события backend, LLM, STT, TTS и соединений в реальном времени.
-- **Settings** — язык голоса, speaker Silero, скорость воспроизведения, live prebuffer и runtime-настройки.
+- **Settings** — язык голоса, speaker Silero, скорость воспроизведения, live prebuffer, runtime-настройки и тестовое управление аватаром.
 
 В шапке отображаются состояние backend, подключение WebSocket, наличие API-ключа и фиксированная LLM-модель.
 
@@ -239,6 +239,14 @@ VOICE_SILERO_WARMUP=true
 | `VOICE_LIVE_PLAYBACK_PREBUFFER_SEGMENTS` | Сколько декодированных live-сегментов буферизовать перед стартом воспроизведения. Можно менять в runtime через Settings. |
 | `VOICE_LIVE_PLAYBACK_PREBUFFER_MS` | Дополнительная задержка live prebuffer в миллисекундах. Можно менять в runtime через Settings. |
 
+#### Unity avatar bridge
+
+| Параметр | За что отвечает |
+|---|---|
+| `AVATAR_ENABLED` | Включает отправку команд аватара подключённым Unity-клиентам. По умолчанию выключен, поэтому Unity остаётся опциональным. |
+| `AVATAR_HEARTBEAT_INTERVAL_SECONDS` | Интервал heartbeat-ping от backend к Unity-клиентам. |
+| `AVATAR_CLIENT_TIMEOUT_SECONDS` | Время без heartbeat, после которого Unity-клиент отключается. |
+
 #### Frontend
 
 | Параметр | За что отвечает |
@@ -288,11 +296,12 @@ flowchart TB
 
     subgraph Backend[FastAPI backend]
         API[REST API]
-        WS[Events и voice WebSockets]
+        WS[Events, voice и avatar WebSockets]
         Agent[Character Agent]
         Runtime[Runtime settings]
         Events[Event Bus]
         Voice[Voice Service]
+        Avatar[Avatar Service]
         History[SQLite history]
     end
 
@@ -300,18 +309,22 @@ flowchart TB
     LLM[DeepSeek-совместимый API]
     TTS[Silero TTS]
     Audio[WAV audio storage]
+    Unity[Unity VRM runtime]
 
     UI <-->|REST| API
     UI <-->|WebSocket| WS
     API --> Agent
     API --> Voice
     API --> Runtime
+    API --> Avatar
     Agent --> History
     Agent --> LLM
     Agent --> Events
     Voice --> STT
     Voice --> TTS
     TTS --> Audio
+    Audio --> Avatar
+    Avatar <-->|/ws/avatar| Unity
     Events --> WS
     TTS --> WS
 ```
@@ -349,6 +362,19 @@ Browser MediaRecorder
 
 Для live-режима настраиваются размер сегментов, лимит очереди, параллельность TTS и prebuffer воспроизведения.
 
+### Воспроизведение Unity-аватаром
+
+```text
+Текстовый или обычный голосовой ответ
+  → фоновая генерация Silero
+  → voice.tts_ready
+  → URL полного WAV
+  → avatar.speak через /ws/avatar
+  → Unity AudioSource, lipsync и VRM-эмоция
+```
+
+Мост аватара использует protocol v1 и намеренно остаётся опциональным: недоступный Unity-клиент не замедляет и не ломает чат или TTS. Backend рассылает команды с полным WAV всем подключённым клиентам. Также доступны `GET /avatar/status` и тестовые endpoints речи, эмоции и остановки; настройка и диагностика — в [гайде Unity avatar runtime](Docs/unity_avatar_runtime_v0.4.md).
+
 ## Структура проекта
 
 ```text
@@ -358,6 +384,7 @@ NeuroAsist/
 │   │   ├── main.py
 │   │   └── app/
 │   │       ├── agents/
+│   │       ├── avatar/
 │   │       ├── api/
 │   │       ├── core/
 │   │       ├── events/

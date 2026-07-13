@@ -1345,26 +1345,27 @@ TTS-детали:
 
 ## v0.4 — 3D/VTuber avatar
 
-Цель: добавить визуального персонажа.
+Статус: реализовано как опциональный Unity VRM runtime с bridge-протоколом v1. Unity-проект остаётся companion-проектом и не копируется в этот репозиторий.
 
-Функционал:
+Фактический функционал:
 
-- Unity/VRM avatar app;
-- WebSocket bridge backend ↔ avatar;
-- базовые эмоции: neutral, happy, annoyed, smug, thinking;
-- lipsync по audio amplitude;
-- trigger animations.
+- backend WebSocket `GET /ws/avatar?version=1` с валидацией JSON-frame и версии протокола;
+- `AvatarConnectionManager`: несколько клиентов, handshake, heartbeat/ping, timeout и reconnect на стороне Unity;
+- исходящие команды `avatar.speak`, `avatar.emotion`, `avatar.stop`, `avatar.state`, `avatar.ping`, `avatar.error`;
+- входящие сообщения `avatar.hello`, `avatar.pong`, `avatar.ack`, `avatar.playback.started`, `avatar.playback.finished`, `avatar.playback.failed`, `avatar.state.changed`;
+- `SpeechOrchestrator` посылает `avatar.speak` только после готовности полного Silero WAV; команда содержит текст, `audio_url`, `emotion`, `intent`, `utterance_id` и флаг `interrupt`;
+- REST-контроль: `GET /avatar/status`, `POST /avatar/test/speak`, `POST /avatar/test/emotion`, `POST /avatar/stop`;
+- React Settings содержит статус клиентов и тестовые кнопки речи, эмоции и остановки;
+- Unity runtime использует UniVRM 1.0 и uLipSync 3.1.5; при отсутствии uLipSync предусмотрен amplitude fallback в VRM expression `aa`.
 
-Критерии готовности:
+Границы реализации:
 
-- модель отображается;
-- при ответе двигает губами;
-- меняет эмоции по команде backend;
-- есть idle animation.
+- Unity выключен по умолчанию через `AVATAR_ENABLED=false`; отсутствие, перезапуск или ошибка клиента не меняют результат chat/TTS;
+- `avatar.speak` broadcast-ится всем текущим клиентам; ownership одного speaker пока отсутствует;
+- передаются только полные WAV-файлы: live browser WAV-сегменты в Unity не отправляются;
+- body gestures, eye tracking, phoneme timestamps, Rhubarb и VRM hot-swap не реализованы.
 
-Риски: Unity займет много времени, нет своей модели, lipsync может выглядеть криво.
-
-Временное решение: использовать placeholder VRM‑модель.
+Проверка: включить `AVATAR_ENABLED=true`, запустить backend и Unity, проверить количество клиентов через `/avatar/status`; после ответа должен прийти `avatar.speak` после `voice.tts_ready`, затем Unity сообщает `avatar.playback.started` и `avatar.playback.finished`. Детальная настройка: [Unity avatar runtime v0.4](unity_avatar_runtime_v0.4.md).
 
 ## v0.5 — Dev Agent + sandbox project folder
 
@@ -1893,7 +1894,7 @@ Rate limit handling
 сказал фразу → 8 секунд тишины → ответ
 ```
 
-Текущее состояние v0.3:
+Текущее состояние v0.4:
 
 ```text
 сказал фразу
@@ -1901,6 +1902,7 @@ Rate limit handling
 → текстовый ответ появляется сразу после LLM
 → TTS генерируется background job
 → UI получает voice.tts_ready и включает audio control
+→ при подключённом Unity backend рассылает полный WAV через avatar.speak
 ```
 
 Как снизить:
@@ -1912,7 +1914,7 @@ sentence-by-sentence TTS
 partial avatar reactions
 ```
 
-Для v0.3.1 уже используется live playback WAV-сегментов. Следующий шаг для v0.4+ — streaming STT и более ранние avatar reactions:
+Для браузера уже используется live playback WAV-сегментов. Следующий шаг после v0.4 — streaming STT и более ранние avatar reactions:
 
 ```text
 первые предложения LLM
@@ -2001,8 +2003,7 @@ local UI → desktop wrapper/cloud
 
 # 20. Что делать первым шагом после прочтения ответа
 
-Статус NeuroAsist: v0.1 и v0.2 уже реализованы. Следующий фактический шаг —
-v0.3 voice pipeline, не трогая пока Unity/avatar bridge, Dev Agent и sandbox.
+Статус NeuroAsist: v0.1, v0.2, v0.3.1 и v0.4 реализованы. Следующий фактический шаг — стабилизировать avatar runtime и, при необходимости, добавить Unity live-audio segments; Dev Agent и sandbox остаются за пределами текущего scope.
 
 ## Уже реализовано в v0.1
 
@@ -2044,6 +2045,18 @@ WS /ws/events
 EventBus ring buffer
 local CORS config
 runtime model/personality selection
+```
+
+## Уже реализовано в v0.3.1–v0.4
+
+```text
+Push-to-talk STT/TTS и browser live WAV playback
+Локальный faster-whisper + Silero TTS
+Background TTS с voice.tts_ready и готовым WAV URL
+Unity VRM runtime через optional WebSocket bridge v1
+Heartbeat, client status и playback events
+avatar.speak / avatar.emotion / avatar.stop
+REST и React test controls для аватара
 ```
 
 ## Минимальный v0.1 endpoint
@@ -2199,7 +2212,7 @@ v1.0 — plugin-based multi-agent platform
 - voice selection provider-aware: runtime voices от других провайдеров не передаются напрямую в Silero;
 - при backend TTS failure текст остается доступен, UI может использовать browser SpeechSynthesis fallback.
 
-## ADR-005 — Голосовой режим
+## ADR-005 — Голосовой режим и связка с аватаром
 
 Для v0.1–v0.3 используется Push-To-Talk.
 
@@ -2213,9 +2226,9 @@ User
 → background Silero TTS
 → Web UI audio playback
 
-Unity Avatar/lipsync еще не подключены в v0.3.
+В v0.4 после готовности non-live WAV `SpeechOrchestrator` дополнительно посылает `avatar.speak` в Unity. Это не blocking path: текст, browser audio и TTS job сохраняют успешный результат, даже если нет avatar-клиентов.
 
-Live LLM/TTS уже работает через WebSocket WAV-сегменты. Streaming STT и avatar/lipsync переносятся на более поздние версии.
+Live LLM/TTS работает через WebSocket WAV-сегменты только для браузера. Streaming STT, Unity live segments и barge-in переносятся на следующие версии.
 
 ## ADR-006 — Хранение данных
 
@@ -2241,14 +2254,13 @@ SQLite:
 ## ADR-008 — Backend ↔ Unity
 
 Основной транспорт:
-- WebSocket.
+- WebSocket `GET /ws/avatar?version=1`.
 
-Через него передаются:
-- текст;
-- эмоции;
-- анимации;
-- события;
-- состояние агента.
+Протокол v1 использует строгий JSON-envelope: `protocol_version`, `type`, `message_id`, `timestamp`, `session_id`, `payload`. Backend принимает hello/heartbeat, acknowledgement, playback и state events, а отправляет команды речи, эмоции, остановки, состояния, ping и protocol error.
+
+Речь передаётся как URL полного WAV, а не как base64 или stream. Это уменьшает размер WebSocket-frame, позволяет Unity скачать файл через обычный HTTP и оставляет live-сегменты отдельной browser-only функцией. Доставка — broadcast всем подключённым клиентам; отдельная адресация/ownership — отложенное решение.
+
+Доступность управляется через `AVATAR_ENABLED`, `AVATAR_HEARTBEAT_INTERVAL_SECONDS` и `AVATAR_CLIENT_TIMEOUT_SECONDS`. При `AVATAR_ENABLED=false` команды безопасно пропускаются.
 
 ## ADR-009 — Отложенные решения
 

@@ -2,6 +2,9 @@
 
 **Назначение файла:** это самодостаточный проектный blueprint, который можно загрузить в новый чат и продолжить разработку без потери контекста.
 
+> [!NOTE]
+> Это исходная версия blueprint. Актуальный статус реализации ведётся в [Blueprint v1.1](neuro_vtuber_assistant_blueprint_v1.1.md); на v0.4 реализован optional Unity VRM avatar bridge с protocol v1, полным WAV playback и lipsync.
+
 ## Контекст проекта и вводные
 
 Проект делается для себя, но с возможностью перерасти в стартап‑продукт, который можно продвигать или продавать. Нужен рабочий MVP с архитектурой, которую можно расширять. Главный ранний приоритет: корректная базовая работа голосового ассистента: пользователь говорит, STT распознает речь, текст уходит через LLM API, ответ возвращается, озвучивается через TTS и синхронизируется с 3D‑моделью.
@@ -1260,26 +1263,11 @@ Character Agent пользователю:
 
 ## v0.4 — 3D/VTuber avatar
 
-Цель: добавить визуального персонажа.
+Статус: реализовано. Unity VRM runtime подключается к `GET /ws/avatar?version=1` и получает protocol v1 команды `avatar.speak`, `avatar.emotion` и `avatar.stop`.
 
-Функционал:
+Backend генерирует полный Silero WAV, публикует `voice.tts_ready`, после чего рассылает `avatar.speak` всем подключённым Unity-клиентам. Команда содержит URL WAV, текст, эмоцию, intent и `utterance_id`; Unity воспроизводит WAV через `AudioSource` и использует uLipSync с amplitude fallback в expression `aa`.
 
-- Unity/VRM avatar app;
-- WebSocket bridge backend ↔ avatar;
-- базовые эмоции: neutral, happy, annoyed, smug, thinking;
-- lipsync по audio amplitude;
-- trigger animations.
-
-Критерии готовности:
-
-- модель отображается;
-- при ответе двигает губами;
-- меняет эмоции по команде backend;
-- есть idle animation.
-
-Риски: Unity займет много времени, нет своей модели, lipsync может выглядеть криво.
-
-Временное решение: использовать placeholder VRM‑модель.
+Bridge опционален (`AVATAR_ENABLED=false` по умолчанию): отсутствие или ошибка Unity не влияет на chat/TTS. Есть heartbeat, client status (`GET /avatar/status`) и REST-тесты речи/эмоции/остановки. В Unity пока не поддерживаются live WAV-сегменты, phoneme timestamps, gestures, eye tracking и speaker ownership. См. [актуальный Blueprint v1.1](neuro_vtuber_assistant_blueprint_v1.1.md) и [Unity runtime v0.4](unity_avatar_runtime_v0.4.md).
 
 ## v0.5 — Dev Agent + sandbox project folder
 
@@ -1895,8 +1883,7 @@ local UI → desktop wrapper/cloud
 
 # 20. Что делать первым шагом после прочтения ответа
 
-Статус NeuroAsist: v0.1 и v0.2 уже реализованы. Следующий фактический шаг —
-v0.3 voice pipeline, не трогая пока Unity/avatar bridge, Dev Agent и sandbox.
+Статус NeuroAsist: v0.1–v0.4 реализованы. Следующий фактический шаг — стабилизация avatar runtime и, при необходимости, Unity live-audio segments; Dev Agent и sandbox остаются отложенными.
 
 ## Уже реализовано в v0.1
 
