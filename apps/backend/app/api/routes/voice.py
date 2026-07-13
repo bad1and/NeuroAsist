@@ -2,7 +2,6 @@ import asyncio
 import logging
 import time
 from uuid import uuid4
-
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
 
@@ -15,7 +14,6 @@ from apps.backend.app.schemas.voice import (
     VoiceProviderStats,
     VoiceTTSStatusResponse,
 )
-from apps.backend.app.voice.providers import split_tts_chunks
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -143,24 +141,11 @@ async def voice_chat(
         tts_status = "disabled"
         if settings.voice_tts_enabled and result["reply"].strip():
             tts_status = "queued"
-            voice_service.set_tts_job(
-                voice_request_id,
-                {
-                    "status": "queued",
-                    "audio_url": None,
-                    "voice": voice,
-                },
-            )
-            asyncio.create_task(
-                _run_tts_background(
-                    voice_service=voice_service,
-                    event_bus=event_bus,
-                    settings=settings,
-                    session_id=session_id,
-                    voice_request_id=voice_request_id,
-                    reply=result["reply"],
-                    voice=voice,
-                )
+            orchestrator = request.app.state.speech_orchestrator
+            orchestrator.bind_runtime(voice_service, settings)
+            orchestrator.enqueue(
+                session_id=session_id, voice_request_id=voice_request_id, reply=result["reply"],
+                emotion=result["emotion"], intent=result["intent"], voice=voice,
             )
         elif not result["reply"].strip():
             tts_status = "skipped"
@@ -281,130 +266,3 @@ def get_voice_tts_status(voice_request_id: str, request: Request) -> VoiceTTSSta
         )
     return VoiceTTSStatusResponse.model_validate(job)
 
-
-async def _run_tts_background(
-    *,
-    voice_service,
-    event_bus,
-    settings,
-    session_id: str,
-    voice_request_id: str,
-    reply: str,
-    voice: str,
-) -> None:
-    output_path = voice_service.next_tts_path(settings.voice_tts_provider)
-    text = reply.strip()[: settings.voice_tts_max_chars]
-    event_bus.publish(
-        "voice.tts_started",
-        "info",
-        "Voice synthesis started",
-        {
-            "session_id": session_id,
-            "voice_request_id": voice_request_id,
-            "voice": voice,
-            "text_length": len(text),
-            "chunks_count": len(split_tts_chunks(text)),
-        },
-    )
-    try:
-        tts_result = await asyncio.wait_for(
-            voice_service.tts_provider.synthesize(text, voice, output_path),
-            timeout=settings.voice_tts_background_timeout_seconds,
-        )
-    except TimeoutError:
-        logger.info(
-            "Voice synthesis fallback activated: voice_request_id=%s voice=%s error_type=TimeoutError",
-            voice_request_id,
-            voice,
-        )
-        voice_service.set_tts_job(
-            voice_request_id,
-            {
-                "status": "failed",
-                "audio_url": None,
-                "voice": voice,
-                "error": "Voice synthesis timed out",
-                "error_type": "TimeoutError",
-                "recoverable": True,
-                "fallback": "browser_speech",
-            },
-        )
-        event_bus.publish(
-            "voice.tts_failed",
-            "warning",
-            "Voice synthesis timed out",
-            {
-                "session_id": session_id,
-                "voice_request_id": voice_request_id,
-                "voice": voice,
-                "failed_chunk_index": None,
-                "error_type": "TimeoutError",
-                "recoverable": True,
-                "fallback": "browser_speech",
-            },
-        )
-    except Exception as exc:
-        logger.info(
-            "Voice synthesis fallback activated: voice_request_id=%s voice=%s error_type=%s",
-            voice_request_id,
-            voice,
-            type(exc).__name__,
-        )
-        logger.debug("Voice synthesis fallback details", exc_info=True)
-        voice_service.set_tts_job(
-            voice_request_id,
-            {
-                "status": "failed",
-                "audio_url": None,
-                "voice": voice,
-                "error": "Voice synthesis failed",
-                "error_type": type(exc).__name__,
-                "recoverable": True,
-                "fallback": "browser_speech",
-            },
-        )
-        event_bus.publish(
-            "voice.tts_failed",
-            "warning",
-            "Voice synthesis failed",
-            {
-                "session_id": session_id,
-                "voice_request_id": voice_request_id,
-                "voice": voice,
-                "failed_chunk_index": None,
-                "error_type": type(exc).__name__,
-                "recoverable": True,
-                "fallback": "browser_speech",
-            },
-        )
-    else:
-        audio_url = f"/voice/audio/{tts_result.audio_path.name}"
-        voice_service.set_tts_job(
-            voice_request_id,
-            {
-                "status": "ready",
-                "audio_url": audio_url,
-                "voice": tts_result.voice,
-                "duration_ms": tts_result.duration_ms,
-                "chunks_count": tts_result.chunks_count,
-                "audio_duration_seconds": tts_result.audio_duration_seconds,
-            },
-        )
-        event_bus.publish(
-            "voice.tts_ready",
-            "info",
-            "Voice synthesis ready",
-            {
-                "session_id": session_id,
-                "voice_request_id": voice_request_id,
-                "audio_url": audio_url,
-                "duration_ms": tts_result.duration_ms,
-                "voice": tts_result.voice,
-                "chunks_count": tts_result.chunks_count,
-                "audio_duration_seconds": tts_result.audio_duration_seconds,
-            },
-        )
-
-
-def _default_voice(settings, language: str) -> str:
-    return settings.voice_silero_speaker_ru

@@ -1,11 +1,49 @@
 import asyncio
 import contextlib
 import logging
+import json
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
+from apps.backend.app.avatar.protocol import AvatarProtocolError, parse_incoming
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+@router.websocket("/ws/avatar")
+async def websocket_avatar(websocket: WebSocket, version: int = 1) -> None:
+    if version != 1:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    await websocket.accept()
+    service = websocket.app.state.avatar_service
+    if not service.enabled:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    client = await service.manager.register(websocket)
+    service.event_bus.publish("avatar.connected", "info", "Avatar client connected", {"client_id": client.client_id})
+    try:
+        while True:
+            try:
+                raw = json.loads(await websocket.receive_text())
+                envelope, payload = parse_incoming(raw)
+            except json.JSONDecodeError:
+                await service.protocol_error(client.client_id, "malformed_json", "Malformed JSON frame")
+                continue
+            except AvatarProtocolError as exc:
+                await service.protocol_error(client.client_id, "protocol_error", str(exc))
+                if "Unsupported protocol_version" in str(exc):
+                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                    break
+                continue
+            await service.inbound(client.client_id, envelope, payload)
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
+        removed = await service.manager.unregister(client.client_id)
+        if removed is not None:
+            service.event_bus.publish("avatar.disconnected", "info", "Avatar client disconnected", {"client_id": client.client_id})
 
 
 @router.websocket("/ws/voice/{session_id}")

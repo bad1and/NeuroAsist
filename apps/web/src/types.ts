@@ -13,6 +13,9 @@ export type ChatResponse = {
   reply: string;
   emotion: string;
   intent: string;
+  voice_request_id?: string | null;
+  reply_audio_url?: string | null;
+  tts_status?: VoiceTtsStatus | null;
 };
 
 export type VoiceTtsStatus =
@@ -90,6 +93,25 @@ export type StatusResponse = {
   database: string;
 };
 
+export type AvatarClientStatus = {
+  client_id: string;
+  connected_at: string;
+  last_heartbeat_at: string;
+  client_name?: string | null;
+  client_version?: string | null;
+  platform?: string | null;
+  state: string;
+  current_utterance_id?: string | null;
+};
+
+export type AvatarStatusResponse = {
+  enabled: boolean;
+  protocol_version: number;
+  broadcast_policy: string;
+  client_count: number;
+  clients: AvatarClientStatus[];
+};
+
 export type PublicSettings = {
   provider: string;
   model: string;
@@ -97,6 +119,7 @@ export type PublicSettings = {
   voice_language: string;
   voice_stt_model: string;
   voice_tts_enabled: boolean;
+  avatar_enabled: boolean;
   voice_tts_voice: string;
   voice_playback_rate: number;
   voice_live_playback_prebuffer_segments: number;

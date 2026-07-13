@@ -4,7 +4,7 @@
 
 ### Локальный голосовой AI‑персонаж и будущая neuro‑VTuber платформа
 
-[![Версия](https://img.shields.io/badge/version-0.3.1-7c3aed?style=flat-square)](https://github.com/bad1and/NeuroAsist/tree/v0.3.1)
+[![Версия](https://img.shields.io/badge/version-0.4.0-7c3aed?style=flat-square)](https://github.com/bad1and/NeuroAsist/tree/v0.4)
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776ab?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-24%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.116-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -16,8 +16,8 @@
 </div>
 
 > [!IMPORTANT]
-> **NeuroAsist v0.3.1 — экспериментальный локальный прототип.**  
-> Текстовый чат, push-to-talk, локальное распознавание речи, локальная озвучка и live-воспроизведение уже реализованы. Аватар, lipsync, доступ к ПК и агент-разработчик планируются в следующих версиях.
+> **NeuroAsist v0.4.0 — экспериментальный локальный прототип.**
+> Доступны текстовый/голосовой чат, полный WAV TTS и опциональный Unity VRM-аватар. Live-сегменты остаются браузерной функцией.
 
 ## О проекте
 
@@ -36,7 +36,7 @@ flowchart LR
 
 Долгосрочная цель — превратить это ядро в модульную neuro‑VTuber платформу с анимированным аватаром, эмоциями, памятью, контролируемыми инструментами и безопасным агентом-разработчиком.
 
-## Возможности v0.3.1
+## Возможности v0.4.0
 
 | Возможность | Статус | Реализация |
 |---|:---:|---|
@@ -49,7 +49,7 @@ flowchart LR
 | Runtime-события | ✅ | REST и WebSocket |
 | Настройка голоса и runtime | ✅ | Локальная React-панель |
 | Browser speech fallback | ✅ | При ошибке backend TTS |
-| Аватар и lipsync | 🧭 | Планируется |
+| Unity VRM-аватар и lipsync | ✅ | Опциональный WebSocket-клиент с UniVRM/uLipSync |
 | Dev-agent и sandbox | 🧭 | Планируется |
 | Контекст экрана и ПК | 🧭 | Планируется |
 
@@ -60,7 +60,7 @@ flowchart LR
 - **Устойчивость к ошибкам озвучки** — падение TTS не уничтожает готовый ответ.
 - **Наблюдаемый runtime** — события backend, chat, STT, TTS и WebSocket видны в интерфейсе.
 - **Модульная структура** — LLM, STT, TTS, storage, events и agents разделены по ответственности.
-- **Ограниченный текущий scope** — v0.3.1 не выполняет команды, не читает файлы и не управляет рабочим столом.
+- **Ограниченный текущий scope** — v0.4.0 не выполняет команды, не читает файлы и не управляет рабочим столом.
 
 ## Интерфейс
 
@@ -109,7 +109,7 @@ flowchart LR
 ### 1. Клонирование ветки
 
 ```powershell
-git clone --branch v0.3.1 --single-branch https://github.com/bad1and/NeuroAsist.git
+git clone --branch v0.4 --single-branch https://github.com/bad1and/NeuroAsist.git
 cd NeuroAsist
 ```
 
@@ -489,12 +489,12 @@ VOICE_STT_COMPUTE_TYPE=int8_float16
 
 ## Текущие ограничения
 
-NeuroAsist v0.3.1 пока не умеет:
+NeuroAsist v0.4.0 пока не умеет:
 
 - постоянно слушать микрофон;
 - автоматически вести диалог через VAD;
 - прерывать речь персонажа;
-- отображать аватар и lipsync;
+- Unity live-audio segments (полный WAV для аватара поддерживается);
 - хранить долгосрочную семантическую память или использовать RAG;
 - работать с файлами, shell, браузером, экраном или рабочим столом;
 - поддерживать аккаунты, публичный production deployment и multi-user isolation.
@@ -504,6 +504,7 @@ NeuroAsist v0.3.1 пока не умеет:
 Текущая архитектура, долгосрочная идея и направление разработки описаны в единственном основном документе:
 
 - **[Neuro‑VTuber Assistant Blueprint v1.1](Docs/neuro_vtuber_assistant_blueprint_v1.1.md)**
+- **[Настройка Unity avatar runtime v0.4](Docs/unity_avatar_runtime_v0.4.md)**
 
 ## Планируемое направление
 

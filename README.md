@@ -4,7 +4,7 @@
 
 ### Local-first voice AI character and future neuro‑VTuber platform
 
-[![Version](https://img.shields.io/badge/version-0.3.1-7c3aed?style=flat-square)](https://github.com/bad1and/NeuroAsist/tree/v0.3.1)
+[![Version](https://img.shields.io/badge/version-0.4.0-7c3aed?style=flat-square)](https://github.com/bad1and/NeuroAsist/tree/v0.4)
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776ab?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-24%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.116-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -16,8 +16,8 @@
 </div>
 
 > [!IMPORTANT]
-> **NeuroAsist v0.3.1 is an experimental local prototype.**  
-> Text chat, push-to-talk, local speech recognition, local speech synthesis, and live voice playback are already implemented. Avatar rendering, lip sync, desktop access, and the development agent are planned for future versions.
+> **NeuroAsist v0.4.0 is an experimental local prototype.**
+> Text and voice chat, full-WAV TTS, and an optional Unity VRM avatar runtime are available. Live audio segments remain a browser feature.
 
 ## About the project
 
@@ -49,7 +49,7 @@ The long-term goal is to turn this foundation into a modular neuro‑VTuber plat
 | Runtime events | ✅ | REST and WebSocket |
 | Voice and runtime settings | ✅ | Local React control panel |
 | Browser speech fallback | ✅ | Used when backend TTS fails |
-| Avatar and lip sync | 🧭 | Planned |
+| Unity VRM avatar and lip sync | ✅ | Optional WebSocket client with UniVRM/uLipSync |
 | Development agent and sandbox | 🧭 | Planned |
 | Screen and desktop context | 🧭 | Planned |
 
@@ -60,7 +60,7 @@ The long-term goal is to turn this foundation into a modular neuro‑VTuber plat
 - **Fail-soft audio** — a TTS failure does not destroy a successful text response.
 - **Observable runtime** — backend, chat, STT, TTS, and WebSocket events are visible in the UI.
 - **Modular structure** — LLM, STT, TTS, storage, events, and agents are separated by responsibility.
-- **Restricted current scope** — v0.3.1 cannot execute commands, browse files, or control the desktop.
+- **Restricted current scope** — v0.4.0 cannot execute commands, browse files, or control the desktop.
 
 ## Interface
 
@@ -109,7 +109,7 @@ The header displays backend status, WebSocket connection state, API-key availabi
 ### 1. Clone the release branch
 
 ```powershell
-git clone --branch v0.3.1 --single-branch https://github.com/bad1and/NeuroAsist.git
+git clone --branch v0.4 --single-branch https://github.com/bad1and/NeuroAsist.git
 cd NeuroAsist
 ```
 
@@ -489,12 +489,12 @@ VOICE_STT_COMPUTE_TYPE=int8_float16
 
 ## Current limitations
 
-NeuroAsist v0.3.1 does not provide:
+NeuroAsist v0.4.0 does not provide:
 
 - always-on listening;
 - automatic voice activity detection conversations;
 - interruption while the character is speaking;
-- avatar rendering or lip sync;
+- Unity live-audio segments (full WAV avatar playback is supported);
 - long-term semantic memory or RAG;
 - file, shell, browser, screen, or desktop access;
 - accounts, remote hosting hardening, or multi-user isolation.
@@ -504,6 +504,7 @@ NeuroAsist v0.3.1 does not provide:
 The current project architecture, long-term concept, and development direction are described in:
 
 - **[Neuro‑VTuber Assistant Blueprint v1.1](Docs/neuro_vtuber_assistant_blueprint_v1.1.md)**
+- **[Unity avatar runtime v0.4 setup](Docs/unity_avatar_runtime_v0.4.md)**
 
 ## Planned direction
 

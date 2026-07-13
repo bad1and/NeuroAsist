@@ -1,4 +1,5 @@
 import type {
+  AvatarStatusResponse,
   BackendEvent,
   ChatResponse,
   PublicSettings,
@@ -158,6 +159,22 @@ export async function sendVoiceMessage(
   }
 
   return response.json() as Promise<VoiceChatResponse | VoiceLiveResponse>;
+}
+
+export function getAvatarStatus(): Promise<AvatarStatusResponse> {
+  return requestJson<AvatarStatusResponse>("/avatar/status");
+}
+
+export function sendAvatarTestPhrase(payload: { text: string; emotion: string }): Promise<{ voice_request_id: string; status: string }> {
+  return requestJson("/avatar/test/speak", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function sendAvatarTestEmotion(payload: { emotion: string; intensity: number }): Promise<{ sent: number; skipped: boolean }> {
+  return requestJson("/avatar/test/emotion", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function stopAvatar(): Promise<{ sent: number; skipped: boolean }> {
+  return requestJson("/avatar/stop", { method: "POST", body: JSON.stringify({}) });
 }
 
 export function resolveApiUrl(path: string): string {
