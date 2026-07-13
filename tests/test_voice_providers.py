@@ -3,6 +3,7 @@ import contextlib
 import logging
 import os
 import sys
+import time
 import wave
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,6 +21,27 @@ from apps.backend.app.voice.providers import (
     waveform_to_wav_bytes,
 )
 from apps.backend.app.voice.service import VoiceService
+
+
+def test_tts_cleanup_keeps_only_recent_wavs(tmp_path) -> None:
+    settings = Settings(
+        voice_audio_dir=str(tmp_path / "audio"),
+        voice_stt_provider="mock",
+        voice_tts_provider="mock",
+    )
+    service = VoiceService(settings)
+    tts_dir = settings.voice_audio_path / "tts"
+    tts_dir.mkdir(parents=True)
+    old_wav = tts_dir / "old.wav"
+    fresh_wav = tts_dir / "fresh.wav"
+    old_wav.write_bytes(b"old")
+    fresh_wav.write_bytes(b"fresh")
+    old_timestamp = time.time() - 121
+    os.utime(old_wav, (old_timestamp, old_timestamp))
+
+    assert service.cleanup_tts_audio(max_age_seconds=120) == 1
+    assert not old_wav.exists()
+    assert fresh_wav.exists()
 
 
 def test_split_tts_chunks_keeps_short_reply_as_one_chunk() -> None:

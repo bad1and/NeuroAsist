@@ -1,5 +1,6 @@
 import logging
 import shutil
+import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
@@ -173,6 +174,33 @@ class VoiceService:
         root = self._settings.voice_audio_path
         if root.exists():
             shutil.rmtree(root)
+
+    def clear_tts_audio(self) -> int:
+        """Remove all generated WAV files when the backend starts."""
+        return self._remove_tts_wavs(older_than_seconds=None)
+
+    def cleanup_tts_audio(self, *, max_age_seconds: float) -> int:
+        """Remove generated WAV files whose last write is older than the retention window."""
+        return self._remove_tts_wavs(older_than_seconds=max_age_seconds)
+
+    def _remove_tts_wavs(self, *, older_than_seconds: float | None) -> int:
+        output_dir = self._settings.voice_audio_path / "tts"
+        if not output_dir.is_dir():
+            return 0
+
+        cutoff = None if older_than_seconds is None else time.time() - older_than_seconds
+        removed = 0
+        for path in output_dir.glob("*.wav"):
+            try:
+                if cutoff is not None and path.stat().st_mtime >= cutoff:
+                    continue
+                path.unlink()
+                removed += 1
+            except FileNotFoundError:
+                continue
+            except OSError:
+                logger.warning("Could not remove generated WAV: path=%s", path)
+        return removed
 
     def _build_stt_provider(self, settings: Settings) -> STTProvider:
         if settings.voice_stt_provider == "mock":
