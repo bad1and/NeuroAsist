@@ -51,6 +51,7 @@ class CharacterAgent:
             llm_response.content,
             session_id=session_id,
             empty_fallback_reply=empty_reply,
+            report_invalid=False,
         )
         if not parsed.valid:
             first_invalid = parsed
@@ -73,6 +74,7 @@ class CharacterAgent:
                 session_id=session_id,
                 empty_fallback_reply=empty_reply,
                 event_type="llm.invalid_json_retry_failed",
+                report_invalid=True,
             )
             if (
                 not parsed.valid
@@ -138,6 +140,7 @@ class CharacterAgent:
         session_id: str | None = None,
         empty_fallback_reply: str = "Модель вернула пустой ответ. Попробуй повторить.",
         event_type: str = "llm.invalid_json",
+        report_invalid: bool = True,
     ) -> _ParseResult:
         json_content = self._extract_json(raw_content)
 
@@ -150,6 +153,7 @@ class CharacterAgent:
                 session_id,
                 empty_fallback_reply,
                 event_type,
+                report_invalid,
             )
 
         if not isinstance(payload, dict):
@@ -159,6 +163,7 @@ class CharacterAgent:
                 session_id,
                 empty_fallback_reply,
                 event_type,
+                report_invalid,
             )
 
         try:
@@ -170,10 +175,31 @@ class CharacterAgent:
                 session_id,
                 empty_fallback_reply,
                 event_type,
+                report_invalid,
             )
 
+        payload = parsed.model_dump(exclude_defaults=True)
+        nested_reply = self._extract_nested_reply(payload["reply"])
+        if nested_reply is not None:
+            payload["reply"] = nested_reply
+
         # Do not change the v0.4 public agent result when the optional gesture was absent.
-        return _ParseResult(parsed.model_dump(exclude_defaults=True), valid=True)
+        return _ParseResult(payload, valid=True)
+
+    @staticmethod
+    def _extract_nested_reply(reply: str) -> str | None:
+        """Unwrap a JSON response accidentally serialized into the reply field."""
+        candidate = reply.strip()
+        if not candidate.startswith("{"):
+            return None
+        try:
+            nested = json.loads(candidate)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(nested, dict):
+            return None
+        value = nested.get("reply")
+        return value.strip() if isinstance(value, str) and value.strip() else None
 
     def _extract_json(self, raw_content: str) -> str:
         stripped = raw_content.strip()
@@ -195,13 +221,15 @@ class CharacterAgent:
         session_id: str | None,
         empty_fallback_reply: str,
         event_type: str,
+        report_invalid: bool,
     ) -> _ParseResult:
-        logger.warning(
-            "Invalid LLM JSON response, using fallback: reason=%s raw_length=%s",
-            reason,
-            len(raw_content),
-        )
-        if self._event_publisher is not None:
+        if report_invalid:
+            logger.warning(
+                "Invalid LLM JSON response, using fallback after repair attempt: reason=%s raw_length=%s",
+                reason,
+                len(raw_content),
+            )
+        if report_invalid and self._event_publisher is not None:
             metadata: dict[str, Any] = {
                 "reason": reason,
                 "raw_length": len(raw_content),
@@ -218,6 +246,10 @@ class CharacterAgent:
             )
 
         stripped = raw_content.strip()
+        # A partial/invalid JSON object is transport metadata, not a user-facing reply.
+        # Showing it verbatim was the source of occasional JSON messages in the UI.
+        if self._looks_like_structured_content(stripped):
+            stripped = ""
         return _ParseResult(
             {
                 "reply": stripped or empty_fallback_reply,
@@ -227,6 +259,10 @@ class CharacterAgent:
             valid=False,
             reason=reason,
         )
+
+    @staticmethod
+    def _looks_like_structured_content(value: str) -> bool:
+        return value.startswith(("{", "[", "```"))
 
     def _empty_model_fallback(self, user_text: str) -> str:
         return f'Я услышал: "{user_text}". Но модель вернула пустой ответ. Попробуй повторить.'
