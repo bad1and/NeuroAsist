@@ -68,7 +68,7 @@ The React control panel contains three main sections:
 
 - **Chat** — text messages, microphone recording, transcription, AI replies, and audio playback.
 - **Events** — live backend, LLM, STT, TTS, and connection events.
-- **Settings** — voice language, Silero speaker, playback speed, live prebuffer, and runtime options.
+- **Settings** — voice language, Silero speaker, playback speed, live prebuffer, runtime options, and avatar test controls.
 
 The header displays backend status, WebSocket connection state, API-key availability, and the fixed LLM model.
 
@@ -239,6 +239,14 @@ VOICE_SILERO_WARMUP=true
 | `VOICE_LIVE_PLAYBACK_PREBUFFER_SEGMENTS` | Number of decoded live audio segments buffered before playback starts. Runtime-editable in Settings. |
 | `VOICE_LIVE_PLAYBACK_PREBUFFER_MS` | Additional live playback prebuffer delay in milliseconds. Runtime-editable in Settings. |
 
+#### Unity avatar bridge
+
+| Variable | What it controls |
+|---|---|
+| `AVATAR_ENABLED` | Enables delivery of avatar commands to connected Unity clients. Disabled by default, so Unity is optional. |
+| `AVATAR_HEARTBEAT_INTERVAL_SECONDS` | Interval between backend heartbeat pings to avatar clients. |
+| `AVATAR_CLIENT_TIMEOUT_SECONDS` | Time without a heartbeat after which an avatar client is disconnected. |
+
 #### Frontend
 
 | Variable | What it controls |
@@ -288,11 +296,12 @@ flowchart TB
 
     subgraph Backend[FastAPI backend]
         API[REST API]
-        WS[Events and voice WebSockets]
+        WS[Events, voice, and avatar WebSockets]
         Agent[Character Agent]
         Runtime[Runtime settings]
         Events[Event Bus]
         Voice[Voice Service]
+        Avatar[Avatar Service]
         History[SQLite history]
     end
 
@@ -300,18 +309,22 @@ flowchart TB
     LLM[DeepSeek-compatible API]
     TTS[Silero TTS]
     Audio[WAV audio storage]
+    Unity[Unity VRM runtime]
 
     UI <-->|REST| API
     UI <-->|WebSocket| WS
     API --> Agent
     API --> Voice
     API --> Runtime
+    API --> Avatar
     Agent --> History
     Agent --> LLM
     Agent --> Events
     Voice --> STT
     Voice --> TTS
     TTS --> Audio
+    Audio --> Avatar
+    Avatar <-->|/ws/avatar| Unity
     Events --> WS
     TTS --> WS
 ```
@@ -349,6 +362,19 @@ LLM text stream
 
 The live mode uses configurable chunk sizes, queue limits, TTS concurrency, and playback prebuffering.
 
+### Unity avatar playback
+
+```text
+Chat or non-live voice response
+  → background Silero synthesis
+  → voice.tts_ready
+  → complete WAV URL
+  → avatar.speak over /ws/avatar
+  → Unity AudioSource, lip sync, and VRM expression
+```
+
+The avatar bridge uses protocol v1 and is deliberately optional: unavailable Unity clients do not delay or fail text chat or TTS. The backend broadcasts full-WAV commands to all connected clients. It also provides `GET /avatar/status` plus test endpoints for speech, emotion, and stop; see the [Unity avatar runtime guide](Docs/unity_avatar_runtime_v0.4.md) for setup and diagnostics.
+
 ## Project structure
 
 ```text
@@ -358,6 +384,7 @@ NeuroAsist/
 │   │   ├── main.py
 │   │   └── app/
 │   │       ├── agents/
+│   │       ├── avatar/
 │   │       ├── api/
 │   │       ├── core/
 │   │       ├── events/
