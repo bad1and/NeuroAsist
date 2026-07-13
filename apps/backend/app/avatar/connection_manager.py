@@ -26,6 +26,8 @@ class AvatarClient:
     platform: str | None = None
     state: str = "Idle"
     current_utterance_id: str | None = None
+    current_motion_profile: str | None = None
+    current_gesture: str | None = None
 
     def status(self) -> AvatarStatusClient:
         return AvatarStatusClient(
@@ -37,6 +39,8 @@ class AvatarClient:
             platform=self.platform,
             state=self.state,
             current_utterance_id=self.current_utterance_id,
+            current_motion_profile=self.current_motion_profile,
+            current_gesture=self.current_gesture,
         )
 
 

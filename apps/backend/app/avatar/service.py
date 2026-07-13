@@ -9,6 +9,7 @@ from .schemas import (
     AvatarStatusResponse,
     EmotionPayload,
     ErrorPayload,
+    GesturePayload,
     OutgoingMessage,
     PingPayload,
     SpeakPayload,
@@ -56,12 +57,14 @@ class AvatarService:
 
     async def speak(
         self, *, session_id: str, utterance_id: str, text: str, audio_url: str,
-        emotion: str, intent: str, interrupt: bool = True,
+        emotion: str, intent: str, gesture: str = "auto", gesture_intensity: float = 1.0,
+        interrupt: bool = True,
     ) -> BroadcastResult:
         return await self._broadcast(
             "avatar.speak", session_id,
             SpeakPayload(utterance_id=utterance_id, text=text, audio_url=audio_url,
-                         emotion=emotion, intent=intent, interrupt=interrupt).model_dump(mode="json"),
+                         emotion=emotion, intent=intent, gesture=gesture,
+                         gesture_intensity=gesture_intensity, interrupt=interrupt).model_dump(mode="json"),
             utterance_id=utterance_id,
         )
 
@@ -75,6 +78,14 @@ class AvatarService:
         return await self._broadcast(
             "avatar.stop", session_id, StopPayload(utterance_id=utterance_id).model_dump(mode="json"),
             utterance_id=utterance_id,
+        )
+
+    async def gesture(
+        self, *, session_id: str, gesture: str, intensity: float = 1.0, interrupt: bool = True
+    ) -> BroadcastResult:
+        payload = GesturePayload(gesture=gesture, intensity=intensity, interrupt=interrupt)
+        return await self._broadcast(
+            "avatar.gesture", session_id, payload.model_dump(mode="json")
         )
 
     async def set_state(self, *, session_id: str, state: str) -> BroadcastResult:
@@ -108,6 +119,15 @@ class AvatarService:
         elif envelope.type == "avatar.state.changed":
             await self.manager.update(client_id, state=payload.state)
             self.event_bus.publish("avatar.state_changed", "info", "Avatar state changed", {"client_id": client_id, "state": payload.state})
+        elif envelope.type == "avatar.gesture.started":
+            await self.manager.update(client_id, current_gesture=payload.gesture)
+            self.event_bus.publish(envelope.type, "info", "Avatar motion event", {"client_id": client_id, **payload.model_dump(mode="json")})
+        elif envelope.type in {"avatar.gesture.finished", "avatar.gesture.failed"}:
+            await self.manager.update(client_id, current_gesture=None)
+            self.event_bus.publish(envelope.type, "info", "Avatar motion event", {"client_id": client_id, **payload.model_dump(mode="json")})
+        elif envelope.type == "avatar.motion_profile_changed":
+            await self.manager.update(client_id, current_motion_profile=payload.profile)
+            self.event_bus.publish(envelope.type, "info", "Avatar motion event", {"client_id": client_id, **payload.model_dump(mode="json")})
 
     async def _broadcast(self, message_type: str, session_id: str, payload: dict[str, Any], *, utterance_id: str | None = None) -> BroadcastResult:
         if not self.enabled:

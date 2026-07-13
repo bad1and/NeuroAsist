@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from apps.backend.app.avatar.connection_manager import AvatarConnectionManager
 from apps.backend.app.avatar.protocol import AvatarProtocolError, parse_incoming
 from apps.backend.app.avatar.service import AvatarService
+from apps.backend.app.avatar.schemas import SpeakPayload
 from apps.backend.app.events.bus import EventBus
 from apps.backend.app.voice.orchestrator import SpeechOrchestrator
 from apps.backend.app.voice.providers import MockTTSProvider
@@ -72,6 +73,16 @@ def test_avatar_protocol_validates_type_and_version() -> None:
         parse_incoming({"protocol_version": 1, "type": "avatar.unknown", "payload": {}})
 
 
+def test_speak_gesture_is_backward_compatible_and_unknown_falls_back() -> None:
+    legacy = SpeakPayload(utterance_id="u", text="hello", audio_url="/voice/audio/a.wav")
+    explicit = SpeakPayload(utterance_id="u", text="hello", audio_url="/voice/audio/a.wav", gesture="GREETING", gesture_intensity=.8)
+    unknown = SpeakPayload(utterance_id="u", text="hello", audio_url="/voice/audio/a.wav", gesture="dance")
+    assert legacy.gesture == "auto"
+    assert explicit.gesture == "greeting"
+    assert explicit.gesture_intensity == .8
+    assert unknown.gesture == "auto"
+
+
 @pytest.mark.anyio
 async def test_disabled_avatar_service_is_safe_noop() -> None:
     service = AvatarService(AvatarConnectionManager(), EventBus(), enabled=False, heartbeat_interval_seconds=1, client_timeout_seconds=2)
@@ -80,6 +91,25 @@ async def test_disabled_avatar_service_is_safe_noop() -> None:
     assert result.skipped is True
     assert status.enabled is False
     assert status.client_count == 0
+
+
+@pytest.mark.anyio
+async def test_gesture_command_and_motion_events_are_structured() -> None:
+    events = EventBus()
+    manager = AvatarConnectionManager()
+    socket = FakeSocket()
+    client = await manager.register(socket)
+    service = AvatarService(manager, events, enabled=True, heartbeat_interval_seconds=1, client_timeout_seconds=2)
+    result = await service.gesture(session_id="default", gesture="greeting", intensity=.8)
+    assert result.sent == 1
+    assert socket.sent[0]["type"] == "avatar.gesture"
+    assert socket.sent[0]["payload"] == {"gesture": "greeting", "intensity": .8, "interrupt": True}
+    envelope, payload = parse_incoming({
+        "protocol_version": 1, "type": "avatar.motion_profile_changed", "message_id": "motion", "timestamp": "2026-01-01T00:00:00Z", "session_id": "default",
+        "payload": {"profile": "happy"},
+    })
+    await service.inbound(client.client_id, envelope, payload)
+    assert (await service.status()).clients[0].current_motion_profile == "happy"
 
 
 @pytest.mark.anyio
@@ -150,6 +180,7 @@ def test_avatar_http_status_and_test_commands(monkeypatch) -> None:
             assert status.json()["enabled"] is False
             assert client.post("/avatar/test/emotion", json={"emotion": "happy"}).json()["skipped"] is True
             assert client.post("/avatar/stop", json={}).json()["skipped"] is True
+            assert client.post("/avatar/test/gesture", json={"gesture": "dance", "intensity": 0.4}).json() == {"gesture": "auto", "sent": 0, "skipped": True}
             assert client.post("/avatar/test/speak", json={"text": "test"}).json()["voice_request_id"] == "test-job"
     finally:
         service.enabled = previous

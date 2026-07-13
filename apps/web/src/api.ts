@@ -173,6 +173,10 @@ export function sendAvatarTestEmotion(payload: { emotion: string; intensity: num
   return requestJson("/avatar/test/emotion", { method: "POST", body: JSON.stringify(payload) });
 }
 
+export function sendAvatarTestGesture(payload: { gesture: string; intensity: number; interrupt?: boolean }): Promise<{ gesture: string; sent: number; skipped: boolean }> {
+  return requestJson("/avatar/test/gesture", { method: "POST", body: JSON.stringify(payload) });
+}
+
 export function stopAvatar(): Promise<{ sent: number; skipped: boolean }> {
   return requestJson("/avatar/stop", { method: "POST", body: JSON.stringify({}) });
 }

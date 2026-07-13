@@ -172,7 +172,8 @@ class CharacterAgent:
                 event_type,
             )
 
-        return _ParseResult(parsed.model_dump(), valid=True)
+        # Do not change the v0.4 public agent result when the optional gesture was absent.
+        return _ParseResult(parsed.model_dump(exclude_defaults=True), valid=True)
 
     def _extract_json(self, raw_content: str) -> str:
         stripped = raw_content.strip()

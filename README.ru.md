@@ -373,7 +373,7 @@ Browser MediaRecorder
   → Unity AudioSource, lipsync и VRM-эмоция
 ```
 
-Мост аватара использует protocol v1 и намеренно остаётся опциональным: недоступный Unity-клиент не замедляет и не ломает чат или TTS. Backend рассылает команды с полным WAV всем подключённым клиентам. Также доступны `GET /avatar/status` и тестовые endpoints речи, эмоции и остановки; настройка и диагностика — в [гайде Unity avatar runtime](Docs/unity_avatar_runtime_v0.4.md).
+Мост аватара использует protocol v1 и намеренно остаётся опциональным: недоступный Unity-клиент не замедляет и не ломает чат или TTS. Backend рассылает команды с полным WAV всем подключённым клиентам. Также доступны `GET /avatar/status` и тестовые endpoints речи, эмоции, жеста и остановки; настройка и диагностика — в [гайде Unity avatar runtime](Docs/unity_avatar_runtime_v0.4.md) и [гайде motion v0.5](Docs/avatar-motion-v0.5.md).
 
 ## Структура проекта
 

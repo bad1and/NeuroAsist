@@ -15,7 +15,8 @@ CHARACTER_JSON_PROMPT = CHARACTER_PERSONA_PROMPT + """
 {
   "reply": "видимый ответ пользователю на русском (строго от женского лица, с матом, подколами)",
   "emotion": "neutral|happy|annoyed|smirk|thinking",
-  "intent": "casual_chat|question|task_request|unknown"
+  "intent": "casual_chat|question|task_request|unknown",
+  "gesture": "none|auto|talk|greeting|agreement|disagreement|question|explanation|thinking|surprise|frustration|farewell|shrug"
 }
 """
 
@@ -35,7 +36,8 @@ CHARACTER_REPAIR_PROMPT = """Ты исправляешь ответ ассист
 {
   "reply": "видимый ответ пользователю на русском",
   "emotion": "neutral|happy|annoyed|smirk|thinking",
-  "intent": "casual_chat|question|task_request|unknown"
+  "intent": "casual_chat|question|task_request|unknown",
+  "gesture": "none|auto|talk|greeting|agreement|disagreement|question|explanation|thinking|surprise|frustration|farewell|shrug"
 }
 Без markdown, без пояснений, без текста до или после JSON.
 """
