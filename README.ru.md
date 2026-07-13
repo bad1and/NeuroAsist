@@ -119,17 +119,18 @@ cd NeuroAsist
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128
 ```
 
-PyTorch устанавливается отдельно. Самый переносимый вариант — CPU:
+Текущий lockfile использует проверенную CUDA-сборку `torch==2.11.0+cu128`. Нужны
+NVIDIA-видеокарта и совместимый драйвер. Проверка установки:
 
 ```powershell
-python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-python -m pip install silero
+python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 ```
 
-Для CUDA установи сборку PyTorch, подходящую под драйвер и CUDA runtime.
+Если CUDA недоступна, установи совместимую CPU-сборку PyTorch и укажи в `.env`
+`VOICE_STT_DEVICE=cpu` и `VOICE_SILERO_DEVICE=cpu`.
 
 ### 3. Frontend-зависимости
 
@@ -155,8 +156,8 @@ DEEPSEEK_API_KEY=your_deepseek_api_key
 ```env
 VOICE_STT_PROVIDER=faster_whisper
 VOICE_STT_MODEL=small
-VOICE_STT_DEVICE=auto
-VOICE_STT_COMPUTE_TYPE=int8
+VOICE_STT_DEVICE=cuda
+VOICE_STT_COMPUTE_TYPE=int8_float16
 
 VOICE_TTS_ENABLED=true
 VOICE_TTS_PROVIDER=silero
@@ -164,7 +165,7 @@ VOICE_PRELOAD_TTS_MODEL=true
 VOICE_SILERO_MODEL=v5_5_ru
 VOICE_SILERO_SPEAKER_RU=xenia
 VOICE_SILERO_SAMPLE_RATE=24000
-VOICE_SILERO_DEVICE=cpu
+VOICE_SILERO_DEVICE=cuda
 VOICE_SILERO_CPU_THREADS=4
 VOICE_SILERO_WARMUP=true
 ```
