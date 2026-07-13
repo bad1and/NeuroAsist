@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 
@@ -23,6 +24,9 @@ from apps.backend.app.voice.live import VoiceSessionManager
 from apps.backend.app.voice.orchestrator import SpeechOrchestrator
 
 logger = logging.getLogger(__name__)
+
+TTS_AUDIO_CLEANUP_INTERVAL_SECONDS = 20 * 60
+TTS_AUDIO_RETENTION_SECONDS = 2 * 60
 
 
 def create_app() -> FastAPI:
@@ -73,9 +77,28 @@ def create_app() -> FastAPI:
         client_timeout_seconds=settings.avatar_client_timeout_seconds,
     )
     speech_orchestrator = SpeechOrchestrator(voice_service, event_bus, settings, avatar_service)
+    tts_audio_cleanup_task: asyncio.Task[None] | None = None
+
+    async def cleanup_tts_audio_forever() -> None:
+        try:
+            while True:
+                await asyncio.sleep(TTS_AUDIO_CLEANUP_INTERVAL_SECONDS)
+                removed = await asyncio.to_thread(
+                    voice_service.cleanup_tts_audio,
+                    max_age_seconds=TTS_AUDIO_RETENTION_SECONDS,
+                )
+                if removed:
+                    logger.info("Generated WAV cleanup complete: removed=%s", removed)
+        except asyncio.CancelledError:
+            raise
 
     @app.on_event("startup")
     async def startup() -> None:
+        nonlocal tts_audio_cleanup_task
+        removed = await asyncio.to_thread(voice_service.clear_tts_audio)
+        if removed:
+            logger.info("Generated WAV startup cleanup complete: removed=%s", removed)
+
         try:
             history.init_db()
         except Exception:
@@ -170,9 +193,16 @@ def create_app() -> FastAPI:
         logger.info("Backend startup complete")
 
         await avatar_service.start()
+        tts_audio_cleanup_task = asyncio.create_task(cleanup_tts_audio_forever())
 
     @app.on_event("shutdown")
     async def shutdown() -> None:
+        if tts_audio_cleanup_task is not None:
+            tts_audio_cleanup_task.cancel()
+            try:
+                await tts_audio_cleanup_task
+            except asyncio.CancelledError:
+                pass
         await speech_orchestrator.close()
         await avatar_service.close()
 

@@ -219,7 +219,7 @@ VOICE_SILERO_WARMUP=true
 | `VOICE_TTS_BACKGROUND_TIMEOUT_SECONDS` | Timeout фоновых batch TTS jobs, которые создаёт `/voice/chat`. |
 | `VOICE_TTS_TIMEOUT_SECONDS` | Общий timeout TTS для voice API flow. |
 | `VOICE_TTS_MAX_CHARS` | Максимальная длина текста для одного backend TTS-запроса. |
-| `VOICE_AUDIO_DIR` | Папка, куда сохраняются сгенерированные аудиофайлы. |
+| `VOICE_AUDIO_DIR` | Папка, куда сохраняются сгенерированные аудиофайлы. WAV удаляются при старте backend, затем раз в 20 минут удаляются файлы старше 2 минут. |
 
 #### Live voice playback
 
