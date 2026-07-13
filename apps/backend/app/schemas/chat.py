@@ -10,3 +10,6 @@ class ChatResponse(BaseModel):
     reply: str
     emotion: str = "neutral"
     intent: str = "casual_chat"
+    voice_request_id: str | None = None
+    reply_audio_url: str | None = None
+    tts_status: str | None = None

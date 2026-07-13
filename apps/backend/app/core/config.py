@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     voice_live_tts_concurrency_max: int = 2
     voice_live_playback_prebuffer_segments: int = 2
     voice_live_playback_prebuffer_ms: int = 1000
+    avatar_enabled: bool = False
+    avatar_heartbeat_interval_seconds: float = 15.0
+    avatar_client_timeout_seconds: float = 45.0
 
     @property
     def llm_api_key(self) -> str | None:

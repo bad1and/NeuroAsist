@@ -8,6 +8,7 @@ class PublicSettingsResponse(BaseModel):
     voice_language: str
     voice_stt_model: str
     voice_tts_enabled: bool
+    avatar_enabled: bool
     voice_tts_voice: str
     voice_playback_rate: float
     voice_live_playback_prebuffer_segments: int

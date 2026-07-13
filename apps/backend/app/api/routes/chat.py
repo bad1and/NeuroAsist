@@ -6,6 +6,7 @@ from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.llm.base import LLMProviderError
 from apps.backend.app.llm.providers.deepseek import DeepSeekProvider
 from apps.backend.app.schemas.chat import ChatRequest, ChatResponse
+from uuid import uuid4
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -124,4 +125,21 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             "intent": result["intent"],
         },
     )
-    return ChatResponse(**result)
+    response = ChatResponse(**result)
+    if settings.voice_tts_enabled and settings.avatar_enabled and result["reply"].strip():
+        voice = request.app.state.voice_service.resolve_tts_voice(
+            request.app.state.runtime_settings.voice_language,
+            request.app.state.runtime_settings.voice_tts_voice,
+        )
+        orchestrator = request.app.state.speech_orchestrator
+        orchestrator.bind_runtime(request.app.state.voice_service, settings)
+        response.voice_request_id = orchestrator.enqueue(
+            session_id=payload.session_id,
+            voice_request_id=uuid4().hex,
+            reply=result["reply"],
+            emotion=result["emotion"],
+            intent=result["intent"],
+            voice=voice,
+        )
+        response.tts_status = "queued"
+    return response

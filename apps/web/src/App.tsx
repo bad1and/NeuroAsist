@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  getAvatarStatus,
   getEvents,
   getSettings,
   getStatus,
@@ -11,9 +12,13 @@ import {
   updateRuntimeSettings,
   voiceWebSocketUrl,
   WS_EVENTS_URL,
+  sendAvatarTestEmotion,
+  sendAvatarTestPhrase,
+  stopAvatar,
 } from "./api";
 import type {
   BackendEvent,
+  AvatarStatusResponse,
   ChatMessage,
   EventLevel,
   PublicSettings,
@@ -76,6 +81,7 @@ function isLiveVoiceTransportError(error: unknown): boolean {
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>("chat");
   const [status, setStatus] = useState<StatusResponse | null>(null);
+  const [avatarStatus, setAvatarStatus] = useState<AvatarStatusResponse | null>(null);
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [events, setEvents] = useState<BackendEvent[]>([]);
   const [wsState, setWsState] = useState<WsState>("disconnected");
@@ -94,6 +100,11 @@ export default function App() {
       ]);
       setStatus(nextStatus);
       setSettings(nextSettings);
+      try {
+        setAvatarStatus(await getAvatarStatus());
+      } catch {
+        setAvatarStatus(null);
+      }
       setStatusError(null);
     } catch (error) {
       setStatusError(error instanceof Error ? error.message : "Backend unavailable");
@@ -192,6 +203,7 @@ export default function App() {
           <ChatPage
             events={events}
             settings={settings}
+            avatarStatus={avatarStatus}
             onRefreshEvents={refreshEvents}
           />
         )}
@@ -201,6 +213,8 @@ export default function App() {
         {activeTab === "settings" && (
           <SettingsPage
             settings={settings}
+            avatarStatus={avatarStatus}
+            onRefreshAvatar={refreshOverview}
             onSettingsChanged={(nextSettings) => {
               setSettings(nextSettings);
               void refreshOverview();
@@ -266,10 +280,12 @@ function StatusPill({
 function ChatPage({
   events,
   settings,
+  avatarStatus,
   onRefreshEvents,
 }: {
   events: BackendEvent[];
   settings: PublicSettings | null;
+  avatarStatus: AvatarStatusResponse | null;
   onRefreshEvents: () => Promise<void>;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -296,6 +312,7 @@ function ChatPage({
     typeof window !== "undefined" &&
     "speechSynthesis" in window &&
     "SpeechSynthesisUtterance" in window;
+  const avatarOwnsAudio = Boolean(avatarStatus?.enabled && avatarStatus.client_count > 0);
 
   const stopVoicePlayback = useCallback((except?: HTMLAudioElement) => {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
@@ -652,7 +669,9 @@ function ChatPage({
               : message,
           ),
         );
-        void playAudioUrl(resolvedAudioUrl);
+        if (!avatarOwnsAudio) {
+          void playAudioUrl(resolvedAudioUrl);
+        }
       } else {
         const fallbackMessage = messages.find(
           (message) => message.voiceRequestId === voiceRequestId,
@@ -678,7 +697,7 @@ function ChatPage({
         );
       }
     }
-  }, [browserSpeechSupported, events, messages, playAudioUrl, speakTextInBrowser]);
+  }, [avatarOwnsAudio, browserSpeechSupported, events, messages, playAudioUrl, speakTextInBrowser]);
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -707,8 +726,13 @@ function ChatPage({
           content: response.reply,
           emotion: response.emotion,
           intent: response.intent,
+          voiceRequestId: response.voice_request_id ?? undefined,
+          ttsStatus: response.tts_status ?? undefined,
         },
       ]);
+      if (response.voice_request_id && response.tts_status === "queued") {
+        void pollVoiceTtsStatus(response.voice_request_id);
+      }
       await onRefreshEvents();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Chat failed");
@@ -802,29 +826,38 @@ function ChatPage({
     }, 500);
     try {
       let response;
-      try {
-        await ensureLiveVoice();
-        liveSocketRef.current?.clearActive();
-        liveAudioStartedRef.current = false;
-        response = await sendVoiceMessage(
-          SESSION_ID,
-          audio,
-          settings?.voice_language ?? "ru",
-          true,
-        );
-      } catch (liveError) {
-        if (!isLiveVoiceTransportError(liveError)) {
-          throw liveError;
-        }
-        liveSocketRef.current?.close();
-        liveSocketRef.current = null;
+      if (avatarOwnsAudio) {
         response = await sendVoiceMessage(
           SESSION_ID,
           audio,
           settings?.voice_language ?? "ru",
           false,
         );
-        setError("Live voice stream is unavailable; used legacy voice response.");
+      } else {
+        try {
+          await ensureLiveVoice();
+          liveSocketRef.current?.clearActive();
+          liveAudioStartedRef.current = false;
+          response = await sendVoiceMessage(
+            SESSION_ID,
+            audio,
+            settings?.voice_language ?? "ru",
+            true,
+          );
+        } catch (liveError) {
+          if (!isLiveVoiceTransportError(liveError)) {
+            throw liveError;
+          }
+          liveSocketRef.current?.close();
+          liveSocketRef.current = null;
+          response = await sendVoiceMessage(
+            SESSION_ID,
+            audio,
+            settings?.voice_language ?? "ru",
+            false,
+          );
+          setError("Live voice stream is unavailable; used legacy voice response.");
+        }
       }
       if ("status" in response) {
         liveSocketRef.current?.activate(response.utterance_id);
@@ -1066,9 +1099,13 @@ function EventsPage({
 
 function SettingsPage({
   settings,
+  avatarStatus,
+  onRefreshAvatar,
   onSettingsChanged,
 }: {
   settings: PublicSettings | null;
+  avatarStatus: AvatarStatusResponse | null;
+  onRefreshAvatar: () => Promise<void>;
   onSettingsChanged: (settings: PublicSettings) => void;
 }) {
   const [personality, setPersonality] = useState("");
@@ -1138,6 +1175,8 @@ function SettingsPage({
           value={`${settings.voice_language} / ${settings.voice_tts_voice} / ${settings.voice_playback_rate.toFixed(2)}x`}
         />
       </div>
+
+      <AvatarControls avatarStatus={avatarStatus} onRefresh={onRefreshAvatar} />
 
       <div className="form-grid">
         <fieldset className="settings-group">
@@ -1237,6 +1276,69 @@ function SettingsPage({
         </button>
       </div>
 
+      {message && <div className="notice">{message}</div>}
+    </section>
+  );
+}
+
+function AvatarControls({
+  avatarStatus,
+  onRefresh,
+}: {
+  avatarStatus: AvatarStatusResponse | null;
+  onRefresh: () => Promise<void>;
+}) {
+  const [phrase, setPhrase] = useState("Проверка аватара.");
+  const [emotion, setEmotion] = useState("happy");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const enabled = Boolean(avatarStatus?.enabled);
+  const client = avatarStatus?.clients[0];
+
+  const run = async (action: () => Promise<unknown>, success: string) => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await action();
+      setMessage(success);
+      await onRefresh();
+    } catch {
+      setMessage("Avatar request could not be completed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="avatar-controls" aria-label="Avatar controls">
+      <div className="panel-header">
+        <div>
+          <h2>Avatar</h2>
+          <span>{enabled ? `${avatarStatus?.client_count ?? 0} connected client(s)` : "Integration disabled"}</span>
+        </div>
+        <button className="secondary" onClick={() => void onRefresh()} disabled={busy}>Refresh status</button>
+      </div>
+      <div className="avatar-grid">
+        <InfoRow label="Protocol" value={avatarStatus ? `v${avatarStatus.protocol_version}` : "unavailable"} />
+        <InfoRow label="Client" value={client?.client_name ?? "disconnected"} />
+        <InfoRow label="State" value={client?.state ?? "Disconnected"} />
+        <InfoRow label="Heartbeat" value={client ? formatTime(client.last_heartbeat_at) : "—"} />
+      </div>
+      <div className="avatar-actions">
+        <label>
+          Test phrase
+          <input value={phrase} onChange={(event) => setPhrase(event.target.value)} disabled={!enabled || busy} />
+        </label>
+        <label>
+          Emotion
+          <select value={emotion} onChange={(event) => setEmotion(event.target.value)} disabled={!enabled || busy}>
+            {["neutral", "happy", "sad", "angry", "surprised", "relaxed", "thinking", "annoyed", "smirk"].map((value) => <option key={value}>{value}</option>)}
+          </select>
+        </label>
+        <button onClick={() => void run(() => sendAvatarTestPhrase({ text: phrase, emotion }), "Test phrase queued.")} disabled={!enabled || busy || !phrase.trim()}>Send test phrase</button>
+        <button onClick={() => void run(() => sendAvatarTestEmotion({ emotion, intensity: 1 }), "Emotion sent.")} disabled={!enabled || busy}>Send emotion</button>
+        <button className="secondary" onClick={() => void run(stopAvatar, "Stop sent.")} disabled={!enabled || busy}>Stop avatar</button>
+      </div>
       {message && <div className="notice">{message}</div>}
     </section>
   );

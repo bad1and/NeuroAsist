@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from apps.backend.app.api.routes.chat import router as chat_router
+from apps.backend.app.api.routes.avatar import router as avatar_router
 from apps.backend.app.api.routes.events import router as events_router
 from apps.backend.app.api.routes.settings import router as settings_router
 from apps.backend.app.api.routes.status import router as status_router
@@ -13,10 +14,13 @@ from apps.backend.app.api.websocket import router as websocket_router
 from apps.backend.app.core.config import get_settings
 from apps.backend.app.core.logging import configure_logging
 from apps.backend.app.events.bus import EventBus
+from apps.backend.app.avatar.connection_manager import AvatarConnectionManager
+from apps.backend.app.avatar.service import AvatarService
 from apps.backend.app.runtime.settings import RuntimeSettings
 from apps.backend.app.storage.sqlite_history import SQLiteMessageHistory
 from apps.backend.app.voice.service import VoiceService
 from apps.backend.app.voice.live import VoiceSessionManager
+from apps.backend.app.voice.orchestrator import SpeechOrchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +32,7 @@ def create_app() -> FastAPI:
     if not settings.llm_api_key:
         logger.warning("DeepSeek API key is not configured")
 
-    app = FastAPI(title=settings.app_name, version="0.3.1")
+    app = FastAPI(title=settings.app_name, version="0.4.0")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
@@ -62,6 +66,13 @@ def create_app() -> FastAPI:
         tts_concurrency_min=settings.voice_live_tts_concurrency_min,
         tts_concurrency_max=settings.voice_live_tts_concurrency_max,
     )
+    avatar_service = AvatarService(
+        AvatarConnectionManager(), event_bus,
+        enabled=settings.avatar_enabled,
+        heartbeat_interval_seconds=settings.avatar_heartbeat_interval_seconds,
+        client_timeout_seconds=settings.avatar_client_timeout_seconds,
+    )
+    speech_orchestrator = SpeechOrchestrator(voice_service, event_bus, settings, avatar_service)
 
     @app.on_event("startup")
     async def startup() -> None:
@@ -158,6 +169,13 @@ def create_app() -> FastAPI:
         )
         logger.info("Backend startup complete")
 
+        await avatar_service.start()
+
+    @app.on_event("shutdown")
+    async def shutdown() -> None:
+        await speech_orchestrator.close()
+        await avatar_service.close()
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
@@ -168,7 +186,10 @@ def create_app() -> FastAPI:
     app.state.runtime_settings = runtime_settings
     app.state.voice_service = voice_service
     app.state.voice_session_manager = voice_session_manager
+    app.state.avatar_service = avatar_service
+    app.state.speech_orchestrator = speech_orchestrator
     app.include_router(chat_router)
+    app.include_router(avatar_router)
     app.include_router(events_router)
     app.include_router(settings_router)
     app.include_router(status_router)

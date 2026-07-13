@@ -33,6 +33,7 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         voice_language=runtime_settings.voice_language,
         voice_stt_model=settings.voice_stt_model,
         voice_tts_enabled=settings.voice_tts_enabled,
+        avatar_enabled=settings.avatar_enabled,
         voice_tts_voice=runtime_settings.voice_tts_voice or settings.voice_silero_speaker_ru,
         voice_playback_rate=runtime_settings.voice_playback_rate,
         voice_live_playback_prebuffer_segments=runtime_settings.voice_live_playback_prebuffer_segments,
