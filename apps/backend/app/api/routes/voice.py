@@ -145,7 +145,8 @@ async def voice_chat(
             orchestrator.bind_runtime(voice_service, settings)
             orchestrator.enqueue(
                 session_id=session_id, voice_request_id=voice_request_id, reply=result["reply"],
-                emotion=result["emotion"], intent=result["intent"], voice=voice,
+                emotion=result["emotion"], intent=result["intent"],
+                gesture=result.get("gesture", "auto"), voice=voice,
             )
         elif not result["reply"].strip():
             tts_status = "skipped"

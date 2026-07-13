@@ -373,7 +373,7 @@ Chat or non-live voice response
   → Unity AudioSource, lip sync, and VRM expression
 ```
 
-The avatar bridge uses protocol v1 and is deliberately optional: unavailable Unity clients do not delay or fail text chat or TTS. The backend broadcasts full-WAV commands to all connected clients. It also provides `GET /avatar/status` plus test endpoints for speech, emotion, and stop; see the [Unity avatar runtime guide](Docs/unity_avatar_runtime_v0.4.md) for setup and diagnostics.
+The avatar bridge uses protocol v1 and is deliberately optional: unavailable Unity clients do not delay or fail text chat or TTS. The backend broadcasts full-WAV commands to all connected clients. It also provides `GET /avatar/status` plus test endpoints for speech, emotion, gesture, and stop; see the [Unity avatar runtime guide](Docs/unity_avatar_runtime_v0.4.md) and [motion v0.5 guide](Docs/avatar-motion-v0.5.md) for setup and diagnostics.
 
 ## Project structure
 

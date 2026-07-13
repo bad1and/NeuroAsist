@@ -5,6 +5,8 @@ from pydantic import ValidationError
 from .schemas import (
     AckPayload,
     ClientStatePayload,
+    GesturePayload,
+    MotionProfilePayload,
     HelloPayload,
     IncomingMessage,
     PlaybackPayload,
@@ -25,6 +27,10 @@ _PAYLOADS = {
     "avatar.playback.finished": PlaybackPayload,
     "avatar.playback.failed": PlaybackPayload,
     "avatar.state.changed": ClientStatePayload,
+    "avatar.gesture.started": GesturePayload,
+    "avatar.gesture.finished": GesturePayload,
+    "avatar.gesture.failed": GesturePayload,
+    "avatar.motion_profile_changed": MotionProfilePayload,
 }
 
 
@@ -44,4 +50,3 @@ def parse_incoming(raw: object) -> tuple[IncomingMessage, object]:
         return envelope, payload_type.model_validate(envelope.payload)
     except ValidationError as exc:
         raise AvatarProtocolError("Malformed avatar message") from exc
-

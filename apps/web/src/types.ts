@@ -102,6 +102,8 @@ export type AvatarClientStatus = {
   platform?: string | null;
   state: string;
   current_utterance_id?: string | null;
+  current_motion_profile?: string | null;
+  current_gesture?: string | null;
 };
 
 export type AvatarStatusResponse = {
