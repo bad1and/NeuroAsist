@@ -1,4 +1,9 @@
-from dataclasses import dataclass
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import asdict, dataclass
+from pathlib import Path
 
 
 @dataclass
@@ -11,3 +16,47 @@ class RuntimeSettings:
     voice_live_playback_prebuffer_ms: int = 200
     memory_mode: str = "ask"
     memory_incognito: bool = False
+
+
+class RuntimeSettingsStore:
+    """Versioned, atomic storage for non-secret desktop preferences."""
+
+    schema_version = 1
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def load(self, defaults: RuntimeSettings) -> RuntimeSettings:
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return defaults
+        if not isinstance(payload, dict) or payload.get("schema_version") != self.schema_version:
+            return defaults
+        if not isinstance(payload.get("settings"), dict):
+            return defaults
+        defaults_dict = asdict(defaults)
+        values = {
+            key: value
+            for key, value in payload["settings"].items()
+            if key in defaults_dict
+            and (defaults_dict[key] is None or isinstance(value, type(defaults_dict[key])))
+        }
+        try:
+            return RuntimeSettings(**{**defaults_dict, **values})
+        except TypeError:
+            return defaults
+
+    def save(self, settings: RuntimeSettings) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps(
+                {"schema_version": self.schema_version, "settings": asdict(settings)},
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        os.replace(temporary, self.path)

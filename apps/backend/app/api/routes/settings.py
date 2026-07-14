@@ -123,6 +123,14 @@ def patch_runtime_settings(
     if payload.memory_incognito is not None:
         runtime_settings.memory_incognito = payload.memory_incognito
 
+    try:
+        request.app.state.runtime_settings_store.save(runtime_settings)
+    except OSError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not persist settings",
+        ) from error
+
     event_bus.publish(
         "backend.status",
         "info",

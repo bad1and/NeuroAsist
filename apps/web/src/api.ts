@@ -21,6 +21,21 @@ export const API_BASE_URL =
   ?? import.meta.env.VITE_API_BASE_URL
   ?? "http://127.0.0.1:8000";
 
+export function isDesktopManaged(): boolean {
+  return Boolean(DESKTOP_RUNTIME && window.__TAURI_INTERNALS__);
+}
+
+async function invokeDesktop<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  if (!window.__TAURI_INTERNALS__) {
+    throw new Error("This action is available only in the installed desktop app.");
+  }
+  return window.__TAURI_INTERNALS__.invoke<T>(command, args);
+}
+
+export function saveDesktopApiKey(apiKey: string): Promise<unknown> {
+  return invokeDesktop("save_api_key", { apiKey });
+}
+
 export const WS_EVENTS_URL =
   DESKTOP_RUNTIME?.wsEventsUrl
   ?? import.meta.env.VITE_WS_EVENTS_URL
@@ -30,6 +45,12 @@ export function voiceWebSocketUrl(sessionId: string): string {
   const base = API_BASE_URL.replace(/^http/, "ws");
   const token = DESKTOP_RUNTIME?.apiToken;
   return `${base}/ws/voice/${encodeURIComponent(sessionId)}?version=1${token ? `&token=${encodeURIComponent(token)}` : ""}`;
+}
+
+export function voiceInputWebSocketUrl(sessionId: string): string {
+  const base = API_BASE_URL.replace(/^http/, "ws");
+  const token = DESKTOP_RUNTIME?.apiToken;
+  return `${base}/ws/voice-input/${encodeURIComponent(sessionId)}?version=1${token ? `&token=${encodeURIComponent(token)}` : ""}`;
 }
 
 function audioExtensionForMime(mimeType: string): string {
@@ -181,6 +202,26 @@ export async function sendVoiceMessage(
   }
 
   return response.json() as Promise<VoiceChatResponse | VoiceLiveResponse>;
+}
+
+export function getModels(): Promise<{ models: import("./types").ManagedModel[] }> {
+  return requestJson("/models");
+}
+
+export function installModel(modelId: string): Promise<import("./types").ManagedModel> {
+  return requestJson(`/models/${encodeURIComponent(modelId)}/install`, { method: "POST" });
+}
+
+export function removeModel(modelId: string): Promise<import("./types").ManagedModel> {
+  return requestJson(`/models/${encodeURIComponent(modelId)}`, { method: "DELETE" });
+}
+
+export function getBackups(): Promise<Array<{ name: string; size_bytes: number; created_at: string }>> {
+  return requestJson("/backups");
+}
+
+export function createBackup(): Promise<{ name: string; size_bytes: number; created_at: string }> {
+  return requestJson("/backups", { method: "POST" });
 }
 
 export function getTimelineMessages(limit = 50): Promise<{ items: TimelineMessage[]; next_offset: number | null }> {

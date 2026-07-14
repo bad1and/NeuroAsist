@@ -173,6 +173,21 @@ export type PublicSettings = {
   available_tts_voices: string[];
 };
 
+export type ManagedModel = {
+  id: string;
+  name: string;
+  version: string;
+  installed: boolean;
+  size_bytes: number;
+  location?: string | null;
+  sha256: string;
+  restart_required: boolean;
+  status: "not_installed" | "downloading" | "installed" | "failed";
+  downloaded_bytes: number;
+  total_bytes: number;
+  error?: string | null;
+};
+
 export type ChatMessage = {
   id: string;
   role: "user" | "assistant";

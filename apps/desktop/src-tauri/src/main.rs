@@ -10,6 +10,8 @@ use std::{
 };
 
 use serde::Serialize;
+use keyring::Entry;
+use tauri_plugin_shell::{process::{CommandChild, CommandEvent}, ShellExt};
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -19,6 +21,8 @@ use tauri_plugin_global_shortcut::ShortcutState;
 
 const CORE_STARTUP_ATTEMPTS: u8 = 60;
 const CORE_STARTUP_DELAY: Duration = Duration::from_millis(250);
+const KEYRING_SERVICE: &str = "NeuroAsist";
+const KEYRING_ACCOUNT: &str = "deepseek_api_key";
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,10 +38,15 @@ struct DesktopState {
     root: PathBuf,
     safe_mode: bool,
     runtime: Mutex<DesktopRuntime>,
-    core: Mutex<Option<Child>>,
+    core: Mutex<Option<CoreProcess>>,
     avatar: Mutex<Option<Child>>,
     crash_restarts: Mutex<u8>,
     core_generation: AtomicU64,
+}
+
+enum CoreProcess {
+    Native(Child),
+    Sidecar(CommandChild),
 }
 
 impl DesktopState {
@@ -83,14 +92,51 @@ impl DesktopState {
         self.set_core_status(app, "starting");
         let generation = self.core_generation.fetch_add(1, Ordering::SeqCst) + 1;
         let runtime = self.runtime();
-        let mut command = core_command(&self.root)?;
-        command
-            .current_dir(&self.root)
-            .env("NEUROASIST_PORT", runtime.api_base_url.rsplit(':').next().unwrap_or("8000"))
-            .env("NEUROASIST_DESKTOP_TOKEN", &runtime.api_token)
-            .env("NEUROASIST_SAFE_MODE", if self.safe_mode { "1" } else { "0" });
-        let child = command.spawn().map_err(|error| format!("Could not start Neuro Core: {error}"))?;
-        *self.core.lock().map_err(|_| "core mutex poisoned")? = Some(child);
+        let data_root = desktop_data_root(&self.root);
+        std::fs::create_dir_all(&data_root).map_err(|error| format!("Could not create NeuroAsist data directory: {error}"))?;
+        let port = runtime.api_base_url.rsplit(':').next().unwrap_or("8000");
+        let api_key = read_api_key()?;
+        let mut sidecar_events = None;
+        let process = if cfg!(debug_assertions) || env::var_os("NEUROASIST_CORE_EXECUTABLE").is_some() {
+            let mut command = core_command(&self.root)?;
+            configure_core_command(&mut command, &self.root, &data_root, port, &runtime.api_token, self.safe_mode, api_key.as_deref());
+            CoreProcess::Native(command.spawn().map_err(|error| format!("Could not start Neuro Core: {error}"))?)
+        } else {
+            let mut command = app.shell().sidecar("neuroasist-core")
+                .map_err(|error| format!("Could not locate bundled Neuro Core: {error}"))?
+                .current_dir(&data_root)
+                .env("NEUROASIST_PORT", port)
+                .env("NEUROASIST_DESKTOP_TOKEN", &runtime.api_token)
+                .env("NEUROASIST_APP_DATA_DIR", &data_root)
+                .env("SQLITE_PATH", data_root.join("data").join("neuroasist.sqlite3"))
+                .env("VOICE_AUDIO_DIR", data_root.join("data").join("audio"))
+                .env("LOG_TO_FILE", "true")
+                .env("LOG_FILE_PATH", data_root.join("logs").join("app.log"))
+                .env("NEUROASIST_SAFE_MODE", if self.safe_mode { "1" } else { "0" });
+            if let Some(api_key) = api_key.as_deref() {
+                command = command.env("DEEPSEEK_API_KEY", api_key);
+            }
+            let (events, child) = command.spawn().map_err(|error| format!("Could not start bundled Neuro Core: {error}"))?;
+            sidecar_events = Some(events);
+            CoreProcess::Sidecar(child)
+        };
+        *self.core.lock().map_err(|_| "core mutex poisoned")? = Some(process);
+        if let Some(mut events) = sidecar_events {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                while let Some(event) = events.recv().await {
+                    if matches!(event, CommandEvent::Terminated(_)) {
+                        let state = app.state::<DesktopState>();
+                        if state.core_generation.load(Ordering::SeqCst) == generation {
+                            if let Ok(mut core) = state.core.lock() {
+                                *core = None;
+                            }
+                        }
+                        break;
+                    }
+                }
+            });
+        }
 
         for _ in 0..CORE_STARTUP_ATTEMPTS {
             if core_health_is_ready(&runtime) {
@@ -144,9 +190,11 @@ impl DesktopState {
     fn core_exited(&self) -> Result<bool, String> {
         let mut core = self.core.lock().map_err(|_| "core mutex poisoned")?;
         let Some(child) = core.as_mut() else { return Ok(true) };
-        if child.try_wait().map_err(|error| error.to_string())?.is_some() {
-            *core = None;
-            return Ok(true);
+        if let CoreProcess::Native(child) = child {
+            if child.try_wait().map_err(|error| error.to_string())?.is_some() {
+                *core = None;
+                return Ok(true);
+            }
         }
         Ok(false)
     }
@@ -163,15 +211,20 @@ impl DesktopState {
         let runtime = self.runtime();
         let _ = core_shutdown_request(&runtime);
         let child = self.core.lock().ok().and_then(|mut core| core.take());
-        if let Some(mut child) = child {
-            for _ in 0..12 {
-                if child.try_wait().ok().flatten().is_some() {
-                    return;
+        if let Some(child) = child {
+            match child {
+                CoreProcess::Native(mut child) => {
+                    for _ in 0..12 {
+                        if child.try_wait().ok().flatten().is_some() {
+                            return;
+                        }
+                        thread::sleep(Duration::from_millis(250));
+                    }
+                    let _ = child.kill();
+                    let _ = child.wait();
                 }
-                thread::sleep(Duration::from_millis(250));
+                CoreProcess::Sidecar(child) => { let _ = child.kill(); }
             }
-            let _ = child.kill();
-            let _ = child.wait();
         }
     }
 
@@ -229,9 +282,35 @@ fn desktop_runtime(app: AppHandle) -> DesktopRuntime {
     app.state::<DesktopState>().runtime()
 }
 
+#[tauri::command]
+fn api_key_configured() -> Result<bool, String> {
+    Ok(read_api_key()?.is_some())
+}
+
+#[tauri::command]
+fn save_api_key(api_key: String, app: AppHandle) -> Result<DesktopRuntime, String> {
+    let api_key = api_key.trim();
+    if api_key.is_empty() {
+        return Err("API key cannot be empty".into());
+    }
+    keyring_entry()?.set_password(api_key).map_err(|error| format!("Could not save API key in Windows Credential Manager: {error}"))?;
+    app.state::<DesktopState>().restart_core(&app)
+}
+
+#[tauri::command]
+fn remove_api_key(app: AppHandle) -> Result<DesktopRuntime, String> {
+    let entry = keyring_entry()?;
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => {}
+        Err(error) => return Err(format!("Could not remove API key from Windows Credential Manager: {error}")),
+    }
+    app.state::<DesktopState>().restart_core(&app)
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| show_main_window(app)))
+        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let state = DesktopState::new();
             app.manage(state);
@@ -253,7 +332,7 @@ fn main() {
             )?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![desktop_runtime, restart_core, toggle_avatar])
+        .invoke_handler(tauri::generate_handler![desktop_runtime, restart_core, toggle_avatar, api_key_configured, save_api_key, remove_api_key])
         .build(tauri::generate_context!())
         .expect("error while building NeuroAsist desktop shell");
 
@@ -327,6 +406,25 @@ fn random_token() -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
+fn keyring_entry() -> Result<Entry, String> {
+    Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT).map_err(|error| format!("Windows Credential Manager is unavailable: {error}"))
+}
+
+fn desktop_data_root(root: &PathBuf) -> PathBuf {
+    env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .map(|path| path.join("NeuroAsist"))
+        .unwrap_or_else(|| root.join("data"))
+}
+
+fn read_api_key() -> Result<Option<String>, String> {
+    match keyring_entry()?.get_password() {
+        Ok(value) if !value.trim().is_empty() => Ok(Some(value)),
+        Ok(_) | Err(keyring::Error::NoEntry) => Ok(None),
+        Err(error) => Err(format!("Could not read API key from Windows Credential Manager: {error}")),
+    }
+}
+
 fn core_command(root: &PathBuf) -> Result<Command, String> {
     if let Some(executable) = env::var_os("NEUROASIST_CORE_EXECUTABLE") {
         return Ok(Command::new(executable));
@@ -335,6 +433,30 @@ fn core_command(root: &PathBuf) -> Result<Command, String> {
     let mut command = Command::new(if python.exists() { python } else { PathBuf::from("python") });
     command.args(["-m", "apps.backend.desktop_entry"]);
     Ok(command)
+}
+
+fn configure_core_command(
+    command: &mut Command,
+    root: &PathBuf,
+    data_root: &PathBuf,
+    port: &str,
+    token: &str,
+    safe_mode: bool,
+    api_key: Option<&str>,
+) {
+    command
+        .current_dir(root)
+        .env("NEUROASIST_PORT", port)
+        .env("NEUROASIST_DESKTOP_TOKEN", token)
+        .env("NEUROASIST_APP_DATA_DIR", data_root)
+        .env("SQLITE_PATH", data_root.join("data").join("neuroasist.sqlite3"))
+        .env("VOICE_AUDIO_DIR", data_root.join("data").join("audio"))
+        .env("LOG_TO_FILE", "true")
+        .env("LOG_FILE_PATH", data_root.join("logs").join("app.log"))
+        .env("NEUROASIST_SAFE_MODE", if safe_mode { "1" } else { "0" });
+    if let Some(api_key) = api_key {
+        command.env("DEEPSEEK_API_KEY", api_key);
+    }
 }
 
 fn core_health_is_ready(runtime: &DesktopRuntime) -> bool {

@@ -1,6 +1,8 @@
 import logging
 import shutil
 import time
+import wave
+import io
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
@@ -169,6 +171,18 @@ class VoiceService:
             path.unlink(missing_ok=True)
         except OSError:
             pass
+
+    def save_pcm16_temp(self, pcm16: bytes, sample_rate: int) -> Path:
+        """Create a short-lived WAV for STT; callers must invoke cleanup_upload."""
+        upload_dir = self._settings.voice_audio_path / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        path = upload_dir / f"{uuid4().hex}.wav"
+        with wave.open(str(path), "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(sample_rate)
+            audio.writeframes(pcm16)
+        return path
 
     def clear_audio_dir(self) -> None:
         root = self._settings.voice_audio_path

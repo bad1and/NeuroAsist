@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -724,8 +725,11 @@ class TimelineStore:
 
     @staticmethod
     def _fts_query(text: str) -> str:
-        terms = [word.strip(".,!?;:()[]{}\\\"'").replace('"', '') for word in text.split()]
-        return " OR ".join(f'{term}*' for term in terms if len(term) >= 2)
+        # SQLite FTS treats `-`, `:`, quotes, and several other characters as
+        # query syntax. User text must therefore be tokenized before building
+        # a prefix query; otherwise `какую-нибудь` is parsed as a column query.
+        terms = re.findall(r"[^\W_]+", text, flags=re.UNICODE)
+        return " OR ".join(f'"{term}"*' for term in terms if len(term) >= 2)
 
     @staticmethod
     def _memory_row(row: sqlite3.Row) -> dict[str, object]:

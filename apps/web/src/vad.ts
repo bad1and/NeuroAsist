@@ -43,27 +43,27 @@ class NeuroVadProcessor extends AudioWorkletProcessor {
     if (!samples) return true;
     let sum = 0;
     for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
-    this.port.postMessage(Math.sqrt(sum / samples.length));
+    const pcm = new Int16Array(samples.length);
+    for (let i = 0; i < samples.length; i++) pcm[i] = Math.max(-1, Math.min(1, samples[i])) * 32767;
+    this.port.postMessage({ rms: Math.sqrt(sum / samples.length), pcm: pcm.buffer }, [pcm.buffer]);
     return true;
   }
 }
 registerProcessor('neuro-vad', NeuroVadProcessor);`;
 
 /**
- * Browser-only VAD monitor. Audio remains in RAM and MediaRecorder is opened
- * only for a confirmed utterance; no raw microphone file is created locally.
+ * Browser-only monitor. It emits PCM16 frames directly from AudioWorklet; no
+ * MediaRecorder blob or local microphone file is created.
  */
 export class BrowserVadRecorder {
   private stream: MediaStream | null = null;
   private context: AudioContext | null = null;
   private node: AudioWorkletNode | null = null;
   private sink: GainNode | null = null;
-  private recorder: MediaRecorder | null = null;
-  private chunks: Blob[] = [];
   private objectUrl: string | null = null;
   private readonly gate = new VoiceActivityGate();
 
-  async start(onUtterance: (audio: Blob, endedAt: number) => void, onState: (state: VadState) => void): Promise<void> {
+  async start(onPcm: (pcm16: ArrayBuffer, sampleRate: number) => void, onState: (state: VadState) => void): Promise<void> {
     if (this.stream) return;
     if (!globalThis.AudioWorkletNode || !navigator.mediaDevices?.getUserMedia) {
       throw new Error("AudioWorklet VAD is unavailable in this browser");
@@ -71,7 +71,7 @@ export class BrowserVadRecorder {
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
-    this.context = new AudioContext();
+    this.context = new AudioContext({ sampleRate: 16000 });
     this.objectUrl = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: "text/javascript" }));
     await this.context.audioWorklet.addModule(this.objectUrl);
     const source = this.context.createMediaStreamSource(this.stream);
@@ -83,41 +83,37 @@ export class BrowserVadRecorder {
     this.gate.start(performance.now());
     onState("listening");
     this.node.port.onmessage = ({ data }) => {
-      const event = this.gate.feed(Number(data) || 0, performance.now());
+      onPcm(data.pcm as ArrayBuffer, this.context?.sampleRate ?? 16000);
+      const event = this.gate.feed(Number(data.rms) || 0, performance.now());
       onState(this.gate.snapshot());
-      if (event === "speech_started") this.beginCapture();
-      if (event === "speech_ended") this.endCapture(onUtterance);
+      void event;
     };
   }
 
   stop(): void {
     this.gate.stop();
-    if (this.recorder?.state === "recording") this.recorder.stop();
-    this.recorder = null;
     this.node?.disconnect();
     this.sink?.disconnect();
     this.stream?.getTracks().forEach((track) => track.stop());
     void this.context?.close();
     if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
-    this.stream = null; this.context = null; this.node = null; this.sink = null; this.objectUrl = null; this.chunks = [];
+    this.stream = null; this.context = null; this.node = null; this.sink = null; this.objectUrl = null;
   }
+}
 
-  private beginCapture(): void {
-    if (!this.stream || this.recorder?.state === "recording") return;
-    this.chunks = [];
-    this.recorder = new MediaRecorder(this.stream);
-    this.recorder.ondataavailable = (event) => { if (event.data.size) this.chunks.push(event.data); };
-    this.recorder.start();
+export class PcmInputClient {
+  private socket: WebSocket | null = null;
+  constructor(private readonly url: string, private readonly onEvent: (event: { type: string; transcript?: string; message?: string }) => void) {}
+  async connect(sampleRate: number, language: string): Promise<void> {
+    if (this.socket?.readyState === WebSocket.OPEN) return;
+    const socket = new WebSocket(this.url);
+    this.socket = socket;
+    await new Promise<void>((resolve, reject) => {
+      socket.onopen = () => { socket.send(JSON.stringify({ type: "voice.input.start", sample_rate: sampleRate, channels: 1, language })); resolve(); };
+      socket.onerror = () => reject(new Error("PCM input WebSocket failed"));
+      socket.onmessage = (message) => this.onEvent(JSON.parse(String(message.data)));
+    });
   }
-
-  private endCapture(onUtterance: (audio: Blob, endedAt: number) => void): void {
-    const recorder = this.recorder;
-    if (!recorder || recorder.state !== "recording") return;
-    recorder.onstop = () => {
-      const audio = new Blob(this.chunks, { type: recorder.mimeType || "audio/webm" });
-      this.chunks = [];
-      if (audio.size) onUtterance(audio, Date.now());
-    };
-    recorder.stop();
-  }
+  sendPcm(pcm16: ArrayBuffer): void { if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(pcm16); }
+  close(): void { this.socket?.send(JSON.stringify({ type: "voice.input.stop" })); this.socket?.close(); this.socket = null; }
 }

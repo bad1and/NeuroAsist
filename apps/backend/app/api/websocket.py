@@ -92,6 +92,38 @@ async def websocket_voice(websocket: WebSocket, session_id: str, version: int = 
             await unregister
 
 
+@router.websocket("/ws/voice-input/{session_id}")
+async def websocket_voice_input(websocket: WebSocket, session_id: str, version: int = 1, token: str | None = None) -> None:
+    if not _desktop_token_is_valid(websocket, token) or version != 1:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    await websocket.accept()
+    manager = websocket.app.state.voice_input_session_manager
+    connection = await manager.register(session_id, websocket)
+    try:
+        while True:
+            message = await websocket.receive()
+            if message.get("bytes") is not None:
+                await manager.feed(session_id, message["bytes"])
+                continue
+            payload = json.loads(message.get("text") or "{}")
+            if payload.get("type") == "voice.input.start":
+                await manager.start(
+                    session_id,
+                    sample_rate=int(payload.get("sample_rate", 16000)),
+                    channels=int(payload.get("channels", 1)),
+                    language=str(payload.get("language", "ru")),
+                )
+            elif payload.get("type") == "voice.input.stop":
+                break
+    except (WebSocketDisconnect, RuntimeError, json.JSONDecodeError, ValueError) as exc:
+        if not isinstance(exc, WebSocketDisconnect):
+            with contextlib.suppress(Exception):
+                await connection.send({"type": "voice.input.error", "message": str(exc)})
+    finally:
+        await manager.unregister(session_id, connection)
+
+
 @router.websocket("/ws/events")
 async def websocket_events(websocket: WebSocket, token: str | None = None) -> None:
     if not _desktop_token_is_valid(websocket, token):
