@@ -201,3 +201,8 @@ apps/avatar-unity/Builds/NeuroAsistAvatar/*
 [Ll]ogs/
 UserSettings/
 MemoryCaptures/
+
+# Unity IDE-generated project files
+apps/avatar-unity/*.csproj
+apps/avatar-unity/*.sln
+apps/avatar-unity/.vsconfig
