@@ -4,11 +4,29 @@ param(
 
 $ErrorActionPreference = "Stop"
 $project = Split-Path -Parent $PSScriptRoot
+$logFile = Join-Path $project "Builds\avatar-build.log"
+
+function Show-BuildLog {
+    if (Test-Path -LiteralPath $logFile) {
+        Write-Host "`n--- Unity build log (last 100 lines): $logFile ---" -ForegroundColor Yellow
+        Get-Content -LiteralPath $logFile -Tail 100
+    }
+    else {
+        Write-Host "Unity did not create a build log: $logFile" -ForegroundColor Yellow
+    }
+}
+
 if (-not $UnityEditor) {
-    throw "Set NEUROASIST_UNITY_EDITOR to Unity.exe (Unity 2022.3.62f3)."
+    throw "NEUROASIST_UNITY_EDITOR is not set. Example: `$env:NEUROASIST_UNITY_EDITOR = 'C:\Program Files\Unity\Hub\Editor\2022.3.62f3\Editor\Unity.exe'"
 }
 if (-not (Test-Path -LiteralPath $UnityEditor)) {
     throw "Unity editor was not found: $UnityEditor"
+}
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    throw "Git was not found in PATH. Unity needs Git to restore the uLipSync package from Packages/manifest.json. Install Git for Windows, reopen PowerShell, then run the build again."
+}
+if (Test-Path -LiteralPath (Join-Path $project "Temp\UnityLockfile")) {
+    throw "The Unity project is locked. Close Unity Editor and every running build of NeuroAsistAvatar, then run the build again."
 }
 
 $arguments = @(
@@ -17,7 +35,18 @@ $arguments = @(
     '-quit',
     '-projectPath', "`"$project`"",
     '-executeMethod', 'NeuroAsist.AvatarEditor.AvatarBuild.BuildWindows',
-    '-logFile', "`"$project\Builds\avatar-build.log`""
+    '-logFile', "`"$logFile`""
 )
-$process = Start-Process -FilePath $UnityEditor -ArgumentList $arguments -Wait -PassThru
-if ($process.ExitCode -ne 0) { throw "Unity avatar build failed with exit code $($process.ExitCode). See $project\Builds\avatar-build.log" }
+Write-Host "Building Unity avatar with: $UnityEditor"
+try {
+    $process = Start-Process -FilePath $UnityEditor -ArgumentList $arguments -Wait -PassThru
+}
+catch {
+    Show-BuildLog
+    throw
+}
+if ($process.ExitCode -ne 0) {
+    Show-BuildLog
+    throw "Unity avatar build failed with exit code $($process.ExitCode)."
+}
+Write-Host "Avatar build completed: $project\Builds\NeuroAsistAvatar\NeuroAsistAvatar.exe" -ForegroundColor Green
