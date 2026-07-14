@@ -394,6 +394,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
     let menu = MenuBuilder::new(app).items(&[&show, &avatar, &safe_mode, &quit]).build()?;
     TrayIconBuilder::with_id("companion")
+        .icon(tauri::include_image!("./icons/32x32.png"))
         .tooltip("NeuroAsist companion")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {

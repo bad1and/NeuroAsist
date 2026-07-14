@@ -325,7 +325,7 @@ function Header({
     <header className="topbar">
       <div>
         <h1>NeuroAsist</h1>
-        <p>{status?.version ?? "v0.2.0"} local control panel</p>
+        <p>{status?.version ?? "0.6.0"} local control panel</p>
       </div>
 
       <div className="status-grid">

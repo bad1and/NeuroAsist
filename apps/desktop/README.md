@@ -6,8 +6,16 @@ The desktop shell is a Tauri 2 application around the existing React UI and Fast
 
 ```powershell
 npm install --prefix apps/desktop
+```
+
+On the first launch, point the desktop build scripts to the Unity Editor executable in the same PowerShell session, then start the companion:
+
+```powershell
+$env:NEUROASIST_UNITY_EDITOR = 'C:\Program Files\Unity\Hub\Editor\<version>\Editor\Unity.exe'
 npm run dev --prefix apps/desktop
 ```
+
+Replace `<version>` with the installed Unity version or use the full path to your `Unity.exe`. The environment variable applies only to the current PowerShell session and must be set again in a new terminal.
 
 The dev shell uses the repository `.venv\Scripts\python.exe` when present and launches `python -m apps.backend.desktop_entry`. It starts Vite itself, so no browser tab or separately started backend is required. `CommandOrControl+Shift+N` opens the main window again; the tray provides the same action, Safe Mode, avatar toggle, and Quit.
 
