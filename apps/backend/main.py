@@ -56,7 +56,7 @@ def create_app() -> FastAPI:
     if not settings.llm_api_key:
         logger.warning("DeepSeek API key is not configured")
 
-    app = FastAPI(title=settings.app_name, version="0.4.0")
+    app = FastAPI(title=settings.app_name, version="0.6.0")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
