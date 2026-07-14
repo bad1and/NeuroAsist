@@ -9,7 +9,7 @@ from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.llm.base import ChatMessage, LLMProvider, LLMResponse
 from apps.backend.app.storage.sqlite_history import SQLiteMessageHistory
 from apps.backend.app.voice.text import TextChunker, TextNormalizer
-from apps.backend.app.voice.directives import LiveDirectiveParser, clean_live_reply
+from apps.backend.app.voice.directives import LiveDirectiveParser, AvatarDirective, clean_live_reply, make_live_directive_expressive
 from apps.backend.app.voice.live import VoiceSessionManager
 from apps.backend.app.voice.live import UtteranceContext
 from apps.backend.app.voice.providers import AudioChunk, MockTTSProvider
@@ -67,6 +67,15 @@ def test_malformed_machine_header_is_not_spoken() -> None:
     assert directive is not None
     assert directive.emotion == "neutral"
     assert text == [" Привет"]
+
+
+def test_live_directive_fallback_is_visible_and_contextual() -> None:
+    assert make_live_directive_expressive(AvatarDirective(), "Почему опять ошибка?") == AvatarDirective("annoyed", "frustration", 1.0)
+    assert make_live_directive_expressive(AvatarDirective(), "Спасибо, это круто") == AvatarDirective("happy", "talk", 1.0)
+    assert make_live_directive_expressive(AvatarDirective(), "Меня это бесит") == AvatarDirective("annoyed", "frustration", 1.0)
+    assert make_live_directive_expressive(AvatarDirective(), "Как это работает?") == AvatarDirective("thinking", "question", 1.0)
+    assert make_live_directive_expressive(AvatarDirective(), "Сделай заметку") == AvatarDirective("neutral", "talk", 1.0)
+    assert make_live_directive_expressive(AvatarDirective("thinking", "auto", .7), "Почему?") == AvatarDirective("thinking", "question", .7)
 
 
 def test_chunker_protects_decimal_and_russian_abbreviation() -> None:

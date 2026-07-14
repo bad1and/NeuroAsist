@@ -16,7 +16,9 @@ from apps.backend.app.voice.providers import (
     _minimum_tts_duration_seconds,
 )
 from apps.backend.app.voice.text import TextChunker, TextNormalizer
-from apps.backend.app.voice.directives import AvatarDirective, LiveDirectiveParser, clean_live_reply
+from apps.backend.app.voice.directives import (
+    AvatarDirective, LiveDirectiveParser, clean_live_reply, make_live_directive_expressive,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +179,7 @@ class VoiceSessionManager:
             if directive_sent:
                 return
             directive_sent = True
+            directive = make_live_directive_expressive(directive, transcript)
             if self._avatar_service is not None:
                 await self._avatar_service.stream_metadata(
                     session_id=context.session_id,
