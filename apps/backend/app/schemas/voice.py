@@ -19,6 +19,7 @@ class VoiceChatResponse(BaseModel):
     tts_status: str = "queued"
     stt: VoiceProviderStats
     tts: VoiceProviderStats
+    memory_updates: list[dict[str, str]] = []
 
 
 class VoiceTTSStatusResponse(BaseModel):

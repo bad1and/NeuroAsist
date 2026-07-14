@@ -266,7 +266,12 @@ class VoiceSessionManager:
                 segment = normalizer.normalize(raw_segment)
                 if segment:
                     await self._enqueue_tts_text(queue, worker, segment)
-            await self._send(context, "voice.text.completed", reply="".join(reply_parts).strip())
+            await self._send(
+                context,
+                "voice.text.completed",
+                reply="".join(reply_parts).strip(),
+                memory_updates=agent.last_memory_updates,
+            )
             context.text_completed = True
             await self._enqueue(queue, worker, None)
             await worker

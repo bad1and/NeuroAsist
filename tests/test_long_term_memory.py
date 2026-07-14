@@ -52,6 +52,56 @@ def test_memory_deduplicates_and_supersedes_conflicting_user_fact(tmp_path: Path
     assert service.retrieve("как меня зовут")[0]["value_text"] == "Алекс"
 
 
+def test_balanced_memory_saves_valid_identity_and_returns_it_for_identity_variants(tmp_path: Path) -> None:
+    store, service = _service(tmp_path, mode="balanced")
+    message, _ = store.append_message(
+        role="user", content="Запомни: меня зовут Роман Петров, приятно познакомиться.", input_mode="text",
+    )
+
+    memory = service.extract_from_message(message)[0]
+
+    assert memory["predicate"] == "name"
+    assert memory["value_text"] == "Роман Петров"
+    assert memory["status"] == "active"
+    for query in ("Ты помнишь моё имя?", "Как меня называть?", "Who am I?"):
+        assert service.retrieve(query)[0]["id"] == memory["id"]
+    assert service.memory_update(memory) == {
+        "id": memory["id"], "status": "active", "action": "saved", "predicate": "name",
+    }
+
+
+def test_balanced_memory_keeps_preferences_and_sensitive_facts_for_review(tmp_path: Path) -> None:
+    store, service = _service(tmp_path, mode="balanced")
+    preference, _ = store.append_message(role="user", content="Я предпочитаю короткие ответы", input_mode="text")
+    sensitive, _ = store.append_message(role="user", content="Запомни: у меня диагноз аллергия", input_mode="text")
+
+    assert service.extract_from_message(preference)[0]["status"] == "candidate"
+    assert service.extract_from_message(sensitive)[0]["status"] == "candidate"
+
+
+def test_name_extraction_rejects_invalid_value_and_repairs_legacy_candidate_from_source(tmp_path: Path) -> None:
+    store, service = _service(tmp_path, mode="balanced")
+    invalid, _ = store.append_message(role="user", content="Меня зовут 123", input_mode="text")
+    source, _ = store.append_message(
+        role="user", content="Меня зовут Роман, а ещё я люблю игры", input_mode="text",
+    )
+    legacy = store.create_memory({
+        "scope": "user_profile", "kind": "identity", "subject": "user", "predicate": "name",
+        "value_text": "Роман а ещё я люблю игры", "importance": .9, "confidence": .75,
+        "status": "candidate", "source_message_ids": [source.id], "source_episode_id": source.episode_id,
+        "extractor_version": "deterministic-v1",
+    }, actor="extractor")
+
+    assert service.extract_from_message(invalid) == []
+    repaired = service.repair_legacy_identity_candidates()
+
+    assert len(repaired) == 1
+    assert repaired[0]["value_text"] == "Роман"
+    assert repaired[0]["status"] == "active"
+    assert store.get_memory(str(legacy["id"]))["status"] == "superseded"
+    assert service.repair_legacy_identity_candidates() == []
+
+
 def test_sensitive_and_ask_mode_candidates_require_confirmation(tmp_path: Path) -> None:
     store, automatic = _service(tmp_path, mode="automatic")
     sensitive, _ = store.append_message(role="user", content="Запомни: у меня диагноз аллергия", input_mode="text")
@@ -107,3 +157,28 @@ def test_incognito_skips_timeline_and_memory_writes(tmp_path: Path) -> None:
 
     assert store.list_messages(20)[0] == []
     assert store.list_memories(limit=20) == []
+
+
+def test_agent_persists_user_memory_before_llm_failure(tmp_path: Path) -> None:
+    class FailingProvider:
+        async def generate(self, _messages):
+            raise RuntimeError("provider unavailable")
+
+    store = TimelineStore(tmp_path / "failure.sqlite3")
+    store.init_db()
+    runtime = RuntimeSettings(memory_mode="balanced")
+    service = MemoryService(store, runtime)
+    from apps.backend.app.storage.timeline import TimelineHistoryAdapter
+    import asyncio
+
+    agent = CharacterAgent(FailingProvider(), TimelineHistoryAdapter(store), history_limit=5, memory_service=service)
+    try:
+        asyncio.run(agent.handle_user_message("default", "Меня зовут Роман"))
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("Expected provider failure")
+
+    assert store.list_messages(10)[0][0].content == "Меня зовут Роман"
+    assert service.retrieve("Ты помнишь моё имя?")[0]["value_text"] == "Роман"
+    assert agent.last_memory_updates[0]["action"] == "saved"

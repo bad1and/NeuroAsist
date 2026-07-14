@@ -15,6 +15,20 @@ class MemoryService:
     """The only component allowed to turn a candidate into canonical memory."""
 
     _SENSITIVE_WORDS = ("здоров", "болез", "диагноз", "адрес", "паспорт", "карта", "парол", "полит")
+    _NAME_PREFIX = re.compile(
+        r"(?:\bменя\s+зовут\b|\bмо[её]\s+имя(?:\s+(?:это|[-—:]))?\b|\bmy\s+name\s+is\b|\bcall\s+me\b)",
+        flags=re.IGNORECASE,
+    )
+    _NAME_TOKEN = re.compile(r"^[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё'’-]{1,39}$")
+    _NAME_STOP_WORDS = {
+        "и", "а", "но", "я", "мне", "это", "теперь", "запомни", "remember",
+        "and", "but", "i", "this", "please",
+    }
+    _IDENTITY_QUERY_MARKERS = (
+        "как меня зовут", "помнишь мое имя", "помнишь моё имя", "как меня называть",
+        "кто я", "ты помнишь имя", "my name", "remember my name", "what is my name",
+        "call me", "who am i",
+    )
 
     def __init__(
         self,
@@ -59,7 +73,7 @@ class MemoryService:
         if not self._enabled or self.incognito:
             return []
         normalized_query = self._normalize(query)
-        if "как меня зовут" in normalized_query or "my name" in normalized_query:
+        if self._is_identity_query(normalized_query):
             memories = [item for item in self._store.list_memories(status="active", limit=limit) if item["predicate"] == "name"]
             memories = self._attach_retrieval(memories, {str(item["id"]): 1.0 for item in memories}, {}, temporal=False)
         else:
@@ -94,10 +108,54 @@ class MemoryService:
             candidate.update({
                 "source_message_ids": [message.id],
                 "source_episode_id": message.episode_id,
-                "extractor_version": "deterministic-v1",
+                "extractor_version": "deterministic-v2",
             })
             saved.append(self._apply_candidate(candidate, actor="extractor"))
         return saved
+
+    def repair_legacy_identity_candidates(self) -> list[dict[str, object]]:
+        """Repair only malformed V0.5 name candidates from their source messages.
+
+        The original candidate text is never trusted: a fresh valid name is
+        extracted from its provenance, then the old candidate is superseded.
+        Re-running this method is safe because repaired items are no longer
+        candidates.
+        """
+        repaired: list[dict[str, object]] = []
+        candidates = sorted(
+            self._store.list_memories(status="candidate", limit=250),
+            key=lambda item: str(item["created_at"]),
+        )
+        for candidate in candidates:
+            if candidate["predicate"] != "name" or candidate["extractor_version"] != "deterministic-v1":
+                continue
+            source_ids = list(candidate["source_message_ids"])
+            if len(source_ids) != 1:
+                continue
+            source = self._store.get_message(source_ids[0])
+            value = self._extract_name(source.effective_content) if source is not None else None
+            if value is None:
+                continue
+            values = {
+                "scope": "user_profile", "kind": "identity", "subject": "user", "predicate": "name",
+                "value_text": value, "importance": 0.9, "confidence": 0.9, "sensitivity": "normal",
+                "status": "active", "source_message_ids": source_ids,
+                "source_episode_id": source.episode_id, "extractor_version": "deterministic-v2-repair",
+            }
+            repaired_memory = self._apply_candidate(values, actor="migration", action="legacy_identity_repaired")
+            self._store.supersede_memory(str(candidate["id"]), str(repaired_memory["id"]))
+            repaired.append(repaired_memory)
+        return repaired
+
+    @staticmethod
+    def memory_update(memory: dict[str, object]) -> dict[str, str]:
+        status = str(memory["status"])
+        return {
+            "id": str(memory["id"]),
+            "status": status,
+            "action": "saved" if status == "active" else "review" if status == "candidate" else "updated",
+            "predicate": str(memory["predicate"]),
+        }
 
     def create_manual(self, values: dict[str, object]) -> dict[str, object]:
         source_ids = list(values.get("source_message_ids", []))
@@ -182,7 +240,7 @@ class MemoryService:
         status = str(values.get("status", "candidate"))
         if actor == "extractor":
             sensitive = values.get("sensitivity") == "sensitive"
-            status = "active" if self._runtime.memory_mode == "automatic" and not (sensitive and self._sensitive_mode == "ask") else "candidate"
+            status = "active" if self._should_auto_activate(values, sensitive) else "candidate"
             if conflict is not None and conflict["user_locked"]:
                 status = "candidate"
         values["status"] = status
@@ -210,6 +268,14 @@ class MemoryService:
                 self._degrade_semantic(exc)
         temporal = self._is_temporal_query(query)
         return self._attach_retrieval(list(candidates.values()), fts_scores, semantic_scores, temporal)[:limit]
+
+    def _should_auto_activate(self, values: dict[str, object], sensitive: bool) -> bool:
+        if sensitive and self._sensitive_mode == "ask":
+            return False
+        mode = "balanced" if self._runtime.memory_mode == "ask" else self._runtime.memory_mode
+        if mode == "automatic":
+            return True
+        return mode == "balanced" and str(values.get("predicate")) in {"name", "explicit_memory", "current_statement"}
 
     def _attach_retrieval(
         self, memories: list[dict[str, object]], fts_scores: dict[str, float],
@@ -297,14 +363,15 @@ class MemoryService:
         value: str | None = None
         kind, predicate, importance = "preference", "user_statement", 0.55
         explicit = re.search(r"(?:запомни|remember)\s*[:,]?\s*(.+)", cleaned, flags=re.IGNORECASE)
-        name = re.search(r"(?:меня зовут|my name is)\s+(.+)", cleaned, flags=re.IGNORECASE)
         preference = re.search(r"(?:я предпочитаю|i prefer)\s+(.+)", cleaned, flags=re.IGNORECASE)
         interest = re.search(r"(?:я люблю|мне нравится|i like)\s+(.+)", cleaned, flags=re.IGNORECASE)
         correction = re.search(r"(?:теперь я|я больше не)\s+(.+)", cleaned, flags=re.IGNORECASE)
-        if explicit:
+        name = self._extract_name(cleaned)
+        # Identity takes priority over a generic explicit-memory command.
+        if name:
+            value, kind, predicate, importance = name, "identity", "name", 0.9
+        elif explicit:
             value, predicate, importance = explicit.group(1).strip(), "explicit_memory", 0.8
-        elif name:
-            value, kind, predicate, importance = name.group(1).strip(), "identity", "name", 0.9
         elif preference:
             value, predicate, importance = preference.group(1).strip(), "preferred", 0.7
         elif interest:
@@ -319,6 +386,33 @@ class MemoryService:
             "value_text": value[:2000], "importance": importance, "confidence": 0.9 if explicit else 0.75,
             "sensitivity": sensitivity,
         }]
+
+    @classmethod
+    def _extract_name(cls, text: str) -> str | None:
+        match = cls._NAME_PREFIX.search(text)
+        if match is None:
+            return None
+        suffix = text[match.end():].lstrip(" \t:,-—–")
+        segment = re.split(r"[,.!?;:\n—–-]", suffix, maxsplit=1)[0]
+        tokens: list[str] = []
+        for raw in segment.split():
+            token = raw.strip("\"'“”()[]{}")
+            if not token:
+                continue
+            if token.lower() in cls._NAME_STOP_WORDS:
+                break
+            if not cls._NAME_TOKEN.fullmatch(token):
+                break
+            tokens.append(token)
+            if len(tokens) == 3:
+                break
+        if not tokens:
+            return None
+        return " ".join(tokens)
+
+    @classmethod
+    def _is_identity_query(cls, normalized_query: str) -> bool:
+        return any(marker in normalized_query for marker in cls._IDENTITY_QUERY_MARKERS)
 
     @staticmethod
     def _normalize(value: str) -> str:

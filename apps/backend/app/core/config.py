@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     context_max_tokens: int = 3000
     context_recent_turns: int = 8
     memory_enabled: bool = True
-    memory_mode: str = "ask"
+    memory_mode: str = "balanced"
     memory_sensitive_mode: str = "ask"
     memory_max_candidates_per_turn: int = 3
     memory_context_max_tokens: int = 900

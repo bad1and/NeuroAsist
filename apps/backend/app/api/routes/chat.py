@@ -39,6 +39,7 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             persona_name=request.app.state.runtime_settings.personality,
         )
         result = await agent.handle_user_message(payload.session_id, payload.message)
+        result["memory_updates"] = agent.last_memory_updates
     except ValueError as exc:
         logger.error(
             "Chat request failed: session_id=%s message_length=%s",

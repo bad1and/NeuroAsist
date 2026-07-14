@@ -238,6 +238,15 @@ def create_app() -> FastAPI:
             history.init_db()
             if timeline_store is not None:
                 timeline_store.recover_active_episode()
+            if memory_service is not None:
+                repaired = memory_service.repair_legacy_identity_candidates()
+                if repaired:
+                    event_bus.publish(
+                        "memory.legacy_identity_repaired",
+                        "info",
+                        "Legacy identity memories repaired",
+                        {"count": len(repaired)},
+                    )
         except Exception:
             logger.critical("Storage initialization failed", exc_info=True)
             event_bus.publish(

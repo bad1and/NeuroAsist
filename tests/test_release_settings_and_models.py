@@ -21,6 +21,16 @@ def test_runtime_settings_survive_restart_without_secrets(tmp_path: Path) -> Non
     assert "api" not in (tmp_path / "settings.json").read_text(encoding="utf-8").lower()
 
 
+def test_legacy_ask_memory_mode_is_migrated_to_balanced(tmp_path: Path) -> None:
+    store = RuntimeSettingsStore(tmp_path / "settings.json")
+    store.save(RuntimeSettings(memory_mode="ask"))
+
+    loaded = store.load(RuntimeSettings())
+
+    assert loaded.memory_mode == "balanced"
+    assert '"balanced"' in (tmp_path / "settings.json").read_text(encoding="utf-8")
+
+
 def test_model_manager_downloads_and_verifies_pinned_file(tmp_path: Path) -> None:
     source = tmp_path / "source.jit"
     source.write_bytes(b"silero fixture")

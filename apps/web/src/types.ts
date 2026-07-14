@@ -29,6 +29,14 @@ export type ChatResponse = {
   voice_request_id?: string | null;
   reply_audio_url?: string | null;
   tts_status?: VoiceTtsStatus | null;
+  memory_updates?: MemoryUpdate[];
+};
+
+export type MemoryUpdate = {
+  id: string;
+  status: MemoryStatus;
+  action: "saved" | "review" | "updated";
+  predicate: string;
 };
 
 export type VoiceTtsStatus =
@@ -83,6 +91,7 @@ export type VoiceServerEvent = {
   metadata?: CharacterMetadataFrame;
   code?: string;
   message?: string;
+  memory_updates?: MemoryUpdate[];
 };
 
 export type VoiceTtsStatusResponse = {
