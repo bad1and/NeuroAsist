@@ -100,6 +100,9 @@ async def voice_chat(
             history=history,
             history_limit=settings.chat_history_limit,
             event_publisher=event_bus.publish,
+            context_manager=request.app.state.context_manager,
+            memory_service=request.app.state.memory_service,
+            persona_name=runtime_settings.personality,
         )
         voice = voice_service.resolve_tts_voice(
             stt_result.language,
@@ -147,7 +150,7 @@ async def voice_chat(
         )
         llm_started = time.perf_counter()
         result = await asyncio.wait_for(
-            agent.handle_user_message(session_id, stt_result.text),
+            agent.handle_user_message(session_id, stt_result.text, input_mode="voice"),
             timeout=settings.voice_llm_timeout_seconds,
         )
         llm_duration_ms = int((time.perf_counter() - llm_started) * 1000)
@@ -195,6 +198,13 @@ async def voice_chat(
                 "total_ms": int((time.perf_counter() - request_started) * 1000),
             },
         )
+        if agent.last_turn is not None:
+            event_bus.publish(
+                "character.metadata",
+                "info",
+                "Character metadata resolved",
+                {"session_id": session_id, "metadata": agent.last_turn.metadata_frame()},
+            )
     except HTTPException:
         event_bus.publish(
             "voice.error",

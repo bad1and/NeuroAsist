@@ -14,6 +14,14 @@ class PublicSettingsResponse(BaseModel):
     voice_live_playback_prebuffer_segments: int
     voice_live_playback_prebuffer_ms: int
     chat_history_limit: int
+    episodes_enabled: bool
+    episode_soft_inactivity_minutes: int
+    episode_hard_inactivity_minutes: int
+    episode_maximum_messages: int
+    episode_maximum_estimated_tokens: int
+    memory_enabled: bool
+    memory_mode: str
+    memory_incognito: bool
     log_level: str
     api_key_configured: bool
     available_personalities: list[str]
@@ -30,3 +38,5 @@ class RuntimeSettingsPatch(BaseModel):
     voice_playback_rate: float | None = None
     voice_live_playback_prebuffer_segments: int | None = None
     voice_live_playback_prebuffer_ms: int | None = None
+    memory_mode: str | None = None
+    memory_incognito: bool | None = None

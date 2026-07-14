@@ -6,12 +6,14 @@ from collections.abc import AsyncIterator
 from typing import Any, Callable
 
 from apps.backend.app.agents.character.prompts import (
-    CHARACTER_JSON_PROMPT,
-    CHARACTER_LIVE_PROMPT,
     CHARACTER_REPAIR_PROMPT,
+    character_json_prompt,
+    character_live_prompt,
 )
+from apps.backend.app.agents.character.persona import get_persona
+from apps.backend.app.agents.character.protocol import classify_intent, legacy_result, parse_turn
 from apps.backend.app.llm.base import ChatMessage, LLMProvider
-from apps.backend.app.schemas.character import CharacterLLMResponse
+from apps.backend.app.schemas.character import CharacterTurn
 from apps.backend.app.storage.sqlite_history import SQLiteMessageHistory
 
 logger = logging.getLogger(__name__)
@@ -19,9 +21,10 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class _ParseResult:
-    payload: dict[str, str]
+    payload: dict[str, Any]
     valid: bool
     reason: str | None = None
+    turn: CharacterTurn | None = None
 
 
 class CharacterAgent:
@@ -31,16 +34,23 @@ class CharacterAgent:
         history: SQLiteMessageHistory,
         history_limit: int,
         event_publisher: Callable[[str, str, str, dict[str, Any]], None] | None = None,
+        context_manager=None,
+        memory_service=None,
+        persona_name: str = "default",
     ) -> None:
         self._llm_provider = llm_provider
         self._history = history
         self._history_limit = history_limit
         self._event_publisher = event_publisher
+        self._context_manager = context_manager
+        self._memory_service = memory_service
+        self._persona = get_persona(persona_name)
+        self.last_turn: CharacterTurn | None = None
 
-    async def handle_user_message(self, session_id: str, user_text: str) -> dict[str, str]:
-        context = self._history.get_recent_messages(session_id, limit=self._history_limit)
+    async def handle_user_message(self, session_id: str, user_text: str, input_mode: str = "text") -> dict[str, str]:
+        context = self._context_manager.build(user_text).messages if self._context_manager else self._history.get_recent_messages(session_id, limit=self._history_limit)
         messages = [
-            ChatMessage(role="system", content=CHARACTER_JSON_PROMPT),
+            ChatMessage(role="system", content=character_json_prompt(self._persona)),
             *context,
             ChatMessage(role="user", content=user_text),
         ]
@@ -50,6 +60,7 @@ class CharacterAgent:
         parsed = self._parse_response_result(
             llm_response.content,
             session_id=session_id,
+            user_text=user_text,
             empty_fallback_reply=empty_reply,
             report_invalid=False,
         )
@@ -72,6 +83,7 @@ class CharacterAgent:
             parsed = self._parse_response_result(
                 repair_response.content,
                 session_id=session_id,
+                user_text=user_text,
                 empty_fallback_reply=empty_reply,
                 event_type="llm.invalid_json_retry_failed",
                 report_invalid=True,
@@ -83,20 +95,25 @@ class CharacterAgent:
             ):
                 parsed = first_invalid
 
-        self._history.save_message(session_id, "user", user_text)
-        if parsed.valid:
-            self._history.save_message(session_id, "assistant", parsed.payload["reply"])
+        user_message = self._save_message(session_id, "user", user_text, input_mode)
+        if self._memory_service is not None:
+            self._memory_service.extract_from_message(user_message)
+        if parsed.valid and self._should_persist_timeline():
+            self._save_message(session_id, "assistant", parsed.payload["reply"], input_mode)
+
+        self.last_turn = parsed.turn
 
         return parsed.payload
 
     async def stream_user_message(
         self, session_id: str, user_text: str,
         stored_reply_transform: Callable[[str], str] | None = None,
+        input_mode: str = "text",
     ) -> AsyncIterator[str]:
         """Stream plain reply text and commit history only after clean completion."""
-        context = self._history.get_recent_messages(session_id, limit=self._history_limit)
+        context = self._context_manager.build(user_text).messages if self._context_manager else self._history.get_recent_messages(session_id, limit=self._history_limit)
         messages = [
-            ChatMessage(role="system", content=CHARACTER_LIVE_PROMPT),
+            ChatMessage(role="system", content=character_live_prompt(self._persona)),
             *context,
             ChatMessage(role="user", content=user_text),
         ]
@@ -112,35 +129,41 @@ class CharacterAgent:
         if not reply:
             reply = self._empty_model_fallback(user_text)
             yield reply
-        self._history.save_message(session_id, "user", user_text)
-        self._history.save_message(session_id, "assistant", reply)
+        user_message = self._save_message(session_id, "user", user_text, input_mode)
+        if self._memory_service is not None:
+            self._memory_service.extract_from_message(user_message)
+        if self._should_persist_timeline():
+            self._save_message(session_id, "assistant", reply, input_mode)
+
+    def _save_message(self, session_id: str, role: str, content: str, input_mode: str):
+        if not self._should_persist_timeline():
+            return None
+        try:
+            return self._history.save_message(session_id, role, content, input_mode=input_mode)
+        except TypeError:
+            # V0.4 test doubles and the legacy history implementation only expose three arguments.
+            return self._history.save_message(session_id, role, content)
+
+    def _should_persist_timeline(self) -> bool:
+        return self._memory_service is None or self._memory_service.should_persist_timeline()
 
     @staticmethod
     def classify_intent(user_text: str) -> str:
-        text = user_text.strip().lower()
-        if not text:
-            return "unknown"
-        task_markers = (
-            "сделай", "создай", "запусти", "открой", "покажи", "напиши",
-            "помоги", "please", "create", "make", "run", "open", "write",
-        )
-        if any(marker in text for marker in task_markers):
-            return "task_request"
-        if "?" in text or text.startswith(("кто ", "что ", "где ", "когда ", "как ", "почему ", "why ", "how ", "what ", "who ")):
-            return "question"
-        return "casual_chat"
+        return classify_intent(user_text).value
 
     def _parse_response(
         self,
         raw_content: str,
         session_id: str | None = None,
+        user_text: str = "",
     ) -> dict[str, str]:
-        return self._parse_response_result(raw_content, session_id=session_id).payload
+        return self._parse_response_result(raw_content, session_id=session_id, user_text=user_text).payload
 
     def _parse_response_result(
         self,
         raw_content: str,
         session_id: str | None = None,
+        user_text: str = "",
         empty_fallback_reply: str = "Модель вернула пустой ответ. Попробуй повторить.",
         event_type: str = "llm.invalid_json",
         report_invalid: bool = True,
@@ -170,7 +193,7 @@ class CharacterAgent:
             )
 
         try:
-            parsed = CharacterLLMResponse.model_validate(payload)
+            turn, valid_metadata, adapter_reason = parse_turn(payload, user_text=user_text)
         except ValueError:
             return self._fallback_response(
                 raw_content,
@@ -181,13 +204,17 @@ class CharacterAgent:
                 report_invalid,
             )
 
-        payload = parsed.model_dump(exclude_defaults=True)
-        nested_reply = self._extract_nested_reply(payload["reply"])
+        legacy_without_gesture = "gesture" not in payload and "affect" not in payload
+        result_payload = legacy_result(turn, include_gesture=not legacy_without_gesture)
+        nested_reply = self._extract_nested_reply(result_payload["reply"])
         if nested_reply is not None:
-            payload["reply"] = nested_reply
+            turn = turn.model_copy(update={"reply": nested_reply})
+            result_payload = legacy_result(turn, include_gesture=not legacy_without_gesture)
 
-        # Do not change the v0.4 public agent result when the optional gesture was absent.
-        return _ParseResult(payload, valid=True)
+        if not valid_metadata:
+            self._report_invalid_metadata(raw_content, adapter_reason or "invalid_metadata", session_id, event_type)
+            return _ParseResult(result_payload, valid=True, reason=adapter_reason, turn=turn)
+        return _ParseResult(result_payload, valid=True, reason=adapter_reason, turn=turn)
 
     @staticmethod
     def _extract_nested_reply(reply: str) -> str | None:
@@ -262,6 +289,14 @@ class CharacterAgent:
             valid=False,
             reason=reason,
         )
+
+    def _report_invalid_metadata(self, raw_content: str, reason: str, session_id: str | None, event_type: str) -> None:
+        logger.warning("Invalid Character Protocol metadata; reply retained: reason=%s raw_length=%s", reason, len(raw_content))
+        if self._event_publisher is not None:
+            metadata: dict[str, Any] = {"reason": reason, "raw_length": len(raw_content)}
+            if session_id is not None:
+                metadata["session_id"] = session_id
+            self._event_publisher(event_type, "warning", "Invalid character metadata; reply retained", metadata)
 
     @staticmethod
     def _looks_like_structured_content(value: str) -> bool:

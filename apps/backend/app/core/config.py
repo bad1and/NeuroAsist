@@ -12,6 +12,7 @@ class Settings(BaseSettings):
         env_file=ROOT_DIR / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     app_name: str = "NeuroAsist"
@@ -20,11 +21,32 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-flash"
     sqlite_path: str = "data/neuroasist.sqlite3"
+    desktop_auth_token: str | None = Field(default=None, validation_alias="NEUROASIST_DESKTOP_TOKEN")
     chat_history_limit: int = 20
+    timeline_v2_enabled: bool = True
+    episodes_enabled: bool = True
+    episode_soft_inactivity_minutes: int = 20
+    episode_hard_inactivity_minutes: int = 60
+    episode_maximum_messages: int = 120
+    episode_maximum_estimated_tokens: int = 16000
+    context_manager_enabled: bool = True
+    context_max_tokens: int = 3000
+    context_recent_turns: int = 8
+    memory_enabled: bool = True
+    memory_mode: str = "ask"
+    memory_sensitive_mode: str = "ask"
+    memory_max_candidates_per_turn: int = 3
+    memory_context_max_tokens: int = 900
+    semantic_retrieval_enabled: bool = False
+    semantic_retrieval_eval_passed: bool = False
+    semantic_embedding_provider: str = "hash"
+    semantic_embedding_model_id: str = "hash-multilingual-v1"
+    semantic_embedding_dimension: int = 256
+    semantic_retrieval_limit: int = 8
     log_level: str = "INFO"
     log_to_file: bool = False
     log_file_path: str = "logs/app.log"
-    cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
+    cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173,http://tauri.localhost,tauri://localhost"
     cors_origin_regex: str = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
     voice_stt_provider: str = "faster_whisper"
     voice_stt_model: str = "small"
@@ -64,6 +86,7 @@ class Settings(BaseSettings):
     voice_live_playback_prebuffer_segments: int = 1
     voice_live_playback_prebuffer_ms: int = 200
     avatar_enabled: bool = False
+    avatar_emotion_mapping_path: str = "apps/protocol/avatar-emotion-mapping.json"
     avatar_heartbeat_interval_seconds: float = 15.0
     avatar_client_timeout_seconds: float = 45.0
 
@@ -84,6 +107,11 @@ class Settings(BaseSettings):
         if path.is_absolute():
             return path
         return ROOT_DIR / path
+
+    @property
+    def avatar_emotion_mapping(self) -> Path:
+        path = Path(self.avatar_emotion_mapping_path)
+        return path if path.is_absolute() else ROOT_DIR / path
 
     @property
     def cors_origin_list(self) -> list[str]:

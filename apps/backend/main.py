@@ -2,8 +2,9 @@ import asyncio
 import logging
 import time
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from apps.backend.app.api.routes.chat import router as chat_router
 from apps.backend.app.api.routes.avatar import router as avatar_router
@@ -11,14 +12,25 @@ from apps.backend.app.api.routes.events import router as events_router
 from apps.backend.app.api.routes.settings import router as settings_router
 from apps.backend.app.api.routes.status import router as status_router
 from apps.backend.app.api.routes.voice import router as voice_router
+from apps.backend.app.api.routes.timeline import router as timeline_router
+from apps.backend.app.api.routes.episodes import router as episodes_router
+from apps.backend.app.api.routes.context_debug import router as context_debug_router
+from apps.backend.app.api.routes.memory import router as memory_router
 from apps.backend.app.api.websocket import router as websocket_router
 from apps.backend.app.core.config import get_settings
 from apps.backend.app.core.logging import configure_logging
 from apps.backend.app.events.bus import EventBus
 from apps.backend.app.avatar.connection_manager import AvatarConnectionManager
 from apps.backend.app.avatar.service import AvatarService
+from apps.backend.app.avatar.emotion_engine import EmotionEngine
 from apps.backend.app.runtime.settings import RuntimeSettings
 from apps.backend.app.storage.sqlite_history import SQLiteMessageHistory
+from apps.backend.app.storage.timeline import EpisodePolicy, TimelineHistoryAdapter, TimelineStore
+from apps.backend.app.context.manager import ContextManager
+from apps.backend.app.runtime.summary_worker import SummaryWorker
+from apps.backend.app.memory.service import MemoryService
+from apps.backend.app.semantic.embedding import HashEmbeddingProvider
+from apps.backend.app.semantic.vector_index import NullVectorIndex, SqliteVecIndex
 from apps.backend.app.voice.service import VoiceService
 from apps.backend.app.voice.live import VoiceSessionManager
 from apps.backend.app.voice.orchestrator import SpeechOrchestrator
@@ -46,14 +58,56 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    history = SQLiteMessageHistory(settings.database_path)
+    @app.middleware("http")
+    async def require_desktop_token(request: Request, call_next):
+        """Secure the ephemeral desktop core without changing the browser/dev contract."""
+        expected_token = settings.desktop_auth_token
+        if (
+            expected_token
+            and request.method != "OPTIONS"
+            and request.headers.get("x-neuroasist-token") != expected_token
+        ):
+            return JSONResponse(status_code=401, content={"detail": "Desktop core authentication required"})
+        return await call_next(request)
+
     event_bus = EventBus(max_events=300)
+    timeline_store = TimelineStore(
+        settings.database_path,
+        EpisodePolicy(
+            enabled=settings.episodes_enabled,
+            soft_inactivity_seconds=settings.episode_soft_inactivity_minutes * 60,
+            hard_inactivity_seconds=settings.episode_hard_inactivity_minutes * 60,
+            maximum_messages=settings.episode_maximum_messages,
+            maximum_tokens=settings.episode_maximum_estimated_tokens,
+        ),
+        event_bus.publish,
+    ) if settings.timeline_v2_enabled else None
+    history = TimelineHistoryAdapter(timeline_store) if timeline_store is not None else SQLiteMessageHistory(settings.database_path)
     runtime_settings = RuntimeSettings(
         voice_language=settings.voice_default_language,
         voice_tts_voice=settings.voice_silero_speaker_ru,
         voice_live_playback_prebuffer_segments=settings.voice_live_playback_prebuffer_segments,
         voice_live_playback_prebuffer_ms=settings.voice_live_playback_prebuffer_ms,
+        memory_mode=settings.memory_mode,
     )
+    semantic_mode_enabled = settings.semantic_retrieval_enabled and settings.semantic_retrieval_eval_passed
+    if timeline_store is not None and semantic_mode_enabled and settings.semantic_embedding_provider == "hash":
+        embedding_provider = HashEmbeddingProvider(settings.semantic_embedding_model_id, settings.semantic_embedding_dimension)
+        vector_index = SqliteVecIndex(settings.database_path, embedding_provider, timeline_store.semantic_index_items)
+    else:
+        vector_index = NullVectorIndex()
+    memory_service = MemoryService(
+        timeline_store, runtime_settings,
+        enabled=settings.memory_enabled,
+        sensitive_mode=settings.memory_sensitive_mode,
+        max_candidates_per_turn=settings.memory_max_candidates_per_turn,
+        context_max_tokens=settings.memory_context_max_tokens,
+        vector_index=vector_index,
+        semantic_enabled=semantic_mode_enabled,
+        semantic_limit=settings.semantic_retrieval_limit,
+    ) if timeline_store is not None else None
+    context_manager = ContextManager(timeline_store, settings.context_max_tokens, settings.context_recent_turns, memory_service) if timeline_store is not None and settings.context_manager_enabled else None
+    summary_worker = SummaryWorker(timeline_store, memory_service.index_episode_summary if memory_service is not None else None) if timeline_store is not None else None
     voice_service = VoiceService(settings)
     voice_session_manager = VoiceSessionManager(
         voice_service.tts_provider,
@@ -76,10 +130,12 @@ def create_app() -> FastAPI:
         enabled=settings.avatar_enabled,
         heartbeat_interval_seconds=settings.avatar_heartbeat_interval_seconds,
         client_timeout_seconds=settings.avatar_client_timeout_seconds,
+        emotion_engine=EmotionEngine.from_path(settings.avatar_emotion_mapping),
     )
     voice_session_manager.bind_avatar_service(avatar_service)
     speech_orchestrator = SpeechOrchestrator(voice_service, event_bus, settings, avatar_service)
     tts_audio_cleanup_task: asyncio.Task[None] | None = None
+    summary_worker_task: asyncio.Task[None] | None = None
 
     async def cleanup_tts_audio_forever() -> None:
         try:
@@ -94,15 +150,27 @@ def create_app() -> FastAPI:
         except asyncio.CancelledError:
             raise
 
+    async def summarize_forever() -> None:
+        if summary_worker is None:
+            return
+        try:
+            while True:
+                worked = await summary_worker.run_once()
+                await asyncio.sleep(0 if worked else 1)
+        except asyncio.CancelledError:
+            raise
+
     @app.on_event("startup")
     async def startup() -> None:
-        nonlocal tts_audio_cleanup_task
+        nonlocal tts_audio_cleanup_task, summary_worker_task
         removed = await asyncio.to_thread(voice_service.clear_tts_audio)
         if removed:
             logger.info("Generated WAV startup cleanup complete: removed=%s", removed)
 
         try:
             history.init_db()
+            if timeline_store is not None:
+                timeline_store.recover_active_episode()
         except Exception:
             logger.critical("Storage initialization failed", exc_info=True)
             event_bus.publish(
@@ -196,13 +264,27 @@ def create_app() -> FastAPI:
 
         await avatar_service.start()
         tts_audio_cleanup_task = asyncio.create_task(cleanup_tts_audio_forever())
+        summary_worker_task = asyncio.create_task(summarize_forever())
 
     @app.on_event("shutdown")
     async def shutdown() -> None:
+        if timeline_store is not None:
+            await asyncio.to_thread(timeline_store.close_current_episode, "application_shutdown")
+        if summary_worker is not None:
+            try:
+                await asyncio.wait_for(summary_worker.run_once(), timeout=1)
+            except (TimeoutError, Exception):
+                logger.warning("Bounded shutdown summary pass did not complete", exc_info=True)
         if tts_audio_cleanup_task is not None:
             tts_audio_cleanup_task.cancel()
             try:
                 await tts_audio_cleanup_task
+            except asyncio.CancelledError:
+                pass
+        if summary_worker_task is not None:
+            summary_worker_task.cancel()
+            try:
+                await summary_worker_task
             except asyncio.CancelledError:
                 pass
         await speech_orchestrator.close()
@@ -214,6 +296,9 @@ def create_app() -> FastAPI:
 
     app.state.settings = settings
     app.state.history = history
+    app.state.timeline_store = timeline_store
+    app.state.context_manager = context_manager
+    app.state.memory_service = memory_service
     app.state.event_bus = event_bus
     app.state.runtime_settings = runtime_settings
     app.state.voice_service = voice_service
@@ -226,6 +311,10 @@ def create_app() -> FastAPI:
     app.include_router(settings_router)
     app.include_router(status_router)
     app.include_router(voice_router)
+    app.include_router(timeline_router)
+    app.include_router(episodes_router)
+    app.include_router(context_debug_router)
+    app.include_router(memory_router)
     app.include_router(websocket_router)
     return app
 

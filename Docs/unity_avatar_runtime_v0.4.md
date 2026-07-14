@@ -1,6 +1,6 @@
 # Unity avatar runtime v0.5
 
-Unity runtime lives in the companion project `D:\Nero3DPizda\My project`. It targets Unity **2022.3.62f3**, UniVRM 1.0 and uLipSync 3.1.5.
+The Unity runtime is an optional external project. Its source has not yet been published or pinned; see [Unity source handoff](unity-source.md). It targets Unity **2022.3.62f3**, UniVRM 1.0 and uLipSync 3.1.5.
 
 ## Performance defaults
 

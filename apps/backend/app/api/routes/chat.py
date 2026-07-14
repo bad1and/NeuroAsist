@@ -34,6 +34,9 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             history=history,
             history_limit=settings.chat_history_limit,
             event_publisher=event_bus.publish,
+            context_manager=request.app.state.context_manager,
+            memory_service=request.app.state.memory_service,
+            persona_name=request.app.state.runtime_settings.personality,
         )
         result = await agent.handle_user_message(payload.session_id, payload.message)
     except ValueError as exc:
@@ -125,6 +128,13 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             "intent": result["intent"],
         },
     )
+    if agent.last_turn is not None:
+        event_bus.publish(
+            "character.metadata",
+            "info",
+            "Character metadata resolved",
+            {"session_id": payload.session_id, "metadata": agent.last_turn.metadata_frame()},
+        )
     response = ChatResponse(**result)
     if settings.voice_tts_enabled and settings.avatar_enabled and result["reply"].strip():
         voice = request.app.state.voice_service.resolve_tts_voice(

@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from .connection_manager import AvatarConnectionManager, BroadcastResult
+from .emotion_engine import EmotionEngine
 from .schemas import (
     AvatarStatusResponse,
     EmotionPayload,
@@ -21,6 +22,7 @@ from .schemas import (
     StreamSegmentPayload,
     StreamStartPayload,
 )
+from apps.backend.app.schemas.character import Emotion, Gesture
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +36,14 @@ class AvatarService:
         enabled: bool,
         heartbeat_interval_seconds: float,
         client_timeout_seconds: float,
+        emotion_engine: EmotionEngine | None = None,
     ) -> None:
         self.manager = manager
         self.event_bus = event_bus
         self.enabled = enabled
         self.heartbeat_interval_seconds = heartbeat_interval_seconds
         self.client_timeout_seconds = client_timeout_seconds
+        self.emotion_engine = emotion_engine or EmotionEngine()
         self._heartbeat_task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
@@ -58,28 +62,41 @@ class AvatarService:
 
     async def status(self) -> AvatarStatusResponse:
         clients = await self.manager.status_clients()
-        return AvatarStatusResponse(enabled=self.enabled, client_count=len(clients), clients=clients)
+        return AvatarStatusResponse(
+            enabled=self.enabled,
+            client_count=len(clients),
+            clients=clients,
+            emotion_engine=self.emotion_engine.status(),
+        )
 
     async def speak(
         self, *, session_id: str, utterance_id: str, text: str, audio_url: str,
         emotion: str, intent: str, gesture: str = "auto", gesture_intensity: float = 1.0,
         interrupt: bool = True,
     ) -> BroadcastResult:
+        state = self.emotion_engine.apply_metadata(
+            emotion=Emotion(emotion), gesture=Gesture(gesture), intensity=gesture_intensity,
+            utterance_id=utterance_id,
+        )
         return await self._broadcast(
             "avatar.speak", session_id,
             SpeakPayload(utterance_id=utterance_id, text=text, audio_url=audio_url,
-                         emotion=emotion, intent=intent, gesture=gesture,
-                         gesture_intensity=gesture_intensity, interrupt=interrupt).model_dump(mode="json"),
+                         emotion=state.target_emotion, intent=intent, gesture=state.gesture,
+                         gesture_intensity=state.intensity, interrupt=interrupt).model_dump(mode="json"),
             utterance_id=utterance_id,
         )
 
     async def set_emotion(self, *, session_id: str, emotion: str, intensity: float = 1.0) -> BroadcastResult:
+        state = self.emotion_engine.apply_metadata(
+            emotion=Emotion(emotion), gesture=Gesture.AUTO, intensity=intensity, utterance_id=None,
+        )
         return await self._broadcast(
             "avatar.emotion", session_id,
-            EmotionPayload(emotion=emotion, intensity=intensity).model_dump(mode="json"),
+            EmotionPayload(emotion=state.target_emotion, intensity=state.intensity).model_dump(mode="json"),
         )
 
     async def stop(self, *, session_id: str, utterance_id: str | None = None) -> BroadcastResult:
+        self.emotion_engine.stop(utterance_id)
         return await self._broadcast(
             "avatar.stop", session_id, StopPayload(utterance_id=utterance_id).model_dump(mode="json"),
             utterance_id=utterance_id,
@@ -131,14 +148,18 @@ class AvatarService:
     async def stream_metadata(
         self, *, session_id: str, utterance_id: str, emotion: str, gesture: str, gesture_intensity: float
     ) -> BroadcastResult:
+        state = self.emotion_engine.apply_metadata(
+            emotion=Emotion(emotion), gesture=Gesture(gesture), intensity=gesture_intensity,
+            utterance_id=utterance_id,
+        )
         return await self._broadcast(
             "avatar.stream.metadata",
             session_id,
             StreamMetadataPayload(
                 utterance_id=utterance_id,
-                emotion=emotion,
-                gesture=gesture,
-                gesture_intensity=gesture_intensity,
+                emotion=state.target_emotion,
+                gesture=state.gesture,
+                gesture_intensity=state.intensity,
             ).model_dump(mode="json"),
             utterance_id=utterance_id,
             protocol_version=2,
@@ -158,7 +179,8 @@ class AvatarService:
     async def gesture(
         self, *, session_id: str, gesture: str, intensity: float = 1.0, interrupt: bool = True
     ) -> BroadcastResult:
-        payload = GesturePayload(gesture=gesture, intensity=intensity, interrupt=interrupt)
+        state = self.emotion_engine.apply_gesture(Gesture(gesture), intensity=intensity, interrupt=interrupt)
+        payload = GesturePayload(gesture=state.gesture, intensity=state.intensity, interrupt=interrupt)
         return await self._broadcast(
             "avatar.gesture", session_id, payload.model_dump(mode="json")
         )
@@ -187,9 +209,11 @@ class AvatarService:
             self.event_bus.publish("avatar.speaking_started", "info", "Avatar playback started", {"client_id": client_id, "utterance_id": payload.utterance_id, "client_latency_ms": payload.client_latency_ms})
         elif envelope.type == "avatar.playback.finished":
             await self.manager.update(client_id, current_utterance_id=None, state="Idle")
+            self.emotion_engine.stop(payload.utterance_id)
             self.event_bus.publish("avatar.speaking_finished", "info", "Avatar playback finished", {"client_id": client_id, "utterance_id": payload.utterance_id})
         elif envelope.type == "avatar.playback.failed":
             await self.manager.update(client_id, current_utterance_id=None, state="Error")
+            self.emotion_engine.stop(payload.utterance_id)
             self.event_bus.publish("avatar.playback_failed", "warning", "Avatar playback failed", {"client_id": client_id, "utterance_id": payload.utterance_id, "reason": payload.reason})
         elif envelope.type == "avatar.state.changed":
             await self.manager.update(client_id, state=payload.state)

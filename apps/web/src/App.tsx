@@ -3,11 +3,15 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import {
   getAvatarStatus,
   getEvents,
+  getTimelineJournal,
+  getTimelineMessages,
   getSettings,
   getStatus,
   getVoiceTtsStatus,
   resolveApiUrl,
   sendChatMessage,
+  searchTimeline,
+  deleteTimelineRange,
   sendVoiceMessage,
   updateRuntimeSettings,
   voiceWebSocketUrl,
@@ -24,13 +28,17 @@ import type {
   EventLevel,
   PublicSettings,
   StatusResponse,
+  TimelineJournalItem,
+  TimelineMessage,
   VoiceChatResponse,
   VoiceTtsStatusResponse,
 } from "./types";
 import type { VoiceServerEvent } from "./types";
 import { TTSStreamPlayer, VoiceSocketClient } from "./voice-live";
+import { JournalPage } from "./journal";
+import { MemoryPage } from "./memory";
 
-type Tab = "chat" | "events" | "settings";
+type Tab = "chat" | "journal" | "memory" | "events" | "settings";
 type WsState = "connected" | "disconnected" | "reconnecting";
 type LevelFilter = "all" | EventLevel;
 type VoiceState = "idle" | "recording" | "transcribing" | "thinking" | "speaking" | "stopping" | "error";
@@ -187,6 +195,18 @@ export default function App() {
             Chat
           </button>
           <button
+            className={activeTab === "journal" ? "active" : ""}
+            onClick={() => setActiveTab("journal")}
+          >
+            Journal
+          </button>
+          <button
+            className={activeTab === "memory" ? "active" : ""}
+            onClick={() => setActiveTab("memory")}
+          >
+            Memory
+          </button>
+          <button
             className={activeTab === "events" ? "active" : ""}
             onClick={() => setActiveTab("events")}
           >
@@ -211,6 +231,8 @@ export default function App() {
         {activeTab === "events" && (
           <EventsPage events={events} onRefreshEvents={refreshEvents} />
         )}
+        {activeTab === "journal" && <JournalPage />}
+        {activeTab === "memory" && <MemoryPage />}
         {activeTab === "settings" && (
           <SettingsPage
             settings={settings}
@@ -294,6 +316,7 @@ function ChatPage({
   const [loading, setLoading] = useState(false);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [retryText, setRetryText] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -305,6 +328,16 @@ function ChatPage({
   const avatarOwnsAudioRef = useRef(false);
   const liveAudioStartedRef = useRef(false);
   const liveMetadataRef = useRef({ emotion: "neutral", intent: "unknown" });
+
+  useEffect(() => {
+    void getTimelineMessages().then((payload) => {
+      setMessages(payload.items
+        .filter((message) => message.role === "user" || message.role === "assistant")
+        .map((message) => ({ id: message.id, role: message.role as "user" | "assistant", content: message.content })));
+    }).catch(() => {
+      // The V0.4 compatibility backend may intentionally keep Timeline V2 disabled.
+    });
+  }, []);
 
   const voiceSupported =
     typeof navigator !== "undefined" &&
@@ -727,6 +760,7 @@ function ChatPage({
     setDraft("");
     setLoading(true);
     setError(null);
+    setRetryText(null);
 
     try {
       const response = await sendChatMessage(SESSION_ID, text);
@@ -748,6 +782,8 @@ function ChatPage({
       await onRefreshEvents();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Chat failed");
+      setRetryText(text);
+      setMessages((current) => current.filter((message) => message.id !== userMessage.id));
     } finally {
       setLoading(false);
     }
@@ -980,7 +1016,7 @@ function ChatPage({
         ))}
       </div>
 
-      {error && <div className="error-banner">{error}</div>}
+      {error && <div className="error-banner">{error}{retryText && <button type="button" onClick={() => { setDraft(retryText); setRetryText(null); }}>Retry</button>}</div>}
 
       <form className="chat-form" onSubmit={onSubmit}>
         <textarea
@@ -1119,6 +1155,8 @@ function SettingsPage({
   const [voicePlaybackRate, setVoicePlaybackRate] = useState(1);
   const [prebufferSegments, setPrebufferSegments] = useState(2);
   const [prebufferMs, setPrebufferMs] = useState(1000);
+  const [memoryMode, setMemoryMode] = useState("ask");
+  const [memoryIncognito, setMemoryIncognito] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -1130,6 +1168,8 @@ function SettingsPage({
       setVoicePlaybackRate(settings.voice_playback_rate);
       setPrebufferSegments(settings.voice_live_playback_prebuffer_segments);
       setPrebufferMs(settings.voice_live_playback_prebuffer_ms);
+      setMemoryMode(settings.memory_mode);
+      setMemoryIncognito(settings.memory_incognito);
     }
   }, [settings]);
 
@@ -1144,6 +1184,8 @@ function SettingsPage({
         voice_playback_rate: voicePlaybackRate,
         voice_live_playback_prebuffer_segments: prebufferSegments,
         voice_live_playback_prebuffer_ms: prebufferMs,
+        memory_mode: memoryMode,
+        memory_incognito: memoryIncognito,
       });
       onSettingsChanged(nextSettings);
       setMessage("Runtime settings saved.");
@@ -1276,6 +1318,22 @@ function SettingsPage({
           </label>
         </fieldset>
 
+        <fieldset className="settings-group">
+          <legend>Memory</legend>
+          <label>
+            Saving mode
+            <select value={memoryMode} onChange={(event) => setMemoryMode(event.target.value)}>
+              <option value="off">Off</option>
+              <option value="ask">Ask before saving</option>
+              <option value="automatic">Automatic normal facts</option>
+            </select>
+          </label>
+          <label>
+            <input type="checkbox" checked={memoryIncognito} onChange={(event) => setMemoryIncognito(event.target.checked)} />
+            Do not save this conversation (incognito)
+          </label>
+        </fieldset>
+
         <button className="settings-save" onClick={saveSettings} disabled={saving}>
           {saving ? "Saving" : "Save runtime settings"}
         </button>
@@ -1301,6 +1359,7 @@ function AvatarControls({
   const [message, setMessage] = useState<string | null>(null);
   const enabled = Boolean(avatarStatus?.enabled);
   const client = avatarStatus?.clients[0];
+  const engine = avatarStatus?.emotion_engine;
 
   const run = async (action: () => Promise<unknown>, success: string) => {
     setBusy(true);
@@ -1332,6 +1391,8 @@ function AvatarControls({
         <InfoRow label="Heartbeat" value={client ? formatTime(client.last_heartbeat_at) : "—"} />
         <InfoRow label="Motion profile" value={client?.current_motion_profile ?? "unreported"} />
         <InfoRow label="Current gesture" value={client?.current_gesture ?? "none"} />
+        <InfoRow label="Target emotion" value={engine?.target_emotion ?? "neutral"} />
+        <InfoRow label="Engine mapping" value={engine ? (engine.mapping_valid ? "valid" : "fallback") : "unavailable"} />
       </div>
       <div className="avatar-actions">
         <label>
@@ -1341,7 +1402,7 @@ function AvatarControls({
         <label>
           Emotion
           <select value={emotion} onChange={(event) => setEmotion(event.target.value)} disabled={!enabled || busy}>
-            {["neutral", "happy", "sad", "angry", "surprised", "relaxed", "thinking", "annoyed", "smirk"].map((value) => <option key={value}>{value}</option>)}
+            {["neutral", "happy", "sad", "angry", "annoyed", "smirk", "thinking", "surprised", "embarrassed", "concerned"].map((value) => <option key={value}>{value}</option>)}
           </select>
         </label>
         <label>

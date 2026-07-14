@@ -11,7 +11,7 @@
 [![React](https://img.shields.io/badge/React-19-61dafb?style=flat-square&logo=react&logoColor=111827)](https://react.dev/)
 [![Лицензия](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE)
 
-[English](README.md) · **Русский** · [Blueprint проекта](Docs/neuro_vtuber_assistant_blueprint_v1.1.md)
+[English](README.md) · **Русский** · [Blueprint V0.5](Docs/NeuroAsist_V0.5_Companion_Blueprint.md)
 
 </div>
 
@@ -34,7 +34,7 @@ flowchart LR
     E --> F[Воспроизведение голоса]
 ```
 
-Долгосрочная цель — превратить это ядро в модульную neuro‑VTuber платформу с анимированным аватаром, эмоциями, памятью, контролируемыми инструментами и безопасным агентом-разработчиком.
+Направление V0.5 — один непрерывный desktop-компаньон: один персонаж, одна общая история, внутренние episodes, summaries и управляемая долгосрочная память. Это не продукт с вручную созданными чатами. Dev-agent, sandbox и управление рабочим столом исключены из V0.5.
 
 ## Возможности v0.4.0
 
@@ -50,8 +50,8 @@ flowchart LR
 | Настройка голоса и runtime | ✅ | Локальная React-панель |
 | Browser speech fallback | ✅ | При ошибке backend TTS |
 | Unity VRM-аватар и lipsync | ✅ | Опциональный WebSocket-клиент с UniVRM/uLipSync |
-| Dev-agent и sandbox | 🧭 | Планируется |
-| Контекст экрана и ПК | 🧭 | Планируется |
+| Runtime continuous companion | 🧭 | Реализованы timeline, episodes, summaries, управляемая долгосрочная память и проверенный Tauri shell |
+| Dev-agent, sandbox и управление ПК | 🚫 | Явно вне scope V0.5 |
 
 ## Основные идеи
 
@@ -265,7 +265,7 @@ ffprobe -version
 Если Windows не видит FFmpeg в текущем терминале:
 
 ```powershell
-$env:Path = "C:\Path\To\ffmpeg\bin;$env:Path"
+$env:Path = "<ffmpeg-bin>;$env:Path"
 ```
 
 ### 6. Запуск backend
@@ -374,7 +374,7 @@ Browser MediaRecorder
   → Unity AudioSource, lipsync и VRM-эмоция
 ```
 
-Мост аватара остаётся опциональным. Protocol v1 сохраняет `avatar.speak` с URL полного WAV для старых клиентов; protocol v2 получает `avatar.stream.*` с короткими base64 WAV-сегментами и ставит их в очередь без HTTP-загрузки. Также доступны `GET /avatar/status` и тестовые endpoints речи, эмоции, жеста и остановки; настройка и диагностика — в [гайде Unity avatar runtime v0.5](Docs/unity_avatar_runtime_v0.4.md) и [гайде motion v0.5](Docs/avatar-motion-v0.5.md).
+Мост аватара остаётся опциональным. Protocol v1 сохраняет `avatar.speak` с URL полного WAV для старых клиентов; protocol v2 получает `avatar.stream.*` с короткими base64 WAV-сегментами и ставит их в очередь без HTTP-загрузки. Также доступны `GET /avatar/status` и тестовые endpoints речи, эмоции, жеста и остановки; настройка и диагностика — в [гайде Unity avatar runtime v0.5](Docs/unity_avatar_runtime_v0.4.md) и [передаче Unity source](Docs/unity-source.md).
 
 ## Структура проекта
 
@@ -397,7 +397,9 @@ NeuroAsist/
 │   └── web/
 │       └── src/
 ├── Docs/
-│   └── neuro_vtuber_assistant_blueprint_v1.1.md
+│   ├── NeuroAsist_V0.5_Companion_Blueprint.md
+│   ├── milestone-0-freeze.md
+│   └── version-manifest-v0.4.1.json
 ├── scripts/
 ├── tests/
 ├── main.py
@@ -529,23 +531,21 @@ NeuroAsist v0.4.0 пока не умеет:
 
 ## Документация проекта
 
-Текущая архитектура, долгосрочная идея и направление разработки описаны в единственном основном документе:
+Направление V0.5 и зафиксированный baseline V0.4.1 описаны в:
 
-- **[Neuro‑VTuber Assistant Blueprint v1.1](Docs/neuro_vtuber_assistant_blueprint_v1.1.md)**
-- **[Настройка Unity avatar runtime v0.4](Docs/unity_avatar_runtime_v0.4.md)**
+- **[Blueprint Continuous Companion V0.5](Docs/NeuroAsist_V0.5_Companion_Blueprint.md)**
+- **[Запись freeze Milestone 0](Docs/milestone-0-freeze.md)**
+- **[Единая timeline Milestone 1](Docs/milestone-1-unified-timeline.md)**
+- **[Episode Manager Milestone 2](Docs/milestone-2-episode-manager.md)**
+- **[Summaries и Context Manager Milestone 3](Docs/milestone-3-context-manager.md)**
+- **[Tauri desktop shell Milestone 4](Docs/milestone-4-desktop-shell.md)**
+- **[Долгосрочная память Milestone 5](Docs/milestone-5-long-term-memory.md)**
+- **[Семантический поиск Milestone 6](Docs/milestone-6-semantic-retrieval.md)**
+- **[Передача Unity source](Docs/unity-source.md)**
 
 ## Планируемое направление
 
-Проект предполагается развивать поэтапно:
-
-1. стабильное текстовое и голосовое общение;
-2. интеграция VRM- или Unity-аватара;
-3. эмоции, анимации и lipsync;
-4. контролируемый dev-agent и sandbox проекта;
-5. контекст экрана и опциональная долгосрочная память;
-6. модульная мультиагентная платформа.
-
-Точный план может меняться по мере тестирования и разработки прототипа.
+V0.5 выполняется только по milestones из companion blueprint: freeze, единая timeline, automatic episodes, summaries/context, desktop shell, long-term memory, semantic retrieval, Character Protocol, avatar overlay, live voice, packaging и stabilization. Текущий runtime V0.4 сохраняет совместимость, пока соответствующий milestone не изменит его явно.
 
 ## Лицензия
 

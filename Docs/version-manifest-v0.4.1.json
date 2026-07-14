@@ -1,0 +1,43 @@
+{
+  "format_version": 1,
+  "purpose": "Milestone 0 reproducibility record; this manifest does not change runtime behaviour.",
+  "baseline": {
+    "source_branch": "v0.4.1",
+    "source_commit": "467919ab5b65ed3405cc2f51f0e8aaf53edb741d",
+    "freeze_branch": "v0.5",
+    "application_version": "0.4.0",
+    "web_package_version": "0.4.0"
+  },
+  "runtime": {
+    "python": "3.12+",
+    "node": "24+",
+    "backend": {
+      "framework": "FastAPI 0.116.0",
+      "storage": "SQLite messages table (schema version 0)",
+      "default_session_id": "default"
+    },
+    "web": {
+      "framework": "React 19.2.3",
+      "build_tool": "Vite 7.3.6"
+    },
+    "avatar_protocol": {
+      "supported_versions": [1, 2],
+      "compatibility": "V1 full-WAV and V2 live WAV segment clients remain supported."
+    }
+  },
+  "unity": {
+    "source_repository": null,
+    "source_commit": null,
+    "status": "blocked_unpublished_source",
+    "expected_editor": "2022.3.62f3",
+    "expected_packages": {
+      "univrm": "1.0",
+      "ulipsync": "3.1.5",
+      "animation_rigging": "1.2.1"
+    },
+    "next_action": "Publish the Unity project to a repository, then replace null source fields with its URL and immutable commit."
+  },
+  "fixtures": {
+    "v041_history": "tests/fixtures/v0.4.1-history.sqlite3"
+  }
+}

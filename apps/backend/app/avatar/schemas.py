@@ -6,6 +6,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from apps.backend.app.schemas.character import Emotion
+
 
 PROTOCOL_VERSION = 2
 LEGACY_PROTOCOL_VERSION = 1
@@ -19,7 +21,8 @@ GESTURE_TAGS = frozenset({
 
 def normalize_gesture(value: object) -> str:
     """Keep transport forwards-compatible: unsupported semantic tags become auto."""
-    normalized = str(value or "auto").strip().lower()
+    raw = getattr(value, "value", value)
+    normalized = str(raw or "auto").strip().lower()
     return normalized if normalized in GESTURE_TAGS else "auto"
 
 
@@ -43,7 +46,7 @@ class SpeakPayload(ProtocolModel):
     utterance_id: str
     text: str = Field(min_length=1, max_length=8000)
     audio_url: str = Field(min_length=1, max_length=2048)
-    emotion: str = "neutral"
+    emotion: Emotion = Emotion.NEUTRAL
     intent: str = "casual_chat"
     gesture: str = "auto"
     gesture_intensity: float = Field(default=1.0, ge=0.0, le=1.0)
@@ -54,14 +57,14 @@ class SpeakPayload(ProtocolModel):
 
 class StreamStartPayload(ProtocolModel):
     utterance_id: str
-    emotion: str = "thinking"
+    emotion: Emotion = Emotion.THINKING
     intent: str = "casual_chat"
     interrupt: bool = True
 
 
 class StreamMetadataPayload(ProtocolModel):
     utterance_id: str
-    emotion: str = "neutral"
+    emotion: Emotion = Emotion.NEUTRAL
     gesture: str = "auto"
     gesture_intensity: float = Field(default=1.0, ge=0.0, le=1.0)
 
@@ -88,7 +91,7 @@ class StreamReceiptPayload(ProtocolModel):
 
 
 class EmotionPayload(ProtocolModel):
-    emotion: str
+    emotion: Emotion
     intensity: float = Field(default=1.0, ge=0.0, le=1.0)
 
 
@@ -170,17 +173,34 @@ class AvatarStatusClient(ProtocolModel):
     current_gesture: str | None = None
 
 
+class EmotionEngineStatus(ProtocolModel):
+    mapping_valid: bool
+    mapping_error: str | None = None
+    current_emotion: Emotion = Emotion.NEUTRAL
+    target_emotion: Emotion = Emotion.NEUTRAL
+    intensity: float = Field(ge=0.0, le=1.0)
+    gesture: str = "auto"
+    motion_profile: str
+    attack_ms: int = Field(ge=0)
+    minimum_hold_ms: int = Field(ge=0)
+    release_ms: int = Field(ge=0)
+    source_utterance_id: str | None = None
+    generation: int = Field(ge=0)
+    speaking: bool
+
+
 class AvatarStatusResponse(ProtocolModel):
     enabled: bool
     protocol_version: int = PROTOCOL_VERSION
     broadcast_policy: str = "all_connected_clients"
     client_count: int
     clients: list[AvatarStatusClient]
+    emotion_engine: EmotionEngineStatus
 
 
 class AvatarTestSpeakRequest(ProtocolModel):
     text: str = Field(min_length=1, max_length=1200)
-    emotion: str = "neutral"
+    emotion: Emotion = Emotion.NEUTRAL
     intent: str = "test"
     gesture: str = "auto"
     gesture_intensity: float = Field(default=1.0, ge=0.0, le=1.0)
@@ -191,7 +211,7 @@ class AvatarTestSpeakRequest(ProtocolModel):
 
 
 class AvatarTestEmotionRequest(ProtocolModel):
-    emotion: str = Field(min_length=1, max_length=64)
+    emotion: Emotion
     intensity: float = Field(default=1.0, ge=0.0, le=1.0)
     session_id: str = "default"
 
