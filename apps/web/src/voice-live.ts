@@ -6,6 +6,51 @@ export type TTSStreamPlayerOptions = {
   playbackRate?: number;
 };
 
+export type PlaybackOwner = "unity" | "desktop_ui" | "none";
+
+export type PlaybackLease = {
+  owner: Exclude<PlaybackOwner, "none">;
+  utteranceId: string;
+  generation: number;
+};
+
+/** Ensures the browser and Unity never play the same utterance concurrently. */
+export class PlaybackCoordinator {
+  private current: PlaybackLease | null = null;
+  private generation = 0;
+
+  acquire(owner: Exclude<PlaybackOwner, "none">, utteranceId: string): PlaybackLease {
+    this.generation += 1;
+    this.current = { owner, utteranceId, generation: this.generation };
+    return this.current;
+  }
+
+  release(lease: PlaybackLease | null): boolean {
+    if (!lease || !this.isCurrent(lease)) return false;
+    this.current = null;
+    return true;
+  }
+
+  cancel(): void {
+    this.generation += 1;
+    this.current = null;
+  }
+
+  isOwner(owner: Exclude<PlaybackOwner, "none">, utteranceId: string): boolean {
+    return this.current?.owner === owner && this.current.utteranceId === utteranceId;
+  }
+
+  isCurrent(lease: PlaybackLease): boolean {
+    return this.current?.generation === lease.generation
+      && this.current.utteranceId === lease.utteranceId
+      && this.current.owner === lease.owner;
+  }
+
+  snapshot(): PlaybackLease | null {
+    return this.current;
+  }
+}
+
 export class TTSStreamPlayer {
   private context: AudioContext | null = null;
   private scheduledUntil = 0;
@@ -240,6 +285,9 @@ export class VoiceSocketClient {
         if (event.type === "voice.utterance.started") {
           this.activeUtteranceId = event.utterance_id;
         }
+        // A cancelled lease has no active utterance: discard every late frame
+        // until a fresh server-side start establishes the next generation.
+        if (event.type !== "voice.utterance.started" && !this.activeUtteranceId) return;
         if (this.activeUtteranceId && event.utterance_id !== this.activeUtteranceId) return;
         if (event.type === "tts.segment.started") this.pendingSegment = event;
         this.onEvent(event);
