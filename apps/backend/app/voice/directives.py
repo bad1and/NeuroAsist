@@ -23,6 +23,33 @@ class AvatarDirective:
     intensity: float = 1.0
 
 
+def make_live_directive_expressive(directive: AvatarDirective, user_text: str) -> AvatarDirective:
+    """Keep live avatar reactions visible even when a model omits or defaults its directive."""
+    text = (user_text or "").lower()
+    emotion = directive.emotion
+    if emotion == "neutral":
+        if any(marker in text for marker in ("бесит", "заеб", "злит", "ненавиж", "туп", "ошибк")):
+            emotion = "annoyed"
+        elif any(marker in text for marker in ("спасибо", "класс", "круто", "ура", "молодец", "ахах", "смеш")):
+            emotion = "happy"
+        elif "?" in text or text.startswith(("как ", "почему ", "что ", "кто ", "где ", "когда ", "зачем ")):
+            emotion = "thinking"
+        else:
+            emotion = "neutral"
+    gesture = directive.gesture
+    if gesture == "auto":
+        gesture = {
+            "smirk": "shrug",
+            "happy": "talk",
+            "sad": "shrug",
+            "angry": "frustration",
+            "annoyed": "frustration",
+            "surprised": "surprise",
+            "thinking": "question",
+        }.get(emotion, "talk")
+    return AvatarDirective(emotion, gesture, max(.45, directive.intensity))
+
+
 class LiveDirectiveParser:
     """Consumes only a leading avatar directive and never releases it as spoken text."""
 
