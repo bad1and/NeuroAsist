@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",
+    "build:avatar": "powershell -ExecutionPolicy Bypass -File ../avatar-unity/scripts/build-windows.ps1",
     "check": "cargo check --manifest-path src-tauri/Cargo.toml"
   },
   "devDependencies": {

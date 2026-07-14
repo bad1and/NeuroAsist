@@ -145,6 +145,18 @@ export type AvatarStatusResponse = {
   };
 };
 
+export type AvatarOverlaySettings = {
+  visible: boolean;
+  always_on_top: boolean;
+  locked: boolean;
+  scale: number;
+  monitor: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 export type PublicSettings = {
   provider: string;
   model: string;

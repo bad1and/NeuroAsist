@@ -4,6 +4,7 @@ import asyncio
 import base64
 import logging
 from typing import Any
+from collections.abc import Callable
 
 from .connection_manager import AvatarConnectionManager, BroadcastResult
 from .emotion_engine import EmotionEngine
@@ -13,6 +14,8 @@ from .schemas import (
     ErrorPayload,
     GesturePayload,
     OutgoingMessage,
+    OverlayPayload,
+    OverlayBoundsChangedPayload,
     PingPayload,
     SpeakPayload,
     StatePayload,
@@ -37,6 +40,8 @@ class AvatarService:
         heartbeat_interval_seconds: float,
         client_timeout_seconds: float,
         emotion_engine: EmotionEngine | None = None,
+        overlay: OverlayPayload | None = None,
+        on_overlay_bounds_changed: Callable[[OverlayPayload], None] | None = None,
     ) -> None:
         self.manager = manager
         self.event_bus = event_bus
@@ -44,6 +49,8 @@ class AvatarService:
         self.heartbeat_interval_seconds = heartbeat_interval_seconds
         self.client_timeout_seconds = client_timeout_seconds
         self.emotion_engine = emotion_engine or EmotionEngine()
+        self.overlay = overlay or OverlayPayload()
+        self.on_overlay_bounds_changed = on_overlay_bounds_changed
         self._heartbeat_task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
@@ -188,6 +195,12 @@ class AvatarService:
     async def set_state(self, *, session_id: str, state: str) -> BroadcastResult:
         return await self._broadcast("avatar.state", session_id, StatePayload(state=state).model_dump(mode="json"))
 
+    async def configure_overlay(self, overlay: OverlayPayload, *, session_id: str = "default") -> BroadcastResult:
+        self.overlay = overlay
+        return await self._broadcast(
+            "avatar.overlay.configure", session_id, overlay.model_dump(mode="json"), protocol_version=2, min_protocol_version=2,
+        )
+
     async def protocol_error(self, client_id: str, code: str, message: str) -> None:
         frame = OutgoingMessage(type="avatar.error", payload=ErrorPayload(code=code, message=message).model_dump(mode="json"))
         await self.manager.send_to(client_id, frame.model_dump(mode="json"))
@@ -200,6 +213,12 @@ class AvatarService:
                 platform=payload.platform, protocol_version=envelope.protocol_version,
             )
             self.event_bus.publish("avatar.hello", "info", "Avatar client hello", {"client_id": client_id})
+            frame = OutgoingMessage(
+                protocol_version=2,
+                type="avatar.overlay.configure",
+                payload=self.overlay.model_dump(mode="json"),
+            )
+            await self.manager.send_to(client_id, frame.model_dump(mode="json"))
         elif envelope.type == "avatar.pong":
             return
         elif envelope.type == "avatar.ack":
@@ -234,6 +253,11 @@ class AvatarService:
                 "Avatar stream segment received",
                 {"client_id": client_id, **payload.model_dump(mode="json")},
             )
+        elif envelope.type == "avatar.overlay.bounds_changed":
+            self.overlay = self.overlay.model_copy(update=payload.model_dump())
+            if self.on_overlay_bounds_changed is not None:
+                self.on_overlay_bounds_changed(self.overlay)
+            self.event_bus.publish("avatar.overlay_bounds_changed", "info", "Avatar overlay position updated", {"client_id": client_id, **payload.model_dump(mode="json")})
 
     async def _broadcast(
         self,

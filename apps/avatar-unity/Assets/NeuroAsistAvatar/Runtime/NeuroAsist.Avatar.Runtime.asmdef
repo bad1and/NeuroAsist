@@ -1,0 +1,14 @@
+{
+  "name": "NeuroAsist.Avatar.Runtime",
+  "rootNamespace": "NeuroAsist.Avatar",
+  "references": ["VRM10", "uLipSync.Runtime", "Unity.Animation.Rigging"],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

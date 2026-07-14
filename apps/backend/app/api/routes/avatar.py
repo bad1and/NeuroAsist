@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 
 from apps.backend.app.avatar.schemas import (
     AvatarStatusResponse,
+    AvatarOverlayPatch,
+    OverlayPayload,
     AvatarStopRequest,
     AvatarTestEmotionRequest,
     AvatarTestGestureRequest,
@@ -14,6 +16,40 @@ router = APIRouter(prefix="/avatar", tags=["avatar"])
 @router.get("/status", response_model=AvatarStatusResponse)
 async def avatar_status(request: Request) -> AvatarStatusResponse:
     return await request.app.state.avatar_service.status()
+
+
+def _overlay_from_runtime(runtime_settings) -> OverlayPayload:
+    return OverlayPayload(
+        visible=runtime_settings.avatar_overlay_visible,
+        always_on_top=runtime_settings.avatar_overlay_always_on_top,
+        locked=runtime_settings.avatar_overlay_locked,
+        scale=runtime_settings.avatar_overlay_scale,
+        monitor=runtime_settings.avatar_overlay_monitor,
+        x=runtime_settings.avatar_overlay_x,
+        y=runtime_settings.avatar_overlay_y,
+        width=runtime_settings.avatar_overlay_width,
+        height=runtime_settings.avatar_overlay_height,
+    )
+
+
+@router.get("/overlay", response_model=OverlayPayload)
+async def avatar_overlay(request: Request) -> OverlayPayload:
+    return _overlay_from_runtime(request.app.state.runtime_settings)
+
+
+@router.put("/overlay", response_model=OverlayPayload)
+async def update_avatar_overlay(payload: AvatarOverlayPatch, request: Request) -> OverlayPayload:
+    runtime_settings = request.app.state.runtime_settings
+    for field, value in payload.model_dump(exclude_none=True).items():
+        setattr(runtime_settings, f"avatar_overlay_{field}", value)
+    overlay = _overlay_from_runtime(runtime_settings)
+    try:
+        request.app.state.runtime_settings_store.save(runtime_settings)
+    except OSError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Could not persist avatar overlay settings") from error
+    result = await request.app.state.avatar_service.configure_overlay(overlay)
+    request.app.state.event_bus.publish("avatar.overlay_updated", "info", "Avatar overlay settings updated", {**overlay.model_dump(), "sent": result.sent})
+    return overlay
 
 
 @router.post("/test/speak", status_code=status.HTTP_202_ACCEPTED)

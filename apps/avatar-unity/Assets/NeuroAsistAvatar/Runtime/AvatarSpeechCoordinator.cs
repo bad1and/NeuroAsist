@@ -1,0 +1,76 @@
+using UnityEngine;
+
+namespace NeuroAsist.Avatar
+{
+    public sealed class AvatarSpeechCoordinator : MonoBehaviour
+    {
+        [SerializeField] private AvatarWebSocketClient client;
+        [SerializeField] private AvatarAudioPlayer player;
+        [SerializeField] private AvatarEmotionController emotion;
+        [SerializeField] private AvatarStateController state;
+        [SerializeField] private VolumeLipSyncFallback fallback;
+        [SerializeField] private AvatarMotionController motion;
+        private int generation;
+        private string currentUtterance;
+        private int nextStreamSequence;
+        private GestureTag pendingStreamGesture = GestureTag.Auto;
+        private float pendingStreamGestureIntensity = 1f;
+        private string currentStreamEmotion = "neutral";
+        public void Speak(AvatarCommand command, AvatarCommandPayload payload)
+        {
+            generation++; currentUtterance = payload.utterance_id;
+            emotion.SetEmotion(payload.emotion, 1f);
+            motion?.SetEmotion(payload.emotion);
+            motion?.StopGesture(false);
+            state.SetState(AvatarState.Downloading);
+            fallback.SetActive(fallback.ShouldBeActive());
+            var localGeneration = generation;
+            player.Play(payload.audio_url, localGeneration,
+                () => { if (localGeneration != generation) return; if (AvatarEmotionController.IsTransient(payload.emotion)) emotion.SetEmotion("neutral", 1f); state.SetState(AvatarState.Speaking); motion?.TriggerGesture(AvatarMotionNames.ParseGesture(payload.gesture), payload.gesture_intensity, payload.interrupt); client.SendPlayback("avatar.playback.started", payload.utterance_id, command.message_id, null, AvatarProtocol.ClientLatencyMs(command)); },
+                () => { if (localGeneration != generation) return; fallback.ResetMouth(); emotion.SetEmotion("neutral", 1f); motion?.ResetToNeutral(); state.SetState(AvatarState.Idle); client.SendPlayback("avatar.playback.finished", payload.utterance_id, command.message_id); },
+                reason => { if (localGeneration != generation) return; fallback.ResetMouth(); state.SetState(AvatarState.Error); client.SendPlayback("avatar.playback.failed", payload.utterance_id, command.message_id, reason); });
+        }
+        public void Stop(string utteranceId)
+        {
+            if (!string.IsNullOrEmpty(utteranceId) && utteranceId != currentUtterance) return;
+            generation++; pendingStreamGesture = GestureTag.Auto; currentStreamEmotion = "neutral"; player.Stop(); fallback.ResetMouth(); emotion.SetEmotion("neutral", 1f); motion?.ResetToNeutral(); state.SetState(AvatarState.Idle);
+        }
+
+        public void StreamStart(AvatarCommand command, AvatarCommandPayload payload)
+        {
+            generation++; currentUtterance = payload.utterance_id; nextStreamSequence = 0; pendingStreamGesture = GestureTag.Auto; pendingStreamGestureIntensity = 1f; currentStreamEmotion = payload.emotion ?? "thinking";
+            emotion.SetEmotion(payload.emotion ?? "thinking", 1f); motion?.SetEmotion(payload.emotion ?? "thinking");
+            motion?.StopGesture(false); state.SetState(AvatarState.Thinking);
+            var localGeneration = generation;
+            player.BeginStream(localGeneration,
+                () => { if (localGeneration != generation) return; if (AvatarEmotionController.IsTransient(currentStreamEmotion)) emotion.SetEmotion("neutral", 1f); state.SetState(AvatarState.Speaking); motion?.TriggerGesture(pendingStreamGesture, pendingStreamGestureIntensity, true); client.SendPlayback("avatar.playback.started", currentUtterance, command.message_id, null, AvatarProtocol.ClientLatencyMs(command)); },
+                () => { if (localGeneration != generation) return; pendingStreamGesture = GestureTag.Auto; currentStreamEmotion = "neutral"; fallback.ResetMouth(); emotion.SetEmotion("neutral", 1f); motion?.ResetToNeutral(); state.SetState(AvatarState.Idle); client.SendPlayback("avatar.playback.finished", currentUtterance, command.message_id); },
+                reason => { if (localGeneration != generation) return; fallback.ResetMouth(); state.SetState(AvatarState.Error); client.SendPlayback("avatar.playback.failed", currentUtterance, command.message_id, reason); });
+        }
+
+        public void StreamMetadata(AvatarCommand command, AvatarCommandPayload payload)
+        {
+            if (payload.utterance_id != currentUtterance) return;
+            var intensity = Mathf.Clamp01(payload.gesture_intensity);
+            currentStreamEmotion = payload.emotion ?? "neutral";
+            emotion.SetEmotion(payload.emotion ?? "neutral", intensity);
+            motion?.SetEmotion(payload.emotion ?? "neutral");
+            pendingStreamGesture = AvatarMotionNames.ParseGesture(payload.gesture);
+            pendingStreamGestureIntensity = intensity;
+        }
+
+        public void StreamSegment(AvatarCommand command, AvatarCommandPayload payload, byte[] audio)
+        {
+            if (payload.utterance_id != currentUtterance || payload.sequence != nextStreamSequence) throw new System.InvalidOperationException("Unexpected stream segment order");
+            fallback.SetActive(fallback.ShouldBeActive());
+            player.EnqueueWav(audio, generation); nextStreamSequence++;
+            if (payload.is_final) player.EndStream(generation);
+        }
+
+        public void StreamEnd(AvatarCommand command, AvatarCommandPayload payload)
+        {
+            if (payload.utterance_id != currentUtterance) return;
+            player.EndStream(generation);
+        }
+    }
+}

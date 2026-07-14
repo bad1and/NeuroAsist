@@ -11,7 +11,9 @@ npm run dev --prefix apps/desktop
 
 The dev shell uses the repository `.venv\Scripts\python.exe` when present and launches `python -m apps.backend.desktop_entry`. It starts Vite itself, so no browser tab or separately started backend is required. `CommandOrControl+Shift+N` opens the main window again; the tray provides the same action, Safe Mode, avatar toggle, and Quit.
 
-Set `NEUROASIST_AVATAR_EXECUTABLE` to a Unity executable to make it an optional managed child. The shell gives it `NEUROASIST_BACKEND_URL` and `NEUROASIST_BACKEND_TOKEN`. Until the later overlay milestone adds a show/hide protocol, the tray avatar action stops or restarts that optional process.
+Build the Unity renderer first with `npm run build:avatar --prefix apps/desktop`. In development the shell automatically discovers `apps/avatar-unity/Builds/NeuroAsistAvatar/NeuroAsistAvatar.exe`; production bundles include that directory as an `avatar` resource. `NEUROASIST_AVATAR_EXECUTABLE` remains an override for a custom renderer.
+
+The shell gives Unity `NEUROASIST_BACKEND_URL` and `NEUROASIST_BACKEND_TOKEN`, enabling it to connect to the randomly selected, authenticated backend port. The tray **Show / hide avatar** action controls the live overlay without restarting the renderer. Hold `Ctrl+Alt` to temporarily make the click-through overlay interactive for drag/repositioning; `Ctrl+Alt+A` shows or hides it.
 
 ## Safe Mode and recovery
 

@@ -1,5 +1,6 @@
 import type {
   AvatarStatusResponse,
+  AvatarOverlaySettings,
   BackendEvent,
   ChatResponse,
   PublicSettings,
@@ -285,6 +286,14 @@ export function reindexMemories(): Promise<{ indexed: number }> {
 
 export function getAvatarStatus(): Promise<AvatarStatusResponse> {
   return requestJson<AvatarStatusResponse>("/avatar/status");
+}
+
+export function getAvatarOverlay(): Promise<AvatarOverlaySettings> {
+  return requestJson<AvatarOverlaySettings>("/avatar/overlay");
+}
+
+export function updateAvatarOverlay(payload: Partial<AvatarOverlaySettings>): Promise<AvatarOverlaySettings> {
+  return requestJson<AvatarOverlaySettings>("/avatar/overlay", { method: "PUT", body: JSON.stringify(payload) });
 }
 
 export function sendAvatarTestPhrase(payload: { text: string; emotion: string }): Promise<{ voice_request_id: string; status: string }> {

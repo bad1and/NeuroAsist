@@ -377,7 +377,7 @@ Chat or non-live voice response
   → Unity AudioSource, lip sync, and VRM expression
 ```
 
-The avatar bridge uses protocol v1 and is deliberately optional: unavailable Unity clients do not delay or fail text chat or TTS. The backend broadcasts full-WAV commands to all connected clients. It also provides `GET /avatar/status` plus test endpoints for speech, emotion, gesture, and stop; see the [Unity avatar runtime guide](Docs/unity_avatar_runtime_v0.4.md) and [Unity source handoff](Docs/unity-source.md) for setup and source ownership.
+The avatar bridge remains optional: unavailable Unity clients do not delay or fail text chat or TTS. The renderer source lives in [`apps/avatar-unity`](apps/avatar-unity/README.md); Tauri launches it with an authenticated dynamic-port WebSocket and exposes overlay controls through the Settings page and tray.
 
 ## Project structure
 
@@ -544,7 +544,7 @@ The current V0.5 direction and the frozen V0.4.1 baseline are described in:
 - **[Milestone 4 Tauri desktop shell](Docs/milestone-4-desktop-shell.md)**
 - **[Milestone 5 long-term memory](Docs/milestone-5-long-term-memory.md)**
 - **[Milestone 6 semantic retrieval](Docs/milestone-6-semantic-retrieval.md)**
-- **[Unity source handoff](Docs/unity-source.md)**
+- **[Unity avatar renderer](apps/avatar-unity/README.md)**
 
 ## Planned direction
 

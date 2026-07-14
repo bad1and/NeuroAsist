@@ -16,6 +16,15 @@ class RuntimeSettings:
     voice_live_playback_prebuffer_ms: int = 200
     memory_mode: str = "ask"
     memory_incognito: bool = False
+    avatar_overlay_visible: bool = True
+    avatar_overlay_always_on_top: bool = True
+    avatar_overlay_locked: bool = True
+    avatar_overlay_scale: float = 1.0
+    avatar_overlay_monitor: str = "primary"
+    avatar_overlay_x: float = 80.0
+    avatar_overlay_y: float = 80.0
+    avatar_overlay_width: float = 640.0
+    avatar_overlay_height: float = 720.0
 
 
 class RuntimeSettingsStore:

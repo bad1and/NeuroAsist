@@ -1,0 +1,6 @@
+{
+  "name": "NeuroAsist.Avatar.Tests",
+  "references": ["NeuroAsist.Avatar.Runtime"],
+  "includePlatforms": ["Editor"],
+  "optionalUnityReferences": ["TestAssemblies"]
+}

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { getAvatarStatus, sendAvatarTestEmotion, sendAvatarTestGesture, sendAvatarTestPhrase, stopAvatar } from "./api";
+import { getAvatarOverlay, getAvatarStatus, sendAvatarTestEmotion, sendAvatarTestGesture, sendAvatarTestPhrase, stopAvatar, updateAvatarOverlay } from "./api";
 
 describe("avatar API", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -10,6 +10,8 @@ describe("avatar API", () => {
     vi.stubGlobal("fetch", fetch);
 
     await getAvatarStatus();
+    await getAvatarOverlay();
+    await updateAvatarOverlay({ visible: false });
     await sendAvatarTestPhrase({ text: "hello", emotion: "happy" });
     await sendAvatarTestEmotion({ emotion: "happy", intensity: 1 });
     await sendAvatarTestGesture({ gesture: "greeting", intensity: 0.8 });
@@ -17,11 +19,13 @@ describe("avatar API", () => {
 
     expect(fetch.mock.calls.map(([url]) => url)).toEqual([
       "http://127.0.0.1:8000/avatar/status",
+      "http://127.0.0.1:8000/avatar/overlay",
+      "http://127.0.0.1:8000/avatar/overlay",
       "http://127.0.0.1:8000/avatar/test/speak",
       "http://127.0.0.1:8000/avatar/test/emotion",
       "http://127.0.0.1:8000/avatar/test/gesture",
       "http://127.0.0.1:8000/avatar/stop",
     ]);
-    expect(fetch.mock.calls[1][1].body).toContain("hello");
+    expect(fetch.mock.calls[3][1].body).toContain("hello");
   });
 });

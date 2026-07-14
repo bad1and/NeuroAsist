@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: e4c576b40fc3a14498f97ef222ef3dcb
+ScriptedImporter:
+  internalIDToNameTable: []
+  externalObjects: {}
+  serializedVersion: 2
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+  script: {fileID: 11500000, guid: f66ead3390398f443aa127b741826ad9, type: 3}
+  MigrateToVrm1: 1
+  # The overlay uses Unity's built-in renderer.  Keeping this explicit avoids
+  # importing URP-only MToon shaders into the standalone Windows player.
+  RenderPipeline: 1

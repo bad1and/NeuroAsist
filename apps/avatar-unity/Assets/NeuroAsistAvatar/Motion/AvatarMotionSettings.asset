@@ -1,0 +1,55 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 61d964236dfe50e4e9554d449f463af4, type: 3}
+  m_Name: AvatarMotionSettings
+  m_EditorClassIdentifier: 
+  MotionEnabled: 1
+  DefaultProfile: {fileID: 11400000, guid: 78c0df2bb02e28d448911bd8da1f63a4, type: 2}
+  EmotionProfiles:
+  - Emotion: 0
+    Profile: {fileID: 11400000, guid: 78c0df2bb02e28d448911bd8da1f63a4, type: 2}
+  - Emotion: 1
+    Profile: {fileID: 11400000, guid: a451b0c703c89bf46a0feaa7870b44bb, type: 2}
+  - Emotion: 2
+    Profile: {fileID: 11400000, guid: 74c930018be53854e9070da2bc1fdf5a, type: 2}
+  - Emotion: 3
+    Profile: {fileID: 11400000, guid: 083b7477ee0bb854181644f74b99d4a4, type: 2}
+  - Emotion: 4
+    Profile: {fileID: 11400000, guid: 003c62407b2f89848b10a1a6db7cc764, type: 2}
+  - Emotion: 5
+    Profile: {fileID: 11400000, guid: a71c3f46feee3cc4fa3ab68c8b351da5, type: 2}
+  - Emotion: 6
+    Profile: {fileID: 11400000, guid: c10455e07f05c3c438daa0df691e9577, type: 2}
+  - Emotion: 7
+    Profile: {fileID: 11400000, guid: 448eb82b964ceda4f8e52b5423595c0f, type: 2}
+  - Emotion: 8
+    Profile: {fileID: 11400000, guid: ced73ea342362b743839f6d012a19a59, type: 2}
+  GestureDefinitions:
+  - {fileID: 11400000, guid: 13b28e34c31a3984797d9ee1ca80cf56, type: 2}
+  - {fileID: 11400000, guid: ef4f565a528c9ba4e96a2509d0e6a919, type: 2}
+  - {fileID: 11400000, guid: 583f9a39406119d42aa995710ce05caf, type: 2}
+  - {fileID: 11400000, guid: f940cb8a0e6ee584192ff0e95566f13d, type: 2}
+  - {fileID: 11400000, guid: 65940d1cbee1fed4980e1c50f79b44eb, type: 2}
+  - {fileID: 11400000, guid: 55cebcf04f192f843b4f90095c2c4b99, type: 2}
+  - {fileID: 11400000, guid: 53dc5a50867980840abbd1a406acb2ef, type: 2}
+  - {fileID: 11400000, guid: 9e0646cecd1c1074e9cba7f1f646de57, type: 2}
+  - {fileID: 11400000, guid: c750d6948b2156c439c322c0ca0ad25e, type: 2}
+  - {fileID: 11400000, guid: cb6557a5b5a96fb40849804ab2c2a642, type: 2}
+  - {fileID: 11400000, guid: 323640518ae49ef4b8ed95871f27e2c1, type: 2}
+  IdleSchedulingEnabled: 1
+  AutoGestureIntervalMinSeconds: 3
+  AutoGestureIntervalMaxSeconds: 8
+  AutoGestureProbability: 0
+  DefaultMotionIntensity: 1
+  HeadLookEnabled: 1
+  HeadLookWeight: 1
+  DebugLogging: 0
