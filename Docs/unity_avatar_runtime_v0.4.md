@@ -1,37 +1,42 @@
-# Unity avatar runtime v0.4
+# Unity avatar runtime v0.5
 
-The Unity runtime lives in the companion project `D:\Nero3DPizda\My project`; it is intentionally not copied into the NeuroAsist Git repository. It targets Unity **2022.3.62f3**, embedded UniVRM 1.0 packages, and uLipSync **3.1.5**.
+Unity runtime lives in the companion project `D:\Nero3DPizda\My project`. It targets Unity **2022.3.62f3**, UniVRM 1.0 and uLipSync 3.1.5.
 
-## Flow
+## Performance defaults
+
+The supported performance target is a **Windows Standalone Player**, not the Unity Editor. `AvatarPerformanceProfile` applies `AvatarLow` only in a player:
+
+- 1280×720 window, 30 FPS and VSync disabled;
+- HDR/MSAA, shadows, realtime reflection probes and anisotropic filtering disabled;
+- one directional light, camera far plane capped at 20 metres, lower LOD bias.
+
+The values are stored in `AvatarRuntimeSettings.asset`. Run **NeuroAsist → Avatar → Setup Canonical Scene**, then use **File → Build Settings → Windows → Build**. The Editor remains a development tool; profile the standalone development build with the CPU/GPU Profiler, Frame Debugger and Memory Profiler.
+
+## Voice flow and compatibility
+
+`VOICE_SILERO_DEVICE=cpu` is the recommended default: Whisper remains on CUDA and Unity keeps the GPU while Silero synthesizes on four CPU threads.
+
+Protocol v1 remains compatible:
 
 ```text
-React text or non-live voice → CharacterAgent → SpeechOrchestrator → complete WAV
-→ /voice/audio/{file}.wav → avatar.speak over /ws/avatar → Unity AudioSource
-→ existing uLipSync (or aa volume fallback) + VRM emotion
+full reply → complete WAV → avatar.speak → HTTP download → AudioSource
 ```
 
-Unity is optional. A closed, restarting, or failed Unity client never changes successful chat/TTS results. `avatar.speak` broadcasts to every currently connected avatar client. Live browser voice remains browser-only in v0.4.
+The runtime now connects to `ws://127.0.0.1:8000/ws/avatar?version=2` and advertises `[1, 2]`. A v2 client receives:
 
-## One-time Unity setup
+```text
+avatar.stream.start → avatar.stream.segment (base64 PCM WAV, ordered) → avatar.stream.end
+```
 
-1. Open `D:\Nero3DPizda\My project` with Unity 2022.3.62f3.
-2. Let Unity import `Assets/NeuroAsistAvatar/`; do not delete the existing `LipSyncAudio`, `Liqu.vrm`, or `uLipSync-Profile-New` assets.
-3. Run **NeuroAsist → Avatar → Setup Canonical Scene**. This opens `Assets/хуй.unity`, adds only the `NeuroAsistAvatarRuntime` control object, retains the existing uLipSync object/profile, and adds this scene to Build Settings.
-4. Run **NeuroAsist → Avatar → Validate Canonical Scene**. Fix only reported missing references.
-5. In Play mode, set `AVATAR_ENABLED=true` in the backend `.env`, start the backend, then start Unity. The runtime connects to `ws://127.0.0.1:8000/ws/avatar?version=1`.
+Segments are decoded into `AudioClip`s on the Unity main thread and played from an ordered FIFO. The first segment waits only the configured 200 ms prebuffer; the player does not wait for a complete LLM reply or an HTTP WAV download. `avatar.stop` clears the queue, destroys transient clips and rejects old utterance segments.
 
-`AvatarRuntimeSettings` defaults to the local HTTP/WS endpoints. Change its URLs only for a different backend host. It contains no API key.
+## Latency telemetry
 
-## Verification and diagnostics
+Backend events record upload/STT elapsed time, first LLM delta and first TTS segment readiness. Unity reports `avatar.stream_segment_received` and `avatar.speaking_started` with client-side elapsed time from the server frame timestamp. Neither event contains speech text or audio.
 
-- `GET http://127.0.0.1:8000/avatar/status` shows enabled state, clients, heartbeat, state, and current utterance.
-- Settings → Avatar → **Send test phrase** queues real Silero full-WAV synthesis; **Send emotion** does not synthesize audio; **Stop avatar** returns the avatar to neutral.
-- A 404 WAV error means the backend was restarted/cleaned its runtime audio or `VOICE_AUDIO_DIR` is wrong. Open the returned `/voice/audio/...` URL in a browser first.
-- `[AvatarWS]` logs connection/reconnect/send errors, `[AvatarProtocol]` reports rejected frames, `[AvatarAudio]` reports download failures, `[LipSync]` reports fallback availability, `[Emotion]` reports missing expressions, and `[AvatarState]` is available through backend events.
-- `Auto` lipsync retains the configured uLipSync component. It falls back to amplitude-driven VRM expression `aa` only when uLipSync is absent. Verify the VRM has `aa`, `ih`, `ou`, `ee`, `oh`, plus the required emotion presets.
+## Smoke test
 
-## Tests and limits
-
-Run Unity EditMode tests with the Test Runner after Unity imports the new asmdefs. The runtime deliberately has no live WAV segment support, phoneme timestamps, Rhubarb, body gestures, eye tracking, VRM hot-swap, or multiple-speaker ownership. Unity live segments are deferred to v0.4.1.
-
-Manual smoke test: start backend with `AVATAR_ENABLED=true`; start React and Unity; confirm `/avatar/status` client count; send text; confirm an `avatar.speak` event only after `voice.tts_ready`; observe WAV playback/lip movement; send a second phrase during download; press Stop; restart backend and confirm Unity reconnects.
+1. Set `AVATAR_ENABLED=true`, `VOICE_SILERO_DEVICE=cpu`; start backend and frontend.
+2. Run the standalone avatar and confirm `/avatar/status` shows a v2 client.
+3. Send live voice from the browser. Verify `avatar.stream.start`, ordered segment receipts, first playback, and cancellation when a second utterance starts.
+4. Capture 30 seconds of idle and active speech. Accept only P95 CPU and GPU frame times ≤33.3 ms and P95 end-of-speech to first audio ≤2.5 s.

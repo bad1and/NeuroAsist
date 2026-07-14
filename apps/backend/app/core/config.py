@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     voice_tts_timeout_seconds: int = 45
     voice_live_queue_size: int = 3
     voice_live_idle_flush_ms: int = 500
-    voice_live_first_segment_chars: int = 40
+    voice_live_first_segment_chars: int = 32
     voice_live_next_segment_chars: int = 75
     voice_live_max_segment_chars: int = 110
     voice_live_max_segment_words: int = 18
@@ -61,8 +61,8 @@ class Settings(BaseSettings):
     voice_live_tts_concurrency_mode: str = "1"
     voice_live_tts_concurrency_min: int = 1
     voice_live_tts_concurrency_max: int = 2
-    voice_live_playback_prebuffer_segments: int = 2
-    voice_live_playback_prebuffer_ms: int = 1000
+    voice_live_playback_prebuffer_segments: int = 1
+    voice_live_playback_prebuffer_ms: int = 200
     avatar_enabled: bool = False
     avatar_heartbeat_interval_seconds: float = 15.0
     avatar_client_timeout_seconds: float = 45.0

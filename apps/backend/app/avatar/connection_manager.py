@@ -28,6 +28,7 @@ class AvatarClient:
     current_utterance_id: str | None = None
     current_motion_profile: str | None = None
     current_gesture: str | None = None
+    protocol_version: int = 1
 
     def status(self) -> AvatarStatusClient:
         return AvatarStatusClient(
@@ -92,8 +93,11 @@ class AvatarConnectionManager:
         clients = await self.snapshot()
         return [client.status() for client in clients]
 
-    async def broadcast(self, message: dict[str, Any]) -> BroadcastResult:
-        clients = await self.snapshot()
+    async def broadcast(self, message: dict[str, Any], *, min_protocol_version: int = 1) -> BroadcastResult:
+        clients = [
+            client for client in await self.snapshot()
+            if client.protocol_version >= min_protocol_version
+        ]
         if not clients:
             return BroadcastResult(attempted=0, sent=0, failed=0)
         results = await asyncio.gather(

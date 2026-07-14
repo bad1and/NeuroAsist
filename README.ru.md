@@ -17,7 +17,7 @@
 
 > [!IMPORTANT]
 > **NeuroAsist v0.4.0 — экспериментальный локальный прототип.**
-> Доступны текстовый/голосовой чат, полный WAV TTS и опциональный Unity VRM-аватар. Live-сегменты остаются браузерной функцией.
+> Доступны текстовый/голосовой чат, локальный Silero TTS на CPU и опциональный Unity VRM-аватар. Unity protocol v2 умеет воспроизводить live WAV-сегменты без ожидания полного ответа.
 
 ## О проекте
 
@@ -165,7 +165,7 @@ VOICE_PRELOAD_TTS_MODEL=true
 VOICE_SILERO_MODEL=v5_5_ru
 VOICE_SILERO_SPEAKER_RU=xenia
 VOICE_SILERO_SAMPLE_RATE=24000
-VOICE_SILERO_DEVICE=cuda
+VOICE_SILERO_DEVICE=cpu
 VOICE_SILERO_CPU_THREADS=4
 VOICE_SILERO_WARMUP=true
 ```
@@ -374,7 +374,7 @@ Browser MediaRecorder
   → Unity AudioSource, lipsync и VRM-эмоция
 ```
 
-Мост аватара использует protocol v1 и намеренно остаётся опциональным: недоступный Unity-клиент не замедляет и не ломает чат или TTS. Backend рассылает команды с полным WAV всем подключённым клиентам. Также доступны `GET /avatar/status` и тестовые endpoints речи, эмоции, жеста и остановки; настройка и диагностика — в [гайде Unity avatar runtime](Docs/unity_avatar_runtime_v0.4.md) и [гайде motion v0.5](Docs/avatar-motion-v0.5.md).
+Мост аватара остаётся опциональным. Protocol v1 сохраняет `avatar.speak` с URL полного WAV для старых клиентов; protocol v2 получает `avatar.stream.*` с короткими base64 WAV-сегментами и ставит их в очередь без HTTP-загрузки. Также доступны `GET /avatar/status` и тестовые endpoints речи, эмоции, жеста и остановки; настройка и диагностика — в [гайде Unity avatar runtime v0.5](Docs/unity_avatar_runtime_v0.4.md) и [гайде motion v0.5](Docs/avatar-motion-v0.5.md).
 
 ## Структура проекта
 
@@ -522,7 +522,7 @@ NeuroAsist v0.4.0 пока не умеет:
 - постоянно слушать микрофон;
 - автоматически вести диалог через VAD;
 - прерывать речь персонажа;
-- Unity live-audio segments (полный WAV для аватара поддерживается);
+- GPU/frame-time capture для конкретной VRM-модели и при необходимости дополнительное упрощение spring bones/материалов;
 - хранить долгосрочную семантическую память или использовать RAG;
 - работать с файлами, shell, браузером, экраном или рабочим столом;
 - поддерживать аккаунты, публичный production deployment и multi-user isolation.

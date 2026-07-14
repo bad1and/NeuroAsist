@@ -16,6 +16,7 @@ from apps.backend.app.voice.providers import (
     _minimum_tts_duration_seconds,
 )
 from apps.backend.app.voice.text import TextChunker, TextNormalizer
+from apps.backend.app.voice.directives import AvatarDirective, LiveDirectiveParser, clean_live_reply
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ class UtteranceContext:
     cancelled: bool = False
     audio_started: bool = False
     text_completed: bool = False
+    started_at: float = field(default_factory=time.perf_counter)
 
 
 @dataclass
@@ -74,6 +76,8 @@ class VoiceSessionManager:
         tts_concurrency_mode: str = "1",
         tts_concurrency_min: int = 1,
         tts_concurrency_max: int = 2,
+        avatar_service=None,
+        event_publisher=None,
     ) -> None:
         self._tts_provider = tts_provider
         self._queue_size = queue_size
@@ -95,6 +99,11 @@ class VoiceSessionManager:
         self._tts_semaphore = asyncio.Semaphore(self._tts_concurrency)
         self._connections: dict[str, VoiceConnection] = {}
         self._active: dict[str, UtteranceContext] = {}
+        self._avatar_service = avatar_service
+        self._event_publisher = event_publisher
+
+    def bind_avatar_service(self, avatar_service) -> None:
+        self._avatar_service = avatar_service
 
     async def register(self, session_id: str, websocket: WebSocket) -> VoiceConnection:
         previous = self._connections.get(session_id)
@@ -140,6 +149,10 @@ class VoiceSessionManager:
         context.cancelled = True
         if notify:
             await self._send(context, "voice.utterance.cancelled")
+            if self._avatar_service is not None:
+                await self._avatar_service.stop(
+                    session_id=session_id, utterance_id=context.utterance_id
+                )
         if context.task and context.task is not asyncio.current_task():
             context.task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -156,15 +169,54 @@ class VoiceSessionManager:
         normalizer = TextNormalizer()
         pending: asyncio.Task | None = None
         first_delta_seen = False
-        try:
-            await self._send(context, "voice.utterance.started")
+        directive_parser = LiveDirectiveParser()
+        directive_sent = False
+
+        async def apply_directive(directive: AvatarDirective) -> None:
+            nonlocal directive_sent
+            if directive_sent:
+                return
+            directive_sent = True
+            if self._avatar_service is not None:
+                await self._avatar_service.stream_metadata(
+                    session_id=context.session_id,
+                    utterance_id=context.utterance_id,
+                    emotion=directive.emotion,
+                    gesture=directive.gesture,
+                    gesture_intensity=directive.intensity,
+                )
             await self._send(
                 context,
                 "voice.metadata",
-                emotion="neutral",
-                intent=agent.classify_intent(transcript),
+                emotion=directive.emotion,
+                gesture=directive.gesture,
+                gesture_intensity=directive.intensity,
+                intent=intent,
             )
-            iterator = agent.stream_user_message(context.session_id, transcript).__aiter__()
+
+        async def consume_spoken(parts: list[str]) -> None:
+            for spoken in parts:
+                if not spoken:
+                    continue
+                reply_parts.append(spoken)
+                await self._send(context, "voice.text.delta", delta=spoken)
+                for raw_segment in chunker.feed(spoken):
+                    segment = normalizer.normalize(raw_segment)
+                    if segment:
+                        await self._enqueue_tts_text(queue, worker, segment)
+
+        try:
+            await self._send(context, "voice.utterance.started")
+            intent = agent.classify_intent(transcript)
+            if self._avatar_service is not None:
+                await self._avatar_service.stream_start(
+                    session_id=context.session_id,
+                    utterance_id=context.utterance_id,
+                    intent=intent,
+                )
+            iterator = agent.stream_user_message(
+                context.session_id, transcript, stored_reply_transform=clean_live_reply
+            ).__aiter__()
             pending = asyncio.create_task(anext(iterator))
             while True:
                 done, _ = await asyncio.wait({pending}, timeout=self._idle_flush_seconds)
@@ -180,19 +232,25 @@ class VoiceSessionManager:
                     break
                 if not first_delta_seen:
                     first_delta_seen = True
+                    elapsed_ms = int((time.perf_counter() - started) * 1000)
                     logger.info(
                         "Live voice first LLM delta: session_id=%s utterance_id=%s llm_first_delta_ms=%s",
                         context.session_id,
                         context.utterance_id,
-                        int((time.perf_counter() - started) * 1000),
+                        elapsed_ms,
                     )
-                reply_parts.append(delta)
-                await self._send(context, "voice.text.delta", delta=delta)
-                for raw_segment in chunker.feed(delta):
-                    segment = normalizer.normalize(raw_segment)
-                    if segment:
-                        await self._enqueue_tts_text(queue, worker, segment)
+                    self._publish_latency(context, "voice.llm_first_delta", llm_first_delta_ms=elapsed_ms)
+                directive, spoken = directive_parser.feed(delta)
+                if directive is not None:
+                    await apply_directive(directive)
+                await consume_spoken(spoken)
                 pending = asyncio.create_task(anext(iterator))
+            directive, spoken = directive_parser.finish()
+            if directive is not None:
+                await apply_directive(directive)
+            await consume_spoken(spoken)
+            if not directive_sent:
+                await apply_directive(AvatarDirective())
             for raw_segment in chunker.flush():
                 segment = normalizer.normalize(raw_segment)
                 if segment:
@@ -202,6 +260,10 @@ class VoiceSessionManager:
             await self._enqueue(queue, worker, None)
             await worker
             await self._send(context, "voice.utterance.finished")
+            if self._avatar_service is not None:
+                await self._avatar_service.stream_end(
+                    session_id=context.session_id, utterance_id=context.utterance_id
+                )
         except asyncio.CancelledError:
             worker.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -340,6 +402,23 @@ class VoiceSessionManager:
         }
         sent_started = time.perf_counter()
         await connection.segment(started, audio, finished)
+        if self._avatar_service is not None:
+            await self._avatar_service.stream_segment(
+                session_id=context.session_id,
+                utterance_id=context.utterance_id,
+                sequence=segment_id,
+                audio=audio,
+                duration_seconds=duration,
+                sample_rate=getattr(self._tts_provider, "sample_rate", 24000),
+                is_final=False,
+            )
+        self._publish_latency(
+            context,
+            "voice.tts_first_segment_ready" if segment_id == 0 else "voice.tts_segment_ready",
+            segment_id=segment_id,
+            tts_synthesis_ms=synth_ms,
+            pipeline_elapsed_ms=int((time.perf_counter() - context.started_at) * 1000),
+        )
         logger.info(
             "Live TTS segment ready: session_id=%s utterance_id=%s segment_id=%s "
             "text_length=%s words=%s audio_bytes=%s duration=%.3f attempts=%s "
@@ -616,6 +695,16 @@ class VoiceSessionManager:
         if connection is None:
             return
         await connection.json({**self._event(context, **payload), "type": event_type})
+
+    def _publish_latency(self, context: UtteranceContext, event_type: str, **payload: Any) -> None:
+        if self._event_publisher is None:
+            return
+        self._event_publisher(
+            event_type,
+            "info",
+            "Voice latency milestone",
+            {"session_id": context.session_id, "utterance_id": context.utterance_id, **payload},
+        )
 
     @staticmethod
     def _resolve_tts_concurrency(mode: str, minimum: int, maximum: int) -> int:
