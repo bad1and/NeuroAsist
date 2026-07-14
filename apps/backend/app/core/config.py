@@ -1,4 +1,5 @@
 from functools import lru_cache
+import os
 from pathlib import Path
 
 from pydantic import Field
@@ -21,6 +22,8 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-flash"
     sqlite_path: str = "data/neuroasist.sqlite3"
+    app_data_dir: str | None = Field(default=None, validation_alias="NEUROASIST_APP_DATA_DIR")
+    backup_retention_days: int = 30
     desktop_auth_token: str | None = Field(default=None, validation_alias="NEUROASIST_DESKTOP_TOKEN")
     chat_history_limit: int = 20
     timeline_v2_enabled: bool = True
@@ -85,6 +88,10 @@ class Settings(BaseSettings):
     voice_live_tts_concurrency_max: int = 2
     voice_live_playback_prebuffer_segments: int = 1
     voice_live_playback_prebuffer_ms: int = 200
+    voice_vad_provider: str = "silero"
+    voice_silero_vad_model_path: str | None = None
+    voice_vad_threshold: float = 0.55
+    voice_vad_pre_roll_ms: int = 500
     avatar_enabled: bool = False
     avatar_emotion_mapping_path: str = "apps/protocol/avatar-emotion-mapping.json"
     avatar_heartbeat_interval_seconds: float = 15.0
@@ -109,8 +116,25 @@ class Settings(BaseSettings):
         return ROOT_DIR / path
 
     @property
+    def app_data_path(self) -> Path:
+        """Per-user writable location used by the installed desktop application."""
+        if self.app_data_dir:
+            return Path(self.app_data_dir).expanduser()
+        local_app_data = os.getenv("LOCALAPPDATA")
+        if local_app_data:
+            return Path(local_app_data) / "NeuroAsist"
+        return Path.home() / ".local" / "share" / "NeuroAsist"
+
+    @property
     def avatar_emotion_mapping(self) -> Path:
         path = Path(self.avatar_emotion_mapping_path)
+        return path if path.is_absolute() else ROOT_DIR / path
+
+    @property
+    def voice_silero_vad_model(self) -> Path | None:
+        if not self.voice_silero_vad_model_path:
+            return None
+        path = Path(self.voice_silero_vad_model_path)
         return path if path.is_absolute() else ROOT_DIR / path
 
     @property

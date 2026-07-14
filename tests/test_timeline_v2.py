@@ -85,6 +85,24 @@ def test_timeline_pagination_journal_and_range_deletion(monkeypatch, tmp_path: P
     assert remaining.json()["items"] == []
 
 
+def test_timeline_search_accepts_hyphenated_russian_text(monkeypatch, tmp_path: Path) -> None:
+    client, _ = make_client(monkeypatch, tmp_path)
+    with client:
+        created = client.post(
+            "/timeline/messages",
+            json={
+                "role": "user",
+                "content": "Давай обсудим какую-нибудь тему.",
+                "client_message_id": "hyphenated-search",
+            },
+        )
+        searched = client.get("/timeline/search", params={"q": "какую-нибудь"})
+
+    assert created.status_code == 200
+    assert searched.status_code == 200
+    assert any(item["content"] == "Давай обсудим какую-нибудь тему." for item in searched.json()["items"])
+
+
 def test_legacy_chat_contract_writes_to_primary_timeline(monkeypatch, tmp_path: Path) -> None:
     class SuccessfulProvider:
         def __init__(self, settings, model=None) -> None:

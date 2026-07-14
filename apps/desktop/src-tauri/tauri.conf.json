@@ -4,8 +4,8 @@
   "version": "0.5.0",
   "identifier": "com.neuroasist.companion",
   "build": {
-    "beforeDevCommand": "npm --prefix apps/web run dev -- --port 1420",
-    "beforeBuildCommand": "npm --prefix apps/web run build",
+    "beforeDevCommand": "npm --prefix ../web run dev -- --port 1420 --strictPort",
+    "beforeBuildCommand": "npm --prefix ../web run build",
     "devUrl": "http://127.0.0.1:1420",
     "frontendDist": "../../web/dist"
   },

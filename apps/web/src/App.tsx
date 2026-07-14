@@ -2,19 +2,27 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 
 import {
   getAvatarStatus,
+  createBackup,
+  getBackups,
   getEvents,
   getTimelineJournal,
   getTimelineMessages,
   getSettings,
   getStatus,
   getVoiceTtsStatus,
+  getModels,
+  installModel,
+  isDesktopManaged,
+  removeModel,
   resolveApiUrl,
+  saveDesktopApiKey,
   sendChatMessage,
   searchTimeline,
   deleteTimelineRange,
   sendVoiceMessage,
   updateRuntimeSettings,
   voiceWebSocketUrl,
+  voiceInputWebSocketUrl,
   WS_EVENTS_URL,
   sendAvatarTestEmotion,
   sendAvatarTestGesture,
@@ -27,6 +35,7 @@ import type {
   ChatMessage,
   EventLevel,
   PublicSettings,
+  ManagedModel,
   StatusResponse,
   TimelineJournalItem,
   TimelineMessage,
@@ -35,7 +44,7 @@ import type {
 } from "./types";
 import type { VoiceServerEvent } from "./types";
 import { PlaybackCoordinator, TTSStreamPlayer, VoiceSocketClient } from "./voice-live";
-import { BrowserVadRecorder, type VadState } from "./vad";
+import { BrowserVadRecorder, PcmInputClient, type VadState } from "./vad";
 import { JournalPage } from "./journal";
 import { MemoryPage } from "./memory";
 
@@ -96,6 +105,7 @@ export default function App() {
   const [events, setEvents] = useState<BackendEvent[]>([]);
   const [wsState, setWsState] = useState<WsState>("disconnected");
   const [statusError, setStatusError] = useState<string | null>(null);
+  const setupRequired = Boolean(settings && !settings.api_key_configured && isDesktopManaged());
 
   const refreshEvents = useCallback(async () => {
     const payload = await getEvents(100);
@@ -187,6 +197,9 @@ export default function App() {
         statusError={statusError}
       />
 
+      {setupRequired ? (
+        <SetupWizard onComplete={refreshOverview} />
+      ) : (
       <main className="workspace">
         <nav className="tabs" aria-label="Primary">
           <button
@@ -247,7 +260,47 @@ export default function App() {
           />
         )}
       </main>
+      )}
     </div>
+  );
+}
+
+function SetupWizard({ onComplete }: { onComplete: () => Promise<void> }) {
+  const [apiKey, setApiKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setMessage(null);
+    try {
+      await saveDesktopApiKey(apiKey);
+      setApiKey("");
+      await onComplete();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not save API key.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <main className="workspace">
+      <section className="panel settings-panel">
+        <div className="panel-header"><h2>Welcome to NeuroAsist</h2><span>Step 1 of 2</span></div>
+        <p>Paste your DeepSeek API key once. It is saved in Windows Credential Manager, not in the project files or settings.</p>
+        <form className="form-grid" onSubmit={submit}>
+          <label>
+            DeepSeek API key
+            <input type="password" autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="sk-…" required />
+          </label>
+          <button className="settings-save" type="submit" disabled={busy || !apiKey.trim()}>{busy ? "Saving and starting…" : "Save and continue"}</button>
+        </form>
+        <p>Then open Settings → Models and download Silero VAD for hands-free voice.</p>
+        {message && <div className="notice">{message}</div>}
+      </section>
+    </main>
   );
 }
 
@@ -329,6 +382,7 @@ function ChatPage({
   const liveSocketRef = useRef<VoiceSocketClient | null>(null);
   const livePlayerRef = useRef<TTSStreamPlayer | null>(null);
   const vadRecorderRef = useRef<BrowserVadRecorder | null>(null);
+  const pcmInputRef = useRef<PcmInputClient | null>(null);
   const submitVoiceRef = useRef<(audio: Blob, endedAt?: number) => void>(() => undefined);
   const playbackCoordinatorRef = useRef(new PlaybackCoordinator());
   const avatarOwnsAudioRef = useRef(false);
@@ -349,6 +403,10 @@ function ChatPage({
     typeof navigator !== "undefined" &&
     Boolean(navigator.mediaDevices?.getUserMedia) &&
     typeof MediaRecorder !== "undefined";
+  const handsFreeSupported =
+    typeof navigator !== "undefined"
+    && Boolean(navigator.mediaDevices?.getUserMedia)
+    && typeof AudioWorkletNode !== "undefined";
   const browserSpeechSupported =
     typeof window !== "undefined" &&
     "speechSynthesis" in window &&
@@ -584,6 +642,7 @@ function ChatPage({
     livePlayerRef.current?.stop();
     liveSocketRef.current?.close();
     vadRecorderRef.current?.stop();
+    pcmInputRef.current?.close();
   }, []);
 
   useEffect(() => () => stopVoicePlayback(), [stopVoicePlayback]);
@@ -956,16 +1015,29 @@ function ChatPage({
   const toggleHandsFree = async () => {
     if (handsFree) {
       vadRecorderRef.current?.stop();
+      pcmInputRef.current?.close();
+      pcmInputRef.current = null;
       vadRecorderRef.current = null;
       setHandsFree(false);
       setVadState("idle");
       return;
     }
     try {
+      await ensureLiveVoice();
+      const input = new PcmInputClient(voiceInputWebSocketUrl(SESSION_ID), (event) => {
+        if (event.type === "voice.input.transcript" && event.transcript) {
+          setMessages((current) => [...current, { id: crypto.randomUUID(), role: "user", content: event.transcript! }]);
+          setVoiceState("thinking");
+        } else if (event.type === "voice.input.error") {
+          setError(event.message ?? "Live voice input failed");
+        }
+      });
+      await input.connect(16000, settings?.voice_language ?? "ru");
+      pcmInputRef.current = input;
       const recorder = new BrowserVadRecorder();
       vadRecorderRef.current = recorder;
       await recorder.start(
-        (audio, endedAt) => submitVoiceRef.current(audio, endedAt),
+        (pcm16) => pcmInputRef.current?.sendPcm(pcm16),
         (nextState) => {
           setVadState(nextState);
           if (nextState === "speech" && liveSocketRef.current?.activeUtteranceId) {
@@ -1101,7 +1173,7 @@ function ChatPage({
         </button>
         <button
           className={handsFree ? "recording" : "secondary"}
-          disabled={!voiceSupported || voiceState === "transcribing"}
+          disabled={!handsFreeSupported || voiceState === "transcribing"}
           onClick={() => void toggleHandsFree()}
           type="button"
         >
@@ -1292,6 +1364,8 @@ function SettingsPage({
       </div>
 
       <AvatarControls avatarStatus={avatarStatus} onRefresh={onRefreshAvatar} />
+      <ModelManager />
+      <BackupControls />
 
       <div className="form-grid">
         <fieldset className="settings-group">
@@ -1407,6 +1481,101 @@ function SettingsPage({
         </button>
       </div>
 
+      {message && <div className="notice">{message}</div>}
+    </section>
+  );
+}
+
+function ModelManager() {
+  const [models, setModels] = useState<ManagedModel[]>([]);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      setModels((await getModels()).models);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Models are unavailable.");
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 1000);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+
+  const install = async (modelId: string) => {
+    setMessage(null);
+    try {
+      await installModel(modelId);
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Model download could not be started.");
+    }
+  };
+
+  const remove = async (modelId: string) => {
+    setMessage(null);
+    try {
+      await removeModel(modelId);
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Model could not be removed.");
+    }
+  };
+
+  return (
+    <section className="avatar-controls" aria-label="Model manager">
+      <div className="panel-header"><div><h2>Models</h2><span>Stored outside the application folder</span></div><button className="secondary" onClick={() => void refresh()}>Refresh</button></div>
+      {models.map((model) => {
+        const percent = model.total_bytes > 0 ? Math.min(100, Math.round((model.downloaded_bytes / model.total_bytes) * 100)) : 0;
+        return <div className="settings-group" key={model.id}>
+          <strong>{model.name} {model.version}</strong>
+          <span>{model.installed ? "Installed and checksum verified" : model.status === "downloading" ? `Downloading: ${percent}%` : "Not installed"}</span>
+          {model.status === "failed" && <span className="notice">{model.error}</span>}
+          {model.status === "downloading" && <progress value={percent} max="100">{percent}%</progress>}
+          <div className="avatar-actions">
+            {!model.installed && <button onClick={() => void install(model.id)} disabled={model.status === "downloading"}>{model.status === "failed" ? "Retry download" : "Download"}</button>}
+            {model.installed && <button className="secondary" onClick={() => void remove(model.id)}>Remove</button>}
+          </div>
+          {model.restart_required && model.installed && <small>Restart NeuroAsist to use this model.</small>}
+        </div>;
+      })}
+      {message && <div className="notice">{message}</div>}
+    </section>
+  );
+}
+
+function BackupControls() {
+  const [backups, setBackups] = useState<Array<{ name: string; size_bytes: number; created_at: string }>>([]);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const refresh = useCallback(async () => {
+    try {
+      setBackups(await getBackups());
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Backups are unavailable.");
+    }
+  }, []);
+  useEffect(() => { void refresh(); }, [refresh]);
+  const create = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await createBackup();
+      await refresh();
+      setMessage("Backup created. API keys are never included.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Backup could not be created.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="avatar-controls" aria-label="Backups">
+      <div className="panel-header"><div><h2>Backups</h2><span>Memory and settings; kept for 30 days</span></div><button onClick={() => void create()} disabled={busy}>{busy ? "Creating…" : "Create backup"}</button></div>
+      {backups.length ? <div className="settings-grid">{backups.slice(0, 3).map((backup) => <InfoRow key={backup.name} label={backup.name} value={`${Math.ceil(backup.size_bytes / 1024)} KB · ${formatTime(backup.created_at)}`} />)}</div> : <span>No backups yet.</span>}
+      <small>Uninstalling NeuroAsist leaves this data in your Windows profile. Delete it only if you explicitly choose to.</small>
       {message && <div className="notice">{message}</div>}
     </section>
   );

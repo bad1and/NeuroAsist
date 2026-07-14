@@ -12,6 +12,7 @@ build/
 node_modules/
 develop-eggs/
 dist/
+apps/desktop/src-tauri/binaries/
 downloads/
 eggs/
 .eggs/

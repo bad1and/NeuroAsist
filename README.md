@@ -239,6 +239,9 @@ VOICE_SILERO_WARMUP=true
 | `VOICE_LIVE_TTS_CONCURRENCY_MAX` | Upper live TTS concurrency bound. |
 | `VOICE_LIVE_PLAYBACK_PREBUFFER_SEGMENTS` | Number of decoded live audio segments buffered before playback starts. Runtime-editable in Settings. |
 | `VOICE_LIVE_PLAYBACK_PREBUFFER_MS` | Additional live playback prebuffer delay in milliseconds. Runtime-editable in Settings. |
+| `VOICE_VAD_PROVIDER` | Live PCM input VAD provider: `silero` (with safe energy fallback) or `energy`. |
+| `VOICE_SILERO_VAD_MODEL_PATH` | Optional local 16 kHz Silero TorchScript model. It is never downloaded implicitly. |
+| `VOICE_VAD_PRE_ROLL_MS` | RAM-only PCM ring-buffer duration preserved before detected speech. |
 
 #### Unity avatar bridge
 

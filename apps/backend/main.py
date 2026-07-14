@@ -16,6 +16,8 @@ from apps.backend.app.api.routes.timeline import router as timeline_router
 from apps.backend.app.api.routes.episodes import router as episodes_router
 from apps.backend.app.api.routes.context_debug import router as context_debug_router
 from apps.backend.app.api.routes.memory import router as memory_router
+from apps.backend.app.api.routes.models import router as models_router
+from apps.backend.app.api.routes.maintenance import router as maintenance_router
 from apps.backend.app.api.websocket import router as websocket_router
 from apps.backend.app.core.config import get_settings
 from apps.backend.app.core.logging import configure_logging
@@ -23,7 +25,9 @@ from apps.backend.app.events.bus import EventBus
 from apps.backend.app.avatar.connection_manager import AvatarConnectionManager
 from apps.backend.app.avatar.service import AvatarService
 from apps.backend.app.avatar.emotion_engine import EmotionEngine
-from apps.backend.app.runtime.settings import RuntimeSettings
+from apps.backend.app.runtime.settings import RuntimeSettings, RuntimeSettingsStore
+from apps.backend.app.model_manager.service import ModelManager
+from apps.backend.app.storage.backups import BackupService
 from apps.backend.app.storage.sqlite_history import SQLiteMessageHistory
 from apps.backend.app.storage.timeline import EpisodePolicy, TimelineHistoryAdapter, TimelineStore
 from apps.backend.app.context.manager import ContextManager
@@ -33,7 +37,10 @@ from apps.backend.app.semantic.embedding import HashEmbeddingProvider
 from apps.backend.app.semantic.vector_index import NullVectorIndex, SqliteVecIndex
 from apps.backend.app.voice.service import VoiceService
 from apps.backend.app.voice.live import VoiceSessionManager
+from apps.backend.app.voice.input import SileroVadProvider, VadProvider, VoiceInputSessionManager
 from apps.backend.app.voice.orchestrator import SpeechOrchestrator
+from apps.backend.app.agents.character.agent import CharacterAgent
+from apps.backend.app.llm.providers.deepseek import DeepSeekProvider
 
 logger = logging.getLogger(__name__)
 
@@ -83,12 +90,21 @@ def create_app() -> FastAPI:
         event_bus.publish,
     ) if settings.timeline_v2_enabled else None
     history = TimelineHistoryAdapter(timeline_store) if timeline_store is not None else SQLiteMessageHistory(settings.database_path)
-    runtime_settings = RuntimeSettings(
+    runtime_defaults = RuntimeSettings(
         voice_language=settings.voice_default_language,
         voice_tts_voice=settings.voice_silero_speaker_ru,
         voice_live_playback_prebuffer_segments=settings.voice_live_playback_prebuffer_segments,
         voice_live_playback_prebuffer_ms=settings.voice_live_playback_prebuffer_ms,
         memory_mode=settings.memory_mode,
+    )
+    runtime_settings_store = RuntimeSettingsStore(settings.app_data_path / "settings.json")
+    runtime_settings = runtime_settings_store.load(runtime_defaults)
+    model_manager = ModelManager(settings.app_data_path / "models", event_bus.publish)
+    backup_service = BackupService(
+        settings.app_data_path / "backups",
+        settings.database_path,
+        runtime_settings_store.path,
+        settings.backup_retention_days,
     )
     semantic_mode_enabled = settings.semantic_retrieval_enabled and settings.semantic_retrieval_eval_passed
     if timeline_store is not None and semantic_mode_enabled and settings.semantic_embedding_provider == "hash":
@@ -133,6 +149,37 @@ def create_app() -> FastAPI:
         emotion_engine=EmotionEngine.from_path(settings.avatar_emotion_mapping),
     )
     voice_session_manager.bind_avatar_service(avatar_service)
+    vad_model_path = settings.voice_silero_vad_model or model_manager.path_for("silero-vad")
+    vad_provider = SileroVadProvider(vad_model_path) if settings.voice_vad_provider == "silero" else VadProvider()
+
+    async def process_pcm_utterance(session_id, audio_path, language, connection) -> None:
+        stt_result = await voice_service.stt_provider.transcribe(audio_path, language)
+        if not stt_result.text.strip():
+            await connection.send({"type": "voice.input.error", "message": "Could not transcribe speech"})
+            return
+        if not voice_session_manager.connected(session_id):
+            await connection.send({"type": "voice.input.error", "message": "Live output WebSocket is not connected"})
+            return
+        agent = CharacterAgent(
+            llm_provider=DeepSeekProvider(settings), history=history, history_limit=settings.chat_history_limit,
+            event_publisher=event_bus.publish, context_manager=context_manager, memory_service=memory_service,
+            persona_name=runtime_settings.personality,
+        )
+        utterance_id = __import__("uuid").uuid4().hex
+        voice = voice_service.resolve_tts_voice(language, runtime_settings.voice_tts_voice)
+        await connection.send({"type": "voice.input.transcript", "transcript": stt_result.text, "utterance_id": utterance_id})
+        await voice_session_manager.start(
+            session_id=session_id, utterance_id=utterance_id, transcript=stt_result.text,
+            language=stt_result.language, voice=voice, agent=agent,
+        )
+
+    async def pcm_speech_started(session_id: str) -> None:
+        await voice_session_manager.cancel(session_id)
+
+    voice_input_session_manager = VoiceInputSessionManager(
+        voice_service, process_pcm_utterance, pcm_speech_started,
+        vad=vad_provider, vad_threshold=settings.voice_vad_threshold, pre_roll_ms=settings.voice_vad_pre_roll_ms,
+    )
     speech_orchestrator = SpeechOrchestrator(voice_service, event_bus, settings, avatar_service)
     tts_audio_cleanup_task: asyncio.Task[None] | None = None
     summary_worker_task: asyncio.Task[None] | None = None
@@ -301,8 +348,12 @@ def create_app() -> FastAPI:
     app.state.memory_service = memory_service
     app.state.event_bus = event_bus
     app.state.runtime_settings = runtime_settings
+    app.state.runtime_settings_store = runtime_settings_store
+    app.state.model_manager = model_manager
+    app.state.backup_service = backup_service
     app.state.voice_service = voice_service
     app.state.voice_session_manager = voice_session_manager
+    app.state.voice_input_session_manager = voice_input_session_manager
     app.state.avatar_service = avatar_service
     app.state.speech_orchestrator = speech_orchestrator
     app.include_router(chat_router)
@@ -315,6 +366,8 @@ def create_app() -> FastAPI:
     app.include_router(episodes_router)
     app.include_router(context_debug_router)
     app.include_router(memory_router)
+    app.include_router(models_router)
+    app.include_router(maintenance_router)
     app.include_router(websocket_router)
     return app
 
