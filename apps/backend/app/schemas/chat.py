@@ -13,3 +13,4 @@ class ChatResponse(BaseModel):
     voice_request_id: str | None = None
     reply_audio_url: str | None = None
     tts_status: str | None = None
+    memory_updates: list[dict[str, str]] = Field(default_factory=list)

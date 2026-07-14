@@ -46,9 +46,11 @@ class CharacterAgent:
         self._memory_service = memory_service
         self._persona = get_persona(persona_name)
         self.last_turn: CharacterTurn | None = None
+        self.last_memory_updates: list[dict[str, str]] = []
 
-    async def handle_user_message(self, session_id: str, user_text: str, input_mode: str = "text") -> dict[str, str]:
+    async def handle_user_message(self, session_id: str, user_text: str, input_mode: str = "text") -> dict[str, Any]:
         context = self._context_manager.build(user_text).messages if self._context_manager else self._history.get_recent_messages(session_id, limit=self._history_limit)
+        self.last_memory_updates = self._persist_user_message(session_id, user_text, input_mode)
         messages = [
             ChatMessage(role="system", content=character_json_prompt(self._persona)),
             *context,
@@ -95,9 +97,6 @@ class CharacterAgent:
             ):
                 parsed = first_invalid
 
-        user_message = self._save_message(session_id, "user", user_text, input_mode)
-        if self._memory_service is not None:
-            self._memory_service.extract_from_message(user_message)
         if parsed.valid and self._should_persist_timeline():
             self._save_message(session_id, "assistant", parsed.payload["reply"], input_mode)
 
@@ -112,6 +111,7 @@ class CharacterAgent:
     ) -> AsyncIterator[str]:
         """Stream plain reply text and commit history only after clean completion."""
         context = self._context_manager.build(user_text).messages if self._context_manager else self._history.get_recent_messages(session_id, limit=self._history_limit)
+        self.last_memory_updates = self._persist_user_message(session_id, user_text, input_mode)
         messages = [
             ChatMessage(role="system", content=character_live_prompt(self._persona)),
             *context,
@@ -129,11 +129,14 @@ class CharacterAgent:
         if not reply:
             reply = self._empty_model_fallback(user_text)
             yield reply
-        user_message = self._save_message(session_id, "user", user_text, input_mode)
-        if self._memory_service is not None:
-            self._memory_service.extract_from_message(user_message)
         if self._should_persist_timeline():
             self._save_message(session_id, "assistant", reply, input_mode)
+
+    def _persist_user_message(self, session_id: str, user_text: str, input_mode: str) -> list[dict[str, str]]:
+        user_message = self._save_message(session_id, "user", user_text, input_mode)
+        if self._memory_service is None:
+            return []
+        return [self._memory_service.memory_update(memory) for memory in self._memory_service.extract_from_message(user_message)]
 
     def _save_message(self, session_id: str, role: str, content: str, input_mode: str):
         if not self._should_persist_timeline():

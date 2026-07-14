@@ -14,7 +14,7 @@ class RuntimeSettings:
     voice_playback_rate: float = 1.0
     voice_live_playback_prebuffer_segments: int = 1
     voice_live_playback_prebuffer_ms: int = 200
-    memory_mode: str = "ask"
+    memory_mode: str = "balanced"
     memory_incognito: bool = False
     avatar_overlay_visible: bool = True
     avatar_overlay_always_on_top: bool = True
@@ -51,10 +51,23 @@ class RuntimeSettingsStore:
             if key in defaults_dict
             and (defaults_dict[key] is None or isinstance(value, type(defaults_dict[key])))
         }
+        # V0.5 originally defaulted to ``ask`` but never surfaced a useful
+        # confirmation prompt in the conversation.  Treat persisted values as
+        # the new guided policy so existing local users receive the intended
+        # behaviour after upgrading.
+        if values.get("memory_mode") == "ask":
+            values["memory_mode"] = "balanced"
         try:
-            return RuntimeSettings(**{**defaults_dict, **values})
+            loaded = RuntimeSettings(**{**defaults_dict, **values})
         except TypeError:
             return defaults
+        if payload["settings"].get("memory_mode") == "ask":
+            try:
+                self.save(loaded)
+            except OSError:
+                # A read-only settings file must not prevent the app starting.
+                pass
+        return loaded
 
     def save(self, settings: RuntimeSettings) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

@@ -14,7 +14,7 @@ MIN_PREBUFFER_SEGMENTS = 1
 MAX_PREBUFFER_SEGMENTS = 4
 MIN_PREBUFFER_MS = 0
 MAX_PREBUFFER_MS = 1500
-MEMORY_MODES = {"off", "ask", "automatic"}
+MEMORY_MODES = {"off", "balanced", "automatic", "ask"}
 
 
 def _available_tts_voices(request: Request) -> list[str]:
@@ -118,7 +118,7 @@ def patch_runtime_settings(
     if payload.memory_mode is not None:
         if payload.memory_mode not in MEMORY_MODES:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported memory mode")
-        runtime_settings.memory_mode = payload.memory_mode
+        runtime_settings.memory_mode = "balanced" if payload.memory_mode == "ask" else payload.memory_mode
 
     if payload.memory_incognito is not None:
         runtime_settings.memory_incognito = payload.memory_incognito

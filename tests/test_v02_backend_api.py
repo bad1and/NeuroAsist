@@ -163,6 +163,22 @@ def test_chat_publishes_started_and_completed_events(
     assert matching[-1]["metadata"]["reply_length"] == 6
 
 
+def test_chat_returns_memory_update_for_balanced_identity(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(chat_route, "DeepSeekProvider", SuccessfulLLMProvider)
+
+    response = client.post("/chat", json={"session_id": "memory-update", "message": "Меня зовут Роман"})
+
+    assert response.status_code == 200
+    update = response.json()["memory_updates"][0]
+    assert update["status"] == "active"
+    assert update["action"] == "saved"
+    assert update["predicate"] == "name"
+    assert update["id"]
+
+
 def test_chat_publishes_llm_error_event_and_returns_502(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

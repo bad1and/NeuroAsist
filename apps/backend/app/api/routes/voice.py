@@ -153,6 +153,7 @@ async def voice_chat(
             agent.handle_user_message(session_id, stt_result.text, input_mode="voice"),
             timeout=settings.voice_llm_timeout_seconds,
         )
+        result["memory_updates"] = agent.last_memory_updates
         llm_duration_ms = int((time.perf_counter() - llm_started) * 1000)
         tts_status = "disabled"
         if settings.voice_tts_enabled and result["reply"].strip():
@@ -268,6 +269,7 @@ async def voice_chat(
             voice=voice if settings.voice_tts_enabled else None,
             duration_ms=0,
         ),
+        memory_updates=result.get("memory_updates", []),
     )
 
 

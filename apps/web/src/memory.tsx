@@ -11,7 +11,7 @@ const STATUSES: Array<MemoryStatus | "all"> = ["all", "active", "candidate", "su
 
 export function MemoryPage() {
   const [items, setItems] = useState<MemoryItem[]>([]);
-  const [status, setStatus] = useState<MemoryStatus | "all">("active");
+  const [status, setStatus] = useState<MemoryStatus | "all">("all");
   const [query, setQuery] = useState("");
   const [audit, setAudit] = useState<Record<string, MemoryAuditItem[]>>({});
   const [message, setMessage] = useState<string | null>(null);
@@ -41,7 +41,7 @@ export function MemoryPage() {
   };
 
   return <section className="panel">
-    <div className="panel-heading"><h2>Memory Center</h2><button onClick={() => void refresh()}>Refresh</button></div>
+    <div className="panel-heading"><h2>Memory Center</h2><span>{items.filter((item) => item.status === "candidate").length} awaiting review</span><button onClick={() => void refresh()}>Refresh</button></div>
     <div className="filters">{STATUSES.map((item) => <button className={status === item ? "active" : ""} key={item} onClick={() => setStatus(item)}>{item}</button>)}</div>
     <form className="chat-form" onSubmit={(event) => { event.preventDefault(); void refresh(); }}>
       <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search long-term memory" />

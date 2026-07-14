@@ -44,6 +44,7 @@ import type {
   TimelineMessage,
   VoiceChatResponse,
   VoiceTtsStatusResponse,
+  MemoryUpdate,
 } from "./types";
 import type { VoiceServerEvent } from "./types";
 import { PlaybackCoordinator, TTSStreamPlayer, VoiceSocketClient } from "./voice-live";
@@ -374,6 +375,7 @@ function ChatPage({
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [retryText, setRetryText] = useState<string | null>(null);
+  const [memoryNotice, setMemoryNotice] = useState<string | null>(null);
   const [handsFree, setHandsFree] = useState(false);
   const [vadState, setVadState] = useState<VadState>("idle");
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -391,6 +393,14 @@ function ChatPage({
   const avatarOwnsAudioRef = useRef(false);
   const liveAudioStartedRef = useRef(false);
   const liveMetadataRef = useRef({ emotion: "neutral", intent: "unknown" });
+
+  const showMemoryUpdates = useCallback((updates?: MemoryUpdate[]) => {
+    const update = updates && updates.length ? updates[updates.length - 1] : undefined;
+    if (!update) return;
+    setMemoryNotice(update.action === "saved"
+      ? `Remembered: ${update.predicate}.`
+      : "A memory is ready for your review in Memory Center.");
+  }, []);
 
   useEffect(() => {
     void getTimelineMessages().then((payload) => {
@@ -590,6 +600,8 @@ function ChatPage({
               ? { ...message, content: message.content + event.delta }
               : message);
           });
+        } else if (event.type === "voice.text.completed") {
+          showMemoryUpdates(event.memory_updates);
         } else if (event.type === "tts.segment.started") {
           setVoiceState("speaking");
         } else if (event.type === "voice.utterance.finished") {
@@ -639,7 +651,7 @@ function ChatPage({
     }
     await player.unlock();
     await liveSocketRef.current.connect();
-  }, [ensureLivePlayer, speakTextInBrowser]);
+  }, [ensureLivePlayer, showMemoryUpdates, speakTextInBrowser]);
 
   useEffect(() => () => {
     livePlayerRef.current?.stop();
@@ -728,6 +740,7 @@ function ChatPage({
 
   const appendBatchVoiceResponse = useCallback(
     (response: VoiceChatResponse) => {
+      showMemoryUpdates(response.memory_updates);
       setMessages((current) => [
         ...current,
         {
@@ -752,7 +765,7 @@ function ChatPage({
         void pollVoiceTtsStatus(response.voice_request_id);
       }
     },
-    [pollVoiceTtsStatus],
+    [pollVoiceTtsStatus, showMemoryUpdates],
   );
 
   useEffect(() => {
@@ -845,6 +858,7 @@ function ChatPage({
 
     try {
       const response = await sendChatMessage(SESSION_ID, text);
+      showMemoryUpdates(response.memory_updates);
       setMessages((current) => [
         ...current,
         {
@@ -1068,6 +1082,7 @@ function ChatPage({
         <span>session: {SESSION_ID}</span>
       </div>
 
+      {memoryNotice && <div className="notice">{memoryNotice}</div>}
       <div className="message-list" ref={listRef}>
         {messages.length === 0 && (
           <div className="empty-state">Send a message to start the local session.</div>
@@ -1298,7 +1313,7 @@ function SettingsPage({
   const [voicePlaybackRate, setVoicePlaybackRate] = useState(1);
   const [prebufferSegments, setPrebufferSegments] = useState(2);
   const [prebufferMs, setPrebufferMs] = useState(1000);
-  const [memoryMode, setMemoryMode] = useState("ask");
+  const [memoryMode, setMemoryMode] = useState("balanced");
   const [memoryIncognito, setMemoryIncognito] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -1469,7 +1484,7 @@ function SettingsPage({
             Saving mode
             <select value={memoryMode} onChange={(event) => setMemoryMode(event.target.value)}>
               <option value="off">Off</option>
-              <option value="ask">Ask before saving</option>
+              <option value="balanced">Balanced: remember identity and explicit requests</option>
               <option value="automatic">Automatic normal facts</option>
             </select>
           </label>
