@@ -14,6 +14,7 @@ MIN_PREBUFFER_SEGMENTS = 1
 MAX_PREBUFFER_SEGMENTS = 4
 MIN_PREBUFFER_MS = 0
 MAX_PREBUFFER_MS = 1500
+MEMORY_MODES = {"off", "ask", "automatic"}
 
 
 def _available_tts_voices(request: Request) -> list[str]:
@@ -39,6 +40,14 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         voice_live_playback_prebuffer_segments=runtime_settings.voice_live_playback_prebuffer_segments,
         voice_live_playback_prebuffer_ms=runtime_settings.voice_live_playback_prebuffer_ms,
         chat_history_limit=settings.chat_history_limit,
+        episodes_enabled=settings.episodes_enabled,
+        episode_soft_inactivity_minutes=settings.episode_soft_inactivity_minutes,
+        episode_hard_inactivity_minutes=settings.episode_hard_inactivity_minutes,
+        episode_maximum_messages=settings.episode_maximum_messages,
+        episode_maximum_estimated_tokens=settings.episode_maximum_estimated_tokens,
+        memory_enabled=settings.memory_enabled,
+        memory_mode=runtime_settings.memory_mode,
+        memory_incognito=runtime_settings.memory_incognito,
         log_level=settings.log_level,
         api_key_configured=bool(settings.llm_api_key),
         available_personalities=AVAILABLE_PERSONALITIES,
@@ -106,6 +115,14 @@ def patch_runtime_settings(
             )
         runtime_settings.voice_live_playback_prebuffer_ms = value
 
+    if payload.memory_mode is not None:
+        if payload.memory_mode not in MEMORY_MODES:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported memory mode")
+        runtime_settings.memory_mode = payload.memory_mode
+
+    if payload.memory_incognito is not None:
+        runtime_settings.memory_incognito = payload.memory_incognito
+
     event_bus.publish(
         "backend.status",
         "info",
@@ -118,6 +135,8 @@ def patch_runtime_settings(
             "voice_playback_rate": runtime_settings.voice_playback_rate,
             "voice_live_playback_prebuffer_segments": runtime_settings.voice_live_playback_prebuffer_segments,
             "voice_live_playback_prebuffer_ms": runtime_settings.voice_live_playback_prebuffer_ms,
+            "memory_mode": runtime_settings.memory_mode,
+            "memory_incognito": runtime_settings.memory_incognito,
         },
     )
 

@@ -11,7 +11,7 @@
 [![React](https://img.shields.io/badge/React-19-61dafb?style=flat-square&logo=react&logoColor=111827)](https://react.dev/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE)
 
-**English** · [Русская версия](README.ru.md) · [Project Blueprint](Docs/neuro_vtuber_assistant_blueprint_v1.1.md)
+**English** · [Русская версия](README.ru.md) · [V0.5 Companion Blueprint](Docs/NeuroAsist_V0.5_Companion_Blueprint.md)
 
 </div>
 
@@ -34,7 +34,7 @@ flowchart LR
     E --> F[Voice playback]
 ```
 
-The long-term goal is to turn this foundation into a modular neuro‑VTuber platform with an animated avatar, emotions, memory, controlled tools, and a sandboxed development agent.
+The V0.5 direction is a single continuous desktop companion: one character, one shared conversation history, internal episodes, summaries, and controlled long-term memory. It is not a product with user-created chats. Development-agent, sandbox, and desktop-control features are out of V0.5 scope.
 
 ## Current capabilities
 
@@ -50,8 +50,8 @@ The long-term goal is to turn this foundation into a modular neuro‑VTuber plat
 | Voice and runtime settings | ✅ | Local React control panel |
 | Browser speech fallback | ✅ | Used when backend TTS fails |
 | Unity VRM avatar and lip sync | ✅ | Optional WebSocket client with UniVRM/uLipSync |
-| Development agent and sandbox | 🧭 | Planned |
-| Screen and desktop context | 🧭 | Planned |
+| Continuous companion runtime | 🧭 | Timeline, episodes, summaries, controlled long-term memory, and the validated Tauri shell are implemented |
+| Development agent, sandbox, and desktop control | 🚫 | Explicitly out of V0.5 scope |
 
 ## Key ideas
 
@@ -265,7 +265,7 @@ ffprobe -version
 If Windows cannot find FFmpeg in the current terminal:
 
 ```powershell
-$env:Path = "C:\Path\To\ffmpeg\bin;$env:Path"
+$env:Path = "<ffmpeg-bin>;$env:Path"
 ```
 
 ### 6. Start the backend
@@ -374,7 +374,7 @@ Chat or non-live voice response
   → Unity AudioSource, lip sync, and VRM expression
 ```
 
-The avatar bridge uses protocol v1 and is deliberately optional: unavailable Unity clients do not delay or fail text chat or TTS. The backend broadcasts full-WAV commands to all connected clients. It also provides `GET /avatar/status` plus test endpoints for speech, emotion, gesture, and stop; see the [Unity avatar runtime guide](Docs/unity_avatar_runtime_v0.4.md) and [motion v0.5 guide](Docs/avatar-motion-v0.5.md) for setup and diagnostics.
+The avatar bridge uses protocol v1 and is deliberately optional: unavailable Unity clients do not delay or fail text chat or TTS. The backend broadcasts full-WAV commands to all connected clients. It also provides `GET /avatar/status` plus test endpoints for speech, emotion, gesture, and stop; see the [Unity avatar runtime guide](Docs/unity_avatar_runtime_v0.4.md) and [Unity source handoff](Docs/unity-source.md) for setup and source ownership.
 
 ## Project structure
 
@@ -397,7 +397,9 @@ NeuroAsist/
 │   └── web/
 │       └── src/
 ├── Docs/
-│   └── neuro_vtuber_assistant_blueprint_v1.1.md
+│   ├── NeuroAsist_V0.5_Companion_Blueprint.md
+│   ├── milestone-0-freeze.md
+│   └── version-manifest-v0.4.1.json
 ├── scripts/
 ├── tests/
 ├── main.py
@@ -529,23 +531,21 @@ NeuroAsist v0.4.0 does not provide:
 
 ## Project documentation
 
-The current project architecture, long-term concept, and development direction are described in:
+The current V0.5 direction and the frozen V0.4.1 baseline are described in:
 
-- **[Neuro‑VTuber Assistant Blueprint v1.1](Docs/neuro_vtuber_assistant_blueprint_v1.1.md)**
-- **[Unity avatar runtime v0.4 setup](Docs/unity_avatar_runtime_v0.4.md)**
+- **[V0.5 Continuous Companion Blueprint](Docs/NeuroAsist_V0.5_Companion_Blueprint.md)**
+- **[Milestone 0 freeze record](Docs/milestone-0-freeze.md)**
+- **[Milestone 1 unified timeline](Docs/milestone-1-unified-timeline.md)**
+- **[Milestone 2 episode manager](Docs/milestone-2-episode-manager.md)**
+- **[Milestone 3 summaries and Context Manager](Docs/milestone-3-context-manager.md)**
+- **[Milestone 4 Tauri desktop shell](Docs/milestone-4-desktop-shell.md)**
+- **[Milestone 5 long-term memory](Docs/milestone-5-long-term-memory.md)**
+- **[Milestone 6 semantic retrieval](Docs/milestone-6-semantic-retrieval.md)**
+- **[Unity source handoff](Docs/unity-source.md)**
 
 ## Planned direction
 
-The project is expected to evolve in stages:
-
-1. stable text and voice interaction;
-2. VRM or Unity avatar integration;
-3. emotions, animations, and lip sync;
-4. controlled development agent and project sandbox;
-5. screen context and optional long-term memory;
-6. modular multi-agent platform.
-
-The exact plan may change as the prototype is tested and developed.
+V0.5 progresses only through the milestones in the companion blueprint: freeze, unified timeline, automatic episodes, summaries/context, desktop shell, long-term memory, semantic retrieval, character protocol, avatar overlay, live voice, packaging, then stabilization. The existing V0.4 runtime remains compatible until the relevant milestone explicitly changes it.
 
 ## License
 

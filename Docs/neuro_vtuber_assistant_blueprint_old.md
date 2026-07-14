@@ -695,7 +695,7 @@ Backend должен пушить события:
 Агент работает только в:
 
 ```text
-C:/Users/<you>/AI-VTuber/workspaces/project_name/
+<workspace-root>/project_name/
 ```
 
 Может читать/писать только там. Подходит для первого Dev Agent.

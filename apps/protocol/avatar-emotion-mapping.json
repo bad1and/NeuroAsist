@@ -1,0 +1,12 @@
+{
+  "neutral": {"expression": "neutral", "weight": 0.35, "motion_profile": "idle", "allowed_gestures": ["auto", "none", "talk", "greeting", "agreement"], "attack_ms": 180, "minimum_hold_ms": 450, "release_ms": 260},
+  "happy": {"expression": "happy", "weight": 0.8, "motion_profile": "energetic", "allowed_gestures": ["auto", "talk", "greeting", "agreement"], "attack_ms": 150, "minimum_hold_ms": 550, "release_ms": 240},
+  "sad": {"expression": "sad", "weight": 0.7, "motion_profile": "calm", "allowed_gestures": ["auto", "talk", "shrug"], "attack_ms": 240, "minimum_hold_ms": 700, "release_ms": 320},
+  "angry": {"expression": "angry", "weight": 0.75, "motion_profile": "tense", "allowed_gestures": ["auto", "talk", "frustration", "disagreement"], "attack_ms": 130, "minimum_hold_ms": 600, "release_ms": 300},
+  "annoyed": {"expression": "annoyed", "weight": 0.65, "motion_profile": "tense", "allowed_gestures": ["auto", "talk", "frustration", "shrug"], "attack_ms": 160, "minimum_hold_ms": 550, "release_ms": 280},
+  "smirk": {"expression": "smirk", "weight": 0.6, "motion_profile": "playful", "allowed_gestures": ["auto", "talk", "shrug"], "attack_ms": 180, "minimum_hold_ms": 500, "release_ms": 240},
+  "thinking": {"expression": "thinking", "weight": 0.6, "motion_profile": "thoughtful", "allowed_gestures": ["auto", "thinking", "question", "explanation"], "attack_ms": 180, "minimum_hold_ms": 500, "release_ms": 260},
+  "surprised": {"expression": "surprised", "weight": 0.8, "motion_profile": "alert", "allowed_gestures": ["auto", "surprise", "talk"], "attack_ms": 90, "minimum_hold_ms": 450, "release_ms": 300},
+  "embarrassed": {"expression": "embarrassed", "weight": 0.65, "motion_profile": "shy", "allowed_gestures": ["auto", "shrug", "talk"], "attack_ms": 200, "minimum_hold_ms": 500, "release_ms": 280},
+  "concerned": {"expression": "concerned", "weight": 0.7, "motion_profile": "attentive", "allowed_gestures": ["auto", "question", "explanation", "talk"], "attack_ms": 180, "minimum_hold_ms": 550, "release_ms": 300}
+}

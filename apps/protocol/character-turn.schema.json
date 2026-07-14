@@ -1,0 +1,200 @@
+{
+  "$defs": {
+    "AffectCue": {
+      "additionalProperties": false,
+      "properties": {
+        "emotion": {
+          "$ref": "#/$defs/Emotion",
+          "default": "neutral"
+        },
+        "intensity": {
+          "default": 1.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Intensity",
+          "type": "number"
+        },
+        "valence": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": -1.0,
+          "title": "Valence",
+          "type": "number"
+        },
+        "arousal": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Arousal",
+          "type": "number"
+        }
+      },
+      "title": "AffectCue",
+      "type": "object"
+    },
+    "ContinuityCue": {
+      "additionalProperties": false,
+      "properties": {
+        "referenced_memory_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 12,
+          "title": "Referenced Memory Ids",
+          "type": "array"
+        },
+        "referenced_episode_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 12,
+          "title": "Referenced Episode Ids",
+          "type": "array"
+        },
+        "closes_open_loop_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 12,
+          "title": "Closes Open Loop Ids",
+          "type": "array"
+        }
+      },
+      "title": "ContinuityCue",
+      "type": "object"
+    },
+    "DeliveryCue": {
+      "additionalProperties": false,
+      "properties": {
+        "pace": {
+          "default": "normal",
+          "pattern": "^(slow|normal|fast)$",
+          "title": "Pace",
+          "type": "string"
+        },
+        "emphasis": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Emphasis",
+          "type": "number"
+        }
+      },
+      "title": "DeliveryCue",
+      "type": "object"
+    },
+    "Emotion": {
+      "enum": [
+        "neutral",
+        "happy",
+        "sad",
+        "angry",
+        "annoyed",
+        "smirk",
+        "thinking",
+        "surprised",
+        "embarrassed",
+        "concerned"
+      ],
+      "title": "Emotion",
+      "type": "string"
+    },
+    "Gesture": {
+      "enum": [
+        "none",
+        "auto",
+        "talk",
+        "greeting",
+        "agreement",
+        "disagreement",
+        "question",
+        "explanation",
+        "thinking",
+        "surprise",
+        "frustration",
+        "farewell",
+        "shrug"
+      ],
+      "title": "Gesture",
+      "type": "string"
+    },
+    "GestureCue": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/Gesture",
+          "default": "auto"
+        },
+        "intensity": {
+          "default": 1.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Intensity",
+          "type": "number"
+        },
+        "interrupt": {
+          "default": true,
+          "title": "Interrupt",
+          "type": "boolean"
+        }
+      },
+      "title": "GestureCue",
+      "type": "object"
+    },
+    "Intent": {
+      "enum": [
+        "casual_chat",
+        "question",
+        "task_request",
+        "unknown"
+      ],
+      "title": "Intent",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Canonical visible reply plus non-visible character metadata.",
+  "properties": {
+    "protocol_version": {
+      "default": 3,
+      "title": "Protocol Version",
+      "type": "integer"
+    },
+    "reply": {
+      "maxLength": 8000,
+      "minLength": 1,
+      "title": "Reply",
+      "type": "string"
+    },
+    "intent": {
+      "$ref": "#/$defs/Intent",
+      "default": "unknown"
+    },
+    "affect": {
+      "$ref": "#/$defs/AffectCue"
+    },
+    "gesture": {
+      "$ref": "#/$defs/GestureCue"
+    },
+    "delivery": {
+      "$ref": "#/$defs/DeliveryCue"
+    },
+    "continuity": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContinuityCue"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "reply"
+  ],
+  "title": "Character Protocol v3",
+  "type": "object",
+  "$id": "https://neuroasist.local/schemas/character-turn-v3.json"
+}

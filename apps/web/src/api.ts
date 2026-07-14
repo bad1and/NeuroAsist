@@ -7,17 +7,29 @@ import type {
   VoiceChatResponse,
   VoiceLiveResponse,
   VoiceTtsStatusResponse,
+  TimelineJournalItem,
+  TimelineMessage,
+  MemoryAuditItem,
+  MemoryItem,
 } from "./types";
 
+const DESKTOP_RUNTIME =
+  typeof window === "undefined" ? undefined : window.__NEUROASIST_DESKTOP_CONFIG__;
+
 export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
+  DESKTOP_RUNTIME?.apiBaseUrl
+  ?? import.meta.env.VITE_API_BASE_URL
+  ?? "http://127.0.0.1:8000";
 
 export const WS_EVENTS_URL =
-  import.meta.env.VITE_WS_EVENTS_URL ?? `${API_BASE_URL.replace(/^http/, "ws")}/ws/events`;
+  DESKTOP_RUNTIME?.wsEventsUrl
+  ?? import.meta.env.VITE_WS_EVENTS_URL
+  ?? `${API_BASE_URL.replace(/^http/, "ws")}/ws/events`;
 
 export function voiceWebSocketUrl(sessionId: string): string {
   const base = API_BASE_URL.replace(/^http/, "ws");
-  return `${base}/ws/voice/${encodeURIComponent(sessionId)}?version=1`;
+  const token = DESKTOP_RUNTIME?.apiToken;
+  return `${base}/ws/voice/${encodeURIComponent(sessionId)}?version=1${token ? `&token=${encodeURIComponent(token)}` : ""}`;
 }
 
 function audioExtensionForMime(mimeType: string): string {
@@ -42,6 +54,9 @@ async function requestJson<T>(
   options: RequestInit = {},
 ): Promise<T> {
   const headers: Record<string, string> = {
+    ...(DESKTOP_RUNTIME?.apiToken
+      ? { "X-NeuroAsist-Token": DESKTOP_RUNTIME.apiToken }
+      : {}),
     ...(options.headers as Record<string, string> | undefined),
   };
 
@@ -85,6 +100,8 @@ export function updateRuntimeSettings(payload: {
   voice_playback_rate?: number;
   voice_live_playback_prebuffer_segments?: number;
   voice_live_playback_prebuffer_ms?: number;
+  memory_mode?: string;
+  memory_incognito?: boolean;
 }): Promise<PublicSettings> {
   return requestJson<PublicSettings>("/settings/runtime", {
     method: "PATCH",
@@ -136,6 +153,9 @@ export async function sendVoiceMessage(
     response = await fetch(`${API_BASE_URL}/voice/chat`, {
       method: "POST",
       body: form,
+      headers: DESKTOP_RUNTIME?.apiToken
+        ? { "X-NeuroAsist-Token": DESKTOP_RUNTIME.apiToken }
+        : undefined,
       signal: controller.signal,
     });
   } catch (error) {
@@ -161,6 +181,65 @@ export async function sendVoiceMessage(
   }
 
   return response.json() as Promise<VoiceChatResponse | VoiceLiveResponse>;
+}
+
+export function getTimelineMessages(limit = 50): Promise<{ items: TimelineMessage[]; next_offset: number | null }> {
+  return requestJson(`/timeline/messages?limit=${limit}`);
+}
+
+export function getTimelineJournal(): Promise<{ items: TimelineJournalItem[] }> {
+  return requestJson("/timeline/journal");
+}
+
+export function searchTimeline(query: string): Promise<{ items: TimelineMessage[] }> {
+  return requestJson(`/timeline/search?q=${encodeURIComponent(query)}`);
+}
+
+export function deleteTimelineRange(before: string): Promise<{ deleted: number }> {
+  return requestJson(`/timeline/range?before=${encodeURIComponent(before)}`, { method: "DELETE" });
+}
+
+export function getMemories(status?: string, query?: string): Promise<{ items: MemoryItem[] }> {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  if (query) params.set("q", query);
+  return requestJson(`/memory${params.size ? `?${params}` : ""}`);
+}
+
+export function createMemory(payload: { predicate: string; value_text: string; source_message_ids: string[]; kind?: string }): Promise<{ memory: MemoryItem }> {
+  return requestJson("/memory", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function updateMemory(memoryId: string, payload: { value_text?: string; user_locked?: boolean }): Promise<{ memory: MemoryItem }> {
+  return requestJson(`/memory/${encodeURIComponent(memoryId)}`, { method: "PATCH", body: JSON.stringify(payload) });
+}
+
+export function confirmMemory(memoryId: string): Promise<{ memory: MemoryItem }> {
+  return requestJson(`/memory/${encodeURIComponent(memoryId)}/confirm`, { method: "POST" });
+}
+
+export function rejectMemory(memoryId: string): Promise<{ memory: MemoryItem }> {
+  return requestJson(`/memory/${encodeURIComponent(memoryId)}/reject`, { method: "POST" });
+}
+
+export function deleteMemory(memoryId: string): Promise<{ memory: MemoryItem }> {
+  return requestJson(`/memory/${encodeURIComponent(memoryId)}`, { method: "DELETE" });
+}
+
+export function restoreMemory(memoryId: string): Promise<{ memory: MemoryItem }> {
+  return requestJson(`/memory/${encodeURIComponent(memoryId)}/restore`, { method: "POST" });
+}
+
+export function getMemoryAudit(memoryId: string): Promise<{ items: MemoryAuditItem[] }> {
+  return requestJson(`/memory/${encodeURIComponent(memoryId)}/audit`);
+}
+
+export function clearMemories(): Promise<{ deleted: number }> {
+  return requestJson("/memory/clear", { method: "POST", body: JSON.stringify({}) });
+}
+
+export function reindexMemories(): Promise<{ indexed: number }> {
+  return requestJson("/memory/reindex", { method: "POST" });
 }
 
 export function getAvatarStatus(): Promise<AvatarStatusResponse> {

@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import logging
 import json
+import secrets
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
@@ -11,8 +12,16 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _desktop_token_is_valid(websocket: WebSocket, token: str | None) -> bool:
+    expected_token = websocket.app.state.settings.desktop_auth_token
+    return not expected_token or (token is not None and secrets.compare_digest(token, expected_token))
+
+
 @router.websocket("/ws/avatar")
-async def websocket_avatar(websocket: WebSocket, version: int = 1) -> None:
+async def websocket_avatar(websocket: WebSocket, version: int = 1, token: str | None = None) -> None:
+    if not _desktop_token_is_valid(websocket, token):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
     if version not in {1, 2}:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
@@ -47,7 +56,10 @@ async def websocket_avatar(websocket: WebSocket, version: int = 1) -> None:
 
 
 @router.websocket("/ws/voice/{session_id}")
-async def websocket_voice(websocket: WebSocket, session_id: str, version: int = 1) -> None:
+async def websocket_voice(websocket: WebSocket, session_id: str, version: int = 1, token: str | None = None) -> None:
+    if not _desktop_token_is_valid(websocket, token):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
     if version != 1:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
@@ -81,7 +93,10 @@ async def websocket_voice(websocket: WebSocket, session_id: str, version: int = 
 
 
 @router.websocket("/ws/events")
-async def websocket_events(websocket: WebSocket) -> None:
+async def websocket_events(websocket: WebSocket, token: str | None = None) -> None:
+    if not _desktop_token_is_valid(websocket, token):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
     await websocket.accept()
     event_bus = websocket.app.state.event_bus
     queue = event_bus.subscribe()

@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import WebSocket
 
 from apps.backend.app.agents.character.agent import CharacterAgent
+from apps.backend.app.agents.character.protocol import metadata_frame
 from apps.backend.app.voice.providers import (
     TTSProvider,
     TTSRequest,
@@ -180,6 +181,12 @@ class VoiceSessionManager:
                 return
             directive_sent = True
             directive = make_live_directive_expressive(directive, transcript)
+            frame = metadata_frame(
+                intent=intent,
+                emotion=directive.emotion.value,
+                gesture=directive.gesture,
+                intensity=directive.intensity,
+            )
             if self._avatar_service is not None:
                 await self._avatar_service.stream_metadata(
                     session_id=context.session_id,
@@ -191,6 +198,7 @@ class VoiceSessionManager:
             await self._send(
                 context,
                 "voice.metadata",
+                metadata=frame,
                 emotion=directive.emotion,
                 gesture=directive.gesture,
                 gesture_intensity=directive.intensity,
@@ -218,7 +226,7 @@ class VoiceSessionManager:
                     intent=intent,
                 )
             iterator = agent.stream_user_message(
-                context.session_id, transcript, stored_reply_transform=clean_live_reply
+                context.session_id, transcript, stored_reply_transform=clean_live_reply, input_mode="voice"
             ).__aiter__()
             pending = asyncio.create_task(anext(iterator))
             while True:

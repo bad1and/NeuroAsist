@@ -3,8 +3,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from apps.backend.app.schemas.character import Emotion
 
-_EMOTIONS = frozenset({"neutral", "happy", "sad", "angry", "annoyed", "smirk", "thinking", "surprised"})
+
+_EMOTIONS = frozenset(item.value for item in Emotion)
 _GESTURES = frozenset({
     "none", "auto", "talk", "greeting", "agreement", "disagreement", "question",
     "explanation", "thinking", "surprise", "frustration", "farewell", "shrug",
@@ -18,7 +20,7 @@ _LEADING_DIRECTION_RE = re.compile(r"^\s*\((?P<direction>[^()\n]{1,160})\)\s*", 
 
 @dataclass(frozen=True)
 class AvatarDirective:
-    emotion: str = "neutral"
+    emotion: Emotion = Emotion.NEUTRAL
     gesture: str = "auto"
     intensity: float = 1.0
 
@@ -27,25 +29,25 @@ def make_live_directive_expressive(directive: AvatarDirective, user_text: str) -
     """Keep live avatar reactions visible even when a model omits or defaults its directive."""
     text = (user_text or "").lower()
     emotion = directive.emotion
-    if emotion == "neutral":
+    if emotion == Emotion.NEUTRAL:
         if any(marker in text for marker in ("бесит", "заеб", "злит", "ненавиж", "туп", "ошибк")):
-            emotion = "annoyed"
+            emotion = Emotion.ANNOYED
         elif any(marker in text for marker in ("спасибо", "класс", "круто", "ура", "молодец", "ахах", "смеш")):
-            emotion = "happy"
+            emotion = Emotion.HAPPY
         elif "?" in text or text.startswith(("как ", "почему ", "что ", "кто ", "где ", "когда ", "зачем ")):
-            emotion = "thinking"
+            emotion = Emotion.THINKING
         else:
-            emotion = "neutral"
+            emotion = Emotion.NEUTRAL
     gesture = directive.gesture
     if gesture == "auto":
         gesture = {
-            "smirk": "shrug",
-            "happy": "talk",
-            "sad": "shrug",
-            "angry": "frustration",
-            "annoyed": "frustration",
-            "surprised": "surprise",
-            "thinking": "question",
+            Emotion.SMIRK: "shrug",
+            Emotion.HAPPY: "talk",
+            Emotion.SAD: "shrug",
+            Emotion.ANGRY: "frustration",
+            Emotion.ANNOYED: "frustration",
+            Emotion.SURPRISED: "surprise",
+            Emotion.THINKING: "question",
         }.get(emotion, "talk")
     return AvatarDirective(emotion, gesture, max(.45, directive.intensity))
 
@@ -118,7 +120,7 @@ class LiveDirectiveParser:
         gesture = match.group("gesture").lower()
         intensity = float(match.group("intensity"))
         return AvatarDirective(
-            emotion=emotion if emotion in _EMOTIONS else "neutral",
+            emotion=Emotion(emotion) if emotion in _EMOTIONS else Emotion.NEUTRAL,
             gesture=gesture if gesture in _GESTURES else "auto",
             intensity=max(0.0, min(1.0, intensity)),
         )
@@ -127,19 +129,19 @@ class LiveDirectiveParser:
     def _from_legacy_direction(value: str) -> AvatarDirective:
         text = value.lower()
         if any(word in text for word in ("саркаст", "ухмыл", "усмеш")):
-            return AvatarDirective("smirk", "shrug", 0.55)
+            return AvatarDirective(Emotion.SMIRK, "shrug", 0.55)
         if "кива" in text:
-            return AvatarDirective("happy", "agreement", 0.7)
+            return AvatarDirective(Emotion.HAPPY, "agreement", 0.7)
         if any(word in text for word in ("удив", "изум")):
-            return AvatarDirective("surprised", "surprise", 0.8)
+            return AvatarDirective(Emotion.SURPRISED, "surprise", 0.8)
         if any(word in text for word in ("раздраж", "злоб", "серд")):
-            return AvatarDirective("annoyed", "frustration", 0.65)
+            return AvatarDirective(Emotion.ANNOYED, "frustration", 0.65)
         if any(word in text for word in ("груст", "печал")):
-            return AvatarDirective("sad", "auto", 0.65)
+            return AvatarDirective(Emotion.SAD, "auto", 0.65)
         if any(word in text for word in ("задум", "размыш")):
-            return AvatarDirective("thinking", "thinking", 0.55)
+            return AvatarDirective(Emotion.THINKING, "thinking", 0.55)
         if any(word in text for word in ("улыб", "радост")):
-            return AvatarDirective("happy", "talk", 0.7)
+            return AvatarDirective(Emotion.HAPPY, "talk", 0.7)
         return AvatarDirective()
 
 
