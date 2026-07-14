@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 from typing import Any
 
@@ -15,6 +16,10 @@ from .schemas import (
     SpeakPayload,
     StatePayload,
     StopPayload,
+    StreamEndPayload,
+    StreamMetadataPayload,
+    StreamSegmentPayload,
+    StreamStartPayload,
 )
 
 logger = logging.getLogger(__name__)
@@ -80,6 +85,76 @@ class AvatarService:
             utterance_id=utterance_id,
         )
 
+    async def stream_start(
+        self, *, session_id: str, utterance_id: str, intent: str, interrupt: bool = True
+    ) -> BroadcastResult:
+        return await self._broadcast(
+            "avatar.stream.start",
+            session_id,
+            StreamStartPayload(
+                utterance_id=utterance_id, intent=intent, interrupt=interrupt
+            ).model_dump(mode="json"),
+            utterance_id=utterance_id,
+            protocol_version=2,
+            min_protocol_version=2,
+        )
+
+    async def stream_segment(
+        self,
+        *,
+        session_id: str,
+        utterance_id: str,
+        sequence: int,
+        audio: bytes,
+        duration_seconds: float,
+        sample_rate: int = 24000,
+        channels: int = 1,
+        is_final: bool = False,
+    ) -> BroadcastResult:
+        return await self._broadcast(
+            "avatar.stream.segment",
+            session_id,
+            StreamSegmentPayload(
+                utterance_id=utterance_id,
+                sequence=sequence,
+                audio_base64=base64.b64encode(audio).decode("ascii"),
+                sample_rate=sample_rate,
+                channels=channels,
+                duration_seconds=duration_seconds,
+                is_final=is_final,
+            ).model_dump(mode="json"),
+            utterance_id=utterance_id,
+            protocol_version=2,
+            min_protocol_version=2,
+        )
+
+    async def stream_metadata(
+        self, *, session_id: str, utterance_id: str, emotion: str, gesture: str, gesture_intensity: float
+    ) -> BroadcastResult:
+        return await self._broadcast(
+            "avatar.stream.metadata",
+            session_id,
+            StreamMetadataPayload(
+                utterance_id=utterance_id,
+                emotion=emotion,
+                gesture=gesture,
+                gesture_intensity=gesture_intensity,
+            ).model_dump(mode="json"),
+            utterance_id=utterance_id,
+            protocol_version=2,
+            min_protocol_version=2,
+        )
+
+    async def stream_end(self, *, session_id: str, utterance_id: str) -> BroadcastResult:
+        return await self._broadcast(
+            "avatar.stream.end",
+            session_id,
+            StreamEndPayload(utterance_id=utterance_id).model_dump(mode="json"),
+            utterance_id=utterance_id,
+            protocol_version=2,
+            min_protocol_version=2,
+        )
+
     async def gesture(
         self, *, session_id: str, gesture: str, intensity: float = 1.0, interrupt: bool = True
     ) -> BroadcastResult:
@@ -100,7 +175,7 @@ class AvatarService:
         if envelope.type == "avatar.hello":
             await self.manager.update(
                 client_id, client_name=payload.client_name, client_version=payload.client_version,
-                platform=payload.platform,
+                platform=payload.platform, protocol_version=envelope.protocol_version,
             )
             self.event_bus.publish("avatar.hello", "info", "Avatar client hello", {"client_id": client_id})
         elif envelope.type == "avatar.pong":
@@ -109,7 +184,7 @@ class AvatarService:
             self.event_bus.publish("avatar.command_sent", "info", "Avatar command acknowledged", {"client_id": client_id, "message_id": payload.reply_to, "accepted": payload.accepted})
         elif envelope.type == "avatar.playback.started":
             await self.manager.update(client_id, current_utterance_id=payload.utterance_id, state="Speaking")
-            self.event_bus.publish("avatar.speaking_started", "info", "Avatar playback started", {"client_id": client_id, "utterance_id": payload.utterance_id})
+            self.event_bus.publish("avatar.speaking_started", "info", "Avatar playback started", {"client_id": client_id, "utterance_id": payload.utterance_id, "client_latency_ms": payload.client_latency_ms})
         elif envelope.type == "avatar.playback.finished":
             await self.manager.update(client_id, current_utterance_id=None, state="Idle")
             self.event_bus.publish("avatar.speaking_finished", "info", "Avatar playback finished", {"client_id": client_id, "utterance_id": payload.utterance_id})
@@ -128,12 +203,35 @@ class AvatarService:
         elif envelope.type == "avatar.motion_profile_changed":
             await self.manager.update(client_id, current_motion_profile=payload.profile)
             self.event_bus.publish(envelope.type, "info", "Avatar motion event", {"client_id": client_id, **payload.model_dump(mode="json")})
+        elif envelope.type == "avatar.stream.received":
+            self.event_bus.publish(
+                "avatar.stream_segment_received",
+                "info",
+                "Avatar stream segment received",
+                {"client_id": client_id, **payload.model_dump(mode="json")},
+            )
 
-    async def _broadcast(self, message_type: str, session_id: str, payload: dict[str, Any], *, utterance_id: str | None = None) -> BroadcastResult:
+    async def _broadcast(
+        self,
+        message_type: str,
+        session_id: str,
+        payload: dict[str, Any],
+        *,
+        utterance_id: str | None = None,
+        protocol_version: int = 1,
+        min_protocol_version: int = 1,
+    ) -> BroadcastResult:
         if not self.enabled:
             return BroadcastResult(attempted=0, sent=0, failed=0, skipped=True)
-        frame = OutgoingMessage(type=message_type, session_id=session_id, payload=payload)
-        result = await self.manager.broadcast(frame.model_dump(mode="json"))
+        frame = OutgoingMessage(
+            protocol_version=protocol_version,
+            type=message_type,
+            session_id=session_id,
+            payload=payload,
+        )
+        result = await self.manager.broadcast(
+            frame.model_dump(mode="json"), min_protocol_version=min_protocol_version
+        )
         event_data = {"message_id": frame.message_id, "command_type": message_type, "utterance_id": utterance_id, "attempted": result.attempted, "sent": result.sent, "failed": result.failed}
         self.event_bus.publish(
             "avatar.command_failed" if result.failed else "avatar.command_sent",

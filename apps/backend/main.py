@@ -69,6 +69,7 @@ def create_app() -> FastAPI:
         tts_concurrency_mode=settings.voice_live_tts_concurrency_mode,
         tts_concurrency_min=settings.voice_live_tts_concurrency_min,
         tts_concurrency_max=settings.voice_live_tts_concurrency_max,
+        event_publisher=event_bus.publish,
     )
     avatar_service = AvatarService(
         AvatarConnectionManager(), event_bus,
@@ -76,6 +77,7 @@ def create_app() -> FastAPI:
         heartbeat_interval_seconds=settings.avatar_heartbeat_interval_seconds,
         client_timeout_seconds=settings.avatar_client_timeout_seconds,
     )
+    voice_session_manager.bind_avatar_service(avatar_service)
     speech_orchestrator = SpeechOrchestrator(voice_service, event_bus, settings, avatar_service)
     tts_audio_cleanup_task: asyncio.Task[None] | None = None
 

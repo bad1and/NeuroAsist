@@ -7,7 +7,9 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
+LEGACY_PROTOCOL_VERSION = 1
+SUPPORTED_PROTOCOL_VERSIONS = (LEGACY_PROTOCOL_VERSION, PROTOCOL_VERSION)
 GESTURE_TAGS = frozenset({
     "none", "auto", "talk", "greeting", "agreement", "disagreement",
     "question", "explanation", "thinking", "surprise", "frustration",
@@ -30,7 +32,7 @@ class ProtocolModel(BaseModel):
 
 
 class Envelope(ProtocolModel):
-    protocol_version: Literal[PROTOCOL_VERSION] = PROTOCOL_VERSION
+    protocol_version: Literal[1, 2] = PROTOCOL_VERSION
     type: str
     message_id: str = Field(default_factory=lambda: str(uuid4()))
     timestamp: datetime = Field(default_factory=utc_now)
@@ -48,6 +50,41 @@ class SpeakPayload(ProtocolModel):
     interrupt: bool = True
 
     _normalize_gesture = field_validator("gesture", mode="before")(normalize_gesture)
+
+
+class StreamStartPayload(ProtocolModel):
+    utterance_id: str
+    emotion: str = "thinking"
+    intent: str = "casual_chat"
+    interrupt: bool = True
+
+
+class StreamMetadataPayload(ProtocolModel):
+    utterance_id: str
+    emotion: str = "neutral"
+    gesture: str = "auto"
+    gesture_intensity: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class StreamSegmentPayload(ProtocolModel):
+    utterance_id: str
+    sequence: int = Field(ge=0)
+    audio_base64: str = Field(min_length=8, max_length=1_000_000)
+    format: Literal["wav"] = "wav"
+    sample_rate: int = Field(default=24000, ge=8000, le=96000)
+    channels: int = Field(default=1, ge=1, le=2)
+    duration_seconds: float = Field(gt=0, le=120)
+    is_final: bool = False
+
+
+class StreamEndPayload(ProtocolModel):
+    utterance_id: str
+
+
+class StreamReceiptPayload(ProtocolModel):
+    utterance_id: str
+    sequence: int = Field(ge=0)
+    client_latency_ms: int = Field(ge=0, le=120_000)
 
 
 class EmotionPayload(ProtocolModel):
@@ -105,6 +142,7 @@ class PlaybackPayload(ProtocolModel):
     utterance_id: str
     reply_to: str | None = None
     reason: str | None = Field(default=None, max_length=512)
+    client_latency_ms: int | None = Field(default=None, ge=0, le=120_000)
 
 
 class ClientStatePayload(ProtocolModel):

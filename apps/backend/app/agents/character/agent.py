@@ -90,7 +90,8 @@ class CharacterAgent:
         return parsed.payload
 
     async def stream_user_message(
-        self, session_id: str, user_text: str
+        self, session_id: str, user_text: str,
+        stored_reply_transform: Callable[[str], str] | None = None,
     ) -> AsyncIterator[str]:
         """Stream plain reply text and commit history only after clean completion."""
         context = self._history.get_recent_messages(session_id, limit=self._history_limit)
@@ -106,6 +107,8 @@ class CharacterAgent:
             chunks.append(delta)
             yield delta
         reply = "".join(chunks).strip()
+        if stored_reply_transform is not None:
+            reply = stored_reply_transform(reply)
         if not reply:
             reply = self._empty_model_fallback(user_text)
             yield reply

@@ -67,8 +67,10 @@ def test_avatar_protocol_validates_type_and_version() -> None:
     })
     assert envelope.type == "avatar.hello"
     assert payload.client_name == "Unity"
+    envelope_v2, _ = parse_incoming({"protocol_version": 2, "type": "avatar.pong", "payload": {}})
+    assert envelope_v2.protocol_version == 2
     with pytest.raises(AvatarProtocolError, match="Unsupported"):
-        parse_incoming({"protocol_version": 2, "type": "avatar.pong", "payload": {}})
+        parse_incoming({"protocol_version": 3, "type": "avatar.pong", "payload": {}})
     with pytest.raises(AvatarProtocolError, match="Unknown"):
         parse_incoming({"protocol_version": 1, "type": "avatar.unknown", "payload": {}})
 
@@ -132,6 +134,56 @@ async def test_hello_and_playback_events_update_client_status() -> None:
     assert status.clients[0].client_name == "Unity"
     assert status.clients[0].current_utterance_id == "utterance"
     assert [event.type for event in events.get_recent_events()] == ["avatar.hello", "avatar.speaking_started"]
+
+
+@pytest.mark.anyio
+async def test_v2_stream_segments_are_sent_only_to_v2_clients() -> None:
+    events = EventBus()
+    manager = AvatarConnectionManager()
+    legacy_socket = FakeSocket()
+    v2_socket = FakeSocket()
+    legacy = await manager.register(legacy_socket)
+    v2 = await manager.register(v2_socket)
+    service = AvatarService(manager, events, enabled=True, heartbeat_interval_seconds=1, client_timeout_seconds=2)
+    hello, hello_payload = parse_incoming({
+        "protocol_version": 2, "type": "avatar.hello", "message_id": "hello-v2", "timestamp": "2026-01-01T00:00:00Z", "session_id": "s",
+        "payload": {"client_name": "Unity", "client_version": "0.6", "supported_protocol_versions": [1, 2]},
+    })
+    await service.inbound(v2.client_id, hello, hello_payload)
+    result = await service.stream_segment(
+        session_id="s", utterance_id="u", sequence=0, audio=b"RIFF-test", duration_seconds=.2
+    )
+    assert result.sent == 1
+    assert legacy.client_id != v2.client_id
+    assert legacy_socket.sent == []
+    assert v2_socket.sent[0]["protocol_version"] == 2
+    assert v2_socket.sent[0]["type"] == "avatar.stream.segment"
+    assert v2_socket.sent[0]["payload"]["sequence"] == 0
+
+
+@pytest.mark.anyio
+async def test_v2_stream_metadata_is_sent_only_to_v2_clients() -> None:
+    events = EventBus()
+    manager = AvatarConnectionManager()
+    legacy_socket = FakeSocket()
+    v2_socket = FakeSocket()
+    await manager.register(legacy_socket)
+    v2 = await manager.register(v2_socket)
+    service = AvatarService(manager, events, enabled=True, heartbeat_interval_seconds=1, client_timeout_seconds=2)
+    hello, hello_payload = parse_incoming({
+        "protocol_version": 2, "type": "avatar.hello", "message_id": "hello-v2", "timestamp": "2026-01-01T00:00:00Z", "session_id": "s",
+        "payload": {"client_name": "Unity", "client_version": "0.6", "supported_protocol_versions": [1, 2]},
+    })
+    await service.inbound(v2.client_id, hello, hello_payload)
+    result = await service.stream_metadata(
+        session_id="s", utterance_id="u", emotion="smirk", gesture="shrug", gesture_intensity=.55
+    )
+    assert result.sent == 1
+    assert legacy_socket.sent == []
+    assert v2_socket.sent[0]["type"] == "avatar.stream.metadata"
+    assert v2_socket.sent[0]["payload"] == {
+        "utterance_id": "u", "emotion": "smirk", "gesture": "shrug", "gesture_intensity": .55,
+    }
 
 
 @pytest.mark.anyio

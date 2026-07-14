@@ -11,12 +11,13 @@ from .schemas import (
     IncomingMessage,
     PlaybackPayload,
     PongPayload,
-    PROTOCOL_VERSION,
+    StreamReceiptPayload,
+    SUPPORTED_PROTOCOL_VERSIONS,
 )
 
 
 class AvatarProtocolError(ValueError):
-    """A client frame did not conform to Avatar protocol v1."""
+    """A client frame did not conform to a supported Avatar protocol."""
 
 
 _PAYLOADS = {
@@ -31,6 +32,7 @@ _PAYLOADS = {
     "avatar.gesture.finished": GesturePayload,
     "avatar.gesture.failed": GesturePayload,
     "avatar.motion_profile_changed": MotionProfilePayload,
+    "avatar.stream.received": StreamReceiptPayload,
 }
 
 
@@ -39,9 +41,9 @@ def parse_incoming(raw: object) -> tuple[IncomingMessage, object]:
         raise AvatarProtocolError("Avatar frame must be a JSON object")
     try:
         version = raw.get("protocol_version")
-        if version != PROTOCOL_VERSION:
+        if version not in SUPPORTED_PROTOCOL_VERSIONS:
             raise AvatarProtocolError(
-                f"Unsupported protocol_version {version!r}; expected {PROTOCOL_VERSION}"
+                f"Unsupported protocol_version {version!r}; expected one of {SUPPORTED_PROTOCOL_VERSIONS}"
             )
         envelope = IncomingMessage.model_validate(raw)
         payload_type = _PAYLOADS.get(envelope.type)
