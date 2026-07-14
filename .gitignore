@@ -194,6 +194,10 @@ cython_debug/
 [Oo]bj/
 [Bb]uild/
 [Bb]uilds/
+!apps/avatar-unity/Builds/
+!apps/avatar-unity/Builds/NeuroAsistAvatar/
+apps/avatar-unity/Builds/NeuroAsistAvatar/*
+!apps/avatar-unity/Builds/NeuroAsistAvatar/.gitkeep
 [Ll]ogs/
 UserSettings/
 MemoryCaptures/

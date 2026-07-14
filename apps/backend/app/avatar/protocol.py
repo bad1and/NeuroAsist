@@ -7,6 +7,7 @@ from .schemas import (
     ClientStatePayload,
     GesturePayload,
     MotionProfilePayload,
+    OverlayBoundsChangedPayload,
     HelloPayload,
     IncomingMessage,
     PlaybackPayload,
@@ -33,6 +34,7 @@ _PAYLOADS = {
     "avatar.gesture.failed": GesturePayload,
     "avatar.motion_profile_changed": MotionProfilePayload,
     "avatar.stream.received": StreamReceiptPayload,
+    "avatar.overlay.bounds_changed": OverlayBoundsChangedPayload,
 }
 
 

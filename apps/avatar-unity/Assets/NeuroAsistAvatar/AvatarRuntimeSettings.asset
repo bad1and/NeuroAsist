@@ -1,0 +1,30 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e07280593dc1c394d9aa3320ca9c0430, type: 3}
+  m_Name: AvatarRuntimeSettings
+  m_EditorClassIdentifier: 
+  BackendHttpBaseUrl: http://127.0.0.1:8000
+  BackendWebSocketUrl: ws://127.0.0.1:8000/ws/avatar?version=2
+  ReconnectEnabled: 1
+  ConnectTimeoutSeconds: 10
+  DownloadTimeoutSeconds: 30
+  LipSyncMode: 0
+  AudioVolume: 1
+  DefaultEmotion: neutral
+  EmotionBlendInSeconds: 0.15
+  EmotionBlendOutSeconds: 0.2
+  StreamPlaybackPrebufferSeconds: 0.2
+  ApplyAvatarLowProfile: 1
+  AvatarFrameRate: 30
+  AvatarWidth: 1280
+  AvatarHeight: 720
+  DebugLogging: 0

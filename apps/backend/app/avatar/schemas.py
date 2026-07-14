@@ -99,6 +99,25 @@ class StopPayload(ProtocolModel):
     utterance_id: str | None = None
 
 
+class OverlayPayload(ProtocolModel):
+    visible: bool = True
+    always_on_top: bool = True
+    locked: bool = True
+    scale: float = Field(default=1.0, ge=0.5, le=2.0)
+    monitor: str = Field(default="primary", min_length=1, max_length=256)
+    x: float = 80.0
+    y: float = 80.0
+    width: float = Field(default=640.0, ge=240.0, le=3840.0)
+    height: float = Field(default=720.0, ge=240.0, le=2160.0)
+
+
+class OverlayBoundsChangedPayload(ProtocolModel):
+    x: float
+    y: float
+    width: float = Field(ge=240.0, le=3840.0)
+    height: float = Field(ge=240.0, le=2160.0)
+
+
 class GesturePayload(ProtocolModel):
     gesture: str = "auto"
     intensity: float = Field(default=1.0, ge=0.0, le=1.0)
@@ -223,3 +242,15 @@ class AvatarTestGestureRequest(GesturePayload):
 class AvatarStopRequest(ProtocolModel):
     utterance_id: str | None = None
     session_id: str = "default"
+
+
+class AvatarOverlayPatch(ProtocolModel):
+    visible: bool | None = None
+    always_on_top: bool | None = None
+    locked: bool | None = None
+    scale: float | None = Field(default=None, ge=0.5, le=2.0)
+    monitor: str | None = Field(default=None, min_length=1, max_length=256)
+    x: float | None = None
+    y: float | None = None
+    width: float | None = Field(default=None, ge=240.0, le=3840.0)
+    height: float | None = Field(default=None, ge=240.0, le=2160.0)

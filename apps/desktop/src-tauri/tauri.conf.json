@@ -17,6 +17,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": "nsis"
+    "targets": "nsis",
+    "resources": {
+      "../../avatar-unity/Builds/NeuroAsistAvatar": "avatar"
+    }
   }
 }

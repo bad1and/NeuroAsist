@@ -1,0 +1,1 @@
+Unity writes NeuroAsistAvatar.exe and its companion _Data directory here. This placeholder lets Tauri validate the resource path before the production build.

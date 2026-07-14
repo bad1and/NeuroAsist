@@ -16,7 +16,7 @@
 | 5 | Long-Term Memory V1 | готово | Управляемая память с происхождением и аудитом. |
 | 6 | Semantic Retrieval | готово, выключено по умолчанию | FTS-first поиск и опциональный семантический адаптер. |
 | 7 | Character Protocol v3 | готово | Единый контракт ответа персонажа и аватара. |
-| 8 | Emotion Engine и Avatar Overlay | частично готово | Emotion Engine готов; Unity overlay ждёт исходники Unity. |
+| 8 | Emotion Engine и Avatar Overlay | готово | Unity source, desktop overlay и управление через Tauri добавлены. |
 | 9 | Live Voice, VAD и Barge-in | готово для локального режима | PCM, VAD, interruption и защита от late audio. |
 | 10 | Settings, Models и Installer | готово для локального режима | Постоянные настройки, Credential Manager, Model Manager, backups. |
 | 11 | Stabilization Gate | в работе | Регрессии пройдены; публичный release intentionally отложен. |
@@ -107,11 +107,9 @@
 
 **Цель.** Превратить метаданные персонажа в предсказуемые эмоции, жесты и motion profile аватара.
 
-**Сделано.** Emotion Engine, mapping JSON, arbitration команд, защита от stale stop и UI diagnostics.
+**Сделано.** Emotion Engine, mapping JSON, arbitration команд, защита от stale stop, Unity source с Liqu, authenticated dynamic-port connection, desktop overlay и UI diagnostics.
 
-**Ограничение.** Реальный прозрачный Unity overlay не реализован, потому что исходники Unity не переданы в репозиторий.
-
-**Подробности:** [milestone-8-emotion-overlay.md](milestone-8-emotion-overlay.md), [unity-source.md](unity-source.md).
+**Сборка.** Unity 2022.3.62f3: `npm run build:avatar --prefix apps/desktop`; проект расположен в [`apps/avatar-unity`](../apps/avatar-unity/README.md).
 
 ## Milestone 9 — Live Voice, VAD и Barge-in
 

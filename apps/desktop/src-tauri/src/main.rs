@@ -40,6 +40,7 @@ struct DesktopState {
     runtime: Mutex<DesktopRuntime>,
     core: Mutex<Option<CoreProcess>>,
     avatar: Mutex<Option<Child>>,
+    avatar_visible: Mutex<bool>,
     crash_restarts: Mutex<u8>,
     core_generation: AtomicU64,
 }
@@ -71,6 +72,7 @@ impl DesktopState {
             }),
             core: Mutex::new(None),
             avatar: Mutex::new(None),
+            avatar_visible: Mutex::new(true),
             crash_restarts: Mutex::new(0),
             core_generation: AtomicU64::new(0),
         }
@@ -96,10 +98,11 @@ impl DesktopState {
         std::fs::create_dir_all(&data_root).map_err(|error| format!("Could not create NeuroAsist data directory: {error}"))?;
         let port = runtime.api_base_url.rsplit(':').next().unwrap_or("8000");
         let api_key = read_api_key()?;
+        let avatar_enabled = self.avatar_executable(app).is_some() && !self.safe_mode;
         let mut sidecar_events = None;
         let process = if cfg!(debug_assertions) || env::var_os("NEUROASIST_CORE_EXECUTABLE").is_some() {
             let mut command = core_command(&self.root)?;
-            configure_core_command(&mut command, &self.root, &data_root, port, &runtime.api_token, self.safe_mode, api_key.as_deref());
+            configure_core_command(&mut command, &self.root, &data_root, port, &runtime.api_token, self.safe_mode, avatar_enabled, api_key.as_deref());
             CoreProcess::Native(command.spawn().map_err(|error| format!("Could not start Neuro Core: {error}"))?)
         } else {
             let mut command = app.shell().sidecar("neuroasist-core")
@@ -113,6 +116,7 @@ impl DesktopState {
                 .env("LOG_TO_FILE", "true")
                 .env("LOG_FILE_PATH", data_root.join("logs").join("app.log"))
                 .env("NEUROASIST_SAFE_MODE", if self.safe_mode { "1" } else { "0" });
+            command = command.env("AVATAR_ENABLED", if avatar_enabled { "true" } else { "false" });
             if let Some(api_key) = api_key.as_deref() {
                 command = command.env("DEEPSEEK_API_KEY", api_key);
             }
@@ -228,11 +232,28 @@ impl DesktopState {
         }
     }
 
-    fn start_avatar(&self) -> Result<bool, String> {
+    fn avatar_executable(&self, app: &AppHandle) -> Option<PathBuf> {
+        if let Some(path) = env::var_os("NEUROASIST_AVATAR_EXECUTABLE") {
+            let path = PathBuf::from(path);
+            return path.exists().then_some(path);
+        }
+        let development = self.root.join("apps").join("avatar-unity").join("Builds").join("NeuroAsistAvatar").join("NeuroAsistAvatar.exe");
+        if development.exists() {
+            return Some(development);
+        }
+        app.path().resource_dir().ok()
+            .map(|path| path.join("avatar").join("NeuroAsistAvatar.exe"))
+            .filter(|path| path.exists())
+    }
+
+    fn start_avatar(&self, app: &AppHandle) -> Result<bool, String> {
         if self.safe_mode || self.avatar.lock().map_err(|_| "avatar mutex poisoned")?.is_some() {
             return Ok(false);
         }
-        let Some(path) = env::var_os("NEUROASIST_AVATAR_EXECUTABLE") else { return Ok(false) };
+        let Some(path) = self.avatar_executable(app) else {
+            let _ = app.emit("desktop-avatar-status", "not-configured");
+            return Ok(false);
+        };
         let runtime = self.runtime();
         let child = Command::new(path)
             .current_dir(&self.root)
@@ -241,6 +262,8 @@ impl DesktopState {
             .spawn()
             .map_err(|error| format!("Could not start avatar process: {error}"))?;
         *self.avatar.lock().map_err(|_| "avatar mutex poisoned")? = Some(child);
+        *self.avatar_visible.lock().map_err(|_| "avatar visibility mutex poisoned")? = true;
+        let _ = app.emit("desktop-avatar-status", "connecting");
         Ok(true)
     }
 
@@ -252,12 +275,18 @@ impl DesktopState {
         }
     }
 
-    fn toggle_avatar(&self) -> Result<bool, String> {
+    fn toggle_avatar(&self, app: &AppHandle) -> Result<bool, String> {
         if self.avatar.lock().map_err(|_| "avatar mutex poisoned")?.is_some() {
-            self.stop_avatar();
-            Ok(false)
+            let next = {
+                let mut visible = self.avatar_visible.lock().map_err(|_| "avatar visibility mutex poisoned")?;
+                *visible = !*visible;
+                *visible
+            };
+            avatar_overlay_visibility_request(&self.runtime(), next)?;
+            let _ = app.emit("desktop-avatar-status", if next { "visible" } else { "hidden" });
+            Ok(next)
         } else {
-            self.start_avatar()
+            self.start_avatar(app)
         }
     }
 
@@ -274,7 +303,7 @@ fn restart_core(app: AppHandle) -> Result<DesktopRuntime, String> {
 
 #[tauri::command]
 fn toggle_avatar(app: AppHandle) -> Result<bool, String> {
-    app.state::<DesktopState>().toggle_avatar()
+    app.state::<DesktopState>().toggle_avatar(&app)
 }
 
 #[tauri::command]
@@ -316,16 +345,20 @@ fn main() {
             app.manage(state);
             let state = app.state::<DesktopState>();
             state.start_core(&app.handle()).map_err(std::io::Error::other)?;
-            let _ = state.start_avatar();
+            let _ = state.start_avatar(&app.handle());
             create_main_window(&app.handle(), state.runtime())?;
             setup_tray(app)?;
             #[cfg(desktop)]
             app.handle().plugin(
                 tauri_plugin_global_shortcut::Builder::new()
-                    .with_shortcuts(["CommandOrControl+Shift+N"])?
-                    .with_handler(|app, _, event| {
+                    .with_shortcuts(["CommandOrControl+Shift+N", "CommandOrControl+Alt+A"])?
+                    .with_handler(|app, shortcut, event| {
                         if event.state == ShortcutState::Pressed {
-                            show_main_window(app);
+                            if shortcut.to_string() == "CTRL+ALT+A" {
+                                let _ = app.state::<DesktopState>().toggle_avatar(app);
+                            } else {
+                                show_main_window(app);
+                            }
                         }
                     })
                     .build(),
@@ -365,7 +398,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => show_main_window(app),
-            "avatar" => { let _ = app.state::<DesktopState>().toggle_avatar(); }
+            "avatar" => { let _ = app.state::<DesktopState>().toggle_avatar(app); }
             "safe-mode" => restart_in_safe_mode(app),
             "quit" => app.exit(0),
             _ => {}
@@ -442,6 +475,7 @@ fn configure_core_command(
     port: &str,
     token: &str,
     safe_mode: bool,
+    avatar_enabled: bool,
     api_key: Option<&str>,
 ) {
     command
@@ -453,7 +487,8 @@ fn configure_core_command(
         .env("VOICE_AUDIO_DIR", data_root.join("data").join("audio"))
         .env("LOG_TO_FILE", "true")
         .env("LOG_FILE_PATH", data_root.join("logs").join("app.log"))
-        .env("NEUROASIST_SAFE_MODE", if safe_mode { "1" } else { "0" });
+        .env("NEUROASIST_SAFE_MODE", if safe_mode { "1" } else { "0" })
+        .env("AVATAR_ENABLED", if avatar_enabled { "true" } else { "false" });
     if let Some(api_key) = api_key {
         command.env("DEEPSEEK_API_KEY", api_key);
     }
@@ -472,6 +507,18 @@ fn core_request(runtime: &DesktopRuntime, method: &str, path: &str) -> Result<()
     let mut stream = TcpStream::connect(address).map_err(|error| error.to_string())?;
     stream.set_read_timeout(Some(Duration::from_secs(1))).map_err(|error| error.to_string())?;
     let request = format!("{method} {path} HTTP/1.1\r\nHost: {address}\r\nX-NeuroAsist-Token: {}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n", runtime.api_token);
+    stream.write_all(request.as_bytes()).map_err(|error| error.to_string())?;
+    let mut response = String::new();
+    stream.read_to_string(&mut response).map_err(|error| error.to_string())?;
+    if response.starts_with("HTTP/1.1 2") { Ok(()) } else { Err(response.lines().next().unwrap_or("No HTTP response").into()) }
+}
+
+fn avatar_overlay_visibility_request(runtime: &DesktopRuntime, visible: bool) -> Result<(), String> {
+    let address = runtime.api_base_url.trim_start_matches("http://");
+    let mut stream = TcpStream::connect(address).map_err(|error| error.to_string())?;
+    stream.set_read_timeout(Some(Duration::from_secs(1))).map_err(|error| error.to_string())?;
+    let body = format!(r#"{{"visible":{visible}}}"#);
+    let request = format!("PUT /avatar/overlay HTTP/1.1\r\nHost: {address}\r\nX-NeuroAsist-Token: {}\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}", runtime.api_token, body.len());
     stream.write_all(request.as_bytes()).map_err(|error| error.to_string())?;
     let mut response = String::new();
     stream.read_to_string(&mut response).map_err(|error| error.to_string())?;

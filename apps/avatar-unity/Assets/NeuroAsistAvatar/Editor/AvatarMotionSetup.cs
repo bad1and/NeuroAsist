@@ -1,0 +1,133 @@
+using System.Collections.Generic;
+using NeuroAsist.Avatar;
+using UnityEditor;
+using UnityEditor.Animations;
+using UnityEngine;
+
+namespace NeuroAsist.AvatarEditor
+{
+    public static class AvatarMotionSetup
+    {
+        internal const string Root = "Assets/NeuroAsistAvatar/Motion";
+        internal const string SettingsPath = Root + "/AvatarMotionSettings.asset";
+        internal const string ControllerPath = Root + "/AvatarMotion.controller";
+        internal const string MaskPath = Root + "/UpperBody.mask";
+
+        [MenuItem("NeuroAsist/Avatar/Setup Motion Assets")]
+        public static void SetupAssets()
+        {
+            EnsureFolders();
+            var settings = EnsureSettings();
+            var controller = EnsureController();
+            var mask = EnsureMask();
+            if (controller.layers.Length > 1) { var layers = controller.layers; layers[1].avatarMask = mask; controller.layers = layers; }
+            EditorUtility.SetDirty(settings);
+            AssetDatabase.SaveAssets();
+            Debug.Log("[AvatarMotion] Motion assets created. Run Setup Canonical Scene to assign the controller to the VRM Animator. Animation slots deliberately contain no third-party clips.");
+        }
+
+        internal static AvatarMotionSettings EnsureSettings()
+        {
+            EnsureFolders();
+            var settings = AssetDatabase.LoadAssetAtPath<AvatarMotionSettings>(SettingsPath);
+            if (settings != null) return settings;
+            settings = ScriptableObject.CreateInstance<AvatarMotionSettings>();
+            var neutral = CreateProfile("Neutral", "neutral", 1f, 1f, 1f);
+            settings.DefaultProfile = neutral;
+            foreach (var item in new[] {
+                (AvatarEmotion.Neutral, neutral), (AvatarEmotion.Happy, CreateProfile("Happy", "happy", 1.15f, 1.2f, 1.05f)),
+                (AvatarEmotion.Sad, CreateProfile("Sad", "sad", .55f, .75f, .8f)), (AvatarEmotion.Angry, CreateProfile("Angry", "angry", .9f, 1.1f, 1.2f)),
+                (AvatarEmotion.Surprised, CreateProfile("Surprised", "surprised", 1.05f, 1.05f, 1.1f)), (AvatarEmotion.Relaxed, CreateProfile("Relaxed", "relaxed", .65f, .8f, .8f)),
+                (AvatarEmotion.Thinking, CreateProfile("Thinking", "thinking", .6f, .75f, .85f)), (AvatarEmotion.Annoyed, CreateProfile("Annoyed", "annoyed", .8f, .9f, 1.1f)),
+                (AvatarEmotion.Smirk, CreateProfile("Smirk", "smirk", .9f, 1f, 1f)),
+            }) settings.EmotionProfiles.Add(new EmotionMotionProfile { Emotion = item.Item1, Profile = item.Item2 });
+            foreach (var tag in new[] { GestureTag.Talk, GestureTag.Greeting, GestureTag.Agreement, GestureTag.Disagreement, GestureTag.Question, GestureTag.Explanation, GestureTag.Thinking, GestureTag.Surprise, GestureTag.Frustration, GestureTag.Farewell, GestureTag.Shrug })
+                settings.GestureDefinitions.Add(CreateGesture(tag));
+            AssetDatabase.CreateAsset(settings, SettingsPath);
+            return settings;
+        }
+
+        private static MotionProfile CreateProfile(string name, string id, float gestureFrequency, float intensity, float headWeight)
+        {
+            var path = Root + "/Profiles/" + name + "MotionProfile.asset";
+            var existing = AssetDatabase.LoadAssetAtPath<MotionProfile>(path);
+            if (existing != null) return existing;
+            var profile = ScriptableObject.CreateInstance<MotionProfile>();
+            profile.ProfileId = id; profile.GestureFrequencyMultiplier = gestureFrequency; profile.GestureIntensityMultiplier = intensity; profile.HeadLookWeight = headWeight;
+            profile.AlternativeIdles.Add(new AlternativeIdleDefinition { Id = "IdleLookAround", AnimatorState = "IdleLookAround", Category = IdleCategory.Micro, DurationSeconds = 1.8f });
+            profile.AlternativeIdles.Add(new AlternativeIdleDefinition { Id = "IdleShiftWeight", AnimatorState = "IdleShiftWeight", Category = IdleCategory.Normal, DurationSeconds = 3f });
+            profile.AlternativeIdles.Add(new AlternativeIdleDefinition { Id = "IdleSmallStretch", AnimatorState = "IdleSmallStretch", Category = IdleCategory.Long, DurationSeconds = 4f });
+            AssetDatabase.CreateAsset(profile, path);
+            return profile;
+        }
+
+        private static GestureDefinition CreateGesture(GestureTag tag)
+        {
+            var path = Root + "/Gestures/" + tag + ".asset";
+            var existing = AssetDatabase.LoadAssetAtPath<GestureDefinition>(path);
+            if (existing != null) return existing;
+            var value = ScriptableObject.CreateInstance<GestureDefinition>();
+            value.Id = tag + "Gesture"; value.Tag = tag; value.AnimatorState = tag == GestureTag.Talk ? "TalkGesture01" : tag.ToString();
+            value.Priority = tag == GestureTag.Greeting || tag == GestureTag.Farewell ? 50 : 10;
+            value.HeadLookSuppression = tag == GestureTag.Thinking ? .3f : 0f;
+            AssetDatabase.CreateAsset(value, path);
+            return value;
+        }
+
+        private static AnimatorController EnsureController()
+        {
+            var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(ControllerPath);
+            if (controller != null) return controller;
+            controller = AnimatorController.CreateAnimatorControllerAtPath(ControllerPath);
+            controller.AddParameter("IsSpeaking", AnimatorControllerParameterType.Bool);
+            controller.AddParameter("MotionIntensity", AnimatorControllerParameterType.Float);
+            controller.AddParameter("BaseIdle", AnimatorControllerParameterType.Int);
+            var baseMachine = controller.layers[0].stateMachine;
+            AddStates(baseMachine, new[] { "IdleNeutral", "IdleRelaxed", "IdleEnergetic", "IdleSad", "IdleThinking", "IdleLookAround", "IdleShiftWeight", "IdleSmallStretch" }, "IdleNeutral");
+            controller.AddLayer(AvatarMotionNames.GestureLayer);
+            var layers = controller.layers;
+            AddStates(layers[1].stateMachine, new[] { "Empty", "TalkGesture01", "Greeting", "Agreement", "Disagreement", "Question", "Explanation", "Thinking", "Surprise", "Frustration", "Farewell", "Shrug" }, "Empty");
+            controller.layers = layers;
+            return controller;
+        }
+        private static void AddStates(AnimatorStateMachine machine, IEnumerable<string> names, string defaultName)
+        {
+            foreach (var name in names)
+            {
+                var state = machine.AddState(name);
+                if (name == defaultName) machine.defaultState = state;
+            }
+        }
+        private static AvatarMask EnsureMask()
+        {
+            var mask = AssetDatabase.LoadAssetAtPath<AvatarMask>(MaskPath);
+            if (mask == null) { mask = new AvatarMask(); AssetDatabase.CreateAsset(mask, MaskPath); }
+            // LastBodyPart is a sentinel enum value. Passing it to AvatarMask produces
+            // Unity's "Invalid BodyPart Index" error, so configure real parts explicitly.
+            mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.Root, false);
+            // Mixamo clips frequently animate Hips/Body even in a seemingly upper-body
+            // gesture. Keeping Body off prevents an overlay clip from lowering or
+            // rotating the avatar while the base idle owns the stance.
+            mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.Body, false);
+            mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.Head, false);
+            mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.LeftLeg, false);
+            mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.RightLeg, false);
+            mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.LeftArm, true);
+            mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.RightArm, true);
+            mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.LeftFingers, true);
+            mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.RightFingers, true);
+            mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.LeftFootIK, false);
+            mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.RightFootIK, false);
+            mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.LeftHandIK, false);
+            mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.RightHandIK, false);
+            EditorUtility.SetDirty(mask);
+            return mask;
+        }
+        private static void EnsureFolders()
+        {
+            if (!AssetDatabase.IsValidFolder(Root)) AssetDatabase.CreateFolder("Assets/NeuroAsistAvatar", "Motion");
+            if (!AssetDatabase.IsValidFolder(Root + "/Profiles")) AssetDatabase.CreateFolder(Root, "Profiles");
+            if (!AssetDatabase.IsValidFolder(Root + "/Gestures")) AssetDatabase.CreateFolder(Root, "Gestures");
+        }
+    }
+}

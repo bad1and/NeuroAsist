@@ -25,6 +25,7 @@ from apps.backend.app.events.bus import EventBus
 from apps.backend.app.avatar.connection_manager import AvatarConnectionManager
 from apps.backend.app.avatar.service import AvatarService
 from apps.backend.app.avatar.emotion_engine import EmotionEngine
+from apps.backend.app.avatar.schemas import OverlayPayload
 from apps.backend.app.runtime.settings import RuntimeSettings, RuntimeSettingsStore
 from apps.backend.app.model_manager.service import ModelManager
 from apps.backend.app.storage.backups import BackupService
@@ -141,12 +142,31 @@ def create_app() -> FastAPI:
         tts_concurrency_max=settings.voice_live_tts_concurrency_max,
         event_publisher=event_bus.publish,
     )
+    def persist_avatar_overlay_bounds(overlay: OverlayPayload) -> None:
+        runtime_settings.avatar_overlay_x = overlay.x
+        runtime_settings.avatar_overlay_y = overlay.y
+        runtime_settings.avatar_overlay_width = overlay.width
+        runtime_settings.avatar_overlay_height = overlay.height
+        runtime_settings_store.save(runtime_settings)
+
     avatar_service = AvatarService(
         AvatarConnectionManager(), event_bus,
         enabled=settings.avatar_enabled,
         heartbeat_interval_seconds=settings.avatar_heartbeat_interval_seconds,
         client_timeout_seconds=settings.avatar_client_timeout_seconds,
         emotion_engine=EmotionEngine.from_path(settings.avatar_emotion_mapping),
+        overlay=OverlayPayload(
+            visible=runtime_settings.avatar_overlay_visible,
+            always_on_top=runtime_settings.avatar_overlay_always_on_top,
+            locked=runtime_settings.avatar_overlay_locked,
+            scale=runtime_settings.avatar_overlay_scale,
+            monitor=runtime_settings.avatar_overlay_monitor,
+            x=runtime_settings.avatar_overlay_x,
+            y=runtime_settings.avatar_overlay_y,
+            width=runtime_settings.avatar_overlay_width,
+            height=runtime_settings.avatar_overlay_height,
+        ),
+        on_overlay_bounds_changed=persist_avatar_overlay_bounds,
     )
     voice_session_manager.bind_avatar_service(avatar_service)
     vad_model_path = settings.voice_silero_vad_model or model_manager.path_for("silero-vad")

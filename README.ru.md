@@ -374,7 +374,7 @@ Browser MediaRecorder
   → Unity AudioSource, lipsync и VRM-эмоция
 ```
 
-Мост аватара остаётся опциональным. Protocol v1 сохраняет `avatar.speak` с URL полного WAV для старых клиентов; protocol v2 получает `avatar.stream.*` с короткими base64 WAV-сегментами и ставит их в очередь без HTTP-загрузки. Также доступны `GET /avatar/status` и тестовые endpoints речи, эмоции, жеста и остановки; настройка и диагностика — в [гайде Unity avatar runtime v0.5](Docs/unity_avatar_runtime_v0.4.md) и [передаче Unity source](Docs/unity-source.md).
+Мост аватара остаётся опциональным: недоступный Unity-клиент не задерживает чат или TTS. Исходники renderer лежат в [`apps/avatar-unity`](apps/avatar-unity/README.md); Tauri запускает его с динамическим портом и одноразовым токеном, а overlay управляется из Settings и трея.
 
 ## Структура проекта
 
@@ -541,7 +541,7 @@ NeuroAsist v0.4.0 пока не умеет:
 - **[Tauri desktop shell Milestone 4](Docs/milestone-4-desktop-shell.md)**
 - **[Долгосрочная память Milestone 5](Docs/milestone-5-long-term-memory.md)**
 - **[Семантический поиск Milestone 6](Docs/milestone-6-semantic-retrieval.md)**
-- **[Передача Unity source](Docs/unity-source.md)**
+- **[Unity avatar renderer](apps/avatar-unity/README.md)**
 
 ## Планируемое направление
 

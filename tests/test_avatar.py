@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from apps.backend.app.avatar.connection_manager import AvatarConnectionManager
 from apps.backend.app.avatar.protocol import AvatarProtocolError, parse_incoming
 from apps.backend.app.avatar.service import AvatarService
-from apps.backend.app.avatar.schemas import SpeakPayload
+from apps.backend.app.avatar.schemas import OverlayPayload, SpeakPayload
 from apps.backend.app.events.bus import EventBus
 from apps.backend.app.voice.orchestrator import SpeechOrchestrator
 from apps.backend.app.voice.providers import MockTTSProvider
@@ -156,9 +156,10 @@ async def test_v2_stream_segments_are_sent_only_to_v2_clients() -> None:
     assert result.sent == 1
     assert legacy.client_id != v2.client_id
     assert legacy_socket.sent == []
-    assert v2_socket.sent[0]["protocol_version"] == 2
-    assert v2_socket.sent[0]["type"] == "avatar.stream.segment"
-    assert v2_socket.sent[0]["payload"]["sequence"] == 0
+    assert v2_socket.sent[0]["type"] == "avatar.overlay.configure"
+    assert v2_socket.sent[-1]["protocol_version"] == 2
+    assert v2_socket.sent[-1]["type"] == "avatar.stream.segment"
+    assert v2_socket.sent[-1]["payload"]["sequence"] == 0
 
 
 @pytest.mark.anyio
@@ -180,10 +181,34 @@ async def test_v2_stream_metadata_is_sent_only_to_v2_clients() -> None:
     )
     assert result.sent == 1
     assert legacy_socket.sent == []
-    assert v2_socket.sent[0]["type"] == "avatar.stream.metadata"
-    assert v2_socket.sent[0]["payload"] == {
+    assert v2_socket.sent[0]["type"] == "avatar.overlay.configure"
+    assert v2_socket.sent[-1]["type"] == "avatar.stream.metadata"
+    assert v2_socket.sent[-1]["payload"] == {
         "utterance_id": "u", "emotion": "smirk", "gesture": "shrug", "gesture_intensity": .55,
     }
+
+
+@pytest.mark.anyio
+async def test_overlay_configuration_is_sent_and_persisted_for_new_clients() -> None:
+    events = EventBus()
+    manager = AvatarConnectionManager()
+    socket = FakeSocket()
+    client = await manager.register(socket)
+    service = AvatarService(manager, events, enabled=True, heartbeat_interval_seconds=1, client_timeout_seconds=2)
+    hello, hello_payload = parse_incoming({
+        "protocol_version": 2, "type": "avatar.hello", "message_id": "hello-v2", "timestamp": "2026-01-01T00:00:00Z", "session_id": "s",
+        "payload": {"client_name": "Unity", "client_version": "0.6", "supported_protocol_versions": [1, 2]},
+    })
+    await service.inbound(client.client_id, hello, hello_payload)
+    await service.configure_overlay(OverlayPayload(visible=False, scale=1.4, locked=False))
+    assert socket.sent[-1]["type"] == "avatar.overlay.configure"
+    assert socket.sent[-1]["payload"]["visible"] is False
+    reconnect_hello, reconnect_hello_payload = parse_incoming({
+        "protocol_version": 2, "type": "avatar.hello", "message_id": "hello-v2", "timestamp": "2026-01-01T00:00:00Z", "session_id": "s",
+        "payload": {"client_name": "Unity", "client_version": "0.6", "supported_protocol_versions": [1, 2]},
+    })
+    await service.inbound(client.client_id, reconnect_hello, reconnect_hello_payload)
+    assert socket.sent[-1]["payload"]["scale"] == 1.4
 
 
 @pytest.mark.anyio

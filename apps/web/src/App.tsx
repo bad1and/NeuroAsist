@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 
 import {
   getAvatarStatus,
+  getAvatarOverlay,
   createBackup,
   getBackups,
   getEvents,
@@ -28,10 +29,12 @@ import {
   sendAvatarTestGesture,
   sendAvatarTestPhrase,
   stopAvatar,
+  updateAvatarOverlay,
 } from "./api";
 import type {
   BackendEvent,
   AvatarStatusResponse,
+  AvatarOverlaySettings,
   ChatMessage,
   EventLevel,
   PublicSettings,
@@ -1594,9 +1597,12 @@ function AvatarControls({
   const [motionIntensity, setMotionIntensity] = useState(0.8);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [overlay, setOverlay] = useState<AvatarOverlaySettings | null>(null);
   const enabled = Boolean(avatarStatus?.enabled);
   const client = avatarStatus?.clients[0];
   const engine = avatarStatus?.emotion_engine;
+
+  useEffect(() => { void getAvatarOverlay().then(setOverlay).catch(() => setOverlay(null)); }, []);
 
   const run = async (action: () => Promise<unknown>, success: string) => {
     setBusy(true);
@@ -1610,6 +1616,13 @@ function AvatarControls({
     } finally {
       setBusy(false);
     }
+  };
+
+  const updateOverlay = async (patch: Partial<AvatarOverlaySettings>) => {
+    setBusy(true); setMessage(null);
+    try { setOverlay(await updateAvatarOverlay(patch)); setMessage("Overlay settings updated."); }
+    catch { setMessage("Overlay settings could not be saved."); }
+    finally { setBusy(false); }
   };
 
   return (
@@ -1632,6 +1645,22 @@ function AvatarControls({
         <InfoRow label="Engine mapping" value={engine ? (engine.mapping_valid ? "valid" : "fallback") : "unavailable"} />
       </div>
       <div className="avatar-actions">
+        <label>
+          <input type="checkbox" checked={overlay?.visible ?? true} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ visible: event.target.checked })} />
+          Show overlay
+        </label>
+        <label>
+          <input type="checkbox" checked={overlay?.always_on_top ?? true} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ always_on_top: event.target.checked })} />
+          Always on top
+        </label>
+        <label>
+          <input type="checkbox" checked={overlay?.locked ?? true} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ locked: event.target.checked })} />
+          Lock / click-through
+        </label>
+        <label>
+          Overlay scale {overlay?.scale?.toFixed(1) ?? "1.0"}
+          <input min="0.5" max="2" step="0.1" type="range" value={overlay?.scale ?? 1} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ scale: Number(event.target.value) })} />
+        </label>
         <label>
           Test phrase
           <input value={phrase} onChange={(event) => setPhrase(event.target.value)} disabled={!enabled || busy} />
