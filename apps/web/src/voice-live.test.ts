@@ -1,6 +1,30 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { TTSStreamPlayer } from "./voice-live";
+import { PlaybackCoordinator, TTSStreamPlayer } from "./voice-live";
+
+describe("PlaybackCoordinator", () => {
+  it("gives exactly one owner a generation-scoped lease", () => {
+    const coordinator = new PlaybackCoordinator();
+    const unity = coordinator.acquire("unity", "first");
+    const browser = coordinator.acquire("desktop_ui", "second");
+
+    expect(coordinator.isCurrent(unity)).toBe(false);
+    expect(coordinator.isOwner("unity", "first")).toBe(false);
+    expect(coordinator.isCurrent(browser)).toBe(true);
+    expect(coordinator.isOwner("desktop_ui", "second")).toBe(true);
+  });
+
+  it("does not let an old completion release a newer utterance", () => {
+    const coordinator = new PlaybackCoordinator();
+    const first = coordinator.acquire("desktop_ui", "first");
+    const second = coordinator.acquire("desktop_ui", "second");
+
+    expect(coordinator.release(first)).toBe(false);
+    expect(coordinator.snapshot()).toEqual(second);
+    expect(coordinator.release(second)).toBe(true);
+    expect(coordinator.snapshot()).toBeNull();
+  });
+});
 
 type Deferred = {
   resolve: (buffer: AudioBuffer) => void;

@@ -34,7 +34,8 @@ import type {
   VoiceTtsStatusResponse,
 } from "./types";
 import type { VoiceServerEvent } from "./types";
-import { TTSStreamPlayer, VoiceSocketClient } from "./voice-live";
+import { PlaybackCoordinator, TTSStreamPlayer, VoiceSocketClient } from "./voice-live";
+import { BrowserVadRecorder, type VadState } from "./vad";
 import { JournalPage } from "./journal";
 import { MemoryPage } from "./memory";
 
@@ -317,6 +318,8 @@ function ChatPage({
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [retryText, setRetryText] = useState<string | null>(null);
+  const [handsFree, setHandsFree] = useState(false);
+  const [vadState, setVadState] = useState<VadState>("idle");
   const listRef = useRef<HTMLDivElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -325,6 +328,9 @@ function ChatPage({
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
   const liveSocketRef = useRef<VoiceSocketClient | null>(null);
   const livePlayerRef = useRef<TTSStreamPlayer | null>(null);
+  const vadRecorderRef = useRef<BrowserVadRecorder | null>(null);
+  const submitVoiceRef = useRef<(audio: Blob, endedAt?: number) => void>(() => undefined);
+  const playbackCoordinatorRef = useRef(new PlaybackCoordinator());
   const avatarOwnsAudioRef = useRef(false);
   const liveAudioStartedRef = useRef(false);
   const liveMetadataRef = useRef({ emotion: "neutral", intent: "unknown" });
@@ -451,12 +457,14 @@ function ChatPage({
         },
         () => {
           liveSocketRef.current?.send("playback.finished");
+          playbackCoordinatorRef.current.release(playbackCoordinatorRef.current.snapshot());
           liveSocketRef.current?.clearActive();
           setLoading(false);
           setVoiceState("idle");
         },
         (playerError) => {
           livePlayerRef.current?.stop();
+          playbackCoordinatorRef.current.cancel();
           liveSocketRef.current?.cancel();
           setError(playerError.message);
           setLoading(false);
@@ -489,6 +497,10 @@ function ChatPage({
     if (!liveSocketRef.current) {
       const onEvent = (event: VoiceServerEvent) => {
         if (event.type === "voice.utterance.started") {
+          playbackCoordinatorRef.current.acquire(
+            avatarOwnsAudioRef.current ? "unity" : "desktop_ui",
+            event.utterance_id,
+          );
           liveSocketRef.current?.activate(event.utterance_id);
           livePlayerRef.current?.begin(event.utterance_id);
           setVoiceState("thinking");
@@ -521,6 +533,7 @@ function ChatPage({
           setVoiceState("speaking");
         } else if (event.type === "voice.utterance.finished") {
           if (avatarOwnsAudioRef.current) {
+            playbackCoordinatorRef.current.release(playbackCoordinatorRef.current.snapshot());
             liveSocketRef.current?.clearActive();
             setLoading(false);
             setVoiceState("idle");
@@ -528,11 +541,13 @@ function ChatPage({
             livePlayerRef.current?.finish(event.utterance_id);
           }
         } else if (event.type === "voice.utterance.cancelled") {
+          playbackCoordinatorRef.current.cancel();
           liveSocketRef.current?.clearActive();
           setLoading(false);
           setVoiceState("idle");
         } else if (event.type === "voice.error") {
           livePlayerRef.current?.stop();
+          playbackCoordinatorRef.current.cancel();
           liveSocketRef.current?.clearActive();
           setError(event.message ?? event.code ?? "Live voice failed");
           setLoading(false);
@@ -550,7 +565,10 @@ function ChatPage({
         voiceWebSocketUrl(SESSION_ID),
         onEvent,
         (audio, segment) => {
-          if (!avatarOwnsAudioRef.current && segment.segment_id !== undefined) {
+          if (
+            segment.segment_id !== undefined
+            && playbackCoordinatorRef.current.isOwner("desktop_ui", segment.utterance_id)
+          ) {
             void livePlayerRef.current?.enqueue(
               segment.utterance_id, segment.segment_id, audio, segment,
             ).catch(() => undefined);
@@ -565,6 +583,7 @@ function ChatPage({
   useEffect(() => () => {
     livePlayerRef.current?.stop();
     liveSocketRef.current?.close();
+    vadRecorderRef.current?.stop();
   }, []);
 
   useEffect(() => () => stopVoicePlayback(), [stopVoicePlayback]);
@@ -789,8 +808,8 @@ function ChatPage({
     }
   };
 
-  const startRecording = async () => {
-    if (!voiceSupported || loading || voiceState !== "idle") {
+  const startRecording = async (bargeIn = false) => {
+    if (!voiceSupported || (!bargeIn && (loading || voiceState !== "idle"))) {
       return;
     }
 
@@ -849,6 +868,10 @@ function ChatPage({
       setVoiceState("stopping");
       livePlayerRef.current?.stop();
       liveSocketRef.current?.cancel();
+      liveSocketRef.current?.clearActive();
+      playbackCoordinatorRef.current.cancel();
+      setLoading(false);
+      await startRecording(true);
       return;
     }
     await startRecording();
@@ -923,6 +946,43 @@ function ChatPage({
         setLoading(false);
         setVoiceState("idle");
       }
+    }
+  };
+
+  useEffect(() => {
+    submitVoiceRef.current = (audio: Blob, endedAt?: number) => { void submitVoice(audio, endedAt); };
+  }, [submitVoice]);
+
+  const toggleHandsFree = async () => {
+    if (handsFree) {
+      vadRecorderRef.current?.stop();
+      vadRecorderRef.current = null;
+      setHandsFree(false);
+      setVadState("idle");
+      return;
+    }
+    try {
+      const recorder = new BrowserVadRecorder();
+      vadRecorderRef.current = recorder;
+      await recorder.start(
+        (audio, endedAt) => submitVoiceRef.current(audio, endedAt),
+        (nextState) => {
+          setVadState(nextState);
+          if (nextState === "speech" && liveSocketRef.current?.activeUtteranceId) {
+            livePlayerRef.current?.stop();
+            liveSocketRef.current.cancel();
+            liveSocketRef.current.clearActive();
+            playbackCoordinatorRef.current.cancel();
+          }
+        },
+      );
+      setHandsFree(true);
+    } catch (vadError) {
+      vadRecorderRef.current?.stop();
+      vadRecorderRef.current = null;
+      setError(vadError instanceof Error ? vadError.message : "Hands-free voice is unavailable");
+      setHandsFree(false);
+      setVadState("idle");
     }
   };
 
@@ -1039,9 +1099,17 @@ function ChatPage({
         >
           {voiceButtonLabel(voiceState)}
         </button>
+        <button
+          className={handsFree ? "recording" : "secondary"}
+          disabled={!voiceSupported || voiceState === "transcribing"}
+          onClick={() => void toggleHandsFree()}
+          type="button"
+        >
+          {handsFree ? "Hands-free on" : "Hands-free"}
+        </button>
         <span>
           {voiceSupported
-            ? `voice: ${settings?.voice_language ?? "ru"}`
+            ? `voice: ${settings?.voice_language ?? "ru"}${handsFree ? ` · ${vadState}` : ""}`
             : "voice unavailable"}
         </span>
       </div>
