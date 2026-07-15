@@ -5,6 +5,7 @@
 - [Milestones 0–11](MILESTONES.md) — единая карта работ и статусы.
 - [V0.5 Companion Blueprint](NeuroAsist_V0.5_Companion_Blueprint.md) — полная целевая архитектура.
 - [Локальный запуск и отложенные release-задачи](deferred-release-work.md).
+- [ChromaDB memory](chroma-memory.md) — текущий retrieval/index и настройки V0.6.
 - [Stabilization Gate](milestone-11-stabilization.md) — что уже проверено и что ещё измерять.
 
 ## Отчёты о реализации

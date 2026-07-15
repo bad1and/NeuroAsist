@@ -85,6 +85,18 @@ class ContinuityCue(ProtocolModel):
         return list(dict.fromkeys(cleaned))
 
 
+class MemoryCandidate(ProtocolModel):
+    """A proposed memory, never a direct command to mutate storage."""
+
+    kind: str = Field(min_length=1, max_length=40)
+    subject: str = Field(default="user", min_length=1, max_length=200)
+    predicate: str = Field(min_length=1, max_length=200)
+    value_text: str = Field(min_length=1, max_length=1000)
+    importance: float = Field(default=0.6, ge=0.0, le=1.0)
+    confidence: float = Field(default=0.7, ge=0.0, le=1.0)
+    sensitivity: str = Field(default="normal", pattern="^(normal|sensitive)$")
+
+
 class CharacterTurn(ProtocolModel):
     """Canonical visible reply plus non-visible character metadata."""
 
@@ -95,6 +107,7 @@ class CharacterTurn(ProtocolModel):
     gesture: GestureCue = Field(default_factory=GestureCue)
     delivery: DeliveryCue = Field(default_factory=DeliveryCue)
     continuity: ContinuityCue | None = None
+    memory_candidates: list[MemoryCandidate] = Field(default_factory=list, max_length=3)
 
     @field_validator("reply")
     @classmethod
@@ -105,8 +118,8 @@ class CharacterTurn(ProtocolModel):
         return stripped
 
     def metadata_frame(self) -> dict[str, object]:
-        """Return metadata only; this object is never rendered as reply text."""
-        return self.model_dump(mode="json", exclude={"reply"})
+        """Return avatar metadata only; memory proposals are private to the backend."""
+        return self.model_dump(mode="json", exclude={"reply", "memory_candidates"})
 
 
 class CharacterLLMResponse(ProtocolModel):
