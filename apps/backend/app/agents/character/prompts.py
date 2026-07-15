@@ -18,8 +18,18 @@ def character_json_prompt(persona: PersonaConfig | None = None) -> str:
   "affect": {{"emotion": "neutral|happy|sad|angry|annoyed|smirk|thinking|surprised|embarrassed|concerned", "intensity": 0.0, "valence": 0.0, "arousal": 0.0}},
   "gesture": {{"name": "none|auto|talk|greeting|agreement|disagreement|question|explanation|thinking|surprise|frustration|farewell|shrug", "intensity": 0.0, "interrupt": true}},
   "delivery": {{"pace": "slow|normal|fast", "emphasis": 0.0}},
-  "continuity": {{"referenced_memory_ids": [], "referenced_episode_ids": [], "closes_open_loop_ids": []}}
+  "continuity": {{"referenced_memory_ids": [], "referenced_episode_ids": [], "closes_open_loop_ids": []}},
+  "memory_candidates": []
 }}
+
+memory_candidates — только внутренние предложения памяти, они никогда не должны попадать в reply.
+Сохраняй максимум 3 устойчивых факта из слов пользователя: предпочтения, цели, отношения,
+важные инструкции и явно сказанное «запомни». Не сохраняй догадки, одноразовые детали,
+повторения или сведения из собственной реплики. Допустимый kind: identity, preference,
+relationship, goal, constraint, skill, interest, episode, decision, correction, open_loop,
+shared_milestone. Каждый элемент: kind, subject, predicate,
+value_text, importance (0..1), confidence (0..1), sensitivity (normal|sensitive).
+Для медицинских, финансовых, адресных и иных чувствительных данных всегда sensitivity="sensitive".
 """
 
 
@@ -45,4 +55,4 @@ CHARACTER_LIVE_PROMPT = character_live_prompt()
 CHARACTER_SYSTEM_PROMPT = CHARACTER_JSON_PROMPT
 CHARACTER_REPAIR_PROMPT = """Исправь ответ ассистентки в один валидный JSON Character Protocol v3.
 Сохрани видимый reply, если он есть. Не добавляй markdown или пояснения. Верни affect, gesture,
-delivery и continuity по схеме Character Protocol v3; недостающие metadata заполни нейтральными значениями."""
+ delivery, continuity и memory_candidates по схеме Character Protocol v3; недостающие metadata заполни нейтральными значениями."""

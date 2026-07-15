@@ -40,8 +40,12 @@ class Settings(BaseSettings):
     memory_sensitive_mode: str = "ask"
     memory_max_candidates_per_turn: int = 3
     memory_context_max_tokens: int = 900
+    memory_llm_extraction_enabled: bool = False
+    memory_llm_min_confidence: float = 0.70
     semantic_retrieval_enabled: bool = False
     semantic_retrieval_eval_passed: bool = False
+    semantic_vector_backend: str = "sqlite"
+    semantic_chroma_path: str | None = None
     semantic_embedding_provider: str = "hash"
     semantic_embedding_model_id: str = "hash-multilingual-v1"
     semantic_embedding_dimension: int = 256
@@ -124,6 +128,12 @@ class Settings(BaseSettings):
         if local_app_data:
             return Path(local_app_data) / "NeuroAsist"
         return Path.home() / ".local" / "share" / "NeuroAsist"
+
+    @property
+    def semantic_chroma_directory(self) -> Path:
+        if self.semantic_chroma_path:
+            return Path(self.semantic_chroma_path).expanduser()
+        return ROOT_DIR / "data" / "chroma"
 
     @property
     def avatar_emotion_mapping(self) -> Path:

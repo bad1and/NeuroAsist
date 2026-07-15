@@ -522,13 +522,17 @@ VOICE_STT_COMPUTE_TYPE=int8_float16
 
 ## Current limitations
 
+### V0.6 memory development
+
+The current development branch adds a ChromaDB index on top of canonical SQLite memory: relevant facts are injected into the DeepSeek prompt and a single model response may return memory candidates. The index is stored in `data/chroma` and can be rebuilt from SQLite. See [ChromaDB memory](Docs/chroma-memory.md) for settings and current limitations.
+
 NeuroAsist v0.4.0 does not provide:
 
 - always-on listening;
 - automatic voice activity detection conversations;
 - interruption while the character is speaking;
 - Unity live-audio segments (full WAV avatar playback is supported);
-- long-term semantic memory or RAG;
+- guaranteed high-quality semantic retrieval: the ChromaDB index is in development and currently uses lightweight hash embeddings;
 - file, shell, browser, screen, or desktop access;
 - accounts, remote hosting hardening, or multi-user isolation.
 
