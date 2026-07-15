@@ -27,6 +27,8 @@ class SpeechOrchestrator:
         reply: str,
         emotion: str,
         intent: str,
+        gesture: str = "auto",
+        gesture_intensity: float = 1.0,
         voice: str,
         interrupt: bool = True,
         voice_request_id: str | None = None,
@@ -42,6 +44,8 @@ class SpeechOrchestrator:
                 reply=reply,
                 emotion=emotion,
                 intent=intent,
+                gesture=gesture,
+                gesture_intensity=gesture_intensity,
                 voice=voice,
                 interrupt=interrupt,
             )
@@ -70,6 +74,8 @@ class SpeechOrchestrator:
         reply: str,
         emotion: str,
         intent: str,
+        gesture: str,
+        gesture_intensity: float,
         voice: str,
         interrupt: bool,
     ) -> None:
@@ -111,7 +117,8 @@ class SpeechOrchestrator:
             )
             await self.avatar_service.speak(
                 session_id=session_id, utterance_id=voice_request_id, text=text, audio_url=audio_url,
-                emotion=emotion, intent=intent, interrupt=interrupt,
+                emotion=emotion, intent=intent, gesture=gesture,
+                gesture_intensity=gesture_intensity, interrupt=interrupt,
             )
 
     def _fail(self, session_id: str, voice_request_id: str, voice: str, error: str, error_type: str) -> None:

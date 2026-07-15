@@ -26,8 +26,14 @@ async def voice_chat(
     session_id: str = Form(default="default"),
     language: str = Form(default="auto"),
     live: bool = Form(default=False),
+    client_end_of_speech_unix_ms: int | None = Form(default=None),
 ) -> VoiceChatResponse | VoiceLiveResponse:
     request_started = time.perf_counter()
+    end_of_speech_age_ms = (
+        max(0, int(time.time() * 1000) - client_end_of_speech_unix_ms)
+        if client_end_of_speech_unix_ms is not None
+        else None
+    )
     voice_request_id = uuid4().hex
     settings = request.app.state.settings
     history = request.app.state.history
@@ -53,6 +59,8 @@ async def voice_chat(
             "session_id": session_id,
             "language": selected_language,
             "duration_ms": upload_save_ms,
+            "pipeline_elapsed_ms": int((time.perf_counter() - request_started) * 1000),
+            "end_of_speech_to_upload_ms": end_of_speech_age_ms,
         },
     )
 
@@ -80,6 +88,9 @@ async def voice_chat(
                 "session_id": session_id,
                 "language": stt_result.language,
                 "duration_ms": stt_result.duration_ms,
+                "pipeline_elapsed_ms": int((time.perf_counter() - request_started) * 1000),
+                "provider": stt_result.provider,
+                "model": stt_result.model,
             },
         )
 
@@ -118,6 +129,8 @@ async def voice_chat(
                     "session_id": session_id,
                     "utterance_id": utterance_id,
                     "voice_request_id": voice_request_id,
+                    "stt_ms": stt_result.duration_ms,
+                    "pipeline_elapsed_ms": int((time.perf_counter() - request_started) * 1000),
                 },
             )
             return VoiceLiveResponse(
@@ -145,7 +158,8 @@ async def voice_chat(
             orchestrator.bind_runtime(voice_service, settings)
             orchestrator.enqueue(
                 session_id=session_id, voice_request_id=voice_request_id, reply=result["reply"],
-                emotion=result["emotion"], intent=result["intent"], voice=voice,
+                emotion=result["emotion"], intent=result["intent"],
+                gesture=result.get("gesture", "auto"), voice=voice,
             )
         elif not result["reply"].strip():
             tts_status = "skipped"

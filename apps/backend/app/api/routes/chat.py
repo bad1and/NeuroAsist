@@ -139,6 +139,7 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             reply=result["reply"],
             emotion=result["emotion"],
             intent=result["intent"],
+            gesture=result.get("gesture", "auto"),
             voice=voice,
         )
         response.tts_status = "queued"

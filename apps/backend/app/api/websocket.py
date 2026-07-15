@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 @router.websocket("/ws/avatar")
 async def websocket_avatar(websocket: WebSocket, version: int = 1) -> None:
-    if version != 1:
+    if version not in {1, 2}:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     await websocket.accept()

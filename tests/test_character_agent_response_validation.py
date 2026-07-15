@@ -49,31 +49,49 @@ def test_parse_response_accepts_json_with_extra_text(agent: CharacterAgent) -> N
 
 
 @pytest.mark.parametrize(
-    "raw_content",
+    ("raw_content", "expected_reply"),
     [
-        "Привет, я не JSON",
-        '["hello"]',
-        '{"reply":"","emotion":"happy","intent":"casual_chat"}',
-        '{"reply":"Привет","emotion":"banana","intent":"casual_chat"}',
-        '{"reply":"Привет","emotion":"happy","intent":"dance"}',
+        ("Привет, я не JSON", "Привет, я не JSON"),
+        ('{"reply":"","emotion":"happy","intent":"casual_chat"}', "Модель вернула пустой ответ. Попробуй повторить."),
+        ('{"reply":"Привет","emotion":"banana","intent":"casual_chat"}', "Модель вернула пустой ответ. Попробуй повторить."),
+        ('{"reply":"Привет","emotion":"happy","intent":"dance"}', "Модель вернула пустой ответ. Попробуй повторить."),
     ],
 )
 def test_parse_response_uses_fallback_for_invalid_llm_response(
     agent: CharacterAgent,
     raw_content: str,
+    expected_reply: str,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     with caplog.at_level(logging.WARNING):
         result = agent._parse_response(raw_content)
 
     assert result == {
-        "reply": raw_content.strip() or "Модель вернула пустой ответ. Попробуй повторить.",
+        "reply": expected_reply,
         "emotion": "neutral",
         "intent": "unknown",
     }
     assert "Invalid LLM JSON response, using fallback" in caplog.text
     assert "raw_length=" in caplog.text
     assert raw_content not in caplog.text
+
+
+def test_parse_response_does_not_expose_invalid_json_as_reply(agent: CharacterAgent) -> None:
+    result = agent._parse_response('{"reply":"оборванный ответ')
+
+    assert result == {
+        "reply": "Модель вернула пустой ответ. Попробуй повторить.",
+        "emotion": "neutral",
+        "intent": "unknown",
+    }
+
+
+def test_parse_response_unwraps_json_accidentally_put_in_reply(agent: CharacterAgent) -> None:
+    result = agent._parse_response(
+        '{"reply":"{\\\"reply\\\": \\\"Привет\\\"}","emotion":"happy","intent":"casual_chat"}'
+    )
+
+    assert result["reply"] == "Привет"
 
 
 class SequencedLLMProvider:
@@ -122,6 +140,21 @@ def test_handle_user_message_retries_invalid_json_once() -> None:
         ("s1", "user", "Привет"),
         ("s1", "assistant", "Исправлено"),
     ]
+
+
+def test_handle_user_message_does_not_warn_when_repair_succeeds(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    provider = SequencedLLMProvider(
+        ["невалидный ответ", '{"reply":"Исправлено","emotion":"happy","intent":"casual_chat"}']
+    )
+    agent = CharacterAgent(provider, InMemoryHistory(), history_limit=0)
+
+    with caplog.at_level(logging.WARNING):
+        result = anyio.run(agent.handle_user_message, "s1", "Привет")
+
+    assert result["reply"] == "Исправлено"
+    assert "Invalid LLM JSON response" not in caplog.text
 
 
 def test_handle_user_message_uses_json_persona_prompt() -> None:

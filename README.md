@@ -119,17 +119,18 @@ cd NeuroAsist
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128
 ```
 
-Install PyTorch separately. The CPU build is the most portable option:
+The current lockfile uses the tested CUDA build `torch==2.11.0+cu128`. It requires
+an NVIDIA GPU and a compatible driver. Verify the installation with:
 
 ```powershell
-python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-python -m pip install silero
+python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 ```
 
-For CUDA, install the PyTorch build matching the installed GPU driver and CUDA runtime.
+If CUDA is unavailable, use a compatible CPU PyTorch wheel and set both
+`VOICE_STT_DEVICE` and `VOICE_SILERO_DEVICE` to `cpu` in `.env`.
 
 ### 3. Install frontend dependencies
 
@@ -155,8 +156,8 @@ Default voice configuration:
 ```env
 VOICE_STT_PROVIDER=faster_whisper
 VOICE_STT_MODEL=small
-VOICE_STT_DEVICE=auto
-VOICE_STT_COMPUTE_TYPE=int8
+VOICE_STT_DEVICE=cuda
+VOICE_STT_COMPUTE_TYPE=int8_float16
 
 VOICE_TTS_ENABLED=true
 VOICE_TTS_PROVIDER=silero
@@ -164,7 +165,7 @@ VOICE_PRELOAD_TTS_MODEL=true
 VOICE_SILERO_MODEL=v5_5_ru
 VOICE_SILERO_SPEAKER_RU=xenia
 VOICE_SILERO_SAMPLE_RATE=24000
-VOICE_SILERO_DEVICE=cpu
+VOICE_SILERO_DEVICE=cuda
 VOICE_SILERO_CPU_THREADS=4
 VOICE_SILERO_WARMUP=true
 ```
@@ -219,7 +220,7 @@ VOICE_SILERO_WARMUP=true
 | `VOICE_TTS_BACKGROUND_TIMEOUT_SECONDS` | Timeout for background batch TTS jobs created by `/voice/chat`. |
 | `VOICE_TTS_TIMEOUT_SECONDS` | General TTS timeout used by voice API flows. |
 | `VOICE_TTS_MAX_CHARS` | Maximum text length accepted for one backend TTS request. |
-| `VOICE_AUDIO_DIR` | Directory where generated audio files are stored. |
+| `VOICE_AUDIO_DIR` | Directory where generated audio files are stored. Generated WAV files are cleared at backend startup, then every 20 minutes files older than 2 minutes are removed. |
 
 #### Live voice playback
 
@@ -373,7 +374,7 @@ Chat or non-live voice response
   → Unity AudioSource, lip sync, and VRM expression
 ```
 
-The avatar bridge uses protocol v1 and is deliberately optional: unavailable Unity clients do not delay or fail text chat or TTS. The backend broadcasts full-WAV commands to all connected clients. It also provides `GET /avatar/status` plus test endpoints for speech, emotion, and stop; see the [Unity avatar runtime guide](Docs/unity_avatar_runtime_v0.4.md) for setup and diagnostics.
+The avatar bridge uses protocol v1 and is deliberately optional: unavailable Unity clients do not delay or fail text chat or TTS. The backend broadcasts full-WAV commands to all connected clients. It also provides `GET /avatar/status` plus test endpoints for speech, emotion, gesture, and stop; see the [Unity avatar runtime guide](Docs/unity_avatar_runtime_v0.4.md) and [motion v0.5 guide](Docs/avatar-motion-v0.5.md) for setup and diagnostics.
 
 ## Project structure
 

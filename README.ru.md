@@ -17,7 +17,7 @@
 
 > [!IMPORTANT]
 > **NeuroAsist v0.4.0 — экспериментальный локальный прототип.**
-> Доступны текстовый/голосовой чат, полный WAV TTS и опциональный Unity VRM-аватар. Live-сегменты остаются браузерной функцией.
+> Доступны текстовый/голосовой чат, локальный Silero TTS на CPU и опциональный Unity VRM-аватар. Unity protocol v2 умеет воспроизводить live WAV-сегменты без ожидания полного ответа.
 
 ## О проекте
 
@@ -119,17 +119,18 @@ cd NeuroAsist
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128
 ```
 
-PyTorch устанавливается отдельно. Самый переносимый вариант — CPU:
+Текущий lockfile использует проверенную CUDA-сборку `torch==2.11.0+cu128`. Нужны
+NVIDIA-видеокарта и совместимый драйвер. Проверка установки:
 
 ```powershell
-python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-python -m pip install silero
+python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 ```
 
-Для CUDA установи сборку PyTorch, подходящую под драйвер и CUDA runtime.
+Если CUDA недоступна, установи совместимую CPU-сборку PyTorch и укажи в `.env`
+`VOICE_STT_DEVICE=cpu` и `VOICE_SILERO_DEVICE=cpu`.
 
 ### 3. Frontend-зависимости
 
@@ -155,8 +156,8 @@ DEEPSEEK_API_KEY=your_deepseek_api_key
 ```env
 VOICE_STT_PROVIDER=faster_whisper
 VOICE_STT_MODEL=small
-VOICE_STT_DEVICE=auto
-VOICE_STT_COMPUTE_TYPE=int8
+VOICE_STT_DEVICE=cuda
+VOICE_STT_COMPUTE_TYPE=int8_float16
 
 VOICE_TTS_ENABLED=true
 VOICE_TTS_PROVIDER=silero
@@ -219,7 +220,7 @@ VOICE_SILERO_WARMUP=true
 | `VOICE_TTS_BACKGROUND_TIMEOUT_SECONDS` | Timeout фоновых batch TTS jobs, которые создаёт `/voice/chat`. |
 | `VOICE_TTS_TIMEOUT_SECONDS` | Общий timeout TTS для voice API flow. |
 | `VOICE_TTS_MAX_CHARS` | Максимальная длина текста для одного backend TTS-запроса. |
-| `VOICE_AUDIO_DIR` | Папка, куда сохраняются сгенерированные аудиофайлы. |
+| `VOICE_AUDIO_DIR` | Папка, куда сохраняются сгенерированные аудиофайлы. WAV удаляются при старте backend, затем раз в 20 минут удаляются файлы старше 2 минут. |
 
 #### Live voice playback
 
@@ -373,7 +374,7 @@ Browser MediaRecorder
   → Unity AudioSource, lipsync и VRM-эмоция
 ```
 
-Мост аватара использует protocol v1 и намеренно остаётся опциональным: недоступный Unity-клиент не замедляет и не ломает чат или TTS. Backend рассылает команды с полным WAV всем подключённым клиентам. Также доступны `GET /avatar/status` и тестовые endpoints речи, эмоции и остановки; настройка и диагностика — в [гайде Unity avatar runtime](Docs/unity_avatar_runtime_v0.4.md).
+Мост аватара остаётся опциональным. Protocol v1 сохраняет `avatar.speak` с URL полного WAV для старых клиентов; protocol v2 получает `avatar.stream.*` с короткими base64 WAV-сегментами и ставит их в очередь без HTTP-загрузки. Также доступны `GET /avatar/status` и тестовые endpoints речи, эмоции, жеста и остановки; настройка и диагностика — в [гайде Unity avatar runtime v0.5](Docs/unity_avatar_runtime_v0.4.md) и [гайде motion v0.5](Docs/avatar-motion-v0.5.md).
 
 ## Структура проекта
 
@@ -521,7 +522,7 @@ NeuroAsist v0.4.0 пока не умеет:
 - постоянно слушать микрофон;
 - автоматически вести диалог через VAD;
 - прерывать речь персонажа;
-- Unity live-audio segments (полный WAV для аватара поддерживается);
+- GPU/frame-time capture для конкретной VRM-модели и при необходимости дополнительное упрощение spring bones/материалов;
 - хранить долгосрочную семантическую память или использовать RAG;
 - работать с файлами, shell, браузером, экраном или рабочим столом;
 - поддерживать аккаунты, публичный production deployment и multi-user isolation.

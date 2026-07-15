@@ -9,6 +9,7 @@ from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.llm.base import ChatMessage, LLMProvider, LLMResponse
 from apps.backend.app.storage.sqlite_history import SQLiteMessageHistory
 from apps.backend.app.voice.text import TextChunker, TextNormalizer
+from apps.backend.app.voice.directives import LiveDirectiveParser, AvatarDirective, clean_live_reply, make_live_directive_expressive
 from apps.backend.app.voice.live import VoiceSessionManager
 from apps.backend.app.voice.live import UtteranceContext
 from apps.backend.app.voice.providers import AudioChunk, MockTTSProvider
@@ -38,6 +39,43 @@ def test_normalizer_keeps_ui_independent_tts_copy() -> None:
     source = "**Ответ** `value` https://example.com\n```python\nsecret()\n```"
     assert TextNormalizer().normalize(source) == "Ответ value ссылка"
     assert "https://example.com" in source
+
+
+def test_live_directive_is_fragment_safe_and_never_becomes_spoken_text() -> None:
+    parser = LiveDirectiveParser()
+    directive, text = parser.feed("[[avatar emotion=smirk gesture=shr")
+    assert directive is None and text == []
+    directive, text = parser.feed("ug intensity=0.7]]\nНу да, конечно.")
+    assert directive is not None
+    assert (directive.emotion, directive.gesture, directive.intensity) == ("smirk", "shrug", .7)
+    assert text == ["\nНу да, конечно."]
+    assert clean_live_reply("[[avatar emotion=smirk gesture=shrug intensity=0.7]]\nНу да, конечно.") == "Ну да, конечно."
+
+
+def test_legacy_leading_direction_becomes_avatar_metadata_not_tts() -> None:
+    parser = LiveDirectiveParser()
+    directive, text = parser.feed("(саркастически ухмыляясь) Ну да, конечно.")
+    assert directive is not None
+    assert (directive.emotion, directive.gesture) == ("smirk", "shrug")
+    assert text == ["Ну да, конечно."]
+    assert clean_live_reply("(саркастически ухмыляясь) Ну да, конечно.") == "Ну да, конечно."
+
+
+def test_malformed_machine_header_is_not_spoken() -> None:
+    parser = LiveDirectiveParser()
+    directive, text = parser.feed("[[avatar emotion=not-real gesture=shrug intensity=2]] Привет")
+    assert directive is not None
+    assert directive.emotion == "neutral"
+    assert text == [" Привет"]
+
+
+def test_live_directive_fallback_is_visible_and_contextual() -> None:
+    assert make_live_directive_expressive(AvatarDirective(), "Почему опять ошибка?") == AvatarDirective("annoyed", "frustration", 1.0)
+    assert make_live_directive_expressive(AvatarDirective(), "Спасибо, это круто") == AvatarDirective("happy", "talk", 1.0)
+    assert make_live_directive_expressive(AvatarDirective(), "Меня это бесит") == AvatarDirective("annoyed", "frustration", 1.0)
+    assert make_live_directive_expressive(AvatarDirective(), "Как это работает?") == AvatarDirective("thinking", "question", 1.0)
+    assert make_live_directive_expressive(AvatarDirective(), "Сделай заметку") == AvatarDirective("neutral", "talk", 1.0)
+    assert make_live_directive_expressive(AvatarDirective("thinking", "auto", .7), "Почему?") == AvatarDirective("thinking", "question", .7)
 
 
 def test_chunker_protects_decimal_and_russian_abbreviation() -> None:
@@ -199,6 +237,22 @@ async def test_streaming_agent_commits_complete_history(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_streaming_agent_commits_history_without_avatar_directive(tmp_path: Path) -> None:
+    class DirectedProvider(StreamingProvider):
+        async def stream(self, messages: list[ChatMessage]):
+            yield "[[avatar emotion=smirk gesture=shrug intensity=0.7]]\nНу да, конечно."
+
+    history = SQLiteMessageHistory(tmp_path / "history.sqlite3")
+    history.init_db()
+    agent = CharacterAgent(DirectedProvider(), history, history_limit=10)
+    raw = [delta async for delta in agent.stream_user_message("s", "Привет", stored_reply_transform=clean_live_reply)]
+    assert "[[avatar" in "".join(raw)
+    assert [(item.role, item.content) for item in history.get_recent_messages("s", 10)] == [
+        ("user", "Привет"), ("assistant", "Ну да, конечно."),
+    ]
+
+
+@pytest.mark.anyio
 async def test_streaming_agent_uses_character_persona_prompt(tmp_path: Path) -> None:
     class RecordingStreamingProvider(StreamingProvider):
         def __init__(self):
@@ -220,11 +274,11 @@ async def test_streaming_agent_uses_character_persona_prompt(tmp_path: Path) -> 
     assert "Нейро Пизда" in system_prompt
     assert "NeuroAsist" not in system_prompt
     assert "дружелюбный персонаж" not in system_prompt
-    assert "Не возвращай JSON" in system_prompt
+    assert "не возвращай JSON" in system_prompt
     assert "верни только один валидный JSON" not in system_prompt
     assert '"reply"' not in system_prompt
-    assert '"emotion"' not in system_prompt
-    assert '"intent"' not in system_prompt
+    assert "[[avatar emotion=smirk gesture=shrug intensity=0.7]]" in system_prompt
+    assert "Не пиши скобочные ремарки действий" in system_prompt
 
 
 @pytest.mark.parametrize(
