@@ -4,10 +4,23 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
+LEGACY_PROTOCOL_VERSION = 1
+SUPPORTED_PROTOCOL_VERSIONS = (LEGACY_PROTOCOL_VERSION, PROTOCOL_VERSION)
+GESTURE_TAGS = frozenset({
+    "none", "auto", "talk", "greeting", "agreement", "disagreement",
+    "question", "explanation", "thinking", "surprise", "frustration",
+    "farewell", "shrug",
+})
+
+
+def normalize_gesture(value: object) -> str:
+    """Keep transport forwards-compatible: unsupported semantic tags become auto."""
+    normalized = str(value or "auto").strip().lower()
+    return normalized if normalized in GESTURE_TAGS else "auto"
 
 
 def utc_now() -> datetime:
@@ -19,7 +32,7 @@ class ProtocolModel(BaseModel):
 
 
 class Envelope(ProtocolModel):
-    protocol_version: Literal[PROTOCOL_VERSION] = PROTOCOL_VERSION
+    protocol_version: Literal[1, 2] = PROTOCOL_VERSION
     type: str
     message_id: str = Field(default_factory=lambda: str(uuid4()))
     timestamp: datetime = Field(default_factory=utc_now)
@@ -32,7 +45,46 @@ class SpeakPayload(ProtocolModel):
     audio_url: str = Field(min_length=1, max_length=2048)
     emotion: str = "neutral"
     intent: str = "casual_chat"
+    gesture: str = "auto"
+    gesture_intensity: float = Field(default=1.0, ge=0.0, le=1.0)
     interrupt: bool = True
+
+    _normalize_gesture = field_validator("gesture", mode="before")(normalize_gesture)
+
+
+class StreamStartPayload(ProtocolModel):
+    utterance_id: str
+    emotion: str = "thinking"
+    intent: str = "casual_chat"
+    interrupt: bool = True
+
+
+class StreamMetadataPayload(ProtocolModel):
+    utterance_id: str
+    emotion: str = "neutral"
+    gesture: str = "auto"
+    gesture_intensity: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class StreamSegmentPayload(ProtocolModel):
+    utterance_id: str
+    sequence: int = Field(ge=0)
+    audio_base64: str = Field(min_length=8, max_length=1_000_000)
+    format: Literal["wav"] = "wav"
+    sample_rate: int = Field(default=24000, ge=8000, le=96000)
+    channels: int = Field(default=1, ge=1, le=2)
+    duration_seconds: float = Field(gt=0, le=120)
+    is_final: bool = False
+
+
+class StreamEndPayload(ProtocolModel):
+    utterance_id: str
+
+
+class StreamReceiptPayload(ProtocolModel):
+    utterance_id: str
+    sequence: int = Field(ge=0)
+    client_latency_ms: int = Field(ge=0, le=120_000)
 
 
 class EmotionPayload(ProtocolModel):
@@ -42,6 +94,14 @@ class EmotionPayload(ProtocolModel):
 
 class StopPayload(ProtocolModel):
     utterance_id: str | None = None
+
+
+class GesturePayload(ProtocolModel):
+    gesture: str = "auto"
+    intensity: float = Field(default=1.0, ge=0.0, le=1.0)
+    interrupt: bool = True
+
+    _normalize_gesture = field_validator("gesture", mode="before")(normalize_gesture)
 
 
 class StatePayload(ProtocolModel):
@@ -82,10 +142,15 @@ class PlaybackPayload(ProtocolModel):
     utterance_id: str
     reply_to: str | None = None
     reason: str | None = Field(default=None, max_length=512)
+    client_latency_ms: int | None = Field(default=None, ge=0, le=120_000)
 
 
 class ClientStatePayload(ProtocolModel):
     state: str = Field(min_length=1, max_length=64)
+
+
+class MotionProfilePayload(ProtocolModel):
+    profile: str = Field(min_length=1, max_length=64)
 
 
 class IncomingMessage(Envelope):
@@ -101,6 +166,8 @@ class AvatarStatusClient(ProtocolModel):
     platform: str | None = None
     state: str = "Idle"
     current_utterance_id: str | None = None
+    current_motion_profile: str | None = None
+    current_gesture: str | None = None
 
 
 class AvatarStatusResponse(ProtocolModel):
@@ -115,8 +182,12 @@ class AvatarTestSpeakRequest(ProtocolModel):
     text: str = Field(min_length=1, max_length=1200)
     emotion: str = "neutral"
     intent: str = "test"
+    gesture: str = "auto"
+    gesture_intensity: float = Field(default=1.0, ge=0.0, le=1.0)
     session_id: str = "default"
     interrupt: bool = True
+
+    _normalize_gesture = field_validator("gesture", mode="before")(normalize_gesture)
 
 
 class AvatarTestEmotionRequest(ProtocolModel):
@@ -125,7 +196,10 @@ class AvatarTestEmotionRequest(ProtocolModel):
     session_id: str = "default"
 
 
+class AvatarTestGestureRequest(GesturePayload):
+    session_id: str = "default"
+
+
 class AvatarStopRequest(ProtocolModel):
     utterance_id: str | None = None
     session_id: str = "default"
-

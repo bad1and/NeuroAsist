@@ -13,6 +13,7 @@ import {
   voiceWebSocketUrl,
   WS_EVENTS_URL,
   sendAvatarTestEmotion,
+  sendAvatarTestGesture,
   sendAvatarTestPhrase,
   stopAvatar,
 } from "./api";
@@ -301,6 +302,7 @@ function ChatPage({
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
   const liveSocketRef = useRef<VoiceSocketClient | null>(null);
   const livePlayerRef = useRef<TTSStreamPlayer | null>(null);
+  const avatarOwnsAudioRef = useRef(false);
   const liveAudioStartedRef = useRef(false);
   const liveMetadataRef = useRef({ emotion: "neutral", intent: "unknown" });
 
@@ -313,6 +315,10 @@ function ChatPage({
     "speechSynthesis" in window &&
     "SpeechSynthesisUtterance" in window;
   const avatarOwnsAudio = Boolean(avatarStatus?.enabled && avatarStatus.client_count > 0);
+
+  useEffect(() => {
+    avatarOwnsAudioRef.current = avatarOwnsAudio;
+  }, [avatarOwnsAudio]);
 
   const stopVoicePlayback = useCallback((except?: HTMLAudioElement) => {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
@@ -481,7 +487,13 @@ function ChatPage({
         } else if (event.type === "tts.segment.started") {
           setVoiceState("speaking");
         } else if (event.type === "voice.utterance.finished") {
-          livePlayerRef.current?.finish(event.utterance_id);
+          if (avatarOwnsAudioRef.current) {
+            liveSocketRef.current?.clearActive();
+            setLoading(false);
+            setVoiceState("idle");
+          } else {
+            livePlayerRef.current?.finish(event.utterance_id);
+          }
         } else if (event.type === "voice.utterance.cancelled") {
           liveSocketRef.current?.clearActive();
           setLoading(false);
@@ -505,7 +517,7 @@ function ChatPage({
         voiceWebSocketUrl(SESSION_ID),
         onEvent,
         (audio, segment) => {
-          if (segment.segment_id !== undefined) {
+          if (!avatarOwnsAudioRef.current && segment.segment_id !== undefined) {
             void livePlayerRef.current?.enqueue(
               segment.utterance_id, segment.segment_id, audio, segment,
             ).catch(() => undefined);
@@ -768,7 +780,7 @@ function ChatPage({
         stream.getTracks().forEach((track) => track.stop());
         const audio = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
         chunksRef.current = [];
-        void submitVoice(audio);
+        void submitVoice(audio, Date.now());
       };
 
       recorderRef.current = recorder;
@@ -806,7 +818,7 @@ function ChatPage({
     await startRecording();
   };
 
-  const submitVoice = async (audio: Blob) => {
+  const submitVoice = async (audio: Blob, endOfSpeechUnixMs?: number) => {
     if (audio.size === 0) {
       setError("Recording is empty");
       setVoiceState("idle");
@@ -826,38 +838,31 @@ function ChatPage({
     }, 500);
     try {
       let response;
-      if (avatarOwnsAudio) {
+      try {
+        await ensureLiveVoice();
+        liveSocketRef.current?.clearActive();
+        liveAudioStartedRef.current = false;
+        response = await sendVoiceMessage(
+          SESSION_ID,
+          audio,
+          settings?.voice_language ?? "ru",
+          true,
+          endOfSpeechUnixMs,
+        );
+      } catch (liveError) {
+        if (!isLiveVoiceTransportError(liveError)) {
+          throw liveError;
+        }
+        liveSocketRef.current?.close();
+        liveSocketRef.current = null;
         response = await sendVoiceMessage(
           SESSION_ID,
           audio,
           settings?.voice_language ?? "ru",
           false,
+          endOfSpeechUnixMs,
         );
-      } else {
-        try {
-          await ensureLiveVoice();
-          liveSocketRef.current?.clearActive();
-          liveAudioStartedRef.current = false;
-          response = await sendVoiceMessage(
-            SESSION_ID,
-            audio,
-            settings?.voice_language ?? "ru",
-            true,
-          );
-        } catch (liveError) {
-          if (!isLiveVoiceTransportError(liveError)) {
-            throw liveError;
-          }
-          liveSocketRef.current?.close();
-          liveSocketRef.current = null;
-          response = await sendVoiceMessage(
-            SESSION_ID,
-            audio,
-            settings?.voice_language ?? "ru",
-            false,
-          );
-          setError("Live voice stream is unavailable; used legacy voice response.");
-        }
+        setError("Live voice stream is unavailable; used legacy voice response.");
       }
       if ("status" in response) {
         liveSocketRef.current?.activate(response.utterance_id);
@@ -1290,6 +1295,8 @@ function AvatarControls({
 }) {
   const [phrase, setPhrase] = useState("Проверка аватара.");
   const [emotion, setEmotion] = useState("happy");
+  const [gesture, setGesture] = useState("greeting");
+  const [motionIntensity, setMotionIntensity] = useState(0.8);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const enabled = Boolean(avatarStatus?.enabled);
@@ -1323,6 +1330,8 @@ function AvatarControls({
         <InfoRow label="Client" value={client?.client_name ?? "disconnected"} />
         <InfoRow label="State" value={client?.state ?? "Disconnected"} />
         <InfoRow label="Heartbeat" value={client ? formatTime(client.last_heartbeat_at) : "—"} />
+        <InfoRow label="Motion profile" value={client?.current_motion_profile ?? "unreported"} />
+        <InfoRow label="Current gesture" value={client?.current_gesture ?? "none"} />
       </div>
       <div className="avatar-actions">
         <label>
@@ -1335,9 +1344,20 @@ function AvatarControls({
             {["neutral", "happy", "sad", "angry", "surprised", "relaxed", "thinking", "annoyed", "smirk"].map((value) => <option key={value}>{value}</option>)}
           </select>
         </label>
+        <label>
+          Test gesture
+          <select value={gesture} onChange={(event) => setGesture(event.target.value)} disabled={!enabled || busy}>
+            {["greeting", "agreement", "disagreement", "question", "explanation", "thinking", "surprise", "frustration", "farewell", "shrug", "talk"].map((value) => <option key={value}>{value}</option>)}
+          </select>
+        </label>
+        <label>
+          Motion intensity {motionIntensity.toFixed(1)}
+          <input min="0" max="1" step="0.1" type="range" value={motionIntensity} onChange={(event) => setMotionIntensity(Number(event.target.value))} disabled={!enabled || busy} />
+        </label>
         <button onClick={() => void run(() => sendAvatarTestPhrase({ text: phrase, emotion }), "Test phrase queued.")} disabled={!enabled || busy || !phrase.trim()}>Send test phrase</button>
         <button onClick={() => void run(() => sendAvatarTestEmotion({ emotion, intensity: 1 }), "Emotion sent.")} disabled={!enabled || busy}>Send emotion</button>
-        <button className="secondary" onClick={() => void run(stopAvatar, "Stop sent.")} disabled={!enabled || busy}>Stop avatar</button>
+        <button onClick={() => void run(() => sendAvatarTestGesture({ gesture, intensity: motionIntensity, interrupt: true }), "Gesture sent.")} disabled={!enabled || busy}>Send test gesture</button>
+        <button className="secondary" onClick={() => void run(stopAvatar, "Motion reset sent.")} disabled={!enabled || busy}>Reset motion</button>
       </div>
       {message && <div className="notice">{message}</div>}
     </section>

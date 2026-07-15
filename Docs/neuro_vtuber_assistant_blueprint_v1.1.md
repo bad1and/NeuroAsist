@@ -1289,9 +1289,8 @@ VOICE_LIVE_TTS_CONCURRENCY_MODE=1
 Runtime dependency:
 
 - `ffmpeg` и `ffprobe` должны быть видны backend-процессу через `PATH`;
-- PyTorch ставится отдельно от `requirements.txt`, потому что CPU и CUDA wheel отличаются;
-- для CPU: `python -m pip install torch --index-url https://download.pytorch.org/whl/cpu`;
-- затем: `python -m pip install silero`;
+- текущий `requirements.txt` фиксирует проверенную CUDA-сборку `torch==2.11.0+cu128`; установка: `python -m pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128`;
+- после установки проверить `python -c "import torch; print(torch.cuda.is_available())"`; при отсутствии CUDA использовать совместимую CPU-сборку и установить `VOICE_STT_DEVICE=cpu`, `VOICE_SILERO_DEVICE=cpu`;
 - на Windows при уже открытом PowerShell нужно либо перезапустить терминал, либо добавить FFmpeg `bin` директорию в `$env:Path` перед запуском backend.
 
 STT-детали:
@@ -1310,6 +1309,7 @@ TTS-детали:
 - Silero inference выполняется в отдельном thread через `asyncio.to_thread`;
 - один экземпляр модели защищен `asyncio.Lock`;
 - waveform конвертируется в WAV PCM signed 16-bit / 24000 Hz / mono;
+- при старте backend все WAV из `data/audio/tts` удаляются; затем раз в 20 минут удаляются WAV, изменённые более двух минут назад;
 - live voice получает один WAV chunk на один TTS request;
 - первый live-сегмент держится примерно в диапазоне 4–8 слов, следующие — 8–14 слов, максимум 18 слов;
 - короткий хвост до трех слов присоединяется к предыдущему сегменту, если лимиты не превышены;
@@ -1904,6 +1904,11 @@ Rate limit handling
 → UI получает voice.tts_ready и включает audio control
 → при подключённом Unity backend рассылает полный WAV через avatar.speak
 ```
+
+Измерения на целевой машине показывают, что основная задержка находится не в локальных
+STT/TTS: `stt_ms` составляет примерно 0.36–0.61 с, готовый WAV Silero — 0.045–0.067 с,
+а запрос к удалённой LLM — 4.95–11.61 с. Поэтому CUDA для STT/TTS полезна, но не сокращает
+полную паузу пропорционально; для заметного UX-эффекта нужен streaming или более быстрый LLM provider.
 
 Как снизить:
 

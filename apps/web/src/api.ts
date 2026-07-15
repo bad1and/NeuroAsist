@@ -120,6 +120,7 @@ export async function sendVoiceMessage(
   audio: Blob,
   language: string,
   live = false,
+  endOfSpeechUnixMs?: number,
 ): Promise<VoiceChatResponse | VoiceLiveResponse> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 90000);
@@ -127,6 +128,7 @@ export async function sendVoiceMessage(
   form.append("session_id", sessionId);
   form.append("language", language);
   form.append("live", String(live));
+  if (endOfSpeechUnixMs !== undefined) form.append("client_end_of_speech_unix_ms", String(endOfSpeechUnixMs));
   form.append("audio", audio, `voice-message${audioExtensionForMime(audio.type)}`);
 
   let response: Response;
@@ -171,6 +173,10 @@ export function sendAvatarTestPhrase(payload: { text: string; emotion: string })
 
 export function sendAvatarTestEmotion(payload: { emotion: string; intensity: number }): Promise<{ sent: number; skipped: boolean }> {
   return requestJson("/avatar/test/emotion", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function sendAvatarTestGesture(payload: { gesture: string; intensity: number; interrupt?: boolean }): Promise<{ gesture: string; sent: number; skipped: boolean }> {
+  return requestJson("/avatar/test/gesture", { method: "POST", body: JSON.stringify(payload) });
 }
 
 export function stopAvatar(): Promise<{ sent: number; skipped: boolean }> {

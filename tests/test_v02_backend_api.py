@@ -153,7 +153,7 @@ def test_chat_publishes_started_and_completed_events(
     matching = [
         event
         for event in events
-        if event["metadata"].get("session_id") == session_id
+        if event["metadata"].get("session_id") == session_id and event["type"].startswith("chat.")
     ]
     assert [event["type"] for event in matching[-2:]] == [
         "chat.started",
