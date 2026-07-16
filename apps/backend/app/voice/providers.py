@@ -403,6 +403,10 @@ class SileroTTSProvider(TTSProvider):
                     model="silero_tts",
                     language="ru",
                     speaker=self.model_name,
+                    # The desktop backend has no interactive stdin. Without an
+                    # explicit trust decision Torch Hub blocks startup waiting
+                    # for a confirmation that cannot be entered by the user.
+                    trust_repo=True,
                 )
             except Exception as exc:
                 message = str(exc)
