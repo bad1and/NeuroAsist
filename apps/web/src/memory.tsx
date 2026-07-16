@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Brain, Check, CircleHelp, Pencil, Pin, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { Archive, Brain, Check, CheckCircle2, CircleHelp, ClipboardCheck, Pencil, Pin, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
 
 import {
   confirmMemory, createMemory, deleteMemory, getMemories, getMemoryAudit,
@@ -7,14 +7,22 @@ import {
 } from "./api";
 import type { MemoryAuditItem, MemoryItem, MemoryStatus } from "./types";
 
-const STATUSES: Array<MemoryStatus | "all"> = ["all", "active", "candidate", "superseded", "deleted", "rejected"];
+type MemorySection = "all" | "active" | "candidate" | "archive";
+
 const STATUS_LABELS: Record<MemoryStatus | "all", string> = {
   all: "Все", active: "Сохранённые", candidate: "На проверке", superseded: "Заменённые", deleted: "Удалённые", rejected: "Отклонённые", expired: "Истёкшие",
 };
 
+const MEMORY_SECTIONS: Array<{ id: MemorySection; label: string; icon: typeof Brain }> = [
+  { id: "all", label: "Все", icon: Brain },
+  { id: "active", label: "Сохранённые", icon: CheckCircle2 },
+  { id: "candidate", label: "На проверке", icon: ClipboardCheck },
+  { id: "archive", label: "Архив", icon: Archive },
+];
+
 export function MemoryPage() {
   const [items, setItems] = useState<MemoryItem[]>([]);
-  const [status, setStatus] = useState<MemoryStatus | "all">("all");
+  const [section, setSection] = useState<MemorySection>("all");
   const [query, setQuery] = useState("");
   const [audit, setAudit] = useState<Record<string, MemoryAuditItem[]>>({});
   const [message, setMessage] = useState<string | null>(null);
@@ -25,14 +33,19 @@ export function MemoryPage() {
 
   const refresh = async () => {
     try {
-      setItems((await getMemories(status === "all" ? undefined : status, query || undefined)).items);
+      const result = await getMemories(section === "all" || section === "archive" ? undefined : section, query || undefined);
+      setItems(
+        section === "archive"
+          ? result.items.filter((item) => !["active", "candidate"].includes(item.status))
+          : result.items,
+      );
       setMessage(null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Память недоступна");
     }
   };
 
-  useEffect(() => { void refresh(); }, [status]);
+  useEffect(() => { void refresh(); }, [section]);
 
   const action = async (run: () => Promise<unknown>) => {
     try { await run(); await refresh(); } catch (error) { setMessage(error instanceof Error ? error.message : "Не удалось выполнить действие"); }
@@ -47,15 +60,32 @@ export function MemoryPage() {
   };
 
   return <section className="panel memory-panel">
-    <div className="panel-header">
-      <div><span className="eyebrow">ДОЛГОСРОЧНЫЙ КОНТЕКСТ</span><h2>Память</h2></div>
-      <button className="primary-button" onClick={() => setShowCreateForm((current) => !current)}><Plus size={17} aria-hidden="true" />{showCreateForm ? "Закрыть" : "Добавить запись"}</button>
-    </div>
+    <nav className="settings-navigation memory-navigation" aria-label="Разделы памяти">
+      {MEMORY_SECTIONS.map(({ id, label, icon: Icon }) => (
+        <button
+          className={`settings-nav-button${section === id ? " is-active" : ""}`}
+          aria-current={section === id ? "page" : undefined}
+          key={id}
+          onClick={() => setSection(id)}
+        >
+          <Icon size={17} aria-hidden="true" />
+          {label}
+        </button>
+      ))}
+    </nav>
     <div className="memory-toolbar">
-      <div className="filters" aria-label="Фильтр памяти">{STATUSES.map((item) => <button className={status === item ? "active" : ""} key={item} onClick={() => setStatus(item)}>{STATUS_LABELS[item]}</button>)}</div>
-      <form className="search-form compact" onSubmit={(event) => { event.preventDefault(); void refresh(); }}>
-        <Search size={17} aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по памяти" aria-label="Поиск по памяти" /><button className="secondary" type="submit">Найти</button>
-      </form>
+      <div className="memory-toolbar-actions">
+        <form className="search-form compact" onSubmit={(event) => { event.preventDefault(); void refresh(); }}>
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по памяти" aria-label="Поиск по памяти" />
+          <button className="icon-button search-submit" type="submit" aria-label="Найти в памяти" title="Найти в памяти"><Search size={17} /></button>
+        </form>
+        <button
+          className="secondary memory-add-button"
+          onClick={() => setShowCreateForm((current) => !current)}
+          aria-label={showCreateForm ? "Закрыть добавление записи" : "Добавить запись"}
+          title={showCreateForm ? "Закрыть добавление записи" : "Добавить запись"}
+        ><Plus size={17} aria-hidden="true" />{showCreateForm ? "Закрыть" : "Добавить"}</button>
+      </div>
     </div>
     {showCreateForm && <form className="memory-create-form" onSubmit={onCreate}>
       <label>Тип записи<input value={predicate} onChange={(event) => setPredicate(event.target.value)} required /></label>

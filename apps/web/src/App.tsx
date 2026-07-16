@@ -257,7 +257,7 @@ export default function App() {
           statusError={statusError}
           onOpenNavigation={() => setNavigationOpen(true)}
         />
-        <main className="workspace">
+        <main className={`workspace workspace-${activeView}`}>
           {activeView === "chat" && (
             <ChatPage
               events={events}
@@ -350,7 +350,7 @@ function Sidebar({
     <aside className={`sidebar${isOpen ? " is-open" : ""}`} aria-label="Основная навигация">
       <div className="sidebar-brand">
         <span className="brand-mark" aria-hidden="true">N</span>
-        <div><strong>NeuroAsist</strong><span>Личный помощник</span></div>
+        <strong>NeuroAsist</strong>
         <button className="icon-button sidebar-close" aria-label="Закрыть меню" title="Закрыть меню" onClick={onClose}><X size={18} /></button>
       </div>
       <nav className="sidebar-nav" aria-label="Разделы приложения">
@@ -402,10 +402,6 @@ function Header({
   return (
     <header className="topbar">
       <button className="icon-button menu-toggle" aria-label="Открыть меню" title="Открыть меню" onClick={onOpenNavigation}><Menu size={20} /></button>
-      <div className="topbar-title">
-        <h1>NeuroAsist</h1>
-        <p>Личный голосовой помощник</p>
-      </div>
       <StatusPill label={connected ? "Подключено" : pending ? "Подключаемся" : "Нет подключения"} state={connected ? "ok" : pending ? "warn" : "bad"} />
     </header>
   );
@@ -1147,14 +1143,6 @@ function ChatPage({
 
   return (
     <section className="panel chat-panel">
-      <div className="panel-header">
-        <div>
-          <span className="eyebrow">ОСНОВНОЕ ПРОСТРАНСТВО</span>
-          <h2>Диалог</h2>
-        </div>
-        <span className="panel-caption">{avatarOwnsAudio ? "Аватар озвучивает ответы" : "Готов к разговору"}</span>
-      </div>
-
       {memoryNotice && <div className="notice" role="status">{memoryNotice}<button className="text-button" onClick={onOpenMemory}>Открыть память</button></div>}
       <div className="message-list" ref={listRef}>
         {messages.length === 0 && (
@@ -1168,16 +1156,6 @@ function ChatPage({
           <article className={`message ${message.role}`} key={message.id}>
             <div className="message-role">{message.role === "user" ? "Вы" : "NeuroAsist"}</div>
             <p>{message.content}</p>
-            {message.role === "assistant" && (
-              <details className="message-details">
-                <summary>Сведения об ответе</summary>
-                <div className="message-meta">
-                  {message.emotion && <span>Эмоция: {message.emotion}</span>}
-                  {message.intent && <span>Намерение: {message.intent}</span>}
-                  {message.ttsStatus && <span>Озвучка: {message.ttsStatus}</span>}
-                </div>
-              </details>
-            )}
             {message.ttsError && <div className="message-error">{message.ttsError}</div>}
             {message.audioUrl && (
               <audio
@@ -1249,42 +1227,49 @@ function ChatPage({
 
       {error && <div className="error-banner" role="alert"><CircleAlert size={18} aria-hidden="true" />{error}{retryText && <button className="text-button" type="button" onClick={() => { setDraft(retryText); setRetryText(null); }}>Повторить</button>}</div>}
 
-      <form className="chat-form" onSubmit={onSubmit}>
-        <textarea
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder="Напишите сообщение…"
-          rows={3}
-        />
-        <button className="primary-button send-button" type="submit" disabled={loading || draft.trim().length === 0}>
-          <SendHorizontal size={18} aria-hidden="true" />
-          {loading ? "Отправляем" : "Отправить"}
-        </button>
-      </form>
+      <div className="chat-composer">
+        <form className="chat-form" onSubmit={onSubmit}>
+          <textarea
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder="Напишите сообщение…"
+            rows={2}
+          />
+          <button
+            className="primary-button send-button"
+            type="submit"
+            disabled={loading || draft.trim().length === 0}
+            aria-label={loading ? "Отправка сообщения" : "Отправить сообщение"}
+            title={loading ? "Отправка сообщения" : "Отправить сообщение"}
+          >
+            <SendHorizontal size={18} aria-hidden="true" />
+          </button>
+        </form>
 
-      <div className="voice-controls">
-        <button
-          className={`voice-button${voiceState === "recording" ? " recording" : ""}`}
-          disabled={!voiceSupported || voiceState === "transcribing" || voiceState === "stopping"}
-          onClick={() => void toggleRecording()}
-          type="button"
-        >
-          <Mic size={18} aria-hidden="true" />
-          {voiceButtonLabel(voiceState)}
-        </button>
-        <button
-          className={handsFree ? "voice-button recording" : "secondary voice-button"}
-          disabled={!handsFreeSupported || voiceState === "transcribing"}
-          onClick={() => void toggleHandsFree()}
-          type="button"
-        >
-          {handsFree ? "Свободные руки: вкл." : "Свободные руки"}
-        </button>
-        <span>
-          {voiceSupported
-            ? `Голос: ${settings?.voice_language === "en" ? "английский" : "русский"}${handsFree ? ` · ${vadState}` : ""}`
-            : "Голосовой ввод недоступен"}
-        </span>
+        <div className="voice-controls">
+          <button
+            className={`voice-button${voiceState === "recording" ? " recording" : ""}`}
+            disabled={!voiceSupported || voiceState === "transcribing" || voiceState === "stopping"}
+            onClick={() => void toggleRecording()}
+            type="button"
+          >
+            <Mic size={18} aria-hidden="true" />
+            {voiceButtonLabel(voiceState)}
+          </button>
+          <button
+            className={handsFree ? "voice-button recording" : "secondary voice-button"}
+            disabled={!handsFreeSupported || voiceState === "transcribing"}
+            onClick={() => void toggleHandsFree()}
+            type="button"
+          >
+            {handsFree ? "Свободные руки: вкл." : "Свободные руки"}
+          </button>
+          {(handsFree || voiceState !== "idle" || !voiceSupported) && <span>
+            {voiceSupported
+              ? `Голос: ${settings?.voice_language === "en" ? "английский" : "русский"}${handsFree ? ` · ${vadState}` : ""}`
+              : "Голосовой ввод недоступен"}
+          </span>}
+        </div>
       </div>
     </section>
   );
@@ -1320,9 +1305,11 @@ function getStringMetadata(event: BackendEvent, key: string): string | null {
 function EventsPage({
   events,
   onRefreshEvents,
+  compact = false,
 }: {
   events: BackendEvent[];
   onRefreshEvents: () => Promise<void>;
+  compact?: boolean;
 }) {
   const [levelFilter, setLevelFilter] = useState<LevelFilter>("all");
   const filteredEvents = useMemo(
@@ -1335,13 +1322,15 @@ function EventsPage({
 
   return (
     <section className="panel events-panel">
-      <div className="panel-header">
+      {compact ? <div className="events-toolbar"><button className="icon-button" onClick={() => void onRefreshEvents()} aria-label="Обновить журнал событий" title="Обновить журнал событий">
+          <RefreshCw size={16} />
+        </button></div> : <div className="panel-header">
         <div><h2>Журнал системы</h2><span>Технические события и диагностика</span></div>
         <button className="secondary" onClick={() => void onRefreshEvents()}>
           <RefreshCw size={16} aria-hidden="true" />
           Обновить
         </button>
-      </div>
+      </div>}
 
       <div className="filters">
         {(["all", "info", "warning", "error", "critical"] as LevelFilter[]).map(
@@ -1456,11 +1445,6 @@ function SettingsPage({
 
   return (
     <section className="panel settings-panel">
-      <div className="panel-header">
-        <div><span className="eyebrow">УПРАВЛЕНИЕ ПРИЛОЖЕНИЕМ</span><h2>Настройки</h2></div>
-        <span className="panel-caption">Изменения применяются сразу</span>
-      </div>
-
       <nav className="settings-navigation" aria-label="Разделы настроек">
         <SettingsSectionButton section="general" current={activeSection} label="Общее" icon={SlidersHorizontal} onClick={setActiveSection} />
         <SettingsSectionButton section="voice" current={activeSection} label="Голос" icon={Volume2} onClick={setActiveSection} />
@@ -1485,7 +1469,13 @@ function SettingsPage({
         <BackupControls />
         <SystemMaintenance />
         <AvatarControls avatarStatus={avatarStatus} onRefresh={onRefreshAvatar} />
-        <EventsPage events={events} onRefreshEvents={onRefreshEvents} />
+        <details className="system-disclosure events-disclosure">
+          <summary>
+            <span><strong>Журнал событий</strong><small>Технические события и диагностика</small></span>
+            <ChevronDown size={18} aria-hidden="true" />
+          </summary>
+          <EventsPage events={events} onRefreshEvents={onRefreshEvents} compact />
+        </details>
       </div>
 
       <div className="form-grid settings-form" hidden={activeSection === "system"}>
@@ -1680,7 +1670,7 @@ function ModelManager() {
           <span>{model.installed ? "Установлена и проверена" : model.status === "downloading" ? `Загружаем: ${percent}%` : "Не установлена"}</span>
           {model.status === "failed" && <span className="notice">{model.error}</span>}
           {model.status === "downloading" && <progress value={percent} max="100">{percent}%</progress>}
-          <div className="avatar-actions">
+          <div className="model-actions">
             {!model.installed && <button className="primary-button" onClick={() => void install(model.id)} disabled={model.status === "downloading"}>{model.status === "failed" ? "Повторить загрузку" : "Скачать"}</button>}
             {model.installed && <button className="secondary" onClick={() => void remove(model.id)}>Удалить</button>}
           </div>
@@ -1803,25 +1793,27 @@ function AvatarControls({
         <span><strong>Аватар</strong><small>{enabled ? `${avatarStatus?.client_count ?? 0} подключено` : "Интеграция отключена"}</small></span>
         <ChevronDown size={18} aria-hidden="true" />
       </summary>
-      <section className="system-card avatar-controls" aria-label="Управление аватаром">
-      <div className="panel-header">
-        <div>
-          <h2>Аватар</h2>
-          <span>{enabled ? `${avatarStatus?.client_count ?? 0} подключено` : "Интеграция отключена"}</span>
-        </div>
-        <button className="secondary" onClick={() => void onRefresh()} disabled={busy}><RefreshCw size={16} aria-hidden="true" />Обновить статус</button>
+      <section className="avatar-controls" aria-label="Управление аватаром">
+      <div className="disclosure-toolbar">
+        <span>{enabled ? "Управление оверлеем и тестовыми командами" : "Подключите Unity-аватар, чтобы отправлять команды"}</span>
+        <button className="icon-button" onClick={() => void onRefresh()} disabled={busy} aria-label="Обновить статус аватара" title="Обновить статус аватара"><RefreshCw size={16} /></button>
       </div>
-      <div className="avatar-grid">
-        <InfoRow label="Протокол" value={avatarStatus ? `v${avatarStatus.protocol_version}` : "недоступен"} />
+      <div className="avatar-summary-grid">
         <InfoRow label="Клиент" value={client?.client_name ?? "не подключён"} />
         <InfoRow label="Состояние" value={client?.state ?? "Отключён"} />
         <InfoRow label="Последний сигнал" value={client ? formatTime(client.last_heartbeat_at) : "—"} />
-        <InfoRow label="Профиль движения" value={client?.current_motion_profile ?? "нет данных"} />
-        <InfoRow label="Текущий жест" value={client?.current_gesture ?? "нет"} />
         <InfoRow label="Целевая эмоция" value={engine?.target_emotion ?? "нейтральная"} />
-        <InfoRow label="Связь с движком" value={engine ? (engine.mapping_valid ? "настроена" : "резервная") : "недоступна"} />
       </div>
-      <div className="avatar-actions">
+      <details className="avatar-technical">
+        <summary>Технические данные</summary>
+        <div className="avatar-grid">
+          <InfoRow label="Протокол" value={avatarStatus ? `v${avatarStatus.protocol_version}` : "недоступен"} />
+          <InfoRow label="Профиль движения" value={client?.current_motion_profile ?? "нет данных"} />
+          <InfoRow label="Текущий жест" value={client?.current_gesture ?? "нет"} />
+          <InfoRow label="Связь с движком" value={engine ? (engine.mapping_valid ? "настроена" : "резервная") : "недоступна"} />
+        </div>
+      </details>
+      <div className="avatar-options">
         <label>
           <input type="checkbox" checked={overlay?.visible ?? true} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ visible: event.target.checked })} />
           Показывать оверлей
@@ -1834,6 +1826,8 @@ function AvatarControls({
           <input type="checkbox" checked={overlay?.locked ?? true} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ locked: event.target.checked })} />
           Заблокировать клики
         </label>
+      </div>
+      <div className="avatar-test-grid">
         <label>
           Масштаб оверлея {overlay?.scale?.toFixed(1) ?? "1.0"}
           <input min="0.5" max="2" step="0.1" type="range" value={overlay?.scale ?? 1} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ scale: Number(event.target.value) })} />
@@ -1858,9 +1852,11 @@ function AvatarControls({
           Интенсивность движения {motionIntensity.toFixed(1)}
           <input min="0" max="1" step="0.1" type="range" value={motionIntensity} onChange={(event) => setMotionIntensity(Number(event.target.value))} disabled={!enabled || busy} />
         </label>
+      </div>
+      <div className="avatar-test-actions">
         <button className="primary-button" onClick={() => void run(() => sendAvatarTestPhrase({ text: phrase, emotion }), "Тестовая фраза отправлена.")} disabled={!enabled || busy || !phrase.trim()}>Отправить фразу</button>
-        <button onClick={() => void run(() => sendAvatarTestEmotion({ emotion, intensity: 1 }), "Эмоция отправлена.")} disabled={!enabled || busy}>Отправить эмоцию</button>
-        <button onClick={() => void run(() => sendAvatarTestGesture({ gesture, intensity: motionIntensity, interrupt: true }), "Тестовый жест отправлен.")} disabled={!enabled || busy}>Отправить жест</button>
+        <button className="secondary" onClick={() => void run(() => sendAvatarTestEmotion({ emotion, intensity: 1 }), "Эмоция отправлена.")} disabled={!enabled || busy}>Отправить эмоцию</button>
+        <button className="secondary" onClick={() => void run(() => sendAvatarTestGesture({ gesture, intensity: motionIntensity, interrupt: true }), "Тестовый жест отправлен.")} disabled={!enabled || busy}>Отправить жест</button>
         <button className="secondary" onClick={() => void run(stopAvatar, "Движение сброшено.")} disabled={!enabled || busy}>Сбросить движение</button>
       </div>
       {message && <div className="notice" role="status">{message}</div>}
