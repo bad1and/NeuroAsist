@@ -30,6 +30,13 @@ relationship, goal, constraint, skill, interest, episode, decision, correction, 
 shared_milestone. Каждый элемент: kind, subject, predicate,
 value_text, importance (0..1), confidence (0..1), sensitivity (normal|sensitive).
 Для медицинских, финансовых, адресных и иных чувствительных данных всегда sensitivity="sensitive".
+
+Качество памяти важнее количества. Формулируй один самодостаточный атомарный факт, без слов
+«запомни», «что», «пользователь сказал», местоимений без понятного референта и оценочных
+догадок. Не превращай одну фразу в несколько похожих candidates. Примеры:
+- «Я предпочитаю короткие ответы» → {{"kind":"preference","subject":"user","predicate":"prefers_response_length","value_text":"короткие ответы","importance":0.7,"confidence":0.95,"sensitivity":"normal"}}
+- «Твоих разработчиков зовут Олег и Федя» → {{"kind":"relationship","subject":"assistant","predicate":"developers","value_text":"Олег и Федя","importance":0.8,"confidence":0.95,"sensitivity":"normal"}}
+- Обычное приветствие, настроение на сегодня или неясное «он плохой» → [] .
 """
 
 

@@ -79,6 +79,30 @@ def test_balanced_memory_keeps_preferences_and_sensitive_facts_for_review(tmp_pa
     assert service.extract_from_message(sensitive)[0]["status"] == "candidate"
 
 
+def test_explicit_memory_is_normalized_and_developer_relationship_is_structured(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    developer_message, _ = store.append_message(
+        role="user", content="Привет, запомни, что твоих разработчиков зовут Олег и Федя.", input_mode="text",
+    )
+    generic_message, _ = store.append_message(
+        role="user", content="Запомни такой факт, что я люблю чай.", input_mode="text",
+    )
+
+    developer = service.extract_from_message(developer_message)[0]
+    generic = service.extract_from_message(generic_message)[0]
+
+    assert (developer["scope"], developer["kind"], developer["subject"], developer["predicate"], developer["value_text"]) == (
+        "relationship", "relationship", "assistant", "developers", "Олег и Федя",
+    )
+    assert generic["value_text"] == "я люблю чай"
+
+
+def test_explicit_vague_fact_is_not_saved(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    message, _ = store.append_message(role="user", content="Запомни: это, он очень плохой человек.", input_mode="text")
+    assert service.extract_from_message(message) == []
+
+
 def test_name_extraction_rejects_invalid_value_and_repairs_legacy_candidate_from_source(tmp_path: Path) -> None:
     store, service = _service(tmp_path, mode="balanced")
     invalid, _ = store.append_message(role="user", content="Меня зовут 123", input_mode="text")

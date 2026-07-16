@@ -12,6 +12,13 @@ Long-term memory remains canonical in SQLite; ChromaDB is a rebuildable semantic
 
 Live voice retains streaming. Explicit `Запомни: ...` commands use the deterministic fallback after the turn without a second LLM request.
 
+## Quality rules
+
+- Store only self-contained, atomic facts. Phrases such as `что ...`, command prefixes, and unclear references are removed or rejected.
+- Independent explicit notes coexist; only single-value facts such as the user's name and current corrections supersede older values.
+- A typed relationship is used for known patterns, for example `assistant → developers → Олег и Федя`.
+- DeepSeek receives examples of good and bad candidates, while backend validation remains the final authority.
+
 ## Enable
 
 ```env
