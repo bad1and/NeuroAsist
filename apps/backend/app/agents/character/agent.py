@@ -47,6 +47,7 @@ class CharacterAgent:
         self._persona = get_persona(persona_name)
         self.last_turn: CharacterTurn | None = None
         self.last_memory_updates: list[dict[str, str]] = []
+        self._last_user_message = None
 
     async def handle_user_message(self, session_id: str, user_text: str, input_mode: str = "text") -> dict[str, Any]:
         context = self._context_manager.build(user_text).messages if self._context_manager else self._history.get_recent_messages(session_id, limit=self._history_limit)
@@ -97,6 +98,15 @@ class CharacterAgent:
             ):
                 parsed = first_invalid
 
+        if parsed.valid and parsed.turn is not None and self._memory_service is not None and self._memory_service.llm_extraction_enabled:
+            created = self._memory_service.apply_llm_candidates(parsed.turn.memory_candidates, self._last_user_message)
+            # DeepSeek can legitimately omit optional metadata. Preserve explicit
+            # "remember this" commands with the deterministic, policy-controlled
+            # fallback without making a second model request.
+            if not created and not parsed.turn.memory_candidates:
+                created = self._memory_service.extract_from_message(self._last_user_message)
+            self.last_memory_updates.extend(self._memory_service.memory_update(memory) for memory in created)
+
         if parsed.valid and self._should_persist_timeline():
             self._save_message(session_id, "assistant", parsed.payload["reply"], input_mode)
 
@@ -131,10 +141,17 @@ class CharacterAgent:
             yield reply
         if self._should_persist_timeline():
             self._save_message(session_id, "assistant", reply, input_mode)
+        if self._memory_service is not None and self._memory_service.llm_extraction_enabled:
+            # Live mode streams plain speech rather than the JSON character
+            # protocol. Preserve explicit memory commands after a completed
+            # turn without adding a second DeepSeek request.
+            created = self._memory_service.extract_from_message(self._last_user_message)
+            self.last_memory_updates.extend(self._memory_service.memory_update(memory) for memory in created)
 
     def _persist_user_message(self, session_id: str, user_text: str, input_mode: str) -> list[dict[str, str]]:
         user_message = self._save_message(session_id, "user", user_text, input_mode)
-        if self._memory_service is None:
+        self._last_user_message = user_message
+        if self._memory_service is None or self._memory_service.llm_extraction_enabled:
             return []
         return [self._memory_service.memory_update(memory) for memory in self._memory_service.extract_from_message(user_message)]
 

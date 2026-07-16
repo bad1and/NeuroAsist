@@ -94,3 +94,10 @@ def reindex_memory(request: Request) -> dict[str, object]:
 @router.post("/clear")
 def clear_memory(payload: MemoryClear, request: Request) -> dict[str, int]:
     return {"deleted": _service(request).clear(payload.status)}
+
+
+@router.post("/reset-all")
+def reset_all_memory_and_timeline(request: Request) -> dict[str, int]:
+    result = _service(request).reset_all()
+    request.app.state.event_bus.publish("companion.data_reset", "warning", "Timeline and memory were reset", result)
+    return result

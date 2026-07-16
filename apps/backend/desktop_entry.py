@@ -31,7 +31,13 @@ def main() -> None:
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="info")
     server = uvicorn.Server(config)
     app.state.desktop_shutdown_callback = lambda: setattr(server, "should_exit", True)
-    server.run()
+    try:
+        server.run()
+    except KeyboardInterrupt:
+        # Ctrl+C in `npm run dev` is delivered to the whole Windows console
+        # process group. Uvicorn has already run FastAPI shutdown handlers;
+        # suppress the otherwise misleading traceback from asyncio.run().
+        return
 
 
 if __name__ == "__main__":

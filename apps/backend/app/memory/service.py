@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import re
+import logging
+import time
 from datetime import UTC, datetime
 from typing import Any
 
 from apps.backend.app.runtime.settings import RuntimeSettings
 from apps.backend.app.semantic.vector_index import NullVectorIndex, VectorDimensionMismatch
 from apps.backend.app.storage.timeline import StoredTimelineMessage, TimelineStore
+
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryService:
@@ -29,6 +35,15 @@ class MemoryService:
         "кто я", "ты помнишь имя", "my name", "remember my name", "what is my name",
         "call me", "who am i",
     )
+    _EXPLICIT_PREFIX = re.compile(
+        r"^.*?\b(?:запомни|remember)(?:\s+(?:пожалуйста|please))?\s*[:,—-]?\s*",
+        flags=re.IGNORECASE,
+    )
+    _DEVELOPER_FACT = re.compile(
+        r"^(?:такой\s+факт,?\s*)?(?:что\s+)?тво(?:их|его)\s+разработчик(?:ов|и)\s+зовут\s+(.+)$",
+        flags=re.IGNORECASE,
+    )
+    _LEADING_FACT_FILLER = re.compile(r"^(?:такой\s+факт,?\s*)?(?:что\s+)?", flags=re.IGNORECASE)
 
     def __init__(
         self,
@@ -42,6 +57,8 @@ class MemoryService:
         vector_index=None,
         semantic_enabled: bool = False,
         semantic_limit: int = 8,
+        llm_extraction_enabled: bool = False,
+        llm_min_confidence: float = 0.70,
     ) -> None:
         self._store = store
         self._runtime = runtime
@@ -53,6 +70,12 @@ class MemoryService:
         self._semantic_enabled = semantic_enabled and getattr(self._vector_index, "available", False)
         self._semantic_limit = semantic_limit
         self._semantic_degraded_reason: str | None = None
+        self._llm_extraction_enabled = llm_extraction_enabled
+        self._llm_min_confidence = llm_min_confidence
+
+    @property
+    def llm_extraction_enabled(self) -> bool:
+        return self._llm_extraction_enabled
 
     @property
     def incognito(self) -> bool:
@@ -90,11 +113,15 @@ class MemoryService:
         return selected
 
     def explain_retrieval(self, query: str, limit: int = 8) -> dict[str, object]:
+        started = time.perf_counter()
+        items = self.retrieve(query, limit)
         return {
             "query": query,
             "semantic_enabled": self.semantic_enabled,
             "semantic_degraded_reason": self._semantic_degraded_reason,
-            "items": self.retrieve(query, limit),
+            "backend": getattr(self._vector_index, "backend", "null"),
+            "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+            "items": items,
         }
 
     def extract_from_message(self, message: StoredTimelineMessage | None) -> list[dict[str, object]]:
@@ -111,6 +138,56 @@ class MemoryService:
                 "extractor_version": "deterministic-v2",
             })
             saved.append(self._apply_candidate(candidate, actor="extractor"))
+        return saved
+
+    def apply_llm_candidates(
+        self, candidates: list[object], source_message: StoredTimelineMessage | None,
+    ) -> list[dict[str, object]]:
+        """Validate model proposals through the same policy path as all other writes."""
+        if not self._enabled or self.incognito or self._runtime.memory_mode == "off" or source_message is None:
+            return []
+        if source_message.role != "user" or source_message.status != "completed":
+            return []
+        allowed_kinds = {
+            "identity", "preference", "relationship", "goal", "constraint", "skill", "interest",
+            "episode", "decision", "correction", "open_loop", "shared_milestone",
+        }
+        saved: list[dict[str, object]] = []
+        for raw_candidate in candidates[: self._max_candidates_per_turn]:
+            candidate = raw_candidate.model_dump() if hasattr(raw_candidate, "model_dump") else raw_candidate
+            if not isinstance(candidate, dict):
+                continue
+            try:
+                kind = str(candidate["kind"]).strip().lower()
+                confidence = float(candidate.get("confidence", 0))
+                value_text = self._clean_memory_value(str(candidate["value_text"]))
+                predicate = str(candidate["predicate"]).strip()
+            except (KeyError, TypeError, ValueError):
+                continue
+            if kind not in allowed_kinds or confidence < self._llm_min_confidence or not value_text or not predicate:
+                continue
+            sensitivity = str(candidate.get("sensitivity", "normal"))
+            values = {
+                "scope": "user_profile",
+                "kind": kind,
+                "subject": str(candidate.get("subject", "user"))[:200],
+                "predicate": predicate[:200],
+                "value_text": value_text[:1000],
+                "importance": min(1.0, max(0.0, float(candidate.get("importance", 0.6)))),
+                "confidence": min(1.0, max(0.0, confidence)),
+                "sensitivity": "sensitive" if sensitivity == "sensitive" else "normal",
+                "source_message_ids": [source_message.id],
+                "source_episode_id": source_message.episode_id,
+                "extractor_version": "deepseek-character-v1",
+            }
+            try:
+                memory = self._apply_candidate(values, actor="extractor", sync_vector=False)
+            except (KeyError, TypeError, ValueError):
+                logger.warning("Discarded invalid LLM memory candidate")
+                continue
+            saved.append(memory)
+            if memory["status"] == "active":
+                self._schedule_vector_sync(memory)
         return saved
 
     def repair_legacy_identity_candidates(self) -> list[dict[str, object]]:
@@ -222,6 +299,16 @@ class MemoryService:
                 self._degrade_semantic(exc)
         return deleted
 
+    def reset_all(self) -> dict[str, int]:
+        result = self._store.reset_companion_data()
+        if self.semantic_enabled:
+            try:
+                self._vector_index.rebuild_sync("memory")
+                self._vector_index.rebuild_sync("episode_summary")
+            except Exception as exc:
+                self._degrade_semantic(exc)
+        return result
+
     def index_episode_summary(self, summary: dict[str, object] | None) -> None:
         if not summary or not self.semantic_enabled:
             return
@@ -230,7 +317,9 @@ class MemoryService:
         except Exception as exc:
             self._degrade_semantic(exc)
 
-    def _apply_candidate(self, values: dict[str, object], *, actor: str, action: str = "candidate_created") -> dict[str, object]:
+    def _apply_candidate(
+        self, values: dict[str, object], *, actor: str, action: str = "candidate_created", sync_vector: bool = True,
+    ) -> dict[str, object]:
         self._validate_sources(list(values.get("source_message_ids", [])), manual=actor == "user")
         values = {**values, "subject": self._normalize(str(values["subject"])), "predicate": self._normalize(str(values["predicate"]))}
         exact, conflict = self._match_existing(values)
@@ -247,10 +336,34 @@ class MemoryService:
         memory = self._store.create_memory(values, actor=actor, action=action if status == "active" else "candidate_created")
         if status == "active" and conflict is not None:
             self._store.supersede_memory(str(conflict["id"]), str(memory["id"]))
+            self._schedule_vector_sync(conflict)
             memory = self._store.get_memory(str(memory["id"])) or memory
-        if memory["status"] == "active":
+        if sync_vector and memory["status"] == "active":
             self._sync_vector(memory)
         return memory
+
+    def _schedule_vector_sync(self, memory: dict[str, object]) -> None:
+        """Queue index work durably so a crash cannot lose a Chroma update."""
+        if not self.semantic_enabled:
+            return
+        self._store.enqueue_memory_index_job(str(memory["id"]))
+
+    def sync_next_index_job(self) -> bool:
+        job = self._store.claim_memory_index_job()
+        if job is None:
+            return False
+        try:
+            memory_id = str(json.loads(str(job["payload_json"]))["memory_id"])
+            memory = self._store.get_memory(memory_id)
+            if memory is not None and memory["status"] == "active":
+                self._vector_index.upsert_sync(str(memory["id"]), str(memory["canonical_text"]), "memory")
+            else:
+                self._vector_index.delete_sync(memory_id, "memory")
+            self._store.complete_summary_job(str(job["id"]))
+        except Exception as exc:
+            self._degrade_semantic(exc)
+            self._store.fail_summary_job(str(job["id"]), str(exc))
+        return True
 
     def _hybrid_retrieve(self, query: str, limit: int) -> list[dict[str, object]]:
         fts = self._store.list_memories(status="active", query=query, limit=max(limit, self._semantic_limit))
@@ -340,7 +453,9 @@ class MemoryService:
                 continue
             if self._normalize(str(item["value_text"])) == candidate_value:
                 exact = item
-            else:
+            # A profile name and an explicit correction are single-valued;
+            # independent preferences and explicit notes must coexist.
+            elif predicate in {"name", "current_statement"}:
                 conflict = item
         return exact, conflict
 
@@ -362,7 +477,7 @@ class MemoryService:
         lower = cleaned.lower()
         value: str | None = None
         kind, predicate, importance = "preference", "user_statement", 0.55
-        explicit = re.search(r"(?:запомни|remember)\s*[:,]?\s*(.+)", cleaned, flags=re.IGNORECASE)
+        explicit = self._explicit_fact(cleaned)
         preference = re.search(r"(?:я предпочитаю|i prefer)\s+(.+)", cleaned, flags=re.IGNORECASE)
         interest = re.search(r"(?:я люблю|мне нравится|i like)\s+(.+)", cleaned, flags=re.IGNORECASE)
         correction = re.search(r"(?:теперь я|я больше не)\s+(.+)", cleaned, flags=re.IGNORECASE)
@@ -371,7 +486,7 @@ class MemoryService:
         if name:
             value, kind, predicate, importance = name, "identity", "name", 0.9
         elif explicit:
-            value, predicate, importance = explicit.group(1).strip(), "explicit_memory", 0.8
+            return [explicit]
         elif preference:
             value, predicate, importance = preference.group(1).strip(), "preferred", 0.7
         elif interest:
@@ -386,6 +501,34 @@ class MemoryService:
             "value_text": value[:2000], "importance": importance, "confidence": 0.9 if explicit else 0.75,
             "sensitivity": sensitivity,
         }]
+
+    def _explicit_fact(self, text: str) -> dict[str, object] | None:
+        if self._EXPLICIT_PREFIX.match(text) is None:
+            return None
+        value = self._EXPLICIT_PREFIX.sub("", text).strip()
+        value = self._clean_memory_value(value)
+        if not value:
+            return None
+        developer_match = self._DEVELOPER_FACT.match(value)
+        if developer_match is not None:
+            names = developer_match.group(1).strip(" \t,;:.—-")
+            if names:
+                return {
+                    "scope": "relationship", "kind": "relationship", "subject": "assistant",
+                    "predicate": "developers", "value_text": names[:200], "importance": 0.8,
+                    "confidence": 0.95, "sensitivity": "normal",
+                }
+        return {
+            "scope": "user_profile", "kind": "decision", "subject": "user",
+            "predicate": "explicit_memory", "value_text": value[:1000], "importance": 0.8,
+            "confidence": 0.9, "sensitivity": "sensitive" if any(word in value.lower() for word in self._SENSITIVE_WORDS) else "normal",
+        }
+
+    def _clean_memory_value(self, value: str) -> str:
+        cleaned = self._LEADING_FACT_FILLER.sub("", value.strip()).strip(" \t,;:.—-")
+        if len(cleaned) < 3 or re.match(r"^(?:это[, ]+)?он\b", cleaned, flags=re.IGNORECASE):
+            return ""
+        return cleaned
 
     @classmethod
     def _extract_name(cls, text: str) -> str | None:
