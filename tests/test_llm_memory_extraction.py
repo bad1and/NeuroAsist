@@ -62,6 +62,21 @@ def test_low_confidence_llm_candidate_is_ignored(tmp_path: Path) -> None:
     assert store.list_memories() == []
 
 
+def test_llm_candidate_strips_filler_and_rejects_vague_text(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "memory.sqlite3")
+    store.init_db()
+    service = MemoryService(store, RuntimeSettings(memory_mode="automatic"), llm_extraction_enabled=True)
+    message = TimelineHistoryAdapter(store).save_message("session", "user", "Запомни факт")
+
+    created = service.apply_llm_candidates([
+        {"kind": "decision", "subject": "user", "predicate": "note", "value_text": "что я люблю чай", "confidence": 0.9},
+        {"kind": "decision", "subject": "user", "predicate": "note", "value_text": "это, он плохой", "confidence": 0.9},
+    ], message)
+
+    assert len(created) == 1
+    assert created[0]["value_text"] == "я люблю чай"
+
+
 def test_explicit_memory_uses_fallback_when_model_omits_candidates(tmp_path: Path) -> None:
     store = TimelineStore(tmp_path / "memory.sqlite3")
     store.init_db()

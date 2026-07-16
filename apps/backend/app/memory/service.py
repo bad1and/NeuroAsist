@@ -35,6 +35,15 @@ class MemoryService:
         "кто я", "ты помнишь имя", "my name", "remember my name", "what is my name",
         "call me", "who am i",
     )
+    _EXPLICIT_PREFIX = re.compile(
+        r"^.*?\b(?:запомни|remember)(?:\s+(?:пожалуйста|please))?\s*[:,—-]?\s*",
+        flags=re.IGNORECASE,
+    )
+    _DEVELOPER_FACT = re.compile(
+        r"^(?:такой\s+факт,?\s*)?(?:что\s+)?тво(?:их|его)\s+разработчик(?:ов|и)\s+зовут\s+(.+)$",
+        flags=re.IGNORECASE,
+    )
+    _LEADING_FACT_FILLER = re.compile(r"^(?:такой\s+факт,?\s*)?(?:что\s+)?", flags=re.IGNORECASE)
 
     def __init__(
         self,
@@ -151,7 +160,7 @@ class MemoryService:
             try:
                 kind = str(candidate["kind"]).strip().lower()
                 confidence = float(candidate.get("confidence", 0))
-                value_text = str(candidate["value_text"]).strip()
+                value_text = self._clean_memory_value(str(candidate["value_text"]))
                 predicate = str(candidate["predicate"]).strip()
             except (KeyError, TypeError, ValueError):
                 continue
@@ -468,7 +477,7 @@ class MemoryService:
         lower = cleaned.lower()
         value: str | None = None
         kind, predicate, importance = "preference", "user_statement", 0.55
-        explicit = re.search(r"(?:запомни|remember)\s*[:,]?\s*(.+)", cleaned, flags=re.IGNORECASE)
+        explicit = self._explicit_fact(cleaned)
         preference = re.search(r"(?:я предпочитаю|i prefer)\s+(.+)", cleaned, flags=re.IGNORECASE)
         interest = re.search(r"(?:я люблю|мне нравится|i like)\s+(.+)", cleaned, flags=re.IGNORECASE)
         correction = re.search(r"(?:теперь я|я больше не)\s+(.+)", cleaned, flags=re.IGNORECASE)
@@ -477,7 +486,7 @@ class MemoryService:
         if name:
             value, kind, predicate, importance = name, "identity", "name", 0.9
         elif explicit:
-            value, predicate, importance = explicit.group(1).strip(), "explicit_memory", 0.8
+            return [explicit]
         elif preference:
             value, predicate, importance = preference.group(1).strip(), "preferred", 0.7
         elif interest:
@@ -492,6 +501,34 @@ class MemoryService:
             "value_text": value[:2000], "importance": importance, "confidence": 0.9 if explicit else 0.75,
             "sensitivity": sensitivity,
         }]
+
+    def _explicit_fact(self, text: str) -> dict[str, object] | None:
+        if self._EXPLICIT_PREFIX.match(text) is None:
+            return None
+        value = self._EXPLICIT_PREFIX.sub("", text).strip()
+        value = self._clean_memory_value(value)
+        if not value:
+            return None
+        developer_match = self._DEVELOPER_FACT.match(value)
+        if developer_match is not None:
+            names = developer_match.group(1).strip(" \t,;:.—-")
+            if names:
+                return {
+                    "scope": "relationship", "kind": "relationship", "subject": "assistant",
+                    "predicate": "developers", "value_text": names[:200], "importance": 0.8,
+                    "confidence": 0.95, "sensitivity": "normal",
+                }
+        return {
+            "scope": "user_profile", "kind": "decision", "subject": "user",
+            "predicate": "explicit_memory", "value_text": value[:1000], "importance": 0.8,
+            "confidence": 0.9, "sensitivity": "sensitive" if any(word in value.lower() for word in self._SENSITIVE_WORDS) else "normal",
+        }
+
+    def _clean_memory_value(self, value: str) -> str:
+        cleaned = self._LEADING_FACT_FILLER.sub("", value.strip()).strip(" \t,;:.—-")
+        if len(cleaned) < 3 or re.match(r"^(?:это[, ]+)?он\b", cleaned, flags=re.IGNORECASE):
+            return ""
+        return cleaned
 
     @classmethod
     def _extract_name(cls, text: str) -> str | None:
