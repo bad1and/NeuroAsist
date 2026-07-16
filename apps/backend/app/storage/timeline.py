@@ -352,6 +352,35 @@ class TimelineStore:
             connection.execute("UPDATE background_jobs SET status = 'running', attempts = attempts + 1, updated_at = ? WHERE id = ?", (self._now(), row["id"]))
             return dict(row)
 
+    def enqueue_memory_index_job(self, memory_id: str) -> None:
+        """Durably coalesce Chroma updates; SQLite remains the source of truth."""
+        now = self._now()
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE background_jobs SET status = 'completed' WHERE type = 'memory_index' AND status = 'pending' AND json_extract(payload_json, '$.memory_id') = ?",
+                (memory_id,),
+            )
+            connection.execute(
+                "INSERT INTO background_jobs (id, type, status, payload_json, available_at, created_at, updated_at) VALUES (?, 'memory_index', 'pending', ?, ?, ?, ?)",
+                (uuid4().hex, json.dumps({"memory_id": memory_id}), now, now, now),
+            )
+
+    def claim_memory_index_job(self) -> dict[str, object] | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM background_jobs WHERE type = 'memory_index' AND status = 'pending' AND available_at <= ? ORDER BY available_at, created_at LIMIT 1", (self._now(),)).fetchone()
+            if row is None:
+                return None
+            connection.execute("UPDATE background_jobs SET status = 'running', attempts = attempts + 1, updated_at = ? WHERE id = ?", (self._now(), row["id"]))
+            return dict(row)
+
+    def recover_memory_index_jobs(self) -> None:
+        """A process crash may leave a claimed job running; make it retry on startup."""
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE background_jobs SET status = 'pending', available_at = ?, updated_at = ? WHERE type = 'memory_index' AND status = 'running'",
+                (self._now(), self._now()),
+            )
+
     def complete_summary_job(self, job_id: str) -> None:
         with self._connect() as connection:
             connection.execute("UPDATE background_jobs SET status = 'completed', updated_at = ? WHERE id = ?", (self._now(), job_id))
@@ -507,6 +536,20 @@ class TimelineStore:
                 after = {**before, "status": "deleted", "updated_at": now}
                 self._audit_memory(connection, row["id"], "deleted", "user", before, after, "Memory center clear", before["source_message_ids"])
             return len(rows)
+
+    def reset_companion_data(self) -> dict[str, int]:
+        """Irreversibly clear the primary companion's timeline and memory."""
+        with self._connect() as connection:
+            messages = connection.execute("SELECT COUNT(*) FROM conversation_messages WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,)).fetchone()[0]
+            memories = connection.execute("SELECT COUNT(*) FROM memory_items WHERE relationship_id = ? AND status != 'deleted'", (PRIMARY_RELATIONSHIP_ID,)).fetchone()[0]
+            episodes = connection.execute("SELECT COUNT(*) FROM conversation_episodes WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,)).fetchone()[0]
+            for table in ("memory_fts", "episode_summary_fts", "timeline_message_fts", "memory_audit", "episode_summaries", "background_jobs"):
+                connection.execute(f"DELETE FROM {table}")
+            connection.execute("DELETE FROM memory_items WHERE relationship_id = ?", (PRIMARY_RELATIONSHIP_ID,))
+            connection.execute("DELETE FROM conversation_messages WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,))
+            connection.execute("DELETE FROM conversation_episodes WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,))
+            connection.execute("UPDATE conversation_timelines SET current_episode_id = NULL, updated_at = ? WHERE id = ?", (self._now(), PRIMARY_TIMELINE_ID))
+            return {"messages": int(messages), "memories": int(memories), "episodes": int(episodes)}
 
     def memory_audit(self, memory_id: str) -> list[dict[str, object]]:
         with self._connect() as connection:

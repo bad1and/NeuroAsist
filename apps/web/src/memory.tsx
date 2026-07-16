@@ -3,7 +3,7 @@ import { FormEvent, useEffect, useState } from "react";
 import {
   clearMemories, confirmMemory, createMemory, deleteMemory, getMemories,
   getMemoryAudit, rejectMemory, reindexMemories, restoreMemory,
-  updateMemory,
+  resetAllCompanionData, updateMemory,
 } from "./api";
 import type { MemoryAuditItem, MemoryItem, MemoryStatus } from "./types";
 
@@ -54,6 +54,9 @@ export function MemoryPage() {
       <button type="submit">Add verified memory</button>
     </form>
     <button className="secondary" onClick={() => { if (window.confirm("Delete long-term memories only? Timeline history stays intact.")) void action(clearMemories); }}>Clear memory only</button>
+    <button className="secondary" onClick={() => {
+      if (window.confirm("Permanently delete ALL conversation history, episode summaries, and long-term memories? This cannot be undone.")) void action(resetAllCompanionData);
+    }}>Reset all memory and history</button>
     <button className="secondary" onClick={() => void action(reindexMemories)}>Rebuild FTS index</button>
     {message && <p className="error-text">{message}</p>}
     <div className="event-list">{items.map((memory) => <article className="event-card" key={memory.id}>

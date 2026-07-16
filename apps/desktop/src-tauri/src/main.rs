@@ -343,6 +343,14 @@ fn main() {
         .setup(|app| {
             let state = DesktopState::new();
             app.manage(state);
+            let shutdown_handle = app.handle().clone();
+            ctrlc::set_handler(move || {
+                // In development Ctrl+C reaches both Cargo/Tauri and the
+                // Python core. Exit the desktop shell deliberately so Cargo
+                // observes code 0 instead of STATUS_CONTROL_C_EXIT.
+                shutdown_handle.state::<DesktopState>().shutdown();
+                shutdown_handle.exit(0);
+            }).map_err(std::io::Error::other)?;
             let state = app.state::<DesktopState>();
             state.start_core(&app.handle()).map_err(std::io::Error::other)?;
             let _ = state.start_avatar(&app.handle());
