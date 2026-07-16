@@ -12,6 +12,8 @@ Long-term memory remains canonical in SQLite; ChromaDB is a rebuildable semantic
 
 Live voice retains streaming. Explicit `Запомни: ...` commands use the deterministic fallback after the turn without a second LLM request.
 
+The index is not a source of truth: it can be deleted and rebuilt from the active SQLite records. Existing history is not automatically turned into memories; extraction starts with new turns after the feature is enabled.
+
 ## Quality rules
 
 - Store only self-contained, atomic facts. Phrases such as `что ...`, command prefixes, and unclear references are removed or rejected.
@@ -30,6 +32,8 @@ SEMANTIC_VECTOR_BACKEND=chroma
 ```
 
 Use `POST /memory/reindex` to rebuild Chroma from SQLite. **Memory Center → Reset all memory and history** irreversibly clears the timeline, summaries, memories, and the rebuildable index.
+
+For normal development startup use `npm --prefix apps/desktop run dev`; the desktop shell starts Vite and the backend together.
 
 ## Current limitation
 
