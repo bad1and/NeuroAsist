@@ -47,15 +47,11 @@ export function JournalPage() {
   };
 
   return <section className="panel history-panel">
-    <div className="panel-header">
-      <div><span className="eyebrow">ЕДИНАЯ ХРОНОЛОГИЯ</span><h2>История</h2></div>
-      <button className="secondary" onClick={() => void refresh()}><RefreshCw size={16} aria-hidden="true" />Обновить</button>
-    </div>
     <form className="search-form" onSubmit={onSearch}>
-      <Search size={18} aria-hidden="true" />
       <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по истории" aria-label="Поиск по истории" />
       {results && <button className="secondary" type="button" onClick={() => { setQuery(""); setResults(null); }}>Сбросить</button>}
-      <button className="primary-button" type="submit">Найти</button>
+      <button className="icon-button" type="button" onClick={() => void refresh()} aria-label="Обновить историю" title="Обновить историю"><RefreshCw size={17} /></button>
+      <button className="icon-button search-submit" type="submit" aria-label="Найти в истории" title="Найти в истории"><Search size={18} /></button>
     </form>
     {error && <p className="error-text" role="alert">{error}</p>}
     {results && <div className="history-list search-results">

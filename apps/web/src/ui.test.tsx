@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
@@ -65,9 +65,20 @@ beforeEach(() => {
   api.updateRuntimeSettings.mockResolvedValue(settings);
 });
 
-afterEach(() => { vi.clearAllMocks(); });
+afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe("русский интерфейс", () => {
+  it("собирает диалог в отдельную рабочую область с закреплённым композером", async () => {
+    const { container } = render(<App />);
+
+    await screen.findByRole("button", { name: "Диалог" });
+    expect(container.querySelector("main.workspace-chat")).toBeInTheDocument();
+    expect(container.querySelector(".chat-panel .message-list")).toBeInTheDocument();
+    expect(container.querySelector(".chat-panel .chat-composer")).toBeInTheDocument();
+    expect(container.querySelector(".chat-composer textarea")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Свободные руки" })).toBeInTheDocument();
+  });
+
   it("открывает системный подраздел без отдельного пункта событий", async () => {
     render(<App />);
 
@@ -79,7 +90,21 @@ describe("русский интерфейс", () => {
     fireEvent.click(screen.getByRole("button", { name: "Система" }));
 
     expect(await screen.findByRole("heading", { name: "Модели" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Журнал системы" })).toBeInTheDocument();
+    expect(screen.getByText("Журнал событий")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Журнал событий"));
+    expect(await screen.findByRole("button", { name: "Обновить журнал событий" })).toBeInTheDocument();
+  });
+
+  it("показывает только выбранный раздел настроек", async () => {
+    const { container } = render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
+    expect(screen.getByLabelText("Стиль общения")).toBeVisible();
+    expect(container.querySelector(".system-stack")).toHaveAttribute("hidden");
+
+    fireEvent.click(screen.getByRole("button", { name: "Голос" }));
+    expect(screen.getByLabelText("Язык голосового ввода")).toBeVisible();
+    expect(screen.getByLabelText("Стиль общения")).not.toBeVisible();
   });
 
   it("создаёт запись памяти с тем же API-полезным содержимым", async () => {
@@ -94,5 +119,14 @@ describe("русский интерфейс", () => {
     await waitFor(() => expect(api.createMemory).toHaveBeenCalledWith({
       predicate: "предпочтение", value_text: "Любит чай", source_message_ids: [],
     }));
+  });
+
+  it("переключает раздел памяти в таком же меню", async () => {
+    render(<MemoryPage />);
+    await screen.findByRole("button", { name: "Все" });
+
+    fireEvent.click(screen.getByRole("button", { name: "На проверке" }));
+
+    await waitFor(() => expect(api.getMemories).toHaveBeenLastCalledWith("candidate", undefined));
   });
 });
