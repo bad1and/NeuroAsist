@@ -4,7 +4,7 @@
 
 ### Local-first voice AI character and future neuro‑VTuber platform
 
-[![Version](https://img.shields.io/badge/version-0.4.0-7c3aed?style=flat-square)](https://github.com/bad1and/NeuroAsist/tree/v0.4)
+[![Version](https://img.shields.io/badge/version-0.6.0--dev-7c3aed?style=flat-square)](https://github.com/bad1and/NeuroAsist/tree/v0.6)
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776ab?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-24%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.116-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -16,8 +16,8 @@
 </div>
 
 > [!IMPORTANT]
-> **NeuroAsist v0.4.0 is an experimental local prototype.**
-> Text and voice chat, full-WAV TTS, and an optional Unity VRM avatar runtime are available. Live audio segments remain a browser feature.
+> **NeuroAsist v0.6 is an experimental local desktop development branch.**
+> The Tauri shell starts the React UI and FastAPI core together. Text and voice chat, long-term memory, and an optional Unity VRM avatar runtime are available.
 
 ## About the project
 
@@ -45,7 +45,9 @@ The V0.5 direction is a single continuous desktop companion: one character, one 
 | Live voice response | ✅ | WebSocket audio segments |
 | Local speech-to-text | ✅ | `faster-whisper` |
 | Local Russian text-to-speech | ✅ | Silero `v5_5_ru` |
-| Conversation history | ✅ | SQLite |
+| Conversation history and journal | ✅ | SQLite timeline, episodes, and summaries |
+| Long-term memory | 🧪 | SQLite canonical records, audit trail, and Memory Center |
+| Semantic memory retrieval | 🧪 | Rebuildable ChromaDB index with FTS fallback |
 | Runtime events | ✅ | REST and WebSocket |
 | Voice and runtime settings | ✅ | Local React control panel |
 | Browser speech fallback | ✅ | Used when backend TTS fails |
@@ -60,13 +62,15 @@ The V0.5 direction is a single continuous desktop companion: one character, one 
 - **Fail-soft audio** — a TTS failure does not destroy a successful text response.
 - **Observable runtime** — backend, chat, STT, TTS, and WebSocket events are visible in the UI.
 - **Modular structure** — LLM, STT, TTS, storage, events, and agents are separated by responsibility.
-- **Restricted current scope** — v0.4.0 cannot execute commands, browse files, or control the desktop.
+- **Restricted current scope** — the companion cannot execute commands, browse files, or control the desktop.
 
 ## Interface
 
-The React control panel contains three main sections:
+The React control panel contains five main sections:
 
 - **Chat** — text messages, microphone recording, transcription, AI replies, and audio playback.
+- **Journal** — the continuous timeline and internal conversation episodes.
+- **Memory** — saved facts, provenance, review, and a full reset of memory and history.
 - **Events** — live backend, LLM, STT, TTS, and connection events.
 - **Settings** — voice language, Silero speaker, playback speed, live prebuffer, runtime options, and avatar test controls.
 
@@ -106,10 +110,10 @@ The header displays backend status, WebSocket connection state, API-key availabi
 - internet access for the first Whisper and Silero model download;
 - optional CUDA-capable GPU.
 
-### 1. Clone the release branch
+### 1. Clone the development branch
 
 ```powershell
-git clone --branch v0.4 --single-branch https://github.com/bad1and/NeuroAsist.git
+git clone --branch v0.6 --single-branch https://github.com/bad1and/NeuroAsist.git
 cd NeuroAsist
 ```
 
@@ -137,6 +141,7 @@ If CUDA is unavailable, use a compatible CPU PyTorch wheel and set both
 ```powershell
 npm install
 npm install --prefix apps/web
+npm install --prefix apps/desktop
 ```
 
 ### 4. Configure the environment
@@ -271,14 +276,22 @@ If Windows cannot find FFmpeg in the current terminal:
 $env:Path = "<ffmpeg-bin>;$env:Path"
 ```
 
-### 6. Start the backend
+### 6. Start the desktop application (recommended)
+
+```powershell
+npm --prefix apps/desktop run dev
+```
+
+This one command starts Vite and the local FastAPI core; a separately started backend or browser tab is not required. See the [desktop README](apps/desktop/README.md) for avatar build options.
+
+### 7. Start backend and web UI separately (optional)
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-### 7. Start the frontend
+### 8. Start the frontend
 
 Open a second terminal:
 

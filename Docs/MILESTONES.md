@@ -2,7 +2,7 @@
 
 Это единая карта работ по V0.5. Здесь находятся цель, результат и текущий статус каждого milestone. Детали реализации, API и тесты остаются в отдельных отчётах, на которые ведут ссылки ниже.
 
-**Актуальный статус: 14 июля 2026.** Проект работает как локальный desktop companion; публичный release пока не готовится.
+**Актуальный статус: 16 июля 2026.** V0.5 остаётся архитектурной картой, а ветка V0.6 развивает локальный desktop companion. Публичный release пока не готовится.
 
 ## Карта статусов
 
@@ -14,7 +14,7 @@
 | 3 | Summarization и Context Manager | готово | Ограниченный и объяснимый контекст для LLM. |
 | 4 | Tauri Desktop Shell | готово для development | Desktop-оболочка запускает и контролирует backend. |
 | 5 | Long-Term Memory V1 | готово | Управляемая память с происхождением и аудитом. |
-| 6 | Semantic Retrieval | готово, выключено по умолчанию | FTS-first поиск и опциональный семантический адаптер. |
+| 6 | Semantic Retrieval | в развитии V0.6 | FTS-first поиск и перестраиваемый ChromaDB-индекс. |
 | 7 | Character Protocol v3 | готово | Единый контракт ответа персонажа и аватара. |
 | 8 | Emotion Engine и Avatar Overlay | готово | Unity source, desktop overlay и управление через Tauri добавлены. |
 | 9 | Live Voice, VAD и Barge-in | готово для локального режима | PCM, VAD, interruption и защита от late audio. |
@@ -87,11 +87,11 @@
 
 **Цель.** Усилить обычный поиск по памяти семантическим поиском, но не делать его обязательным.
 
-**Сделано.** FTS5 остаётся baseline; добавлены hash embedding provider, SQLite-compatible vector index, fusion и strict evaluation flag.
+**Сделано.** FTS5 остаётся baseline; в V0.6 добавлен ChromaDB как перестраиваемый индекс поверх канонической SQLite-памяти, durable index jobs и feature flags.
 
-**Результат.** При проблемах с векторами система безопасно возвращается к FTS.
+**Результат.** При проблемах с ChromaDB система безопасно возвращается к FTS. Качество hash embeddings ещё требует настройки и оценки.
 
-**Подробности:** [milestone-6-semantic-retrieval.md](milestone-6-semantic-retrieval.md).
+**Подробности:** [ChromaDB memory](chroma-memory.md).
 
 ## Milestone 7 — Character Protocol v3
 

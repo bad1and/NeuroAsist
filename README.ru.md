@@ -4,7 +4,7 @@
 
 ### Локальный голосовой AI‑персонаж и будущая neuro‑VTuber платформа
 
-[![Версия](https://img.shields.io/badge/version-0.4.0-7c3aed?style=flat-square)](https://github.com/bad1and/NeuroAsist/tree/v0.4)
+[![Версия](https://img.shields.io/badge/version-0.6.0--dev-7c3aed?style=flat-square)](https://github.com/bad1and/NeuroAsist/tree/v0.6)
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776ab?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-24%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.116-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -16,8 +16,8 @@
 </div>
 
 > [!IMPORTANT]
-> **NeuroAsist v0.4.0 — экспериментальный локальный прототип.**
-> Доступны текстовый/голосовой чат, локальный Silero TTS на CPU и опциональный Unity VRM-аватар. Unity protocol v2 умеет воспроизводить live WAV-сегменты без ожидания полного ответа.
+> **NeuroAsist v0.6 — экспериментальная development-ветка локального desktop-приложения.**
+> Tauri запускает React-интерфейс и FastAPI core вместе. Доступны текстовый/голосовой чат, долгосрочная память и опциональный Unity VRM-аватар.
 
 ## О проекте
 
@@ -36,7 +36,7 @@ flowchart LR
 
 Направление V0.5 — один непрерывный desktop-компаньон: один персонаж, одна общая история, внутренние episodes, summaries и управляемая долгосрочная память. Это не продукт с вручную созданными чатами. Dev-agent, sandbox и управление рабочим столом исключены из V0.5.
 
-## Возможности v0.4.0
+## Возможности v0.6
 
 | Возможность | Статус | Реализация |
 |---|:---:|---|
@@ -45,7 +45,9 @@ flowchart LR
 | Live-ответ голосом | ✅ | Аудиосегменты через WebSocket |
 | Локальное распознавание речи | ✅ | `faster-whisper` |
 | Локальная русская озвучка | ✅ | Silero `v5_5_ru` |
-| История диалога | ✅ | SQLite |
+| История диалога и Journal | ✅ | SQLite timeline, episodes и summaries |
+| Долгосрочная память | 🧪 | Канонические записи SQLite, audit trail и Memory Center |
+| Семантический поиск по памяти | 🧪 | Перестраиваемый ChromaDB-индекс с FTS fallback |
 | Runtime-события | ✅ | REST и WebSocket |
 | Настройка голоса и runtime | ✅ | Локальная React-панель |
 | Browser speech fallback | ✅ | При ошибке backend TTS |
@@ -60,13 +62,15 @@ flowchart LR
 - **Устойчивость к ошибкам озвучки** — падение TTS не уничтожает готовый ответ.
 - **Наблюдаемый runtime** — события backend, chat, STT, TTS и WebSocket видны в интерфейсе.
 - **Модульная структура** — LLM, STT, TTS, storage, events и agents разделены по ответственности.
-- **Ограниченный текущий scope** — v0.4.0 не выполняет команды, не читает файлы и не управляет рабочим столом.
+- **Ограниченный текущий scope** — companion не выполняет команды, не читает файлы и не управляет рабочим столом.
 
 ## Интерфейс
 
-В React-панели есть три основных раздела:
+В React-панели есть пять основных разделов:
 
 - **Chat** — текстовые сообщения, запись микрофона, распознанная фраза, ответ и воспроизведение.
+- **Journal** — непрерывная timeline и внутренние эпизоды разговора.
+- **Memory** — сохранённые факты, их происхождение, проверка и полный сброс памяти с историей.
 - **Events** — события backend, LLM, STT, TTS и соединений в реальном времени.
 - **Settings** — язык голоса, speaker Silero, скорость воспроизведения, live prebuffer, runtime-настройки и тестовое управление аватаром.
 
@@ -109,7 +113,7 @@ flowchart LR
 ### 1. Клонирование ветки
 
 ```powershell
-git clone --branch v0.4 --single-branch https://github.com/bad1and/NeuroAsist.git
+git clone --branch v0.6 --single-branch https://github.com/bad1and/NeuroAsist.git
 cd NeuroAsist
 ```
 
@@ -137,6 +141,7 @@ python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_
 ```powershell
 npm install
 npm install --prefix apps/web
+npm install --prefix apps/desktop
 ```
 
 ### 4. Конфигурация
@@ -268,14 +273,22 @@ ffprobe -version
 $env:Path = "<ffmpeg-bin>;$env:Path"
 ```
 
-### 6. Запуск backend
+### 6. Запуск desktop-приложения (рекомендуется)
+
+```powershell
+npm --prefix apps/desktop run dev
+```
+
+Одна команда запускает Vite и локальный FastAPI core; отдельно поднимать backend или открывать браузер не нужно. Параметры сборки аватара описаны в [desktop README](apps/desktop/README.md).
+
+### 7. Раздельный запуск backend и web UI (опционально)
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-### 7. Запуск frontend
+### 8. Запуск frontend
 
 Открой второй терминал:
 
