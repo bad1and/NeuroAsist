@@ -303,12 +303,8 @@ class MemoryService:
         result = self._store.reset_companion_data()
         if self.semantic_enabled:
             try:
-                reset_storage = getattr(self._vector_index, "reset_storage_sync", None)
-                if callable(reset_storage):
-                    reset_storage()
-                else:
-                    self._vector_index.rebuild_sync("memory")
-                    self._vector_index.rebuild_sync("episode_summary")
+                self._vector_index.rebuild_sync("memory")
+                self._vector_index.rebuild_sync("episode_summary")
             except Exception as exc:
                 self._degrade_semantic(exc)
         return result
