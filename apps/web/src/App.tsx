@@ -1726,8 +1726,9 @@ function SystemMaintenance() {
     setBusy(true);
     setMessage(null);
     try {
-      await action();
-      setMessage(success);
+      const result = await action();
+      const restartRequired = typeof result === "object" && result !== null && "chroma_cleanup_pending" in result && Boolean(result.chroma_cleanup_pending);
+      setMessage(restartRequired ? `${success} Перезапусти приложение: тогда папка ChromaDB будет удалена полностью.` : success);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Не удалось завершить обслуживание.");
     } finally {

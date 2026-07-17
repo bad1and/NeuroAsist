@@ -7,6 +7,7 @@ text, so the index can always be rebuilt after an upgrade, corruption, or restor
 from __future__ import annotations
 
 from pathlib import Path
+from shutil import rmtree
 from typing import Callable
 
 from .embedding import EmbeddingProvider
@@ -22,6 +23,7 @@ class ChromaVectorIndex:
             import chromadb
         except ImportError as exc:  # pragma: no cover - exercised in packaged environments
             raise RuntimeError("ChromaDB is enabled but the chromadb package is not installed") from exc
+        self._directory = directory
         self._client = chromadb.PersistentClient(path=str(directory))
         self._provider = provider
         self._source = source
@@ -67,6 +69,35 @@ class ChromaVectorIndex:
             pass  # A missing collection is the normal first-run case.
         for item_id, text in self._source(namespace):
             self.upsert_sync(item_id, text, namespace)
+
+    def reset_storage_sync(self) -> None:
+        """Mark the persistent index for hard deletion at the next backend start.
+
+        Windows keeps Chroma's HNSW files open while this process is running.
+        The marker is outside the index directory, so startup can safely remove
+        the whole directory before opening a new PersistentClient.
+        """
+        self.reset_marker_path(self._directory).touch()
+        for namespace in ("memory", "episode_summary"):
+            try:
+                self._client.delete_collection(self._collection_name(namespace))
+            except Exception:
+                pass
+
+    @classmethod
+    def clear_pending_reset(cls, directory: Path) -> bool:
+        """Hard-delete a stale Chroma directory before any client opens it."""
+        marker = cls.reset_marker_path(directory)
+        if not marker.exists():
+            return False
+        if directory.exists():
+            rmtree(directory, ignore_errors=False)
+        marker.unlink()
+        return True
+
+    @staticmethod
+    def reset_marker_path(directory: Path) -> Path:
+        return directory.parent / f".{directory.name}.reset-pending"
 
     def _collection(self, namespace: str):
         return self._client.get_or_create_collection(

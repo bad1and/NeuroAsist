@@ -110,6 +110,8 @@ def create_app() -> FastAPI:
         settings.backup_retention_days,
     )
     semantic_mode_enabled = settings.semantic_retrieval_enabled and settings.semantic_retrieval_eval_passed
+    if settings.semantic_vector_backend == "chroma":
+        ChromaVectorIndex.clear_pending_reset(settings.semantic_chroma_directory)
     if timeline_store is not None and semantic_mode_enabled and settings.semantic_embedding_provider == "hash":
         embedding_provider = HashEmbeddingProvider(settings.semantic_embedding_model_id, settings.semantic_embedding_dimension)
         if settings.semantic_vector_backend == "chroma":

@@ -301,7 +301,11 @@ class MemoryService:
 
     def reset_all(self) -> dict[str, int]:
         result = self._store.reset_companion_data()
-        if self.semantic_enabled:
+        reset_storage = getattr(self._vector_index, "reset_storage_sync", None)
+        if callable(reset_storage):
+            reset_storage()
+            result["chroma_cleanup_pending"] = 1
+        elif self.semantic_enabled:
             try:
                 self._vector_index.rebuild_sync("memory")
                 self._vector_index.rebuild_sync("episode_summary")
