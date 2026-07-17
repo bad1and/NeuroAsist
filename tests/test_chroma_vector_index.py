@@ -23,6 +23,21 @@ def test_chroma_index_upserts_searches_deletes_and_rebuilds(tmp_path: Path) -> N
     assert index.search_sync("чай", "memory", 1)[0].item_id == "second"
 
 
+def test_pending_reset_hard_deletes_chroma_before_next_client_starts(tmp_path: Path) -> None:
+    directory = tmp_path / "chroma"
+    index = ChromaVectorIndex(directory, HashEmbeddingProvider(dimension=64), lambda _namespace: [])
+    index.upsert_sync("first", "пользователь любит кофе", "memory")
+
+    index.reset_storage_sync()
+    marker = ChromaVectorIndex.reset_marker_path(directory)
+    assert marker.exists()
+
+    index._client.close()
+    assert ChromaVectorIndex.clear_pending_reset(directory) is True
+    assert not directory.exists()
+    assert not marker.exists()
+
+
 def test_llm_candidate_is_indexed_in_chroma_outside_an_event_loop(tmp_path: Path) -> None:
     store = TimelineStore(tmp_path / "memory.sqlite3")
     store.init_db()

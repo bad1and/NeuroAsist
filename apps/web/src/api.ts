@@ -280,7 +280,7 @@ export function clearMemories(): Promise<{ deleted: number }> {
   return requestJson("/memory/clear", { method: "POST", body: JSON.stringify({}) });
 }
 
-export function resetAllCompanionData(): Promise<{ messages: number; memories: number; episodes: number }> {
+export function resetAllCompanionData(): Promise<{ messages: number; memories: number; episodes: number; chroma_cleanup_pending?: number }> {
   return requestJson("/memory/reset-all", { method: "POST" });
 }
 

@@ -31,7 +31,7 @@ SEMANTIC_RETRIEVAL_EVAL_PASSED=true
 SEMANTIC_VECTOR_BACKEND=chroma
 ```
 
-Use `POST /memory/reindex` to rebuild Chroma from SQLite. **Memory Center → Reset all memory and history** irreversibly clears the timeline, summaries, memories, and the rebuildable index.
+Use `POST /memory/reindex` to rebuild Chroma from SQLite. **Memory Center → Reset all memory and history** irreversibly clears the timeline, summaries, memories, and the rebuildable index. On Windows it marks `data/chroma` for a hard delete at the next backend start, because ChromaDB keeps its vector files open while the current process is running.
 
 For normal development startup use `npm --prefix apps/desktop run dev`; the desktop shell starts Vite and the backend together.
 
