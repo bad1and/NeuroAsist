@@ -543,12 +543,47 @@ class TimelineStore:
             messages = connection.execute("SELECT COUNT(*) FROM conversation_messages WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,)).fetchone()[0]
             memories = connection.execute("SELECT COUNT(*) FROM memory_items WHERE relationship_id = ? AND status != 'deleted'", (PRIMARY_RELATIONSHIP_ID,)).fetchone()[0]
             episodes = connection.execute("SELECT COUNT(*) FROM conversation_episodes WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,)).fetchone()[0]
-            for table in ("memory_fts", "episode_summary_fts", "timeline_message_fts", "memory_audit", "episode_summaries", "background_jobs"):
-                connection.execute(f"DELETE FROM {table}")
+
+            # Desktop data survives branch changes and application upgrades. A database
+            # created by a newer memory build can therefore contain optional graph and
+            # retrieval tables even when the running core only knows the V0.5 schema.
+            # Clear known child tables first so their foreign keys cannot block the
+            # canonical timeline reset. Missing optional tables are intentionally skipped
+            # to keep the same code compatible with fresh and older installations.
+            existing_tables = {
+                str(row[0])
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+            }
+            reset_tables_child_first = (
+                "memory_usage",
+                "memory_retrieval_runs",
+                "memory_operations",
+                "graph_edge_evidence",
+                "memory_contradictions",
+                "graph_audit",
+                "graph_nodes_fts",
+                "graph_edges",
+                "graph_nodes",
+                "memory_fts",
+                "episode_summary_fts",
+                "timeline_message_fts",
+                "memory_audit",
+                "episode_summaries",
+                "semantic_vectors",
+                "semantic_index_state",
+                "background_jobs",
+            )
+            connection.execute(
+                "UPDATE conversation_timelines SET current_episode_id = NULL, latest_message_id = NULL, updated_at = ? WHERE id = ?",
+                (self._now(), PRIMARY_TIMELINE_ID),
+            )
+            for table in reset_tables_child_first:
+                if table in existing_tables:
+                    # Table names come exclusively from the fixed allowlist above.
+                    connection.execute(f"DELETE FROM {table}")
             connection.execute("DELETE FROM memory_items WHERE relationship_id = ?", (PRIMARY_RELATIONSHIP_ID,))
             connection.execute("DELETE FROM conversation_messages WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,))
             connection.execute("DELETE FROM conversation_episodes WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,))
-            connection.execute("UPDATE conversation_timelines SET current_episode_id = NULL, updated_at = ? WHERE id = ?", (self._now(), PRIMARY_TIMELINE_ID))
             return {"messages": int(messages), "memories": int(memories), "episodes": int(episodes)}
 
     def memory_audit(self, memory_id: str) -> list[dict[str, object]]:
