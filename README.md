@@ -27,7 +27,7 @@ The current release focuses on a stable voice interaction loop:
 
 ```mermaid
 flowchart LR
-    A[Microphone or text] --> B[faster-whisper STT]
+    A[Microphone or text] --> B[GigaAM v3 STT]
     B --> C[Character Agent]
     C --> D[DeepSeek-compatible LLM]
     D --> E[Silero TTS]
@@ -43,7 +43,7 @@ The V0.5 direction is a single continuous desktop companion: one character, one 
 | Text conversation | ✅ | FastAPI chat endpoint |
 | Push-to-talk voice chat | ✅ | Browser `MediaRecorder` |
 | Live voice response | ✅ | WebSocket audio segments |
-| Local speech-to-text | ✅ | `faster-whisper` |
+| Local speech-to-text | ✅ | GigaAM v3, `faster-whisper` fallback |
 | Local Russian text-to-speech | ✅ | Silero `v5_5_ru` |
 | Conversation history and journal | ✅ | SQLite timeline, episodes, and summaries |
 | Long-term memory | 🧪 | SQLite canonical records, audit trail, and Memory Center |
@@ -85,7 +85,8 @@ The header displays backend status, WebSocket connection state, API-key availabi
 - Pydantic Settings
 - SQLite
 - WebSocket
-- `faster-whisper`
+- GigaAM v3
+- `faster-whisper` as a multilingual fallback
 - Silero TTS
 - DeepSeek-compatible LLM API
 
@@ -107,7 +108,7 @@ The header displays backend status, WebSocket connection state, API-key availabi
 - Node.js **24+**;
 - FFmpeg and FFprobe available through `PATH`;
 - a DeepSeek API key;
-- internet access for the first Whisper and Silero model download;
+- internet access for the first GigaAM/Whisper and Silero model download;
 - optional CUDA-capable GPU.
 
 ### 1. Clone the development branch
@@ -159,10 +160,9 @@ DEEPSEEK_API_KEY=your_deepseek_api_key
 Default voice configuration:
 
 ```env
-VOICE_STT_PROVIDER=faster_whisper
-VOICE_STT_MODEL=small
-VOICE_STT_DEVICE=cuda
-VOICE_STT_COMPUTE_TYPE=int8_float16
+VOICE_STT_PROVIDER=gigaam
+VOICE_STT_MODEL=v3_rnnt
+VOICE_STT_DEVICE=cpu
 
 VOICE_TTS_ENABLED=true
 VOICE_TTS_PROVIDER=silero
@@ -198,15 +198,17 @@ VOICE_SILERO_WARMUP=true
 
 | Variable | What it controls |
 |---|---|
-| `VOICE_STT_PROVIDER` | STT provider. Use `faster_whisper` for real local recognition; `mock` is for tests. |
-| `VOICE_STT_MODEL` | Whisper model size, for example `small`. Larger models can improve quality but need more resources. |
+| `VOICE_STT_PROVIDER` | STT provider: `gigaam` for accurate Russian, `faster_whisper` for multilingual use, or `mock` for tests. |
+| `VOICE_STT_MODEL` | Provider model: `v3_rnnt` is recommended for GigaAM and `large-v3-turbo` for faster-whisper. |
 | `VOICE_STT_DEVICE` | STT device policy: `cpu`, `cuda`, or `auto`. |
-| `VOICE_STT_COMPUTE_TYPE` | faster-whisper compute type, for example `int8` for CPU-friendly inference. |
+| `VOICE_STT_COMPUTE_TYPE` | faster-whisper-only compute type, such as `int8` for CPU or `int8_float16` for CUDA. GigaAM ignores it. |
 | `VOICE_DEFAULT_LANGUAGE` | Default language hint for STT and voice UI, for example `ru`. |
 | `VOICE_PRELOAD_STT_MODEL` | Loads the STT model during backend startup instead of on first recording. |
 | `VOICE_STT_TIMEOUT_SECONDS` | Maximum time allowed for one STT request. |
 | `VOICE_MAX_UPLOAD_MB` | Maximum uploaded audio size. |
 | `VOICE_MAX_RECORD_SECONDS` | Maximum accepted recording duration. |
+
+For a Russian voice assistant, the recommended setup is `gigaam` + `v3_rnnt`. It is the most word-accurate mode, but returns lowercase text without punctuation. `v3_e2e_rnnt` produces readable punctuation and normalized numbers with a small accuracy trade-off. On a GTX 1660 SUPER / Ryzen 7 5700X control run (`20` short Golos recordings), `v3_rnnt` reached `1.0% WER` with `0.56 s` median latency on GPU or `0.40 s` on CPU with four threads. `large-v3-turbo` reached `16.2% WER` and `1.26 s`; Whisper `small` reached `32.3% WER` and `1.05 s`. This small run selects the runtime; final quality should be checked on the actual user's recordings.
 
 #### Text-to-speech / Silero
 
@@ -322,7 +324,7 @@ flowchart TB
         History[SQLite history]
     end
 
-    STT[faster-whisper]
+    STT[GigaAM v3 or faster-whisper]
     LLM[DeepSeek-compatible API]
     TTS[Silero TTS]
     Audio[WAV audio storage]
@@ -357,7 +359,7 @@ This keeps the prototype easy to run and debug without introducing unnecessary i
 ```text
 Browser MediaRecorder
   → POST /voice/chat
-  → faster-whisper
+  → GigaAM v3
   → Character Agent
   → DeepSeek-compatible LLM
   → immediate text response
@@ -483,6 +485,23 @@ Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\torch\hub\checkpoints" -Err
 
 If the machine has restricted corporate or antivirus HTTPS inspection, allow Python to access GitHub/PyTorch downloads or prepare the Torch cache on another machine and copy `%USERPROFILE%\.cache\torch` to the target user profile.
 
+### GigaAM STT
+
+On first use, GigaAM downloads the roughly `426 MB` `v3_rnnt` checkpoint to `%USERPROFILE%\.cache\gigaam`. CPU is recommended for Russian on the target machine: short utterances were faster on the Ryzen 7 5700X than on the GTX 1660 SUPER, while leaving VRAM free. Verify the installed provider with:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import asyncio; from apps.backend.app.voice.providers import GigaAMSTTProvider; p=GigaAMSTTProvider('v3_rnnt','cpu'); asyncio.run(p.preload()); print('gigaam ok', p._selected_device)"
+```
+
+`v3_rnnt` is Russian-first. For English or mixed-language speech, switch to:
+
+```env
+VOICE_STT_PROVIDER=faster_whisper
+VOICE_STT_MODEL=large-v3-turbo
+VOICE_STT_DEVICE=cuda
+VOICE_STT_COMPUTE_TYPE=int8_float16
+```
+
 ### faster-whisper falls back to CPU on Windows
 
 If logs contain:
@@ -513,10 +532,10 @@ New-Item -ItemType Directory -Force -Path $out
 Copy-Item -Force .cache\ct2-cuda\extracted\*.dll .venv\Scripts\
 
 # 5. Verify direct faster-whisper CUDA loading.
-.\.venv\Scripts\python.exe -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cuda', compute_type='int8_float16'); print('cuda ok')"
+.\.venv\Scripts\python.exe -c "from faster_whisper import WhisperModel; WhisperModel('large-v3-turbo', device='cuda', compute_type='int8_float16'); print('cuda ok')"
 
 # 6. Verify the backend provider chooses CUDA in auto mode.
-.\.venv\Scripts\python.exe -c "from apps.backend.app.voice.providers import FasterWhisperSTTProvider; p=FasterWhisperSTTProvider('small','auto','int8'); p._ensure_model(); print('provider ok', p._selected_device, p._selected_compute_type)"
+.\.venv\Scripts\python.exe -c "from apps.backend.app.voice.providers import FasterWhisperSTTProvider; p=FasterWhisperSTTProvider('large-v3-turbo','auto','int8'); p._ensure_model(); print('provider ok', p._selected_device, p._selected_compute_type)"
 ```
 
 Expected result:

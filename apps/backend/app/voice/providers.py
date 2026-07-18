@@ -1,8 +1,12 @@
 import asyncio
+import array
 import io
 import logging
 import os
 import re
+import subprocess
+import tempfile
+import threading
 import time
 import wave
 from dataclasses import dataclass
@@ -253,6 +257,190 @@ class FasterWhisperSTTProvider(STTProvider):
             "library",
         )
         return any(marker in message for marker in cuda_markers)
+
+
+class GigaAMSTTProvider(STTProvider):
+    """Russian-first local ASR backed by GigaAM v3."""
+
+    _SAMPLE_RATE = 16000
+    _MAX_SHORT_SECONDS = 24
+
+    def __init__(self, model_name: str, device: str) -> None:
+        if device not in {"cpu", "cuda", "auto"}:
+            raise ValueError("VOICE_STT_DEVICE must be one of: cpu, cuda, auto")
+        self._model_name = model_name
+        self._device = device
+        self._model = None
+        self._selected_device: str | None = None
+        self._load_lock = threading.Lock()
+        self._inference_lock = threading.Lock()
+
+    async def transcribe(self, audio_path: Path, language: str) -> STTResult:
+        started = time.perf_counter()
+        return await asyncio.to_thread(self._transcribe_sync, audio_path, language, started)
+
+    async def preload(self) -> None:
+        await asyncio.to_thread(self._ensure_model)
+
+    def _ensure_model(self):
+        try:
+            import gigaam
+        except ImportError as exc:
+            raise RuntimeError("GigaAM is not installed") from exc
+
+        if self._model is not None:
+            return self._model
+        with self._load_lock:
+            if self._model is not None:
+                return self._model
+            candidates = [self._device]
+            if self._device == "auto":
+                candidates = ["cuda", "cpu"]
+            last_error: Exception | None = None
+            for device in candidates:
+                try:
+                    self._model = gigaam.load_model(
+                        self._model_name,
+                        device=device,
+                        fp16_encoder=device == "cuda",
+                        use_flash=False,
+                    )
+                    self._selected_device = device
+                    logger.info(
+                        "GigaAM STT model loaded: model=%s device=%s",
+                        self._model_name,
+                        device,
+                    )
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    logger.warning(
+                        "GigaAM model load failed: model=%s device=%s error_type=%s",
+                        self._model_name,
+                        device,
+                        type(exc).__name__,
+                    )
+            if self._model is None:
+                raise RuntimeError("GigaAM model could not be loaded") from last_error
+        return self._model
+
+    def _transcribe_sync(self, audio_path: Path, language: str, started: float) -> STTResult:
+        with self._inference_lock:
+            try:
+                text = self._transcribe_with_current_model(audio_path)
+            except Exception as exc:
+                if not self._should_retry_on_cpu(exc):
+                    raise
+                logger.info(
+                    "GigaAM CUDA runtime failed, retrying on CPU: model=%s error_type=%s",
+                    self._model_name,
+                    type(exc).__name__,
+                )
+                self._model = None
+                self._device = "cpu"
+                self._selected_device = None
+                text = self._transcribe_with_current_model(audio_path)
+        return STTResult(
+            text=text,
+            language="ru" if language == "auto" else language,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            provider="gigaam",
+            model=self._model_name,
+        )
+
+    def _transcribe_with_current_model(self, audio_path: Path) -> str:
+        model = self._ensure_model()
+        try:
+            return self._transcribe_short(model, audio_path)
+        except ValueError as exc:
+            if "too long wav" not in str(exc).lower():
+                raise
+        return self._transcribe_long(model, audio_path)
+
+    @staticmethod
+    def _transcribe_short(model: Any, audio_path: Path) -> str:
+        result = model.transcribe(str(audio_path))
+        return str(getattr(result, "text", result)).strip()
+
+    def _transcribe_long(self, model: Any, audio_path: Path) -> str:
+        pcm16 = self._decode_pcm16(audio_path)
+        chunks = self._split_pcm16_on_quiet(pcm16)
+        texts: list[str] = []
+        with tempfile.TemporaryDirectory(prefix="neuroasist-gigaam-") as temp_dir:
+            for index, chunk in enumerate(chunks):
+                chunk_path = Path(temp_dir) / f"chunk-{index:03d}.wav"
+                with wave.open(str(chunk_path), "wb") as audio:
+                    audio.setnchannels(1)
+                    audio.setsampwidth(2)
+                    audio.setframerate(self._SAMPLE_RATE)
+                    audio.writeframes(chunk)
+                text = self._transcribe_short(model, chunk_path)
+                if text:
+                    texts.append(text)
+        return " ".join(texts).strip()
+
+    def _decode_pcm16(self, audio_path: Path) -> bytes:
+        command = [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-nostdin",
+            "-i",
+            str(audio_path),
+            "-f",
+            "s16le",
+            "-acodec",
+            "pcm_s16le",
+            "-ac",
+            "1",
+            "-ar",
+            str(self._SAMPLE_RATE),
+            "-",
+        ]
+        completed = subprocess.run(command, capture_output=True, check=False)
+        if completed.returncode != 0 or not completed.stdout:
+            raise RuntimeError("Could not decode long audio for GigaAM")
+        return completed.stdout
+
+    def _split_pcm16_on_quiet(self, pcm16: bytes) -> list[bytes]:
+        samples = array.array("h")
+        samples.frombytes(pcm16)
+        max_samples = self._MAX_SHORT_SECONDS * self._SAMPLE_RATE
+        if len(samples) <= max_samples:
+            return [pcm16]
+
+        min_chunk = 16 * self._SAMPLE_RATE
+        max_chunk = 23 * self._SAMPLE_RATE
+        min_tail = 5 * self._SAMPLE_RATE
+        frame = self._SAMPLE_RATE // 10
+        chunks: list[bytes] = []
+        start = 0
+        while len(samples) - start > max_samples:
+            search_start = start + min_chunk
+            search_end = min(start + max_chunk, len(samples) - min_tail)
+            if search_end <= search_start:
+                cut = min(start + max_chunk, len(samples))
+            else:
+                candidates = range(search_start, search_end - frame + 1, frame)
+                quiet_start = min(
+                    candidates,
+                    key=lambda offset: sum(value * value for value in samples[offset : offset + frame]),
+                )
+                cut = quiet_start + frame // 2
+            chunks.append(samples[start:cut].tobytes())
+            start = cut
+        if start < len(samples):
+            chunks.append(samples[start:].tobytes())
+        return chunks
+
+    def _should_retry_on_cpu(self, exc: Exception) -> bool:
+        if self._device != "auto" or self._selected_device != "cuda":
+            return False
+        message = str(exc).lower()
+        return any(
+            marker in message
+            for marker in ("cuda", "cublas", "cudnn", "out of memory", "driver")
+        )
 
 
 def waveform_to_wav_bytes(waveform: Any, sample_rate: int) -> bytes:
