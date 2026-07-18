@@ -55,7 +55,7 @@ def test_public_settings_does_not_return_api_key(client: TestClient) -> None:
     assert "available_models" not in body
     assert body["available_personalities"] == ["default"]
     assert body["voice_language"] == "ru"
-    assert body["voice_stt_model"] == "small"
+    assert body["voice_stt_model"] == "v3_rnnt"
     assert body["voice_tts_enabled"] is True
     assert body["voice_tts_voice"]
     assert body["voice_playback_rate"] == 1.0

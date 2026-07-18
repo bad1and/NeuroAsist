@@ -45,6 +45,8 @@ New-Item -ItemType Directory -Force -Path $binaries, $output | Out-Null
     --paths $root `
     --add-data "$(Join-Path $root 'apps\protocol');apps\protocol" `
     --collect-all silero `
+    --collect-all gigaam `
+    --collect-all torchaudio `
     --collect-all faster_whisper `
     --collect-all ctranslate2 `
     --collect-all av `

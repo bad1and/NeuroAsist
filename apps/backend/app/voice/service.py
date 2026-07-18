@@ -13,6 +13,7 @@ from fastapi import HTTPException, UploadFile, status
 from apps.backend.app.core.config import Settings
 from apps.backend.app.voice.providers import (
     FasterWhisperSTTProvider,
+    GigaAMSTTProvider,
     MockSTTProvider,
     MockTTSProvider,
     SileroTTSProvider,
@@ -224,6 +225,11 @@ class VoiceService:
                 settings.voice_stt_model,
                 settings.voice_stt_device,
                 settings.voice_stt_compute_type,
+            )
+        if settings.voice_stt_provider == "gigaam":
+            return GigaAMSTTProvider(
+                settings.voice_stt_model,
+                settings.voice_stt_device,
             )
         raise ValueError(f"Unsupported STT provider: {settings.voice_stt_provider}")
 

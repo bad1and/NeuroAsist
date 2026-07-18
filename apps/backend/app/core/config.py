@@ -55,9 +55,9 @@ class Settings(BaseSettings):
     log_file_path: str = "logs/app.log"
     cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173,http://tauri.localhost,tauri://localhost"
     cors_origin_regex: str = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
-    voice_stt_provider: str = "faster_whisper"
-    voice_stt_model: str = "small"
-    voice_stt_device: str = "auto"
+    voice_stt_provider: str = "gigaam"
+    voice_stt_model: str = "v3_rnnt"
+    voice_stt_device: str = "cpu"
     voice_stt_compute_type: str = "int8"
     voice_default_language: str = "ru"
     voice_preload_stt_model: bool = True

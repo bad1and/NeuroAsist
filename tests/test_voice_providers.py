@@ -15,6 +15,7 @@ from apps.backend.app.core.config import Settings
 from apps.backend.app.voice.providers import (
     AudioChunk,
     FasterWhisperSTTProvider,
+    GigaAMSTTProvider,
     SileroTTSProvider,
     TTSRequest,
     split_tts_chunks,
@@ -101,6 +102,73 @@ def test_faster_whisper_auto_retries_cpu_on_cuda_runtime_dll_error(
     assert calls == [("cuda", "int8_float16"), ("cpu", "int8")]
     assert "FasterWhisper CUDA runtime failed, retrying on CPU" in caplog.text
     assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
+
+
+def test_gigaam_transcribes_with_selected_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    load_calls: list[dict[str, object]] = []
+
+    class FakeGigaAMModel:
+        def transcribe(self, audio_path: str):
+            assert audio_path.endswith("input.wav")
+            return SimpleNamespace(text="точная русская расшифровка")
+
+    def load_model(model_name: str, **kwargs):
+        load_calls.append({"model": model_name, **kwargs})
+        return FakeGigaAMModel()
+
+    monkeypatch.setitem(sys.modules, "gigaam", SimpleNamespace(load_model=load_model))
+    audio_path = tmp_path / "input.wav"
+    audio_path.write_bytes(b"fake")
+    provider = GigaAMSTTProvider("v3_rnnt", "cpu")
+
+    result = asyncio.run(provider.transcribe(audio_path, "ru"))
+
+    assert result.text == "точная русская расшифровка"
+    assert result.provider == "gigaam"
+    assert result.model == "v3_rnnt"
+    assert load_calls == [
+        {
+            "model": "v3_rnnt",
+            "device": "cpu",
+            "fp16_encoder": False,
+            "use_flash": False,
+        }
+    ]
+
+
+def test_gigaam_auto_falls_back_to_cpu_during_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    devices: list[str] = []
+
+    def load_model(model_name: str, *, device: str, **kwargs):
+        devices.append(device)
+        if device == "cuda":
+            raise RuntimeError("CUDA out of memory")
+        return SimpleNamespace(transcribe=lambda path: SimpleNamespace(text="готово"))
+
+    monkeypatch.setitem(sys.modules, "gigaam", SimpleNamespace(load_model=load_model))
+    provider = GigaAMSTTProvider("v3_rnnt", "auto")
+
+    asyncio.run(provider.preload())
+
+    assert devices == ["cuda", "cpu"]
+    assert provider._selected_device == "cpu"
+
+
+def test_gigaam_long_audio_split_preserves_pcm_and_stays_under_limit() -> None:
+    provider = GigaAMSTTProvider("v3_rnnt", "cpu")
+    samples = np.full(30 * 16000, 1000, dtype="<i2")
+    samples[18 * 16000 : 18 * 16000 + 1600] = 0
+    pcm16 = samples.tobytes()
+
+    chunks = provider._split_pcm16_on_quiet(pcm16)
+
+    assert len(chunks) == 2
+    assert b"".join(chunks) == pcm16
+    assert all(len(chunk) // 2 <= 24 * 16000 for chunk in chunks)
+    assert abs((len(chunks[0]) // 2) - int(18.05 * 16000)) <= 1600
 
 
 def test_waveform_to_wav_bytes_clamps_and_writes_pcm16_wav() -> None:
