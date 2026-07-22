@@ -26,6 +26,8 @@ def _available_tts_voices(request: Request) -> list[str]:
 def get_public_settings(request: Request) -> PublicSettingsResponse:
     settings = request.app.state.settings
     runtime_settings = request.app.state.runtime_settings
+    tts_provider = request.app.state.voice_service.tts_provider
+    tts_metadata = dict(getattr(tts_provider, "metadata", {}))
 
     return PublicSettingsResponse(
         provider="deepseek",
@@ -34,8 +36,12 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         voice_language=runtime_settings.voice_language,
         voice_stt_model=settings.voice_stt_model,
         voice_tts_enabled=settings.voice_tts_enabled,
+        voice_tts_provider=str(tts_metadata.get("provider", tts_provider.name)),
+        voice_tts_model=tts_metadata.get("model"),
+        voice_tts_device=tts_metadata.get("device"),
+        voice_tts_fallback_active=bool(tts_metadata.get("fallback_active", False)),
         avatar_enabled=settings.avatar_enabled,
-        voice_tts_voice=runtime_settings.voice_tts_voice or settings.voice_silero_speaker_ru,
+        voice_tts_voice=runtime_settings.voice_tts_voice or settings.voice_tts_default_voice,
         voice_playback_rate=runtime_settings.voice_playback_rate,
         voice_live_playback_prebuffer_segments=runtime_settings.voice_live_playback_prebuffer_segments,
         voice_live_playback_prebuffer_ms=runtime_settings.voice_live_playback_prebuffer_ms,

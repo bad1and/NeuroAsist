@@ -29,6 +29,8 @@ if (-not $SkipDependencyInstall) {
     Add-Content -Encoding utf8 -LiteralPath $releaseRequirements "pyinstaller==6.21.0"
     & $python -m pip install --requirement $releaseRequirements
     Assert-LastExitCode "Installing release Python dependencies"
+    & (Join-Path $root "scripts\install-openvoice.ps1") -Python $python
+    Assert-LastExitCode "Installing OpenVoice tone converter"
     npm ci --prefix (Join-Path $root "apps\web")
     Assert-LastExitCode "Installing web dependencies"
     npm ci --prefix $desktop
@@ -46,6 +48,9 @@ New-Item -ItemType Directory -Force -Path $binaries, $output | Out-Null
     --add-data "$(Join-Path $root 'apps\protocol');apps\protocol" `
     --collect-all silero `
     --collect-all gigaam `
+    --collect-all openvoice `
+    --collect-all supertonic `
+    --collect-all onnxruntime `
     --collect-all torchaudio `
     --collect-all faster_whisper `
     --collect-all ctranslate2 `

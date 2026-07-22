@@ -88,6 +88,93 @@ class TTSProvider:
         raise NotImplementedError
 
 
+class FallbackTTSProvider(TTSProvider):
+    """Use a primary TTS provider and lazily switch to a fallback after failure."""
+
+    def __init__(self, primary: TTSProvider, fallback: TTSProvider) -> None:
+        self.primary = primary
+        self.fallback = fallback
+        self._active = primary
+        self._switch_lock = asyncio.Lock()
+
+    @property
+    def name(self) -> str:
+        return self.primary.name
+
+    @property
+    def sample_rate(self) -> int:
+        return int(getattr(self._active, "sample_rate", 24000))
+
+    @property
+    def available_speakers(self) -> list[str]:
+        voices = getattr(self._active, "available_speakers", None)
+        return list(voices) if voices is not None else []
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        metadata = dict(getattr(self._active, "metadata", {}))
+        metadata.setdefault("provider", self._active.name)
+        metadata["configured_provider"] = self.primary.name
+        metadata["fallback_provider"] = self.fallback.name
+        metadata["fallback_active"] = self._active is self.fallback
+        return metadata
+
+    def resolve_voice(self, language: str, requested_voice: str | None = None) -> str:
+        return self._active.resolve_voice(language, requested_voice)
+
+    async def _activate_fallback(self, error: Exception) -> None:
+        async with self._switch_lock:
+            if self._active is self.fallback:
+                return
+            logger.warning(
+                "Primary TTS provider failed; activating fallback: primary=%s fallback=%s "
+                "error_type=%s",
+                self.primary.name,
+                self.fallback.name,
+                type(error).__name__,
+                exc_info=error,
+            )
+            await self.fallback.preload()
+            self._active = self.fallback
+
+    async def preload(self) -> None:
+        try:
+            await self.primary.preload()
+        except Exception as exc:
+            await self._activate_fallback(exc)
+
+    async def stream(self, request: TTSRequest):
+        try:
+            async for chunk in self._active.stream(request):
+                yield chunk
+            return
+        except Exception as exc:
+            if self._active is self.fallback:
+                raise
+            await self._activate_fallback(exc)
+        fallback_voice = self.fallback.resolve_voice(request.language, request.voice)
+        fallback_request = TTSRequest(
+            text=request.text,
+            language=request.language,
+            voice=fallback_voice,
+            rate=request.rate,
+            pitch=request.pitch,
+            volume=request.volume,
+        )
+        async for chunk in self.fallback.stream(fallback_request):
+            yield chunk
+
+    async def synthesize(self, text: str, voice: str, output_path: Path) -> TTSResult:
+        try:
+            return await self._active.synthesize(text, voice, output_path)
+        except Exception as exc:
+            if self._active is self.fallback:
+                raise
+            await self._activate_fallback(exc)
+        fallback_voice = self.fallback.resolve_voice("ru", voice)
+        return await self.fallback.synthesize(text, fallback_voice, output_path)
+
+
 class MockSTTProvider(STTProvider):
     async def transcribe(self, audio_path: Path, language: str) -> STTResult:
         return STTResult(
@@ -475,6 +562,888 @@ def wav_duration_seconds(wav_bytes: bytes) -> float:
         return frames / rate
 
 
+_RU_UNITS = (
+    "ноль",
+    "один",
+    "два",
+    "три",
+    "четыре",
+    "пять",
+    "шесть",
+    "семь",
+    "восемь",
+    "девять",
+    "десять",
+    "одиннадцать",
+    "двенадцать",
+    "тринадцать",
+    "четырнадцать",
+    "пятнадцать",
+    "шестнадцать",
+    "семнадцать",
+    "восемнадцать",
+    "девятнадцать",
+)
+_RU_TENS = ("", "", "двадцать", "тридцать", "сорок", "пятьдесят", "шестьдесят", "семьдесят", "восемьдесят", "девяносто")
+_RU_HUNDREDS = ("", "сто", "двести", "триста", "четыреста", "пятьсот", "шестьсот", "семьсот", "восемьсот", "девятьсот")
+_RU_SCALES = (
+    ("", "", "", False),
+    ("тысяча", "тысячи", "тысяч", True),
+    ("миллион", "миллиона", "миллионов", False),
+    ("миллиард", "миллиарда", "миллиардов", False),
+    ("триллион", "триллиона", "триллионов", False),
+)
+_RU_DIGITS = tuple(_RU_UNITS[:10])
+
+
+def _ru_plural_form(number: int, forms: tuple[str, str, str]) -> str:
+    last_two = number % 100
+    if 11 <= last_two <= 14:
+        return forms[2]
+    last = number % 10
+    if last == 1:
+        return forms[0]
+    if 2 <= last <= 4:
+        return forms[1]
+    return forms[2]
+
+
+def _ru_triplet(number: int, *, feminine: bool = False) -> list[str]:
+    words: list[str] = []
+    hundreds, remainder = divmod(number, 100)
+    if hundreds:
+        words.append(_RU_HUNDREDS[hundreds])
+    if remainder < 20:
+        if remainder:
+            if feminine and remainder == 1:
+                words.append("одна")
+            elif feminine and remainder == 2:
+                words.append("две")
+            else:
+                words.append(_RU_UNITS[remainder])
+        return words
+    tens, units = divmod(remainder, 10)
+    words.append(_RU_TENS[tens])
+    if units:
+        if feminine and units == 1:
+            words.append("одна")
+        elif feminine and units == 2:
+            words.append("две")
+        else:
+            words.append(_RU_UNITS[units])
+    return words
+
+
+def integer_to_russian_words(value: int, *, original_digits: str | None = None) -> str:
+    digits = original_digits or str(abs(value))
+    unsigned_digits = digits.lstrip("+-")
+    if (len(unsigned_digits) > 1 and unsigned_digits.startswith("0")) or len(unsigned_digits) > 15:
+        prefix = "минус " if value < 0 else ""
+        return prefix + " ".join(_RU_DIGITS[int(digit)] for digit in unsigned_digits if digit.isdigit())
+    if value == 0:
+        return _RU_UNITS[0]
+
+    prefix = ["минус"] if value < 0 else []
+    remaining = abs(value)
+    groups: list[int] = []
+    while remaining:
+        remaining, group = divmod(remaining, 1000)
+        groups.append(group)
+    if len(groups) > len(_RU_SCALES):
+        return " ".join(_RU_DIGITS[int(digit)] for digit in unsigned_digits)
+
+    words = prefix
+    for scale_index in range(len(groups) - 1, -1, -1):
+        group = groups[scale_index]
+        if not group:
+            continue
+        scale = _RU_SCALES[scale_index]
+        words.extend(_ru_triplet(group, feminine=scale[3]))
+        if scale_index:
+            words.append(_ru_plural_form(group, scale[:3]))
+    return " ".join(words)
+
+
+_IPV4_PATTERN = re.compile(r"(?<![\d.])(\d{1,3}(?:\.\d{1,3}){3})(?!\d|\.\d)")
+_DOTTED_NUMBER_PATTERN = re.compile(r"(?<![\d.])(\d+(?:\.\d+){2,})(?!\d|\.\d)")
+_TECH_PAIR_NUMBER_PATTERN = re.compile(
+    r"(?i)\b((?:порт(?:а|у|ом|е)?|(?:rtx|gtx|rx))\s+)(\d{4})\b"
+)
+_YEAR_PATTERN = re.compile(
+    r"(?i)(?<!\d)((?:19|20)\d{2})(\s+)(год|года|году|годом|годе)\b"
+)
+_NUMBER_PATTERN = re.compile(r"(?<!\d)([+-]?\d+(?:[.,]\d+)?)(%?)(?!\d)")
+
+_RU_ORDINALS = {
+    1: "первый", 2: "второй", 3: "третий", 4: "четвёртый", 5: "пятый",
+    6: "шестой", 7: "седьмой", 8: "восьмой", 9: "девятый", 10: "десятый",
+    11: "одиннадцатый", 12: "двенадцатый", 13: "тринадцатый",
+    14: "четырнадцатый", 15: "пятнадцатый", 16: "шестнадцатый",
+    17: "семнадцатый", 18: "восемнадцатый", 19: "девятнадцатый",
+    20: "двадцатый", 30: "тридцатый", 40: "сороковой", 50: "пятидесятый",
+    60: "шестидесятый", 70: "семидесятый", 80: "восьмидесятый",
+    90: "девяностый",
+}
+
+
+def _ru_ordinal_under_hundred(value: int) -> str:
+    if value in _RU_ORDINALS:
+        return _RU_ORDINALS[value]
+    tens, units = divmod(value, 10)
+    return f"{_RU_TENS[tens]} {_RU_ORDINALS[units]}"
+
+
+def _decline_year_ordinal(ordinal: str, year_noun: str) -> str:
+    if year_noun == "год":
+        return ordinal
+    if ordinal.endswith("третий"):
+        endings = {"года": "третьего", "году": "третьем", "годом": "третьим", "годе": "третьем"}
+        return ordinal.removesuffix("третий") + endings[year_noun]
+    stem = ordinal[:-2]
+    endings = {"года": "ого", "году": "ом", "годом": "ым", "годе": "ом"}
+    return stem + endings[year_noun]
+
+
+def _year_to_russian_words(year: int, year_noun: str) -> str:
+    if year == 2000:
+        ordinal = "двухтысячный"
+        return _decline_year_ordinal(ordinal, year_noun)
+    if year == 1900:
+        ordinal = "тысяча девятисотый"
+        return _decline_year_ordinal(ordinal, year_noun)
+    if 2000 < year < 2100:
+        prefix = "две тысячи"
+        ordinal = _ru_ordinal_under_hundred(year - 2000)
+    else:
+        prefix = "тысяча девятьсот"
+        remainder = year - 1900
+        ordinal = _ru_ordinal_under_hundred(remainder)
+    return f"{prefix} {_decline_year_ordinal(ordinal, year_noun)}"
+
+
+def expand_russian_numbers(text: str) -> str:
+    def replace_year(match: re.Match[str]) -> str:
+        year, spacing, year_noun = match.groups()
+        return f"{_year_to_russian_words(int(year), year_noun.lower())}{spacing}{year_noun}"
+
+    def replace_dotted(match: re.Match[str]) -> str:
+        return " точка ".join(
+            integer_to_russian_words(int(part), original_digits=part)
+            for part in match.group(1).split(".")
+        )
+
+    def replace_tech_pair(match: re.Match[str]) -> str:
+        prefix, digits = match.groups()
+        left, right = digits[:2], digits[2:]
+        if int(left) < 10 or int(right) < 10:
+            return match.group(0)
+        return (
+            f"{prefix}{integer_to_russian_words(int(left), original_digits=left)}, "
+            f"{integer_to_russian_words(int(right), original_digits=right)}"
+        )
+
+    def replace(match: re.Match[str]) -> str:
+        raw_number, percent = match.groups()
+        sign = -1 if raw_number.startswith("-") else 1
+        unsigned = raw_number.lstrip("+-")
+        if "." in unsigned or "," in unsigned:
+            integer_part, fractional_part = re.split(r"[.,]", unsigned, maxsplit=1)
+            integer_value = sign * int(integer_part or "0")
+            result = (
+                f"{integer_to_russian_words(integer_value, original_digits=integer_part)} "
+                f"точка {integer_to_russian_words(int(fractional_part), original_digits=fractional_part)}"
+            )
+        else:
+            integer_value = sign * int(unsigned)
+            result = integer_to_russian_words(integer_value, original_digits=unsigned)
+        if percent:
+            result += " " + _ru_plural_form(abs(int(float(raw_number.replace(",", ".")))), ("процент", "процента", "процентов"))
+        return result
+
+    normalized = _YEAR_PATTERN.sub(replace_year, text)
+    normalized = _IPV4_PATTERN.sub(replace_dotted, normalized)
+    normalized = _DOTTED_NUMBER_PATTERN.sub(replace_dotted, normalized)
+    normalized = _TECH_PAIR_NUMBER_PATTERN.sub(replace_tech_pair, normalized)
+    return _NUMBER_PATTERN.sub(replace, normalized)
+
+
+_ENGLISH_LETTER_NAMES = {
+    "a": "эй", "b": "би", "c": "си", "d": "ди", "e": "и", "f": "эф", "g": "джи",
+    "h": "эйч", "i": "ай", "j": "джей", "k": "кей", "l": "эл", "m": "эм", "n": "эн",
+    "o": "оу", "p": "пи", "q": "кью", "r": "ар", "s": "эс", "t": "ти", "u": "ю",
+    "v": "ви", "w": "дабл ю", "x": "экс", "y": "уай", "z": "зи",
+}
+_TECH_WORDS_RU = {
+    "ai": "эй ай",
+    "api": "эй пи ай",
+    "cpu": "си пи ю",
+    "cuda": "кьюда",
+    "docker": "докер",
+    "github": "гитхаб",
+    "gpu": "джи пи ю",
+    "http": "эйч ти ти пи",
+    "https": "эйч ти ти пи эс",
+    "json": "джейсон",
+    "linux": "линукс",
+    "llm": "эл эл эм",
+    "neuroasist": "нейро асист",
+    "nvidia": "энвидиа",
+    "openai": "оупен эй ай",
+    "python": "пайтон",
+    "sql": "эс кью эл",
+    "stt": "эс ти ти",
+    "tts": "ти ти эс",
+    "ui": "ю ай",
+    "url": "ю ар эл",
+    "usb": "ю эс би",
+    "windows": "уиндоус",
+    "wifi": "вай фай",
+}
+_ENGLISH_MULTIGRAPHS = (
+    ("tion", "шн"), ("sion", "жн"), ("ture", "чер"), ("eigh", "эй"),
+    ("igh", "ай"), ("air", "эйр"), ("ear", "ир"), ("tch", "ч"),
+    ("ph", "ф"), ("sh", "ш"), ("ch", "ч"), ("th", "с"), ("ck", "к"),
+    ("qu", "кв"), ("ng", "нг"), ("ee", "и"), ("ea", "и"), ("oo", "у"),
+    ("ou", "ау"), ("ow", "ау"), ("ai", "эй"), ("ay", "эй"), ("oi", "ой"),
+    ("oy", "ой"), ("au", "о"),
+)
+_LATIN_WORD_PATTERN = re.compile(r"[A-Za-z]+(?:['’-][A-Za-z]+)*")
+
+_CMUDICT_REVISION = "74790861f652b15e4ac49015a90074ad62a27690"
+_CMUDICT_PATH: Path | None = None
+_CMUDICT_ENTRIES: dict[str, list[str]] | None = None
+_CMUDICT_LOCK = threading.Lock()
+_ARPABET_TO_CYRILLIC = {
+    "AA": "а", "AE": "э", "AH": "э", "AO": "о", "AW": "ау",
+    "AY": "ай", "B": "б", "CH": "ч", "D": "д", "DH": "з",
+    "EH": "э", "ER": "эр", "EY": "эй", "F": "ф", "G": "г",
+    "HH": "х", "IH": "и", "IY": "и", "JH": "дж", "K": "к",
+    "L": "л", "M": "м", "N": "н", "NG": "нг", "OW": "оу",
+    "OY": "ой", "P": "п", "R": "р", "S": "с", "SH": "ш",
+    "T": "т", "TH": "с", "UH": "у", "UW": "у", "V": "в",
+    "W": "у", "Y": "й", "Z": "з", "ZH": "ж",
+}
+
+
+def configure_cmudict(path: Path) -> None:
+    global _CMUDICT_PATH, _CMUDICT_ENTRIES
+    resolved = path.resolve()
+    with _CMUDICT_LOCK:
+        if _CMUDICT_PATH != resolved:
+            _CMUDICT_PATH = resolved
+            _CMUDICT_ENTRIES = None
+
+
+def _load_cmudict_entries() -> dict[str, list[str]]:
+    global _CMUDICT_ENTRIES
+    with _CMUDICT_LOCK:
+        if _CMUDICT_ENTRIES is not None:
+            return _CMUDICT_ENTRIES
+        entries: dict[str, list[str]] = {}
+        if _CMUDICT_PATH is not None and _CMUDICT_PATH.is_file():
+            with _CMUDICT_PATH.open("r", encoding="utf-8", errors="ignore") as dictionary:
+                for raw_line in dictionary:
+                    line = raw_line.strip()
+                    if not line or line.startswith(";;;"):
+                        continue
+                    parts = line.split()
+                    if len(parts) < 2:
+                        continue
+                    word = re.sub(r"\(\d+\)$", "", parts[0].lower())
+                    entries.setdefault(word, parts[1:])
+        _CMUDICT_ENTRIES = entries
+        return entries
+
+
+def _cmudict_word_to_cyrillic(word: str) -> str | None:
+    phonemes = _load_cmudict_entries().get(word.lower())
+    if not phonemes:
+        return None
+    rendered: list[str] = []
+    for phoneme in phonemes:
+        base = re.sub(r"\d", "", phoneme)
+        value = _ARPABET_TO_CYRILLIC.get(base)
+        if value:
+            rendered.append(value)
+    return "".join(rendered) or None
+
+def _english_word_to_cyrillic(word: str) -> str:
+    lower = word.lower().replace("'", "").replace("’", "")
+    known = _TECH_WORDS_RU.get(lower)
+    if known:
+        return known
+    if len(lower) == 1 or (word.isupper() and len(lower) <= 8):
+        return " ".join(_ENGLISH_LETTER_NAMES[letter] for letter in lower)
+    dictionary_pronunciation = _cmudict_word_to_cyrillic(lower)
+    if dictionary_pronunciation:
+        return dictionary_pronunciation
+    if len(lower) > 3 and lower.endswith("e"):
+        lower = lower[:-1]
+    for source, target in _ENGLISH_MULTIGRAPHS:
+        lower = lower.replace(source, target)
+
+    output: list[str] = []
+    for index, char in enumerate(lower):
+        if not ("a" <= char <= "z"):
+            output.append(char)
+            continue
+        next_char = lower[index + 1] if index + 1 < len(lower) else ""
+        if char == "c":
+            output.append("с" if next_char in "eiy" else "к")
+        elif char == "g":
+            output.append("дж" if next_char in "eiy" else "г")
+        else:
+            output.append({
+                "a": "а", "b": "б", "d": "д", "e": "е", "f": "ф", "h": "х",
+                "i": "и", "j": "дж", "k": "к", "l": "л", "m": "м", "n": "н",
+                "o": "о", "p": "п", "q": "к", "r": "р", "s": "с", "t": "т",
+                "u": "у", "v": "в", "w": "у", "x": "кс", "y": "и", "z": "з",
+            }.get(char, char))
+    return "".join(output)
+
+
+def transliterate_english_for_russian_tts(text: str) -> str:
+    return _LATIN_WORD_PATTERN.sub(lambda match: _english_word_to_cyrillic(match.group(0)), text)
+
+
+def normalize_russian_tts_text(text: str, *, transliterate_latin: bool = True) -> str:
+    normalized = expand_russian_numbers(" ".join(text.strip().split()))
+    if transliterate_latin:
+        normalized = transliterate_english_for_russian_tts(normalized)
+    return " ".join(normalized.split())
+
+
+_ENGLISH_RUN_PATTERN = re.compile(
+    r"[A-Za-z]+(?:['’-][A-Za-z]+)*(?:\s+(?:[A-Za-z]+(?:['’-][A-Za-z]+)*|\d+(?:[._-]\d+)*))*"
+)
+_RUSSIAN_OR_NUMBER_PATTERN = re.compile(r"[А-Яа-яЁё\d]")
+
+
+def split_multilingual_tts_segments(text: str, language: str = "ru") -> list[tuple[str, str]]:
+    """Split Russian text into native RU/EN runs without synthesizing punctuation alone."""
+    normalized = " ".join(text.strip().split())
+    if not normalized:
+        return []
+    if language.lower().startswith("en"):
+        return [("en", normalized)]
+
+    raw_segments: list[tuple[str, str]] = []
+    cursor = 0
+    for match in _ENGLISH_RUN_PATTERN.finditer(normalized):
+        if match.start() > cursor:
+            raw_segments.append(("ru", normalized[cursor:match.start()]))
+        raw_segments.append(("en", match.group(0)))
+        cursor = match.end()
+    if cursor < len(normalized):
+        raw_segments.append(("ru", normalized[cursor:]))
+    if not raw_segments:
+        raw_segments.append(("ru", normalized))
+
+    segments: list[tuple[str, str]] = []
+    pending_prefix = ""
+    for segment_language, segment_text in raw_segments:
+        if (
+            segment_language == "ru"
+            and not _RUSSIAN_OR_NUMBER_PATTERN.search(segment_text)
+        ):
+            if segments:
+                previous_language, previous_text = segments[-1]
+                segments[-1] = (previous_language, previous_text + segment_text)
+            else:
+                pending_prefix += segment_text
+            continue
+        prepared = pending_prefix + segment_text
+        pending_prefix = ""
+        if segments and segments[-1][0] == segment_language:
+            segments[-1] = (segment_language, segments[-1][1] + prepared)
+        else:
+            segments.append((segment_language, prepared))
+    if pending_prefix and segments:
+        previous_language, previous_text = segments[-1]
+        segments[-1] = (previous_language, previous_text + pending_prefix)
+
+    return [
+        (
+            segment_language,
+            normalize_russian_tts_text(segment_text, transliterate_latin=False)
+            if segment_language == "ru"
+            else " ".join(segment_text.strip().split()),
+        )
+        for segment_language, segment_text in segments
+        if segment_text.strip()
+    ]
+
+
+def prepare_english_tts_text(text: str) -> str:
+    pronunciation_overrides = {
+        "neuroasist": "Neuro Assist",
+        "openai": "Open A I",
+        "python": "Pie thon",
+        "github": "Git Hub",
+    }
+    prepared = _LATIN_WORD_PATTERN.sub(
+        lambda match: pronunciation_overrides.get(
+            match.group(0).lower(),
+            match.group(0),
+        ),
+        text,
+    )
+    prepared = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", prepared)
+    prepared = re.sub(
+        r"\b[A-Z]{2,}\b",
+        lambda match: " ".join(match.group(0)),
+        prepared,
+    )
+    return " ".join(prepared.strip().split())
+
+
+_SUPERTONIC_FEMALE_VOICES = ("F4", "F1", "F2", "F3", "F5")
+
+
+class SupertonicTTSProvider(TTSProvider):
+    """Local multilingual Supertonic 3 inference through ONNX Runtime on CPU."""
+
+    def __init__(
+        self,
+        *,
+        model: str = "supertonic-3",
+        voice: str = "F4",
+        model_dir: Path | None = None,
+        total_steps: int = 8,
+        speed: float = 1.05,
+        cpu_threads: int = 8,
+        warmup: bool = True,
+        auto_download: bool = True,
+        timeout_seconds: float = 15.0,
+        inter_segment_silence_ms: int = 60,
+        trim_silence: bool = True,
+        leading_padding_ms: int = 70,
+        trailing_padding_ms: int = 110,
+        model_loader: Callable[[], Any] | None = None,
+    ) -> None:
+        normalized_voice = voice.upper()
+        if normalized_voice not in _SUPERTONIC_FEMALE_VOICES:
+            raise ValueError(
+                "VOICE_SUPERTONIC_VOICE must be a female preset: "
+                + ", ".join(_SUPERTONIC_FEMALE_VOICES)
+            )
+        if not 1 <= total_steps <= 100:
+            raise ValueError("VOICE_SUPERTONIC_TOTAL_STEPS must be between 1 and 100")
+        if not 0.7 <= speed <= 2.0:
+            raise ValueError("VOICE_SUPERTONIC_SPEED must be between 0.7 and 2.0")
+        self.model_name = model
+        self.voice = normalized_voice
+        self.model_dir = model_dir
+        self.total_steps = total_steps
+        self.speed = speed
+        self.cpu_threads = cpu_threads
+        self.warmup_enabled = warmup
+        self.auto_download = auto_download
+        self.timeout_seconds = timeout_seconds
+        self.inter_segment_silence_ms = max(0, inter_segment_silence_ms)
+        self.trim_silence = trim_silence
+        self.leading_padding_ms = max(0, leading_padding_ms)
+        self.trailing_padding_ms = max(0, trailing_padding_ms)
+        self.sample_rate = 44100
+        self._model_loader = model_loader
+        self._tts = None
+        self._styles: dict[str, Any] = {}
+        self._load_lock = asyncio.Lock()
+        self._infer_lock = asyncio.Lock()
+        self._warmed_up = False
+
+    @property
+    def name(self) -> str:
+        return "supertonic"
+
+    @property
+    def available_speakers(self) -> list[str]:
+        return list(_SUPERTONIC_FEMALE_VOICES)
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return {
+            "provider": self.name,
+            "model": self.model_name,
+            "voice": self.voice,
+            "device": "cpu",
+            "runtime": "onnxruntime",
+            "sample_rate": self.sample_rate,
+            "total_steps": self.total_steps,
+            "speed": self.speed,
+            "native_multilingual": True,
+            "silence_trimming": self.trim_silence,
+        }
+
+    def resolve_voice(self, language: str, requested_voice: str | None = None) -> str:
+        normalized = (requested_voice or "").upper()
+        if normalized in self.available_speakers:
+            return normalized
+        return self.voice
+
+    async def preload(self) -> None:
+        await self._ensure_model()
+
+    async def _ensure_model(self):
+        if self._tts is not None:
+            return self._tts
+        async with self._load_lock:
+            if self._tts is not None:
+                return self._tts
+            started = time.perf_counter()
+            tts = await asyncio.to_thread(self._load_model_sync)
+            self._tts = tts
+            self._styles[self.voice] = tts.get_voice_style(self.voice)
+            logger.info(
+                "Supertonic TTS model loaded: load_ms=%s model=%s voice=%s device=cpu "
+                "sample_rate=%s steps=%s",
+                int((time.perf_counter() - started) * 1000),
+                self.model_name,
+                self.voice,
+                self.sample_rate,
+                self.total_steps,
+            )
+            if self.warmup_enabled and not self._warmed_up:
+                warmup_started = time.perf_counter()
+                await asyncio.to_thread(self._render_sync, "Привет.", "ru", self.voice)
+                self._warmed_up = True
+                logger.info(
+                    "Supertonic TTS model warmed up: warmup_ms=%s voice=%s",
+                    int((time.perf_counter() - warmup_started) * 1000),
+                    self.voice,
+                )
+            return self._tts
+
+    def _load_model_sync(self):
+        if self._model_loader is not None:
+            return self._model_loader()
+        try:
+            from supertonic import TTS
+        except ImportError as exc:
+            raise RuntimeError(
+                "Supertonic is not installed. Install supertonic==1.3.1."
+            ) from exc
+        return TTS(
+            model=self.model_name,
+            model_dir=self.model_dir,
+            auto_download=self.auto_download,
+            intra_op_num_threads=self.cpu_threads,
+            inter_op_num_threads=1,
+        )
+
+    def _get_style(self, voice: str):
+        if self._tts is None:
+            raise RuntimeError("Supertonic model is not loaded")
+        style = self._styles.get(voice)
+        if style is None:
+            style = self._tts.get_voice_style(voice)
+            self._styles[voice] = style
+        return style
+
+    def _trim_waveform(self, waveform):
+        if not self.trim_silence:
+            return waveform
+        import numpy as np
+
+        samples = np.asarray(waveform, dtype=np.float32).reshape(-1)
+        if samples.size == 0:
+            return samples
+        peak = float(np.max(np.abs(samples)))
+        if peak <= 0:
+            return samples
+        threshold = max(0.0025, peak * 0.008)
+        active = np.flatnonzero(np.abs(samples) >= threshold)
+        if active.size == 0:
+            return samples
+        leading = int(self.sample_rate * self.leading_padding_ms / 1000)
+        trailing = int(self.sample_rate * self.trailing_padding_ms / 1000)
+        start = max(0, int(active[0]) - leading)
+        end = min(samples.size, int(active[-1]) + trailing + 1)
+        return samples[start:end]
+
+    def _render_sync(self, text: str, language: str, voice: str):
+        if self._tts is None:
+            raise RuntimeError("Supertonic model is not loaded")
+        import numpy as np
+
+        segments = split_multilingual_tts_segments(text, language)
+        if not segments:
+            raise ValueError("TTS text is empty")
+        style = self._get_style(voice)
+        silence = np.zeros(
+            int(self.sample_rate * self.inter_segment_silence_ms / 1000),
+            dtype=np.float32,
+        )
+        rendered: list[Any] = []
+        for segment_language, segment_text in segments:
+            if rendered and silence.size:
+                rendered.append(silence)
+            waveform, _duration = self._tts.synthesize(
+                text=segment_text,
+                lang=segment_language,
+                voice_style=style,
+                total_steps=self.total_steps,
+                speed=self.speed,
+            )
+            rendered.append(self._trim_waveform(waveform))
+        return np.concatenate(rendered)
+
+    async def _synthesize_wav_bytes(
+        self,
+        text: str,
+        language: str,
+        voice: str,
+    ) -> tuple[bytes, float, int]:
+        await self._ensure_model()
+        started = time.perf_counter()
+        async with self._infer_lock:
+            waveform = await asyncio.wait_for(
+                asyncio.to_thread(self._render_sync, text, language, voice),
+                timeout=self.timeout_seconds,
+            )
+        synthesis_ms = int((time.perf_counter() - started) * 1000)
+        wav_bytes = waveform_to_wav_bytes(waveform, self.sample_rate)
+        duration = wav_duration_seconds(wav_bytes)
+        logger.info(
+            "Supertonic TTS segment synthesized: model=%s voice=%s text_length=%s "
+            "word_count=%s synthesis_ms=%s audio_duration_ms=%s RTF=%.3f audio_bytes=%s",
+            self.model_name,
+            voice,
+            len(text),
+            len(text.split()),
+            synthesis_ms,
+            int(duration * 1000),
+            (synthesis_ms / 1000) / duration if duration else 0.0,
+            len(wav_bytes),
+        )
+        return wav_bytes, duration, synthesis_ms
+
+    async def stream(self, request: TTSRequest):
+        text = " ".join(request.text.strip().split())
+        if not text:
+            raise ValueError("TTS text is empty")
+        voice = self.resolve_voice(request.language, request.voice)
+        wav_bytes, _, _ = await self._synthesize_wav_bytes(
+            text,
+            request.language,
+            voice,
+        )
+        yield AudioChunk(
+            data=wav_bytes,
+            format="wav",
+            sequence=0,
+            is_final=True,
+            metadata={
+                "sample_rate": self.sample_rate,
+                "channels": 1,
+                "sample_width": 2,
+                "voice": voice,
+                "model": self.model_name,
+                "device": "cpu",
+                "native_multilingual": True,
+            },
+        )
+
+    async def synthesize(self, text: str, voice: str, output_path: Path) -> TTSResult:
+        normalized = " ".join(text.strip().split())
+        if not normalized:
+            raise ValueError("TTS text is empty")
+        resolved_voice = self.resolve_voice("ru", voice)
+        started = time.perf_counter()
+        output_path = output_path.with_suffix(self.file_extension)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = output_path.with_name(f"{output_path.stem}.tmp{output_path.suffix}")
+        temp_path.unlink(missing_ok=True)
+        try:
+            wav_bytes, audio_duration_seconds, _ = await self._synthesize_wav_bytes(
+                normalized,
+                "ru",
+                resolved_voice,
+            )
+            temp_path.write_bytes(wav_bytes)
+            if wav_duration_seconds(temp_path.read_bytes()) <= 0:
+                raise RuntimeError("Supertonic returned zero-duration audio")
+            temp_path.replace(output_path)
+        except asyncio.CancelledError:
+            temp_path.unlink(missing_ok=True)
+            raise
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            output_path.unlink(missing_ok=True)
+            raise
+        return TTSResult(
+            audio_path=output_path,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            provider=self.name,
+            voice=resolved_voice,
+            chunks_count=1,
+            audio_duration_seconds=audio_duration_seconds,
+        )
+
+
+class OpenVoiceToneConverter:
+    """CPU-only OpenVoice V2 tone conversion used after fast Silero synthesis."""
+
+    def __init__(
+        self,
+        *,
+        reference_audio_path: Path,
+        cache_dir: Path,
+        repo_id: str,
+        revision: str,
+        tau: float = 0.3,
+        cpu_threads: int = 8,
+    ) -> None:
+        self.reference_audio_path = reference_audio_path
+        self.cache_dir = cache_dir
+        self.repo_id = repo_id
+        self.revision = revision
+        self.tau = tau
+        self.cpu_threads = cpu_threads
+        self.sample_rate = 22050
+        self.filter_length = 1024
+        self.hop_length = 256
+        self.win_length = 1024
+        self._torch = None
+        self._torchaudio = None
+        self._spectrogram_torch = None
+        self._model = None
+        self._target_embedding = None
+
+    def load(self) -> None:
+        reference_path = self.reference_audio_path.resolve()
+        if not reference_path.is_file():
+            raise RuntimeError(f"OpenVoice reference audio does not exist: {reference_path}")
+        config_path, checkpoint_path = self._ensure_checkpoint()
+        try:
+            import soundfile
+            import torch
+            import torchaudio
+            from openvoice import utils as openvoice_utils
+            from openvoice.mel_processing import spectrogram_torch
+            from openvoice.models import SynthesizerTrn
+        except ImportError as exc:
+            raise RuntimeError(
+                "OpenVoice tone conversion is not installed. Run scripts/install-openvoice.ps1."
+            ) from exc
+
+        if self.cpu_threads > 0:
+            torch.set_num_threads(self.cpu_threads)
+        hps = openvoice_utils.get_hparams_from_file(str(config_path))
+        model = SynthesizerTrn(
+            len(getattr(hps, "symbols", [])),
+            hps.data.filter_length // 2 + 1,
+            n_speakers=hps.data.n_speakers,
+            **hps.model,
+        ).to("cpu")
+        checkpoint = torch.load(
+            str(checkpoint_path),
+            map_location=torch.device("cpu"),
+            weights_only=False,
+        )
+        missing, unexpected = model.load_state_dict(checkpoint["model"], strict=False)
+        if missing or unexpected:
+            raise RuntimeError(
+                f"OpenVoice checkpoint is incompatible: missing={missing}, unexpected={unexpected}"
+            )
+        model.eval()
+        self.sample_rate = int(hps.data.sampling_rate)
+        self.filter_length = int(hps.data.filter_length)
+        self.hop_length = int(hps.data.hop_length)
+        self.win_length = int(hps.data.win_length)
+        self._torch = torch
+        self._torchaudio = torchaudio
+        self._spectrogram_torch = spectrogram_torch
+        self._model = model
+        reference_audio, reference_rate = soundfile.read(
+            str(reference_path),
+            dtype="float32",
+            always_2d=True,
+        )
+        reference = torch.from_numpy(reference_audio.mean(axis=1))
+        self._target_embedding = self._extract_embedding(reference, int(reference_rate))
+
+    def _ensure_checkpoint(self) -> tuple[Path, Path]:
+        converter_dir = self.cache_dir.resolve() / "converter"
+        config_path = converter_dir / "config.json"
+        checkpoint_path = converter_dir / "checkpoint.pth"
+        if config_path.is_file() and checkpoint_path.is_file():
+            return config_path, checkpoint_path
+        try:
+            from huggingface_hub import snapshot_download
+        except ImportError as exc:
+            raise RuntimeError("OpenVoice download requires huggingface_hub") from exc
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        snapshot_download(
+            repo_id=self.repo_id,
+            revision=self.revision,
+            allow_patterns=["converter/*"],
+            local_dir=str(self.cache_dir.resolve()),
+        )
+        if not config_path.is_file() or not checkpoint_path.is_file():
+            raise RuntimeError("OpenVoice converter checkpoint download is incomplete")
+        return config_path, checkpoint_path
+
+    def _resample(self, waveform: Any, sample_rate: int):
+        if self._torch is None or self._torchaudio is None:
+            raise RuntimeError("OpenVoice converter is not loaded")
+        value = waveform
+        if not hasattr(value, "detach"):
+            value = self._torch.as_tensor(value)
+        value = value.detach().to(device="cpu", dtype=self._torch.float32).squeeze()
+        if value.ndim > 1:
+            value = value.mean(dim=0)
+        if sample_rate != self.sample_rate:
+            value = self._torchaudio.functional.resample(
+                value,
+                sample_rate,
+                self.sample_rate,
+            )
+        return value.contiguous()
+
+    def _spectrogram(self, waveform):
+        if self._model is None or self._spectrogram_torch is None:
+            raise RuntimeError("OpenVoice converter is not loaded")
+        return self._spectrogram_torch(
+            waveform.unsqueeze(0),
+            self.filter_length,
+            self.sample_rate,
+            self.hop_length,
+            self.win_length,
+            center=False,
+        )
+
+    def _extract_embedding(self, waveform: Any, sample_rate: int):
+        if self._torch is None or self._model is None:
+            raise RuntimeError("OpenVoice converter is not loaded")
+        prepared = self._resample(waveform, sample_rate)
+        with self._torch.inference_mode():
+            spectrogram = self._spectrogram(prepared)
+            return self._model.ref_enc(spectrogram.transpose(1, 2)).unsqueeze(-1).detach()
+
+    def convert(self, waveform: Any, sample_rate: int):
+        if self._torch is None or self._model is None or self._target_embedding is None:
+            raise RuntimeError("OpenVoice converter is not loaded")
+        prepared = self._resample(waveform, sample_rate)
+        with self._torch.inference_mode():
+            spectrogram = self._spectrogram(prepared)
+            lengths = self._torch.LongTensor([spectrogram.size(-1)])
+            source_embedding = self._model.ref_enc(
+                spectrogram.transpose(1, 2)
+            ).unsqueeze(-1)
+            converted = self._model.voice_conversion(
+                spectrogram,
+                lengths,
+                sid_src=source_embedding,
+                sid_tgt=self._target_embedding,
+                tau=self.tau,
+            )[0][0, 0]
+        return converted.detach().cpu()
+
+
+_SILERO_RU_FEMALE_SPEAKERS = ("xenia", "baya", "kseniya")
+
+
 class SileroTTSProvider(TTSProvider):
     def __init__(
         self,
@@ -485,7 +1454,21 @@ class SileroTTSProvider(TTSProvider):
         cpu_threads: int = 4,
         warmup: bool = True,
         timeout_seconds: float = 10.0,
+        native_english: bool = False,
+        english_model: str = "v3_en",
+        english_speaker: str = "en_0",
+        cmudict_enabled: bool = True,
+        cmudict_cache_dir: Path | None = None,
+        openvoice_enabled: bool = False,
+        openvoice_reference_audio_path: Path | None = None,
+        openvoice_cache_dir: Path | None = None,
+        openvoice_repo_id: str = "myshell-ai/OpenVoiceV2",
+        openvoice_revision: str = "fd981100305a0e4291f93a9ad169c6d9f7bed54a",
+        openvoice_tau: float = 0.3,
+        openvoice_cpu_threads: int = 8,
         model_loader: Callable[[], Any] | None = None,
+        english_model_loader: Callable[[], Any] | None = None,
+        voice_converter_loader: Callable[[], Any] | None = None,
     ) -> None:
         if device not in {"cpu", "cuda", "auto"}:
             raise ValueError("VOICE_SILERO_DEVICE must be one of: cpu, cuda, auto")
@@ -496,8 +1479,28 @@ class SileroTTSProvider(TTSProvider):
         self.cpu_threads = cpu_threads
         self.warmup_enabled = warmup
         self.timeout_seconds = timeout_seconds
+        self.native_english = native_english
+        self.english_model_name = english_model
+        self.english_speaker = english_speaker
+        self.cmudict_enabled = cmudict_enabled
+        self.cmudict_cache_dir = cmudict_cache_dir or Path(".cache/cmudict")
+        self.openvoice_enabled = openvoice_enabled
+        self.openvoice_reference_audio_path = openvoice_reference_audio_path
+        self.openvoice_cache_dir = openvoice_cache_dir or Path(".cache/openvoice-v2")
+        self.openvoice_repo_id = openvoice_repo_id
+        self.openvoice_revision = openvoice_revision
+        self.openvoice_tau = openvoice_tau
+        self.openvoice_cpu_threads = openvoice_cpu_threads
         self._model_loader = model_loader
+        self._english_model_loader = english_model_loader
+        self._voice_converter_loader = voice_converter_loader
         self._model = None
+        self._english_tts_model = None
+        self._voice_converter = None
+        if self.openvoice_enabled and self.openvoice_reference_audio_path is None:
+            raise ValueError(
+                "VOICE_OPENVOICE_REFERENCE_AUDIO is required when VOICE_OPENVOICE_ENABLED=true"
+            )
         self._torch = None
         self._selected_device: str | None = None
         self._available_speakers: set[str] | None = None
@@ -521,15 +1524,26 @@ class SileroTTSProvider(TTSProvider):
             "model": self.model_name,
             "speaker": self.speaker,
             "device": self._selected_device or self.requested_device,
-            "sample_rate": self.sample_rate,
+            "sample_rate": getattr(self._voice_converter, "sample_rate", self.sample_rate),
+            "voice_conversion": self._voice_converter is not None,
+            "native_english": self._english_tts_model is not None,
+            "english_transcription": self.cmudict_enabled and not self.native_english,
         }
 
     @property
     def available_speakers(self) -> list[str]:
+        if self.model_name == "v5_5_ru":
+            speakers = [
+                voice
+                for voice in _SILERO_RU_FEMALE_SPEAKERS
+                if self._available_speakers is None or voice in self._available_speakers
+            ]
+            if self.speaker in speakers:
+                speakers.remove(self.speaker)
+                speakers.insert(0, self.speaker)
+            return speakers
         if self._available_speakers is not None:
             return sorted(self._available_speakers)
-        if self.model_name == "v5_5_ru":
-            return ["aidar", "baya", "kseniya", "xenia", "eugene", "random"]
         return [self.speaker]
 
     async def preload(self) -> None:
@@ -548,6 +1562,40 @@ class SileroTTSProvider(TTSProvider):
             self._selected_device = selected_device
             self._available_speakers = self._extract_speakers(model)
             self._validate_speaker(self.speaker)
+            if self.cmudict_enabled and not self.native_english:
+                try:
+                    dictionary_size = await asyncio.to_thread(self._prepare_cmudict_sync)
+                    logger.info(
+                        "CMU English pronunciation dictionary loaded: entries=%s",
+                        dictionary_size,
+                    )
+                except Exception:
+                    logger.warning(
+                        "CMU pronunciation dictionary is unavailable; using basic transliteration",
+                        exc_info=True,
+                    )
+            if self.native_english:
+                english_started = time.perf_counter()
+                self._english_tts_model = await asyncio.to_thread(
+                    self._load_english_model_sync
+                )
+                logger.info(
+                    "Silero English TTS model loaded: load_ms=%s model=%s speaker=%s device=%s",
+                    int((time.perf_counter() - english_started) * 1000),
+                    self.english_model_name,
+                    self.english_speaker,
+                    selected_device,
+                )
+            if self.openvoice_enabled:
+                converter_started = time.perf_counter()
+                self._voice_converter = await asyncio.to_thread(
+                    self._load_voice_converter_sync
+                )
+                logger.info(
+                    "OpenVoice tone converter loaded: load_ms=%s device=cpu reference=%s",
+                    int((time.perf_counter() - converter_started) * 1000),
+                    self.openvoice_reference_audio_path,
+                )
             load_ms = int((time.perf_counter() - started) * 1000)
             logger.info(
                 "Silero TTS model loaded: tts_model_load_ms=%s device=%s model=%s speaker=%s sample_rate=%s",
@@ -559,7 +1607,9 @@ class SileroTTSProvider(TTSProvider):
             )
             if self.warmup_enabled and not self._warmed_up:
                 warmup_started = time.perf_counter()
-                await asyncio.to_thread(self._apply_tts_sync, "Привет.", self.speaker)
+                if self._english_tts_model is not None:
+                    await asyncio.to_thread(self._apply_english_tts_sync, "Hello.")
+                await asyncio.to_thread(self._render_sync, "Привет.", self.speaker)
                 self._warmed_up = True
                 logger.info(
                     "Silero TTS model warmed up: tts_warmup_ms=%s device=%s model=%s speaker=%s sample_rate=%s",
@@ -570,6 +1620,73 @@ class SileroTTSProvider(TTSProvider):
                     self.sample_rate,
                 )
             return self._model
+
+    def _load_voice_converter_sync(self):
+        if self._voice_converter_loader is not None:
+            converter = self._voice_converter_loader()
+        else:
+            assert self.openvoice_reference_audio_path is not None
+            converter = OpenVoiceToneConverter(
+                reference_audio_path=self.openvoice_reference_audio_path,
+                cache_dir=self.openvoice_cache_dir,
+                repo_id=self.openvoice_repo_id,
+                revision=self.openvoice_revision,
+                tau=self.openvoice_tau,
+                cpu_threads=self.openvoice_cpu_threads,
+            )
+        load = getattr(converter, "load", None)
+        if callable(load):
+            load()
+        return converter
+
+    def _load_english_model_sync(self):
+        if self._torch is None or self._selected_device is None:
+            raise RuntimeError("Silero Russian model must be loaded first")
+        if self._english_model_loader is not None:
+            model = self._english_model_loader()
+        else:
+            self._configure_certifi_ca_bundle()
+            model, _ = self._torch.hub.load(
+                repo_or_dir="snakers4/silero-models",
+                model="silero_tts",
+                language="en",
+                speaker=self.english_model_name,
+                trust_repo=True,
+            )
+        if hasattr(model, "to"):
+            moved_model = model.to(self._selected_device)
+            if moved_model is not None:
+                model = moved_model
+        speakers = self._extract_speakers(model)
+        if speakers is not None and self.english_speaker not in speakers:
+            raise RuntimeError(f"Unknown Silero English speaker: {self.english_speaker}")
+        return model
+
+    def _prepare_cmudict_sync(self) -> int:
+        import urllib.request
+
+        cache_dir = self.cmudict_cache_dir.resolve()
+        dictionary_path = cache_dir / "cmudict.dict"
+        license_path = cache_dir / "LICENSE"
+        base_url = (
+            "https://raw.githubusercontent.com/cmusphinx/cmudict/"
+            f"{_CMUDICT_REVISION}"
+        )
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        for path, name in ((dictionary_path, "cmudict.dict"), (license_path, "LICENSE")):
+            if path.is_file():
+                continue
+            request = urllib.request.Request(
+                f"{base_url}/{name}",
+                headers={"User-Agent": "NeuroAsist/0.5"},
+            )
+            with urllib.request.urlopen(request, timeout=30) as response:
+                payload = response.read()
+            temp_path = path.with_suffix(path.suffix + ".tmp")
+            temp_path.write_bytes(payload)
+            temp_path.replace(path)
+        configure_cmudict(dictionary_path)
+        return len(_load_cmudict_entries())
 
     def _load_model_sync(self):
         try:
@@ -652,31 +1769,82 @@ class SileroTTSProvider(TTSProvider):
             raise RuntimeError("Silero model is not loaded")
         with self._torch.inference_mode():
             return self._model.apply_tts(
-                text=text,
+                text=normalize_russian_tts_text(text),
                 speaker=speaker,
                 sample_rate=self.sample_rate,
             )
+
+    def _apply_english_tts_sync(self, text: str):
+        if self._english_tts_model is None or self._torch is None:
+            raise RuntimeError("Silero English model is not loaded")
+        with self._torch.inference_mode():
+            return self._english_tts_model.apply_tts(
+                text=prepare_english_tts_text(text),
+                speaker=self.english_speaker,
+                sample_rate=self.sample_rate,
+            )
+
+    @staticmethod
+    def _waveform_as_numpy(waveform: Any):
+        import numpy as np
+
+        value = waveform
+        if hasattr(value, "detach"):
+            value = value.detach()
+        if hasattr(value, "cpu"):
+            value = value.cpu()
+        if hasattr(value, "numpy"):
+            value = value.numpy()
+        return np.asarray(value, dtype=np.float32).reshape(-1)
+
+    def _render_sync(self, text: str, speaker: str) -> tuple[Any, int]:
+        if self._english_tts_model is None:
+            waveform = self._apply_tts_sync(text, speaker)
+        else:
+            import numpy as np
+
+            segments = split_multilingual_tts_segments(text, "ru")
+            rendered: list[Any] = []
+            silence = np.zeros(int(self.sample_rate * 0.04), dtype=np.float32)
+            for segment_language, segment_text in segments:
+                if rendered:
+                    rendered.append(silence)
+                segment_waveform = (
+                    self._apply_english_tts_sync(segment_text)
+                    if segment_language == "en"
+                    else self._apply_tts_sync(segment_text, speaker)
+                )
+                rendered.append(self._waveform_as_numpy(segment_waveform))
+            if not rendered:
+                raise ValueError("TTS text is empty")
+            waveform = np.concatenate(rendered)
+        if self._voice_converter is None:
+            return waveform, self.sample_rate
+        converted = self._voice_converter.convert(waveform, self.sample_rate)
+        return converted, int(self._voice_converter.sample_rate)
 
     async def _synthesize_wav_bytes(self, text: str, speaker: str) -> tuple[bytes, float, int]:
         await self._ensure_model()
         self._validate_speaker(speaker)
         started = time.perf_counter()
         async with self._infer_lock:
-            waveform = await asyncio.wait_for(
-                asyncio.to_thread(self._apply_tts_sync, text, speaker),
+            (waveform, output_sample_rate) = await asyncio.wait_for(
+                asyncio.to_thread(self._render_sync, text, speaker),
                 timeout=self.timeout_seconds,
             )
         synthesis_ms = int((time.perf_counter() - started) * 1000)
-        wav_bytes = waveform_to_wav_bytes(waveform, self.sample_rate)
+        wav_bytes = waveform_to_wav_bytes(waveform, output_sample_rate)
         duration = wav_duration_seconds(wav_bytes)
         logger.info(
             "Silero TTS segment synthesized: provider=silero model=%s speaker=%s device=%s "
-            "text_length=%s word_count=%s synthesis_ms=%s audio_duration_ms=%s RTF=%.3f audio_bytes=%s",
+            "text_length=%s word_count=%s voice_conversion=%s synthesis_ms=%s "
+            "audio_duration_ms=%s RTF=%.3f audio_bytes=%s",
             self.model_name,
             speaker,
             self._selected_device,
             len(text),
             len(text.split()),
+            self._voice_converter is not None,
             synthesis_ms,
             int(duration * 1000),
             (synthesis_ms / 1000) / duration if duration else 0.0,
@@ -696,12 +1864,14 @@ class SileroTTSProvider(TTSProvider):
             sequence=0,
             is_final=True,
             metadata={
-                "sample_rate": self.sample_rate,
+                "sample_rate": self.metadata["sample_rate"],
                 "channels": 1,
                 "sample_width": 2,
                 "speaker": speaker,
                 "model": self.model_name,
                 "device": self._selected_device,
+                "voice_conversion": self._voice_converter is not None,
+                "native_english": self._english_tts_model is not None,
             },
         )
 
@@ -736,6 +1906,8 @@ class SileroTTSProvider(TTSProvider):
             chunks_count=1,
             audio_duration_seconds=audio_duration_seconds,
         )
+
+
 
 
 def split_tts_chunks(text: str, max_chars: int = 90, max_words: int = 18) -> list[str]:

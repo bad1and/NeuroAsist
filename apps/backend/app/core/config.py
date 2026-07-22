@@ -63,7 +63,21 @@ class Settings(BaseSettings):
     voice_preload_stt_model: bool = True
     voice_preload_tts_model: bool = True
     voice_tts_enabled: bool = True
-    voice_tts_provider: str = "silero"
+    voice_tts_provider: str = "supertonic"
+    voice_tts_fallback_provider: str | None = "silero"
+    voice_supertonic_model: str = "supertonic-3"
+    voice_supertonic_voice: str = "F4"
+    voice_supertonic_cache_dir: str | None = None
+    voice_supertonic_total_steps: int = 8
+    voice_supertonic_speed: float = 1.05
+    voice_supertonic_cpu_threads: int = 8
+    voice_supertonic_warmup: bool = True
+    voice_supertonic_auto_download: bool = True
+    voice_supertonic_timeout_seconds: float = 15.0
+    voice_supertonic_inter_segment_silence_ms: int = 60
+    voice_supertonic_trim_silence: bool = True
+    voice_supertonic_leading_padding_ms: int = 70
+    voice_supertonic_trailing_padding_ms: int = 110
     voice_silero_model: str = "v5_5_ru"
     voice_silero_speaker_ru: str = "xenia"
     voice_silero_sample_rate: int = 24000
@@ -71,7 +85,19 @@ class Settings(BaseSettings):
     voice_silero_cpu_threads: int = 4
     voice_silero_warmup: bool = True
     voice_silero_timeout_seconds: float = 10.0
-    voice_tts_background_timeout_seconds: int = 20
+    voice_silero_native_english: bool = False
+    voice_silero_english_model: str = "v3_en"
+    voice_silero_english_speaker: str = "en_0"
+    voice_cmudict_enabled: bool = True
+    voice_cmudict_cache_dir: str = ".cache/cmudict"
+    voice_openvoice_enabled: bool = False
+    voice_openvoice_reference_audio: str | None = None
+    voice_openvoice_cache_dir: str = ".cache/openvoice-v2"
+    voice_openvoice_repo_id: str = "myshell-ai/OpenVoiceV2"
+    voice_openvoice_revision: str = "fd981100305a0e4291f93a9ad169c6d9f7bed54a"
+    voice_openvoice_tau: float = 0.3
+    voice_openvoice_cpu_threads: int = 8
+    voice_tts_background_timeout_seconds: int = 120
     voice_tts_max_chars: int = 1200
     voice_audio_dir: str = "data/audio"
     voice_max_upload_mb: int = 25
@@ -91,7 +117,7 @@ class Settings(BaseSettings):
     voice_live_tts_concurrency_min: int = 1
     voice_live_tts_concurrency_max: int = 2
     voice_live_playback_prebuffer_segments: int = 1
-    voice_live_playback_prebuffer_ms: int = 200
+    voice_live_playback_prebuffer_ms: int = 0
     voice_vad_provider: str = "silero"
     voice_silero_vad_model_path: str | None = None
     voice_vad_threshold: float = 0.55
@@ -145,6 +171,36 @@ class Settings(BaseSettings):
         if not self.voice_silero_vad_model_path:
             return None
         path = Path(self.voice_silero_vad_model_path)
+        return path if path.is_absolute() else ROOT_DIR / path
+
+    @property
+    def voice_openvoice_reference_audio_path(self) -> Path | None:
+        if not self.voice_openvoice_reference_audio:
+            return None
+        path = Path(self.voice_openvoice_reference_audio).expanduser()
+        return path if path.is_absolute() else ROOT_DIR / path
+
+    @property
+    def voice_tts_default_voice(self) -> str:
+        if self.voice_tts_provider == "supertonic":
+            return self.voice_supertonic_voice.upper()
+        return self.voice_silero_speaker_ru
+
+    @property
+    def voice_supertonic_cache_path(self) -> Path:
+        if not self.voice_supertonic_cache_dir:
+            return self.app_data_path / "models" / "supertonic-3"
+        path = Path(self.voice_supertonic_cache_dir).expanduser()
+        return path if path.is_absolute() else ROOT_DIR / path
+
+    @property
+    def voice_openvoice_cache_path(self) -> Path:
+        path = Path(self.voice_openvoice_cache_dir).expanduser()
+        return path if path.is_absolute() else ROOT_DIR / path
+
+    @property
+    def voice_cmudict_cache_path(self) -> Path:
+        path = Path(self.voice_cmudict_cache_dir).expanduser()
         return path if path.is_absolute() else ROOT_DIR / path
 
     @property

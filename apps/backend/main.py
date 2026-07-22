@@ -95,7 +95,7 @@ def create_app() -> FastAPI:
     history = TimelineHistoryAdapter(timeline_store) if timeline_store is not None else SQLiteMessageHistory(settings.database_path)
     runtime_defaults = RuntimeSettings(
         voice_language=settings.voice_default_language,
-        voice_tts_voice=settings.voice_silero_speaker_ru,
+        voice_tts_voice=settings.voice_tts_default_voice,
         voice_live_playback_prebuffer_segments=settings.voice_live_playback_prebuffer_segments,
         voice_live_playback_prebuffer_ms=settings.voice_live_playback_prebuffer_ms,
         memory_mode=settings.memory_mode,
@@ -136,6 +136,14 @@ def create_app() -> FastAPI:
     summary_worker = SummaryWorker(timeline_store, memory_service.index_episode_summary if memory_service is not None else None) if timeline_store is not None else None
     semantic_sync_worker = SemanticSyncWorker(memory_service) if memory_service is not None else None
     voice_service = VoiceService(settings)
+    available_tts_voices = voice_service.available_tts_voices()
+    if runtime_settings.voice_tts_voice not in available_tts_voices:
+        runtime_settings.voice_tts_voice = (
+            settings.voice_tts_default_voice
+            if settings.voice_tts_default_voice in available_tts_voices
+            else available_tts_voices[0]
+        )
+        runtime_settings_store.save(runtime_settings)
     voice_session_manager = VoiceSessionManager(
         voice_service.tts_provider,
         queue_size=settings.voice_live_queue_size,
@@ -298,16 +306,13 @@ def create_app() -> FastAPI:
                 )
 
         if settings.voice_preload_tts_model and settings.voice_tts_enabled:
+            tts_metadata = dict(getattr(voice_service.tts_provider, "metadata", {}))
+            tts_metadata.setdefault("provider", voice_service.tts_provider.name)
             event_bus.publish(
                 "voice.tts_preloading_started",
                 "info",
                 "Voice TTS model preloading started",
-                {
-                    "provider": voice_service.tts_provider.name,
-                    "model": settings.voice_silero_model,
-                    "speaker": settings.voice_silero_speaker_ru,
-                    "device": settings.voice_silero_device,
-                },
+                tts_metadata,
             )
             preload_started = time.perf_counter()
             try:
@@ -317,26 +322,14 @@ def create_app() -> FastAPI:
                     "voice.tts_preloaded",
                     "info",
                     "Voice TTS model preloaded",
-                    {
-                        "provider": voice_service.tts_provider.name,
-                        "model": settings.voice_silero_model,
-                        "speaker": settings.voice_silero_speaker_ru,
-                        "device": settings.voice_silero_device,
-                        "duration_ms": duration_ms,
-                    },
+                    {**tts_metadata, "duration_ms": duration_ms},
                 )
-                if settings.voice_silero_warmup:
+                if getattr(voice_service.tts_provider, "warmup_enabled", False):
                     event_bus.publish(
                         "voice.tts_warmed_up",
                         "info",
                         "Voice TTS model warmed up",
-                        {
-                            "provider": voice_service.tts_provider.name,
-                            "model": settings.voice_silero_model,
-                            "speaker": settings.voice_silero_speaker_ru,
-                            "device": settings.voice_silero_device,
-                            "duration_ms": duration_ms,
-                        },
+                        {**tts_metadata, "duration_ms": duration_ms},
                     )
             except Exception:
                 logger.warning("Voice TTS preload failed", exc_info=True)
@@ -344,12 +337,7 @@ def create_app() -> FastAPI:
                     "voice.tts_preload_failed",
                     "warning",
                     "Voice TTS preload failed; browser speech fallback remains available",
-                    {
-                        "provider": voice_service.tts_provider.name,
-                        "model": settings.voice_silero_model,
-                        "speaker": settings.voice_silero_speaker_ru,
-                        "device": settings.voice_silero_device,
-                    },
+                    tts_metadata,
                 )
 
         event_bus.publish(

@@ -13,7 +13,7 @@ class RuntimeSettings:
     voice_tts_voice: str | None = None
     voice_playback_rate: float = 1.0
     voice_live_playback_prebuffer_segments: int = 1
-    voice_live_playback_prebuffer_ms: int = 200
+    voice_live_playback_prebuffer_ms: int = 0
     memory_mode: str = "balanced"
     memory_incognito: bool = False
     avatar_overlay_visible: bool = True

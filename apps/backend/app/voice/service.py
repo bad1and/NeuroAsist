@@ -12,12 +12,14 @@ from fastapi import HTTPException, UploadFile, status
 
 from apps.backend.app.core.config import Settings
 from apps.backend.app.voice.providers import (
+    FallbackTTSProvider,
     FasterWhisperSTTProvider,
     GigaAMSTTProvider,
     MockSTTProvider,
     MockTTSProvider,
     SileroTTSProvider,
     STTProvider,
+    SupertonicTTSProvider,
     TTSProvider,
 )
 
@@ -150,7 +152,7 @@ class VoiceService:
         if voices is not None:
             return list(voices)
         if self._settings.voice_tts_provider == "silero" and self._settings.voice_silero_model == "v5_5_ru":
-            return ["aidar", "baya", "kseniya", "xenia", "eugene", "random"]
+            return ["xenia", "baya", "kseniya"]
         return [self._settings.voice_silero_speaker_ru]
 
     def resolve_audio_path(self, audio_id: str) -> Path:
@@ -234,9 +236,38 @@ class VoiceService:
         raise ValueError(f"Unsupported STT provider: {settings.voice_stt_provider}")
 
     def _build_tts_provider(self, settings: Settings) -> TTSProvider:
-        if settings.voice_tts_provider == "mock":
+        primary = self._build_tts_provider_by_name(settings.voice_tts_provider, settings)
+        fallback_name = getattr(settings, "voice_tts_fallback_provider", None)
+        if (
+            settings.voice_tts_provider == "mock"
+            or not fallback_name
+            or fallback_name == settings.voice_tts_provider
+        ):
+            return primary
+        fallback = self._build_tts_provider_by_name(fallback_name, settings)
+        return FallbackTTSProvider(primary, fallback)
+
+    @staticmethod
+    def _build_tts_provider_by_name(provider_name: str, settings: Settings) -> TTSProvider:
+        if provider_name == "mock":
             return MockTTSProvider()
-        if settings.voice_tts_provider == "silero":
+        if provider_name == "supertonic":
+            return SupertonicTTSProvider(
+                model=settings.voice_supertonic_model,
+                voice=settings.voice_supertonic_voice,
+                model_dir=settings.voice_supertonic_cache_path,
+                total_steps=settings.voice_supertonic_total_steps,
+                speed=settings.voice_supertonic_speed,
+                cpu_threads=settings.voice_supertonic_cpu_threads,
+                warmup=settings.voice_supertonic_warmup,
+                auto_download=settings.voice_supertonic_auto_download,
+                timeout_seconds=settings.voice_supertonic_timeout_seconds,
+                inter_segment_silence_ms=settings.voice_supertonic_inter_segment_silence_ms,
+                trim_silence=settings.voice_supertonic_trim_silence,
+                leading_padding_ms=settings.voice_supertonic_leading_padding_ms,
+                trailing_padding_ms=settings.voice_supertonic_trailing_padding_ms,
+            )
+        if provider_name == "silero":
             return SileroTTSProvider(
                 model=settings.voice_silero_model,
                 speaker=settings.voice_silero_speaker_ru,
@@ -245,5 +276,17 @@ class VoiceService:
                 cpu_threads=settings.voice_silero_cpu_threads,
                 warmup=settings.voice_silero_warmup,
                 timeout_seconds=settings.voice_silero_timeout_seconds,
+                native_english=settings.voice_silero_native_english,
+                english_model=settings.voice_silero_english_model,
+                english_speaker=settings.voice_silero_english_speaker,
+                cmudict_enabled=settings.voice_cmudict_enabled,
+                cmudict_cache_dir=settings.voice_cmudict_cache_path,
+                openvoice_enabled=settings.voice_openvoice_enabled,
+                openvoice_reference_audio_path=settings.voice_openvoice_reference_audio_path,
+                openvoice_cache_dir=settings.voice_openvoice_cache_path,
+                openvoice_repo_id=settings.voice_openvoice_repo_id,
+                openvoice_revision=settings.voice_openvoice_revision,
+                openvoice_tau=settings.voice_openvoice_tau,
+                openvoice_cpu_threads=settings.voice_openvoice_cpu_threads,
             )
-        raise ValueError(f"Unsupported TTS provider: {settings.voice_tts_provider}")
+        raise ValueError(f"Unsupported TTS provider: {provider_name}")
