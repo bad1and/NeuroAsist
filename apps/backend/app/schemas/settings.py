@@ -8,6 +8,10 @@ class PublicSettingsResponse(BaseModel):
     voice_language: str
     voice_stt_model: str
     voice_tts_enabled: bool
+    voice_tts_provider: str
+    voice_tts_model: str | None = None
+    voice_tts_device: str | None = None
+    voice_tts_fallback_active: bool = False
     avatar_enabled: bool
     voice_tts_voice: str
     voice_playback_rate: float

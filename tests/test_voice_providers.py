@@ -14,10 +14,18 @@ import pytest
 from apps.backend.app.core.config import Settings
 from apps.backend.app.voice.providers import (
     AudioChunk,
+    FallbackTTSProvider,
     FasterWhisperSTTProvider,
     GigaAMSTTProvider,
+    MockTTSProvider,
     SileroTTSProvider,
+    SupertonicTTSProvider,
+    TTSProvider,
     TTSRequest,
+    configure_cmudict,
+    normalize_russian_tts_text,
+    prepare_english_tts_text,
+    split_multilingual_tts_segments,
     split_tts_chunks,
     waveform_to_wav_bytes,
 )
@@ -183,6 +191,67 @@ def test_waveform_to_wav_bytes_clamps_and_writes_pcm16_wav() -> None:
     assert pcm.tolist() == [-32767, -16383, 0, 16383, 32767]
 
 
+def test_russian_tts_normalization_expands_numbers_and_common_english_words() -> None:
+    text = "NeuroAsist версии 2.5 использует OpenAI API, GPU на 37% и порт 8080."
+
+    normalized = normalize_russian_tts_text(text)
+
+    assert normalized == (
+        "нейро асист версии два точка пять использует оупен эй ай эй пи ай, "
+        "джи пи ю на тридцать семь процентов и порт восемьдесят, восемьдесят."
+    )
+
+
+def test_russian_tts_normalization_reads_leading_zeroes_digit_by_digit() -> None:
+    assert normalize_russian_tts_text("Код 007") == "Код ноль ноль семь"
+
+
+def test_russian_tts_normalization_handles_versions_and_ip_addresses() -> None:
+    assert normalize_russian_tts_text("Версия 1.2.10", transliterate_latin=False) == (
+        "Версия один точка два точка десять"
+    )
+    assert normalize_russian_tts_text("Сервер 192.168.1.1", transliterate_latin=False) == (
+        "Сервер сто девяносто два точка сто шестьдесят восемь точка один точка один"
+    )
+
+
+def test_russian_tts_normalization_declines_years_and_transcribes_technical_english() -> None:
+    assert normalize_russian_tts_text("Я начала в 2015 году") == (
+        "Я начала в две тысячи пятнадцатом году"
+    )
+    assert normalize_russian_tts_text("OpenAI API, Python и GitHub") == (
+        "оупен эй ай эй пи ай, пайтон и гитхаб"
+    )
+    assert prepare_english_tts_text("OpenAI API, Python and GitHub") == (
+        "Open A I A P I, Pie thon and Git Hub"
+    )
+
+
+def test_russian_tts_uses_cmu_pronunciation_for_regular_english(tmp_path: Path) -> None:
+    dictionary = tmp_path / "cmudict.dict"
+    dictionary.write_text(
+        "hello HH AH0 L OW1\nworld W ER1 L D\nvoice V OY1 S\n",
+        encoding="utf-8",
+    )
+    configure_cmudict(dictionary)
+
+    assert normalize_russian_tts_text("Hello world, voice") == "хэлоу уэрлд, войс"
+
+
+def test_multilingual_tts_segments_keep_english_native() -> None:
+    assert split_multilingual_tts_segments(
+        "Запусти Python 3.12 через OpenAI API на порту 8080."
+    ) == [
+        ("ru", "Запусти"),
+        ("en", "Python 3.12"),
+        ("ru", "через"),
+        ("en", "OpenAI API"),
+        ("ru", "на порту восемьдесят, восемьдесят."),
+    ]
+
+
+
+
 class FakeSileroModel:
     speakers = ["xenia", "baya"]
 
@@ -208,6 +277,39 @@ class InPlaceDeviceSileroModel(FakeSileroModel):
     def to(self, device: str):
         self.to_device = device
         return None
+
+
+class FakeEnglishSileroModel(FakeSileroModel):
+    speakers = ["en_0"]
+
+
+class FakeVoiceConverter:
+    sample_rate = 22050
+
+    def __init__(self) -> None:
+        self.loads = 0
+        self.calls: list[tuple[int, int]] = []
+
+    def load(self) -> None:
+        self.loads += 1
+
+    def convert(self, waveform, sample_rate: int):
+        self.calls.append((len(waveform), sample_rate))
+        return waveform
+
+
+class FakeSupertonicModel:
+    def __init__(self) -> None:
+        self.style_requests: list[str] = []
+        self.calls: list[dict[str, object]] = []
+
+    def get_voice_style(self, voice_name: str):
+        self.style_requests.append(voice_name)
+        return f"style:{voice_name}"
+
+    def synthesize(self, **kwargs):
+        self.calls.append(kwargs)
+        return np.array([[0.0, 0.2, -0.2, 0.0]], dtype=np.float32), np.array([0.01])
 
 
 def fake_torch(cuda_available: bool = False):
@@ -308,6 +410,67 @@ async def test_silero_stream_returns_single_final_wav_chunk(monkeypatch: pytest.
 
 
 @pytest.mark.anyio
+async def test_silero_normalizes_text_and_applies_optional_cpu_voice_conversion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_fake_torch(monkeypatch)
+    model = FakeSileroModel()
+    converter = FakeVoiceConverter()
+    provider = SileroTTSProvider(
+        model_loader=lambda: model,
+        warmup=False,
+        openvoice_enabled=True,
+        openvoice_reference_audio_path=Path("voice.wav"),
+        voice_converter_loader=lambda: converter,
+    )
+
+    chunks = [
+        chunk
+        async for chunk in provider.stream(
+            TTSRequest("OpenAI API на порту 8080", "ru", "xenia")
+        )
+    ]
+
+    assert model.calls == ["оупен эй ай эй пи ай на порту восемьдесят, восемьдесят"]
+    assert converter.loads == 1
+    assert converter.calls == [(4, 24000)]
+    assert chunks[0].metadata["sample_rate"] == 22050
+    assert chunks[0].metadata["voice_conversion"] is True
+    with wave.open(__import__("io").BytesIO(chunks[0].data), "rb") as audio:
+        assert audio.getframerate() == 22050
+
+
+@pytest.mark.anyio
+async def test_silero_can_synthesize_english_runs_natively_before_voice_conversion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_fake_torch(monkeypatch)
+    russian_model = FakeSileroModel()
+    english_model = FakeEnglishSileroModel()
+    converter = FakeVoiceConverter()
+    provider = SileroTTSProvider(
+        model_loader=lambda: russian_model,
+        english_model_loader=lambda: english_model,
+        native_english=True,
+        warmup=False,
+        openvoice_enabled=True,
+        openvoice_reference_audio_path=Path("voice.wav"),
+        voice_converter_loader=lambda: converter,
+    )
+
+    chunks = [
+        chunk
+        async for chunk in provider.stream(
+            TTSRequest("Запусти OpenAI API на порту 8080", "ru", "xenia")
+        )
+    ]
+
+    assert russian_model.calls == ["Запусти", "на порту восемьдесят, восемьдесят"]
+    assert english_model.calls == ["Open A I A P I"]
+    assert chunks[0].metadata["native_english"] is True
+
+
+@pytest.mark.anyio
 async def test_silero_uses_requested_valid_speaker(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -320,6 +483,104 @@ async def test_silero_uses_requested_valid_speaker(
 
     assert result.voice == "baya"
     assert model.calls == ["Привет"]
+
+
+@pytest.mark.anyio
+async def test_supertonic_uses_one_female_style_for_native_ru_and_en_segments() -> None:
+    model = FakeSupertonicModel()
+    provider = SupertonicTTSProvider(
+        voice="F4",
+        warmup=False,
+        inter_segment_silence_ms=0,
+        model_loader=lambda: model,
+    )
+
+    chunks = [
+        chunk
+        async for chunk in provider.stream(
+            TTSRequest("Сегодня OpenAI API на порту 8080.", "ru", "F4")
+        )
+    ]
+
+    assert model.style_requests == ["F4"]
+    assert [(call["lang"], call["text"]) for call in model.calls] == [
+        ("ru", "Сегодня"),
+        ("en", "OpenAI API"),
+        ("ru", "на порту восемьдесят, восемьдесят."),
+    ]
+    assert {call["voice_style"] for call in model.calls} == {"style:F4"}
+    assert chunks[0].metadata["voice"] == "F4"
+    with wave.open(__import__("io").BytesIO(chunks[0].data), "rb") as audio:
+        assert audio.getframerate() == 44100
+        assert audio.getnchannels() == 1
+
+
+def test_supertonic_trims_model_padding_but_keeps_natural_pause() -> None:
+    provider = SupertonicTTSProvider(
+        warmup=False,
+        leading_padding_ms=10,
+        trailing_padding_ms=20,
+        model_loader=FakeSupertonicModel,
+    )
+    provider.sample_rate = 1000
+    waveform = np.concatenate(
+        [np.zeros(100, dtype=np.float32), np.ones(100, dtype=np.float32), np.zeros(100, dtype=np.float32)]
+    )
+
+    trimmed = provider._trim_waveform(waveform)
+
+    assert len(trimmed) == 130
+    assert np.count_nonzero(trimmed) == 100
+
+
+@pytest.mark.anyio
+async def test_tts_fallback_switches_after_primary_stream_failure() -> None:
+    class BrokenTTSProvider(TTSProvider):
+        @property
+        def name(self) -> str:
+            return "broken"
+
+        @property
+        def available_speakers(self) -> list[str]:
+            return ["F4"]
+
+        async def stream(self, request: TTSRequest):
+            if False:
+                yield None
+            raise RuntimeError("primary failed")
+
+    provider = FallbackTTSProvider(BrokenTTSProvider(), MockTTSProvider())
+
+    chunks = [
+        chunk async for chunk in provider.stream(TTSRequest("Привет", "ru", "F4"))
+    ]
+
+    assert len(chunks) == 1
+    assert provider.metadata["fallback_active"] is True
+    assert provider.metadata["provider"] == "mock"
+
+
+def test_voice_service_builds_supertonic_with_lazy_silero_fallback(tmp_path: Path) -> None:
+    settings = Settings(
+        voice_tts_provider="supertonic",
+        voice_tts_fallback_provider="silero",
+        voice_supertonic_cache_dir=str(tmp_path / "supertonic"),
+    )
+
+    provider = VoiceService(settings).tts_provider
+
+    assert isinstance(provider, FallbackTTSProvider)
+    assert isinstance(provider.primary, SupertonicTTSProvider)
+    assert isinstance(provider.fallback, SileroTTSProvider)
+    assert provider.available_speakers[0] == "F4"
+
+
+def test_silero_rejects_male_runtime_voice_and_falls_back_to_configured_female() -> None:
+    provider = SileroTTSProvider(speaker="xenia", warmup=False)
+
+    assert provider.available_speakers == ["xenia", "baya", "kseniya"]
+    assert provider.resolve_voice("ru", "aidar") == "xenia"
+    assert provider.resolve_voice("ru", "eugene") == "xenia"
 
 
 @pytest.mark.anyio
@@ -381,7 +642,7 @@ def test_next_tts_path_uses_wav_for_silero(tmp_path: Path) -> None:
     assert service.next_tts_path("silero").suffix == ".wav"
 
 
-@pytest.mark.parametrize("provider_name", ["edge_tts", "auto"])
+@pytest.mark.parametrize("provider_name", ["edge_tts", "auto", "chatterbox"])
 def test_edge_and_auto_tts_providers_are_not_supported(provider_name: str, tmp_path: Path) -> None:
     settings = Settings(voice_tts_provider=provider_name, voice_audio_dir=str(tmp_path / "audio"))
 

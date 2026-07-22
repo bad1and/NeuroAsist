@@ -4,11 +4,15 @@ from fastapi.testclient import TestClient
 
 from apps.backend import main as backend_main
 from apps.backend.app.core.config import Settings
+from apps.backend.app.runtime.settings import RuntimeSettings, RuntimeSettingsStore
 
 
 class FailingTTSPreloadVoiceService:
     def __init__(self, settings: Settings) -> None:
         self.tts_provider = SimpleNamespace(name=settings.voice_tts_provider)
+
+    def available_tts_voices(self) -> list[str]:
+        return ["xenia"]
 
     async def preload_stt(self) -> None:
         return None
@@ -18,6 +22,58 @@ class FailingTTSPreloadVoiceService:
 
     def clear_tts_audio(self) -> int:
         return 0
+
+
+def test_startup_replaces_persisted_male_voice_with_configured_female(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    settings = Settings(
+        deepseek_api_key="test-key",
+        app_data_dir=str(tmp_path / "app-data"),
+        sqlite_path=str(tmp_path / "startup.sqlite3"),
+        log_to_file=False,
+        voice_preload_stt_model=False,
+        voice_preload_tts_model=False,
+        voice_stt_provider="mock",
+        voice_tts_provider="silero",
+        voice_silero_speaker_ru="xenia",
+    )
+    store = RuntimeSettingsStore(settings.app_data_path / "settings.json")
+    store.save(RuntimeSettings(voice_tts_voice="aidar"))
+    monkeypatch.setattr(backend_main, "get_settings", lambda: settings)
+
+    app = backend_main.create_app()
+
+    assert app.state.runtime_settings.voice_tts_voice == "xenia"
+    assert store.load(RuntimeSettings()).voice_tts_voice == "xenia"
+
+
+def test_startup_migrates_legacy_silero_voice_to_supertonic_f4(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    settings = Settings(
+        deepseek_api_key="test-key",
+        app_data_dir=str(tmp_path / "app-data"),
+        sqlite_path=str(tmp_path / "startup.sqlite3"),
+        log_to_file=False,
+        voice_preload_stt_model=False,
+        voice_preload_tts_model=False,
+        voice_stt_provider="mock",
+        voice_tts_provider="supertonic",
+        voice_tts_fallback_provider="mock",
+        voice_supertonic_voice="F4",
+        voice_supertonic_cache_dir=str(tmp_path / "supertonic"),
+    )
+    store = RuntimeSettingsStore(settings.app_data_path / "settings.json")
+    store.save(RuntimeSettings(voice_tts_voice="xenia"))
+    monkeypatch.setattr(backend_main, "get_settings", lambda: settings)
+
+    app = backend_main.create_app()
+
+    assert app.state.runtime_settings.voice_tts_voice == "F4"
+    assert store.load(RuntimeSettings()).voice_tts_voice == "F4"
 
 
 def test_startup_continues_when_tts_preload_fails(

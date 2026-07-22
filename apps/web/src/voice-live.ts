@@ -75,8 +75,8 @@ export class TTSStreamPlayer {
     options: TTSStreamPlayerOptions = {},
     private readonly onUnderrun: (gapMs: number) => void = () => undefined,
   ) {
-    this.prebufferSegments = Math.max(1, options.prebufferSegments ?? 2);
-    this.prebufferMs = Math.max(0, options.prebufferMs ?? 700);
+    this.prebufferSegments = Math.max(1, options.prebufferSegments ?? 1);
+    this.prebufferMs = Math.max(0, options.prebufferMs ?? 0);
     this.playbackRate = this.normalizePlaybackRate(options.playbackRate ?? 1);
   }
 

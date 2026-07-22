@@ -608,8 +608,8 @@ function ChatPage({
           setVoiceState("error");
         },
         {
-          prebufferSegments: settings?.voice_live_playback_prebuffer_segments ?? 2,
-          prebufferMs: settings?.voice_live_playback_prebuffer_ms ?? 700,
+          prebufferSegments: settings?.voice_live_playback_prebuffer_segments ?? 1,
+          prebufferMs: settings?.voice_live_playback_prebuffer_ms ?? 0,
           playbackRate: settings?.voice_playback_rate ?? 1,
         },
         (gapMs) => {
@@ -618,8 +618,8 @@ function ChatPage({
       );
     }
     livePlayerRef.current.updateOptions({
-      prebufferSegments: settings?.voice_live_playback_prebuffer_segments ?? 2,
-      prebufferMs: settings?.voice_live_playback_prebuffer_ms ?? 700,
+      prebufferSegments: settings?.voice_live_playback_prebuffer_segments ?? 1,
+      prebufferMs: settings?.voice_live_playback_prebuffer_ms ?? 0,
       playbackRate: settings?.voice_playback_rate ?? 1,
     });
     return livePlayerRef.current;
@@ -1392,8 +1392,8 @@ function SettingsPage({
   const [voiceLanguage, setVoiceLanguage] = useState("ru");
   const [voiceTtsVoice, setVoiceTtsVoice] = useState("");
   const [voicePlaybackRate, setVoicePlaybackRate] = useState(1);
-  const [prebufferSegments, setPrebufferSegments] = useState(2);
-  const [prebufferMs, setPrebufferMs] = useState(1000);
+  const [prebufferSegments, setPrebufferSegments] = useState(1);
+  const [prebufferMs, setPrebufferMs] = useState(0);
   const [memoryMode, setMemoryMode] = useState("balanced");
   const [memoryIncognito, setMemoryIncognito] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1442,6 +1442,15 @@ function SettingsPage({
       </section>
     );
   }
+
+  const ttsProviderLabel = settings.voice_tts_provider === "supertonic"
+    ? "Supertonic 3"
+    : settings.voice_tts_provider === "silero"
+      ? "Silero"
+      : settings.voice_tts_provider;
+  const ttsRuntimeLabel = [ttsProviderLabel, settings.voice_tts_device?.toUpperCase()]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <section className="panel settings-panel">
@@ -1513,7 +1522,7 @@ function SettingsPage({
           </label>
 
           <label>
-            Голос Silero
+            Голос {ttsProviderLabel}
             <select
               value={voiceTtsVoice}
               onChange={(event) => setVoiceTtsVoice(event.target.value)}
@@ -1539,8 +1548,11 @@ function SettingsPage({
           </label>
 
           <div className="readonly-setting">
-            <span>Тон и высота голоса</span>
-            <strong>Текущий движок Silero не поддерживает эту настройку</strong>
+            <span>Движок синтеза</span>
+            <strong>
+              {ttsRuntimeLabel}
+              {settings.voice_tts_fallback_active ? " · резервный режим" : " · активен"}
+            </strong>
           </div>
         </fieldset>
 

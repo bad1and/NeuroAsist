@@ -31,12 +31,13 @@ import { MemoryPage } from "./memory";
 
 const settings = {
   provider: "deepseek", model: "deepseek-chat", personality: "default", voice_language: "ru",
-  voice_stt_model: "small", voice_tts_enabled: true, avatar_enabled: false, voice_tts_voice: "xenia",
+  voice_stt_model: "small", voice_tts_enabled: true, avatar_enabled: false, voice_tts_voice: "F4",
+  voice_tts_provider: "supertonic", voice_tts_model: "supertonic-3", voice_tts_device: "cpu", voice_tts_fallback_active: false,
   voice_playback_rate: 1, voice_live_playback_prebuffer_segments: 2, voice_live_playback_prebuffer_ms: 700,
   chat_history_limit: 40, episodes_enabled: true, episode_soft_inactivity_minutes: 30,
   episode_hard_inactivity_minutes: 120, episode_maximum_messages: 100, episode_maximum_estimated_tokens: 12000,
   memory_enabled: true, memory_mode: "balanced", memory_incognito: false, log_level: "info",
-  api_key_configured: true, available_personalities: ["default"], available_voice_languages: ["ru"], available_tts_voices: ["xenia"],
+  api_key_configured: true, available_personalities: ["default"], available_voice_languages: ["ru"], available_tts_voices: ["F4"],
 };
 
 class MockWebSocket {
@@ -104,6 +105,8 @@ describe("русский интерфейс", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Голос" }));
     expect(screen.getByLabelText("Язык голосового ввода")).toBeVisible();
+    expect(screen.getByLabelText("Голос Supertonic 3")).toBeVisible();
+    expect(screen.getByText("Supertonic 3 · CPU · активен")).toBeVisible();
     expect(screen.getByLabelText("Стиль общения")).not.toBeVisible();
   });
 
