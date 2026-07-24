@@ -158,7 +158,7 @@ def patch_runtime_settings(
     return get_public_settings(request)
 
 
-@router.patch("/voice-style", response_model=PublicSettingsResponse)
+@router.patch("/settings/voice-style", response_model=PublicSettingsResponse)
 def patch_voice_style(payload: VoiceStylePatch, request: Request) -> PublicSettingsResponse:
     from apps.backend.app.voice.style import VoiceStyle
 
