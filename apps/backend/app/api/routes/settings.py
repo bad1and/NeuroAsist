@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from apps.backend.app.schemas.settings import (
     PublicSettingsResponse,
     RuntimeSettingsPatch,
+    VoiceStylePatch,
 )
 
 router = APIRouter()
@@ -39,9 +40,9 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         voice_tts_provider=str(tts_metadata.get("provider", tts_provider.name)),
         voice_tts_model=tts_metadata.get("model"),
         voice_tts_device=tts_metadata.get("device"),
-        voice_tts_fallback_active=bool(tts_metadata.get("fallback_active", False)),
         avatar_enabled=settings.avatar_enabled,
         voice_tts_voice=runtime_settings.voice_tts_voice or settings.voice_tts_default_voice,
+        voice_tts_style=str(getattr(request.app.state, "voice_tts_style", "auto")),
         voice_playback_rate=runtime_settings.voice_playback_rate,
         voice_live_playback_prebuffer_segments=runtime_settings.voice_live_playback_prebuffer_segments,
         voice_live_playback_prebuffer_ms=runtime_settings.voice_live_playback_prebuffer_ms,
@@ -154,4 +155,19 @@ def patch_runtime_settings(
         },
     )
 
+    return get_public_settings(request)
+
+
+@router.patch("/voice-style", response_model=PublicSettingsResponse)
+def patch_voice_style(payload: VoiceStylePatch, request: Request) -> PublicSettingsResponse:
+    from apps.backend.app.voice.style import VoiceStyle
+
+    try:
+        style = VoiceStyle(payload.voice_tts_style)
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported voice style") from error
+    request.app.state.voice_tts_style = style.value
+    request.app.state.event_bus.publish(
+        "voice.style_changed", "info", "Temporary voice style changed", {"style": style.value}
+    )
     return get_public_settings(request)

@@ -58,7 +58,7 @@ def test_public_settings_does_not_return_api_key(client: TestClient) -> None:
     assert body["voice_stt_model"] == "v3_rnnt"
     assert body["voice_tts_enabled"] is True
     assert body["voice_tts_provider"] == app.state.voice_service.tts_provider.name
-    assert "voice_tts_fallback_active" in body
+    assert body["voice_tts_style"] == "auto"
     assert body["voice_tts_voice"]
     assert body["voice_playback_rate"] == 1.0
     assert 1 <= body["voice_live_playback_prebuffer_segments"] <= 4

@@ -46,6 +46,7 @@ import {
   deleteTimelineRange,
   sendVoiceMessage,
   updateRuntimeSettings,
+  updateVoiceStyle,
   voiceWebSocketUrl,
   voiceInputWebSocketUrl,
   WS_EVENTS_URL,
@@ -1391,6 +1392,7 @@ function SettingsPage({
   const [personality, setPersonality] = useState("");
   const [voiceLanguage, setVoiceLanguage] = useState("ru");
   const [voiceTtsVoice, setVoiceTtsVoice] = useState("");
+  const [voiceTtsStyle, setVoiceTtsStyle] = useState("auto");
   const [voicePlaybackRate, setVoicePlaybackRate] = useState(1);
   const [prebufferSegments, setPrebufferSegments] = useState(1);
   const [prebufferMs, setPrebufferMs] = useState(0);
@@ -1404,6 +1406,7 @@ function SettingsPage({
       setPersonality(settings.personality);
       setVoiceLanguage(settings.voice_language);
       setVoiceTtsVoice(settings.voice_tts_voice);
+      setVoiceTtsStyle(settings.voice_tts_style);
       setVoicePlaybackRate(settings.voice_playback_rate);
       setPrebufferSegments(settings.voice_live_playback_prebuffer_segments);
       setPrebufferMs(settings.voice_live_playback_prebuffer_ms);
@@ -1435,6 +1438,21 @@ function SettingsPage({
     }
   };
 
+  const changeVoiceStyle = async (value: string) => {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const nextSettings = await updateVoiceStyle(value);
+      onSettingsChanged(nextSettings);
+      setVoiceTtsStyle(nextSettings.voice_tts_style);
+      setMessage("Подача голоса изменена до перезапуска.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Не удалось изменить подачу голоса.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (!settings) {
     return (
       <section className="panel">
@@ -1443,11 +1461,7 @@ function SettingsPage({
     );
   }
 
-  const ttsProviderLabel = settings.voice_tts_provider === "supertonic"
-    ? "Supertonic 3"
-    : settings.voice_tts_provider === "silero"
-      ? "Silero"
-      : settings.voice_tts_provider;
+  const ttsProviderLabel = settings.voice_tts_provider === "silero" ? "Silero" : settings.voice_tts_provider;
   const ttsRuntimeLabel = [ttsProviderLabel, settings.voice_tts_device?.toUpperCase()]
     .filter(Boolean)
     .join(" · ");
@@ -1547,11 +1561,24 @@ function SettingsPage({
             />
           </label>
 
+          <label>
+            Подача голоса
+            <select value={voiceTtsStyle} onChange={(event) => void changeVoiceStyle(event.target.value)} disabled={saving}>
+              <option value="auto">Авто — по эмоции нейросети</option>
+              <option value="calm">Спокойно</option>
+              <option value="normal">Обычно</option>
+              <option value="energetic">Энергично</option>
+              <option value="thoughtful">Задумчиво</option>
+              <option value="assertive">Напористо</option>
+            </select>
+            <small>Действует до перезапуска приложения.</small>
+          </label>
+
           <div className="readonly-setting">
             <span>Движок синтеза</span>
             <strong>
               {ttsRuntimeLabel}
-              {settings.voice_tts_fallback_active ? " · резервный режим" : " · активен"}
+              {" · активен"}
             </strong>
           </div>
         </fieldset>

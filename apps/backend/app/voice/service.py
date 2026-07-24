@@ -12,14 +12,12 @@ from fastapi import HTTPException, UploadFile, status
 
 from apps.backend.app.core.config import Settings
 from apps.backend.app.voice.providers import (
-    FallbackTTSProvider,
     FasterWhisperSTTProvider,
     GigaAMSTTProvider,
     MockSTTProvider,
     MockTTSProvider,
     SileroTTSProvider,
     STTProvider,
-    SupertonicTTSProvider,
     TTSProvider,
 )
 
@@ -236,37 +234,12 @@ class VoiceService:
         raise ValueError(f"Unsupported STT provider: {settings.voice_stt_provider}")
 
     def _build_tts_provider(self, settings: Settings) -> TTSProvider:
-        primary = self._build_tts_provider_by_name(settings.voice_tts_provider, settings)
-        fallback_name = getattr(settings, "voice_tts_fallback_provider", None)
-        if (
-            settings.voice_tts_provider == "mock"
-            or not fallback_name
-            or fallback_name == settings.voice_tts_provider
-        ):
-            return primary
-        fallback = self._build_tts_provider_by_name(fallback_name, settings)
-        return FallbackTTSProvider(primary, fallback)
+        return self._build_tts_provider_by_name(settings.voice_tts_provider, settings)
 
     @staticmethod
     def _build_tts_provider_by_name(provider_name: str, settings: Settings) -> TTSProvider:
         if provider_name == "mock":
             return MockTTSProvider()
-        if provider_name == "supertonic":
-            return SupertonicTTSProvider(
-                model=settings.voice_supertonic_model,
-                voice=settings.voice_supertonic_voice,
-                model_dir=settings.voice_supertonic_cache_path,
-                total_steps=settings.voice_supertonic_total_steps,
-                speed=settings.voice_supertonic_speed,
-                cpu_threads=settings.voice_supertonic_cpu_threads,
-                warmup=settings.voice_supertonic_warmup,
-                auto_download=settings.voice_supertonic_auto_download,
-                timeout_seconds=settings.voice_supertonic_timeout_seconds,
-                inter_segment_silence_ms=settings.voice_supertonic_inter_segment_silence_ms,
-                trim_silence=settings.voice_supertonic_trim_silence,
-                leading_padding_ms=settings.voice_supertonic_leading_padding_ms,
-                trailing_padding_ms=settings.voice_supertonic_trailing_padding_ms,
-            )
         if provider_name == "silero":
             return SileroTTSProvider(
                 model=settings.voice_silero_model,
@@ -276,6 +249,9 @@ class VoiceService:
                 cpu_threads=settings.voice_silero_cpu_threads,
                 warmup=settings.voice_silero_warmup,
                 timeout_seconds=settings.voice_silero_timeout_seconds,
+                loudness_target_dbfs=settings.voice_silero_loudness_target_dbfs,
+                peak_ceiling_dbfs=settings.voice_silero_peak_ceiling_dbfs,
+                pronunciation_dictionary_path=settings.voice_silero_pronunciation_dictionary,
                 native_english=settings.voice_silero_native_english,
                 english_model=settings.voice_silero_english_model,
                 english_speaker=settings.voice_silero_english_speaker,

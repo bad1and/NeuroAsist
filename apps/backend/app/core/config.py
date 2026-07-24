@@ -2,7 +2,7 @@ from functools import lru_cache
 import os
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT_DIR = Path(__file__).resolve().parents[4]
@@ -63,28 +63,17 @@ class Settings(BaseSettings):
     voice_preload_stt_model: bool = True
     voice_preload_tts_model: bool = True
     voice_tts_enabled: bool = True
-    voice_tts_provider: str = "supertonic"
-    voice_tts_fallback_provider: str | None = "silero"
-    voice_supertonic_model: str = "supertonic-3"
-    voice_supertonic_voice: str = "F4"
-    voice_supertonic_cache_dir: str | None = None
-    voice_supertonic_total_steps: int = 8
-    voice_supertonic_speed: float = 1.05
-    voice_supertonic_cpu_threads: int = 8
-    voice_supertonic_warmup: bool = True
-    voice_supertonic_auto_download: bool = True
-    voice_supertonic_timeout_seconds: float = 15.0
-    voice_supertonic_inter_segment_silence_ms: int = 60
-    voice_supertonic_trim_silence: bool = True
-    voice_supertonic_leading_padding_ms: int = 70
-    voice_supertonic_trailing_padding_ms: int = 110
+    voice_tts_provider: str = "silero"
     voice_silero_model: str = "v5_5_ru"
-    voice_silero_speaker_ru: str = "xenia"
-    voice_silero_sample_rate: int = 24000
+    voice_silero_speaker_ru: str = "baya"
+    voice_silero_sample_rate: int = 48000
     voice_silero_device: str = "cpu"
     voice_silero_cpu_threads: int = 4
     voice_silero_warmup: bool = True
     voice_silero_timeout_seconds: float = 10.0
+    voice_silero_loudness_target_dbfs: float = -18.0
+    voice_silero_peak_ceiling_dbfs: float = -1.0
+    voice_silero_pronunciation_dictionary_path: str | None = None
     voice_silero_native_english: bool = False
     voice_silero_english_model: str = "v3_en"
     voice_silero_english_speaker: str = "en_0"
@@ -126,6 +115,13 @@ class Settings(BaseSettings):
     avatar_emotion_mapping_path: str = "apps/protocol/avatar-emotion-mapping.json"
     avatar_heartbeat_interval_seconds: float = 15.0
     avatar_client_timeout_seconds: float = 45.0
+
+    @field_validator("voice_tts_provider", mode="before")
+    @classmethod
+    def migrate_legacy_supertonic_provider(cls, value: object) -> str:
+        if str(value or "").lower() == "supertonic":
+            return "silero"
+        return str(value or "silero").lower()
 
     @property
     def llm_api_key(self) -> str | None:
@@ -181,17 +177,15 @@ class Settings(BaseSettings):
         return path if path.is_absolute() else ROOT_DIR / path
 
     @property
-    def voice_tts_default_voice(self) -> str:
-        if self.voice_tts_provider == "supertonic":
-            return self.voice_supertonic_voice.upper()
-        return self.voice_silero_speaker_ru
+    def voice_silero_pronunciation_dictionary(self) -> Path:
+        if self.voice_silero_pronunciation_dictionary_path:
+            path = Path(self.voice_silero_pronunciation_dictionary_path).expanduser()
+            return path if path.is_absolute() else ROOT_DIR / path
+        return self.app_data_path / "tts-pronunciations.json"
 
     @property
-    def voice_supertonic_cache_path(self) -> Path:
-        if not self.voice_supertonic_cache_dir:
-            return self.app_data_path / "models" / "supertonic-3"
-        path = Path(self.voice_supertonic_cache_dir).expanduser()
-        return path if path.is_absolute() else ROOT_DIR / path
+    def voice_tts_default_voice(self) -> str:
+        return self.voice_silero_speaker_ru
 
     @property
     def voice_openvoice_cache_path(self) -> Path:

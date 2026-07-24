@@ -35,14 +35,14 @@ class FailingLLMProvider:
 
 
 class FailingTTSProvider:
-    async def synthesize(self, text, voice, output_path):
+    async def synthesize(self, text, voice, output_path, style="auto"):
         raise RuntimeError("tts failed")
 
 
 class SlowTTSProvider:
-    async def synthesize(self, text, voice, output_path):
+    async def synthesize(self, text, voice, output_path, style="auto"):
         await asyncio.sleep(0.5)
-        return await MockTTSProvider().synthesize(text, voice, output_path)
+        return await MockTTSProvider().synthesize(text, voice, output_path, style)
 
 
 @pytest.fixture
@@ -107,7 +107,7 @@ def test_voice_chat_returns_transcript_reply_and_queues_tts(client: TestClient) 
     assert body["tts_status"] == "queued"
     assert body["stt"]["provider"] == "mock"
     assert body["tts"]["provider"] == "mock"
-    assert body["tts"]["voice"] == "xenia"
+    assert body["tts"]["voice"] == "baya"
     assert body["tts"]["duration_ms"] == 0
     assert body["memory_updates"] == []
 
@@ -260,7 +260,7 @@ def test_voice_chat_returns_text_when_background_tts_fails(
     assert body["tts"]["duration_ms"] == 0
 
     assert failed_event["metadata"]["voice_request_id"] == body["voice_request_id"]
-    assert "Voice synthesis fallback activated" in caplog.text
+    assert "Voice synthesis failed" in caplog.text
     assert "Traceback" not in caplog.text
 
     status_response = client.get(f"/voice/tts/{body['voice_request_id']}")

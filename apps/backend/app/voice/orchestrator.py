@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from apps.backend.app.voice.providers import split_tts_chunks
+from apps.backend.app.voice.style import VoiceStyle
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ class SpeechOrchestrator:
         gesture: str = "auto",
         gesture_intensity: float = 1.0,
         voice: str,
+        style: VoiceStyle | str = VoiceStyle.AUTO,
         interrupt: bool = True,
         voice_request_id: str | None = None,
     ) -> str:
@@ -47,6 +49,7 @@ class SpeechOrchestrator:
                 gesture=gesture,
                 gesture_intensity=gesture_intensity,
                 voice=voice,
+                style=style,
                 interrupt=interrupt,
             )
         )
@@ -77,6 +80,7 @@ class SpeechOrchestrator:
         gesture: str,
         gesture_intensity: float,
         voice: str,
+        style: VoiceStyle | str,
         interrupt: bool,
     ) -> None:
         output_path = self.voice_service.next_tts_path(self.settings.voice_tts_provider)
@@ -88,7 +92,7 @@ class SpeechOrchestrator:
         )
         try:
             result = await asyncio.wait_for(
-                self.voice_service.tts_provider.synthesize(text, voice, output_path),
+                self.voice_service.tts_provider.synthesize(text, voice, output_path, style),
                 timeout=self.settings.voice_tts_background_timeout_seconds,
             )
             if not result.audio_path.exists() or not result.audio_path.is_file():
@@ -98,7 +102,7 @@ class SpeechOrchestrator:
         except TimeoutError:
             self._fail(session_id, voice_request_id, voice, "Voice synthesis timed out", "TimeoutError")
         except Exception as exc:
-            logger.info("Voice synthesis fallback activated: voice_request_id=%s voice=%s error_type=%s", voice_request_id, voice, type(exc).__name__)
+            logger.info("Voice synthesis failed: voice_request_id=%s voice=%s error_type=%s", voice_request_id, voice, type(exc).__name__)
             logger.debug("Voice synthesis fallback details", exc_info=True)
             self._fail(session_id, voice_request_id, voice, "Voice synthesis failed", type(exc).__name__)
         else:

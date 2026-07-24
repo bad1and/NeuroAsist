@@ -131,6 +131,13 @@ export function updateRuntimeSettings(payload: {
   });
 }
 
+export function updateVoiceStyle(voice_tts_style: string): Promise<PublicSettings> {
+  return requestJson<PublicSettings>("/settings/voice-style", {
+    method: "PATCH",
+    body: JSON.stringify({ voice_tts_style }),
+  });
+}
+
 export function getEvents(limit = 100): Promise<{ events: BackendEvent[] }> {
   return requestJson<{ events: BackendEvent[] }>(`/events?limit=${limit}`);
 }

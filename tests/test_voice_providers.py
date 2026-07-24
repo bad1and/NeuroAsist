@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import re
 import sys
 import time
 import wave
@@ -14,12 +15,10 @@ import pytest
 from apps.backend.app.core.config import Settings
 from apps.backend.app.voice.providers import (
     AudioChunk,
-    FallbackTTSProvider,
     FasterWhisperSTTProvider,
     GigaAMSTTProvider,
     MockTTSProvider,
     SileroTTSProvider,
-    SupertonicTTSProvider,
     TTSProvider,
     TTSRequest,
     configure_cmudict,
@@ -30,6 +29,11 @@ from apps.backend.app.voice.providers import (
     waveform_to_wav_bytes,
 )
 from apps.backend.app.voice.service import VoiceService
+from apps.backend.app.voice.style import VoiceStyle, make_silero_ssml, resolve_voice_style
+
+
+def _spoken_ssml(value: str) -> str:
+    return re.sub(r"<[^>]+>", "", value).strip()
 
 
 def test_tts_cleanup_keeps_only_recent_wavs(tmp_path) -> None:
@@ -219,6 +223,22 @@ def test_russian_tts_normalization_declines_years_and_transcribes_technical_engl
     assert normalize_russian_tts_text("Я начала в 2015 году") == (
         "Я начала в две тысячи пятнадцатом году"
     )
+
+
+def test_russian_tts_normalization_expands_numeric_date() -> None:
+    assert normalize_russian_tts_text("Встреча 25.07.2026", transliterate_latin=False) == (
+        "Встреча двадцать пятое июля две тысячи двадцать шестого года"
+    )
+
+
+def test_silero_ssml_uses_style_profile_and_escapes_text() -> None:
+    ssml = make_silero_ssml("Громче <сейчас>!", VoiceStyle.ENERGETIC)
+
+    assert "rate=\"fast\"" in ssml
+    assert "pitch=\"x-high\"" in ssml
+    assert "Громче &lt;сейчас&gt;!" in ssml
+    assert resolve_voice_style(VoiceStyle.AUTO, emotion="sad") is VoiceStyle.CALM
+    assert resolve_voice_style(VoiceStyle.ASSERTIVE, emotion="happy") is VoiceStyle.ASSERTIVE
     assert normalize_russian_tts_text("OpenAI API, Python и GitHub") == (
         "оупен эй ай эй пи ай, пайтон и гитхаб"
     )
@@ -264,12 +284,12 @@ class FakeSileroModel:
         self.to_device = device
         return self
 
-    def apply_tts(self, *, text: str, speaker: str, sample_rate: int):
+    def apply_tts(self, *, text: str | None = None, ssml_text: str | None = None, speaker: str, sample_rate: int, intensity: int = 3):
         if self.delay:
             import time
 
             time.sleep(self.delay)
-        self.calls.append(text)
+        self.calls.append(text or ssml_text or "")
         return np.array([0.0, 0.2, -0.2, 0.0], dtype=np.float32)
 
 
@@ -296,20 +316,6 @@ class FakeVoiceConverter:
     def convert(self, waveform, sample_rate: int):
         self.calls.append((len(waveform), sample_rate))
         return waveform
-
-
-class FakeSupertonicModel:
-    def __init__(self) -> None:
-        self.style_requests: list[str] = []
-        self.calls: list[dict[str, object]] = []
-
-    def get_voice_style(self, voice_name: str):
-        self.style_requests.append(voice_name)
-        return f"style:{voice_name}"
-
-    def synthesize(self, **kwargs):
-        self.calls.append(kwargs)
-        return np.array([[0.0, 0.2, -0.2, 0.0]], dtype=np.float32), np.array([0.01])
 
 
 def fake_torch(cuda_available: bool = False):
@@ -378,7 +384,7 @@ def test_silero_warmup_runs_once(monkeypatch: pytest.MonkeyPatch) -> None:
     asyncio.run(provider.preload())
     asyncio.run(provider.preload())
 
-    assert model.calls == ["Привет."]
+    assert [_spoken_ssml(call) for call in model.calls] == ["Привет."]
 
 
 def test_silero_accepts_in_place_model_to(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -389,7 +395,7 @@ def test_silero_accepts_in_place_model_to(monkeypatch: pytest.MonkeyPatch) -> No
     asyncio.run(provider.preload())
 
     assert model.to_device == "cpu"
-    assert model.calls == ["Привет."]
+    assert [_spoken_ssml(call) for call in model.calls] == ["Привет."]
 
 
 @pytest.mark.anyio
@@ -431,7 +437,7 @@ async def test_silero_normalizes_text_and_applies_optional_cpu_voice_conversion(
         )
     ]
 
-    assert model.calls == ["оупен эй ай эй пи ай на порту восемьдесят, восемьдесят"]
+    assert [_spoken_ssml(call) for call in model.calls] == ["оупен эй ай эй пи ай на порту восемьдесят, восемьдесят"]
     assert converter.loads == 1
     assert converter.calls == [(4, 24000)]
     assert chunks[0].metadata["sample_rate"] == 22050
@@ -465,7 +471,7 @@ async def test_silero_can_synthesize_english_runs_natively_before_voice_conversi
         )
     ]
 
-    assert russian_model.calls == ["Запусти", "на порту восемьдесят, восемьдесят"]
+    assert [_spoken_ssml(call) for call in russian_model.calls] == ["Запусти", "на порту восемьдесят, восемьдесят"]
     assert english_model.calls == ["Open A I A P I"]
     assert chunks[0].metadata["native_english"] is True
 
@@ -482,97 +488,7 @@ async def test_silero_uses_requested_valid_speaker(
     result = await provider.synthesize("Привет", "baya", tmp_path / "reply.wav")
 
     assert result.voice == "baya"
-    assert model.calls == ["Привет"]
-
-
-@pytest.mark.anyio
-async def test_supertonic_uses_one_female_style_for_native_ru_and_en_segments() -> None:
-    model = FakeSupertonicModel()
-    provider = SupertonicTTSProvider(
-        voice="F4",
-        warmup=False,
-        inter_segment_silence_ms=0,
-        model_loader=lambda: model,
-    )
-
-    chunks = [
-        chunk
-        async for chunk in provider.stream(
-            TTSRequest("Сегодня OpenAI API на порту 8080.", "ru", "F4")
-        )
-    ]
-
-    assert model.style_requests == ["F4"]
-    assert [(call["lang"], call["text"]) for call in model.calls] == [
-        ("ru", "Сегодня"),
-        ("en", "OpenAI API"),
-        ("ru", "на порту восемьдесят, восемьдесят."),
-    ]
-    assert {call["voice_style"] for call in model.calls} == {"style:F4"}
-    assert chunks[0].metadata["voice"] == "F4"
-    with wave.open(__import__("io").BytesIO(chunks[0].data), "rb") as audio:
-        assert audio.getframerate() == 44100
-        assert audio.getnchannels() == 1
-
-
-def test_supertonic_trims_model_padding_but_keeps_natural_pause() -> None:
-    provider = SupertonicTTSProvider(
-        warmup=False,
-        leading_padding_ms=10,
-        trailing_padding_ms=20,
-        model_loader=FakeSupertonicModel,
-    )
-    provider.sample_rate = 1000
-    waveform = np.concatenate(
-        [np.zeros(100, dtype=np.float32), np.ones(100, dtype=np.float32), np.zeros(100, dtype=np.float32)]
-    )
-
-    trimmed = provider._trim_waveform(waveform)
-
-    assert len(trimmed) == 130
-    assert np.count_nonzero(trimmed) == 100
-
-
-@pytest.mark.anyio
-async def test_tts_fallback_switches_after_primary_stream_failure() -> None:
-    class BrokenTTSProvider(TTSProvider):
-        @property
-        def name(self) -> str:
-            return "broken"
-
-        @property
-        def available_speakers(self) -> list[str]:
-            return ["F4"]
-
-        async def stream(self, request: TTSRequest):
-            if False:
-                yield None
-            raise RuntimeError("primary failed")
-
-    provider = FallbackTTSProvider(BrokenTTSProvider(), MockTTSProvider())
-
-    chunks = [
-        chunk async for chunk in provider.stream(TTSRequest("Привет", "ru", "F4"))
-    ]
-
-    assert len(chunks) == 1
-    assert provider.metadata["fallback_active"] is True
-    assert provider.metadata["provider"] == "mock"
-
-
-def test_voice_service_builds_supertonic_with_lazy_silero_fallback(tmp_path: Path) -> None:
-    settings = Settings(
-        voice_tts_provider="supertonic",
-        voice_tts_fallback_provider="silero",
-        voice_supertonic_cache_dir=str(tmp_path / "supertonic"),
-    )
-
-    provider = VoiceService(settings).tts_provider
-
-    assert isinstance(provider, FallbackTTSProvider)
-    assert isinstance(provider.primary, SupertonicTTSProvider)
-    assert isinstance(provider.fallback, SileroTTSProvider)
-    assert provider.available_speakers[0] == "F4"
+    assert [_spoken_ssml(call) for call in model.calls] == ["Привет"]
 
 
 def test_silero_rejects_male_runtime_voice_and_falls_back_to_configured_female() -> None:
