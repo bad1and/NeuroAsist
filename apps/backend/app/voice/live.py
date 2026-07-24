@@ -20,6 +20,7 @@ from apps.backend.app.voice.text import TextChunker, TextNormalizer
 from apps.backend.app.voice.directives import (
     AvatarDirective, LiveDirectiveParser, clean_live_reply, make_live_directive_expressive,
 )
+from apps.backend.app.voice.style import VoiceStyle, coerce_voice_style, resolve_voice_style
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,7 @@ class UtteranceContext:
     cancelled: bool = False
     audio_started: bool = False
     text_completed: bool = False
+    voice_style: VoiceStyle = VoiceStyle.AUTO
     started_at: float = field(default_factory=time.perf_counter)
 
 
@@ -134,11 +136,12 @@ class VoiceSessionManager:
         language: str,
         voice: str,
         agent: CharacterAgent,
+        style_override: str | VoiceStyle = VoiceStyle.AUTO,
     ) -> None:
         if not self.connected(session_id):
             raise RuntimeError("Voice WebSocket is not connected")
         await self.cancel(session_id)
-        context = UtteranceContext(session_id, utterance_id)
+        context = UtteranceContext(session_id, utterance_id, voice_style=coerce_voice_style(style_override))
         self._active[session_id] = context
         context.task = asyncio.create_task(
             self._run(context, transcript, language, voice, agent),
@@ -181,6 +184,9 @@ class VoiceSessionManager:
                 return
             directive_sent = True
             directive = make_live_directive_expressive(directive, transcript)
+            context.voice_style = resolve_voice_style(
+                context.voice_style, emotion=directive.emotion.value
+            )
             frame = metadata_frame(
                 intent=intent,
                 emotion=directive.emotion.value,
@@ -319,7 +325,9 @@ class VoiceSessionManager:
                 if text is None:
                     input_finished = True
                     return
-                jobs[next_job_index] = self._create_tts_job(next_job_index, text, language, voice)
+                jobs[next_job_index] = self._create_tts_job(
+                    next_job_index, text, language, voice, context.voice_style
+                )
                 logger.info(
                     "Live TTS job started: session_id=%s utterance_id=%s job_index=%s "
                     "text_length=%s words=%s queue_depth=%s tts_concurrency=%s",
@@ -366,13 +374,15 @@ class VoiceSessionManager:
                 with contextlib.suppress(asyncio.CancelledError):
                     await job.task
 
-    def _create_tts_job(self, index: int, text: str, language: str, voice: str) -> TTSJob:
+    def _create_tts_job(
+        self, index: int, text: str, language: str, voice: str, style: VoiceStyle
+    ) -> TTSJob:
         output: asyncio.Queue = asyncio.Queue()
 
         async def produce() -> None:
             started = time.perf_counter()
             try:
-                async for part in self._synthesize_part_stream(text, language, voice):
+                async for part in self._synthesize_part_stream(text, language, voice, style=style):
                     synth_ms = int((time.perf_counter() - started) * 1000)
                     await output.put((part, synth_ms))
             except Exception as exc:
@@ -454,17 +464,17 @@ class VoiceSessionManager:
         )
 
     async def _synthesize_parts(
-        self, text: str, language: str, voice: str, depth: int = 0
+        self, text: str, language: str, voice: str, depth: int = 0, style: VoiceStyle = VoiceStyle.AUTO
     ) -> list[tuple[str, bytes, str, float, int]]:
         return [
-            part async for part in self._synthesize_part_stream(text, language, voice, depth)
+            part async for part in self._synthesize_part_stream(text, language, voice, depth, style)
         ]
 
     async def _synthesize_part_stream(
-        self, text: str, language: str, voice: str, depth: int = 0
+        self, text: str, language: str, voice: str, depth: int = 0, style: VoiceStyle = VoiceStyle.AUTO
     ):
         words = text.split()
-        request = TTSRequest(text=text, language=language, voice=voice)
+        request = TTSRequest(text=text, language=language, voice=voice, style=style)
         last_error: Exception | None = None
         for attempt in range(1, self._retry_count + 2):
             chunks: list[bytes] = []
@@ -498,10 +508,12 @@ class VoiceSessionManager:
             "Adaptive live TTS split: text_length=%s words=%s depth=%s error_type=%s",
             len(text), len(words), depth, type(last_error).__name__,
         )
-        async for part in self._split_and_synthesize(text, language, voice, depth):
+        async for part in self._split_and_synthesize(text, language, voice, depth, style):
             yield part
 
-    async def _split_and_synthesize(self, text: str, language: str, voice: str, depth: int):
+    async def _split_and_synthesize(
+        self, text: str, language: str, voice: str, depth: int, style: VoiceStyle
+    ):
         words = self._SOFT_PAUSE_RE.sub(" ", text).split()
         split_at = self._adaptive_split_index(text, words)
         minimum = min(5, max(1, len(words) // 2))
@@ -519,11 +531,11 @@ class VoiceSessionManager:
             keep_final_punctuation=bool(final_punctuation),
         )
         right_task = asyncio.create_task(
-            self._synthesize_parts(right, language, voice, depth + 1),
+            self._synthesize_parts(right, language, voice, depth + 1, style),
             name=f"tts-adaptive-right-{depth + 1}",
         )
         try:
-            async for part in self._synthesize_part_stream(left, language, voice, depth + 1):
+            async for part in self._synthesize_part_stream(left, language, voice, depth + 1, style):
                 yield part
         except Exception:
             right_task.cancel()

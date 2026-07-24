@@ -9,6 +9,7 @@ from apps.backend.app.avatar.schemas import (
     AvatarTestGestureRequest,
     AvatarTestSpeakRequest,
 )
+from apps.backend.app.voice.style import coerce_voice_style
 
 router = APIRouter(prefix="/avatar", tags=["avatar"])
 
@@ -69,6 +70,7 @@ async def avatar_test_speak(payload: AvatarTestSpeakRequest, request: Request) -
         gesture=payload.gesture,
         gesture_intensity=payload.gesture_intensity,
         voice=voice,
+        style=coerce_voice_style(getattr(request.app.state, "voice_tts_style", "auto")),
         interrupt=payload.interrupt,
     )
     return {"voice_request_id": job_id, "status": "queued"}

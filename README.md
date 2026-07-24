@@ -30,7 +30,7 @@ flowchart LR
     A[Microphone or text] --> B[GigaAM v3 STT]
     B --> C[Character Agent]
     C --> D[DeepSeek-compatible LLM]
-    D --> E[Supertonic 3 TTS with Silero fallback]
+    D --> E[Silero v5_5_ru TTS]
     E --> F[Voice playback]
 ```
 
@@ -44,7 +44,7 @@ The V0.5 direction is a single continuous desktop companion: one character, one 
 | Push-to-talk voice chat | ✅ | Browser `MediaRecorder` |
 | Live voice response | ✅ | WebSocket audio segments |
 | Local speech-to-text | ✅ | GigaAM v3, `faster-whisper` fallback |
-| Local multilingual text-to-speech | ✅ | Supertonic 3 `F4`, native Russian/English, Silero fallback |
+| Local text-to-speech | ✅ | Silero v5_5_ru, Baya by default |
 | Conversation history and journal | ✅ | SQLite timeline, episodes, and summaries |
 | Long-term memory | 🧪 | SQLite canonical records, audit trail, and Memory Center |
 | Semantic memory retrieval | 🧪 | Rebuildable ChromaDB index with FTS fallback |
@@ -87,8 +87,7 @@ The header displays backend status, WebSocket connection state, API-key availabi
 - WebSocket
 - GigaAM v3
 - `faster-whisper` as a multilingual fallback
-- Supertonic 3 ONNX TTS with one female `F4` voice for Russian and English
-- Russian number normalization and lazy Silero fallback
+- Silero v5_5_ru with Baya, SSML delivery profiles and Russian normalization
 - DeepSeek-compatible LLM API
 
 ### Frontend
@@ -109,7 +108,7 @@ The header displays backend status, WebSocket connection state, API-key availabi
 - Node.js **24+**;
 - FFmpeg and FFprobe available through `PATH`;
 - a DeepSeek API key;
-- internet access for the first GigaAM/Whisper, Supertonic, and Silero fallback download;
+- internet access for the first GigaAM/Whisper and Silero download;
 - optional CUDA-capable GPU.
 
 ### 1. Clone the development branch
@@ -167,16 +166,11 @@ VOICE_STT_MODEL=v3_rnnt
 VOICE_STT_DEVICE=cpu
 
 VOICE_TTS_ENABLED=true
-VOICE_TTS_PROVIDER=supertonic
-VOICE_TTS_FALLBACK_PROVIDER=silero
+VOICE_TTS_PROVIDER=silero
 VOICE_PRELOAD_TTS_MODEL=true
-VOICE_SUPERTONIC_MODEL=supertonic-3
-VOICE_SUPERTONIC_VOICE=F4
-VOICE_SUPERTONIC_TOTAL_STEPS=8
-VOICE_SUPERTONIC_SPEED=1.05
-VOICE_SUPERTONIC_CPU_THREADS=8
 VOICE_SILERO_MODEL=v5_5_ru
-VOICE_SILERO_SPEAKER_RU=xenia
+VOICE_SILERO_SPEAKER_RU=baya
+VOICE_SILERO_SAMPLE_RATE=48000
 VOICE_SILERO_DEVICE=cpu
 VOICE_SILERO_NATIVE_ENGLISH=false
 VOICE_CMUDICT_ENABLED=true
@@ -226,29 +220,16 @@ For a Russian voice assistant, the recommended setup is `gigaam` + `v3_rnnt`. It
 | Variable | What it controls |
 |---|---|
 | `VOICE_TTS_ENABLED` | Enables backend TTS generation. If disabled or failed, the frontend can fall back to browser SpeechSynthesis. |
-| `VOICE_TTS_PROVIDER` | Backend TTS provider. Recommended value is `supertonic`; `silero` is the low-latency fallback and `mock` is only for tests. |
-| `VOICE_TTS_FALLBACK_PROVIDER` | Provider loaded lazily if the primary TTS fails. Default is `silero`; it does not consume memory while Supertonic is healthy. |
+| `VOICE_TTS_PROVIDER` | Backend TTS provider: `silero`; `mock` is only for tests. |
 | `VOICE_PRELOAD_TTS_MODEL` | Loads and warms up the selected TTS model during backend startup. First startup downloads local weights and takes longer. |
-| `VOICE_SUPERTONIC_MODEL` | Supertonic model release. Current pinned SDK default is `supertonic-3`. |
-| `VOICE_SUPERTONIC_VOICE` | Female preset used by default. `F4` is the tested voice; the UI also exposes `F1`, `F2`, `F3`, and `F5`. |
-| `VOICE_SUPERTONIC_CACHE_DIR` | Optional model directory. Empty uses `%LOCALAPPDATA%/NeuroAsist/models/supertonic-3`. |
-| `VOICE_SUPERTONIC_TOTAL_STEPS` | Quality/latency trade-off. Keep `8`; 5–6 steps were faster but less reliable on English and numbers. |
-| `VOICE_SUPERTONIC_SPEED` | Speech speed passed to the model. Tested default is `1.05`. |
-| `VOICE_SUPERTONIC_CPU_THREADS` | ONNX Runtime CPU threads. `8` is recommended for Ryzen 7 5700X. |
-| `VOICE_SUPERTONIC_WARMUP` | Generates a short phrase during startup to remove first-request setup latency. |
-| `VOICE_SUPERTONIC_AUTO_DOWNLOAD` | Downloads the pinned model assets from Hugging Face when absent. |
-| `VOICE_SUPERTONIC_TIMEOUT_SECONDS` | Timeout for one Supertonic segment before the lazy Silero fallback is activated. |
-| `VOICE_SUPERTONIC_TRIM_SILENCE` | Removes model-added leading/trailing silence from every live segment to prevent long gaps between sentences. |
-| `VOICE_SUPERTONIC_LEADING_PADDING_MS` | Natural pause retained before speech after silence trimming. |
-| `VOICE_SUPERTONIC_TRAILING_PADDING_MS` | Natural pause retained after speech after silence trimming. |
 | `VOICE_OPENVOICE_ENABLED` | Applies CPU-only OpenVoice V2 tone conversion after Silero. Keep disabled for minimum latency. |
 | `VOICE_OPENVOICE_REFERENCE_AUDIO` | A clean roughly 5–15 second WAV/MP3 reference. It is read locally once during startup. |
 | `VOICE_OPENVOICE_CACHE_DIR` | Project-local directory for the 131 MB converter checkpoint. |
 | `VOICE_OPENVOICE_TAU` | Conversion variation; the tested default is `0.3`. |
 | `VOICE_OPENVOICE_CPU_THREADS` | CPU threads used by the converter. `8` is recommended for a Ryzen 7 5700X. |
 | `VOICE_SILERO_MODEL` | Silero model name. Current default is `v5_5_ru`. |
-| `VOICE_SILERO_SPEAKER_RU` | Default Russian Silero speaker, for example `xenia`. Can be changed at runtime from Settings. |
-| `VOICE_SILERO_SAMPLE_RATE` | WAV sample rate produced by Silero. Current default is `24000`; changing it requires backend restart. |
+| `VOICE_SILERO_SPEAKER_RU` | Default Russian Silero speaker, `baya` by default. Can be changed at runtime from Settings. |
+| `VOICE_SILERO_SAMPLE_RATE` | WAV sample rate produced by Silero. Default is `48000`; changing it requires backend restart. |
 | `VOICE_SILERO_DEVICE` | Silero device policy: `cpu`, `cuda`, or `auto`. |
 | `VOICE_SILERO_NATIVE_ENGLISH` | Keep `false` when one consistent voice is required. English is then transcribed into Cyrillic and spoken by the same Russian speaker. |
 | `VOICE_CMUDICT_ENABLED` | Uses the official CMU pronunciation dictionary for English-to-Cyrillic transcription. |
@@ -256,17 +237,19 @@ For a Russian voice assistant, the recommended setup is `gigaam` + `v3_rnnt`. It
 | `VOICE_SILERO_CPU_THREADS` | Number of CPU threads used by PyTorch for Silero inference. |
 | `VOICE_SILERO_WARMUP` | Runs a short warmup phrase after loading Silero to reduce first real TTS latency. |
 | `VOICE_SILERO_TIMEOUT_SECONDS` | Timeout for synthesizing one phrase. |
+| `VOICE_SILERO_LOUDNESS_TARGET_DBFS` / `VOICE_SILERO_PEAK_CEILING_DBFS` | Target speech loudness and hard peak ceiling for generated WAV files. |
+| `VOICE_SILERO_PRONUNCIATION_DICTIONARY_PATH` | Optional path to a JSON pronunciation dictionary. By default it is created in the app data directory. |
 | `VOICE_TTS_BACKGROUND_TIMEOUT_SECONDS` | Timeout for background batch TTS jobs created by `/voice/chat`. |
 | `VOICE_TTS_TIMEOUT_SECONDS` | General TTS timeout used by voice API flows. |
 | `VOICE_TTS_MAX_CHARS` | Maximum text length accepted for one backend TTS request. |
 | `VOICE_AUDIO_DIR` | Directory where generated audio files are stored. Generated WAV files are cleared at backend startup, then every 20 minutes files older than 2 minutes are removed. |
 
-On the Ryzen 7 5700X control run, Supertonic 3 `F4` generated 10.59 seconds of
-mixed speech in 2.23 seconds (RTF `0.21`) and used about 586 MB of system RAM.
-It runs through ONNX Runtime on CPU and does not reserve GPU VRAM. Russian and
-English segments use the same `F4` style with native language tags; contextual
-numbers are expanded before synthesis. Pure Silero remains a lazy fallback at
-roughly RTF `0.05` and is loaded only after a Supertonic failure.
+Silero v5.5 RU is the primary local TTS engine. The default voice is `baya` at
+48 kHz; `xenia` remains available from the voice selector. Text is normalized
+before synthesis, and Silero SSML controls pauses and the active style profile.
+The generated WAV is normalized to the configured loudness target and peak
+ceiling. The editable pronunciation dictionary is created at
+`data/tts-pronunciations.json` on its first use.
 
 #### Live voice playback
 
@@ -365,7 +348,7 @@ flowchart TB
 
     STT[GigaAM v3 or faster-whisper]
     LLM[DeepSeek-compatible API]
-    TTS[Supertonic 3 TTS and Silero fallback]
+    TTS[Silero v5.5 RU TTS]
     Audio[WAV audio storage]
     Unity[Unity VRM runtime]
 
@@ -402,7 +385,7 @@ Browser MediaRecorder
   → Character Agent
   → DeepSeek-compatible LLM
   → immediate text response
-  → background Supertonic synthesis
+  → background Silero synthesis
   → ready WAV audio
 ```
 
@@ -413,7 +396,7 @@ The text response is returned before TTS finishes. The UI then receives the gene
 ```text
 LLM text stream
   → safe text chunks
-  → Supertonic WAV segments
+  → Silero WAV segments
   → voice WebSocket
   → browser playback queue
 ```
@@ -424,7 +407,7 @@ The live mode uses configurable chunk sizes, queue limits, TTS concurrency, and 
 
 ```text
 Chat or non-live voice response
-  → background Supertonic synthesis
+  → background Silero synthesis
   → voice.tts_ready
   → complete WAV URL
   → avatar.speak over /ws/avatar
@@ -629,4 +612,4 @@ V0.5 progresses only through the milestones in the companion blueprint: freeze, 
 
 NeuroAsist is licensed under the [Apache License 2.0](LICENSE).
 
-Third-party models and services may have their own licenses and usage terms. Supertonic model weights use OpenRAIL-M; also check the Silero fallback and configured LLM provider terms before commercial use.
+Third-party models and services may have their own licenses and usage terms. Check the Silero model and configured LLM provider terms before commercial use.

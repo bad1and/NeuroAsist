@@ -49,7 +49,7 @@ def test_startup_replaces_persisted_male_voice_with_configured_female(
     assert store.load(RuntimeSettings()).voice_tts_voice == "xenia"
 
 
-def test_startup_migrates_legacy_silero_voice_to_supertonic_f4(
+def test_startup_migrates_legacy_supertonic_provider_and_voice_to_baya(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -62,18 +62,15 @@ def test_startup_migrates_legacy_silero_voice_to_supertonic_f4(
         voice_preload_tts_model=False,
         voice_stt_provider="mock",
         voice_tts_provider="supertonic",
-        voice_tts_fallback_provider="mock",
-        voice_supertonic_voice="F4",
-        voice_supertonic_cache_dir=str(tmp_path / "supertonic"),
     )
     store = RuntimeSettingsStore(settings.app_data_path / "settings.json")
-    store.save(RuntimeSettings(voice_tts_voice="xenia"))
+    store.save(RuntimeSettings(voice_tts_voice="F4"))
     monkeypatch.setattr(backend_main, "get_settings", lambda: settings)
 
     app = backend_main.create_app()
 
-    assert app.state.runtime_settings.voice_tts_voice == "F4"
-    assert store.load(RuntimeSettings()).voice_tts_voice == "F4"
+    assert app.state.runtime_settings.voice_tts_voice == "baya"
+    assert store.load(RuntimeSettings()).voice_tts_voice == "baya"
 
 
 def test_startup_continues_when_tts_preload_fails(
