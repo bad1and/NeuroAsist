@@ -109,6 +109,8 @@ class CharacterAgent:
 
         if parsed.valid and self._should_persist_timeline():
             self._save_message(session_id, "assistant", parsed.payload["reply"], input_mode)
+        if parsed.valid and self._memory_service is not None:
+            self._memory_service.schedule_extraction(self._last_user_message)
 
         self.last_turn = parsed.turn
 
@@ -141,6 +143,8 @@ class CharacterAgent:
             yield reply
         if self._should_persist_timeline():
             self._save_message(session_id, "assistant", reply, input_mode)
+        if self._memory_service is not None:
+            self._memory_service.schedule_extraction(self._last_user_message)
         if self._memory_service is not None and self._memory_service.llm_extraction_enabled:
             # Live mode streams plain speech rather than the JSON character
             # protocol. Preserve explicit memory commands after a completed
@@ -151,7 +155,9 @@ class CharacterAgent:
     def _persist_user_message(self, session_id: str, user_text: str, input_mode: str) -> list[dict[str, str]]:
         user_message = self._save_message(session_id, "user", user_text, input_mode)
         self._last_user_message = user_message
-        if self._memory_service is None or self._memory_service.llm_extraction_enabled:
+        if self._memory_service is None:
+            return []
+        if self._memory_service.llm_extraction_enabled:
             return []
         return [self._memory_service.memory_update(memory) for memory in self._memory_service.extract_from_message(user_message)]
 

@@ -365,6 +365,32 @@ class TimelineStore:
                 (uuid4().hex, json.dumps({"memory_id": memory_id}), now, now, now),
             )
 
+    def enqueue_memory_extraction_job(self, message_id: str) -> None:
+        """Queue one durable DeepSeek extraction pass for a user turn.
+
+        A turn is allowed to produce only one pending extraction job. Repeated
+        scheduling can happen when a caller retries after a transient error,
+        so older pending copies are completed before enqueueing the newest one.
+        """
+        now = self._now()
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE background_jobs SET status = 'completed', updated_at = ? WHERE type = 'memory_extract' AND status = 'pending' AND json_extract(payload_json, '$.message_id') = ?",
+                (now, message_id),
+            )
+            connection.execute(
+                "INSERT INTO background_jobs (id, type, status, payload_json, available_at, created_at, updated_at) VALUES (?, 'memory_extract', 'pending', ?, ?, ?, ?)",
+                (uuid4().hex, json.dumps({"message_id": message_id}), now, now, now),
+            )
+
+    def claim_memory_extraction_job(self) -> dict[str, object] | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM background_jobs WHERE type = 'memory_extract' AND status = 'pending' AND available_at <= ? ORDER BY available_at, created_at LIMIT 1", (self._now(),)).fetchone()
+            if row is None:
+                return None
+            connection.execute("UPDATE background_jobs SET status = 'running', attempts = attempts + 1, updated_at = ? WHERE id = ?", (self._now(), row["id"]))
+            return dict(row)
+
     def claim_memory_index_job(self) -> dict[str, object] | None:
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM background_jobs WHERE type = 'memory_index' AND status = 'pending' AND available_at <= ? ORDER BY available_at, created_at LIMIT 1", (self._now(),)).fetchone()
@@ -377,7 +403,7 @@ class TimelineStore:
         """A process crash may leave a claimed job running; make it retry on startup."""
         with self._connect() as connection:
             connection.execute(
-                "UPDATE background_jobs SET status = 'pending', available_at = ?, updated_at = ? WHERE type = 'memory_index' AND status = 'running'",
+                "UPDATE background_jobs SET status = 'pending', available_at = ?, updated_at = ? WHERE type IN ('memory_index', 'memory_extract') AND status = 'running'",
                 (self._now(), self._now()),
             )
 
