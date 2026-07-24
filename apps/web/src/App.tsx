@@ -1589,8 +1589,8 @@ function SettingsPage({
             Режим сохранения
             <select value={memoryMode} onChange={(event) => setMemoryMode(event.target.value)}>
               <option value="off">Не сохранять</option>
-              <option value="balanced">Сбалансированный — личность и явные просьбы</option>
-              <option value="automatic">Автоматический — обычные факты</option>
+              <option value="balanced">Умный — только важные устойчивые факты</option>
+              <option value="automatic">Автоматический — все обычные факты</option>
             </select>
           </label>
           <label>

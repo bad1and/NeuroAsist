@@ -59,6 +59,9 @@ class MemoryService:
         semantic_limit: int = 8,
         llm_extraction_enabled: bool = False,
         llm_min_confidence: float = 0.70,
+        async_extraction_enabled: bool = True,
+        auto_min_confidence: float = 0.85,
+        auto_min_importance: float = 0.60,
     ) -> None:
         self._store = store
         self._runtime = runtime
@@ -72,6 +75,9 @@ class MemoryService:
         self._semantic_degraded_reason: str | None = None
         self._llm_extraction_enabled = llm_extraction_enabled
         self._llm_min_confidence = llm_min_confidence
+        self._async_extraction_enabled = async_extraction_enabled
+        self._auto_min_confidence = auto_min_confidence
+        self._auto_min_importance = auto_min_importance
 
     @property
     def llm_extraction_enabled(self) -> bool:
@@ -87,6 +93,21 @@ class MemoryService:
 
     def should_persist_timeline(self) -> bool:
         return not self.incognito
+
+    def schedule_extraction(self, message: StoredTimelineMessage | None) -> bool:
+        """Queue background extraction without delaying the user-facing turn."""
+        if (
+            not self._async_extraction_enabled
+            or not self._enabled
+            or self.incognito
+            or self._runtime.memory_mode == "off"
+            or message is None
+            or message.role != "user"
+            or message.status != "completed"
+        ):
+            return False
+        self._store.enqueue_memory_extraction_job(message.id)
+        return True
 
     @property
     def semantic_enabled(self) -> bool:
@@ -392,7 +413,14 @@ class MemoryService:
         mode = "balanced" if self._runtime.memory_mode == "ask" else self._runtime.memory_mode
         if mode == "automatic":
             return True
-        return mode == "balanced" and str(values.get("predicate")) in {"name", "explicit_memory", "current_statement"}
+        if mode != "balanced":
+            return False
+        if str(values.get("predicate")) in {"name", "explicit_memory", "current_statement"}:
+            return True
+        return (
+            float(values.get("confidence", 0.0)) >= self._auto_min_confidence
+            and float(values.get("importance", 0.0)) >= self._auto_min_importance
+        )
 
     def _attach_retrieval(
         self, memories: list[dict[str, object]], fts_scores: dict[str, float],

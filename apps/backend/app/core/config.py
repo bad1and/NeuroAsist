@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     memory_context_max_tokens: int = 900
     memory_llm_extraction_enabled: bool = False
     memory_llm_min_confidence: float = 0.70
+    memory_async_extraction_enabled: bool = True
+    memory_auto_min_confidence: float = 0.85
+    memory_auto_min_importance: float = 0.60
     semantic_retrieval_enabled: bool = False
     semantic_retrieval_eval_passed: bool = False
     semantic_vector_backend: str = "sqlite"

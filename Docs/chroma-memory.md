@@ -6,11 +6,11 @@ Long-term memory remains canonical in SQLite; ChromaDB is a rebuildable semantic
 
 1. Context Manager retrieves active memories from FTS and ChromaDB.
 2. Relevant compact memories are added to the DeepSeek prompt.
-3. One DeepSeek response returns the character reply and optional `memory_candidates`.
-4. SQLite validates candidates, records provenance/audit, deduplicates and resolves only truly single-value conflicts.
-5. A durable SQLite background job syncs active records to ChromaDB. On crash, pending work is retried at startup.
+3. The user receives the character reply immediately. A durable `memory_extract` job then asks DeepSeek for compact memory candidates; this runs for both text and completed live-voice turns.
+4. SQLite validates candidates, records provenance/audit, deduplicates and resolves only truly single-value conflicts. In balanced mode only high-confidence, durable normal facts are auto-activated; sensitive facts remain in review.
+5. Durable SQLite background jobs sync active records to ChromaDB. On crash, pending work is retried at startup.
 
-Live voice retains streaming. Explicit `Запомни: ...` commands use the deterministic fallback after the turn without a second LLM request.
+Live voice retains streaming: its extraction request begins only after the completed turn, so it does not delay speech. Explicit `Запомни: ...` commands retain the deterministic fallback as a backup.
 
 The index is not a source of truth: it can be deleted and rebuilt from the active SQLite records. Existing history is not automatically turned into memories; extraction starts with new turns after the feature is enabled.
 

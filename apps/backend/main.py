@@ -34,6 +34,7 @@ from apps.backend.app.storage.timeline import EpisodePolicy, TimelineHistoryAdap
 from apps.backend.app.context.manager import ContextManager
 from apps.backend.app.runtime.summary_worker import SummaryWorker
 from apps.backend.app.memory.service import MemoryService
+from apps.backend.app.memory.extraction_worker import MemoryExtractionWorker
 from apps.backend.app.semantic.embedding import HashEmbeddingProvider
 from apps.backend.app.semantic.chroma_index import ChromaVectorIndex
 from apps.backend.app.semantic.sync_worker import SemanticSyncWorker
@@ -131,10 +132,19 @@ def create_app() -> FastAPI:
         semantic_limit=settings.semantic_retrieval_limit,
         llm_extraction_enabled=settings.memory_llm_extraction_enabled,
         llm_min_confidence=settings.memory_llm_min_confidence,
+        async_extraction_enabled=settings.memory_async_extraction_enabled,
+        auto_min_confidence=settings.memory_auto_min_confidence,
+        auto_min_importance=settings.memory_auto_min_importance,
     ) if timeline_store is not None else None
     context_manager = ContextManager(timeline_store, settings.context_max_tokens, settings.context_recent_turns, memory_service) if timeline_store is not None and settings.context_manager_enabled else None
     summary_worker = SummaryWorker(timeline_store, memory_service.index_episode_summary if memory_service is not None else None) if timeline_store is not None else None
     semantic_sync_worker = SemanticSyncWorker(memory_service) if memory_service is not None else None
+    memory_extraction_worker = MemoryExtractionWorker(
+        timeline_store,
+        memory_service,
+        DeepSeekProvider(settings),
+        event_bus.publish,
+    ) if timeline_store is not None and memory_service is not None and settings.memory_async_extraction_enabled else None
     voice_service = VoiceService(settings)
     available_tts_voices = voice_service.available_tts_voices()
     if runtime_settings.voice_tts_voice not in available_tts_voices:
@@ -222,6 +232,7 @@ def create_app() -> FastAPI:
     tts_audio_cleanup_task: asyncio.Task[None] | None = None
     summary_worker_task: asyncio.Task[None] | None = None
     semantic_sync_worker_task: asyncio.Task[None] | None = None
+    memory_extraction_worker_task: asyncio.Task[None] | None = None
 
     async def cleanup_tts_audio_forever() -> None:
         try:
@@ -256,9 +267,19 @@ def create_app() -> FastAPI:
         except asyncio.CancelledError:
             raise
 
+    async def extract_memory_forever() -> None:
+        if memory_extraction_worker is None:
+            return
+        try:
+            while True:
+                worked = await memory_extraction_worker.run_once()
+                await asyncio.sleep(0 if worked else 1)
+        except asyncio.CancelledError:
+            raise
+
     @app.on_event("startup")
     async def startup() -> None:
-        nonlocal tts_audio_cleanup_task, summary_worker_task, semantic_sync_worker_task
+        nonlocal tts_audio_cleanup_task, summary_worker_task, semantic_sync_worker_task, memory_extraction_worker_task
         removed = await asyncio.to_thread(voice_service.clear_tts_audio)
         if removed:
             logger.info("Generated WAV startup cleanup complete: removed=%s", removed)
@@ -352,6 +373,7 @@ def create_app() -> FastAPI:
         tts_audio_cleanup_task = asyncio.create_task(cleanup_tts_audio_forever())
         summary_worker_task = asyncio.create_task(summarize_forever())
         semantic_sync_worker_task = asyncio.create_task(sync_semantic_forever())
+        memory_extraction_worker_task = asyncio.create_task(extract_memory_forever())
 
     @app.on_event("shutdown")
     async def shutdown() -> None:
@@ -378,6 +400,12 @@ def create_app() -> FastAPI:
             semantic_sync_worker_task.cancel()
             try:
                 await semantic_sync_worker_task
+            except asyncio.CancelledError:
+                pass
+        if memory_extraction_worker_task is not None:
+            memory_extraction_worker_task.cancel()
+            try:
+                await memory_extraction_worker_task
             except asyncio.CancelledError:
                 pass
         await speech_orchestrator.close()
