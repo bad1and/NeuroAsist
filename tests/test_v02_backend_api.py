@@ -113,6 +113,17 @@ def test_runtime_voice_settings_can_be_updated(client: TestClient) -> None:
         )
 
 
+def test_voice_style_can_be_changed_until_restart(client: TestClient) -> None:
+    response = client.patch("/settings/voice-style", json={"voice_tts_style": "energetic"})
+
+    assert response.status_code == 200
+    assert response.json()["voice_tts_style"] == "energetic"
+
+    unsupported = client.patch("/settings/voice-style", json={"voice_tts_style": "very-loud"})
+
+    assert unsupported.status_code == 400
+
+
 @pytest.mark.parametrize(
     "payload",
     [
