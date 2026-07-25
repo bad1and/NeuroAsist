@@ -29,7 +29,8 @@ from apps.backend.app.voice.providers import (
     waveform_to_wav_bytes,
 )
 from apps.backend.app.voice.service import VoiceService
-from apps.backend.app.voice.style import VoiceStyle, make_silero_ssml, resolve_voice_style
+from apps.backend.app.voice.lexicon import load_pronunciations, save_pronunciations
+from apps.backend.app.voice.style import VoiceExpressionLevel, VoiceStyle, make_silero_ssml, profile_for, resolve_voice_style
 
 
 def _spoken_ssml(value: str) -> str:
@@ -231,14 +232,28 @@ def test_russian_tts_normalization_expands_numeric_date() -> None:
     )
 
 
-def test_silero_ssml_uses_style_profile_and_escapes_text() -> None:
+def test_silero_ssml_uses_natural_style_profile_and_escapes_text() -> None:
     ssml = make_silero_ssml("Громче <сейчас>!", VoiceStyle.ENERGETIC)
 
-    assert "rate=\"fast\"" in ssml
-    assert "pitch=\"x-high\"" in ssml
     assert "Громче &lt;сейчас&gt;!" in ssml
+    assert "<prosody" not in ssml
+    assert "<break time=\"95ms\"/>" in ssml
+    assert profile_for(VoiceStyle.CALM).intensity == 2
+    assert profile_for(VoiceStyle.NORMAL).intensity == 3
+    assert profile_for(VoiceStyle.ENERGETIC).intensity == 4
+    assert profile_for(VoiceStyle.ENERGETIC, VoiceExpressionLevel.MINIMAL).intensity == 3
+    assert profile_for(VoiceStyle.ENERGETIC, VoiceExpressionLevel.NOTICEABLE).intensity == 5
     assert resolve_voice_style(VoiceStyle.AUTO, emotion="sad") is VoiceStyle.CALM
     assert resolve_voice_style(VoiceStyle.ASSERTIVE, emotion="happy") is VoiceStyle.ASSERTIVE
+
+
+def test_pronunciation_dictionary_can_be_saved_and_reloaded(tmp_path: Path) -> None:
+    dictionary = tmp_path / "pronunciations.json"
+
+    pronunciations = save_pronunciations(dictionary, {"Luka": "Лука", "API": "эй пи ай"})
+
+    assert pronunciations["Luka"] == "Лука"
+    assert load_pronunciations(dictionary)["API"] == "эй пи ай"
     assert normalize_russian_tts_text("OpenAI API, Python и GitHub") == (
         "оупен эй ай эй пи ай, пайтон и гитхаб"
     )

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from apps.backend.app.voice.style import VoiceStyle, coerce_voice_style, make_silero_ssml, profile_for
+from apps.backend.app.voice.style import VoiceExpressionLevel, VoiceStyle, coerce_voice_expression_level, coerce_voice_style, make_silero_ssml, profile_for
 from apps.backend.app.voice.lexicon import apply_pronunciations, load_pronunciations
 
 logger = logging.getLogger(__name__)
@@ -1178,6 +1178,7 @@ class SileroTTSProvider(TTSProvider):
         self._selected_device: str | None = None
         self._available_speakers: set[str] | None = None
         self._pronunciations: dict[str, str] = {}
+        self._expression_level = VoiceExpressionLevel.NATURAL
         self._load_lock = asyncio.Lock()
         self._infer_lock = asyncio.Lock()
         self._warmed_up = False
@@ -1203,6 +1204,12 @@ class SileroTTSProvider(TTSProvider):
             "native_english": self._english_tts_model is not None,
             "english_transcription": self.cmudict_enabled and not self.native_english,
         }
+
+    def set_pronunciations(self, pronunciations: dict[str, str]) -> None:
+        self._pronunciations = dict(pronunciations)
+
+    def set_expression_level(self, level: str | VoiceExpressionLevel) -> None:
+        self._expression_level = coerce_voice_expression_level(level)
 
     @property
     def available_speakers(self) -> list[str]:
@@ -1448,10 +1455,10 @@ class SileroTTSProvider(TTSProvider):
         with self._torch.inference_mode():
             normalized = normalize_russian_tts_text(text, pronunciations=self._pronunciations)
             return self._model.apply_tts(
-                ssml_text=make_silero_ssml(normalized, style),
+                ssml_text=make_silero_ssml(normalized, style, self._expression_level),
                 speaker=speaker,
                 sample_rate=self.sample_rate,
-                intensity=profile_for(style).intensity,
+                intensity=profile_for(style, self._expression_level).intensity,
             )
 
     def _apply_english_tts_sync(self, text: str):
