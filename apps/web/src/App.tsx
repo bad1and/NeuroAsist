@@ -34,6 +34,7 @@ import {
   getStatus,
   getVoiceTtsStatus,
   getModels,
+  getPronunciations,
   installModel,
   isDesktopManaged,
   removeModel,
@@ -46,6 +47,8 @@ import {
   deleteTimelineRange,
   sendVoiceMessage,
   updateRuntimeSettings,
+  updatePronunciations,
+  updateVoiceExpression,
   updateVoiceStyle,
   voiceWebSocketUrl,
   voiceInputWebSocketUrl,
@@ -94,6 +97,23 @@ const AVATAR_GESTURE_LABELS: Record<string, string> = {
   explanation: "Объяснение", thinking: "Размышление", surprise: "Удивление", frustration: "Фрустрация",
   farewell: "Прощание", shrug: "Пожимание плечами", talk: "Разговор",
 };
+
+function formatPronunciations(entries: Record<string, string>): string {
+  return Object.entries(entries)
+    .sort(([left], [right]) => left.localeCompare(right, "ru"))
+    .map(([term, pronunciation]) => `${term} = ${pronunciation}`)
+    .join("\n");
+}
+
+function parsePronunciations(value: string): Record<string, string> {
+  return Object.fromEntries(
+    value.split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#"))
+      .map((line) => line.split(/\s*=\s*/, 2))
+      .filter(([term, pronunciation]) => term && pronunciation),
+  );
+}
 const RECORDING_MIME_TYPES = [
   "audio/webm;codecs=opus",
   "audio/webm",
@@ -1393,6 +1413,8 @@ function SettingsPage({
   const [voiceLanguage, setVoiceLanguage] = useState("ru");
   const [voiceTtsVoice, setVoiceTtsVoice] = useState("");
   const [voiceTtsStyle, setVoiceTtsStyle] = useState("auto");
+  const [voiceExpressionLevel, setVoiceExpressionLevel] = useState("natural");
+  const [pronunciationsText, setPronunciationsText] = useState("");
   const [voicePlaybackRate, setVoicePlaybackRate] = useState(1);
   const [prebufferSegments, setPrebufferSegments] = useState(1);
   const [prebufferMs, setPrebufferMs] = useState(0);
@@ -1407,6 +1429,7 @@ function SettingsPage({
       setVoiceLanguage(settings.voice_language);
       setVoiceTtsVoice(settings.voice_tts_voice);
       setVoiceTtsStyle(settings.voice_tts_style);
+      setVoiceExpressionLevel(settings.voice_tts_expression_level);
       setVoicePlaybackRate(settings.voice_playback_rate);
       setPrebufferSegments(settings.voice_live_playback_prebuffer_segments);
       setPrebufferMs(settings.voice_live_playback_prebuffer_ms);
@@ -1414,6 +1437,12 @@ function SettingsPage({
       setMemoryIncognito(settings.memory_incognito);
     }
   }, [settings]);
+
+  useEffect(() => {
+    void getPronunciations()
+      .then((result) => setPronunciationsText(formatPronunciations(result.pronunciations)))
+      .catch(() => setPronunciationsText(""));
+  }, []);
 
   const saveSettings = async () => {
     setSaving(true);
@@ -1448,6 +1477,35 @@ function SettingsPage({
       setMessage("Подача голоса изменена до перезапуска.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Не удалось изменить подачу голоса.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const changeVoiceExpression = async (value: string) => {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const nextSettings = await updateVoiceExpression(value);
+      onSettingsChanged(nextSettings);
+      setVoiceExpressionLevel(nextSettings.voice_tts_expression_level);
+      setMessage("Выразительность изменена до перезапуска.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Не удалось изменить выразительность.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const savePronunciations = async () => {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const result = await updatePronunciations(parsePronunciations(pronunciationsText));
+      setPronunciationsText(formatPronunciations(result.pronunciations));
+      setMessage("Словарь произношений сохранён и применён.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Не удалось сохранить словарь.");
     } finally {
       setSaving(false);
     }
@@ -1574,6 +1632,16 @@ function SettingsPage({
             <small>Действует до перезапуска приложения.</small>
           </label>
 
+          <label>
+            Выразительность
+            <select value={voiceExpressionLevel} onChange={(event) => void changeVoiceExpression(event.target.value)} disabled={saving}>
+              <option value="minimal">Минимальная — почти нейтрально</option>
+              <option value="natural">Естественная — рекомендовано</option>
+              <option value="noticeable">Заметная — сильнее эмоции</option>
+            </select>
+            <small>Усиливает или смягчает выбранную подачу; обычный профиль не меняется.</small>
+          </label>
+
           <div className="readonly-setting">
             <span>Движок синтеза</span>
             <strong>
@@ -1581,6 +1649,24 @@ function SettingsPage({
               {" · активен"}
             </strong>
           </div>
+        </fieldset>
+
+        <fieldset className="settings-group" hidden={activeSection !== "voice"}>
+          <legend>Словарь произношений</legend>
+          <label>
+            Термин = как произносить
+            <textarea
+              rows={8}
+              value={pronunciationsText}
+              onChange={(event) => setPronunciationsText(event.target.value)}
+              placeholder={"OpenAI = Оупен Эй Ай\nLuka = Лука"}
+              disabled={saving}
+            />
+            <small>Одна пара на строку. Изменения применяются к следующей фразе без перезапуска.</small>
+          </label>
+          <button className="secondary" type="button" onClick={() => void savePronunciations()} disabled={saving}>
+            Сохранить словарь
+          </button>
         </fieldset>
 
         <fieldset className="settings-group" hidden={activeSection !== "voice"}>

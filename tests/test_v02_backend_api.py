@@ -124,6 +124,16 @@ def test_voice_style_can_be_changed_until_restart(client: TestClient) -> None:
     assert unsupported.status_code == 400
 
 
+def test_voice_expression_level_can_be_changed_until_restart(client: TestClient) -> None:
+    response = client.patch(
+        "/settings/voice-expression",
+        json={"voice_tts_expression_level": "minimal"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["voice_tts_expression_level"] == "minimal"
+
+
 @pytest.mark.parametrize(
     "payload",
     [

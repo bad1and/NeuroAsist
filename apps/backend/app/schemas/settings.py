@@ -14,6 +14,7 @@ class PublicSettingsResponse(BaseModel):
     avatar_enabled: bool
     voice_tts_voice: str
     voice_tts_style: str
+    voice_tts_expression_level: str
     voice_playback_rate: float
     voice_live_playback_prebuffer_segments: int
     voice_live_playback_prebuffer_ms: int
@@ -50,3 +51,15 @@ class VoiceStylePatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     voice_tts_style: str
+
+
+class VoiceExpressionPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    voice_tts_expression_level: str
+
+
+class PronunciationsPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pronunciations: dict[str, str]

@@ -32,6 +32,20 @@ def load_pronunciations(path: Path) -> dict[str, str]:
     return {**DEFAULT_PRONUNCIATIONS, **custom}
 
 
+def save_pronunciations(path: Path, entries: dict[str, str]) -> dict[str, str]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    cleaned = {
+        str(key).strip(): str(value).strip()
+        for key, value in entries.items()
+        if str(key).strip() and str(value).strip()
+    }
+    path.write_text(
+        json.dumps({"pronunciations": cleaned}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return {**DEFAULT_PRONUNCIATIONS, **cleaned}
+
+
 def apply_pronunciations(text: str, entries: dict[str, str]) -> str:
     for source in sorted(entries, key=len, reverse=True):
         pattern = re.compile(rf"(?<!\w){re.escape(source)}(?!\w)", re.IGNORECASE)

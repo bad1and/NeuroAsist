@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from html import escape
 import re
@@ -15,6 +15,12 @@ class VoiceStyle(StrEnum):
     ASSERTIVE = "assertive"
 
 
+class VoiceExpressionLevel(StrEnum):
+    MINIMAL = "minimal"
+    NATURAL = "natural"
+    NOTICEABLE = "noticeable"
+
+
 @dataclass(frozen=True)
 class VoiceStyleProfile:
     intensity: int
@@ -24,11 +30,14 @@ class VoiceStyleProfile:
 
 
 _PROFILES: dict[VoiceStyle, VoiceStyleProfile] = {
-    VoiceStyle.CALM: VoiceStyleProfile(intensity=1, rate="slow", pitch="x-low", pause_ms=190),
+    # Silero's prosody tags noticeably distort Baya at their extreme values.
+    # Keep profiles close to the natural voice and differentiate with the
+    # model-native intensity plus short, conversational sentence pauses.
+    VoiceStyle.CALM: VoiceStyleProfile(intensity=2, pause_ms=155),
     VoiceStyle.NORMAL: VoiceStyleProfile(intensity=3, pause_ms=120),
-    VoiceStyle.ENERGETIC: VoiceStyleProfile(intensity=5, rate="fast", pitch="x-high", pause_ms=80),
-    VoiceStyle.THOUGHTFUL: VoiceStyleProfile(intensity=2, rate="slow", pause_ms=170),
-    VoiceStyle.ASSERTIVE: VoiceStyleProfile(intensity=4, pitch="x-low", pause_ms=130),
+    VoiceStyle.ENERGETIC: VoiceStyleProfile(intensity=4, pause_ms=95),
+    VoiceStyle.THOUGHTFUL: VoiceStyleProfile(intensity=2, pause_ms=165),
+    VoiceStyle.ASSERTIVE: VoiceStyleProfile(intensity=4, pause_ms=115),
 }
 
 
@@ -37,6 +46,13 @@ def coerce_voice_style(value: str | VoiceStyle | None) -> VoiceStyle:
         return VoiceStyle(value or VoiceStyle.AUTO)
     except ValueError:
         return VoiceStyle.AUTO
+
+
+def coerce_voice_expression_level(value: str | VoiceExpressionLevel | None) -> VoiceExpressionLevel:
+    try:
+        return VoiceExpressionLevel(value or VoiceExpressionLevel.NATURAL)
+    except ValueError:
+        return VoiceExpressionLevel.NATURAL
 
 
 def resolve_voice_style(
@@ -72,13 +88,30 @@ def resolve_turn_voice_style(requested: str | VoiceStyle | None, turn) -> VoiceS
     )
 
 
-def profile_for(style: str | VoiceStyle) -> VoiceStyleProfile:
-    return _PROFILES[resolve_voice_style(style)]
+def profile_for(
+    style: str | VoiceStyle,
+    expression_level: str | VoiceExpressionLevel = VoiceExpressionLevel.NATURAL,
+) -> VoiceStyleProfile:
+    profile = _PROFILES[resolve_voice_style(style)]
+    weight = {
+        VoiceExpressionLevel.MINIMAL: 0.45,
+        VoiceExpressionLevel.NATURAL: 1.0,
+        VoiceExpressionLevel.NOTICEABLE: 1.6,
+    }[coerce_voice_expression_level(expression_level)]
+    return replace(
+        profile,
+        intensity=max(1, min(5, round(3 + (profile.intensity - 3) * weight))),
+        pause_ms=round(120 + (profile.pause_ms - 120) * weight),
+    )
 
 
-def make_silero_ssml(text: str, style: str | VoiceStyle) -> str:
+def make_silero_ssml(
+    text: str,
+    style: str | VoiceStyle,
+    expression_level: str | VoiceExpressionLevel = VoiceExpressionLevel.NATURAL,
+) -> str:
     """Create only backend-owned SSML; source text is always escaped first."""
-    profile = profile_for(style)
+    profile = profile_for(style, expression_level)
     rendered = escape(text, quote=False)
     rendered = re.sub(
         r"([.!?…])(?:\s+|$)",

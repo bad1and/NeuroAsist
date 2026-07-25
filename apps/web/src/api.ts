@@ -138,6 +138,24 @@ export function updateVoiceStyle(voice_tts_style: string): Promise<PublicSetting
   });
 }
 
+export function updateVoiceExpression(voice_tts_expression_level: string): Promise<PublicSettings> {
+  return requestJson<PublicSettings>("/settings/voice-expression", {
+    method: "PATCH",
+    body: JSON.stringify({ voice_tts_expression_level }),
+  });
+}
+
+export function getPronunciations(): Promise<{ pronunciations: Record<string, string> }> {
+  return requestJson("/settings/pronunciations");
+}
+
+export function updatePronunciations(pronunciations: Record<string, string>): Promise<{ pronunciations: Record<string, string> }> {
+  return requestJson("/settings/pronunciations", {
+    method: "PUT",
+    body: JSON.stringify({ pronunciations }),
+  });
+}
+
 export function getEvents(limit = 100): Promise<{ events: BackendEvent[] }> {
   return requestJson<{ events: BackendEvent[] }>(`/events?limit=${limit}`);
 }

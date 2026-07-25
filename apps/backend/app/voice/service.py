@@ -20,6 +20,7 @@ from apps.backend.app.voice.providers import (
     STTProvider,
     TTSProvider,
 )
+from apps.backend.app.voice.lexicon import load_pronunciations, save_pronunciations
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,21 @@ class VoiceService:
             return None
         self._tts_jobs.move_to_end(voice_request_id)
         return dict(job)
+
+    def pronunciations(self) -> dict[str, str]:
+        return load_pronunciations(self._settings.voice_silero_pronunciation_dictionary)
+
+    def update_pronunciations(self, entries: dict[str, str]) -> dict[str, str]:
+        pronunciations = save_pronunciations(self._settings.voice_silero_pronunciation_dictionary, entries)
+        updater = getattr(self._tts_provider, "set_pronunciations", None)
+        if updater is not None:
+            updater(pronunciations)
+        return pronunciations
+
+    def set_tts_expression_level(self, level: str) -> None:
+        updater = getattr(self._tts_provider, "set_expression_level", None)
+        if updater is not None:
+            updater(level)
 
     async def save_upload(self, upload: UploadFile) -> Path:
         content_type = _normalize_content_type(upload.content_type)
