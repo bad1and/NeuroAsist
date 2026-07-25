@@ -173,6 +173,11 @@ VOICE_SILERO_SPEAKER_RU=baya
 VOICE_SILERO_SAMPLE_RATE=48000
 VOICE_SILERO_DEVICE=cpu
 VOICE_SILERO_NATIVE_ENGLISH=false
+VOICE_STRESS_ENABLED=true
+VOICE_STRESS_CPU_THREADS=1
+VOICE_TTS_POSTPROCESSING_ENABLED=true
+VOICE_TTS_HIGHPASS_CUTOFF_HZ=60
+VOICE_TTS_ADAPTIVE_PROSODY=true
 VOICE_CMUDICT_ENABLED=true
 VOICE_CMUDICT_CACHE_DIR=.cache/cmudict
 VOICE_OPENVOICE_ENABLED=false
@@ -238,6 +243,11 @@ For a Russian voice assistant, the recommended setup is `gigaam` + `v3_rnnt`. It
 | `VOICE_SILERO_WARMUP` | Runs a short warmup phrase after loading Silero to reduce first real TTS latency. |
 | `VOICE_SILERO_TIMEOUT_SECONDS` | Timeout for synthesizing one phrase. |
 | `VOICE_SILERO_LOUDNESS_TARGET_DBFS` / `VOICE_SILERO_PEAK_CEILING_DBFS` | Target speech loudness and hard peak ceiling for generated WAV files. |
+| `VOICE_STRESS_ENABLED` | Uses local Silero Stress to add explicit Russian stress before TTS. Loading failures retain v5_5_ru's built-in stress. |
+| `VOICE_STRESS_CPU_THREADS` | Requested CPU thread budget for the local accentor; the packaged model defaults to one thread. |
+| `VOICE_TTS_POSTPROCESSING_ENABLED` | Enables DC removal, high-pass filtering, anti-click fades, and safe normalization for generated WAV. |
+| `VOICE_TTS_HIGHPASS_CUTOFF_HZ` | Low-frequency rumble cutoff used when TTS post-processing is enabled; `60` is the default. |
+| `VOICE_TTS_ADAPTIVE_PROSODY` | Adds safe semantic clause pauses while keeping Silero's model-native style intensity. Disable for a strict baseline comparison. |
 | `VOICE_SILERO_PRONUNCIATION_DICTIONARY_PATH` | Optional path to a JSON pronunciation dictionary. By default it is created in the app data directory. |
 | `VOICE_TTS_BACKGROUND_TIMEOUT_SECONDS` | Timeout for background batch TTS jobs created by `/voice/chat`. |
 | `VOICE_TTS_TIMEOUT_SECONDS` | General TTS timeout used by voice API flows. |
@@ -261,7 +271,7 @@ ceiling. The editable pronunciation dictionary is created at
 | `VOICE_LIVE_NEXT_SEGMENT_CHARS` | Target size for following live TTS segments. |
 | `VOICE_LIVE_MAX_SEGMENT_CHARS` | Hard character limit for one live TTS segment. |
 | `VOICE_LIVE_MAX_SEGMENT_WORDS` | Hard word limit for one live TTS segment. |
-| `VOICE_LIVE_SAFE_SEGMENT_WORDS` | Preferred word count before the segmenter starts looking for a natural split. |
+| `VOICE_LIVE_SAFE_SEGMENT_WORDS` | Maximum conversational thought kept in one live TTS request before the segmenter seeks a natural split. Default `18` avoids stitched-sounding speech. |
 | `VOICE_LIVE_TTS_RETRY_COUNT` | Number of retries for a failed live TTS segment. |
 | `VOICE_LIVE_TTS_CONCURRENCY_MODE` | Live TTS concurrency mode. Default `1` keeps segment order simple and stable. |
 | `VOICE_LIVE_TTS_CONCURRENCY_MIN` | Lower live TTS concurrency bound. |

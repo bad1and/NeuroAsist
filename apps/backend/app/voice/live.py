@@ -561,7 +561,11 @@ class VoiceSessionManager:
             if len(remaining_words) <= 18:
                 jobs.append(self._cleanup_tts_job_text(remaining, keep_final_punctuation=True))
                 break
-            target = 7 if first else (self._safe_segment_words or 10)
+            # A seven-word opening is quick, but makes ordinary conversational
+            # sentences sound like independently stitched fragments.  Keep a
+            # complete thought whenever possible; only use the shorter split
+            # after a genuine provider recovery path requires it.
+            target = min(14, self._safe_segment_words or 14) if first else (self._safe_segment_words or 18)
             split_at = self._preferred_split_offset(remaining, target_words=target, max_words=18)
             left = self._cleanup_tts_job_text(
                 remaining[:split_at],

@@ -139,6 +139,14 @@ def test_live_tts_safe_jobs_keep_short_sentence_whole() -> None:
     assert manager._split_tts_jobs("Давно не виделись") == ["Давно не виделись"]
 
 
+def test_live_tts_keeps_a_full_conversational_thought_together_by_default() -> None:
+    manager = VoiceSessionManager(MockTTSProvider(), safe_segment_words=18)
+    thought = "Ну я сначала спокойно проверю настройки потом перезапущу приложение и скажу что получилось"
+
+    assert len(thought.split()) == 13
+    assert manager._split_tts_jobs(thought) == [thought]
+
+
 def test_live_tts_jobs_split_long_text_without_tiny_tail() -> None:
     manager = VoiceSessionManager(MockTTSProvider(), safe_segment_words=10)
     text = (
