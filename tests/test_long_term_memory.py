@@ -52,6 +52,81 @@ def test_memory_deduplicates_and_supersedes_conflicting_user_fact(tmp_path: Path
     assert service.retrieve("как меня зовут")[0]["value_text"] == "Алекс"
 
 
+def test_response_length_preference_replaces_previous_choice(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    short_message, _ = store.append_message(role="user", content="Я предпочитаю короткие ответы", input_mode="text")
+    long_message, _ = store.append_message(role="user", content="Теперь я люблю длинные ответы", input_mode="text")
+
+    short = service.apply_llm_candidates([
+        {"kind": "preference", "subject": "user", "predicate": "prefers_response_length", "value_text": "короткие ответы", "importance": .7, "confidence": .95},
+    ], short_message)[0]
+    long = service.apply_llm_candidates([
+        {"kind": "preference", "subject": "user", "predicate": "prefers_response_length", "value_text": "длинные ответы", "importance": .7, "confidence": .95},
+    ], long_message)[0]
+
+    assert store.get_memory(str(short["id"]))["status"] == "superseded"
+    assert store.get_memory(str(long["id"]))["status"] == "active"
+    active = store.list_memories(status="active")
+    assert [(item["predicate"], item["value_text"]) for item in active] == [("prefers_response_length", "длинные ответы")]
+
+
+def test_legacy_response_length_alias_is_repaired(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    source, _ = store.append_message(role="user", content="Я предпочитаю короткие ответы", input_mode="text")
+    legacy = store.create_memory({
+        "scope": "user_profile", "kind": "preference", "subject": "user", "predicate": "preferred",
+        "value_text": "короткие ответы", "importance": .7, "confidence": .9, "sensitivity": "normal",
+        "status": "active", "source_message_ids": [source.id], "source_episode_id": source.episode_id,
+        "extractor_version": "deterministic-v2",
+    }, actor="extractor")
+
+    repaired = service.repair_legacy_response_length_preferences()
+
+    assert len(repaired) == 1
+    assert store.get_memory(str(legacy["id"]))["status"] == "superseded"
+    active = store.list_memories(status="active")
+    assert [(item["predicate"], item["value_text"]) for item in active] == [("prefers_response_length", "короткие ответы")]
+
+
+def test_memory_policy_marks_allergy_sensitive_and_never_keeps_password(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    allergy, _ = store.append_message(role="user", content="У меня аллергия на цветение", input_mode="text")
+    secret, _ = store.append_message(role="user", content="Мой пароль от почты 123456", input_mode="text")
+
+    stored_allergy = service.apply_llm_candidates([
+        {"kind": "constraint", "subject": "user", "predicate": "allergy", "value_text": "аллергия на цветение", "importance": .9, "confidence": .99, "sensitivity": "normal"},
+    ], allergy)
+    stored_secret = service.apply_llm_candidates([
+        {"kind": "decision", "subject": "user", "predicate": "email_password", "value_text": "123456", "importance": .9, "confidence": .99, "sensitivity": "sensitive"},
+    ], secret)
+    disguised_secret = service.apply_llm_candidates([
+        {"kind": "decision", "subject": "user", "predicate": "note", "value_text": "123456", "importance": .9, "confidence": .99, "sensitivity": "normal"},
+    ], secret)
+
+    assert stored_allergy[0]["status"] == "candidate"
+    assert stored_allergy[0]["sensitivity"] == "sensitive"
+    assert stored_secret == []
+    assert disguised_secret == []
+
+
+def test_ambiguous_social_relation_requires_review_but_direct_one_is_saved(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    ambiguous, _ = store.append_message(
+        role="user", content="Моего друга Федю и мы разрабатываем тебя вдвоём", input_mode="text",
+    )
+    direct, _ = store.append_message(role="user", content="Лука — мой друг.", input_mode="text")
+
+    ambiguous_memory = service.apply_llm_candidates([
+        {"kind": "relationship", "subject": "user", "predicate": "has_friend", "value_text": "Федя", "importance": .8, "confidence": .99},
+    ], ambiguous)[0]
+    direct_memory = service.apply_llm_candidates([
+        {"kind": "relationship", "subject": "user", "predicate": "has_friend", "value_text": "Лука", "importance": .8, "confidence": .99},
+    ], direct)[0]
+
+    assert ambiguous_memory["status"] == "candidate"
+    assert direct_memory["status"] == "active"
+
+
 def test_balanced_memory_saves_valid_identity_and_returns_it_for_identity_variants(tmp_path: Path) -> None:
     store, service = _service(tmp_path, mode="balanced")
     message, _ = store.append_message(
@@ -95,6 +170,37 @@ def test_explicit_memory_is_normalized_and_developer_relationship_is_structured(
         "relationship", "relationship", "assistant", "developers", "Олег и Федя",
     )
     assert generic["value_text"] == "я люблю чай"
+
+
+def test_direct_developer_wording_is_saved_immediately(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    message, _ = store.append_message(
+        role="user", content="Твой разработчик это Олег и Федя", input_mode="text",
+    )
+
+    saved = service.extract_high_precision_from_message(message)
+
+    assert [(item["subject"], item["predicate"], item["value_text"]) for item in saved] == [
+        ("assistant", "developers", "Олег и Федя"),
+    ]
+
+
+def test_ambiguous_legacy_relationship_is_moved_to_review(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    source, _ = store.append_message(
+        role="user", content="Я буду часто упоминать Федю", input_mode="text",
+    )
+    memory = store.create_memory({
+        "scope": "relationship", "kind": "relationship", "subject": "user", "predicate": "has_friend",
+        "value_text": "Федя", "importance": .8, "confidence": .99, "sensitivity": "normal",
+        "status": "active", "source_message_ids": [source.id], "source_episode_id": source.episode_id,
+        "extractor_version": "deepseek-character-v1",
+    }, actor="extractor")
+
+    repaired = service.repair_ambiguous_relationship_memories()
+
+    assert [item["id"] for item in repaired] == [memory["id"]]
+    assert store.get_memory(str(memory["id"]))["status"] == "candidate"
 
 
 def test_explicit_vague_fact_is_not_saved(tmp_path: Path) -> None:

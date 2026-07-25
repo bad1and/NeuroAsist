@@ -69,19 +69,21 @@ class CharacterAgent:
         )
         if not parsed.valid:
             first_invalid = parsed
-            repair_messages = [
-                ChatMessage(role="system", content=CHARACTER_REPAIR_PROMPT),
-                ChatMessage(
-                    role="user",
-                    content=(
-                        "Запрос пользователя:\n"
-                        f"{user_text}\n\n"
-                        "Невалидный ответ модели:\n"
-                        f"{llm_response.content!r}\n\n"
-                        "Верни один валидный JSON по схеме."
-                    ),
-                ),
-            ]
+            logger.info(
+                "Invalid LLM JSON response; retrying with full context: reason=%s raw_length=%s",
+                parsed.reason,
+                len(llm_response.content),
+            )
+            if self._event_publisher is not None:
+                self._event_publisher(
+                    "llm.invalid_json_retry",
+                    "warning",
+                    "Invalid LLM JSON response; retrying",
+                    {"session_id": session_id, "reason": parsed.reason, "raw_length": len(llm_response.content)},
+                )
+            # The original full prompt has persona and conversation context.  A
+            # standalone repair prompt often caused another empty answer.
+            repair_messages = [*messages, ChatMessage(role="system", content=CHARACTER_REPAIR_PROMPT)]
             repair_response = await self._llm_provider.generate(repair_messages)
             parsed = self._parse_response_result(
                 repair_response.content,
@@ -98,7 +100,16 @@ class CharacterAgent:
             ):
                 parsed = first_invalid
 
-        if parsed.valid and parsed.turn is not None and self._memory_service is not None and self._memory_service.llm_extraction_enabled:
+        # The modern path deliberately has one writer: the background extractor.
+        # Keeping Character Protocol candidates on that path as well prevents a
+        # normal text turn from being saved twice by two independent DeepSeek calls.
+        if (
+            parsed.valid
+            and parsed.turn is not None
+            and self._memory_service is not None
+            and self._memory_service.llm_extraction_enabled
+            and not self._memory_service.uses_background_extraction
+        ):
             created = self._memory_service.apply_llm_candidates(parsed.turn.memory_candidates, self._last_user_message)
             # DeepSeek can legitimately omit optional metadata. Preserve explicit
             # "remember this" commands with the deterministic, policy-controlled
@@ -107,8 +118,16 @@ class CharacterAgent:
                 created = self._memory_service.extract_from_message(self._last_user_message)
             self.last_memory_updates.extend(self._memory_service.memory_update(memory) for memory in created)
 
-        if parsed.valid and self._should_persist_timeline():
+        # A user-visible fallback is still an assistant turn.  Persist it and
+        # schedule extraction so a malformed visible reply never drops a useful
+        # user fact such as a current goal.
+        if self._should_persist_timeline():
             self._save_message(session_id, "assistant", parsed.payload["reply"], input_mode)
+        if self._memory_service is not None:
+            if self._memory_service.uses_background_extraction:
+                created = self._memory_service.extract_high_precision_from_message(self._last_user_message)
+                self.last_memory_updates.extend(self._memory_service.memory_update(memory) for memory in created)
+            self._memory_service.schedule_extraction(self._last_user_message)
 
         self.last_turn = parsed.turn
 
@@ -141,7 +160,16 @@ class CharacterAgent:
             yield reply
         if self._should_persist_timeline():
             self._save_message(session_id, "assistant", reply, input_mode)
-        if self._memory_service is not None and self._memory_service.llm_extraction_enabled:
+        if self._memory_service is not None:
+            if self._memory_service.uses_background_extraction:
+                created = self._memory_service.extract_high_precision_from_message(self._last_user_message)
+                self.last_memory_updates.extend(self._memory_service.memory_update(memory) for memory in created)
+            self._memory_service.schedule_extraction(self._last_user_message)
+        if (
+            self._memory_service is not None
+            and self._memory_service.llm_extraction_enabled
+            and not self._memory_service.uses_background_extraction
+        ):
             # Live mode streams plain speech rather than the JSON character
             # protocol. Preserve explicit memory commands after a completed
             # turn without adding a second DeepSeek request.
@@ -151,7 +179,9 @@ class CharacterAgent:
     def _persist_user_message(self, session_id: str, user_text: str, input_mode: str) -> list[dict[str, str]]:
         user_message = self._save_message(session_id, "user", user_text, input_mode)
         self._last_user_message = user_message
-        if self._memory_service is None or self._memory_service.llm_extraction_enabled:
+        if self._memory_service is None:
+            return []
+        if self._memory_service.llm_extraction_enabled:
             return []
         return [self._memory_service.memory_update(memory) for memory in self._memory_service.extract_from_message(user_message)]
 
@@ -184,7 +214,7 @@ class CharacterAgent:
         raw_content: str,
         session_id: str | None = None,
         user_text: str = "",
-        empty_fallback_reply: str = "Модель вернула пустой ответ. Попробуй повторить.",
+        empty_fallback_reply: str = "Не смогла сформировать ответ. Попробуй отправить сообщение ещё раз.",
         event_type: str = "llm.invalid_json",
         report_invalid: bool = True,
     ) -> _ParseResult:
@@ -283,7 +313,6 @@ class CharacterAgent:
             metadata: dict[str, Any] = {
                 "reason": reason,
                 "raw_length": len(raw_content),
-                "raw_preview": raw_content.strip()[:120],
             }
             if session_id is not None:
                 metadata["session_id"] = session_id
@@ -322,5 +351,6 @@ class CharacterAgent:
     def _looks_like_structured_content(value: str) -> bool:
         return value.startswith(("{", "[", "```"))
 
-    def _empty_model_fallback(self, user_text: str) -> str:
-        return f'Я услышал: "{user_text}". Но модель вернула пустой ответ. Попробуй повторить.'
+    def _empty_model_fallback(self, _user_text: str) -> str:
+        # Do not echo a potentially sensitive user message back into the UI.
+        return "Не смогла сформировать ответ. Попробуй отправить сообщение ещё раз."

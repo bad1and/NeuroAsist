@@ -7,6 +7,7 @@ import re
 import logging
 import time
 from datetime import UTC, datetime
+from threading import RLock
 from typing import Any
 
 from apps.backend.app.runtime.settings import RuntimeSettings
@@ -20,7 +21,12 @@ logger = logging.getLogger(__name__)
 class MemoryService:
     """The only component allowed to turn a candidate into canonical memory."""
 
-    _SENSITIVE_WORDS = ("здоров", "болез", "диагноз", "адрес", "паспорт", "карта", "парол", "полит")
+    _SENSITIVE_WORDS = (
+        "здоров", "болез", "диагноз", "аллерг", "лекар", "симптом", "врач",
+        "адрес", "паспорт", "карта", "банков", "полит",
+    )
+    _SECRET_WORDS = ("парол", "password", "код подтверждения", "код из смс", "cvv", "токен", "token", "api key")
+    _SINGLE_VALUE_PREDICATES = {"name", "current_statement", "current_goal", "prefers_response_length"}
     _NAME_PREFIX = re.compile(
         r"(?:\bменя\s+зовут\b|\bмо[её]\s+имя(?:\s+(?:это|[-—:]))?\b|\bmy\s+name\s+is\b|\bcall\s+me\b)",
         flags=re.IGNORECASE,
@@ -40,10 +46,24 @@ class MemoryService:
         flags=re.IGNORECASE,
     )
     _DEVELOPER_FACT = re.compile(
-        r"^(?:такой\s+факт,?\s*)?(?:что\s+)?тво(?:их|его)\s+разработчик(?:ов|и)\s+зовут\s+(.+)$",
+        r"^(?:такой\s+факт,?\s*)?(?:что\s+)?тво(?:их|его|й)\s+разработчик(?:ов|и)?\s*(?:(?:зовут|это)\s*)?(.+)$",
         flags=re.IGNORECASE,
     )
     _LEADING_FACT_FILLER = re.compile(r"^(?:такой\s+факт,?\s*)?(?:что\s+)?", flags=re.IGNORECASE)
+    _SECRET_SPAN = re.compile(
+        r"(?ix)(?:\b(?:и|а)\s+)?(?:(?:мой|твой|наш|my|your)\s+)?"
+        r"(?:парол[ья]?|password|код\s+подтверждения|код\s+из\s+смс|cvv|токен|token|api\s+key)\b[^.!?\n]*"
+    )
+    _RESPONSE_LENGTH_FACT = re.compile(
+        r"(?:я\s+)?(?:предпочитаю|люблю)\s+"
+        r"((?:(?:коротк|длинн|подробн|лаконич)[^.!?\n]*?)ответ(?:ы|ов)?)",
+        flags=re.IGNORECASE,
+    )
+    _CURRENT_GOAL_FACT = re.compile(
+        r"моя\s+(?:текущая\s+)?цель(?:\s+в\s+разработке)?\s*(?:(?:это|—|-)\s*)?"
+        r"(.+?)(?=\s+(?:а|и)\s+ещ[её]\b|[.!?\n]|$)",
+        flags=re.IGNORECASE,
+    )
 
     def __init__(
         self,
@@ -59,6 +79,9 @@ class MemoryService:
         semantic_limit: int = 8,
         llm_extraction_enabled: bool = False,
         llm_min_confidence: float = 0.70,
+        async_extraction_enabled: bool = True,
+        auto_min_confidence: float = 0.85,
+        auto_min_importance: float = 0.60,
     ) -> None:
         self._store = store
         self._runtime = runtime
@@ -72,10 +95,22 @@ class MemoryService:
         self._semantic_degraded_reason: str | None = None
         self._llm_extraction_enabled = llm_extraction_enabled
         self._llm_min_confidence = llm_min_confidence
+        self._async_extraction_enabled = async_extraction_enabled
+        self._auto_min_confidence = auto_min_confidence
+        self._auto_min_importance = auto_min_importance
+        # A request handler and the background worker share this service.  Keep
+        # their read/check/write sequence serialized so the same fact cannot be
+        # created twice during a narrow scheduling race.
+        self._write_lock = RLock()
 
     @property
     def llm_extraction_enabled(self) -> bool:
         return self._llm_extraction_enabled
+
+    @property
+    def uses_background_extraction(self) -> bool:
+        """Whether this service should use the one asynchronous LLM write path."""
+        return self._llm_extraction_enabled and self._async_extraction_enabled
 
     @property
     def incognito(self) -> bool:
@@ -87,6 +122,21 @@ class MemoryService:
 
     def should_persist_timeline(self) -> bool:
         return not self.incognito
+
+    def schedule_extraction(self, message: StoredTimelineMessage | None) -> bool:
+        """Queue background extraction without delaying the user-facing turn."""
+        if (
+            not self.uses_background_extraction
+            or not self._enabled
+            or self.incognito
+            or self._runtime.memory_mode == "off"
+            or message is None
+            or message.role != "user"
+            or message.status != "completed"
+        ):
+            return False
+        self._store.enqueue_memory_extraction_job(message.id)
+        return True
 
     @property
     def semantic_enabled(self) -> bool:
@@ -140,6 +190,30 @@ class MemoryService:
             saved.append(self._apply_candidate(candidate, actor="extractor"))
         return saved
 
+    def extract_high_precision_from_message(self, message: StoredTimelineMessage | None) -> list[dict[str, object]]:
+        """Persist only facts safe enough to acknowledge in the visible turn.
+
+        Background extraction remains the sole automatic LLM write path.  This
+        tiny deterministic exception keeps identity and the well-structured
+        assistant-developer fact immediate, including the existing Memory
+        Center feedback contract.
+        """
+        if not self._enabled or self.incognito or self._runtime.memory_mode == "off" or message is None:
+            return []
+        if message.role != "user" or message.status != "completed":
+            return []
+        saved: list[dict[str, object]] = []
+        for candidate in self._extract_candidates(message.effective_content):
+            if str(candidate.get("predicate")) not in {"name", "developers"}:
+                continue
+            candidate.update({
+                "source_message_ids": [message.id],
+                "source_episode_id": message.episode_id,
+                "extractor_version": "deterministic-v3-high-precision",
+            })
+            saved.append(self._apply_candidate(candidate, actor="extractor"))
+        return saved
+
     def apply_llm_candidates(
         self, candidates: list[object], source_message: StoredTimelineMessage | None,
     ) -> list[dict[str, object]]:
@@ -166,7 +240,18 @@ class MemoryService:
                 continue
             if kind not in allowed_kinds or confidence < self._llm_min_confidence or not value_text or not predicate:
                 continue
+            if (
+                self._contains_secret(value_text.lower())
+                or self._looks_like_secret_value(value_text)
+                or self._is_secret_predicate(predicate)
+            ):
+                # Secrets should never become review items or durable records.
+                continue
             sensitivity = str(candidate.get("sensitivity", "normal"))
+            is_sensitive = (
+                sensitivity == "sensitive"
+                or self._contains_sensitive(value_text.lower())
+            )
             values = {
                 "scope": "user_profile",
                 "kind": kind,
@@ -175,7 +260,7 @@ class MemoryService:
                 "value_text": value_text[:1000],
                 "importance": min(1.0, max(0.0, float(candidate.get("importance", 0.6)))),
                 "confidence": min(1.0, max(0.0, confidence)),
-                "sensitivity": "sensitive" if sensitivity == "sensitive" else "normal",
+                "sensitivity": "sensitive" if is_sensitive else "normal",
                 "source_message_ids": [source_message.id],
                 "source_episode_id": source_message.episode_id,
                 "extractor_version": "deepseek-character-v1",
@@ -189,6 +274,38 @@ class MemoryService:
             if memory["status"] == "active":
                 self._schedule_vector_sync(memory)
         return saved
+
+    def extract_resilient_facts_from_message(
+        self, message: StoredTimelineMessage | None,
+    ) -> list[dict[str, object]]:
+        """Store a few obvious facts even if the extractor omitted a clause.
+
+        This is intentionally narrow.  It covers structured preferences, a
+        clearly stated current goal and the assistant-developer relation; all
+        other memory decisions remain with the extraction model and policy.
+        """
+        if not self._enabled or self.incognito or self._runtime.memory_mode == "off" or message is None:
+            return []
+        if message.role != "user" or message.status != "completed":
+            return []
+        text, _ = self.sanitize_for_llm_extraction(message.effective_content)
+        # The marker is useful instruction for the LLM, but must never leak
+        # into a deterministic value that becomes canonical memory.
+        text = text.replace("[секрет удалён]", "")
+        saved: list[dict[str, object]] = []
+        for candidate in self._extract_resilient_candidates(text)[: self._max_candidates_per_turn]:
+            candidate.update({
+                "source_message_ids": [message.id],
+                "source_episode_id": message.episode_id,
+                "extractor_version": "deterministic-v4-resilient",
+            })
+            saved.append(self._apply_candidate(candidate, actor="extractor"))
+        return saved
+
+    def sanitize_for_llm_extraction(self, text: str) -> tuple[str, bool]:
+        """Remove secret-bearing spans before they can reach an LLM prompt."""
+        sanitized, count = self._SECRET_SPAN.subn("[секрет удалён]", text)
+        return sanitized, count > 0
 
     def repair_legacy_identity_candidates(self) -> list[dict[str, object]]:
         """Repair only malformed V0.5 name candidates from their source messages.
@@ -222,6 +339,78 @@ class MemoryService:
             repaired_memory = self._apply_candidate(values, actor="migration", action="legacy_identity_repaired")
             self._store.supersede_memory(str(candidate["id"]), str(repaired_memory["id"]))
             repaired.append(repaired_memory)
+        return repaired
+
+    def repair_legacy_response_length_preferences(self) -> list[dict[str, object]]:
+        """Merge the old ``preferred`` alias and stale answer-length choices.
+
+        Before background extraction, a deterministic fallback used the generic
+        predicate ``preferred``.  It also allowed both old and new response
+        length choices to remain active.  Response length is a setting, so the
+        newest explicit choice must be the only active one.
+        """
+        active = [
+            item for item in self._store.list_memories(status="active", limit=250)
+            if item["subject"] == "user"
+            and item["predicate"] in {"preferred", "prefers_response_length"}
+            and self._is_response_length_preference(str(item["value_text"]))
+        ]
+        if not active:
+            return []
+        active.sort(key=lambda item: (str(item["created_at"]), str(item["id"])))
+        latest = active[-1]
+        if len(active) == 1 and latest["predicate"] == "prefers_response_length":
+            return []
+        values = {
+            "scope": str(latest["scope"]),
+            "kind": "preference",
+            "subject": "user",
+            "predicate": "prefers_response_length",
+            "value_text": str(latest["value_text"]),
+            "importance": float(latest["importance"]),
+            "confidence": float(latest["confidence"]),
+            "sensitivity": str(latest["sensitivity"]),
+            "status": "active",
+            "source_message_ids": list(latest["source_message_ids"]),
+            "source_episode_id": latest["source_episode_id"],
+            "extractor_version": "memory-v2-preference-repair",
+        }
+        target = self._apply_candidate(values, actor="migration", action="legacy_preference_repaired")
+        repaired: list[dict[str, object]] = []
+        for item in active:
+            if item["id"] == target["id"]:
+                continue
+            current = self._store.get_memory(str(item["id"]))
+            if current is not None and current["status"] == "active":
+                self._store.supersede_memory(str(item["id"]), str(target["id"]))
+                self._schedule_vector_sync(current)
+                repaired.append(current)
+        return repaired
+
+    def repair_ambiguous_relationship_memories(self) -> list[dict[str, object]]:
+        """Move old, inferred social ties out of active prompt context.
+
+        Earlier extractors could turn a loosely mentioned name into a permanent
+        relationship.  Preserve the record for review, but do not keep it in
+        automatic retrieval.  Explicit user-created memories are never touched.
+        """
+        repaired: list[dict[str, object]] = []
+        for memory in self._store.list_memories(status="active", limit=250):
+            if (
+                memory["kind"] != "relationship"
+                or bool(memory.get("user_locked"))
+                or str(memory.get("extractor_version", "")).startswith("manual")
+                or self._relationship_is_unambiguous(memory)
+            ):
+                continue
+            demoted = self._store.set_memory_status(
+                str(memory["id"]),
+                "candidate",
+                actor="migration",
+                action="ambiguous_relationship_review",
+            )
+            self._delete_vector(str(memory["id"]))
+            repaired.append(demoted)
         return repaired
 
     @staticmethod
@@ -324,27 +513,32 @@ class MemoryService:
     def _apply_candidate(
         self, values: dict[str, object], *, actor: str, action: str = "candidate_created", sync_vector: bool = True,
     ) -> dict[str, object]:
-        self._validate_sources(list(values.get("source_message_ids", [])), manual=actor == "user")
-        values = {**values, "subject": self._normalize(str(values["subject"])), "predicate": self._normalize(str(values["predicate"]))}
-        exact, conflict = self._match_existing(values)
-        if exact is not None:
-            self._store.update_memory(exact["id"], {}, actor="policy", action="retrieved")
-            return exact
-        status = str(values.get("status", "candidate"))
-        if actor == "extractor":
-            sensitive = values.get("sensitivity") == "sensitive"
-            status = "active" if self._should_auto_activate(values, sensitive) else "candidate"
-            if conflict is not None and conflict["user_locked"]:
-                status = "candidate"
-        values["status"] = status
-        memory = self._store.create_memory(values, actor=actor, action=action if status == "active" else "candidate_created")
-        if status == "active" and conflict is not None:
-            self._store.supersede_memory(str(conflict["id"]), str(memory["id"]))
-            self._schedule_vector_sync(conflict)
-            memory = self._store.get_memory(str(memory["id"])) or memory
-        if sync_vector and memory["status"] == "active":
-            self._sync_vector(memory)
-        return memory
+        with self._write_lock:
+            self._validate_sources(list(values.get("source_message_ids", [])), manual=actor == "user")
+            values = {
+                **values,
+                "subject": self._normalize(str(values["subject"])),
+                "predicate": self._normalize(str(values["predicate"])),
+            }
+            exact, conflict = self._match_existing(values)
+            if exact is not None:
+                self._store.update_memory(exact["id"], {}, actor="policy", action="retrieved")
+                return exact
+            status = str(values.get("status", "candidate"))
+            if actor == "extractor":
+                sensitive = values.get("sensitivity") == "sensitive"
+                status = "active" if self._should_auto_activate(values, sensitive) else "candidate"
+                if conflict is not None and conflict["user_locked"]:
+                    status = "candidate"
+            values["status"] = status
+            memory = self._store.create_memory(values, actor=actor, action=action if status == "active" else "candidate_created")
+            if status == "active" and conflict is not None:
+                self._store.supersede_memory(str(conflict["id"]), str(memory["id"]))
+                self._schedule_vector_sync(conflict)
+                memory = self._store.get_memory(str(memory["id"])) or memory
+            if sync_vector and memory["status"] == "active":
+                self._sync_vector(memory)
+            return memory
 
     def _schedule_vector_sync(self, memory: dict[str, object]) -> None:
         """Queue index work durably so a crash cannot lose a Chroma update."""
@@ -389,10 +583,46 @@ class MemoryService:
     def _should_auto_activate(self, values: dict[str, object], sensitive: bool) -> bool:
         if sensitive and self._sensitive_mode == "ask":
             return False
+        if str(values.get("kind")) == "relationship" and not self._relationship_is_unambiguous(values):
+            # Names and social roles are easy to misread in informal dialogue.
+            # Keep uncertain ties in Memory Center for review instead of making
+            # them permanent context that can distort later answers.
+            return False
         mode = "balanced" if self._runtime.memory_mode == "ask" else self._runtime.memory_mode
         if mode == "automatic":
             return True
-        return mode == "balanced" and str(values.get("predicate")) in {"name", "explicit_memory", "current_statement"}
+        if mode != "balanced":
+            return False
+        if str(values.get("predicate")) in {"name", "explicit_memory", "current_statement"}:
+            return True
+        return (
+            float(values.get("confidence", 0.0)) >= self._auto_min_confidence
+            and float(values.get("importance", 0.0)) >= self._auto_min_importance
+        )
+
+    def _relationship_is_unambiguous(self, values: dict[str, object]) -> bool:
+        subject = str(values.get("subject", ""))
+        predicate = str(values.get("predicate", ""))
+        if subject == "assistant" and predicate == "developers":
+            return True
+        if "develop" in predicate:
+            return True
+        source_ids = list(values.get("source_message_ids", []))
+        if len(source_ids) != 1:
+            return False
+        source = self._store.get_message(str(source_ids[0]))
+        if source is None:
+            return False
+        name = re.escape(str(values.get("value_text", "")).strip())
+        if not name:
+            return False
+        text = self._normalize(source.effective_content)
+        direct_patterns = (
+            rf"(?:^|[.!?]\s*)(?:это\s+)?мой\s+друг\s+{name}(?:[.!?]|$)",
+            rf"(?:^|[.!?]\s*){name}\s*(?:-|—)\s*мой\s+друг(?:[.!?]|$)",
+            rf"(?:^|[.!?]\s*)моего\s+друга\s+зовут\s+{name}(?:[.!?]|$)",
+        )
+        return any(re.search(pattern, text, flags=re.IGNORECASE) is not None for pattern in direct_patterns)
 
     def _attach_retrieval(
         self, memories: list[dict[str, object]], fts_scores: dict[str, float],
@@ -449,17 +679,18 @@ class MemoryService:
 
     def _match_existing(self, values: dict[str, object], exclude_id: str | None = None) -> tuple[dict[str, object] | None, dict[str, object] | None]:
         active = self._store.list_memories(status="active", limit=250)
+        review = self._store.list_memories(status="candidate", limit=250)
         subject, predicate = str(values["subject"]), str(values["predicate"])
         candidate_value = self._normalize(str(values["value_text"]))
         exact = conflict = None
-        for item in active:
+        for item in [*active, *review]:
             if item["id"] == exclude_id or item["subject"] != subject or item["predicate"] != predicate:
                 continue
             if self._normalize(str(item["value_text"])) == candidate_value:
                 exact = item
             # A profile name and an explicit correction are single-valued;
-            # independent preferences and explicit notes must coexist.
-            elif predicate in {"name", "current_statement"}:
+            # independent interests and notes must coexist.
+            elif item["status"] == "active" and predicate in self._SINGLE_VALUE_PREDICATES:
                 conflict = item
         return exact, conflict
 
@@ -486,20 +717,27 @@ class MemoryService:
         interest = re.search(r"(?:я люблю|мне нравится|i like)\s+(.+)", cleaned, flags=re.IGNORECASE)
         correction = re.search(r"(?:теперь я|я больше не)\s+(.+)", cleaned, flags=re.IGNORECASE)
         name = self._extract_name(cleaned)
+        developer = self._developer_candidate(cleaned)
         # Identity takes priority over a generic explicit-memory command.
         if name:
             value, kind, predicate, importance = name, "identity", "name", 0.9
+        elif developer:
+            return [developer]
         elif explicit:
             return [explicit]
         elif preference:
-            value, predicate, importance = preference.group(1).strip(), "preferred", 0.7
+            value = preference.group(1).strip()
+            predicate = "prefers_response_length" if self._is_response_length_preference(value) else "prefers"
+            importance = 0.7
         elif interest:
             value, kind, predicate = interest.group(1).strip(), "interest", "likes"
         elif correction:
             value, kind, predicate, importance = correction.group(1).strip(), "correction", "current_statement", 0.75
         if not value or len(value) < 2:
             return []
-        sensitivity = "sensitive" if any(word in lower for word in self._SENSITIVE_WORDS) else "normal"
+        if self._contains_secret(lower):
+            return []
+        sensitivity = "sensitive" if self._contains_sensitive(lower) else "normal"
         return [{
             "scope": "user_profile", "kind": kind, "subject": "user", "predicate": predicate,
             "value_text": value[:2000], "importance": importance, "confidence": 0.9 if explicit else 0.75,
@@ -511,22 +749,87 @@ class MemoryService:
             return None
         value = self._EXPLICIT_PREFIX.sub("", text).strip()
         value = self._clean_memory_value(value)
-        if not value:
+        if not value or self._contains_secret(value.lower()):
             return None
-        developer_match = self._DEVELOPER_FACT.match(value)
-        if developer_match is not None:
-            names = developer_match.group(1).strip(" \t,;:.—-")
-            if names:
-                return {
-                    "scope": "relationship", "kind": "relationship", "subject": "assistant",
-                    "predicate": "developers", "value_text": names[:200], "importance": 0.8,
-                    "confidence": 0.95, "sensitivity": "normal",
-                }
+        developer = self._developer_candidate(value)
+        if developer is not None:
+            return developer
         return {
             "scope": "user_profile", "kind": "decision", "subject": "user",
             "predicate": "explicit_memory", "value_text": value[:1000], "importance": 0.8,
-            "confidence": 0.9, "sensitivity": "sensitive" if any(word in value.lower() for word in self._SENSITIVE_WORDS) else "normal",
+            "confidence": 0.9, "sensitivity": "sensitive" if self._contains_sensitive(value.lower()) else "normal",
         }
+
+    def _extract_resilient_candidates(self, text: str) -> list[dict[str, object]]:
+        candidates: list[dict[str, object]] = []
+        developer = self._developer_candidate(text.strip())
+        if developer is not None:
+            candidates.append(developer)
+        length_match = self._RESPONSE_LENGTH_FACT.search(text)
+        if length_match is not None:
+            value = self._clean_memory_value(length_match.group(1))
+            if value:
+                candidates.append({
+                    "scope": "user_profile", "kind": "preference", "subject": "user",
+                    "predicate": "prefers_response_length", "value_text": value[:200],
+                    "importance": 0.75, "confidence": 0.97, "sensitivity": "normal",
+                })
+        goal_match = self._CURRENT_GOAL_FACT.search(text)
+        if goal_match is not None:
+            value = self._clean_memory_value(goal_match.group(1))
+            if value and not self._contains_secret(value.lower()):
+                candidates.append({
+                    "scope": "user_profile", "kind": "goal", "subject": "user",
+                    "predicate": "current_goal", "value_text": value[:500],
+                    "importance": 0.8, "confidence": 0.97, "sensitivity": "normal",
+                })
+        return candidates
+
+    def _developer_candidate(self, text: str) -> dict[str, object] | None:
+        developer_match = self._DEVELOPER_FACT.match(text.strip())
+        if developer_match is None:
+            return None
+        names = developer_match.group(1).strip(" \t,;:.—-")
+        if not names or self._contains_secret(names.lower()):
+            return None
+        return {
+            "scope": "relationship", "kind": "relationship", "subject": "assistant",
+            "predicate": "developers", "value_text": names[:200], "importance": 0.8,
+            "confidence": 0.95, "sensitivity": "normal",
+        }
+
+    @classmethod
+    def _contains_sensitive(cls, text: str) -> bool:
+        return any(word in text for word in cls._SENSITIVE_WORDS)
+
+    @classmethod
+    def _contains_secret(cls, text: str) -> bool:
+        return any(word in text for word in cls._SECRET_WORDS)
+
+    @classmethod
+    def _is_secret_predicate(cls, predicate: str) -> bool:
+        normalized = predicate.lower().replace("_", " ")
+        return cls._contains_secret(normalized) or any(
+            marker in normalized for marker in ("credential", "credentials", "auth", "access key")
+        )
+
+    @staticmethod
+    def _looks_like_secret_value(value: str) -> bool:
+        normalized = " ".join(value.lower().split())
+        if re.fullmatch(r"[0-9\s-]{4,}", normalized):
+            return True
+        number_words = {
+            "ноль", "один", "одна", "два", "две", "три", "четыре", "пять",
+            "шесть", "семь", "восемь", "девять", "zero", "one", "two", "three",
+            "four", "five", "six", "seven", "eight", "nine",
+        }
+        tokens = re.findall(r"[a-zа-яё]+", normalized, flags=re.IGNORECASE)
+        return len(tokens) >= 4 and all(token in number_words for token in tokens)
+
+    @staticmethod
+    def _is_response_length_preference(value: str) -> bool:
+        normalized = value.lower()
+        return "ответ" in normalized or any(marker in normalized for marker in ("коротк", "длинн", "лаконич"))
 
     def _clean_memory_value(self, value: str) -> str:
         cleaned = self._LEADING_FACT_FILLER.sub("", value.strip()).strip(" \t,;:.—-")

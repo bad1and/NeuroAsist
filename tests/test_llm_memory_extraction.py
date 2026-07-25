@@ -36,6 +36,7 @@ def test_agent_applies_llm_memory_candidates_after_reply(tmp_path: Path) -> None
     store.init_db()
     service = MemoryService(
         store, RuntimeSettings(memory_mode="automatic"), llm_extraction_enabled=True,
+        async_extraction_enabled=False,
     )
     agent = CharacterAgent(CandidateProvider(), TimelineHistoryAdapter(store), history_limit=5, memory_service=service)
 
@@ -80,7 +81,10 @@ def test_llm_candidate_strips_filler_and_rejects_vague_text(tmp_path: Path) -> N
 def test_explicit_memory_uses_fallback_when_model_omits_candidates(tmp_path: Path) -> None:
     store = TimelineStore(tmp_path / "memory.sqlite3")
     store.init_db()
-    service = MemoryService(store, RuntimeSettings(memory_mode="automatic"), llm_extraction_enabled=True)
+    service = MemoryService(
+        store, RuntimeSettings(memory_mode="automatic"), llm_extraction_enabled=True,
+        async_extraction_enabled=False,
+    )
     agent = CharacterAgent(NoCandidateProvider(), TimelineHistoryAdapter(store), history_limit=5, memory_service=service)
 
     asyncio.run(agent.handle_user_message("session", "Запомни: моих разработчиков зовут Фетя и Ален"))

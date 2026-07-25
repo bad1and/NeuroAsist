@@ -136,6 +136,7 @@ class VoiceSessionManager:
         language: str,
         voice: str,
         agent: CharacterAgent,
+        input_mode: str = "voice",
         style_override: str | VoiceStyle = VoiceStyle.AUTO,
     ) -> None:
         if not self.connected(session_id):
@@ -144,7 +145,7 @@ class VoiceSessionManager:
         context = UtteranceContext(session_id, utterance_id, voice_style=coerce_voice_style(style_override))
         self._active[session_id] = context
         context.task = asyncio.create_task(
-            self._run(context, transcript, language, voice, agent),
+            self._run(context, transcript, language, voice, agent, input_mode),
             name=f"voice-{utterance_id}",
         )
 
@@ -166,7 +167,15 @@ class VoiceSessionManager:
         if self._active.get(session_id) is context:
             self._active.pop(session_id, None)
 
-    async def _run(self, context: UtteranceContext, transcript: str, language: str, voice: str, agent: CharacterAgent) -> None:
+    async def _run(
+        self,
+        context: UtteranceContext,
+        transcript: str,
+        language: str,
+        voice: str,
+        agent: CharacterAgent,
+        input_mode: str,
+    ) -> None:
         started = time.perf_counter()
         queue: asyncio.Queue[str | None] = asyncio.Queue(self._queue_size)
         worker = asyncio.create_task(self._tts_worker(context, queue, language, voice))
@@ -232,7 +241,10 @@ class VoiceSessionManager:
                     intent=intent,
                 )
             iterator = agent.stream_user_message(
-                context.session_id, transcript, stored_reply_transform=clean_live_reply, input_mode="voice"
+                context.session_id,
+                transcript,
+                stored_reply_transform=clean_live_reply,
+                input_mode=input_mode,
             ).__aiter__()
             pending = asyncio.create_task(anext(iterator))
             while True:
