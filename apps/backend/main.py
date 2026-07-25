@@ -144,7 +144,12 @@ def create_app() -> FastAPI:
         memory_service,
         DeepSeekProvider(settings),
         event_bus.publish,
-    ) if timeline_store is not None and memory_service is not None and settings.memory_async_extraction_enabled else None
+    ) if (
+        timeline_store is not None
+        and memory_service is not None
+        and settings.memory_llm_extraction_enabled
+        and settings.memory_async_extraction_enabled
+    ) else None
     voice_service = VoiceService(settings)
     available_tts_voices = voice_service.available_tts_voices()
     if runtime_settings.voice_tts_voice not in available_tts_voices:
@@ -297,6 +302,22 @@ def create_app() -> FastAPI:
                         "info",
                         "Legacy identity memories repaired",
                         {"count": len(repaired)},
+                    )
+                repaired_preferences = memory_service.repair_legacy_response_length_preferences()
+                if repaired_preferences:
+                    event_bus.publish(
+                        "memory.legacy_preference_repaired",
+                        "info",
+                        "Legacy response-length preferences repaired",
+                        {"count": len(repaired_preferences)},
+                    )
+                repaired_relationships = memory_service.repair_ambiguous_relationship_memories()
+                if repaired_relationships:
+                    event_bus.publish(
+                        "memory.ambiguous_relationships_reviewed",
+                        "info",
+                        "Ambiguous relationship memories moved to review",
+                        {"count": len(repaired_relationships)},
                     )
         except Exception:
             logger.critical("Storage initialization failed", exc_info=True)

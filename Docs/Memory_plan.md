@@ -1,5 +1,73 @@
-# NeuroAsist V0.6 — Graph Memory System & Local LLM
-### Детальный план реализации для Codex
+# Archive: NeuroAsist V0.6 — Graph Memory System & Local LLM
+### Historical proposal; not the current implementation plan
+
+> [!WARNING]
+> This document is preserved as an archive of an early graph-memory proposal.
+> It is **not** the active V0.7 architecture: NeuroAsist does not use Ollama,
+> Natasha, spaCy, Qwen, or a graph schema. Do not implement the sections below
+> without a new approved design decision.
+
+## Implemented memory plan (V0.7)
+
+### Goal
+
+Build useful, automatic companion memory without adding a second DeepSeek wait
+to the visible reply. The canonical store must remain inspectable and editable,
+and semantic search must be rebuildable.
+
+### Implemented flow
+
+```text
+User message
+  -> Context Manager retrieves active SQLite/Chroma memories
+  -> relevant compact context goes into the character request
+  -> user receives the reply (or live text/audio stream)
+  -> durable background memory_extract job calls DeepSeek once
+  -> policy validates/deduplicates candidates in SQLite
+  -> active records are indexed in ChromaDB
+```
+
+Typed input uses the same live LLM/TTS channel as voice input, but enters it
+directly and never performs STT.
+
+### Storage and retrieval
+
+- **SQLite** is the source of truth: timeline, episodes, memory records,
+  provenance, status, audit log, conflict/supersession state, and durable jobs.
+- **ChromaDB** is a rebuildable semantic index of active records. SQLite FTS is
+  retained as a fallback.
+- Memory Center lets the user confirm, reject, edit, delete, restore, reindex,
+  or fully reset memory and conversation data.
+
+### Extraction policy
+
+- Runs after the visible reply for text and completed live-voice turns.
+- Saves only self-contained, future-useful facts: identity, preferences, goals,
+  projects, relationships, constraints, skills, decisions, and corrections.
+- Passwords, codes, tokens, and API keys are removed before the extraction
+  prompt. Other independent facts from the same message are still processed.
+- Sensitive medical, financial, address, and political data stays in review.
+- A narrow deterministic safety net covers a stated response-length preference,
+  current goal, and the assistant-developer relationship when extraction misses
+  them.
+- Ambiguous social relations are held for review; legacy ambiguous active links
+  are moved out of prompt context on startup. User-locked records are untouched.
+- Single-value facts (name, current goal, response-length preference) supersede
+  older active values; independent interests and notes can coexist.
+
+### Current quality boundary
+
+Memory is intentionally conversational and may retain some temporary context if
+the model classifies it as durable. The current version favours useful,
+inspectable recall over aggressive filtering; Memory Center remains the final
+user control. Future work should be guided by a labelled evaluation corpus,
+not by adding a local LLM by default.
+
+### Verification
+
+- Backend test suite: `201 passed` at the V0.7 memory/live-text milestone.
+- Web build: `npm.cmd --prefix apps/web run build`.
+- `POST /memory/reindex` rebuilds Chroma from SQLite.
 
 ---
 

@@ -451,6 +451,28 @@ class TimelineStore:
             row = connection.execute("SELECT * FROM conversation_messages WHERE id = ? AND timeline_id = ?", (message_id, PRIMARY_TIMELINE_ID)).fetchone()
         return self._row_to_message(row) if row is not None else None
 
+    def memory_extraction_context(self, message_id: str, limit: int = 4) -> list[StoredTimelineMessage]:
+        """Return the target user turn and a small amount of prior dialogue.
+
+        The boundary is the target message itself, rather than "latest now", so
+        a delayed background job cannot use a later turn as evidence.
+        """
+        with self._connect() as connection:
+            target = connection.execute(
+                "SELECT created_at, id FROM conversation_messages WHERE id = ? AND timeline_id = ?",
+                (message_id, PRIMARY_TIMELINE_ID),
+            ).fetchone()
+            if target is None:
+                return []
+            rows = connection.execute(
+                """SELECT * FROM conversation_messages
+                   WHERE timeline_id = ? AND status = 'completed' AND role IN ('user', 'assistant')
+                     AND (created_at < ? OR (created_at = ? AND id <= ?))
+                   ORDER BY created_at DESC, id DESC LIMIT ?""",
+                (PRIMARY_TIMELINE_ID, target["created_at"], target["created_at"], target["id"], max(1, limit)),
+            ).fetchall()
+        return [self._row_to_message(row) for row in reversed(rows)]
+
     def list_memories(self, *, status: str | None = None, query: str | None = None, limit: int = 100) -> list[dict[str, object]]:
         with self._connect() as connection:
             if query and self._fts_query(query):

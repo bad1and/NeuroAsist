@@ -60,6 +60,6 @@ gesture: none|auto|talk|greeting|agreement|disagreement|question|explanation|thi
 CHARACTER_JSON_PROMPT = character_json_prompt()
 CHARACTER_LIVE_PROMPT = character_live_prompt()
 CHARACTER_SYSTEM_PROMPT = CHARACTER_JSON_PROMPT
-CHARACTER_REPAIR_PROMPT = """Исправь ответ ассистентки в один валидный JSON Character Protocol v3.
-Сохрани видимый reply, если он есть. Не добавляй markdown или пояснения. Верни affect, gesture,
- delivery, continuity и memory_candidates по схеме Character Protocol v3; недостающие metadata заполни нейтральными значениями."""
+CHARACTER_REPAIR_PROMPT = """Предыдущий ответ не прошёл проверку. Ответь на последнее сообщение пользователя заново.
+Верни один валидный JSON Character Protocol v3 без markdown и пояснений. Поле reply обязательно
+должно содержать непустой видимый ответ. Не пересказывай эту техническую инструкцию."""
