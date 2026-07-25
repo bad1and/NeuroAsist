@@ -52,9 +52,9 @@ def test_parse_response_accepts_json_with_extra_text(agent: CharacterAgent) -> N
     ("raw_content", "expected_reply"),
     [
         ("Привет, я не JSON", "Привет, я не JSON"),
-        ('{"reply":"","emotion":"happy","intent":"casual_chat"}', "Модель вернула пустой ответ. Попробуй повторить."),
-        ('{"reply":"Привет","emotion":"banana","intent":"casual_chat"}', "Модель вернула пустой ответ. Попробуй повторить."),
-        ('{"reply":"Привет","emotion":"happy","intent":"dance"}', "Модель вернула пустой ответ. Попробуй повторить."),
+        ('{"reply":"","emotion":"happy","intent":"casual_chat"}', "Не смогла сформировать ответ. Попробуй отправить сообщение ещё раз."),
+        ('{"reply":"Привет","emotion":"banana","intent":"casual_chat"}', "Не смогла сформировать ответ. Попробуй отправить сообщение ещё раз."),
+        ('{"reply":"Привет","emotion":"happy","intent":"dance"}', "Не смогла сформировать ответ. Попробуй отправить сообщение ещё раз."),
     ],
 )
 def test_parse_response_uses_fallback_for_invalid_llm_response(
@@ -80,7 +80,7 @@ def test_parse_response_does_not_expose_invalid_json_as_reply(agent: CharacterAg
     result = agent._parse_response('{"reply":"оборванный ответ')
 
     assert result == {
-        "reply": "Модель вернула пустой ответ. Попробуй повторить.",
+        "reply": "Не смогла сформировать ответ. Попробуй отправить сообщение ещё раз.",
         "emotion": "neutral",
         "intent": "unknown",
     }
@@ -189,12 +189,15 @@ def test_handle_user_message_uses_deterministic_fallback_for_empty_model_respons
 
     assert provider.calls == 2
     assert result == {
-        "reply": 'Я услышал: "Да нормально". Но модель вернула пустой ответ. Попробуй повторить.',
+        "reply": "Не смогла сформировать ответ. Попробуй отправить сообщение ещё раз.",
         "emotion": "neutral",
         "intent": "unknown",
     }
     assert "Не смог корректно разобрать ответ модели" not in result["reply"]
-    assert history.saved == [("s1", "user", "Да нормально")]
+    assert history.saved == [
+        ("s1", "user", "Да нормально"),
+        ("s1", "assistant", "Не смогла сформировать ответ. Попробуй отправить сообщение ещё раз."),
+    ]
 
 
 def test_handle_user_message_keeps_first_raw_text_if_retry_is_empty() -> None:
@@ -210,4 +213,7 @@ def test_handle_user_message_keeps_first_raw_text_if_retry_is_empty() -> None:
         "emotion": "neutral",
         "intent": "unknown",
     }
-    assert history.saved == [("s1", "user", "Привет")]
+    assert history.saved == [
+        ("s1", "user", "Привет"),
+        ("s1", "assistant", "Нормальный текст без JSON"),
+    ]

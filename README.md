@@ -46,8 +46,8 @@ The V0.5 direction is a single continuous desktop companion: one character, one 
 | Local speech-to-text | ✅ | GigaAM v3, `faster-whisper` fallback |
 | Local text-to-speech | ✅ | Silero v5_5_ru, Baya by default |
 | Conversation history and journal | ✅ | SQLite timeline, episodes, and summaries |
-| Long-term memory | 🧪 | SQLite canonical records, audit trail, and Memory Center |
-| Semantic memory retrieval | 🧪 | Rebuildable ChromaDB index with FTS fallback |
+| Long-term memory | 🧪 | Automatic post-reply extraction, SQLite provenance/audit, policy controls, and Memory Center |
+| Semantic memory retrieval | 🧪 | Rebuildable ChromaDB index with SQLite FTS fallback |
 | Runtime events | ✅ | REST and WebSocket |
 | Voice and runtime settings | ✅ | Local React control panel |
 | Browser speech fallback | ✅ | Used when backend TTS fails |
@@ -58,7 +58,7 @@ The V0.5 direction is a single continuous desktop companion: one character, one 
 ## Key ideas
 
 - **Local-first voice processing** — STT and TTS run on the user's machine.
-- **Fast text response** — the text reply can be returned before background TTS finishes.
+- **Unified live replies** — typed and spoken messages use the same streaming LLM/TTS channel; typed input bypasses STT entirely.
 - **Fail-soft audio** — a TTS failure does not destroy a successful text response.
 - **Observable runtime** — backend, chat, STT, TTS, and WebSocket events are visible in the UI.
 - **Modular structure** — LLM, STT, TTS, storage, events, and agents are separated by responsibility.
@@ -399,9 +399,9 @@ Browser MediaRecorder
   → ready WAV audio
 ```
 
-The text response is returned before TTS finishes. The UI then receives the generated audio when it becomes ready.
+When backend TTS is enabled, typed messages use the live WebSocket stream too: text deltas and audio arrive together, without an STT pass. If the live channel is unavailable, the UI falls back to the normal text endpoint and then browser speech when needed.
 
-### Live voice response
+### Live responses (voice and typed text)
 
 ```text
 LLM text stream
@@ -411,7 +411,7 @@ LLM text stream
   → browser playback queue
 ```
 
-The live mode uses configurable chunk sizes, queue limits, TTS concurrency, and playback prebuffering.
+The live mode uses configurable chunk sizes, queue limits, TTS concurrency, and playback prebuffering. Voice input adds STT first; typed input enters the same pipeline directly.
 
 ### Unity avatar playback
 
@@ -586,9 +586,24 @@ VOICE_STT_COMPUTE_TYPE=int8_float16
 
 ## Current limitations
 
-### V0.6 memory development
+### V0.7 memory development
 
-The current development branch adds a ChromaDB index on top of canonical SQLite memory: relevant facts are injected into the DeepSeek prompt and a single model response may return memory candidates. The index is stored in `data/chroma` and can be rebuilt from SQLite. See [ChromaDB memory](Docs/chroma-memory.md) for settings and current limitations.
+SQLite is the source of truth for memories, their message sources, statuses, and
+audit history; ChromaDB is a rebuildable semantic index in `data/chroma`.
+Before each reply, active memories are retrieved through SQLite FTS and ChromaDB
+and supplied as compact context to DeepSeek. After the visible reply, one durable
+background `memory_extract` job asks DeepSeek for candidate facts and applies the
+same policy checks before writing them. This does not add a second LLM wait to
+the user-facing response.
+
+Passwords, codes, tokens, and API keys are removed before the extraction prompt
+and can never become memories. A narrow reliable fallback covers stated response
+length preference, current goal, and assistant developers; ambiguous social
+relations stay in review. Memory Center is the final user control: records can
+be inspected, edited, confirmed, removed, reindexed, or reset together with
+history. See [ChromaDB memory](Docs/chroma-memory.md) for configuration and
+limitations; the old local-LLM graph proposal is explicitly archived in
+[Memory plan](Docs/Memory_plan.md).
 
 NeuroAsist v0.4.0 does not provide:
 

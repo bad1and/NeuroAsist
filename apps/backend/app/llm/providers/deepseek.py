@@ -36,38 +36,47 @@ class DeepSeekProvider(LLMProvider):
             len(messages),
         )
 
-        try:
-            response = await self._client.chat.completions.create(
-                model=self._model,
-                messages=[message.model_dump() for message in messages],
-                temperature=0.7,
-                response_format={"type": "json_object"},
-            )
-            content = response.choices[0].message.content
-            model = response.model or self._model
-        except APIStatusError as exc:
-            logger.error(
-                "DeepSeek API status error: status_code=%s model=%s",
-                exc.status_code,
-                self._model,
-            )
-            raise LLMProviderError(
-                f"DeepSeek API returned HTTP {exc.status_code}"
-            ) from exc
-        except (OpenAIError, IndexError, TypeError, ValueError) as exc:
-            logger.error(
-                "DeepSeek API request failed: model=%s exception_type=%s",
-                self._model,
-                type(exc).__name__,
-            )
-            raise LLMProviderError("DeepSeek API request failed") from exc
+        for empty_attempt in range(2):
+            try:
+                response = await self._client.chat.completions.create(
+                    model=self._model,
+                    messages=[message.model_dump() for message in messages],
+                    temperature=0.7,
+                    response_format={"type": "json_object"},
+                )
+                choice = response.choices[0]
+                content = choice.message.content
+                model = response.model or self._model
+            except APIStatusError as exc:
+                logger.error(
+                    "DeepSeek API status error: status_code=%s model=%s",
+                    exc.status_code,
+                    self._model,
+                )
+                raise LLMProviderError(
+                    f"DeepSeek API returned HTTP {exc.status_code}"
+                ) from exc
+            except (OpenAIError, IndexError, TypeError, ValueError) as exc:
+                logger.error(
+                    "DeepSeek API request failed: model=%s exception_type=%s",
+                    self._model,
+                    type(exc).__name__,
+                )
+                raise LLMProviderError("DeepSeek API request failed") from exc
 
-        if not content:
-            logger.error("DeepSeek API returned an empty response: model=%s", self._model)
-            raise LLMProviderError("DeepSeek API returned an empty response")
+            if isinstance(content, str) and content.strip():
+                logger.debug("Received LLM response: provider=deepseek model=%s", model)
+                return LLMResponse(content=content, model=model)
 
-        logger.debug("Received LLM response: provider=deepseek model=%s", model)
-        return LLMResponse(content=content, model=model)
+            logger.warning(
+                "DeepSeek completion was empty: model=%s attempt=%s finish_reason=%s choices=%s",
+                model,
+                empty_attempt + 1,
+                getattr(choice, "finish_reason", None),
+                len(response.choices),
+            )
+
+        raise LLMProviderError("DeepSeek API returned an empty response")
 
     async def stream(self, messages: list[ChatMessage]) -> AsyncIterator[str]:
         if self._client is None:

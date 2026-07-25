@@ -365,6 +365,32 @@ class TimelineStore:
                 (uuid4().hex, json.dumps({"memory_id": memory_id}), now, now, now),
             )
 
+    def enqueue_memory_extraction_job(self, message_id: str) -> None:
+        """Queue one durable DeepSeek extraction pass for a user turn.
+
+        A turn is allowed to produce only one pending extraction job. Repeated
+        scheduling can happen when a caller retries after a transient error,
+        so older pending copies are completed before enqueueing the newest one.
+        """
+        now = self._now()
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE background_jobs SET status = 'completed', updated_at = ? WHERE type = 'memory_extract' AND status = 'pending' AND json_extract(payload_json, '$.message_id') = ?",
+                (now, message_id),
+            )
+            connection.execute(
+                "INSERT INTO background_jobs (id, type, status, payload_json, available_at, created_at, updated_at) VALUES (?, 'memory_extract', 'pending', ?, ?, ?, ?)",
+                (uuid4().hex, json.dumps({"message_id": message_id}), now, now, now),
+            )
+
+    def claim_memory_extraction_job(self) -> dict[str, object] | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM background_jobs WHERE type = 'memory_extract' AND status = 'pending' AND available_at <= ? ORDER BY available_at, created_at LIMIT 1", (self._now(),)).fetchone()
+            if row is None:
+                return None
+            connection.execute("UPDATE background_jobs SET status = 'running', attempts = attempts + 1, updated_at = ? WHERE id = ?", (self._now(), row["id"]))
+            return dict(row)
+
     def claim_memory_index_job(self) -> dict[str, object] | None:
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM background_jobs WHERE type = 'memory_index' AND status = 'pending' AND available_at <= ? ORDER BY available_at, created_at LIMIT 1", (self._now(),)).fetchone()
@@ -377,7 +403,7 @@ class TimelineStore:
         """A process crash may leave a claimed job running; make it retry on startup."""
         with self._connect() as connection:
             connection.execute(
-                "UPDATE background_jobs SET status = 'pending', available_at = ?, updated_at = ? WHERE type = 'memory_index' AND status = 'running'",
+                "UPDATE background_jobs SET status = 'pending', available_at = ?, updated_at = ? WHERE type IN ('memory_index', 'memory_extract') AND status = 'running'",
                 (self._now(), self._now()),
             )
 
@@ -424,6 +450,28 @@ class TimelineStore:
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM conversation_messages WHERE id = ? AND timeline_id = ?", (message_id, PRIMARY_TIMELINE_ID)).fetchone()
         return self._row_to_message(row) if row is not None else None
+
+    def memory_extraction_context(self, message_id: str, limit: int = 4) -> list[StoredTimelineMessage]:
+        """Return the target user turn and a small amount of prior dialogue.
+
+        The boundary is the target message itself, rather than "latest now", so
+        a delayed background job cannot use a later turn as evidence.
+        """
+        with self._connect() as connection:
+            target = connection.execute(
+                "SELECT created_at, id FROM conversation_messages WHERE id = ? AND timeline_id = ?",
+                (message_id, PRIMARY_TIMELINE_ID),
+            ).fetchone()
+            if target is None:
+                return []
+            rows = connection.execute(
+                """SELECT * FROM conversation_messages
+                   WHERE timeline_id = ? AND status = 'completed' AND role IN ('user', 'assistant')
+                     AND (created_at < ? OR (created_at = ? AND id <= ?))
+                   ORDER BY created_at DESC, id DESC LIMIT ?""",
+                (PRIMARY_TIMELINE_ID, target["created_at"], target["created_at"], target["id"], max(1, limit)),
+            ).fetchall()
+        return [self._row_to_message(row) for row in reversed(rows)]
 
     def list_memories(self, *, status: str | None = None, query: str | None = None, limit: int = 100) -> list[dict[str, object]]:
         with self._connect() as connection:
