@@ -14,7 +14,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from apps.backend.app.voice.style import VoiceExpressionLevel, VoiceStyle, coerce_voice_expression_level, coerce_voice_style, make_silero_ssml, profile_for
-from apps.backend.app.voice.lexicon import apply_pronunciations, load_pronunciations
+from apps.backend.app.voice.lexicon import (
+    normalize_tts_orthography,
+    split_pronunciation_overrides,
+    load_pronunciations,
+)
+from apps.backend.app.voice.stress import LocalStressAccentor
 
 logger = logging.getLogger(__name__)
 
@@ -853,15 +858,25 @@ def transliterate_english_for_russian_tts(text: str) -> str:
 
 
 def normalize_russian_tts_text(
-    text: str, *, transliterate_latin: bool = True, pronunciations: dict[str, str] | None = None
+    text: str,
+    *,
+    transliterate_latin: bool = True,
+    pronunciations: dict[str, str] | None = None,
+    stress_accentor: Callable[[str], str] | None = None,
 ) -> str:
-    normalized = " ".join(text.strip().split())
-    if pronunciations:
-        normalized = apply_pronunciations(normalized, pronunciations)
-    normalized = expand_russian_numbers(normalized)
-    if transliterate_latin:
-        normalized = transliterate_english_for_russian_tts(normalized)
-    return " ".join(normalized.split())
+    normalized = normalize_tts_orthography(text)
+    rendered: list[str] = []
+    for segment, is_manual_override in split_pronunciation_overrides(
+        normalized, pronunciations or {}
+    ):
+        if is_manual_override:
+            rendered.append(segment)
+            continue
+        prepared = expand_russian_numbers(segment)
+        if transliterate_latin:
+            prepared = transliterate_english_for_russian_tts(prepared)
+        rendered.append(stress_accentor(prepared) if stress_accentor is not None else prepared)
+    return " ".join("".join(rendered).split())
 
 
 _ENGLISH_RUN_PATTERN = re.compile(
@@ -1129,6 +1144,11 @@ class SileroTTSProvider(TTSProvider):
         english_speaker: str = "en_0",
         cmudict_enabled: bool = True,
         cmudict_cache_dir: Path | None = None,
+        stress_enabled: bool = True,
+        stress_cpu_threads: int = 1,
+        audio_postprocessing_enabled: bool = True,
+        highpass_cutoff_hz: float = 60.0,
+        adaptive_prosody: bool = True,
         openvoice_enabled: bool = False,
         openvoice_reference_audio_path: Path | None = None,
         openvoice_cache_dir: Path | None = None,
@@ -1139,6 +1159,7 @@ class SileroTTSProvider(TTSProvider):
         model_loader: Callable[[], Any] | None = None,
         english_model_loader: Callable[[], Any] | None = None,
         voice_converter_loader: Callable[[], Any] | None = None,
+        stress_accentor_loader: Callable[[], Callable[[str], str] | None] | None = None,
     ) -> None:
         if device not in {"cpu", "cuda", "auto"}:
             raise ValueError("VOICE_SILERO_DEVICE must be one of: cpu, cuda, auto")
@@ -1157,6 +1178,14 @@ class SileroTTSProvider(TTSProvider):
         self.english_speaker = english_speaker
         self.cmudict_enabled = cmudict_enabled
         self.cmudict_cache_dir = cmudict_cache_dir or Path(".cache/cmudict")
+        self.audio_postprocessing_enabled = audio_postprocessing_enabled
+        self.highpass_cutoff_hz = max(0.0, highpass_cutoff_hz)
+        self.adaptive_prosody = adaptive_prosody
+        self._stress_accentor = LocalStressAccentor(
+            enabled=stress_enabled,
+            cpu_threads=stress_cpu_threads,
+            loader=stress_accentor_loader,
+        )
         self.openvoice_enabled = openvoice_enabled
         self.openvoice_reference_audio_path = openvoice_reference_audio_path
         self.openvoice_cache_dir = openvoice_cache_dir or Path(".cache/openvoice-v2")
@@ -1203,6 +1232,10 @@ class SileroTTSProvider(TTSProvider):
             "voice_conversion": self._voice_converter is not None,
             "native_english": self._english_tts_model is not None,
             "english_transcription": self.cmudict_enabled and not self.native_english,
+            "stress": self._stress_accentor.status,
+            "audio_postprocessing": self.audio_postprocessing_enabled,
+            "highpass_cutoff_hz": self.highpass_cutoff_hz if self.audio_postprocessing_enabled else 0.0,
+            "adaptive_prosody": self.adaptive_prosody,
         }
 
     def set_pronunciations(self, pronunciations: dict[str, str]) -> None:
@@ -1236,6 +1269,9 @@ class SileroTTSProvider(TTSProvider):
         async with self._load_lock:
             if self._model is not None:
                 return self._model
+            # silero-stress sets Torch's thread count while importing.  Load it
+            # first so the TTS loader can restore VOICE_SILERO_CPU_THREADS.
+            await self._stress_accentor.preload()
             started = time.perf_counter()
             model, torch_module, selected_device = await asyncio.to_thread(self._load_model_sync)
             self._model = model
@@ -1453,9 +1489,18 @@ class SileroTTSProvider(TTSProvider):
         if self._model is None or self._torch is None:
             raise RuntimeError("Silero model is not loaded")
         with self._torch.inference_mode():
-            normalized = normalize_russian_tts_text(text, pronunciations=self._pronunciations)
+            normalized = normalize_russian_tts_text(
+                text,
+                pronunciations=self._pronunciations,
+                stress_accentor=self._stress_accentor.accent,
+            )
             return self._model.apply_tts(
-                ssml_text=make_silero_ssml(normalized, style, self._expression_level),
+                ssml_text=make_silero_ssml(
+                    normalized,
+                    style,
+                    self._expression_level,
+                    adaptive_prosody=self.adaptive_prosody,
+                ),
                 speaker=speaker,
                 sample_rate=self.sample_rate,
                 intensity=profile_for(style, self._expression_level).intensity,
@@ -1510,20 +1555,83 @@ class SileroTTSProvider(TTSProvider):
         converted = self._voice_converter.convert(waveform, self.sample_rate)
         return converted, int(self._voice_converter.sample_rate)
 
-    def _normalize_speech_waveform(self, waveform: Any):
+    @staticmethod
+    def _audio_metrics(samples: Any) -> dict[str, float | int]:
+        import numpy as np
+
+        value = np.asarray(samples, dtype=np.float32).reshape(-1)
+        if not len(value):
+            return {
+                "rms_dbfs": float("-inf"), "peak_dbfs": float("-inf"),
+                "dc_offset": 0.0, "clipped_samples": 0,
+            }
+        finite = np.nan_to_num(value, nan=0.0, posinf=1.0, neginf=-1.0)
+        peak = float(np.max(np.abs(finite)))
+        rms = float(np.sqrt(np.mean(np.square(finite))))
+        return {
+            "rms_dbfs": 20 * np.log10(max(rms, 1e-12)),
+            "peak_dbfs": 20 * np.log10(max(peak, 1e-12)),
+            "dc_offset": float(np.mean(finite)),
+            "clipped_samples": int(np.count_nonzero(np.abs(finite) >= 0.999969)),
+        }
+
+    @staticmethod
+    def _highpass_filter(samples: Any, sample_rate: int, cutoff_hz: float):
+        import numpy as np
+
+        if cutoff_hz <= 0 or len(samples) < 2:
+            return samples
+        rc = 1.0 / (2.0 * np.pi * cutoff_hz)
+        dt = 1.0 / sample_rate
+        alpha = rc / (rc + dt)
+        output = np.empty_like(samples)
+        output[0] = samples[0]
+        output[1:] = 0.0
+        previous_input = float(samples[0])
+        previous_output = float(output[0])
+        for index in range(1, len(samples)):
+            current = alpha * (previous_output + float(samples[index]) - previous_input)
+            output[index] = current
+            previous_input = float(samples[index])
+            previous_output = current
+        return output
+
+    @staticmethod
+    def _apply_edge_fades(samples: Any, sample_rate: int):
+        import numpy as np
+
+        fade_samples = min(max(1, round(sample_rate * 0.005)), len(samples) // 2)
+        if fade_samples <= 0:
+            return samples
+        envelope = np.linspace(0.0, 1.0, fade_samples, endpoint=False, dtype=np.float32)
+        output = samples.copy()
+        output[:fade_samples] *= envelope
+        output[-fade_samples:] *= envelope[::-1]
+        return output
+
+    def _postprocess_speech_waveform(self, waveform: Any, sample_rate: int):
         import numpy as np
 
         samples = self._waveform_as_numpy(waveform)
+        samples = np.nan_to_num(samples, nan=0.0, posinf=1.0, neginf=-1.0)
+        input_metrics = self._audio_metrics(samples)
+        if self.audio_postprocessing_enabled and len(samples):
+            samples = samples - np.mean(samples)
+            samples = self._highpass_filter(samples, sample_rate, self.highpass_cutoff_hz)
+            samples = self._apply_edge_fades(samples, sample_rate)
         active = np.abs(samples) >= 10 ** (-45 / 20)
-        if not active.any():
-            return samples
-        rms = float(np.sqrt(np.mean(np.square(samples[active]))))
-        if rms <= 0:
-            return samples
-        target = 10 ** (self.loudness_target_dbfs / 20)
-        ceiling = 10 ** (self.peak_ceiling_dbfs / 20)
-        gain = min(target / rms, ceiling / float(np.max(np.abs(samples))))
-        return samples * gain
+        if active.any():
+            rms = float(np.sqrt(np.mean(np.square(samples[active]))))
+            peak = float(np.max(np.abs(samples)))
+            if rms > 0 and peak > 0:
+                target = 10 ** (self.loudness_target_dbfs / 20)
+                ceiling = 10 ** (self.peak_ceiling_dbfs / 20)
+                samples = samples * min(target / rms, ceiling / peak)
+        samples = np.clip(samples, -1.0, 1.0)
+        return samples, {"input": input_metrics, "output": self._audio_metrics(samples)}
+
+    def _normalize_speech_waveform(self, waveform: Any):
+        return self._postprocess_speech_waveform(waveform, self.sample_rate)[0]
 
     async def _synthesize_wav_bytes(
         self, text: str, speaker: str, style: VoiceStyle | str = VoiceStyle.AUTO
@@ -1537,12 +1645,16 @@ class SileroTTSProvider(TTSProvider):
                 timeout=self.timeout_seconds,
             )
         synthesis_ms = int((time.perf_counter() - started) * 1000)
-        wav_bytes = waveform_to_wav_bytes(self._normalize_speech_waveform(waveform), output_sample_rate)
+        normalized_waveform, audio_metrics = self._postprocess_speech_waveform(
+            waveform, output_sample_rate
+        )
+        wav_bytes = waveform_to_wav_bytes(normalized_waveform, output_sample_rate)
         duration = wav_duration_seconds(wav_bytes)
         logger.info(
             "Silero TTS segment synthesized: provider=silero model=%s speaker=%s device=%s "
             "text_length=%s word_count=%s style=%s voice_conversion=%s synthesis_ms=%s "
-            "audio_duration_ms=%s RTF=%.3f audio_bytes=%s",
+            "audio_duration_ms=%s RTF=%.3f audio_bytes=%s rms_dbfs=%.1f peak_dbfs=%.1f "
+            "dc_offset=%.6f input_dc_offset=%.6f clipped_samples=%s postprocessing=%s highpass_hz=%.1f",
             self.model_name,
             speaker,
             self._selected_device,
@@ -1554,6 +1666,13 @@ class SileroTTSProvider(TTSProvider):
             int(duration * 1000),
             (synthesis_ms / 1000) / duration if duration else 0.0,
             len(wav_bytes),
+            audio_metrics["output"]["rms_dbfs"],
+            audio_metrics["output"]["peak_dbfs"],
+            audio_metrics["output"]["dc_offset"],
+            audio_metrics["input"]["dc_offset"],
+            audio_metrics["output"]["clipped_samples"],
+            self.audio_postprocessing_enabled,
+            self.highpass_cutoff_hz if self.audio_postprocessing_enabled else 0.0,
         )
         return wav_bytes, duration, synthesis_ms
 

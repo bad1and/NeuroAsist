@@ -58,6 +58,11 @@ def test_tts_cleanup_keeps_only_recent_wavs(tmp_path) -> None:
     assert fresh_wav.exists()
 
 
+def test_default_voice_settings_prioritize_full_live_thoughts_and_adaptive_prosody() -> None:
+    assert Settings.model_fields["voice_live_safe_segment_words"].default == 18
+    assert Settings.model_fields["voice_tts_adaptive_prosody"].default is True
+
+
 def test_split_tts_chunks_keeps_short_reply_as_one_chunk() -> None:
     assert split_tts_chunks("Привет!") == ["Привет!"]
 
@@ -220,6 +225,32 @@ def test_russian_tts_normalization_handles_versions_and_ip_addresses() -> None:
     )
 
 
+def test_russian_tts_normalization_preserves_hyphenated_words_and_forces_manual_stress() -> None:
+    accentor_calls: list[str] = []
+
+    def accent(text: str) -> str:
+        accentor_calls.append(text)
+        return text.replace("всё-таки", "вс+ё-т+аки")
+
+    normalized = normalize_russian_tts_text(
+        "Как‑то всё–таки случилось.",
+        transliterate_latin=False,
+        pronunciations={"Как-то": "ка́к-то"},
+        stress_accentor=accent,
+    )
+
+    assert normalized == "к+ак-то вс+ё-т+аки случилось."
+    assert all("Как-то" not in call for call in accentor_calls)
+
+
+def test_russian_tts_normalization_accepts_silero_plus_stress_notation() -> None:
+    assert normalize_russian_tts_text(
+        "Мука и замок",
+        transliterate_latin=False,
+        pronunciations={"Мука": "м+ука", "замок": "з+амок"},
+    ) == "м+ука и з+амок"
+
+
 def test_russian_tts_normalization_declines_years_and_transcribes_technical_english() -> None:
     assert normalize_russian_tts_text("Я начала в 2015 году") == (
         "Я начала в две тысячи пятнадцатом году"
@@ -232,11 +263,13 @@ def test_russian_tts_normalization_expands_numeric_date() -> None:
     )
 
 
-def test_silero_ssml_uses_natural_style_profile_and_escapes_text() -> None:
-    ssml = make_silero_ssml("Громче <сейчас>!", VoiceStyle.ENERGETIC)
+def test_silero_ssml_uses_restrained_adaptive_prosody_and_escapes_text() -> None:
+    ssml = make_silero_ssml("Громче: но сейчас, потому что <сейчас>!", VoiceStyle.ENERGETIC)
 
-    assert "Громче &lt;сейчас&gt;!" in ssml
+    assert "&lt;сейчас&gt;!" in ssml
     assert "<prosody" not in ssml
+    assert '<break time="50ms"/>' in ssml
+    assert '<break time="35ms"/>' in ssml
     assert "<break time=\"95ms\"/>" in ssml
     assert profile_for(VoiceStyle.CALM).intensity == 2
     assert profile_for(VoiceStyle.NORMAL).intensity == 3
@@ -245,6 +278,17 @@ def test_silero_ssml_uses_natural_style_profile_and_escapes_text() -> None:
     assert profile_for(VoiceStyle.ENERGETIC, VoiceExpressionLevel.NOTICEABLE).intensity == 5
     assert resolve_voice_style(VoiceStyle.AUTO, emotion="sad") is VoiceStyle.CALM
     assert resolve_voice_style(VoiceStyle.ASSERTIVE, emotion="happy") is VoiceStyle.ASSERTIVE
+    assert resolve_voice_style(VoiceStyle.AUTO, emphasis=0.8) is VoiceStyle.ASSERTIVE
+
+
+def test_silero_ssml_can_disable_adaptive_prosody_for_a_baseline() -> None:
+    ssml = make_silero_ssml(
+        "Громче: но сейчас!", VoiceStyle.ENERGETIC, adaptive_prosody=False
+    )
+
+    assert "<prosody" not in ssml
+    assert '<break time="50ms"/>' not in ssml
+    assert '<break time="95ms"/>' in ssml
 
 
 def test_pronunciation_dictionary_can_be_saved_and_reloaded(tmp_path: Path) -> None:
@@ -260,6 +304,18 @@ def test_pronunciation_dictionary_can_be_saved_and_reloaded(tmp_path: Path) -> N
     assert prepare_english_tts_text("OpenAI API, Python and GitHub") == (
         "Open A I A P I, Pie thon and Git Hub"
     )
+
+
+def test_custom_pronunciation_overrides_builtin_regardless_of_case(tmp_path: Path) -> None:
+    dictionary = tmp_path / "pronunciations.json"
+
+    pronunciations = save_pronunciations(dictionary, {"КАК-ТО": "к+ак-т+о"})
+
+    assert pronunciations["КАК-ТО"] == "к+ак-т+о"
+    assert "как-то" not in pronunciations
+    assert normalize_russian_tts_text(
+        "Как-то", transliterate_latin=False, pronunciations=load_pronunciations(dictionary)
+    ) == "к+ак-т+о"
 
 
 def test_russian_tts_uses_cmu_pronunciation_for_regular_english(tmp_path: Path) -> None:
@@ -360,6 +416,73 @@ def test_silero_model_loads_only_once(monkeypatch: pytest.MonkeyPatch) -> None:
     asyncio.run(provider.preload())
 
     assert loads == 1
+
+
+def test_silero_uses_local_stress_accentor_before_synthesis(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    install_fake_torch(monkeypatch)
+    model = FakeSileroModel()
+    loads = 0
+
+    def load_accentor():
+        nonlocal loads
+        loads += 1
+        return lambda text: text.replace("мама", "м+ама")
+
+    provider = SileroTTSProvider(
+        model_loader=lambda: model,
+        stress_accentor_loader=load_accentor,
+        warmup=False,
+    )
+
+    asyncio.run(provider.synthesize("мама", "xenia", tmp_path / "reply.wav"))
+
+    assert loads == 1
+    assert [_spoken_ssml(call) for call in model.calls] == ["м+ама"]
+    assert provider.metadata["stress"] == "ready"
+
+
+def test_silero_stress_failure_keeps_builtin_stress_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    install_fake_torch(monkeypatch)
+    model = FakeSileroModel()
+
+    def fail_to_load():
+        raise RuntimeError("missing model")
+
+    provider = SileroTTSProvider(
+        model_loader=lambda: model,
+        stress_accentor_loader=fail_to_load,
+        warmup=False,
+    )
+    with caplog.at_level(logging.WARNING):
+        asyncio.run(provider.synthesize("Привет", "xenia", tmp_path / "reply.wav"))
+
+    assert [_spoken_ssml(call) for call in model.calls] == ["Привет"]
+    assert provider.metadata["stress"] == "fallback"
+    assert "falling back to built-in Silero stress" in caplog.text
+
+
+def test_silero_audio_postprocessing_removes_offset_and_avoids_clicks() -> None:
+    provider = SileroTTSProvider(stress_enabled=False, sample_rate=48000)
+    time_axis = np.arange(480, dtype=np.float32) / provider.sample_rate
+    waveform = 0.25 + 0.2 * np.sin(2 * np.pi * 220 * time_axis)
+    waveform[2] = np.nan
+    waveform[3] = np.inf
+
+    normalized, metrics = provider._postprocess_speech_waveform(waveform, provider.sample_rate)
+
+    assert np.isfinite(normalized).all()
+    assert abs(float(metrics["output"]["dc_offset"])) < abs(float(metrics["input"]["dc_offset"]))
+    assert normalized[0] == pytest.approx(0.0)
+    assert normalized[-1] == pytest.approx(0.0)
+    assert int(metrics["output"]["clipped_samples"]) == 0
+    assert float(np.max(np.abs(normalized))) <= 10 ** (-1 / 20) + 1e-6
 
 
 def test_silero_configures_certifi_ca_bundle(monkeypatch: pytest.MonkeyPatch) -> None:

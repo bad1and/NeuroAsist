@@ -24,21 +24,27 @@ class VoiceExpressionLevel(StrEnum):
 @dataclass(frozen=True)
 class VoiceStyleProfile:
     intensity: int
-    rate: str | None = None
-    pitch: str | None = None
     pause_ms: int = 120
+    clause_pause_ms: int = 70
 
 
 _PROFILES: dict[VoiceStyle, VoiceStyleProfile] = {
-    # Silero's prosody tags noticeably distort Baya at their extreme values.
-    # Keep profiles close to the natural voice and differentiate with the
-    # model-native intensity plus short, conversational sentence pauses.
-    VoiceStyle.CALM: VoiceStyleProfile(intensity=2, pause_ms=155),
-    VoiceStyle.NORMAL: VoiceStyleProfile(intensity=3, pause_ms=120),
-    VoiceStyle.ENERGETIC: VoiceStyleProfile(intensity=4, pause_ms=95),
-    VoiceStyle.THOUGHTFUL: VoiceStyleProfile(intensity=2, pause_ms=165),
-    VoiceStyle.ASSERTIVE: VoiceStyleProfile(intensity=4, pause_ms=115),
+    # Silero v5.5 accepts SSML breaks reliably, but its `<prosody rate>`
+    # handling is not safe for percentage values: it can return a nearly empty
+    # WAV or exceed its internal duration limit.  Keep delivery variation in
+    # model-native intensity and short semantic pauses instead.
+    VoiceStyle.CALM: VoiceStyleProfile(intensity=2, pause_ms=155, clause_pause_ms=100),
+    VoiceStyle.NORMAL: VoiceStyleProfile(intensity=3, pause_ms=120, clause_pause_ms=70),
+    VoiceStyle.ENERGETIC: VoiceStyleProfile(intensity=4, pause_ms=95, clause_pause_ms=50),
+    VoiceStyle.THOUGHTFUL: VoiceStyleProfile(intensity=2, pause_ms=165, clause_pause_ms=115),
+    VoiceStyle.ASSERTIVE: VoiceStyleProfile(intensity=4, pause_ms=115, clause_pause_ms=65),
 }
+
+_CLAUSE_BOUNDARY_RE = re.compile(r"(?P<punct>[;:—–])\s+")
+_CONJUNCTION_COMMA_RE = re.compile(
+    r",\s+(?=(?:но|однако|зато|потому\s+что|так\s+что|если|когда|хотя|чтобы)\b)",
+    re.IGNORECASE,
+)
 
 
 def coerce_voice_style(value: str | VoiceStyle | None) -> VoiceStyle:
@@ -60,6 +66,7 @@ def resolve_voice_style(
     *,
     emotion: str | None = None,
     pace: str | None = None,
+    emphasis: float = 0.0,
 ) -> VoiceStyle:
     manual = coerce_voice_style(requested)
     if manual is not VoiceStyle.AUTO:
@@ -74,6 +81,8 @@ def resolve_voice_style(
         return VoiceStyle.ENERGETIC
     if pace == "slow":
         return VoiceStyle.CALM
+    if emphasis >= 0.65:
+        return VoiceStyle.ASSERTIVE
     return VoiceStyle.NORMAL
 
 
@@ -85,6 +94,7 @@ def resolve_turn_voice_style(requested: str | VoiceStyle | None, turn) -> VoiceS
         emotion=getattr(getattr(turn, "affect", None), "emotion", None).value
         if getattr(getattr(turn, "affect", None), "emotion", None) is not None else None,
         pace=getattr(getattr(turn, "delivery", None), "pace", None),
+        emphasis=float(getattr(getattr(turn, "delivery", None), "emphasis", 0.0) or 0.0),
     )
 
 
@@ -109,20 +119,23 @@ def make_silero_ssml(
     text: str,
     style: str | VoiceStyle,
     expression_level: str | VoiceExpressionLevel = VoiceExpressionLevel.NATURAL,
+    adaptive_prosody: bool = True,
 ) -> str:
     """Create only backend-owned SSML; source text is always escaped first."""
     profile = profile_for(style, expression_level)
     rendered = escape(text, quote=False)
+    if adaptive_prosody:
+        rendered = _CLAUSE_BOUNDARY_RE.sub(
+            lambda match: f'{match.group("punct")}<break time="{profile.clause_pause_ms}ms"/> ',
+            rendered,
+        )
+        rendered = _CONJUNCTION_COMMA_RE.sub(
+            lambda match: f',<break time="{max(35, profile.clause_pause_ms - 25)}ms"/> ',
+            rendered,
+        )
     rendered = re.sub(
         r"([.!?…])(?:\s+|$)",
         lambda match: f'{match.group(1)}<break time="{profile.pause_ms}ms"/> ',
         rendered,
     ).strip()
-    if profile.rate or profile.pitch:
-        attributes = " ".join(
-            f'{name}="{value}"'
-            for name, value in (("rate", profile.rate), ("pitch", profile.pitch))
-            if value is not None
-        )
-        rendered = f"<prosody {attributes}>{rendered}</prosody>"
     return f"<speak>{rendered}</speak>"

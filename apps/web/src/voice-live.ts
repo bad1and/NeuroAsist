@@ -217,7 +217,9 @@ export class TTSStreamPlayer {
     source.playbackRate.value = this.playbackRate;
     source.connect(context.destination);
     const startAt = Math.max(context.currentTime + 0.075, this.scheduledUntil);
-    this.scheduledUntil = startAt + buffer.duration;
+    // AudioBuffer.duration is measured at normal speed.  Keeping the original
+    // value here creates a gap above 1x and overlap below 1x between segments.
+    this.scheduledUntil = startAt + buffer.duration / this.playbackRate;
     this.sources.add(source);
     source.onended = () => {
       this.sources.delete(source);

@@ -77,6 +77,11 @@ class Settings(BaseSettings):
     voice_silero_native_english: bool = False
     voice_silero_english_model: str = "v3_en"
     voice_silero_english_speaker: str = "en_0"
+    voice_stress_enabled: bool = True
+    voice_stress_cpu_threads: int = 1
+    voice_tts_postprocessing_enabled: bool = True
+    voice_tts_highpass_cutoff_hz: float = 60.0
+    voice_tts_adaptive_prosody: bool = True
     voice_cmudict_enabled: bool = True
     voice_cmudict_cache_dir: str = ".cache/cmudict"
     voice_openvoice_enabled: bool = False
@@ -100,7 +105,7 @@ class Settings(BaseSettings):
     voice_live_next_segment_chars: int = 75
     voice_live_max_segment_chars: int = 110
     voice_live_max_segment_words: int = 18
-    voice_live_safe_segment_words: int = 10
+    voice_live_safe_segment_words: int = 18
     voice_live_tts_retry_count: int = 0
     voice_live_tts_concurrency_mode: str = "1"
     voice_live_tts_concurrency_min: int = 1

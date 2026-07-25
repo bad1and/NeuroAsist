@@ -6,7 +6,12 @@ from fastapi.testclient import TestClient
 from apps.backend.app.avatar.connection_manager import AvatarConnectionManager
 from apps.backend.app.avatar.protocol import AvatarProtocolError, parse_incoming
 from apps.backend.app.avatar.service import AvatarService
-from apps.backend.app.avatar.schemas import OverlayPayload, SpeakPayload
+from apps.backend.app.avatar.schemas import (
+    MAX_STREAM_AUDIO_BASE64_CHARS,
+    OverlayPayload,
+    SpeakPayload,
+    StreamSegmentPayload,
+)
 from apps.backend.app.events.bus import EventBus
 from apps.backend.app.voice.orchestrator import SpeechOrchestrator
 from apps.backend.app.voice.providers import MockTTSProvider
@@ -160,6 +165,20 @@ async def test_v2_stream_segments_are_sent_only_to_v2_clients() -> None:
     assert v2_socket.sent[-1]["protocol_version"] == 2
     assert v2_socket.sent[-1]["type"] == "avatar.stream.segment"
     assert v2_socket.sent[-1]["payload"]["sequence"] == 0
+
+
+def test_stream_segment_accepts_a_complete_48khz_live_thought() -> None:
+    # 11 seconds of 48 kHz mono PCM turns into roughly 1.4 MB of base64.
+    # The former 1 MB schema guard discarded those normal live TTS segments.
+    payload = StreamSegmentPayload(
+        utterance_id="u",
+        sequence=0,
+        audio_base64="A" * 1_400_000,
+        duration_seconds=11.0,
+    )
+
+    assert len(payload.audio_base64) == 1_400_000
+    assert MAX_STREAM_AUDIO_BASE64_CHARS >= 1_400_000
 
 
 @pytest.mark.anyio

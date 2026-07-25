@@ -1659,10 +1659,13 @@ function SettingsPage({
               rows={8}
               value={pronunciationsText}
               onChange={(event) => setPronunciationsText(event.target.value)}
-              placeholder={"OpenAI = Оупен Эй Ай\nLuka = Лука"}
+              placeholder={"OpenAI = Оупен Эй Ай\nКак-то = к+ак-то\nМука = му́ка"}
               disabled={saving}
             />
-            <small>Одна пара на строку. Изменения применяются к следующей фразе без перезапуска.</small>
+            <small>
+              Одна пара на строку. Ударение можно задать как «к+ак-то» или «ка́к-то».
+              Изменения применяются к следующей фразе без перезапуска.
+            </small>
           </label>
           <button className="secondary" type="button" onClick={() => void savePronunciations()} disabled={saving}>
             Сохранить словарь

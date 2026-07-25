@@ -32,3 +32,4 @@ def test_response_persona_is_shared_without_replacing_protocol_rules() -> None:
     assert '"memory_candidates": []' in json_prompt
     assert '"affect"' in json_prompt
     assert "[[avatar emotion=neutral gesture=auto intensity=1.0]]" in live_prompt
+    assert "Пиши как в живом разговоре" in live_prompt
