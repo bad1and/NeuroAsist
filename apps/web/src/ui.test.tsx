@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   getStatus: vi.fn(), getSettings: vi.fn(), getAvatarStatus: vi.fn(), getEvents: vi.fn(),
   getTimelineMessages: vi.fn(), getModels: vi.fn(), getBackups: vi.fn(), getAvatarOverlay: vi.fn(),
   getMemories: vi.fn(), createMemory: vi.fn(), getMemoryAudit: vi.fn(),
+  getPronunciations: vi.fn(), updatePronunciations: vi.fn(), updateVoiceExpression: vi.fn(), updateVoiceStyle: vi.fn(),
   updateRuntimeSettings: vi.fn(), getTimelineJournal: vi.fn(), searchTimeline: vi.fn(),
   getVoiceTtsStatus: vi.fn(), sendChatMessage: vi.fn(), sendVoiceMessage: vi.fn(),
   installModel: vi.fn(), removeModel: vi.fn(), createBackup: vi.fn(),
@@ -32,7 +33,7 @@ import { MemoryPage } from "./memory";
 const settings = {
   provider: "deepseek", model: "deepseek-chat", personality: "default", voice_language: "ru",
   voice_stt_model: "small", voice_tts_enabled: true, avatar_enabled: false, voice_tts_voice: "F4",
-  voice_tts_provider: "supertonic", voice_tts_model: "supertonic-3", voice_tts_device: "cpu", voice_tts_fallback_active: false,
+  voice_tts_provider: "silero", voice_tts_model: "v5_5_ru", voice_tts_device: "cpu", voice_tts_style: "auto", voice_tts_expression_level: "natural",
   voice_playback_rate: 1, voice_live_playback_prebuffer_segments: 2, voice_live_playback_prebuffer_ms: 700,
   chat_history_limit: 40, episodes_enabled: true, episode_soft_inactivity_minutes: 30,
   episode_hard_inactivity_minutes: 120, episode_maximum_messages: 100, episode_maximum_estimated_tokens: 12000,
@@ -60,6 +61,7 @@ beforeEach(() => {
   api.getModels.mockResolvedValue({ models: [] });
   api.getBackups.mockResolvedValue([]);
   api.getAvatarOverlay.mockResolvedValue({ visible: true, always_on_top: true, locked: true, scale: 1, monitor: "", x: 0, y: 0, width: 0, height: 0 });
+  api.getPronunciations.mockResolvedValue({ pronunciations: {} });
   api.getMemories.mockResolvedValue({ items: [] });
   api.createMemory.mockResolvedValue({ memory: {} });
   api.getMemoryAudit.mockResolvedValue({ items: [] });
@@ -105,8 +107,8 @@ describe("русский интерфейс", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Голос" }));
     expect(screen.getByLabelText("Язык голосового ввода")).toBeVisible();
-    expect(screen.getByLabelText("Голос Supertonic 3")).toBeVisible();
-    expect(screen.getByText("Supertonic 3 · CPU · активен")).toBeVisible();
+    expect(screen.getByLabelText("Голос Silero")).toBeVisible();
+    expect(screen.getByText("Silero · CPU · активен")).toBeVisible();
     expect(screen.getByLabelText("Стиль общения")).not.toBeVisible();
   });
 

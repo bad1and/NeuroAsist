@@ -15,7 +15,6 @@ click==8.4.2
 colorama==0.4.6
 ctranslate2==4.8.1
 distro==1.9.0
-edge-tts==7.2.3
 fastapi==0.116.0
 faster-whisper==1.2.1
 filelock==3.29.0
@@ -66,9 +65,9 @@ requests==2.34.2
 sentencepiece==0.2.2
 setuptools==78.1.0
 silero==0.5.5
+silero-stress @ git+https://github.com/snakers4/silero-stress.git@76706c123dc9ac0ca0b2b428d132a71c6cc4ff36
 sniffio==1.3.1
 soundfile==0.14.0
-supertonic==1.3.1
 starlette==0.46.2
 sympy==1.14.0
 tabulate==0.10.0

@@ -14,6 +14,7 @@ from apps.backend.app.schemas.voice import (
     VoiceProviderStats,
     VoiceTTSStatusResponse,
 )
+from apps.backend.app.voice.style import resolve_turn_voice_style
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -123,6 +124,7 @@ async def voice_chat(
                 language=stt_result.language,
                 voice=voice,
                 agent=agent,
+                style_override=getattr(request.app.state, "voice_tts_style", "auto"),
             )
             event_bus.publish(
                 "voice.live_started",
@@ -164,6 +166,7 @@ async def voice_chat(
                 session_id=session_id, voice_request_id=voice_request_id, reply=result["reply"],
                 emotion=result["emotion"], intent=result["intent"],
                 gesture=result.get("gesture", "auto"), voice=voice,
+                style=resolve_turn_voice_style(getattr(request.app.state, "voice_tts_style", "auto"), agent.last_turn),
             )
         elif not result["reply"].strip():
             tts_status = "skipped"

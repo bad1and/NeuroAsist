@@ -7,6 +7,8 @@ from apps.backend.app.llm.base import LLMProviderError
 from apps.backend.app.llm.providers.deepseek import DeepSeekProvider
 from apps.backend.app.schemas.chat import ChatRequest, ChatResponse
 from apps.backend.app.schemas.voice import VoiceLiveResponse
+from apps.backend.app.voice.style import resolve_turn_voice_style
+
 from uuid import uuid4
 
 router = APIRouter()
@@ -222,6 +224,7 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             intent=result["intent"],
             gesture=result.get("gesture", "auto"),
             voice=voice,
+            style=resolve_turn_voice_style(getattr(request.app.state, "voice_tts_style", "auto"), agent.last_turn),
         )
         response.tts_status = "queued"
     return response

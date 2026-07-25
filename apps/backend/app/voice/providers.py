@@ -13,6 +13,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from apps.backend.app.voice.style import VoiceExpressionLevel, VoiceStyle, coerce_voice_expression_level, coerce_voice_style, make_silero_ssml, profile_for
+from apps.backend.app.voice.lexicon import (
+    normalize_tts_orthography,
+    split_pronunciation_overrides,
+    load_pronunciations,
+)
+from apps.backend.app.voice.stress import LocalStressAccentor
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,6 +48,7 @@ class TTSRequest:
     text: str
     language: str
     voice: str
+    style: VoiceStyle | str = VoiceStyle.AUTO
     rate: str = "+0%"
     pitch: str = "+0Hz"
     volume: str = "+0%"
@@ -81,98 +90,13 @@ class TTSProvider:
     def resolve_voice(self, language: str, requested_voice: str | None = None) -> str:
         return requested_voice or language
 
-    async def synthesize(self, text: str, voice: str, output_path: Path) -> TTSResult:
+    async def synthesize(
+        self, text: str, voice: str, output_path: Path, style: VoiceStyle | str = VoiceStyle.AUTO
+    ) -> TTSResult:
         raise NotImplementedError
 
     async def stream(self, request: TTSRequest):
         raise NotImplementedError
-
-
-class FallbackTTSProvider(TTSProvider):
-    """Use a primary TTS provider and lazily switch to a fallback after failure."""
-
-    def __init__(self, primary: TTSProvider, fallback: TTSProvider) -> None:
-        self.primary = primary
-        self.fallback = fallback
-        self._active = primary
-        self._switch_lock = asyncio.Lock()
-
-    @property
-    def name(self) -> str:
-        return self.primary.name
-
-    @property
-    def sample_rate(self) -> int:
-        return int(getattr(self._active, "sample_rate", 24000))
-
-    @property
-    def available_speakers(self) -> list[str]:
-        voices = getattr(self._active, "available_speakers", None)
-        return list(voices) if voices is not None else []
-
-    @property
-    def metadata(self) -> dict[str, Any]:
-        metadata = dict(getattr(self._active, "metadata", {}))
-        metadata.setdefault("provider", self._active.name)
-        metadata["configured_provider"] = self.primary.name
-        metadata["fallback_provider"] = self.fallback.name
-        metadata["fallback_active"] = self._active is self.fallback
-        return metadata
-
-    def resolve_voice(self, language: str, requested_voice: str | None = None) -> str:
-        return self._active.resolve_voice(language, requested_voice)
-
-    async def _activate_fallback(self, error: Exception) -> None:
-        async with self._switch_lock:
-            if self._active is self.fallback:
-                return
-            logger.warning(
-                "Primary TTS provider failed; activating fallback: primary=%s fallback=%s "
-                "error_type=%s",
-                self.primary.name,
-                self.fallback.name,
-                type(error).__name__,
-                exc_info=error,
-            )
-            await self.fallback.preload()
-            self._active = self.fallback
-
-    async def preload(self) -> None:
-        try:
-            await self.primary.preload()
-        except Exception as exc:
-            await self._activate_fallback(exc)
-
-    async def stream(self, request: TTSRequest):
-        try:
-            async for chunk in self._active.stream(request):
-                yield chunk
-            return
-        except Exception as exc:
-            if self._active is self.fallback:
-                raise
-            await self._activate_fallback(exc)
-        fallback_voice = self.fallback.resolve_voice(request.language, request.voice)
-        fallback_request = TTSRequest(
-            text=request.text,
-            language=request.language,
-            voice=fallback_voice,
-            rate=request.rate,
-            pitch=request.pitch,
-            volume=request.volume,
-        )
-        async for chunk in self.fallback.stream(fallback_request):
-            yield chunk
-
-    async def synthesize(self, text: str, voice: str, output_path: Path) -> TTSResult:
-        try:
-            return await self._active.synthesize(text, voice, output_path)
-        except Exception as exc:
-            if self._active is self.fallback:
-                raise
-            await self._activate_fallback(exc)
-        fallback_voice = self.fallback.resolve_voice("ru", voice)
-        return await self.fallback.synthesize(text, fallback_voice, output_path)
 
 
 class MockSTTProvider(STTProvider):
@@ -200,7 +124,9 @@ class MockTTSProvider(TTSProvider):
             audio.writeframes(b"\x00\x00" * 1600)
         yield AudioChunk(output.getvalue(), "wav", 0, is_final=True)
 
-    async def synthesize(self, text: str, voice: str, output_path: Path) -> TTSResult:
+    async def synthesize(
+        self, text: str, voice: str, output_path: Path, style: VoiceStyle | str = VoiceStyle.AUTO
+    ) -> TTSResult:
         started = time.perf_counter()
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with wave.open(str(output_path), "wb") as audio:
@@ -672,6 +598,7 @@ _TECH_PAIR_NUMBER_PATTERN = re.compile(
 _YEAR_PATTERN = re.compile(
     r"(?i)(?<!\d)((?:19|20)\d{2})(\s+)(год|года|году|годом|годе)\b"
 )
+_DATE_PATTERN = re.compile(r"(?<!\d)(0?[1-9]|[12]\d|3[01])[./-](0?[1-9]|1[0-2])[./-]((?:19|20)\d{2})(?!\d)")
 _NUMBER_PATTERN = re.compile(r"(?<!\d)([+-]?\d+(?:[.,]\d+)?)(%?)(?!\d)")
 
 _RU_ORDINALS = {
@@ -721,7 +648,30 @@ def _year_to_russian_words(year: int, year_noun: str) -> str:
     return f"{prefix} {_decline_year_ordinal(ordinal, year_noun)}"
 
 
+_MONTHS_GENITIVE = (
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+)
+
+
+def _date_day_words(day: int) -> str:
+    ordinal = _ru_ordinal_under_hundred(day)
+    if ordinal.endswith("третий"):
+        return ordinal.removesuffix("третий") + "третье"
+    if ordinal.endswith("ый"):
+        return ordinal[:-2] + "ое"
+    if ordinal.endswith("ий"):
+        return ordinal[:-2] + "ее"
+    if ordinal.endswith("ой"):
+        return ordinal[:-2] + "ое"
+    return ordinal
+
+
 def expand_russian_numbers(text: str) -> str:
+    def replace_date(match: re.Match[str]) -> str:
+        day, month, year = (int(value) for value in match.groups())
+        return f"{_date_day_words(day)} {_MONTHS_GENITIVE[month - 1]} {_year_to_russian_words(year, 'года')} года"
+
     def replace_year(match: re.Match[str]) -> str:
         year, spacing, year_noun = match.groups()
         return f"{_year_to_russian_words(int(year), year_noun.lower())}{spacing}{year_noun}"
@@ -760,7 +710,8 @@ def expand_russian_numbers(text: str) -> str:
             result += " " + _ru_plural_form(abs(int(float(raw_number.replace(",", ".")))), ("процент", "процента", "процентов"))
         return result
 
-    normalized = _YEAR_PATTERN.sub(replace_year, text)
+    normalized = _DATE_PATTERN.sub(replace_date, text)
+    normalized = _YEAR_PATTERN.sub(replace_year, normalized)
     normalized = _IPV4_PATTERN.sub(replace_dotted, normalized)
     normalized = _DOTTED_NUMBER_PATTERN.sub(replace_dotted, normalized)
     normalized = _TECH_PAIR_NUMBER_PATTERN.sub(replace_tech_pair, normalized)
@@ -906,11 +857,26 @@ def transliterate_english_for_russian_tts(text: str) -> str:
     return _LATIN_WORD_PATTERN.sub(lambda match: _english_word_to_cyrillic(match.group(0)), text)
 
 
-def normalize_russian_tts_text(text: str, *, transliterate_latin: bool = True) -> str:
-    normalized = expand_russian_numbers(" ".join(text.strip().split()))
-    if transliterate_latin:
-        normalized = transliterate_english_for_russian_tts(normalized)
-    return " ".join(normalized.split())
+def normalize_russian_tts_text(
+    text: str,
+    *,
+    transliterate_latin: bool = True,
+    pronunciations: dict[str, str] | None = None,
+    stress_accentor: Callable[[str], str] | None = None,
+) -> str:
+    normalized = normalize_tts_orthography(text)
+    rendered: list[str] = []
+    for segment, is_manual_override in split_pronunciation_overrides(
+        normalized, pronunciations or {}
+    ):
+        if is_manual_override:
+            rendered.append(segment)
+            continue
+        prepared = expand_russian_numbers(segment)
+        if transliterate_latin:
+            prepared = transliterate_english_for_russian_tts(prepared)
+        rendered.append(stress_accentor(prepared) if stress_accentor is not None else prepared)
+    return " ".join("".join(rendered).split())
 
 
 _ENGLISH_RUN_PATTERN = re.compile(
@@ -995,290 +961,6 @@ def prepare_english_tts_text(text: str) -> str:
         prepared,
     )
     return " ".join(prepared.strip().split())
-
-
-_SUPERTONIC_FEMALE_VOICES = ("F4", "F1", "F2", "F3", "F5")
-
-
-class SupertonicTTSProvider(TTSProvider):
-    """Local multilingual Supertonic 3 inference through ONNX Runtime on CPU."""
-
-    def __init__(
-        self,
-        *,
-        model: str = "supertonic-3",
-        voice: str = "F4",
-        model_dir: Path | None = None,
-        total_steps: int = 8,
-        speed: float = 1.05,
-        cpu_threads: int = 8,
-        warmup: bool = True,
-        auto_download: bool = True,
-        timeout_seconds: float = 15.0,
-        inter_segment_silence_ms: int = 60,
-        trim_silence: bool = True,
-        leading_padding_ms: int = 70,
-        trailing_padding_ms: int = 110,
-        model_loader: Callable[[], Any] | None = None,
-    ) -> None:
-        normalized_voice = voice.upper()
-        if normalized_voice not in _SUPERTONIC_FEMALE_VOICES:
-            raise ValueError(
-                "VOICE_SUPERTONIC_VOICE must be a female preset: "
-                + ", ".join(_SUPERTONIC_FEMALE_VOICES)
-            )
-        if not 1 <= total_steps <= 100:
-            raise ValueError("VOICE_SUPERTONIC_TOTAL_STEPS must be between 1 and 100")
-        if not 0.7 <= speed <= 2.0:
-            raise ValueError("VOICE_SUPERTONIC_SPEED must be between 0.7 and 2.0")
-        self.model_name = model
-        self.voice = normalized_voice
-        self.model_dir = model_dir
-        self.total_steps = total_steps
-        self.speed = speed
-        self.cpu_threads = cpu_threads
-        self.warmup_enabled = warmup
-        self.auto_download = auto_download
-        self.timeout_seconds = timeout_seconds
-        self.inter_segment_silence_ms = max(0, inter_segment_silence_ms)
-        self.trim_silence = trim_silence
-        self.leading_padding_ms = max(0, leading_padding_ms)
-        self.trailing_padding_ms = max(0, trailing_padding_ms)
-        self.sample_rate = 44100
-        self._model_loader = model_loader
-        self._tts = None
-        self._styles: dict[str, Any] = {}
-        self._load_lock = asyncio.Lock()
-        self._infer_lock = asyncio.Lock()
-        self._warmed_up = False
-
-    @property
-    def name(self) -> str:
-        return "supertonic"
-
-    @property
-    def available_speakers(self) -> list[str]:
-        return list(_SUPERTONIC_FEMALE_VOICES)
-
-    @property
-    def metadata(self) -> dict[str, Any]:
-        return {
-            "provider": self.name,
-            "model": self.model_name,
-            "voice": self.voice,
-            "device": "cpu",
-            "runtime": "onnxruntime",
-            "sample_rate": self.sample_rate,
-            "total_steps": self.total_steps,
-            "speed": self.speed,
-            "native_multilingual": True,
-            "silence_trimming": self.trim_silence,
-        }
-
-    def resolve_voice(self, language: str, requested_voice: str | None = None) -> str:
-        normalized = (requested_voice or "").upper()
-        if normalized in self.available_speakers:
-            return normalized
-        return self.voice
-
-    async def preload(self) -> None:
-        await self._ensure_model()
-
-    async def _ensure_model(self):
-        if self._tts is not None:
-            return self._tts
-        async with self._load_lock:
-            if self._tts is not None:
-                return self._tts
-            started = time.perf_counter()
-            tts = await asyncio.to_thread(self._load_model_sync)
-            self._tts = tts
-            self._styles[self.voice] = tts.get_voice_style(self.voice)
-            logger.info(
-                "Supertonic TTS model loaded: load_ms=%s model=%s voice=%s device=cpu "
-                "sample_rate=%s steps=%s",
-                int((time.perf_counter() - started) * 1000),
-                self.model_name,
-                self.voice,
-                self.sample_rate,
-                self.total_steps,
-            )
-            if self.warmup_enabled and not self._warmed_up:
-                warmup_started = time.perf_counter()
-                await asyncio.to_thread(self._render_sync, "Привет.", "ru", self.voice)
-                self._warmed_up = True
-                logger.info(
-                    "Supertonic TTS model warmed up: warmup_ms=%s voice=%s",
-                    int((time.perf_counter() - warmup_started) * 1000),
-                    self.voice,
-                )
-            return self._tts
-
-    def _load_model_sync(self):
-        if self._model_loader is not None:
-            return self._model_loader()
-        try:
-            from supertonic import TTS
-        except ImportError as exc:
-            raise RuntimeError(
-                "Supertonic is not installed. Install supertonic==1.3.1."
-            ) from exc
-        return TTS(
-            model=self.model_name,
-            model_dir=self.model_dir,
-            auto_download=self.auto_download,
-            intra_op_num_threads=self.cpu_threads,
-            inter_op_num_threads=1,
-        )
-
-    def _get_style(self, voice: str):
-        if self._tts is None:
-            raise RuntimeError("Supertonic model is not loaded")
-        style = self._styles.get(voice)
-        if style is None:
-            style = self._tts.get_voice_style(voice)
-            self._styles[voice] = style
-        return style
-
-    def _trim_waveform(self, waveform):
-        if not self.trim_silence:
-            return waveform
-        import numpy as np
-
-        samples = np.asarray(waveform, dtype=np.float32).reshape(-1)
-        if samples.size == 0:
-            return samples
-        peak = float(np.max(np.abs(samples)))
-        if peak <= 0:
-            return samples
-        threshold = max(0.0025, peak * 0.008)
-        active = np.flatnonzero(np.abs(samples) >= threshold)
-        if active.size == 0:
-            return samples
-        leading = int(self.sample_rate * self.leading_padding_ms / 1000)
-        trailing = int(self.sample_rate * self.trailing_padding_ms / 1000)
-        start = max(0, int(active[0]) - leading)
-        end = min(samples.size, int(active[-1]) + trailing + 1)
-        return samples[start:end]
-
-    def _render_sync(self, text: str, language: str, voice: str):
-        if self._tts is None:
-            raise RuntimeError("Supertonic model is not loaded")
-        import numpy as np
-
-        segments = split_multilingual_tts_segments(text, language)
-        if not segments:
-            raise ValueError("TTS text is empty")
-        style = self._get_style(voice)
-        silence = np.zeros(
-            int(self.sample_rate * self.inter_segment_silence_ms / 1000),
-            dtype=np.float32,
-        )
-        rendered: list[Any] = []
-        for segment_language, segment_text in segments:
-            if rendered and silence.size:
-                rendered.append(silence)
-            waveform, _duration = self._tts.synthesize(
-                text=segment_text,
-                lang=segment_language,
-                voice_style=style,
-                total_steps=self.total_steps,
-                speed=self.speed,
-            )
-            rendered.append(self._trim_waveform(waveform))
-        return np.concatenate(rendered)
-
-    async def _synthesize_wav_bytes(
-        self,
-        text: str,
-        language: str,
-        voice: str,
-    ) -> tuple[bytes, float, int]:
-        await self._ensure_model()
-        started = time.perf_counter()
-        async with self._infer_lock:
-            waveform = await asyncio.wait_for(
-                asyncio.to_thread(self._render_sync, text, language, voice),
-                timeout=self.timeout_seconds,
-            )
-        synthesis_ms = int((time.perf_counter() - started) * 1000)
-        wav_bytes = waveform_to_wav_bytes(waveform, self.sample_rate)
-        duration = wav_duration_seconds(wav_bytes)
-        logger.info(
-            "Supertonic TTS segment synthesized: model=%s voice=%s text_length=%s "
-            "word_count=%s synthesis_ms=%s audio_duration_ms=%s RTF=%.3f audio_bytes=%s",
-            self.model_name,
-            voice,
-            len(text),
-            len(text.split()),
-            synthesis_ms,
-            int(duration * 1000),
-            (synthesis_ms / 1000) / duration if duration else 0.0,
-            len(wav_bytes),
-        )
-        return wav_bytes, duration, synthesis_ms
-
-    async def stream(self, request: TTSRequest):
-        text = " ".join(request.text.strip().split())
-        if not text:
-            raise ValueError("TTS text is empty")
-        voice = self.resolve_voice(request.language, request.voice)
-        wav_bytes, _, _ = await self._synthesize_wav_bytes(
-            text,
-            request.language,
-            voice,
-        )
-        yield AudioChunk(
-            data=wav_bytes,
-            format="wav",
-            sequence=0,
-            is_final=True,
-            metadata={
-                "sample_rate": self.sample_rate,
-                "channels": 1,
-                "sample_width": 2,
-                "voice": voice,
-                "model": self.model_name,
-                "device": "cpu",
-                "native_multilingual": True,
-            },
-        )
-
-    async def synthesize(self, text: str, voice: str, output_path: Path) -> TTSResult:
-        normalized = " ".join(text.strip().split())
-        if not normalized:
-            raise ValueError("TTS text is empty")
-        resolved_voice = self.resolve_voice("ru", voice)
-        started = time.perf_counter()
-        output_path = output_path.with_suffix(self.file_extension)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = output_path.with_name(f"{output_path.stem}.tmp{output_path.suffix}")
-        temp_path.unlink(missing_ok=True)
-        try:
-            wav_bytes, audio_duration_seconds, _ = await self._synthesize_wav_bytes(
-                normalized,
-                "ru",
-                resolved_voice,
-            )
-            temp_path.write_bytes(wav_bytes)
-            if wav_duration_seconds(temp_path.read_bytes()) <= 0:
-                raise RuntimeError("Supertonic returned zero-duration audio")
-            temp_path.replace(output_path)
-        except asyncio.CancelledError:
-            temp_path.unlink(missing_ok=True)
-            raise
-        except Exception:
-            temp_path.unlink(missing_ok=True)
-            output_path.unlink(missing_ok=True)
-            raise
-        return TTSResult(
-            audio_path=output_path,
-            duration_ms=int((time.perf_counter() - started) * 1000),
-            provider=self.name,
-            voice=resolved_voice,
-            chunks_count=1,
-            audio_duration_seconds=audio_duration_seconds,
-        )
 
 
 class OpenVoiceToneConverter:
@@ -1454,11 +1136,19 @@ class SileroTTSProvider(TTSProvider):
         cpu_threads: int = 4,
         warmup: bool = True,
         timeout_seconds: float = 10.0,
+        loudness_target_dbfs: float = -18.0,
+        peak_ceiling_dbfs: float = -1.0,
+        pronunciation_dictionary_path: Path | None = None,
         native_english: bool = False,
         english_model: str = "v3_en",
         english_speaker: str = "en_0",
         cmudict_enabled: bool = True,
         cmudict_cache_dir: Path | None = None,
+        stress_enabled: bool = True,
+        stress_cpu_threads: int = 1,
+        audio_postprocessing_enabled: bool = True,
+        highpass_cutoff_hz: float = 60.0,
+        adaptive_prosody: bool = True,
         openvoice_enabled: bool = False,
         openvoice_reference_audio_path: Path | None = None,
         openvoice_cache_dir: Path | None = None,
@@ -1469,6 +1159,7 @@ class SileroTTSProvider(TTSProvider):
         model_loader: Callable[[], Any] | None = None,
         english_model_loader: Callable[[], Any] | None = None,
         voice_converter_loader: Callable[[], Any] | None = None,
+        stress_accentor_loader: Callable[[], Callable[[str], str] | None] | None = None,
     ) -> None:
         if device not in {"cpu", "cuda", "auto"}:
             raise ValueError("VOICE_SILERO_DEVICE must be one of: cpu, cuda, auto")
@@ -1479,11 +1170,22 @@ class SileroTTSProvider(TTSProvider):
         self.cpu_threads = cpu_threads
         self.warmup_enabled = warmup
         self.timeout_seconds = timeout_seconds
+        self.loudness_target_dbfs = loudness_target_dbfs
+        self.peak_ceiling_dbfs = peak_ceiling_dbfs
+        self.pronunciation_dictionary_path = pronunciation_dictionary_path
         self.native_english = native_english
         self.english_model_name = english_model
         self.english_speaker = english_speaker
         self.cmudict_enabled = cmudict_enabled
         self.cmudict_cache_dir = cmudict_cache_dir or Path(".cache/cmudict")
+        self.audio_postprocessing_enabled = audio_postprocessing_enabled
+        self.highpass_cutoff_hz = max(0.0, highpass_cutoff_hz)
+        self.adaptive_prosody = adaptive_prosody
+        self._stress_accentor = LocalStressAccentor(
+            enabled=stress_enabled,
+            cpu_threads=stress_cpu_threads,
+            loader=stress_accentor_loader,
+        )
         self.openvoice_enabled = openvoice_enabled
         self.openvoice_reference_audio_path = openvoice_reference_audio_path
         self.openvoice_cache_dir = openvoice_cache_dir or Path(".cache/openvoice-v2")
@@ -1504,6 +1206,8 @@ class SileroTTSProvider(TTSProvider):
         self._torch = None
         self._selected_device: str | None = None
         self._available_speakers: set[str] | None = None
+        self._pronunciations: dict[str, str] = {}
+        self._expression_level = VoiceExpressionLevel.NATURAL
         self._load_lock = asyncio.Lock()
         self._infer_lock = asyncio.Lock()
         self._warmed_up = False
@@ -1528,7 +1232,17 @@ class SileroTTSProvider(TTSProvider):
             "voice_conversion": self._voice_converter is not None,
             "native_english": self._english_tts_model is not None,
             "english_transcription": self.cmudict_enabled and not self.native_english,
+            "stress": self._stress_accentor.status,
+            "audio_postprocessing": self.audio_postprocessing_enabled,
+            "highpass_cutoff_hz": self.highpass_cutoff_hz if self.audio_postprocessing_enabled else 0.0,
+            "adaptive_prosody": self.adaptive_prosody,
         }
+
+    def set_pronunciations(self, pronunciations: dict[str, str]) -> None:
+        self._pronunciations = dict(pronunciations)
+
+    def set_expression_level(self, level: str | VoiceExpressionLevel) -> None:
+        self._expression_level = coerce_voice_expression_level(level)
 
     @property
     def available_speakers(self) -> list[str]:
@@ -1555,6 +1269,9 @@ class SileroTTSProvider(TTSProvider):
         async with self._load_lock:
             if self._model is not None:
                 return self._model
+            # silero-stress sets Torch's thread count while importing.  Load it
+            # first so the TTS loader can restore VOICE_SILERO_CPU_THREADS.
+            await self._stress_accentor.preload()
             started = time.perf_counter()
             model, torch_module, selected_device = await asyncio.to_thread(self._load_model_sync)
             self._model = model
@@ -1562,6 +1279,10 @@ class SileroTTSProvider(TTSProvider):
             self._selected_device = selected_device
             self._available_speakers = self._extract_speakers(model)
             self._validate_speaker(self.speaker)
+            if self.pronunciation_dictionary_path is not None:
+                self._pronunciations = await asyncio.to_thread(
+                    load_pronunciations, self.pronunciation_dictionary_path
+                )
             if self.cmudict_enabled and not self.native_english:
                 try:
                     dictionary_size = await asyncio.to_thread(self._prepare_cmudict_sync)
@@ -1609,7 +1330,7 @@ class SileroTTSProvider(TTSProvider):
                 warmup_started = time.perf_counter()
                 if self._english_tts_model is not None:
                     await asyncio.to_thread(self._apply_english_tts_sync, "Hello.")
-                await asyncio.to_thread(self._render_sync, "Привет.", self.speaker)
+                await asyncio.to_thread(self._render_sync, "Привет.", self.speaker, VoiceStyle.NORMAL)
                 self._warmed_up = True
                 logger.info(
                     "Silero TTS model warmed up: tts_warmup_ms=%s device=%s model=%s speaker=%s sample_rate=%s",
@@ -1764,14 +1485,25 @@ class SileroTTSProvider(TTSProvider):
         )
         raise RuntimeError(f"Unknown Silero speaker: {speaker}")
 
-    def _apply_tts_sync(self, text: str, speaker: str):
+    def _apply_tts_sync(self, text: str, speaker: str, style: VoiceStyle | str):
         if self._model is None or self._torch is None:
             raise RuntimeError("Silero model is not loaded")
         with self._torch.inference_mode():
+            normalized = normalize_russian_tts_text(
+                text,
+                pronunciations=self._pronunciations,
+                stress_accentor=self._stress_accentor.accent,
+            )
             return self._model.apply_tts(
-                text=normalize_russian_tts_text(text),
+                ssml_text=make_silero_ssml(
+                    normalized,
+                    style,
+                    self._expression_level,
+                    adaptive_prosody=self.adaptive_prosody,
+                ),
                 speaker=speaker,
                 sample_rate=self.sample_rate,
+                intensity=profile_for(style, self._expression_level).intensity,
             )
 
     def _apply_english_tts_sync(self, text: str):
@@ -1797,9 +1529,9 @@ class SileroTTSProvider(TTSProvider):
             value = value.numpy()
         return np.asarray(value, dtype=np.float32).reshape(-1)
 
-    def _render_sync(self, text: str, speaker: str) -> tuple[Any, int]:
+    def _render_sync(self, text: str, speaker: str, style: VoiceStyle | str) -> tuple[Any, int]:
         if self._english_tts_model is None:
-            waveform = self._apply_tts_sync(text, speaker)
+            waveform = self._apply_tts_sync(text, speaker, style)
         else:
             import numpy as np
 
@@ -1812,7 +1544,7 @@ class SileroTTSProvider(TTSProvider):
                 segment_waveform = (
                     self._apply_english_tts_sync(segment_text)
                     if segment_language == "en"
-                    else self._apply_tts_sync(segment_text, speaker)
+                    else self._apply_tts_sync(segment_text, speaker, style)
                 )
                 rendered.append(self._waveform_as_numpy(segment_waveform))
             if not rendered:
@@ -1823,32 +1555,124 @@ class SileroTTSProvider(TTSProvider):
         converted = self._voice_converter.convert(waveform, self.sample_rate)
         return converted, int(self._voice_converter.sample_rate)
 
-    async def _synthesize_wav_bytes(self, text: str, speaker: str) -> tuple[bytes, float, int]:
+    @staticmethod
+    def _audio_metrics(samples: Any) -> dict[str, float | int]:
+        import numpy as np
+
+        value = np.asarray(samples, dtype=np.float32).reshape(-1)
+        if not len(value):
+            return {
+                "rms_dbfs": float("-inf"), "peak_dbfs": float("-inf"),
+                "dc_offset": 0.0, "clipped_samples": 0,
+            }
+        finite = np.nan_to_num(value, nan=0.0, posinf=1.0, neginf=-1.0)
+        peak = float(np.max(np.abs(finite)))
+        rms = float(np.sqrt(np.mean(np.square(finite))))
+        return {
+            "rms_dbfs": 20 * np.log10(max(rms, 1e-12)),
+            "peak_dbfs": 20 * np.log10(max(peak, 1e-12)),
+            "dc_offset": float(np.mean(finite)),
+            "clipped_samples": int(np.count_nonzero(np.abs(finite) >= 0.999969)),
+        }
+
+    @staticmethod
+    def _highpass_filter(samples: Any, sample_rate: int, cutoff_hz: float):
+        import numpy as np
+
+        if cutoff_hz <= 0 or len(samples) < 2:
+            return samples
+        rc = 1.0 / (2.0 * np.pi * cutoff_hz)
+        dt = 1.0 / sample_rate
+        alpha = rc / (rc + dt)
+        output = np.empty_like(samples)
+        output[0] = samples[0]
+        output[1:] = 0.0
+        previous_input = float(samples[0])
+        previous_output = float(output[0])
+        for index in range(1, len(samples)):
+            current = alpha * (previous_output + float(samples[index]) - previous_input)
+            output[index] = current
+            previous_input = float(samples[index])
+            previous_output = current
+        return output
+
+    @staticmethod
+    def _apply_edge_fades(samples: Any, sample_rate: int):
+        import numpy as np
+
+        fade_samples = min(max(1, round(sample_rate * 0.005)), len(samples) // 2)
+        if fade_samples <= 0:
+            return samples
+        envelope = np.linspace(0.0, 1.0, fade_samples, endpoint=False, dtype=np.float32)
+        output = samples.copy()
+        output[:fade_samples] *= envelope
+        output[-fade_samples:] *= envelope[::-1]
+        return output
+
+    def _postprocess_speech_waveform(self, waveform: Any, sample_rate: int):
+        import numpy as np
+
+        samples = self._waveform_as_numpy(waveform)
+        samples = np.nan_to_num(samples, nan=0.0, posinf=1.0, neginf=-1.0)
+        input_metrics = self._audio_metrics(samples)
+        if self.audio_postprocessing_enabled and len(samples):
+            samples = samples - np.mean(samples)
+            samples = self._highpass_filter(samples, sample_rate, self.highpass_cutoff_hz)
+            samples = self._apply_edge_fades(samples, sample_rate)
+        active = np.abs(samples) >= 10 ** (-45 / 20)
+        if active.any():
+            rms = float(np.sqrt(np.mean(np.square(samples[active]))))
+            peak = float(np.max(np.abs(samples)))
+            if rms > 0 and peak > 0:
+                target = 10 ** (self.loudness_target_dbfs / 20)
+                ceiling = 10 ** (self.peak_ceiling_dbfs / 20)
+                samples = samples * min(target / rms, ceiling / peak)
+        samples = np.clip(samples, -1.0, 1.0)
+        return samples, {"input": input_metrics, "output": self._audio_metrics(samples)}
+
+    def _normalize_speech_waveform(self, waveform: Any):
+        return self._postprocess_speech_waveform(waveform, self.sample_rate)[0]
+
+    async def _synthesize_wav_bytes(
+        self, text: str, speaker: str, style: VoiceStyle | str = VoiceStyle.AUTO
+    ) -> tuple[bytes, float, int]:
         await self._ensure_model()
         self._validate_speaker(speaker)
         started = time.perf_counter()
         async with self._infer_lock:
             (waveform, output_sample_rate) = await asyncio.wait_for(
-                asyncio.to_thread(self._render_sync, text, speaker),
+                asyncio.to_thread(self._render_sync, text, speaker, style),
                 timeout=self.timeout_seconds,
             )
         synthesis_ms = int((time.perf_counter() - started) * 1000)
-        wav_bytes = waveform_to_wav_bytes(waveform, output_sample_rate)
+        normalized_waveform, audio_metrics = self._postprocess_speech_waveform(
+            waveform, output_sample_rate
+        )
+        wav_bytes = waveform_to_wav_bytes(normalized_waveform, output_sample_rate)
         duration = wav_duration_seconds(wav_bytes)
         logger.info(
             "Silero TTS segment synthesized: provider=silero model=%s speaker=%s device=%s "
-            "text_length=%s word_count=%s voice_conversion=%s synthesis_ms=%s "
-            "audio_duration_ms=%s RTF=%.3f audio_bytes=%s",
+            "text_length=%s word_count=%s style=%s voice_conversion=%s synthesis_ms=%s "
+            "audio_duration_ms=%s RTF=%.3f audio_bytes=%s rms_dbfs=%.1f peak_dbfs=%.1f "
+            "dc_offset=%.6f input_dc_offset=%.6f clipped_samples=%s postprocessing=%s highpass_hz=%.1f",
             self.model_name,
             speaker,
             self._selected_device,
             len(text),
             len(text.split()),
+            str(style),
             self._voice_converter is not None,
             synthesis_ms,
             int(duration * 1000),
             (synthesis_ms / 1000) / duration if duration else 0.0,
             len(wav_bytes),
+            audio_metrics["output"]["rms_dbfs"],
+            audio_metrics["output"]["peak_dbfs"],
+            audio_metrics["output"]["dc_offset"],
+            audio_metrics["input"]["dc_offset"],
+            audio_metrics["output"]["clipped_samples"],
+            self.audio_postprocessing_enabled,
+            self.highpass_cutoff_hz if self.audio_postprocessing_enabled else 0.0,
         )
         return wav_bytes, duration, synthesis_ms
 
@@ -1857,7 +1681,8 @@ class SileroTTSProvider(TTSProvider):
         if not text:
             raise ValueError("TTS text is empty")
         speaker = self.resolve_voice(request.language, request.voice)
-        wav_bytes, _, _ = await self._synthesize_wav_bytes(text, speaker)
+        style = coerce_voice_style(request.style)
+        wav_bytes, _, _ = await self._synthesize_wav_bytes(text, speaker, style)
         yield AudioChunk(
             data=wav_bytes,
             format="wav",
@@ -1872,10 +1697,13 @@ class SileroTTSProvider(TTSProvider):
                 "device": self._selected_device,
                 "voice_conversion": self._voice_converter is not None,
                 "native_english": self._english_tts_model is not None,
+                "style": style.value,
             },
         )
 
-    async def synthesize(self, text: str, voice: str, output_path: Path) -> TTSResult:
+    async def synthesize(
+        self, text: str, voice: str, output_path: Path, style: VoiceStyle | str = VoiceStyle.AUTO
+    ) -> TTSResult:
         normalized = " ".join(text.strip().split())
         if not normalized:
             raise ValueError("TTS text is empty")
@@ -1886,7 +1714,7 @@ class SileroTTSProvider(TTSProvider):
         temp_path = output_path.with_name(f"{output_path.stem}.tmp{output_path.suffix}")
         temp_path.unlink(missing_ok=True)
         try:
-            wav_bytes, audio_duration_seconds, _ = await self._synthesize_wav_bytes(normalized, speaker)
+            wav_bytes, audio_duration_seconds, _ = await self._synthesize_wav_bytes(normalized, speaker, style)
             temp_path.write_bytes(wav_bytes)
             if wav_duration_seconds(temp_path.read_bytes()) <= 0:
                 raise RuntimeError("Silero TTS returned zero-duration audio")

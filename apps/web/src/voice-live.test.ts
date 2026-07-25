@@ -158,6 +158,26 @@ describe("TTSStreamPlayer", () => {
     expect(context.sources[0].playbackRate.value).toBe(1.15);
   });
 
+  it.each([
+    [0.75, 1.0 / 0.75],
+    [1, 1],
+    [1.25, 1.0 / 1.25],
+  ])("schedules the next buffer after its playback-rate-adjusted duration", async (rate, duration) => {
+    const player = new TTSStreamPlayer(vi.fn(), vi.fn(), vi.fn(), { playbackRate: rate });
+    player.begin("utterance");
+    const first = player.enqueue("utterance", 0, audio());
+    const second = player.enqueue("utterance", 1, audio());
+    await tick();
+    const context = FakeAudioContext.instance;
+    context.deferred[0].resolve(buffer(1));
+    await first;
+    await tick();
+    context.deferred[1].resolve(buffer(0.5));
+    await second;
+
+    expect(context.sources[1].start.mock.calls[0][0]).toBeCloseTo(1.075 + duration);
+  });
+
   it("invalidates an unfinished decode on stop", async () => {
     const player = new TTSStreamPlayer(vi.fn(), vi.fn(), vi.fn());
     player.begin("utterance");
