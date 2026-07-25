@@ -176,9 +176,10 @@ export type PublicSettings = {
   voice_tts_provider: string;
   voice_tts_model: string | null;
   voice_tts_device: string | null;
-  voice_tts_fallback_active: boolean;
   avatar_enabled: boolean;
   voice_tts_voice: string;
+  voice_tts_style: string;
+  voice_tts_expression_level: string;
   voice_playback_rate: number;
   voice_live_playback_prebuffer_segments: number;
   voice_live_playback_prebuffer_ms: number;

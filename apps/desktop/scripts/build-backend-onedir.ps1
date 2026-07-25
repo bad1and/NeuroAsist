@@ -12,6 +12,5 @@ Set-Location $repositoryRoot
 if (-not (Test-Path -LiteralPath $Python)) { $Python = "python" }
 & $Python -m PyInstaller --noconfirm --clean --onedir --name neuroasist-core --distpath $Output `
     --collect-all openvoice `
-    --collect-all supertonic `
     apps/backend/desktop_entry.py
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller onedir build failed." }

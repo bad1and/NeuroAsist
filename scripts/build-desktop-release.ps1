@@ -49,7 +49,6 @@ New-Item -ItemType Directory -Force -Path $binaries, $output | Out-Null
     --collect-all silero `
     --collect-all gigaam `
     --collect-all openvoice `
-    --collect-all supertonic `
     --collect-all onnxruntime `
     --collect-all torchaudio `
     --collect-all faster_whisper `

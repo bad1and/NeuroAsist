@@ -103,6 +103,8 @@ def create_app() -> FastAPI:
     )
     runtime_settings_store = RuntimeSettingsStore(settings.app_data_path / "settings.json")
     runtime_settings = runtime_settings_store.load(runtime_defaults)
+    app.state.voice_tts_style = "auto"
+    app.state.voice_tts_expression_level = "natural"
     model_manager = ModelManager(settings.app_data_path / "models", event_bus.publish)
     backup_service = BackupService(
         settings.app_data_path / "backups",

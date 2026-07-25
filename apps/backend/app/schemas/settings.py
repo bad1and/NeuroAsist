@@ -11,9 +11,10 @@ class PublicSettingsResponse(BaseModel):
     voice_tts_provider: str
     voice_tts_model: str | None = None
     voice_tts_device: str | None = None
-    voice_tts_fallback_active: bool = False
     avatar_enabled: bool
     voice_tts_voice: str
+    voice_tts_style: str
+    voice_tts_expression_level: str
     voice_playback_rate: float
     voice_live_playback_prebuffer_segments: int
     voice_live_playback_prebuffer_ms: int
@@ -44,3 +45,21 @@ class RuntimeSettingsPatch(BaseModel):
     voice_live_playback_prebuffer_ms: int | None = None
     memory_mode: str | None = None
     memory_incognito: bool | None = None
+
+
+class VoiceStylePatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    voice_tts_style: str
+
+
+class VoiceExpressionPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    voice_tts_expression_level: str
+
+
+class PronunciationsPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pronunciations: dict[str, str]

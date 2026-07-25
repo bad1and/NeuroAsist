@@ -8,8 +8,11 @@ import json
 import statistics
 import tempfile
 import time
+import wave
 from pathlib import Path
 import sys
+
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -34,6 +37,9 @@ PHRASES = [
     "Ни одного потерянного окончания быть не должно.", "Что за хрень происходит с декодером?",
     "Один короткий хвост нужно присоединить к предыдущему сегменту сейчас.",
     "Пять плюс восемь равно тринадцать.", "Готово? Тогда начинаем тест.",
+    "Как-то всё-таки нужно проверить кто-нибудь по-прежнему на связи.",
+    "Я плачу за счёт, а ребёнок плачет от радости.",
+    "Мука́ закончилась, а мука осталась на столе.",
 ]
 
 
@@ -43,6 +49,22 @@ def percentile(values: list[float], pct: float) -> float:
     ordered = sorted(values)
     index = min(len(ordered) - 1, round((len(ordered) - 1) * pct))
     return ordered[index]
+
+
+def wav_quality_metrics(path: Path) -> dict[str, float | int]:
+    with wave.open(str(path), "rb") as audio:
+        samples = np.frombuffer(audio.readframes(audio.getnframes()), dtype="<i2").astype(np.float32)
+    if not len(samples):
+        return {"rms_dbfs": float("-inf"), "peak_dbfs": float("-inf"), "dc_offset": 0.0, "clipped_samples": 0}
+    normalized = samples / 32767.0
+    rms = float(np.sqrt(np.mean(np.square(normalized))))
+    peak = float(np.max(np.abs(normalized)))
+    return {
+        "rms_dbfs": 20 * np.log10(max(rms, 1e-12)),
+        "peak_dbfs": 20 * np.log10(max(peak, 1e-12)),
+        "dc_offset": float(np.mean(normalized)),
+        "clipped_samples": int(np.count_nonzero(np.abs(samples) >= 32766)),
+    }
 
 
 async def run(device: str, runs: int, output: Path) -> None:
@@ -81,6 +103,7 @@ async def run(device: str, runs: int, output: Path) -> None:
                         "RTF": rtf,
                         "inverse_RTF": 1 / rtf if rtf else 0.0,
                         "output_bytes": path.stat().st_size,
+                        **wav_quality_metrics(path),
                         "provider": "silero",
                         "device": provider.metadata["device"],
                         "speaker": provider.speaker,
@@ -109,6 +132,8 @@ async def run(device: str, runs: int, output: Path) -> None:
         "p95_synthesis_ms": percentile([row["synthesis_ms"] for row in good], 0.95),
         "p50_RTF": statistics.median(row["RTF"] for row in good) if good else 0.0,
         "p95_RTF": percentile([row["RTF"] for row in good], 0.95),
+        "max_abs_dc_offset": max((abs(float(row["dc_offset"])) for row in good), default=0.0),
+        "max_clipped_samples": max((int(row["clipped_samples"]) for row in good), default=0),
         "rows": rows,
     }
     output.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

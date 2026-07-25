@@ -168,11 +168,16 @@ VOICE_TTS_ENABLED=true
 VOICE_TTS_PROVIDER=silero
 VOICE_PRELOAD_TTS_MODEL=true
 VOICE_SILERO_MODEL=v5_5_ru
-VOICE_SILERO_SPEAKER_RU=xenia
-VOICE_SILERO_SAMPLE_RATE=24000
+VOICE_SILERO_SPEAKER_RU=baya
+VOICE_SILERO_SAMPLE_RATE=48000
 VOICE_SILERO_DEVICE=cpu
 VOICE_SILERO_CPU_THREADS=4
 VOICE_SILERO_WARMUP=true
+VOICE_STRESS_ENABLED=true
+VOICE_STRESS_CPU_THREADS=1
+VOICE_TTS_POSTPROCESSING_ENABLED=true
+VOICE_TTS_HIGHPASS_CUTOFF_HZ=60
+VOICE_TTS_ADAPTIVE_PROSODY=true
 ```
 
 ### Справочник параметров окружения
@@ -219,11 +224,16 @@ VOICE_SILERO_WARMUP=true
 | `VOICE_PRELOAD_TTS_MODEL` | Загружает и прогревает Silero при старте backend. Первый запуск может быть дольше. |
 | `VOICE_SILERO_MODEL` | Имя модели Silero. Текущее значение по умолчанию — `v5_5_ru`. |
 | `VOICE_SILERO_SPEAKER_RU` | Русский speaker Silero по умолчанию, например `xenia`. Можно менять в runtime через Settings. |
-| `VOICE_SILERO_SAMPLE_RATE` | Sample rate WAV-файлов Silero. Текущее значение — `24000`; изменение требует перезапуска backend. |
+| `VOICE_SILERO_SAMPLE_RATE` | Sample rate WAV-файлов Silero. Текущее значение — `48000`; изменение требует перезапуска backend. |
 | `VOICE_SILERO_DEVICE` | Где запускать Silero: `cpu`, `cuda` или `auto`. |
 | `VOICE_SILERO_CPU_THREADS` | Сколько CPU-потоков PyTorch использует для Silero inference. |
 | `VOICE_SILERO_WARMUP` | Запускает короткую warmup-фразу после загрузки Silero, чтобы первый реальный TTS был быстрее. |
 | `VOICE_SILERO_TIMEOUT_SECONDS` | Timeout на синтез одной фразы. |
+| `VOICE_STRESS_ENABLED` | Использует локальный Silero Stress для явной расстановки русских ударений перед TTS. При ошибке загрузки остаётся встроенное автоударение v5_5_ru. |
+| `VOICE_STRESS_CPU_THREADS` | Запрашиваемый лимит CPU-потоков акцентатора; пакетная модель по умолчанию использует один поток. |
+| `VOICE_TTS_POSTPROCESSING_ENABLED` | Включает удаление DC-смещения, high-pass, антищелчковые fades и безопасную нормализацию WAV. |
+| `VOICE_TTS_HIGHPASS_CUTOFF_HZ` | Частота среза низкочастотного гула при включённой постобработке; по умолчанию `60`. |
+| `VOICE_TTS_ADAPTIVE_PROSODY` | Добавляет безопасные смысловые паузы между частями фразы, сохраняя нативную выразительность Silero. Выключите для сравнения с базовым звучанием. |
 | `VOICE_TTS_BACKGROUND_TIMEOUT_SECONDS` | Timeout фоновых batch TTS jobs, которые создаёт `/voice/chat`. |
 | `VOICE_TTS_TIMEOUT_SECONDS` | Общий timeout TTS для voice API flow. |
 | `VOICE_TTS_MAX_CHARS` | Максимальная длина текста для одного backend TTS-запроса. |
@@ -239,7 +249,7 @@ VOICE_SILERO_WARMUP=true
 | `VOICE_LIVE_NEXT_SEGMENT_CHARS` | Целевой размер следующих live TTS-сегментов. |
 | `VOICE_LIVE_MAX_SEGMENT_CHARS` | Жёсткий лимит символов для одного live TTS-сегмента. |
 | `VOICE_LIVE_MAX_SEGMENT_WORDS` | Жёсткий лимит слов для одного live TTS-сегмента. |
-| `VOICE_LIVE_SAFE_SEGMENT_WORDS` | Желательное число слов перед тем, как сегментатор начнёт искать естественное место разреза. |
+| `VOICE_LIVE_SAFE_SEGMENT_WORDS` | Максимальный размер цельной разговорной мысли перед поиском естественного разреза. Значение `18` по умолчанию уменьшает эффект склейки фрагментов. |
 | `VOICE_LIVE_TTS_RETRY_COUNT` | Сколько раз повторять генерацию упавшего live TTS-сегмента. |
 | `VOICE_LIVE_TTS_CONCURRENCY_MODE` | Режим параллельности live TTS. Значение `1` по умолчанию сохраняет простой и стабильный порядок сегментов. |
 | `VOICE_LIVE_TTS_CONCURRENCY_MIN` | Нижняя граница параллельности live TTS. |
