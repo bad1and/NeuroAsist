@@ -6,10 +6,78 @@ from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.llm.base import LLMProviderError
 from apps.backend.app.llm.providers.deepseek import DeepSeekProvider
 from apps.backend.app.schemas.chat import ChatRequest, ChatResponse
+from apps.backend.app.schemas.voice import VoiceLiveResponse
 from uuid import uuid4
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+@router.post("/chat/live", response_model=VoiceLiveResponse)
+async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse:
+    """Stream a typed message through the same LLM/TTS path as live voice.
+
+    The browser sends text directly, so this deliberately does not invoke STT.
+    A connected voice socket is still required because it carries text deltas,
+    metadata and audio segments back to the desktop client.
+    """
+    settings = request.app.state.settings
+    if not settings.voice_tts_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Live text requires backend TTS to be enabled",
+        )
+    manager = request.app.state.voice_session_manager
+    if not manager.connected(payload.session_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Voice WebSocket must be connected before live request",
+        )
+
+    runtime_settings = request.app.state.runtime_settings
+    event_bus = request.app.state.event_bus
+    voice_request_id = uuid4().hex
+    utterance_id = uuid4().hex
+    provider = DeepSeekProvider(settings)
+    agent = CharacterAgent(
+        llm_provider=provider,
+        history=request.app.state.history,
+        history_limit=settings.chat_history_limit,
+        event_publisher=event_bus.publish,
+        context_manager=request.app.state.context_manager,
+        memory_service=request.app.state.memory_service,
+        persona_name=runtime_settings.personality,
+    )
+    voice = request.app.state.voice_service.resolve_tts_voice(
+        runtime_settings.voice_language,
+        runtime_settings.voice_tts_voice,
+    )
+    await manager.start(
+        session_id=payload.session_id,
+        utterance_id=utterance_id,
+        transcript=payload.message,
+        language=runtime_settings.voice_language,
+        voice=voice,
+        agent=agent,
+        input_mode="text",
+    )
+    event_bus.publish(
+        "chat.live_started",
+        "info",
+        "Live text response started",
+        {
+            "session_id": payload.session_id,
+            "utterance_id": utterance_id,
+            "voice_request_id": voice_request_id,
+            "message_length": len(payload.message),
+        },
+    )
+    return VoiceLiveResponse(
+        session_id=payload.session_id,
+        utterance_id=utterance_id,
+        voice_request_id=voice_request_id,
+        transcript=payload.message,
+    )
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -137,7 +205,9 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             {"session_id": payload.session_id, "metadata": agent.last_turn.metadata_frame()},
         )
     response = ChatResponse(**result)
-    if settings.voice_tts_enabled and settings.avatar_enabled and result["reply"].strip():
+    # Text chat is independently speakable.  Avatar availability only affects
+    # animation delivery inside the orchestrator, not whether audio is made.
+    if settings.voice_tts_enabled and result["reply"].strip():
         voice = request.app.state.voice_service.resolve_tts_voice(
             request.app.state.runtime_settings.voice_language,
             request.app.state.runtime_settings.voice_tts_voice,

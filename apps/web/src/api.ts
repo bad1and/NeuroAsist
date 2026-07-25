@@ -154,6 +154,19 @@ export function sendChatMessage(
   });
 }
 
+export function sendLiveTextMessage(
+  sessionId: string,
+  message: string,
+): Promise<VoiceLiveResponse> {
+  return requestJson<VoiceLiveResponse>("/chat/live", {
+    method: "POST",
+    body: JSON.stringify({
+      session_id: sessionId,
+      message,
+    }),
+  });
+}
+
 export async function sendVoiceMessage(
   sessionId: string,
   audio: Blob,

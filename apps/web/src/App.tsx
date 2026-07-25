@@ -42,6 +42,7 @@ import {
   resolveApiUrl,
   saveDesktopApiKey,
   sendChatMessage,
+  sendLiveTextMessage,
   searchTimeline,
   deleteTimelineRange,
   sendVoiceMessage,
@@ -136,7 +137,8 @@ function isLiveVoiceTransportError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   return (
     error.message.includes("Live voice connection failed") ||
-    error.message.includes("Voice WebSocket must be connected")
+    error.message.includes("Voice WebSocket must be connected") ||
+    error.message.includes("Live text requires backend TTS")
   );
 }
 
@@ -923,6 +925,22 @@ function ChatPage({
     setRetryText(null);
 
     try {
+      try {
+        await ensureLiveVoice();
+        liveSocketRef.current?.clearActive();
+        liveAudioStartedRef.current = false;
+        const response = await sendLiveTextMessage(SESSION_ID, text);
+        liveSocketRef.current?.activate(response.utterance_id);
+        setVoiceState("thinking");
+        return;
+      } catch (liveError) {
+        if (!isLiveVoiceTransportError(liveError)) {
+          throw liveError;
+        }
+        liveSocketRef.current?.close();
+        liveSocketRef.current = null;
+        setError("Потоковый режим недоступен: использован обычный ответ.");
+      }
       const response = await sendChatMessage(SESSION_ID, text);
       showMemoryUpdates(response.memory_updates);
       setMessages((current) => [
@@ -946,7 +964,10 @@ function ChatPage({
       setRetryText(text);
       setMessages((current) => current.filter((message) => message.id !== userMessage.id));
     } finally {
-      setLoading(false);
+      if (!liveSocketRef.current?.activeUtteranceId) {
+        setLoading(false);
+        setVoiceState("idle");
+      }
     }
   };
 
