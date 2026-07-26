@@ -46,6 +46,9 @@ directly and never performs STT.
   projects, relationships, constraints, skills, decisions, and corrections.
 - Passwords, codes, tokens, and API keys are removed before the extraction
   prompt. Other independent facts from the same message are still processed.
+- Voice input receives a conservative pre-LLM interpretation: clear common
+  typos and close matches to already known names can be repaired, while the raw
+  STT transcript remains available for audit. Ambiguous words are left intact.
 - Sensitive medical, financial, address, and political data stays in review.
 - A narrow deterministic safety net covers a stated response-length preference,
   current goal, and the assistant-developer relationship when extraction misses
@@ -65,7 +68,7 @@ not by adding a local LLM by default.
 
 ### Verification
 
-- Backend test suite: `201 passed` at the V0.7 memory/live-text milestone.
+- Backend test suite: `216 passed` at the V0.7 memory/live-text milestone.
 - Web build: `npm.cmd --prefix apps/web run build`.
 - `POST /memory/reindex` rebuilds Chroma from SQLite.
 

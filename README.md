@@ -599,7 +599,9 @@ the user-facing response.
 Passwords, codes, tokens, and API keys are removed before the extraction prompt
 and can never become memories. A narrow reliable fallback covers stated response
 length preference, current goal, and assistant developers; ambiguous social
-relations stay in review. Memory Center is the final user control: records can
+relations stay in review. Voice STT text receives a conservative interpretation
+before it reaches DeepSeek: obvious typos and known names can be repaired while
+the raw transcript remains available in the journal. Memory Center is the final user control: records can
 be inspected, edited, confirmed, removed, reindexed, or reset together with
 history. See [ChromaDB memory](Docs/chroma-memory.md) for configuration and
 limitations; the old local-LLM graph proposal is explicitly archived in
