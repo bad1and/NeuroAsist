@@ -12,6 +12,7 @@ from apps.backend.app.agents.character.prompts import (
 )
 from apps.backend.app.agents.character.persona import get_persona
 from apps.backend.app.agents.character.protocol import classify_intent, legacy_result, parse_turn
+from apps.backend.app.agents.character.voice_input import VoiceInputInterpreter
 from apps.backend.app.llm.base import ChatMessage, LLMProvider
 from apps.backend.app.schemas.character import CharacterTurn
 from apps.backend.app.storage.sqlite_history import SQLiteMessageHistory
@@ -44,26 +45,29 @@ class CharacterAgent:
         self._event_publisher = event_publisher
         self._context_manager = context_manager
         self._memory_service = memory_service
+        self._voice_input = VoiceInputInterpreter(memory_service)
         self._persona = get_persona(persona_name)
         self.last_turn: CharacterTurn | None = None
         self.last_memory_updates: list[dict[str, str]] = []
         self._last_user_message = None
 
     async def handle_user_message(self, session_id: str, user_text: str, input_mode: str = "text") -> dict[str, Any]:
-        context = self._context_manager.build(user_text).messages if self._context_manager else self._history.get_recent_messages(session_id, limit=self._history_limit)
-        self.last_memory_updates = self._persist_user_message(session_id, user_text, input_mode)
+        interpreted = self._voice_input.interpret(user_text, input_mode)
+        effective_text = interpreted.text
+        context = self._context_manager.build(effective_text).messages if self._context_manager else self._history.get_recent_messages(session_id, limit=self._history_limit)
+        self.last_memory_updates = self._persist_user_message(session_id, user_text, input_mode, interpreted)
         messages = [
             ChatMessage(role="system", content=character_json_prompt(self._persona)),
             *context,
-            ChatMessage(role="user", content=user_text),
+            ChatMessage(role="user", content=effective_text),
         ]
-        empty_reply = self._empty_model_fallback(user_text)
+        empty_reply = self._empty_model_fallback(effective_text)
 
         llm_response = await self._llm_provider.generate(messages)
         parsed = self._parse_response_result(
             llm_response.content,
             session_id=session_id,
-            user_text=user_text,
+            user_text=effective_text,
             empty_fallback_reply=empty_reply,
             report_invalid=False,
         )
@@ -88,7 +92,7 @@ class CharacterAgent:
             parsed = self._parse_response_result(
                 repair_response.content,
                 session_id=session_id,
-                user_text=user_text,
+                user_text=effective_text,
                 empty_fallback_reply=empty_reply,
                 event_type="llm.invalid_json_retry_failed",
                 report_invalid=True,
@@ -139,12 +143,14 @@ class CharacterAgent:
         input_mode: str = "text",
     ) -> AsyncIterator[str]:
         """Stream plain reply text and commit history only after clean completion."""
-        context = self._context_manager.build(user_text).messages if self._context_manager else self._history.get_recent_messages(session_id, limit=self._history_limit)
-        self.last_memory_updates = self._persist_user_message(session_id, user_text, input_mode)
+        interpreted = self._voice_input.interpret(user_text, input_mode)
+        effective_text = interpreted.text
+        context = self._context_manager.build(effective_text).messages if self._context_manager else self._history.get_recent_messages(session_id, limit=self._history_limit)
+        self.last_memory_updates = self._persist_user_message(session_id, user_text, input_mode, interpreted)
         messages = [
             ChatMessage(role="system", content=character_live_prompt(self._persona)),
             *context,
-            ChatMessage(role="user", content=user_text),
+            ChatMessage(role="user", content=effective_text),
         ]
         chunks: list[str] = []
         async for delta in self._llm_provider.stream(messages):
@@ -156,7 +162,7 @@ class CharacterAgent:
         if stored_reply_transform is not None:
             reply = stored_reply_transform(reply)
         if not reply:
-            reply = self._empty_model_fallback(user_text)
+            reply = self._empty_model_fallback(effective_text)
             yield reply
         if self._should_persist_timeline():
             self._save_message(session_id, "assistant", reply, input_mode)
@@ -176,8 +182,16 @@ class CharacterAgent:
             created = self._memory_service.extract_from_message(self._last_user_message)
             self.last_memory_updates.extend(self._memory_service.memory_update(memory) for memory in created)
 
-    def _persist_user_message(self, session_id: str, user_text: str, input_mode: str) -> list[dict[str, str]]:
+    def _persist_user_message(self, session_id: str, user_text: str, input_mode: str, interpreted) -> list[dict[str, str]]:
         user_message = self._save_message(session_id, "user", user_text, input_mode)
+        if user_message is not None and interpreted.changed:
+            apply_interpretation = getattr(self._history, "apply_voice_interpretation", None)
+            if callable(apply_interpretation):
+                user_message = apply_interpretation(
+                    user_message.id,
+                    interpreted.text,
+                    interpreted.replacement_count,
+                )
         self._last_user_message = user_message
         if self._memory_service is None:
             return []
