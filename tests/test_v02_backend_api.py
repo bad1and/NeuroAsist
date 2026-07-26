@@ -38,6 +38,7 @@ def test_status_returns_safe_public_status(client: TestClient) -> None:
 
     assert response.status_code == 200
     body = response.json()
+    assert body["app_name"] == "Iris"
     assert body["backend"] == "ok"
     assert body["llm_provider"] == "deepseek"
     assert body["llm_model"]

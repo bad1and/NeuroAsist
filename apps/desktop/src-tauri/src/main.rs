@@ -95,7 +95,7 @@ impl DesktopState {
         let generation = self.core_generation.fetch_add(1, Ordering::SeqCst) + 1;
         let runtime = self.runtime();
         let data_root = desktop_data_root(&self.root);
-        std::fs::create_dir_all(&data_root).map_err(|error| format!("Could not create NeuroAsist data directory: {error}"))?;
+        std::fs::create_dir_all(&data_root).map_err(|error| format!("Could not create Iris data directory: {error}"))?;
         let port = runtime.api_base_url.rsplit(':').next().unwrap_or("8000");
         let api_key = read_api_key()?;
         let avatar_enabled = self.avatar_executable(app).is_some() && !self.safe_mode;
@@ -375,7 +375,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![desktop_runtime, restart_core, toggle_avatar, api_key_configured, save_api_key, remove_api_key])
         .build(tauri::generate_context!())
-        .expect("error while building NeuroAsist desktop shell");
+        .expect("error while building Iris desktop shell");
 
     app.run(|app, event| {
             if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
@@ -387,7 +387,7 @@ fn main() {
 fn create_main_window(app: &AppHandle, runtime: DesktopRuntime) -> tauri::Result<()> {
     let bootstrap = format!("window.__NEUROASIST_DESKTOP_CONFIG__ = {};", serde_json::to_string(&runtime).expect("desktop config serializes"));
     WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-        .title("NeuroAsist")
+        .title("Iris")
         .inner_size(1120.0, 760.0)
         .min_inner_size(760.0, 540.0)
         .initialization_script(&bootstrap)
@@ -396,14 +396,14 @@ fn create_main_window(app: &AppHandle, runtime: DesktopRuntime) -> tauri::Result
 }
 
 fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
-    let show = MenuItemBuilder::with_id("show", "Show NeuroAsist").build(app)?;
+    let show = MenuItemBuilder::with_id("show", "Show Iris").build(app)?;
     let avatar = MenuItemBuilder::with_id("avatar", "Show / hide avatar").build(app)?;
     let safe_mode = MenuItemBuilder::with_id("safe-mode", "Restart in Safe Mode").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
     let menu = MenuBuilder::new(app).items(&[&show, &avatar, &safe_mode, &quit]).build()?;
     TrayIconBuilder::with_id("companion")
         .icon(tauri::include_image!("./icons/32x32.png"))
-        .tooltip("NeuroAsist companion")
+        .tooltip("Iris companion")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => show_main_window(app),

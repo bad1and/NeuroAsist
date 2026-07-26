@@ -337,7 +337,7 @@ function SetupWizard({ onComplete }: { onComplete: () => Promise<void> }) {
     <main className="setup-workspace">
       <section className="setup-card" aria-labelledby="setup-title">
         <span className="eyebrow">ПЕРВИЧНАЯ НАСТРОЙКА</span>
-        <h1 id="setup-title">Подключите NeuroAsist</h1>
+        <h1 id="setup-title">Подключите Iris</h1>
         <p>Введите ключ DeepSeek один раз. Он хранится в диспетчере учётных данных Windows, а не в файлах проекта.</p>
         <form className="setup-form" onSubmit={submit}>
           <label>
@@ -373,8 +373,7 @@ function Sidebar({
   return (
     <aside className={`sidebar${isOpen ? " is-open" : ""}`} aria-label="Основная навигация">
       <div className="sidebar-brand">
-        <span className="brand-mark" aria-hidden="true">N</span>
-        <strong>NeuroAsist</strong>
+        <img className="brand-logo" src="/brand/iris-wordmark-light.svg" alt="Iris" />
         <button className="icon-button sidebar-close" aria-label="Закрыть меню" title="Закрыть меню" onClick={onClose}><X size={18} /></button>
       </div>
       <nav className="sidebar-nav" aria-label="Разделы приложения">
@@ -1209,7 +1208,7 @@ function ChatPage({
         )}
         {messages.map((message) => (
           <article className={`message ${message.role}`} key={message.id}>
-            <div className="message-role">{message.role === "user" ? "Вы" : "NeuroAsist"}</div>
+            <div className="message-role">{message.role === "user" ? "Вы" : "Iris"}</div>
             <p>{message.content}</p>
             {message.ttsError && <div className="message-error">{message.ttsError}</div>}
             {message.audioUrl && (
@@ -1277,7 +1276,7 @@ function ChatPage({
             )}
           </article>
         ))}
-        {loading && <div className="assistant-thinking" role="status"><span aria-hidden="true" /><span aria-hidden="true" /><span aria-hidden="true" />NeuroAsist печатает</div>}
+        {loading && <div className="assistant-thinking" role="status"><span aria-hidden="true" /><span aria-hidden="true" /><span aria-hidden="true" />Iris печатает</div>}
       </div>
 
       {error && <div className="error-banner" role="alert"><CircleAlert size={18} aria-hidden="true" />{error}{retryText && <button className="text-button" type="button" onClick={() => { setDraft(retryText); setRetryText(null); }}>Повторить</button>}</div>}
@@ -1836,7 +1835,7 @@ function ModelManager() {
             {!model.installed && <button className="primary-button" onClick={() => void install(model.id)} disabled={model.status === "downloading"}>{model.status === "failed" ? "Повторить загрузку" : "Скачать"}</button>}
             {model.installed && <button className="secondary" onClick={() => void remove(model.id)}>Удалить</button>}
           </div>
-          {model.restart_required && model.installed && <small>Перезапустите NeuroAsist, чтобы использовать модель.</small>}
+          {model.restart_required && model.installed && <small>Перезапустите Iris, чтобы использовать модель.</small>}
         </div>;
       })}
       {message && <div className="notice">{message}</div>}
@@ -1873,7 +1872,7 @@ function BackupControls() {
     <section className="system-card" aria-label="Резервные копии">
       <div className="panel-header"><div><h2>Резервные копии</h2><span>Память и настройки, срок хранения — 30 дней</span></div><button className="primary-button" onClick={() => void create()} disabled={busy}>{busy ? "Создаём…" : "Создать копию"}</button></div>
       {backups.length ? <div className="settings-grid">{backups.slice(0, 3).map((backup) => <InfoRow key={backup.name} label={backup.name} value={`${Math.ceil(backup.size_bytes / 1024)} КБ · ${formatTime(backup.created_at)}`} />)}</div> : <span className="card-empty">Резервных копий пока нет.</span>}
-      <small>Удаление NeuroAsist не удаляет эти данные из профиля Windows.</small>
+      <small>Удаление Iris не удаляет эти данные из профиля Windows.</small>
       {message && <div className="notice">{message}</div>}
     </section>
   );

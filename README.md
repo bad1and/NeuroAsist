@@ -1,6 +1,8 @@
 <div align="center">
 
-# NeuroAsist
+<img src="./apps/web/public/brand/iris-wordmark-dark.svg" width="240" alt="Iris logo">
+
+# Iris
 
 ### Local-first voice AI character and future neuro‑VTuber platform
 
@@ -16,12 +18,14 @@
 </div>
 
 > [!IMPORTANT]
-> **NeuroAsist v0.6 is an experimental local desktop development branch.**
+> **Iris v0.6 is an experimental local desktop development branch.**
 > The Tauri shell starts the React UI and FastAPI core together. Text and voice chat, long-term memory, and an optional Unity VRM avatar runtime are available.
+
+Iris is the official name. You can also call her **Ирис**, **Айрис**, or **Ириска**.
 
 ## About the project
 
-NeuroAsist is a local control panel and backend for an AI character that can hear the user, understand a request, generate a response, and speak it aloud.
+Iris is a local control panel and backend for an AI character that can hear the user, understand a request, generate a response, and speak it aloud.
 
 The current release focuses on a stable voice interaction loop:
 
@@ -114,8 +118,8 @@ The header displays backend status, WebSocket connection state, API-key availabi
 ### 1. Clone the development branch
 
 ```powershell
-git clone --branch v0.6 --single-branch https://github.com/bad1and/NeuroAsist.git
-cd NeuroAsist
+git clone --branch v0.6 --single-branch https://github.com/bad1and/NeuroAsist.git Iris
+cd Iris
 ```
 
 ### 2. Create a Python environment
@@ -439,7 +443,7 @@ The avatar bridge remains optional: unavailable Unity clients do not delay or fa
 ## Project structure
 
 ```text
-NeuroAsist/
+Iris/
 ├── apps/
 │   ├── backend/
 │   │   ├── main.py
@@ -617,7 +621,7 @@ history. See [ChromaDB memory](Docs/chroma-memory.md) for configuration and
 limitations; the old local-LLM graph proposal is explicitly archived in
 [Memory plan](Docs/Memory_plan.md).
 
-NeuroAsist v0.4.0 does not provide:
+The pre-Iris v0.4.0 build does not provide:
 
 - always-on listening;
 - Unity live-audio segments (full WAV avatar playback is supported);
@@ -645,6 +649,6 @@ V0.5 progresses only through the milestones in the companion blueprint: freeze, 
 
 ## License
 
-NeuroAsist is licensed under the [Apache License 2.0](LICENSE).
+Iris is licensed under the [Apache License 2.0](LICENSE).
 
 Third-party models and services may have their own licenses and usage terms. Check the Silero model and configured LLM provider terms before commercial use.

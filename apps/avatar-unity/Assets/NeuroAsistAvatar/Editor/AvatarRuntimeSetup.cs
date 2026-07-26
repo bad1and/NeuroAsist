@@ -10,20 +10,20 @@ namespace NeuroAsist.AvatarEditor
     public static class AvatarRuntimeSetup
     {
         private const string ScenePath = "Assets/Scenes/AvatarOverlay.unity";
-        [MenuItem("NeuroAsist/Avatar/Setup Canonical Scene")]
+        [MenuItem("Iris/Avatar/Setup Canonical Scene")]
         public static void Setup()
         {
             var scene = EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
             var audio = GameObject.Find("LipSyncAudio");
             var vrm = Object.FindFirstObjectByType<Vrm10Instance>();
-            if (audio == null || vrm == null) { EditorUtility.DisplayDialog("NeuroAsist Avatar", "LipSyncAudio or Vrm10Instance is missing. Existing scene was not changed.", "OK"); return; }
+            if (audio == null || vrm == null) { EditorUtility.DisplayDialog("Iris Avatar", "LipSyncAudio or Vrm10Instance is missing. Existing scene was not changed.", "OK"); return; }
             var root = GameObject.Find("NeuroAsistAvatarRuntime") ?? new GameObject("NeuroAsistAvatarRuntime");
             AvatarMotionSetup.SetupAssets();
             var settings = AssetDatabase.LoadAssetAtPath<AvatarRuntimeSettings>("Assets/NeuroAsistAvatar/AvatarRuntimeSettings.asset");
             if (settings == null) { settings = ScriptableObject.CreateInstance<AvatarRuntimeSettings>(); AssetDatabase.CreateAsset(settings, "Assets/NeuroAsistAvatar/AvatarRuntimeSettings.asset"); }
             var motionSettings = AvatarMotionSetup.EnsureSettings();
             var animator = vrm.GetComponentInChildren<Animator>();
-            if (animator == null) { EditorUtility.DisplayDialog("NeuroAsist Avatar", "No Animator was found below Vrm10Instance. Existing scene was not changed.", "OK"); return; }
+            if (animator == null) { EditorUtility.DisplayDialog("Iris Avatar", "No Animator was found below Vrm10Instance. Existing scene was not changed.", "OK"); return; }
             var motionController = AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>(AvatarMotionSetup.ControllerPath);
             if (animator.runtimeAnimatorController == null && motionController != null)
             {
@@ -51,12 +51,12 @@ namespace NeuroAsist.AvatarEditor
             EditorSceneManager.MarkSceneDirty(scene); EditorSceneManager.SaveScene(scene); AssetDatabase.SaveAssets();
             Debug.Log("[AvatarSetup] Canonical avatar runtime configured. Existing VRM and uLipSync profile were preserved.");
         }
-        [MenuItem("NeuroAsist/Avatar/Validate Canonical Scene")]
+        [MenuItem("Iris/Avatar/Validate Canonical Scene")]
         public static void Validate()
         {
             var audio = GameObject.Find("LipSyncAudio"); var vrm = Object.FindFirstObjectByType<Vrm10Instance>();
             if (audio == null || audio.GetComponent<AudioSource>() == null || vrm == null) Debug.LogError("[AvatarSetup] Missing LipSyncAudio/AudioSource/Vrm10Instance.");
-            else Debug.Log("[AvatarSetup] Scene validation passed. Run NeuroAsist/Avatar/Validate Avatar Motion Setup and verify uLipSync movement with a real WAV in Play mode.");
+            else Debug.Log("[AvatarSetup] Scene validation passed. Run Iris/Avatar/Validate Avatar Motion Setup and verify uLipSync movement with a real WAV in Play mode.");
         }
         private static T Get<T>(GameObject gameObject) where T : Component => gameObject.GetComponent<T>() ?? gameObject.AddComponent<T>();
         private static void Link(Object target, string field, Object value) { var serialized = new SerializedObject(target); serialized.FindProperty(field).objectReferenceValue = value; serialized.ApplyModifiedPropertiesWithoutUndo(); }

@@ -55,7 +55,7 @@ export function JournalPage() {
     </form>
     {error && <p className="error-text" role="alert">{error}</p>}
     {results && <div className="history-list search-results">
-      {results.length ? results.map((message) => <article className={`message ${message.role === "user" ? "user" : "assistant"}`} key={message.id}><div className="message-role">{message.role === "user" ? "Вы" : "NeuroAsist"}</div><p>{message.content}</p></article>) : <EmptyHistory text="Ничего не найдено" />}
+      {results.length ? results.map((message) => <article className={`message ${message.role === "user" ? "user" : "assistant"}`} key={message.id}><div className="message-role">{message.role === "user" ? "Вы" : "Iris"}</div><p>{message.content}</p></article>) : <EmptyHistory text="Ничего не найдено" />}
     </div>}
     {!results && <div className="history-list">
       {items.length ? items.map((item) => <article className="history-card" key={item.id ?? item.day}>

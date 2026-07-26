@@ -1,6 +1,8 @@
 <div align="center">
 
-# NeuroAsist
+<img src="./apps/web/public/brand/iris-wordmark-dark.svg" width="240" alt="Логотип Iris">
+
+# Iris
 
 ### Локальный голосовой AI‑персонаж и будущая neuro‑VTuber платформа
 
@@ -16,12 +18,14 @@
 </div>
 
 > [!IMPORTANT]
-> **NeuroAsist v0.6 — экспериментальная development-ветка локального desktop-приложения.**
+> **Iris v0.6 — экспериментальная development-ветка локального desktop-приложения.**
 > Tauri запускает React-интерфейс и FastAPI core вместе. Доступны текстовый/голосовой чат, долгосрочная память и опциональный Unity VRM-аватар.
+
+Iris — официальное имя. К ней также можно обращаться: **Ирис**, **Айрис** или **Ириска**.
 
 ## О проекте
 
-NeuroAsist — локальная панель и backend для AI‑персонажа, который может услышать пользователя, понять запрос, сформировать ответ и озвучить его.
+Iris — локальная панель и backend для AI‑персонажа, который может услышать пользователя, понять запрос, сформировать ответ и озвучить его.
 
 Текущая версия сосредоточена на стабильном голосовом цикле:
 
@@ -114,8 +118,8 @@ flowchart LR
 ### 1. Клонирование ветки
 
 ```powershell
-git clone --branch v0.6 --single-branch https://github.com/bad1and/NeuroAsist.git
-cd NeuroAsist
+git clone --branch v0.6 --single-branch https://github.com/bad1and/NeuroAsist.git Iris
+cd Iris
 ```
 
 ### 2. Python-окружение
@@ -404,7 +408,7 @@ Browser MediaRecorder
 ## Структура проекта
 
 ```text
-NeuroAsist/
+Iris/
 ├── apps/
 │   ├── backend/
 │   │   ├── main.py
@@ -561,7 +565,7 @@ VOICE_STT_COMPUTE_TYPE=int8_float16
 
 ## Текущие ограничения
 
-NeuroAsist v0.4.0 пока не умеет:
+Версия до ребрендинга, NeuroAsist v0.4.0, пока не умеет:
 
 - постоянно слушать микрофон;
 - автоматически вести диалог через VAD;
@@ -595,6 +599,6 @@ V0.5 выполняется только по milestones из companion blueprin
 
 ## Лицензия
 
-NeuroAsist распространяется по [Apache License 2.0](LICENSE).
+Iris распространяется по [Apache License 2.0](LICENSE).
 
 У сторонних моделей и сервисов могут быть собственные лицензии и условия использования. Перед коммерческим использованием проверь лицензию выбранной Silero-модели и правила LLM-провайдера.

@@ -5,6 +5,10 @@ from apps.backend.app.agents.character.prompts import character_json_prompt, cha
 def test_default_persona_requires_adaptive_conversational_replies() -> None:
     persona = get_persona("default")
 
+    assert persona.display_name == "Iris"
+    assert "Ты — Iris" in persona.voice
+    for alias in ("Ирис", "Айрис", "Ириска"):
+        assert alias in persona.voice
     assert "Длину выбирай по ситуации" in persona.voice
     assert "Не пихай мат в каждое предложение" in persona.voice
     assert "не превращай каждый ответ в шутку" in persona.voice

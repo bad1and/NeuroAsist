@@ -75,6 +75,8 @@ describe("русский интерфейс", () => {
     const { container } = render(<App />);
 
     await screen.findByRole("button", { name: "Диалог" });
+    expect(screen.getByRole("img", { name: "Iris" })).toBeInTheDocument();
+    expect(container.querySelector("img.brand-logo")).toHaveAttribute("src", "/brand/iris-wordmark-light.svg");
     expect(container.querySelector("main.workspace-chat")).toBeInTheDocument();
     expect(container.querySelector(".chat-panel .message-list")).toBeInTheDocument();
     expect(container.querySelector(".chat-panel .chat-composer")).toBeInTheDocument();

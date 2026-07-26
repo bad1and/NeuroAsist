@@ -1,4 +1,4 @@
-# NeuroAsist Unity Avatar
+# Iris Unity Avatar
 
 The standalone Windows renderer uses the `Liqu.vrm` character and connects to the desktop core through the Avatar WebSocket v2 protocol.
 

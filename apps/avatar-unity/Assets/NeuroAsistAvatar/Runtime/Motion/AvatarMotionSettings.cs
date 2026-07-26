@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace NeuroAsist.Avatar
 {
-    [CreateAssetMenu(menuName = "NeuroAsist/Avatar/Motion Settings", fileName = "AvatarMotionSettings")]
+    [CreateAssetMenu(menuName = "Iris/Avatar/Motion Settings", fileName = "AvatarMotionSettings")]
     public sealed class AvatarMotionSettings : ScriptableObject
     {
         public bool MotionEnabled = true;

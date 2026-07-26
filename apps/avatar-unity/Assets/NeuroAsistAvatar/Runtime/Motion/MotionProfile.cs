@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace NeuroAsist.Avatar
 {
-    [CreateAssetMenu(menuName = "NeuroAsist/Avatar/Motion Profile", fileName = "MotionProfile")]
+    [CreateAssetMenu(menuName = "Iris/Avatar/Motion Profile", fileName = "MotionProfile")]
     public sealed class MotionProfile : ScriptableObject
     {
         public string ProfileId = "neutral";

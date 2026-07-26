@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace NeuroAsist.Avatar
 {
-    [CreateAssetMenu(menuName = "NeuroAsist/Avatar/Gesture Definition", fileName = "GestureDefinition")]
+    [CreateAssetMenu(menuName = "Iris/Avatar/Gesture Definition", fileName = "GestureDefinition")]
     public sealed class GestureDefinition : ScriptableObject
     {
         public string Id = "TalkGesture01";

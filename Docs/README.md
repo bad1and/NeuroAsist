@@ -1,9 +1,9 @@
-# Документация NeuroAsist
+# Документация Iris
 
 ## Начать отсюда
 
 - [Milestones 0–11](MILESTONES.md) — единая карта работ и статусы.
-- [V0.5 Companion Blueprint](NeuroAsist_V0.5_Companion_Blueprint.md) — полная целевая архитектура.
+- [V0.5 Companion Blueprint](NeuroAsist_V0.5_Companion_Blueprint.md) — полная целевая архитектура; в самом документе сохранено историческое имя NeuroAsist.
 - [Локальный запуск и отложенные release-задачи](deferred-release-work.md).
 - [ChromaDB memory](chroma-memory.md) — текущий retrieval/index и настройки V0.6.
 - [Milestones 0–11](MILESTONES.md) — в том числе текущий статус Stabilization Gate.

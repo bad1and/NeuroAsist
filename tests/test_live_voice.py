@@ -279,7 +279,7 @@ async def test_streaming_agent_uses_character_persona_prompt(tmp_path: Path) -> 
 
     assert result == ["Окей."]
     system_prompt = provider.messages[0].content
-    assert "Нейро Пизда" in system_prompt
+    assert "Ты — Iris" in system_prompt
     assert "NeuroAsist" not in system_prompt
     assert "дружелюбный персонаж" not in system_prompt
     assert "не возвращай JSON" in system_prompt

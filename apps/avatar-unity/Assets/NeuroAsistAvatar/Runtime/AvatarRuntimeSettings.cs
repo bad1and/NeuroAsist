@@ -5,7 +5,7 @@ namespace NeuroAsist.Avatar
 {
     public enum LipSyncMode { Auto, ULipSync, VolumeFallback, Disabled }
 
-    [CreateAssetMenu(menuName = "NeuroAsist/Avatar Runtime Settings", fileName = "AvatarRuntimeSettings")]
+    [CreateAssetMenu(menuName = "Iris/Avatar Runtime Settings", fileName = "AvatarRuntimeSettings")]
     public sealed class AvatarRuntimeSettings : ScriptableObject
     {
         public string BackendHttpBaseUrl = "http://127.0.0.1:8000";

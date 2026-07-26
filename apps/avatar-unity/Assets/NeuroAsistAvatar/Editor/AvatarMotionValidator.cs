@@ -7,7 +7,7 @@ namespace NeuroAsist.AvatarEditor
 {
     public static class AvatarMotionValidator
     {
-        [MenuItem("NeuroAsist/Avatar/Validate Avatar Motion Setup")]
+        [MenuItem("Iris/Avatar/Validate Avatar Motion Setup")]
         public static void Validate()
         {
             var settings = AssetDatabase.LoadAssetAtPath<AvatarMotionSettings>(AvatarMotionSetup.SettingsPath);

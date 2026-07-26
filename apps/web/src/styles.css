@@ -72,9 +72,8 @@ select { appearance: auto; }
   z-index: 20;
 }
 
-.sidebar-brand { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 0 8px 16px; }
-.brand-mark { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; color: #fff8f4; background: var(--accent); font-weight: 800; }
-.sidebar-brand strong { letter-spacing: -.02em; }
+.sidebar-brand { display: flex; align-items: center; min-height: 92px; padding: 0 6px 12px; }
+.brand-logo { display: block; width: 120px; height: 88px; object-fit: contain; object-position: left center; }
 .sidebar-nav { display: grid; gap: 4px; }
 .sidebar-footer { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border); }
 
