@@ -178,6 +178,7 @@ def test_handle_user_message_uses_json_persona_prompt() -> None:
     assert '"emotion"' in system_prompt
     assert '"intent"' in system_prompt
     assert "Не возвращай JSON" not in system_prompt
+    assert "голосовых расшифровках возможны опечатки" in system_prompt
 
 
 def test_handle_user_message_uses_deterministic_fallback_for_empty_model_response() -> None:

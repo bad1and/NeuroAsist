@@ -4,6 +4,8 @@ Long-term memory remains canonical in SQLite; ChromaDB is a rebuildable semantic
 
 Memory extraction runs asynchronously after the visible reply, so it does not add a second DeepSeek wait to chat latency. Before an extraction request, password, code, token, and API-key spans are removed. Other independent facts in the same message are still eligible for memory. A small deterministic safety net preserves only clearly structured response-length preferences, current goals, and the assistant-developer relationship when the extraction model misses them; ambiguous social ties are kept in review rather than injected into context.
 
+Voice input is interpreted conservatively before context, LLM, and memory use: obvious common typos and close matches to names already stored in memory may be repaired. The raw STT transcript remains the original message, while a separate corrected value is indexed and used for continuity. Ambiguous words are not silently changed.
+
 ## Flow
 
 1. Context Manager retrieves active memories from FTS and ChromaDB.

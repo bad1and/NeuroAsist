@@ -413,6 +413,16 @@ LLM text stream
 
 The live mode uses configurable chunk sizes, queue limits, TTS concurrency, and playback prebuffering. Voice input adds STT first; typed input enters the same pipeline directly.
 
+### Barge-in
+
+When the hands-free VAD confirms that the user has started speaking (after its
+short anti-noise debounce), playback is stopped locally before any network
+round-trip: the live queue, a complete WAV, and browser speech are all muted.
+The client then cancels the live utterance; the backend cancels the active LLM/
+TTS work, any queued full-WAV synthesis for that session, and sends `avatar.stop`
+to Unity. Pressing the push-to-talk button while the assistant is responding
+uses the same path before recording begins.
+
 ### Unity avatar playback
 
 ```text
@@ -599,7 +609,9 @@ the user-facing response.
 Passwords, codes, tokens, and API keys are removed before the extraction prompt
 and can never become memories. A narrow reliable fallback covers stated response
 length preference, current goal, and assistant developers; ambiguous social
-relations stay in review. Memory Center is the final user control: records can
+relations stay in review. Voice STT text receives a conservative interpretation
+before it reaches DeepSeek: obvious typos and known names can be repaired while
+the raw transcript remains available in the journal. Memory Center is the final user control: records can
 be inspected, edited, confirmed, removed, reindexed, or reset together with
 history. See [ChromaDB memory](Docs/chroma-memory.md) for configuration and
 limitations; the old local-LLM graph proposal is explicitly archived in
@@ -608,8 +620,6 @@ limitations; the old local-LLM graph proposal is explicitly archived in
 NeuroAsist v0.4.0 does not provide:
 
 - always-on listening;
-- automatic voice activity detection conversations;
-- interruption while the character is speaking;
 - Unity live-audio segments (full WAV avatar playback is supported);
 - guaranteed high-quality semantic retrieval: the ChromaDB index is in development and currently uses lightweight hash embeddings;
 - file, shell, browser, screen, or desktop access;

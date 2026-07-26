@@ -115,7 +115,7 @@
 
 **Цель.** Перейти от записи «нажал–сказал–отправил» к естественному разговору.
 
-**Сделано.** Browser AudioWorklet PCM, input WebSocket, RAM-only ring buffer, Silero/energy VAD, barge-in, отмена generation, PlaybackCoordinator и push-to-talk fallback.
+**Сделано.** Browser AudioWorklet PCM, input WebSocket, RAM-only ring buffer, Silero/energy VAD, barge-in, отмена generation, PlaybackCoordinator и push-to-talk fallback. Подтверждённое начало речи сразу останавливает browser/live/Unity-аудио, а backend отменяет streaming и незавершённый batch TTS только текущей сессии.
 
 **Результат.** Hands-free слушает только при включённом режиме и не сохраняет сырой микрофонный звук по умолчанию.
 

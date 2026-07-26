@@ -89,6 +89,32 @@ def wait_for_event(client: TestClient, session_id: str, event_type: str) -> dict
     raise AssertionError(f"Event not found: {event_type}")
 
 
+def test_voice_interrupt_uses_unified_session_cancellation(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str | None]] = []
+
+    async def interrupt(session_id: str, utterance_id: str | None) -> dict[str, int]:
+        calls.append((session_id, utterance_id))
+        return {"batch": 2}
+
+    monkeypatch.setattr(app.state, "interrupt_voice_session", interrupt)
+
+    response = client.post(
+        "/voice/interrupt",
+        json={"session_id": "barge-in", "utterance_id": "utterance-1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "cancelled",
+        "session_id": "barge-in",
+        "cancelled": {"batch": 2},
+    }
+    assert calls == [("barge-in", "utterance-1")]
+
+
 def test_voice_chat_returns_transcript_reply_and_queues_tts(client: TestClient) -> None:
     response = client.post(
         "/voice/chat",

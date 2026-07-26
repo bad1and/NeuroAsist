@@ -71,7 +71,11 @@ async def websocket_voice(websocket: WebSocket, session_id: str, version: int = 
         while True:
             message = await websocket.receive_json()
             if message.get("type") == "voice.cancel":
-                await manager.cancel(session_id, message.get("utterance_id"))
+                interrupt = getattr(websocket.app.state, "interrupt_voice_session", None)
+                if callable(interrupt):
+                    await interrupt(session_id, message.get("utterance_id"))
+                else:
+                    await manager.cancel(session_id, message.get("utterance_id"))
             elif message.get("type") == "playback.underrun":
                 logger.info(
                     "Live playback underrun: session_id=%s utterance_id=%s playback_underrun_ms=%s",
