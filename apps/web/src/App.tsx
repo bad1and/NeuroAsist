@@ -36,6 +36,7 @@ import {
   getModels,
   getPronunciations,
   installModel,
+  interruptVoiceSession,
   isDesktopManaged,
   removeModel,
   reindexMemories,
@@ -532,6 +533,23 @@ function ChatPage({
     activeAudioRef.current = except ?? null;
   }, []);
 
+  const interruptAssistantSpeech = useCallback(() => {
+    const socket = liveSocketRef.current;
+    const utteranceId = socket?.activeUtteranceId ?? undefined;
+    // Local audio must stop before waiting for either WebSocket or REST I/O.
+    stopVoicePlayback();
+    livePlayerRef.current?.stop();
+    const sentOverLiveSocket = socket?.cancel() ?? false;
+    socket?.clearActive();
+    playbackCoordinatorRef.current.cancel();
+    setLoading(false);
+    // A live socket normally carries the cancellation.  REST covers a batch
+    // fallback (or a temporarily disconnected socket), including Unity audio.
+    if (!sentOverLiveSocket) {
+      void interruptVoiceSession(SESSION_ID, utteranceId).catch(() => undefined);
+    }
+  }, [stopVoicePlayback]);
+
   const playAudioUrl = useCallback(
     async (audioUrl: string): Promise<boolean> => {
       stopVoicePlayback();
@@ -703,6 +721,8 @@ function ChatPage({
             livePlayerRef.current?.finish(event.utterance_id);
           }
         } else if (event.type === "voice.utterance.cancelled") {
+          livePlayerRef.current?.stop();
+          stopVoicePlayback();
           playbackCoordinatorRef.current.cancel();
           liveSocketRef.current?.clearActive();
           setLoading(false);
@@ -740,7 +760,7 @@ function ChatPage({
     }
     await player.unlock();
     await liveSocketRef.current.connect();
-  }, [ensureLivePlayer, showMemoryUpdates, speakTextInBrowser]);
+  }, [ensureLivePlayer, showMemoryUpdates, speakTextInBrowser, stopVoicePlayback]);
 
   useEffect(() => () => {
     livePlayerRef.current?.stop();
@@ -997,6 +1017,9 @@ function ChatPage({
       return;
     }
 
+    if (bargeIn) {
+      interruptAssistantSpeech();
+    }
     setError(null);
     try {
       await ensureLivePlayer().unlock();
@@ -1048,17 +1071,10 @@ function ChatPage({
       stopRecording();
       return;
     }
-    if (voiceState === "thinking" || voiceState === "speaking") {
-      setVoiceState("stopping");
-      livePlayerRef.current?.stop();
-      liveSocketRef.current?.cancel();
-      liveSocketRef.current?.clearActive();
-      playbackCoordinatorRef.current.cancel();
-      setLoading(false);
-      await startRecording(true);
-      return;
-    }
-    await startRecording();
+    // The avatar can still be speaking after the browser has released its
+    // local playback lease.  Treat every new push-to-talk recording as a
+    // barge-in instead of relying on UI state to detect that case.
+    await startRecording(true);
   };
 
   const submitVoice = async (audio: Blob, endOfSpeechUnixMs?: number) => {
@@ -1163,13 +1179,10 @@ function ChatPage({
       vadRecorderRef.current = recorder;
       await recorder.start(
         (pcm16) => pcmInputRef.current?.sendPcm(pcm16),
-        (nextState) => {
+        (nextState, event) => {
           setVadState(nextState);
-          if (nextState === "speech" && liveSocketRef.current?.activeUtteranceId) {
-            livePlayerRef.current?.stop();
-            liveSocketRef.current.cancel();
-            liveSocketRef.current.clearActive();
-            playbackCoordinatorRef.current.cancel();
+          if (event === "speech_started") {
+            interruptAssistantSpeech();
           }
         },
       );
@@ -1325,10 +1338,10 @@ function voiceButtonLabel(voiceState: VoiceState): string {
     return "Распознаём речь";
   }
   if (voiceState === "thinking") {
-    return "Остановить";
+    return "Перебить и говорить";
   }
   if (voiceState === "speaking") {
-    return "Остановить озвучку";
+    return "Перебить и говорить";
   }
   if (voiceState === "stopping") {
     return "Останавливаем";

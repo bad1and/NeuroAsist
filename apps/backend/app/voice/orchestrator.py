@@ -20,6 +20,7 @@ class SpeechOrchestrator:
         self.settings = settings
         self.avatar_service = avatar_service
         self._tasks: set[asyncio.Task[None]] = set()
+        self._tasks_by_session: dict[str, set[asyncio.Task[None]]] = {}
 
     def enqueue(
         self,
@@ -54,7 +55,18 @@ class SpeechOrchestrator:
             )
         )
         self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        self._tasks_by_session.setdefault(session_id, set()).add(task)
+
+        def discard(completed: asyncio.Task[None]) -> None:
+            self._tasks.discard(completed)
+            session_tasks = self._tasks_by_session.get(session_id)
+            if session_tasks is None:
+                return
+            session_tasks.discard(completed)
+            if not session_tasks:
+                self._tasks_by_session.pop(session_id, None)
+
+        task.add_done_callback(discard)
         return request_id
 
     def bind_runtime(self, voice_service, settings) -> None:
@@ -68,6 +80,15 @@ class SpeechOrchestrator:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def cancel_session(self, session_id: str) -> int:
+        """Cancel queued or synthesizing full-WAV speech for one conversation."""
+        tasks = list(self._tasks_by_session.get(session_id, set()))
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        return len(tasks)
 
     async def _run(
         self,
@@ -98,6 +119,16 @@ class SpeechOrchestrator:
             if not result.audio_path.exists() or not result.audio_path.is_file():
                 raise FileNotFoundError("TTS provider did not create a WAV file")
         except asyncio.CancelledError:
+            self.voice_service.set_tts_job(
+                voice_request_id,
+                {"status": "cancelled", "audio_url": None, "voice": voice},
+            )
+            self.event_bus.publish(
+                "voice.tts_cancelled",
+                "info",
+                "Voice synthesis cancelled by user speech",
+                {"session_id": session_id, "voice_request_id": voice_request_id, "voice": voice},
+            )
             raise
         except TimeoutError:
             self._fail(session_id, voice_request_id, voice, "Voice synthesis timed out", "TimeoutError")

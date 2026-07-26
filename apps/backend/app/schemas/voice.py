@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class VoiceProviderStats(BaseModel):
@@ -42,3 +42,8 @@ class VoiceLiveResponse(BaseModel):
     voice_request_id: str
     transcript: str
     status: str = "streaming"
+
+
+class VoiceInterruptRequest(BaseModel):
+    session_id: str = Field(default="default", min_length=1, max_length=200)
+    utterance_id: str | None = Field(default=None, max_length=200)

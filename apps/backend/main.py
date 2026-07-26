@@ -204,6 +204,21 @@ def create_app() -> FastAPI:
         on_overlay_bounds_changed=persist_avatar_overlay_bounds,
     )
     voice_session_manager.bind_avatar_service(avatar_service)
+    speech_orchestrator = SpeechOrchestrator(voice_service, event_bus, settings, avatar_service)
+
+    async def interrupt_voice_session(session_id: str, utterance_id: str | None = None) -> dict[str, int]:
+        """Unified barge-in cancellation for streaming, batch TTS and avatar audio."""
+        await voice_session_manager.cancel(session_id, utterance_id)
+        batch_cancelled = await speech_orchestrator.cancel_session(session_id)
+        await avatar_service.stop(session_id=session_id, utterance_id=utterance_id)
+        event_bus.publish(
+            "voice.interrupted",
+            "info",
+            "Assistant speech interrupted by user input",
+            {"session_id": session_id, "utterance_id": utterance_id, "batch_cancelled": batch_cancelled},
+        )
+        return {"batch": batch_cancelled}
+
     vad_model_path = settings.voice_silero_vad_model or model_manager.path_for("silero-vad")
     vad_provider = SileroVadProvider(vad_model_path) if settings.voice_vad_provider == "silero" else VadProvider()
 
@@ -229,13 +244,12 @@ def create_app() -> FastAPI:
         )
 
     async def pcm_speech_started(session_id: str) -> None:
-        await voice_session_manager.cancel(session_id)
+        await interrupt_voice_session(session_id)
 
     voice_input_session_manager = VoiceInputSessionManager(
         voice_service, process_pcm_utterance, pcm_speech_started,
         vad=vad_provider, vad_threshold=settings.voice_vad_threshold, pre_roll_ms=settings.voice_vad_pre_roll_ms,
     )
-    speech_orchestrator = SpeechOrchestrator(voice_service, event_bus, settings, avatar_service)
     tts_audio_cleanup_task: asyncio.Task[None] | None = None
     summary_worker_task: asyncio.Task[None] | None = None
     semantic_sync_worker_task: asyncio.Task[None] | None = None
@@ -451,6 +465,7 @@ def create_app() -> FastAPI:
     app.state.voice_service = voice_service
     app.state.voice_session_manager = voice_session_manager
     app.state.voice_input_session_manager = voice_input_session_manager
+    app.state.interrupt_voice_session = interrupt_voice_session
     app.state.avatar_service = avatar_service
     app.state.speech_orchestrator = speech_orchestrator
     app.include_router(chat_router)
