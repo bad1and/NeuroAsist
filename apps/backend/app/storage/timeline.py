@@ -232,6 +232,34 @@ class TimelineStore:
             self._index_timeline_message(connection, message_id, corrected_content)
             return self._row_to_message(connection.execute("SELECT * FROM conversation_messages WHERE id = ?", (message_id,)).fetchone())
 
+    def apply_voice_interpretation(
+        self, message_id: str, corrected_content: str, replacement_count: int,
+    ) -> StoredTimelineMessage:
+        """Store an automatic STT interpretation without overwriting raw audio text."""
+        if not corrected_content.strip() or replacement_count < 1:
+            raise ValueError("Voice interpretation requires a changed non-empty value")
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM conversation_messages WHERE id = ? AND timeline_id = ?",
+                (message_id, PRIMARY_TIMELINE_ID),
+            ).fetchone()
+            if row is None:
+                raise KeyError(message_id)
+            if row["role"] != "user" or row["input_mode"] != "voice":
+                raise ValueError("Voice interpretation is only valid for user voice messages")
+            metadata = json.loads(row["metadata_json"])
+            metadata["voice_interpretation"] = {
+                "version": "v1",
+                "replacement_count": replacement_count,
+            }
+            connection.execute(
+                "UPDATE conversation_messages SET corrected_content = ?, metadata_json = ? WHERE id = ?",
+                (corrected_content, json.dumps(metadata, ensure_ascii=False), message_id),
+            )
+            self._index_timeline_message(connection, message_id, corrected_content)
+            updated = connection.execute("SELECT * FROM conversation_messages WHERE id = ?", (message_id,)).fetchone()
+            return self._row_to_message(updated)
+
     def cancel_message(self, message_id: str) -> StoredTimelineMessage:
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM conversation_messages WHERE id = ? AND timeline_id = ?", (message_id, PRIMARY_TIMELINE_ID)).fetchone()
@@ -1098,6 +1126,11 @@ class TimelineHistoryAdapter:
     def save_message(self, session_id: str, role: str, content: str, input_mode: str = "text") -> StoredTimelineMessage:
         message, _ = self._store.append_message(role=role, content=content, input_mode=input_mode, metadata={"legacy_session_id": session_id})
         return message
+
+    def apply_voice_interpretation(
+        self, message_id: str, corrected_content: str, replacement_count: int,
+    ) -> StoredTimelineMessage:
+        return self._store.apply_voice_interpretation(message_id, corrected_content, replacement_count)
 
     def get_recent_messages(self, session_id: str, limit: int) -> list[ChatMessage]:
         return self._store.get_recent_messages(session_id, limit)

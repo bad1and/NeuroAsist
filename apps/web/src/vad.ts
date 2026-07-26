@@ -63,7 +63,10 @@ export class BrowserVadRecorder {
   private objectUrl: string | null = null;
   private readonly gate = new VoiceActivityGate();
 
-  async start(onPcm: (pcm16: ArrayBuffer, sampleRate: number) => void, onState: (state: VadState) => void): Promise<void> {
+  async start(
+    onPcm: (pcm16: ArrayBuffer, sampleRate: number) => void,
+    onState: (state: VadState, event: VadEvent) => void,
+  ): Promise<void> {
     if (this.stream) return;
     if (!globalThis.AudioWorkletNode || !navigator.mediaDevices?.getUserMedia) {
       throw new Error("AudioWorklet VAD is unavailable in this browser");
@@ -81,12 +84,18 @@ export class BrowserVadRecorder {
     source.connect(this.node);
     this.node.connect(this.sink).connect(this.context.destination);
     this.gate.start(performance.now());
-    onState("listening");
+    onState("listening", null);
     this.node.port.onmessage = ({ data }) => {
       onPcm(data.pcm as ArrayBuffer, this.context?.sampleRate ?? 16000);
+      const previousState = this.gate.snapshot();
       const event = this.gate.feed(Number(data.rms) || 0, performance.now());
-      onState(this.gate.snapshot());
-      void event;
+      const nextState = this.gate.snapshot();
+      // AudioWorklet calls this about a hundred times per second.  Forward only
+      // meaningful VAD changes so consumers can safely attach one-shot actions
+      // such as barge-in to the confirmed speech_started event.
+      if (event || nextState !== previousState) {
+        onState(nextState, event);
+      }
     };
   }
 

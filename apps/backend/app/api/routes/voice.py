@@ -10,6 +10,7 @@ from apps.backend.app.llm.base import LLMProviderError
 from apps.backend.app.llm.providers.deepseek import DeepSeekProvider
 from apps.backend.app.schemas.voice import (
     VoiceChatResponse,
+    VoiceInterruptRequest,
     VoiceLiveResponse,
     VoiceProviderStats,
     VoiceTTSStatusResponse,
@@ -18,6 +19,18 @@ from apps.backend.app.voice.style import resolve_turn_voice_style
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+@router.post("/voice/interrupt")
+async def interrupt_voice(payload: VoiceInterruptRequest, request: Request) -> dict[str, object]:
+    """Stop all current speech for a session as soon as user speech begins."""
+    interrupt = getattr(request.app.state, "interrupt_voice_session", None)
+    if callable(interrupt):
+        cancelled = await interrupt(payload.session_id, payload.utterance_id)
+    else:
+        await request.app.state.voice_session_manager.cancel(payload.session_id, payload.utterance_id)
+        cancelled = {"live": 0, "batch": 0}
+    return {"status": "cancelled", "session_id": payload.session_id, "cancelled": cancelled}
 
 
 @router.post("/voice/chat", response_model=VoiceChatResponse | VoiceLiveResponse)
