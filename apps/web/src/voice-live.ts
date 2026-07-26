@@ -309,13 +309,15 @@ export class VoiceSocketClient {
     this.pendingSegment = null;
   }
 
-  send(type: string, payload: Record<string, unknown> = {}): void {
+  send(type: string, payload: Record<string, unknown> = {}): boolean {
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify({ type, utterance_id: this.activeUtteranceId, ...payload }));
+      return true;
     }
+    return false;
   }
 
-  cancel(): void { this.send("voice.cancel"); }
+  cancel(): boolean { return this.send("voice.cancel"); }
   close(): void {
     this.socket?.close();
     this.socket = null;

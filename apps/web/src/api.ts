@@ -192,6 +192,16 @@ export function sendLiveTextMessage(
   });
 }
 
+export function interruptVoiceSession(
+  sessionId: string,
+  utteranceId?: string,
+): Promise<{ status: string }> {
+  return requestJson<{ status: string }>("/voice/interrupt", {
+    method: "POST",
+    body: JSON.stringify({ session_id: sessionId, utterance_id: utteranceId }),
+  });
+}
+
 export async function sendVoiceMessage(
   sessionId: string,
   audio: Blob,

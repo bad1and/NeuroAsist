@@ -1,3 +1,4 @@
+import asyncio
 from datetime import timedelta
 
 import pytest
@@ -262,6 +263,58 @@ async def test_orchestrator_sends_only_after_ready_wav(tmp_path, monkeypatch) ->
     assert socket.sent[0]["type"] == "avatar.speak"
     assert socket.sent[0]["payload"]["audio_url"] == job["audio_url"]
     await orchestrator.close()
+
+
+@pytest.mark.anyio
+async def test_orchestrator_cancels_only_batch_speech_for_requested_session(tmp_path) -> None:
+    class Settings:
+        voice_stt_provider = "mock"
+        voice_tts_provider = "mock"
+        voice_tts_max_chars = 1200
+        voice_tts_background_timeout_seconds = 2
+
+        @property
+        def voice_audio_path(self):
+            return tmp_path / "audio"
+
+    class BlockingTTSProvider:
+        file_extension = ".wav"
+
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.calls = 0
+
+        async def synthesize(self, text, voice, output_path, style="auto"):
+            self.calls += 1
+            if self.calls == 2:
+                self.started.set()
+            await asyncio.Event().wait()
+            raise AssertionError("Cancelled TTS task resumed unexpectedly")
+
+    class AvatarRecorder:
+        async def speak(self, **_kwargs) -> None:
+            raise AssertionError("Cancelled TTS must not reach the avatar")
+
+    settings = Settings()
+    voice = VoiceService(settings)
+    provider = BlockingTTSProvider()
+    voice._tts_provider = provider
+    orchestrator = SpeechOrchestrator(voice, EventBus(), settings, AvatarRecorder())
+
+    first_job = orchestrator.enqueue(
+        session_id="first", reply="Первый ответ", emotion="neutral", intent="test", voice="xenia",
+    )
+    second_job = orchestrator.enqueue(
+        session_id="second", reply="Второй ответ", emotion="neutral", intent="test", voice="xenia",
+    )
+    await asyncio.wait_for(provider.started.wait(), timeout=1)
+
+    assert await orchestrator.cancel_session("first") == 1
+    assert voice.get_tts_job(first_job)["status"] == "cancelled"
+    assert voice.get_tts_job(second_job)["status"] == "queued"
+
+    assert await orchestrator.cancel_session("second") == 1
+    assert voice.get_tts_job(second_job)["status"] == "cancelled"
 
 
 def test_avatar_http_status_and_test_commands(monkeypatch) -> None:
