@@ -13,7 +13,7 @@ namespace NeuroAsist.AvatarEditor
         internal const string ControllerPath = Root + "/AvatarMotion.controller";
         internal const string MaskPath = Root + "/UpperBody.mask";
 
-        [MenuItem("NeuroAsist/Avatar/Setup Motion Assets")]
+        [MenuItem("Iris/Avatar/Setup Motion Assets")]
         public static void SetupAssets()
         {
             EnsureFolders();

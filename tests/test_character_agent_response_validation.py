@@ -172,7 +172,7 @@ def test_handle_user_message_uses_json_persona_prompt() -> None:
         "intent": "casual_chat",
     }
     system_prompt = provider.messages[0].content
-    assert "Нейро Пизда" in system_prompt
+    assert "Ты — Iris" in system_prompt
     assert "верни только один валидный JSON" in system_prompt
     assert '"reply"' in system_prompt
     assert '"emotion"' in system_prompt

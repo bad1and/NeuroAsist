@@ -1,5 +1,7 @@
 # NeuroAsist V0.5 — Continuous Companion Blueprint
 
+> Historical architecture document from before the Iris rebrand. Iris is the current public name; the NeuroAsist references below preserve the original version, repository, and runtime paths.
+
 **Полное название:** NeuroAsist V0.5 — Live Desktop Companion, Episodic Context & Long-Term Memory  
 **Базовая версия:** `bad1and/NeuroAsist`, ветка/тег `v0.4.1`  
 **Дата пересмотра:** 14 июля 2026  

@@ -1,4 +1,4 @@
-# NeuroAsist Desktop Shell (Milestone 4)
+# Iris Desktop Shell (Milestone 4)
 
 The desktop shell is a Tauri 2 application around the existing React UI and FastAPI core. It starts the core on a randomly selected loopback port, injects an ephemeral token into the WebView before React starts, and terminates its managed child processes on exit.
 

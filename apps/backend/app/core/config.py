@@ -16,7 +16,7 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
-    app_name: str = "NeuroAsist"
+    app_name: str = "Iris"
     deepseek_api_key: str | None = Field(default=None, validation_alias="DEEPSEEK_API_KEY")
     legacy_api_key: str | None = Field(default=None, validation_alias="API_KEY")
     deepseek_base_url: str = "https://api.deepseek.com"
