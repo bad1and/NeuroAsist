@@ -3,6 +3,7 @@ import { History, RefreshCw, Search, Trash2 } from "lucide-react";
 
 import { deleteTimelineRange, getTimelineJournal, searchTimeline } from "./api";
 import type { TimelineJournalItem, TimelineMessage } from "./types";
+import { AppDialog } from "./components/AppDialog";
 
 function formatDate(value: string): string {
   const date = new Date(value);
@@ -23,6 +24,8 @@ export function JournalPage() {
   const [results, setResults] = useState<TimelineMessage[] | null>(null);
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<TimelineJournalItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const refresh = async () => {
     try {
@@ -60,14 +63,30 @@ export function JournalPage() {
     {!results && <div className="history-list">
       {items.length ? items.map((item) => <article className="history-card" key={item.id ?? item.day}>
         <div><strong>{item.title || formatDate(item.day)}</strong><p>{item.message_count} {item.message_count === 1 ? "сообщение" : "сообщений"} · последняя активность в {formatTime(item.last_activity_at)}</p></div>
-        <button className="icon-button danger-button" title="Удалить историю до этой даты" aria-label={`Удалить историю до ${formatDate(item.day)}`} onClick={async () => {
-          if (window.confirm(`Удалить все сообщения по ${formatDate(item.day)} включительно? Это действие нельзя отменить.`)) {
-            await deleteTimelineRange(`${item.day}T23:59:59.999Z`);
-            await refresh();
-          }
-        }}><Trash2 size={17} /></button>
+        <button className="icon-button danger-button" title="Удалить историю до этой даты" aria-label={`Удалить историю до ${formatDate(item.day)}`} onClick={() => setPendingDelete(item)}><Trash2 size={17} /></button>
       </article>) : <EmptyHistory text="История пока пуста" />}
     </div>}
+    <AppDialog
+      open={Boolean(pendingDelete)}
+      title="Удалить часть истории?"
+      description={pendingDelete ? `Все сообщения по ${formatDate(pendingDelete.day)} включительно будут удалены без возможности восстановления.` : undefined}
+      onClose={() => !deleting && setPendingDelete(null)}
+    >
+      <div className="dialog-actions">
+        <button className="secondary" type="button" onClick={() => setPendingDelete(null)} disabled={deleting}>Отмена</button>
+        <button className="danger-button" type="button" disabled={deleting} onClick={async () => {
+          if (!pendingDelete) return;
+          setDeleting(true);
+          try {
+            await deleteTimelineRange(`${pendingDelete.day}T23:59:59.999Z`);
+            setPendingDelete(null);
+            await refresh();
+          } finally {
+            setDeleting(false);
+          }
+        }}>{deleting ? "Удаляю…" : "Удалить историю"}</button>
+      </div>
+    </AppDialog>
   </section>;
 }
 

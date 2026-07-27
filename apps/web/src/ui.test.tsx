@@ -28,6 +28,7 @@ vi.mock("./api", () => ({
 }));
 
 import App from "./App";
+import { JournalPage } from "./journal";
 import { MemoryPage } from "./memory";
 
 const settings = {
@@ -53,7 +54,9 @@ class MockWebSocket {
 beforeEach(() => {
   vi.stubGlobal("WebSocket", MockWebSocket);
   Object.defineProperty(HTMLElement.prototype, "scrollTo", { configurable: true, value: vi.fn() });
-  api.getStatus.mockResolvedValue({ backend: "ok", version: "0.6.0", api_key_configured: true, llm_model: "deepseek-chat" });
+  Object.defineProperty(HTMLDialogElement.prototype, "showModal", { configurable: true, value() { this.setAttribute("open", ""); } });
+  Object.defineProperty(HTMLDialogElement.prototype, "close", { configurable: true, value() { this.removeAttribute("open"); this.dispatchEvent(new Event("close")); } });
+  api.getStatus.mockResolvedValue({ app_name: "Iris", backend: "ok", database: "ok", version: "0.6.0", api_key_configured: true, llm_provider: "deepseek", llm_model: "deepseek-chat" });
   api.getSettings.mockResolvedValue(settings);
   api.getAvatarStatus.mockResolvedValue({ enabled: false, protocol_version: 1, broadcast_policy: "", client_count: 0, clients: [], emotion_engine: { mapping_valid: true, current_emotion: "neutral", target_emotion: "neutral", intensity: 0, gesture: "", motion_profile: "", attack_ms: 0, minimum_hold_ms: 0, release_ms: 0, generation: 0, speaking: false } });
   api.getEvents.mockResolvedValue({ events: [] });
@@ -77,11 +80,32 @@ describe("русский интерфейс", () => {
     await screen.findByRole("button", { name: "Диалог" });
     expect(screen.getByRole("img", { name: "Iris" })).toBeInTheDocument();
     expect(container.querySelector("img.brand-logo")).toHaveAttribute("src", "/brand/iris-wordmark-light.svg");
+    fireEvent.click(screen.getByRole("button", { name: "Диалог" }));
     expect(container.querySelector("main.workspace-chat")).toBeInTheDocument();
     expect(container.querySelector(".chat-panel .message-list")).toBeInTheDocument();
     expect(container.querySelector(".chat-panel .chat-composer")).toBeInTheDocument();
     expect(container.querySelector(".chat-composer textarea")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Свободные руки" })).toBeInTheDocument();
+  });
+
+  it("открывает обзор с реальными данными и переводит к диалогу", async () => {
+    api.getTimelineJournal.mockResolvedValue({
+      items: [{ day: "2026-07-27", message_count: 8, started_at: "2026-07-27T10:00:00Z", last_activity_at: "2026-07-27T10:40:00Z", title: "Идеи интерфейса" }],
+    });
+    api.getMemories.mockResolvedValue({
+      items: [
+        { id: "m1", status: "active", predicate: "имя", value_text: "Роман", source_message_ids: [] },
+        { id: "m2", status: "candidate", predicate: "проект", value_text: "Iris", source_message_ids: [] },
+      ],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "О чём поговорим?" })).toBeInTheDocument();
+    expect(await screen.findByText("Идеи интерфейса")).toBeInTheDocument();
+    expect(screen.getByText("1 ожидают проверки")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Начать диалог/ }));
+    expect(screen.getByPlaceholderText("Напишите сообщение…")).toBeInTheDocument();
   });
 
   it("открывает системный подраздел без отдельного пункта событий", async () => {
@@ -135,5 +159,42 @@ describe("русский интерфейс", () => {
     fireEvent.click(screen.getByRole("button", { name: "На проверке" }));
 
     await waitFor(() => expect(api.getMemories).toHaveBeenLastCalledWith("candidate", undefined));
+  });
+
+  it("редактирует память во встроенном диалоге", async () => {
+    api.getMemories.mockResolvedValue({
+      items: [{
+        id: "memory-1", scope: "user", kind: "fact", subject: "user", predicate: "напиток",
+        value_text: "Чай", importance: 0.8, confidence: 0.9, sensitivity: "normal",
+        status: "active", user_locked: false, source_message_ids: [], created_at: "", updated_at: "",
+        access_count: 1,
+      }],
+    });
+    api.updateMemory.mockResolvedValue({ memory: {} });
+    render(<MemoryPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Дополнительные действия" }));
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    expect(screen.getByRole("heading", { name: "Изменить запись" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Содержание"), { target: { value: "Зелёный чай" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => expect(api.updateMemory).toHaveBeenCalledWith("memory-1", {
+      value_text: "Зелёный чай", user_locked: true,
+    }));
+  });
+
+  it("подтверждает удаление истории во встроенном диалоге", async () => {
+    api.getTimelineJournal.mockResolvedValue({
+      items: [{ day: "2026-07-27", message_count: 4, started_at: "2026-07-27T10:00:00Z", last_activity_at: "2026-07-27T11:00:00Z" }],
+    });
+    api.deleteTimelineRange.mockResolvedValue({ deleted: 4 });
+    render(<JournalPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Удалить историю до/ }));
+    expect(screen.getByRole("heading", { name: "Удалить часть истории?" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Удалить историю" }));
+
+    await waitFor(() => expect(api.deleteTimelineRange).toHaveBeenCalledWith("2026-07-27T23:59:59.999Z"));
   });
 });
