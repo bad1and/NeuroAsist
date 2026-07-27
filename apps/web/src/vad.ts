@@ -112,13 +112,40 @@ export class BrowserVadRecorder {
 
 export class PcmInputClient {
   private socket: WebSocket | null = null;
-  constructor(private readonly url: string, private readonly onEvent: (event: { type: string; transcript?: string; message?: string }) => void) {}
-  async connect(sampleRate: number, language: string): Promise<void> {
+  constructor(
+    private readonly url: string,
+    private readonly onEvent: (event: {
+      type: string;
+      transcript?: string;
+      message?: string;
+      phase?: string;
+      action?: string;
+      reason?: string;
+      speaker_role?: string;
+      generation?: number;
+      observation_only?: boolean;
+      initiative?: boolean;
+    }) => void,
+  ) {}
+  async connect(
+    sampleRate: number,
+    language: string,
+    mode: "hands_free" | "live_conversation" = "hands_free",
+  ): Promise<void> {
     if (this.socket?.readyState === WebSocket.OPEN) return;
     const socket = new WebSocket(this.url);
     this.socket = socket;
     await new Promise<void>((resolve, reject) => {
-      socket.onopen = () => { socket.send(JSON.stringify({ type: "voice.input.start", sample_rate: sampleRate, channels: 1, language })); resolve(); };
+      socket.onopen = () => {
+        socket.send(JSON.stringify({
+          type: "voice.input.start",
+          sample_rate: sampleRate,
+          channels: 1,
+          language,
+          mode,
+        }));
+        resolve();
+      };
       socket.onerror = () => reject(new Error("PCM input WebSocket failed"));
       socket.onmessage = (message) => this.onEvent(JSON.parse(String(message.data)));
     });

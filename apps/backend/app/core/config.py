@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     episode_maximum_messages: int = 120
     episode_maximum_estimated_tokens: int = 16000
     context_manager_enabled: bool = True
+    conversation_diagnostics_enabled: bool = False
     context_max_tokens: int = 3000
     context_recent_turns: int = 8
     memory_enabled: bool = True

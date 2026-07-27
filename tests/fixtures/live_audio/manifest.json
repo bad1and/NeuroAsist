@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "generator": "Silero v5.5 ru/xenia",
+  "limitations": "Synthetic speech does not cover room acoustics or microphone AEC.",
+  "fixtures": [
+    {
+      "id": "complete_question_ru",
+      "file": "complete_question_ru.wav",
+      "transcript": "Ирис, что ты думаешь об этом?",
+      "sample_rate": 16000,
+      "expected_complete": true,
+      "purpose": "finished Russian question",
+      "synthetic": true
+    },
+    {
+      "id": "incomplete_clause_ru",
+      "file": "incomplete_clause_ru.wav",
+      "transcript": "Я хотел сказать тебе, что",
+      "sample_rate": 16000,
+      "expected_complete": false,
+      "purpose": "unfinished Russian clause",
+      "synthetic": true
+    },
+    {
+      "id": "complete_statement_ru",
+      "file": "complete_statement_ru.wav",
+      "transcript": "Сегодня я закончил важную работу.",
+      "sample_rate": 16000,
+      "expected_complete": true,
+      "purpose": "finished statement",
+      "synthetic": true
+    },
+    {
+      "id": "no_punctuation_ru",
+      "file": "no_punctuation_ru.wav",
+      "transcript": "кажется сегодня будет дождь",
+      "sample_rate": 16000,
+      "expected_complete": true,
+      "purpose": "complete meaning without punctuation",
+      "synthetic": true
+    },
+    {
+      "id": "quiet_ending_ru",
+      "file": "quiet_ending_ru.wav",
+      "transcript": "Ты меня слышишь?",
+      "sample_rate": 16000,
+      "expected_complete": true,
+      "purpose": "quiet question ending",
+      "synthetic": true
+    },
+    {
+      "id": "noisy_question_ru",
+      "file": "noisy_question_ru.wav",
+      "transcript": "Ирис, ответь мне, пожалуйста.",
+      "sample_rate": 16000,
+      "expected_complete": true,
+      "purpose": "speech with deterministic noise",
+      "synthetic": true
+    },
+    {
+      "id": "english_question",
+      "file": "english_question.wav",
+      "transcript": "Iris, what do you think about it?",
+      "sample_rate": 16000,
+      "expected_complete": true,
+      "purpose": "English control",
+      "synthetic": true
+    },
+    {
+      "id": "assistant_echo_ru",
+      "file": "assistant_echo_ru.wav",
+      "transcript": "Да, я здесь и внимательно слушаю.",
+      "sample_rate": 16000,
+      "expected_complete": true,
+      "purpose": "synthetic Iris playback echo",
+      "synthetic": true
+    },
+    {
+      "id": "short_pause_continuation_ru",
+      "file": "short_pause_continuation_ru.wav",
+      "transcript": "Я хотел сказать тебе, что сегодня я закончил важную работу.",
+      "sample_rate": 16000,
+      "expected_complete": true,
+      "prefix_expected_complete": false,
+      "prefix_samples": 25400,
+      "purpose": "two speech islands joined across a 350 ms pause",
+      "synthetic": true
+    }
+  ]
+}

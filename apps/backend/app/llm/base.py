@@ -26,3 +26,12 @@ class LLMProvider(ABC):
     async def stream(self, messages: list[ChatMessage]) -> AsyncIterator[str]:
         """Yield plain assistant text deltas in provider order."""
         raise NotImplementedError
+
+    async def generate_structured(
+        self,
+        messages: list[ChatMessage],
+        *,
+        temperature: float = 0.0,
+    ) -> LLMResponse:
+        """Generate schema-bound JSON; providers may override sampling controls."""
+        return await self.generate(messages)

@@ -66,6 +66,8 @@ def test_public_settings_does_not_return_api_key(client: TestClient) -> None:
     assert 0 <= body["voice_live_playback_prebuffer_ms"] <= 1500
     assert body["available_voice_languages"] == ["auto", "ru", "en"]
     assert body["available_tts_voices"]
+    assert body["live_conversation_enabled"] is False
+    assert body["live_conversation_participant_mode"] == "one_to_one"
     assert "api_key" not in body
     assert "DEEPSEEK_API_KEY" not in response.text
 
@@ -151,6 +153,41 @@ def test_runtime_voice_settings_validate_ranges(client: TestClient, payload: dic
     response = client.patch("/settings/runtime", json=payload)
 
     assert response.status_code == 400
+
+
+def test_live_conversation_settings_are_typed_and_validated(client: TestClient) -> None:
+    original = client.get("/settings/public").json()
+    try:
+        response = client.patch(
+            "/settings/runtime",
+            json={
+                "live_conversation_enabled": True,
+                "live_conversation_participant_mode": "group",
+                "live_conversation_engagement": "high",
+                "live_conversation_echo_mode": "half_duplex",
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["live_conversation_enabled"] is True
+        assert response.json()["live_conversation_participant_mode"] == "group"
+        assert response.json()["live_conversation_engagement"] == "high"
+        assert response.json()["live_conversation_echo_mode"] == "half_duplex"
+
+        invalid = client.patch(
+            "/settings/runtime",
+            json={"live_conversation_engagement": "random"},
+        )
+        assert invalid.status_code == 400
+    finally:
+        client.patch(
+            "/settings/runtime",
+            json={
+                "live_conversation_enabled": original["live_conversation_enabled"],
+                "live_conversation_participant_mode": original["live_conversation_participant_mode"],
+                "live_conversation_engagement": original["live_conversation_engagement"],
+                "live_conversation_echo_mode": original["live_conversation_echo_mode"],
+            },
+        )
 
 
 def test_events_returns_event_list(client: TestClient) -> None:

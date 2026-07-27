@@ -141,14 +141,24 @@ class CharacterAgent:
         self, session_id: str, user_text: str,
         stored_reply_transform: Callable[[str], str] | None = None,
         input_mode: str = "text",
+        source_message=None,
+        state_context: str | None = None,
+        schedule_memory: bool = True,
     ) -> AsyncIterator[str]:
         """Stream plain reply text and commit history only after clean completion."""
         interpreted = self._voice_input.interpret(user_text, input_mode)
         effective_text = interpreted.text
         context = self._context_manager.build(effective_text).messages if self._context_manager else self._history.get_recent_messages(session_id, limit=self._history_limit)
-        self.last_memory_updates = self._persist_user_message(session_id, user_text, input_mode, interpreted)
+        if source_message is None:
+            self.last_memory_updates = self._persist_user_message(session_id, user_text, input_mode, interpreted)
+        else:
+            self._last_user_message = source_message
+            self.last_memory_updates = []
+            if context and context[-1].role == "user" and context[-1].content == effective_text:
+                context = context[:-1]
+        system_prompt = character_live_prompt(self._persona, state_context)
         messages = [
-            ChatMessage(role="system", content=character_live_prompt(self._persona)),
+            ChatMessage(role="system", content=system_prompt),
             *context,
             ChatMessage(role="user", content=effective_text),
         ]
@@ -164,14 +174,16 @@ class CharacterAgent:
         if not reply:
             reply = self._empty_model_fallback(effective_text)
             yield reply
-        if self._should_persist_timeline():
+        if self._should_persist_timeline() and source_message is None:
             self._save_message(session_id, "assistant", reply, input_mode)
-        if self._memory_service is not None:
+        if self._memory_service is not None and schedule_memory:
             if self._memory_service.uses_background_extraction:
                 created = self._memory_service.extract_high_precision_from_message(self._last_user_message)
                 self.last_memory_updates.extend(self._memory_service.memory_update(memory) for memory in created)
             self._memory_service.schedule_extraction(self._last_user_message)
         if (
+            schedule_memory
+            and
             self._memory_service is not None
             and self._memory_service.llm_extraction_enabled
             and not self._memory_service.uses_background_extraction

@@ -37,6 +37,49 @@ def test_memory_has_user_source_and_deleted_memory_never_enters_context(tmp_path
     assert {item["action"] for item in store.memory_audit(str(memory["id"]))} >= {"candidate_created", "deleted"}
 
 
+def test_ambient_live_speech_is_not_extracted_or_retrieved_as_memory(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    source, _ = store.append_message(
+        role="user",
+        content="Олег, запомни, кодовое число сорок два",
+        input_mode="voice",
+    )
+    store.save_conversation_observation(
+        message_id=source.id,
+        session_id="live",
+        turn_id="ambient-turn",
+        utterance_id="ambient-utterance",
+        generation=1,
+        speaker_role="primary",
+        speaker_confidence=0.9,
+        addressedness=0.05,
+        addressed_confidence=0.9,
+        end_of_turn_confidence=1.0,
+        significance=0.4,
+        metadata={},
+    )
+    store.set_observation_decision(source.id, "observe", "other_person")
+
+    assert service.extract_from_message(store.get_message(source.id)) == []
+    legacy = store.create_memory({
+        "scope": "user_profile",
+        "kind": "decision",
+        "subject": "user",
+        "predicate": "code_number",
+        "value_text": "сорок два",
+        "importance": 0.8,
+        "confidence": 0.9,
+        "sensitivity": "normal",
+        "status": "active",
+        "source_message_ids": [source.id],
+        "source_episode_id": source.episode_id,
+        "extractor_version": "legacy-live",
+    }, actor="extractor")
+
+    assert store.get_memory(str(legacy["id"]))["status"] == "active"
+    assert service.retrieve("сорок два") == []
+
+
 def test_memory_deduplicates_and_supersedes_conflicting_user_fact(tmp_path: Path) -> None:
     store, service = _service(tmp_path)
     first_message, _ = store.append_message(role="user", content="Меня зовут Роман", input_mode="text")
