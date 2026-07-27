@@ -1,0 +1,18 @@
+- generic [ref=e3]:
+  - complementary "Основная навигация" [ref=e4]:
+    - generic [ref=e5]:
+      - img "Iris" [ref=e6]
+      - generic [ref=e7]:
+        - text: ириска
+        - superscript [ref=e8]: "*"
+    - navigation "Разделы приложения" [ref=e13]:
+      - button "Обзор" [ref=e14] [cursor=pointer]
+      - button "Диалог" [ref=e21] [cursor=pointer]
+      - button "История" [ref=e25] [cursor=pointer]
+      - button "Память" [ref=e31] [cursor=pointer]
+    - button "Настройки" [active] [ref=e44] [cursor=pointer]
+  - banner [ref=e49]
+  - main [ref=e54]:
+    - generic [ref=e117]:
+      - strong [ref=e120]: Настройки недоступны
+      - generic [ref=e121]: Подключитесь к сервису и попробуйте ещё раз.

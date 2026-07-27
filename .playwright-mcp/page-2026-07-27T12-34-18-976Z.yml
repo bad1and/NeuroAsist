@@ -1,0 +1,45 @@
+- generic [ref=e3]:
+  - complementary "Основная навигация" [ref=e4]:
+    - generic [ref=e5]:
+      - img "Iris" [ref=e6]
+      - generic [ref=e7]:
+        - text: ириска
+        - superscript [ref=e8]: "*"
+      - button "Закрыть меню" [ref=e9] [cursor=pointer]
+    - navigation "Разделы приложения" [ref=e13]:
+      - button "Обзор" [ref=e14] [cursor=pointer]
+      - button "Диалог" [ref=e21] [cursor=pointer]
+      - button "История" [ref=e25] [cursor=pointer]
+      - button "Память" [ref=e31] [cursor=pointer]
+    - button "Настройки" [ref=e44] [cursor=pointer]
+  - banner [ref=e49]:
+    - button "Открыть меню" [ref=e51] [cursor=pointer]
+  - main [ref=e54]:
+    - generic [ref=e55]:
+      - generic [ref=e56]:
+        - generic [ref=e57]:
+          - paragraph [ref=e58]: Добрый день
+          - heading "О чём поговорим?" [level=2] [ref=e59]
+          - generic [ref=e60]: Iris рядом, когда хочется обсудить идею, разобрать задачу или просто выговориться.
+          - button "Начать диалог" [ref=e61] [cursor=pointer]
+        - figure [ref=e64]
+      - generic [ref=e65]:
+        - article [ref=e66]:
+          - generic [ref=e70]:
+            - text: Последний разговор
+            - heading "История пока пуста" [level=3] [ref=e71]
+            - paragraph [ref=e72]: Начни диалог — он появится здесь.
+          - button "Начать разговор" [ref=e73] [cursor=pointer]
+        - article [ref=e76]:
+          - generic [ref=e88]:
+            - text: Память
+            - heading "Нет сохранённых записей" [level=3] [ref=e89]
+            - paragraph [ref=e90]: Новых записей на проверке нет.
+          - button "Открыть память" [ref=e91] [cursor=pointer]
+        - article [ref=e94]:
+          - generic [ref=e102]:
+            - text: Система
+            - heading "Backend недоступен" [level=3] [ref=e103]
+            - paragraph [ref=e104]: Аватар отключён
+          - button "Диагностика" [ref=e105] [cursor=pointer]
+      - generic [ref=e108]: Обновляю реальные данные
