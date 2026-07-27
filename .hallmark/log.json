@@ -3,14 +3,14 @@
     {
       "date": "2026-07-27",
       "macrostructure": "Workbench",
-      "navigation": "N3 Side-rail, left, 20ch, tinted-surface indicator",
+      "navigation": "N3 Side-rail, left, 20ch, solid-accent indicator",
       "theme": "custom",
       "genre": "atmospheric",
       "enrichment": "none",
-      "brief": "Полный редизайн desktop-приложения Iris",
+      "brief": "Графитовая палитра, цельное активное меню и единая система теней Iris",
       "scope": "app",
-      "theme_axes": ["dark", "geometric-sans", "cool-violet"],
-      "vibe": "soft nocturnal workspace"
+      "theme_axes": ["dark-graphite", "geometric-sans", "violet-accent"],
+      "vibe": "calm graphite workspace"
     }
   ]
 }
