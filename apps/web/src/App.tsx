@@ -6,7 +6,7 @@ import {
   CircleAlert,
   Database,
   History,
-  Menu,
+  LayoutDashboard,
   MessageCircle,
   Mic,
   MonitorCog,
@@ -15,8 +15,6 @@ import {
   Settings,
   SlidersHorizontal,
   Volume2,
-  Wifi,
-  WifiOff,
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -81,8 +79,13 @@ import { PlaybackCoordinator, TTSStreamPlayer, VoiceSocketClient } from "./voice
 import { BrowserVadRecorder, PcmInputClient, type VadState } from "./vad";
 import { JournalPage } from "./journal";
 import { MemoryPage } from "./memory";
+import { OverviewPage } from "./overview";
+import { getDesktopRuntime, initialCoreStatus, listenForCoreStatus, restartDesktopCore, type CoreStatus } from "./desktop";
+import { StartupScreen } from "./components/StartupScreen";
+import { WindowChrome } from "./components/WindowChrome";
+import { AppDialog } from "./components/AppDialog";
 
-type AppView = "chat" | "journal" | "memory" | "settings";
+type AppView = "overview" | "chat" | "journal" | "memory" | "settings";
 type SettingsSection = "general" | "voice" | "memory" | "system";
 type WsState = "connected" | "disconnected" | "reconnecting";
 type LevelFilter = "all" | EventLevel;
@@ -165,7 +168,12 @@ function isLiveVoiceTransportError(error: unknown): boolean {
 }
 
 export default function App() {
-  const [activeView, setActiveView] = useState<AppView>("chat");
+  const desktopManaged = isDesktopManaged();
+  const [coreStatus, setCoreStatus] = useState<CoreStatus>(initialCoreStatus);
+  const [showStartup, setShowStartup] = useState(desktopManaged);
+  const [retryingCore, setRetryingCore] = useState(false);
+  const startupStartedAt = useRef(Date.now());
+  const [activeView, setActiveView] = useState<AppView>("overview");
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [avatarStatus, setAvatarStatus] = useState<AvatarStatusResponse | null>(null);
@@ -173,11 +181,55 @@ export default function App() {
   const [events, setEvents] = useState<BackendEvent[]>([]);
   const [wsState, setWsState] = useState<WsState>("disconnected");
   const [statusError, setStatusError] = useState<string | null>(null);
+  const servicesReady = !desktopManaged || coreStatus === "ready";
   const setupRequired = Boolean(settings && !settings.api_key_configured && isDesktopManaged());
 
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    void listenForCoreStatus((nextStatus) => {
+      setCoreStatus(nextStatus);
+      setRetryingCore(false);
+      if (nextStatus !== "ready") setShowStartup(true);
+    }).then((unlisten) => {
+      stop = unlisten;
+      if (desktopManaged) {
+        void getDesktopRuntime().then((runtime) => {
+          setCoreStatus(runtime.coreStatus);
+          if (runtime.coreStatus !== "ready") setShowStartup(true);
+        });
+      }
+    });
+    return () => stop?.();
+  }, [desktopManaged]);
+
+  useEffect(() => {
+    if (!desktopManaged || coreStatus !== "ready") return;
+    const elapsed = Date.now() - startupStartedAt.current;
+    const timer = window.setTimeout(() => setShowStartup(false), Math.max(0, 800 - elapsed) + 380);
+    return () => window.clearTimeout(timer);
+  }, [coreStatus, desktopManaged]);
+
+  const retryCore = async () => {
+    setRetryingCore(true);
+    setCoreStatus("starting");
+    setShowStartup(true);
+    startupStartedAt.current = Date.now();
+    try {
+      const runtime = await restartDesktopCore();
+      setCoreStatus(runtime.coreStatus);
+    } catch {
+      setCoreStatus("failed");
+      setRetryingCore(false);
+    }
+  };
+
   const refreshEvents = useCallback(async () => {
-    const payload = await getEvents(100);
-    setEvents((current) => dedupeEvents([...current, ...payload.events]));
+    try {
+      const payload = await getEvents(100);
+      setEvents((current) => dedupeEvents([...current, ...payload.events]));
+    } catch {
+      // The connection indicator already communicates backend availability.
+    }
   }, []);
 
   const refreshOverview = useCallback(async () => {
@@ -200,15 +252,17 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!servicesReady) return;
     void refreshOverview();
     void refreshEvents();
     const timer = window.setInterval(() => {
       void refreshOverview();
     }, 10000);
     return () => window.clearInterval(timer);
-  }, [refreshEvents, refreshOverview]);
+  }, [refreshEvents, refreshOverview, servicesReady]);
 
   useEffect(() => {
+    if (!servicesReady) return;
     let socket: WebSocket | null = null;
     let reconnectTimer = 0;
     let closed = false;
@@ -254,7 +308,11 @@ export default function App() {
       socket?.close();
       setWsState("disconnected");
     };
-  }, [refreshEvents]);
+  }, [refreshEvents, servicesReady]);
+
+  if (showStartup) {
+    return <StartupScreen status={coreStatus} retrying={retryingCore} onRetry={() => void retryCore()} />;
+  }
 
   if (setupRequired) {
     return <div className="app-shell setup-shell"><SetupWizard onComplete={refreshOverview} /></div>;
@@ -264,7 +322,6 @@ export default function App() {
     setActiveView(view);
     setNavigationOpen(false);
   };
-
   return (
     <div className="app-shell">
       <Sidebar
@@ -274,14 +331,22 @@ export default function App() {
         onClose={() => setNavigationOpen(false)}
       />
       {navigationOpen && <button className="navigation-scrim" aria-label="Закрыть меню" onClick={() => setNavigationOpen(false)} />}
+      <WindowChrome
+        title=""
+        onOpenNavigation={() => setNavigationOpen(true)}
+      />
       <section className="app-content">
-        <Header
-          status={status}
-          wsState={wsState}
-          statusError={statusError}
-          onOpenNavigation={() => setNavigationOpen(true)}
-        />
         <main className={`workspace workspace-${activeView}`}>
+          {activeView === "overview" && (
+            <OverviewPage
+              status={status}
+              avatarStatus={avatarStatus}
+              onOpenChat={() => switchView("chat")}
+              onOpenHistory={() => switchView("journal")}
+              onOpenMemory={() => switchView("memory")}
+              onOpenSettings={() => switchView("settings")}
+            />
+          )}
           {activeView === "chat" && (
             <ChatPage
               events={events}
@@ -336,7 +401,7 @@ function SetupWizard({ onComplete }: { onComplete: () => Promise<void> }) {
   return (
     <main className="setup-workspace">
       <section className="setup-card" aria-labelledby="setup-title">
-        <span className="eyebrow">ПЕРВИЧНАЯ НАСТРОЙКА</span>
+        <span className="eyebrow">Первичная настройка</span>
         <h1 id="setup-title">Подключите Iris</h1>
         <p>Введите ключ DeepSeek один раз. Он хранится в диспетчере учётных данных Windows, а не в файлах проекта.</p>
         <form className="setup-form" onSubmit={submit}>
@@ -354,6 +419,7 @@ function SetupWizard({ onComplete }: { onComplete: () => Promise<void> }) {
 }
 
 const MAIN_NAVIGATION: Array<{ id: Exclude<AppView, "settings">; label: string; icon: LucideIcon }> = [
+  { id: "overview", label: "Обзор", icon: LayoutDashboard },
   { id: "chat", label: "Диалог", icon: MessageCircle },
   { id: "journal", label: "История", icon: History },
   { id: "memory", label: "Память", icon: Brain },
@@ -372,8 +438,9 @@ function Sidebar({
 }) {
   return (
     <aside className={`sidebar${isOpen ? " is-open" : ""}`} aria-label="Основная навигация">
-      <div className="sidebar-brand">
+      <div className="sidebar-brand" data-tauri-drag-region>
         <img className="brand-logo" src="/brand/iris-wordmark-light.svg" alt="Iris" />
+        <span className="brand-alias" data-tauri-drag-region aria-hidden="true">ириска<sup>*</sup></span>
         <button className="icon-button sidebar-close" aria-label="Закрыть меню" title="Закрыть меню" onClick={onClose}><X size={18} /></button>
       </div>
       <nav className="sidebar-nav" aria-label="Разделы приложения">
@@ -404,44 +471,6 @@ function NavigationButton({
       <Icon size={19} aria-hidden="true" />
       <span>{label}</span>
     </button>
-  );
-}
-
-function Header({
-  status,
-  wsState,
-  statusError,
-  onOpenNavigation,
-}: {
-  status: StatusResponse | null;
-  wsState: WsState;
-  statusError: string | null;
-  onOpenNavigation: () => void;
-}) {
-  const backendOk = status?.backend === "ok" && !statusError;
-  const connected = backendOk && wsState === "connected";
-  const pending = backendOk && !connected;
-
-  return (
-    <header className="topbar">
-      <button className="icon-button menu-toggle" aria-label="Открыть меню" title="Открыть меню" onClick={onOpenNavigation}><Menu size={20} /></button>
-      <StatusPill label={connected ? "Подключено" : pending ? "Подключаемся" : "Нет подключения"} state={connected ? "ok" : pending ? "warn" : "bad"} />
-    </header>
-  );
-}
-
-function StatusPill({
-  label,
-  state,
-}: {
-  label: string;
-  state: "ok" | "warn" | "bad";
-}) {
-  return (
-    <span className={`status-pill ${state}`}>
-      {state === "bad" ? <WifiOff size={15} aria-hidden="true" /> : <Wifi size={15} aria-hidden="true" />}
-      {label}
-    </span>
   );
 }
 
@@ -580,11 +609,8 @@ function ChatPage({
   );
 
   const playMessageAudioTrack = useCallback(
-    async (messageId: string, fallbackAudioUrl: string): Promise<boolean> => {
-      const audio =
-        document.querySelector<HTMLAudioElement>(
-          `audio[data-message-id="${CSS.escape(messageId)}"]`,
-        ) ?? new Audio(fallbackAudioUrl);
+    async (_messageId: string, fallbackAudioUrl: string): Promise<boolean> => {
+      const audio = new Audio(fallbackAudioUrl);
 
       stopVoicePlayback(audio);
       audio.playbackRate = settings?.voice_playback_rate ?? 1;
@@ -1211,18 +1237,6 @@ function ChatPage({
             <div className="message-role">{message.role === "user" ? "Вы" : "Iris"}</div>
             <p>{message.content}</p>
             {message.ttsError && <div className="message-error">{message.ttsError}</div>}
-            {message.audioUrl && (
-              <audio
-                className="reply-audio"
-                controls
-                data-message-id={message.id}
-                onPlay={(event) => {
-                  event.currentTarget.playbackRate = settings?.voice_playback_rate ?? 1;
-                  stopVoicePlayback(event.currentTarget);
-                }}
-                src={message.audioUrl}
-              />
-            )}
             {message.role === "assistant" && (
               <button
                 className="speak-button"
@@ -1269,8 +1283,9 @@ function ChatPage({
                 }}
                 type="button"
               >
+                <Volume2 size={15} aria-hidden="true" />
                 {message.audioUrl || message.voiceRequestId || browserSpeechSupported
-                  ? "Озвучить"
+                  ? "Воспроизвести"
                   : "Аудио готовится"}
               </button>
             )}
@@ -1556,6 +1571,25 @@ function SettingsPage({
   const ttsRuntimeLabel = [ttsProviderLabel, settings.voice_tts_device?.toUpperCase()]
     .filter(Boolean)
     .join(" · ");
+  const settingsSectionMeta: Record<SettingsSection, { title: string; description: string }> = {
+    general: {
+      title: "Общее",
+      description: "Характер Iris и базовое поведение приложения.",
+    },
+    voice: {
+      title: "Голос",
+      description: "Звучание, темп и произношение речи.",
+    },
+    memory: {
+      title: "Память",
+      description: "Какие сведения Iris может сохранять между разговорами.",
+    },
+    system: {
+      title: "Система",
+      description: "Модели, резервные копии и состояние компонентов.",
+    },
+  };
+  const activeSettingsMeta = settingsSectionMeta[activeSection];
 
   return (
     <section className="panel settings-panel">
@@ -1566,34 +1600,41 @@ function SettingsPage({
         <SettingsSectionButton section="system" current={activeSection} label="Система" icon={MonitorCog} onClick={setActiveSection} />
       </nav>
 
-      <div className="settings-grid system-status-grid" hidden={activeSection !== "system"}>
-        <InfoRow label="Ключ API" value={settings.api_key_configured ? "Настроен" : "Не настроен"} />
-        <InfoRow label="Провайдер" value={settings.provider} />
-        <InfoRow label="Модель" value={settings.model} />
-        <InfoRow label="История в контексте" value={`${settings.chat_history_limit} сообщений`} />
-        <InfoRow label="Уровень журнала" value={settings.log_level} />
-        <InfoRow
-          label="Голос"
-          value={`${settings.voice_language} / ${settings.voice_tts_voice} / ${settings.voice_playback_rate.toFixed(2)}x`}
-        />
-      </div>
+      <div className="settings-content">
+        <header className="settings-heading">
+          <span>Настройки Iris</span>
+          <h2>{activeSettingsMeta.title}</h2>
+          <p>{activeSettingsMeta.description}</p>
+        </header>
 
-      <div className="system-stack" hidden={activeSection !== "system"}>
-        <ModelManager />
-        <BackupControls />
-        <SystemMaintenance />
-        <AvatarControls avatarStatus={avatarStatus} onRefresh={onRefreshAvatar} />
-        <details className="system-disclosure events-disclosure">
-          <summary>
-            <span><strong>Журнал событий</strong><small>Технические события и диагностика</small></span>
-            <ChevronDown size={18} aria-hidden="true" />
-          </summary>
-          <EventsPage events={events} onRefreshEvents={onRefreshEvents} compact />
-        </details>
-      </div>
+        <div className="settings-grid system-status-grid" hidden={activeSection !== "system"}>
+          <InfoRow label="Ключ API" value={settings.api_key_configured ? "Настроен" : "Не настроен"} />
+          <InfoRow label="Провайдер" value={settings.provider} />
+          <InfoRow label="Модель" value={settings.model} />
+          <InfoRow label="История в контексте" value={`${settings.chat_history_limit} сообщений`} />
+          <InfoRow label="Уровень журнала" value={settings.log_level} />
+          <InfoRow
+            label="Голос"
+            value={`${settings.voice_language} / ${settings.voice_tts_voice} / ${settings.voice_playback_rate.toFixed(2)}x`}
+          />
+        </div>
 
-      <div className="form-grid settings-form" hidden={activeSection === "system"}>
-        <fieldset className="settings-group" hidden={activeSection !== "general"}>
+        <div className="system-stack" hidden={activeSection !== "system"}>
+          <ModelManager />
+          <BackupControls />
+          <SystemMaintenance />
+          <AvatarControls avatarStatus={avatarStatus} onRefresh={onRefreshAvatar} />
+          <details className="system-disclosure events-disclosure">
+            <summary>
+              <span><strong>Журнал событий</strong><small>Технические события и диагностика</small></span>
+              <ChevronDown size={18} aria-hidden="true" />
+            </summary>
+            <EventsPage events={events} onRefreshEvents={onRefreshEvents} compact />
+          </details>
+        </div>
+
+        <div className="form-grid settings-form" hidden={activeSection === "system"}>
+          <fieldset className="settings-group" hidden={activeSection !== "general"}>
           <legend>Общее</legend>
           <label>
             Стиль общения
@@ -1748,12 +1789,13 @@ function SettingsPage({
           </label>
         </fieldset>
 
-        <button className="primary-button settings-save" onClick={saveSettings} disabled={saving}>
-          {saving ? "Сохраняем…" : "Сохранить изменения"}
-        </button>
-      </div>
+          <button className="primary-button settings-save" onClick={saveSettings} disabled={saving}>
+            {saving ? "Сохраняем…" : "Сохранить изменения"}
+          </button>
+        </div>
 
-      {message && <div className="notice" role="status">{message}</div>}
+        {message && <div className="notice" role="status">{message}</div>}
+      </div>
     </section>
   );
 }
@@ -1881,9 +1923,14 @@ function BackupControls() {
 function SystemMaintenance() {
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pendingAction, setPendingAction] = useState<{
+    title: string;
+    description: string;
+    action: () => Promise<unknown>;
+    success: string;
+  } | null>(null);
 
-  const run = async (confirmation: string, action: () => Promise<unknown>, success: string) => {
-    if (!window.confirm(confirmation)) return;
+  const run = async (action: () => Promise<unknown>, success: string) => {
     setBusy(true);
     setMessage(null);
     try {
@@ -1894,17 +1941,24 @@ function SystemMaintenance() {
       setMessage(error instanceof Error ? error.message : "Не удалось завершить обслуживание.");
     } finally {
       setBusy(false);
+      setPendingAction(null);
     }
   };
 
   return <section className="system-card maintenance-card" aria-label="Обслуживание данных">
     <div className="panel-header"><div><h2>Обслуживание данных</h2><span>Необратимые действия вынесены отдельно</span></div><Database size={20} aria-hidden="true" /></div>
     <div className="maintenance-actions">
-      <button className="secondary" disabled={busy} onClick={() => void run("Перестроить индекс памяти? Сами записи не будут удалены.", reindexMemories, "Индекс памяти перестроен.")}>Перестроить индекс памяти</button>
-      <button className="secondary danger-button" disabled={busy} onClick={() => void run("Удалить только долгосрочную память? История диалогов сохранится.", clearMemories, "Долгосрочная память очищена.")}>Очистить память</button>
-      <button className="danger-button" disabled={busy} onClick={() => void run("Удалить всю историю, сводки и долгосрочную память? Это действие нельзя отменить.", resetAllCompanionData, "Все данные помощника удалены.")}>Сбросить все данные</button>
+      <button className="secondary" disabled={busy} onClick={() => setPendingAction({ title: "Перестроить индекс памяти?", description: "Сами записи останутся на месте. Iris заново подготовит их для поиска.", action: reindexMemories, success: "Индекс памяти перестроен." })}>Перестроить индекс памяти</button>
+      <button className="secondary danger-button" disabled={busy} onClick={() => setPendingAction({ title: "Очистить долгосрочную память?", description: "История диалогов сохранится, но восстановить записи памяти будет нельзя.", action: clearMemories, success: "Долгосрочная память очищена." })}>Очистить память</button>
+      <button className="danger-button" disabled={busy} onClick={() => setPendingAction({ title: "Сбросить все данные Iris?", description: "История, сводки и долгосрочная память будут удалены без возможности восстановления.", action: resetAllCompanionData, success: "Все данные помощника удалены." })}>Сбросить все данные</button>
     </div>
     {message && <div className="notice" role="status">{message}</div>}
+    <AppDialog open={Boolean(pendingAction)} title={pendingAction?.title ?? ""} description={pendingAction?.description} onClose={() => !busy && setPendingAction(null)}>
+      <div className="dialog-actions">
+        <button className="secondary" type="button" disabled={busy} onClick={() => setPendingAction(null)}>Отмена</button>
+        <button className="danger-button" type="button" disabled={busy} onClick={() => pendingAction && void run(pendingAction.action, pendingAction.success)}>{busy ? "Выполняю…" : "Подтвердить"}</button>
+      </div>
+    </AppDialog>
   </section>;
 }
 

@@ -1,0 +1,60 @@
+/* Hallmark · genre: atmospheric · macrostructure: Workbench · design-system: design.md · nav: N3 · footer: none (app) · contrast: pass (40–41) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · mobile: pass (34, 49, 50–57) · icons: pass (30) · designed-as-app */
+/* Hallmark · pre-emit critique: P5 H5 E4 S5 R5 V5 */
+:root {
+  color-scheme: dark;
+  --color-base: oklch(20.5% 0.035 267);
+  --color-base-deep: oklch(17% 0.03 267);
+  --color-surface: oklch(24% 0.035 267);
+  --color-surface-raised: oklch(27% 0.038 267);
+  --color-surface-soft: oklch(31% 0.04 267);
+  --color-rule: oklch(42% 0.035 267 / 0.42);
+  --color-rule-strong: oklch(56% 0.04 267 / 0.52);
+  --color-text: oklch(94% 0.01 265);
+  --color-text-soft: oklch(79% 0.02 265);
+  --color-text-muted: oklch(68% 0.025 265);
+  --color-accent: oklch(61% 0.15 289);
+  --color-accent-hover: oklch(66% 0.15 289);
+  --color-accent-visual: oklch(70% 0.13 300);
+  --color-accent-soft: oklch(61% 0.15 289 / 0.17);
+  --color-accent-ink: oklch(98% 0.008 265);
+  --color-focus: oklch(82% 0.13 289);
+  --color-success: oklch(73% 0.13 155);
+  --color-warning: oklch(80% 0.13 85);
+  --color-danger: oklch(69% 0.17 25);
+  --color-danger-soft: oklch(69% 0.17 25 / 0.14);
+  --color-danger-border: oklch(69% 0.17 25 / 0.48);
+  --color-danger-text: oklch(90% 0.06 25);
+  --color-warning-border: oklch(80% 0.13 85 / 0.34);
+  --color-warning-text: oklch(91% 0.06 85);
+  --color-warning-soft: oklch(80% 0.13 85 / 0.1);
+  --color-success-text: oklch(88% 0.08 155);
+  --color-success-soft: oklch(73% 0.13 155 / 0.12);
+  --color-sidebar: oklch(18.2% 0.032 267);
+  --color-chrome: oklch(20.5% 0.035 267 / 0.94);
+  --color-backdrop: oklch(10% 0.02 267 / 0.68);
+  --color-accent-border: oklch(61% 0.15 289 / 0.38);
+  --color-accent-orbit: oklch(61% 0.15 289 / 0.22);
+  --color-accent-bloom: oklch(61% 0.15 289 / 0.12);
+  --color-accent-glow: oklch(61% 0.15 289 / 0.14);
+  --color-accent-glow-soft: oklch(61% 0.15 289 / 0.08);
+  --shadow-dialog: 0 24px 80px oklch(10% 0.02 267 / 0.52);
+
+  --font-ui: "Onest Variable", "Segoe UI Variable", "Segoe UI", sans-serif;
+  --font-mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  --radius-sm: 12px;
+  --radius-md: 18px;
+  --radius-lg: 26px;
+  --radius-shell: 30px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --sidebar-width: 210px;
+  --titlebar-height: 44px;
+  --motion-fast: 180ms;
+  --motion-standard: 220ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+}

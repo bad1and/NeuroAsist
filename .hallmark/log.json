@@ -1,0 +1,16 @@
+{
+  "entries": [
+    {
+      "date": "2026-07-27",
+      "macrostructure": "Workbench",
+      "navigation": "N3 Side-rail, left, 20ch, tinted-surface indicator",
+      "theme": "custom",
+      "genre": "atmospheric",
+      "enrichment": "none",
+      "brief": "Полный редизайн desktop-приложения Iris",
+      "scope": "app",
+      "theme_axes": ["dark", "geometric-sans", "cool-violet"],
+      "vibe": "soft nocturnal workspace"
+    }
+  ]
+}
