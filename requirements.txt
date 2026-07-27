@@ -72,7 +72,7 @@ starlette==0.46.2
 sympy==1.14.0
 tabulate==0.10.0
 texttable==1.7.0
-tokenizers==0.23.1
+tokenizers==0.22.2
 torch==2.11.0
 torchvision==0.26.0
 torchaudio==2.11.0

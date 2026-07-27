@@ -4,6 +4,7 @@ interface Window {
     apiToken: string;
     wsEventsUrl: string;
     safeMode: boolean;
+    coreStatus: "starting" | "ready" | "failed" | "crashed";
   };
   __TAURI_INTERNALS__?: {
     invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;

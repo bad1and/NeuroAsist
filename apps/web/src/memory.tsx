@@ -1,11 +1,12 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Archive, Brain, Check, CheckCircle2, CircleHelp, ClipboardCheck, Pencil, Pin, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { Archive, Brain, Check, CheckCircle2, CircleHelp, ClipboardCheck, MoreHorizontal, Pencil, Pin, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
 
 import {
   confirmMemory, createMemory, deleteMemory, getMemories, getMemoryAudit,
   rejectMemory, restoreMemory, updateMemory,
 } from "./api";
 import type { MemoryAuditItem, MemoryItem, MemoryStatus } from "./types";
+import { AppDialog } from "./components/AppDialog";
 
 type MemorySection = "all" | "active" | "candidate" | "archive";
 
@@ -30,6 +31,9 @@ export function MemoryPage() {
   const [value, setValue] = useState("");
   const [sourceId, setSourceId] = useState("");
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [editing, setEditing] = useState<MemoryItem | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
 
   const refresh = async () => {
     try {
@@ -99,13 +103,39 @@ export function MemoryPage() {
         <div className="memory-card-main"><div className="memory-card-heading"><span className={`memory-status ${memory.status}`}>{STATUS_LABELS[memory.status]}</span>{memory.user_locked && <Pin size={14} aria-label="Закреплённая запись" />}</div><strong>{memory.predicate}</strong><p>{memory.value_text}</p><small>{memory.source_message_ids.length ? `Источник: ${memory.source_message_ids.length} сообщ.` : "Источник не указан"} · использовано: {memory.access_count}</small></div>
         <div className="memory-actions">
           {memory.status === "candidate" && <><button className="primary-button" onClick={() => void action(() => confirmMemory(memory.id))}><Check size={16} aria-hidden="true" />Подтвердить</button><button className="secondary" onClick={() => void action(() => rejectMemory(memory.id))}><X size={16} aria-hidden="true" />Отклонить</button></>}
-          {memory.status === "deleted" ? <button className="secondary" onClick={() => void action(() => restoreMemory(memory.id))}><RotateCcw size={16} aria-hidden="true" />Восстановить</button> : <button className="secondary" onClick={() => void action(() => deleteMemory(memory.id))}><Trash2 size={16} aria-hidden="true" />Забыть</button>}
-          {memory.status !== "deleted" && <button className="icon-button" title="Изменить" aria-label="Изменить запись" onClick={() => { const next = window.prompt("Изменить запись", memory.value_text); if (next?.trim()) void action(() => updateMemory(memory.id, { value_text: next.trim(), user_locked: true })); }}><Pencil size={16} /></button>}
-          {memory.status !== "deleted" && !memory.user_locked && <button className="icon-button" title="Закрепить" aria-label="Закрепить запись" onClick={() => void action(() => updateMemory(memory.id, { user_locked: true }))}><Pin size={16} /></button>}
-          <button className="icon-button" title="Показать историю записи" aria-label="Показать историю записи" onClick={async () => { const nextAudit = await getMemoryAudit(memory.id); setAudit((current) => ({ ...current, [memory.id]: nextAudit.items })); }}><CircleHelp size={16} /></button>
+          {memory.status === "deleted"
+            ? <button className="secondary" onClick={() => void action(() => restoreMemory(memory.id))}><RotateCcw size={16} aria-hidden="true" />Восстановить</button>
+            : <details className="memory-action-menu">
+                <summary className="icon-button" role="button" aria-label="Дополнительные действия"><MoreHorizontal size={17} aria-hidden="true" /></summary>
+                <div>
+                  <button type="button" onClick={() => { setEditing(memory); setEditValue(memory.value_text); }}><Pencil size={16} aria-hidden="true" />Изменить</button>
+                  {!memory.user_locked && <button type="button" onClick={() => void action(() => updateMemory(memory.id, { user_locked: true }))}><Pin size={16} aria-hidden="true" />Закрепить</button>}
+                  <button type="button" onClick={async () => { const nextAudit = await getMemoryAudit(memory.id); setAudit((current) => ({ ...current, [memory.id]: nextAudit.items })); }}><CircleHelp size={16} aria-hidden="true" />История записи</button>
+                  <button className="is-danger" type="button" onClick={() => void action(() => deleteMemory(memory.id))}><Trash2 size={16} aria-hidden="true" />Забыть</button>
+                </div>
+              </details>}
         </div>
         {audit[memory.id] && <details className="memory-audit" open><summary>История записи</summary><p>{audit[memory.id].map((item) => `${item.action} (${item.actor})`).join(" → ")}</p></details>}
       </article>) : <div className="empty-state"><Brain size={28} aria-hidden="true" /><strong>Записей пока нет</strong><span>Помощник предложит факты для сохранения после разговора.</span></div>}
     </div>
+    <AppDialog open={Boolean(editing)} title="Изменить запись" description="После сохранения запись будет закреплена, чтобы Iris не заменила её автоматически." onClose={() => !editBusy && setEditing(null)}>
+      <form className="dialog-form" onSubmit={async (event) => {
+        event.preventDefault();
+        if (!editing || !editValue.trim()) return;
+        setEditBusy(true);
+        try {
+          await action(() => updateMemory(editing.id, { value_text: editValue.trim(), user_locked: true }));
+          setEditing(null);
+        } finally {
+          setEditBusy(false);
+        }
+      }}>
+        <label>Содержание<textarea autoFocus rows={4} value={editValue} onChange={(event) => setEditValue(event.target.value)} required /></label>
+        <div className="dialog-actions">
+          <button className="secondary" type="button" onClick={() => setEditing(null)} disabled={editBusy}>Отмена</button>
+          <button className="primary-button" type="submit" disabled={editBusy || !editValue.trim()}>{editBusy ? "Сохраняю…" : "Сохранить"}</button>
+        </div>
+      </form>
+    </AppDialog>
   </section>;
 }

@@ -44,7 +44,9 @@ def test_v041_history_migrates_to_one_primary_timeline(monkeypatch, tmp_path: Pa
     ]
     assert {item["metadata"].get("legacy_session_id") for item in payload} == {"default", "voice-demo"}
     with sqlite3.connect(database) as connection:
-        assert connection.execute("SELECT version FROM schema_migrations").fetchall() == [(1,), (2,), (3,), (4,), (5,)]
+        assert connection.execute("SELECT version FROM schema_migrations").fetchall() == [
+            (1,), (2,), (3,), (4,), (5,), (6,), (10,),
+        ]
         assert connection.execute("SELECT COUNT(*) FROM conversation_messages").fetchone() == (4,)
         assert connection.execute("SELECT status, message_count FROM conversation_episodes").fetchall() == [("closed", 4)]
 

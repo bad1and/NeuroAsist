@@ -27,6 +27,17 @@ class PublicSettingsResponse(BaseModel):
     memory_enabled: bool
     memory_mode: str
     memory_incognito: bool
+    live_conversation_enabled: bool
+    live_conversation_participant_mode: str
+    live_conversation_engagement: str
+    live_conversation_initiative: str
+    live_conversation_address_strictness: str
+    live_conversation_interruption_sensitivity: str
+    live_conversation_pause_tolerance: str
+    live_conversation_emotion_expression: str
+    live_conversation_mood_recovery: str
+    live_conversation_recent_event_weight: str
+    live_conversation_echo_mode: str
     log_level: str
     api_key_configured: bool
     available_personalities: list[str]
@@ -45,6 +56,17 @@ class RuntimeSettingsPatch(BaseModel):
     voice_live_playback_prebuffer_ms: int | None = None
     memory_mode: str | None = None
     memory_incognito: bool | None = None
+    live_conversation_enabled: bool | None = None
+    live_conversation_participant_mode: str | None = None
+    live_conversation_engagement: str | None = None
+    live_conversation_initiative: str | None = None
+    live_conversation_address_strictness: str | None = None
+    live_conversation_interruption_sensitivity: str | None = None
+    live_conversation_pause_tolerance: str | None = None
+    live_conversation_emotion_expression: str | None = None
+    live_conversation_mood_recovery: str | None = None
+    live_conversation_recent_event_weight: str | None = None
+    live_conversation_echo_mode: str | None = None
 
 
 class VoiceStylePatch(BaseModel):

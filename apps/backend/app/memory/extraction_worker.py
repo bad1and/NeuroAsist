@@ -72,7 +72,12 @@ class MemoryExtractionWorker:
         try:
             message_id = str(json.loads(str(job["payload_json"]))["message_id"])
             message = await asyncio.to_thread(self._store.get_message, message_id)
-            if message is None or message.role != "user" or message.status != "completed":
+            if (
+                message is None
+                or message.role != "user"
+                or message.status != "completed"
+                or not self._memory_service.is_eligible_automatic_source(message)
+            ):
                 await asyncio.to_thread(self._store.complete_summary_job, job_id)
                 return True
             context = await asyncio.to_thread(self._store.memory_extraction_context, message_id)

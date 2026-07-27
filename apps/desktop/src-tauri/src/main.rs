@@ -302,6 +302,12 @@ fn restart_core(app: AppHandle) -> Result<DesktopRuntime, String> {
 }
 
 #[tauri::command]
+fn quit_app(app: AppHandle) {
+    app.state::<DesktopState>().shutdown();
+    app.exit(0);
+}
+
+#[tauri::command]
 fn toggle_avatar(app: AppHandle) -> Result<bool, String> {
     app.state::<DesktopState>().toggle_avatar(&app)
 }
@@ -352,10 +358,15 @@ fn main() {
                 shutdown_handle.exit(0);
             }).map_err(std::io::Error::other)?;
             let state = app.state::<DesktopState>();
-            state.start_core(&app.handle()).map_err(std::io::Error::other)?;
-            let _ = state.start_avatar(&app.handle());
             create_main_window(&app.handle(), state.runtime())?;
             setup_tray(app)?;
+            let startup_handle = app.handle().clone();
+            thread::spawn(move || {
+                let state = startup_handle.state::<DesktopState>();
+                if state.start_core(&startup_handle).is_ok() {
+                    let _ = state.start_avatar(&startup_handle);
+                }
+            });
             #[cfg(desktop)]
             app.handle().plugin(
                 tauri_plugin_global_shortcut::Builder::new()
@@ -373,7 +384,7 @@ fn main() {
             )?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![desktop_runtime, restart_core, toggle_avatar, api_key_configured, save_api_key, remove_api_key])
+        .invoke_handler(tauri::generate_handler![desktop_runtime, restart_core, quit_app, toggle_avatar, api_key_configured, save_api_key, remove_api_key])
         .build(tauri::generate_context!())
         .expect("error while building Iris desktop shell");
 
@@ -388,6 +399,7 @@ fn create_main_window(app: &AppHandle, runtime: DesktopRuntime) -> tauri::Result
     let bootstrap = format!("window.__NEUROASIST_DESKTOP_CONFIG__ = {};", serde_json::to_string(&runtime).expect("desktop config serializes"));
     WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("Iris")
+        .decorations(false)
         .inner_size(1120.0, 760.0)
         .min_inner_size(760.0, 540.0)
         .initialization_script(&bootstrap)
@@ -533,3 +545,5 @@ fn avatar_overlay_visibility_request(runtime: &DesktopRuntime, visible: bool) ->
     stream.read_to_string(&mut response).map_err(|error| error.to_string())?;
     if response.starts_with("HTTP/1.1 2") { Ok(()) } else { Err(response.lines().next().unwrap_or("No HTTP response").into()) }
 }
+
+// Trigger rebuild
