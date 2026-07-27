@@ -204,12 +204,32 @@ async def test_tts_worker_synthesizes_concurrently_but_sends_in_order(monkeypatc
     await queue.put("slow")
     await queue.put("fast")
     await queue.put(None)
+    context = UtteranceContext("s", "u")
+    manager._active["s"] = context
     started = time.perf_counter()
-    await manager._tts_worker(UtteranceContext("s", "u"), queue, "ru", "xenia")
+    await manager._tts_worker(context, queue, "ru", "xenia")
     elapsed = time.perf_counter() - started
     assert elapsed < 0.14
     assert [audio.decode() for _, audio, _ in connection.segments] == ["slow", "fast"]
     assert [started["segment_id"] for started, _, _ in connection.segments] == [0, 1]
+
+
+@pytest.mark.anyio
+async def test_stale_generation_cannot_send_late_tts_segment() -> None:
+    manager = VoiceSessionManager(MockTTSProvider())
+    connection = FakeVoiceConnection()
+    manager._connections["s"] = connection
+    stale = UtteranceContext("s", "old", generation=1)
+    manager._active["s"] = UtteranceContext("s", "new", generation=2)
+    with pytest.raises(asyncio.CancelledError):
+        await manager._send_tts_part(
+            stale,
+            0,
+            ("old text", b"old audio", "wav", 0.1, 1),
+            queue_depth=0,
+            synth_ms=1,
+        )
+    assert connection.segments == []
 
 
 @pytest.mark.anyio
@@ -287,6 +307,9 @@ async def test_streaming_agent_uses_character_persona_prompt(tmp_path: Path) -> 
     assert '"reply"' not in system_prompt
     assert "[[avatar emotion=smirk gesture=shrug intensity=0.7]]" in system_prompt
     assert "Не пиши скобочные ремарки действий" in system_prompt
+    assert "Не выдумывай биографии" in system_prompt
+    assert "ты не про того" in system_prompt
+    assert "Не упоминай тесты" in system_prompt
 
 
 @pytest.mark.parametrize(

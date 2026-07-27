@@ -55,7 +55,7 @@ export class TTSStreamPlayer {
   private context: AudioContext | null = null;
   private scheduledUntil = 0;
   private sources = new Set<AudioBufferSourceNode>();
-  private readyBuffers: AudioBuffer[] = [];
+  private readyBuffers: Array<{ buffer: AudioBuffer; text: string }> = [];
   private generation = 0;
   private started = false;
   private decodeChain: Promise<void> = Promise.resolve();
@@ -74,6 +74,7 @@ export class TTSStreamPlayer {
     private readonly onError: (error: Error) => void,
     options: TTSStreamPlayerOptions = {},
     private readonly onUnderrun: (gapMs: number) => void = () => undefined,
+    private readonly onSegmentFinished: (text: string) => void = () => undefined,
   ) {
     this.prebufferSegments = Math.max(1, options.prebufferSegments ?? 1);
     this.prebufferMs = Math.max(0, options.prebufferMs ?? 0);
@@ -101,7 +102,7 @@ export class TTSStreamPlayer {
     utteranceId: string,
     segmentId: number,
     data: ArrayBuffer,
-    audio: Pick<VoiceServerEvent, "format" | "sample_rate" | "channels"> = {},
+    audio: Pick<VoiceServerEvent, "format" | "sample_rate" | "channels" | "text"> = {},
   ): Promise<void> {
     if (utteranceId !== this.activeUtteranceId) return Promise.resolve();
     if (segmentId !== this.lastQueuedSegment + 1) {
@@ -116,11 +117,12 @@ export class TTSStreamPlayer {
       await this.unlock();
       const context = this.context!;
       const buffer = await context.decodeAudioData(data.slice(0));
+      const decoded = { buffer, text: audio.text ?? "" };
       if (generation !== this.generation || utteranceId !== this.activeUtteranceId) return;
       if (!this.started) {
-        this.readyBuffers.push(buffer);
+        this.readyBuffers.push(decoded);
         this.armPrebufferTimer();
-        const bufferedSeconds = this.readyBuffers.reduce((sum, item) => sum + item.duration, 0);
+        const bufferedSeconds = this.readyBuffers.reduce((sum, item) => sum + item.buffer.duration, 0);
         if (
           this.readyBuffers.length >= this.prebufferSegments
           || bufferedSeconds >= this.prebufferMs / 1000
@@ -129,7 +131,7 @@ export class TTSStreamPlayer {
           this.flushPrebuffer();
         }
       } else {
-        this.scheduleBuffer(buffer);
+        this.scheduleBuffer(decoded);
       }
     };
     const result = this.decodeChain.then(decode);
@@ -208,7 +210,8 @@ export class TTSStreamPlayer {
     this.maybeFinished();
   }
 
-  private scheduleBuffer(buffer: AudioBuffer): void {
+  private scheduleBuffer(item: { buffer: AudioBuffer; text: string }): void {
+    const { buffer, text } = item;
     const context = this.context!;
     const gapMs = this.started ? Math.max(0, (context.currentTime - this.scheduledUntil) * 1000) : 0;
     if (gapMs > 50) this.onUnderrun(Math.round(gapMs));
@@ -224,6 +227,7 @@ export class TTSStreamPlayer {
     source.onended = () => {
       this.sources.delete(source);
       source.disconnect();
+      this.onSegmentFinished(text);
       this.maybeFinished();
     };
     source.start(startAt);

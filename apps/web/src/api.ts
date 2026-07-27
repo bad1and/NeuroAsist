@@ -12,6 +12,7 @@ import type {
   TimelineMessage,
   MemoryAuditItem,
   MemoryItem,
+  ConversationDebug,
 } from "./types";
 
 const DESKTOP_RUNTIME =
@@ -48,10 +49,10 @@ export function voiceWebSocketUrl(sessionId: string): string {
   return `${base}/ws/voice/${encodeURIComponent(sessionId)}?version=1${token ? `&token=${encodeURIComponent(token)}` : ""}`;
 }
 
-export function voiceInputWebSocketUrl(sessionId: string): string {
+export function voiceInputWebSocketUrl(sessionId: string, version: 1 | 2 = 1): string {
   const base = API_BASE_URL.replace(/^http/, "ws");
   const token = DESKTOP_RUNTIME?.apiToken;
-  return `${base}/ws/voice-input/${encodeURIComponent(sessionId)}?version=1${token ? `&token=${encodeURIComponent(token)}` : ""}`;
+  return `${base}/ws/voice-input/${encodeURIComponent(sessionId)}?version=${version}${token ? `&token=${encodeURIComponent(token)}` : ""}`;
 }
 
 function audioExtensionForMime(mimeType: string): string {
@@ -115,6 +116,12 @@ export function getSettings(): Promise<PublicSettings> {
   return requestJson<PublicSettings>("/settings/public");
 }
 
+export function getConversationDebug(sessionId: string): Promise<ConversationDebug> {
+  return requestJson<ConversationDebug>(
+    `/conversation/debug/${encodeURIComponent(sessionId)}`,
+  );
+}
+
 export function updateRuntimeSettings(payload: {
   personality?: string;
   voice_language?: string;
@@ -124,6 +131,17 @@ export function updateRuntimeSettings(payload: {
   voice_live_playback_prebuffer_ms?: number;
   memory_mode?: string;
   memory_incognito?: boolean;
+  live_conversation_enabled?: boolean;
+  live_conversation_participant_mode?: PublicSettings["live_conversation_participant_mode"];
+  live_conversation_engagement?: PublicSettings["live_conversation_engagement"];
+  live_conversation_initiative?: PublicSettings["live_conversation_initiative"];
+  live_conversation_address_strictness?: PublicSettings["live_conversation_address_strictness"];
+  live_conversation_interruption_sensitivity?: PublicSettings["live_conversation_interruption_sensitivity"];
+  live_conversation_pause_tolerance?: PublicSettings["live_conversation_pause_tolerance"];
+  live_conversation_emotion_expression?: PublicSettings["live_conversation_emotion_expression"];
+  live_conversation_mood_recovery?: PublicSettings["live_conversation_mood_recovery"];
+  live_conversation_recent_event_weight?: PublicSettings["live_conversation_recent_event_weight"];
+  live_conversation_echo_mode?: PublicSettings["live_conversation_echo_mode"];
 }): Promise<PublicSettings> {
   return requestJson<PublicSettings>("/settings/runtime", {
     method: "PATCH",

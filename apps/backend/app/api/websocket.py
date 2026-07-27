@@ -83,6 +83,28 @@ async def websocket_voice(websocket: WebSocket, session_id: str, version: int = 
                     message.get("utterance_id"),
                     message.get("underrun_ms"),
                 )
+            elif message.get("type") == "playback.segment.started":
+                service = getattr(websocket.app.state, "conversation_service", None)
+                if service is not None:
+                    await service.playback_segment_started(
+                        session_id,
+                        str(message.get("text", "")),
+                        message.get("utterance_id"),
+                        message.get("generation"),
+                    )
+            elif message.get("type") == "playback.segment.finished":
+                service = getattr(websocket.app.state, "conversation_service", None)
+                if service is not None:
+                    await service.playback_segment_finished(
+                        session_id,
+                        message.get("text"),
+                        message.get("utterance_id"),
+                        message.get("generation"),
+                    )
+            elif message.get("type") == "playback.finished":
+                service = getattr(websocket.app.state, "conversation_service", None)
+                if service is not None:
+                    await service.playback_finished(session_id, message.get("utterance_id"))
     except asyncio.CancelledError:
         shutdown_cancelled = True
         logger.info("Voice WebSocket closed during backend shutdown")
@@ -98,12 +120,12 @@ async def websocket_voice(websocket: WebSocket, session_id: str, version: int = 
 
 @router.websocket("/ws/voice-input/{session_id}")
 async def websocket_voice_input(websocket: WebSocket, session_id: str, version: int = 1, token: str | None = None) -> None:
-    if not _desktop_token_is_valid(websocket, token) or version != 1:
+    if not _desktop_token_is_valid(websocket, token) or version not in {1, 2}:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     await websocket.accept()
     manager = websocket.app.state.voice_input_session_manager
-    connection = await manager.register(session_id, websocket)
+    connection = await manager.register(session_id, websocket, version=version)
     try:
         while True:
             message = await websocket.receive()
@@ -117,6 +139,7 @@ async def websocket_voice_input(websocket: WebSocket, session_id: str, version: 
                     sample_rate=int(payload.get("sample_rate", 16000)),
                     channels=int(payload.get("channels", 1)),
                     language=str(payload.get("language", "ru")),
+                    mode=str(payload.get("mode", "hands_free")),
                 )
             elif payload.get("type") == "voice.input.stop":
                 break
@@ -126,6 +149,9 @@ async def websocket_voice_input(websocket: WebSocket, session_id: str, version: 
                 await connection.send({"type": "voice.input.error", "message": str(exc)})
     finally:
         await manager.unregister(session_id, connection)
+        service = getattr(websocket.app.state, "conversation_service", None)
+        if service is not None and connection.mode == "live_conversation":
+            await service.close_session(session_id)
 
 
 @router.websocket("/ws/events")

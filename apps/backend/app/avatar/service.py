@@ -4,7 +4,7 @@ import asyncio
 import base64
 import logging
 from typing import Any
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from .connection_manager import AvatarConnectionManager, BroadcastResult
 from .emotion_engine import EmotionEngine
@@ -28,6 +28,7 @@ from .schemas import (
 from apps.backend.app.schemas.character import Emotion, Gesture
 
 logger = logging.getLogger(__name__)
+PlaybackFinishedHandler = Callable[[str], Awaitable[None]]
 
 
 class AvatarService:
@@ -52,6 +53,13 @@ class AvatarService:
         self.overlay = overlay or OverlayPayload()
         self.on_overlay_bounds_changed = on_overlay_bounds_changed
         self._heartbeat_task: asyncio.Task[None] | None = None
+        self._playback_finished_handler: PlaybackFinishedHandler | None = None
+
+    def bind_playback_finished_handler(
+        self,
+        handler: PlaybackFinishedHandler | None,
+    ) -> None:
+        self._playback_finished_handler = handler
 
     async def start(self) -> None:
         if self.enabled and self._heartbeat_task is None:
@@ -230,6 +238,8 @@ class AvatarService:
             await self.manager.update(client_id, current_utterance_id=None, state="Idle")
             self.emotion_engine.stop(payload.utterance_id)
             self.event_bus.publish("avatar.speaking_finished", "info", "Avatar playback finished", {"client_id": client_id, "utterance_id": payload.utterance_id})
+            if self._playback_finished_handler is not None:
+                await self._playback_finished_handler(payload.utterance_id)
         elif envelope.type == "avatar.playback.failed":
             await self.manager.update(client_id, current_utterance_id=None, state="Error")
             self.emotion_engine.stop(payload.utterance_id)

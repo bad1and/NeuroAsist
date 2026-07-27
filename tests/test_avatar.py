@@ -143,6 +143,37 @@ async def test_hello_and_playback_events_update_client_status() -> None:
 
 
 @pytest.mark.anyio
+async def test_avatar_playback_finished_notifies_conversation_lifecycle() -> None:
+    events = EventBus()
+    manager = AvatarConnectionManager()
+    client = await manager.register(FakeSocket())
+    service = AvatarService(
+        manager,
+        events,
+        enabled=True,
+        heartbeat_interval_seconds=1,
+        client_timeout_seconds=2,
+    )
+    finished_utterances: list[str] = []
+
+    async def finished(utterance_id: str) -> None:
+        finished_utterances.append(utterance_id)
+
+    service.bind_playback_finished_handler(finished)
+    envelope, payload = parse_incoming({
+        "protocol_version": 1,
+        "type": "avatar.playback.finished",
+        "message_id": "finished",
+        "timestamp": "2026-01-01T00:00:01Z",
+        "session_id": "s",
+        "payload": {"utterance_id": "utterance"},
+    })
+    await service.inbound(client.client_id, envelope, payload)
+
+    assert finished_utterances == ["utterance"]
+
+
+@pytest.mark.anyio
 async def test_v2_stream_segments_are_sent_only_to_v2_clients() -> None:
     events = EventBus()
     manager = AvatarConnectionManager()
