@@ -545,3 +545,5 @@ fn avatar_overlay_visibility_request(runtime: &DesktopRuntime, visible: bool) ->
     stream.read_to_string(&mut response).map_err(|error| error.to_string())?;
     if response.starts_with("HTTP/1.1 2") { Ok(()) } else { Err(response.lines().next().unwrap_or("No HTTP response").into()) }
 }
+
+// Trigger rebuild
