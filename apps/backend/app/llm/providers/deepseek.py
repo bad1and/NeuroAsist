@@ -27,6 +27,22 @@ class DeepSeekProvider(LLMProvider):
             )
 
     async def generate(self, messages: list[ChatMessage]) -> LLMResponse:
+        return await self._generate_json(messages, temperature=0.7)
+
+    async def generate_structured(
+        self,
+        messages: list[ChatMessage],
+        *,
+        temperature: float = 0.0,
+    ) -> LLMResponse:
+        return await self._generate_json(messages, temperature=temperature)
+
+    async def _generate_json(
+        self,
+        messages: list[ChatMessage],
+        *,
+        temperature: float,
+    ) -> LLMResponse:
         if self._client is None:
             raise ValueError("DeepSeek API key is not configured")
 
@@ -41,7 +57,7 @@ class DeepSeekProvider(LLMProvider):
                 response = await self._client.chat.completions.create(
                     model=self._model,
                     messages=[message.model_dump() for message in messages],
-                    temperature=0.7,
+                    temperature=temperature,
                     response_format={"type": "json_object"},
                 )
                 choice = response.choices[0]

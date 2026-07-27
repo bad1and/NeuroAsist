@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 from uuid import uuid4
 
 from apps.backend.app.llm.base import ChatMessage
@@ -16,6 +17,7 @@ from apps.backend.app.llm.base import ChatMessage
 
 PRIMARY_RELATIONSHIP_ID = "primary"
 PRIMARY_TIMELINE_ID = "primary-timeline"
+LATEST_SCHEMA_VERSION = 10
 
 
 @dataclass(frozen=True)
@@ -36,8 +38,11 @@ class StoredTimelineMessage:
     content: str
     corrected_content: str | None
     client_message_id: str | None
+    utterance_id: str | None
+    generation: int | None
     status: str
     input_mode: str
+    language: str | None
     created_at: str
     completed_at: str | None
     cancelled_at: str | None
@@ -57,8 +62,11 @@ class StoredTimelineMessage:
             "original_content": self.content,
             "corrected_content": self.corrected_content,
             "client_message_id": self.client_message_id,
+            "utterance_id": self.utterance_id,
+            "generation": self.generation,
             "status": self.status,
             "input_mode": self.input_mode,
+            "language": self.language,
             "created_at": self.created_at,
             "completed_at": self.completed_at,
             "cancelled_at": self.cancelled_at,
@@ -107,6 +115,18 @@ class TimelineStore:
             if 5 not in applied:
                 self._apply_v5(connection)
                 connection.execute("INSERT INTO schema_migrations (version, applied_at) VALUES (5, ?)", (self._now(),))
+            if 6 not in applied:
+                self._apply_live_conversation_schema(connection)
+                connection.execute("INSERT INTO schema_migrations (version, applied_at) VALUES (6, ?)", (self._now(),))
+            # Migration number 6 was already used by some released databases
+            # before the live-conversation tables were introduced. Version 10
+            # is an idempotent repair migration for those installations.
+            if LATEST_SCHEMA_VERSION not in applied:
+                self._apply_live_conversation_schema(connection)
+                connection.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                    (LATEST_SCHEMA_VERSION, self._now()),
+                )
             self._ensure_primary_timeline(connection)
             self._migrate_legacy_messages(connection)
             self._assign_unassigned_messages_to_import_episode(connection)
@@ -121,6 +141,10 @@ class TimelineStore:
         input_mode: str,
         status: str = "completed",
         client_message_id: str | None = None,
+        utterance_id: str | None = None,
+        generation: int | None = None,
+        language: str | None = None,
+        corrected_content: str | None = None,
         metadata: dict[str, object] | None = None,
         created_at: str | None = None,
     ) -> tuple[StoredTimelineMessage, bool]:
@@ -149,12 +173,16 @@ class TimelineStore:
                 connection.execute(
                     """
                     INSERT INTO conversation_messages (
-                        id, timeline_id, episode_id, role, content, client_message_id, status, input_mode,
-                        created_at, completed_at, metadata_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        id, timeline_id, episode_id, role, content, corrected_content, client_message_id,
+                        utterance_id, generation, status, input_mode, language, created_at, completed_at,
+                        metadata_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (message_id, PRIMARY_TIMELINE_ID, episode_id, role, content, client_message_id, status,
-                     input_mode, now, completed_at, json.dumps(metadata or {}, ensure_ascii=False)),
+                    (
+                        message_id, PRIMARY_TIMELINE_ID, episode_id, role, content, corrected_content,
+                        client_message_id, utterance_id, generation, status, input_mode, language,
+                        now, completed_at, json.dumps(metadata or {}, ensure_ascii=False),
+                    ),
                 )
             except sqlite3.IntegrityError:
                 if client_message_id is None:
@@ -459,17 +487,50 @@ class TimelineStore:
             episode = connection.execute("SELECT * FROM conversation_episodes WHERE id = ?", (episode_id,)).fetchone()
             if episode is None or episode["message_count"] == 0:
                 return None
-            rows = connection.execute("SELECT id, role, content, corrected_content FROM conversation_messages WHERE episode_id = ? ORDER BY created_at, id", (episode_id,)).fetchall()
-            user_texts = [(row["corrected_content"] or row["content"]).strip() for row in rows if row["role"] == "user"]
+            rows = connection.execute(
+                """
+                SELECT m.id, m.role, m.content, m.corrected_content,
+                       o.decision_action, o.decision_reason, o.speaker_role
+                FROM conversation_messages m
+                LEFT JOIN conversation_observations o ON o.message_id = m.id
+                WHERE m.episode_id = ?
+                ORDER BY m.created_at, m.id
+                """,
+                (episode_id,),
+            ).fetchall()
+            user_texts = [
+                (row["corrected_content"] or row["content"]).strip()
+                for row in rows
+                if row["role"] == "user"
+                and row["decision_action"] not in {
+                    "observe", "avatar_reaction", "defer", "wait_more"
+                }
+            ]
+            ambient_texts = [
+                (row["corrected_content"] or row["content"]).strip()
+                for row in rows
+                if row["role"] == "user"
+                and row["decision_action"] in {"observe", "avatar_reaction", "defer"}
+            ]
             decisions = [text for text in user_texts if any(marker in text.lower() for marker in ("решил", "решили", "нужно", "не делать", "будем"))][:5]
             open_loops = [text for text in user_texts if "?" in text][-3:]
             topics = self._keywords(" ".join(user_texts))[:5]
-            summary_text = " ".join(user_texts[:1] + user_texts[-1:])[:900] or "Conversation episode"
+            direct_summary = " ".join(user_texts[:1] + user_texts[-1:]).strip()
+            ambient_summary = " ".join(ambient_texts[-2:]).strip()
+            summary_parts = []
+            if direct_summary:
+                summary_parts.append(f"Прямой диалог с Iris: {direct_summary}")
+            if ambient_summary:
+                summary_parts.append(
+                    "Фоновая речь, услышанная Iris, но адресованная не ей: "
+                    f"{ambient_summary}"
+                )
+            summary_text = " ".join(summary_parts)[:900] or "Conversation episode"
             version = connection.execute("SELECT COALESCE(MAX(version), 0) + 1 FROM episode_summaries WHERE episode_id = ?", (episode_id,)).fetchone()[0]
             now = self._now()
             connection.execute("UPDATE episode_summaries SET superseded_at = ? WHERE episode_id = ? AND superseded_at IS NULL", (now, episode_id))
             summary_id = uuid4().hex
-            connection.execute("""INSERT INTO episode_summaries (id, episode_id, version, summary_text, topics_json, decisions_json, open_loops_json, source_message_ids_json, prompt_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'deterministic-v1', ?)""", (summary_id, episode_id, version, summary_text, json.dumps(topics, ensure_ascii=False), json.dumps(decisions, ensure_ascii=False), json.dumps(open_loops, ensure_ascii=False), json.dumps([row["id"] for row in rows]), now))
+            connection.execute("""INSERT INTO episode_summaries (id, episode_id, version, summary_text, topics_json, decisions_json, open_loops_json, source_message_ids_json, prompt_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'deterministic-v2-address-aware', ?)""", (summary_id, episode_id, version, summary_text, json.dumps(topics, ensure_ascii=False), json.dumps(decisions, ensure_ascii=False), json.dumps(open_loops, ensure_ascii=False), json.dumps([row["id"] for row in rows]), now))
             connection.execute("INSERT INTO episode_summary_fts (summary_id, text) VALUES (?, ?)", (summary_id, summary_text))
             connection.execute("UPDATE conversation_episodes SET summary_status = 'summarized', summary_version = ? WHERE id = ?", (version, episode_id))
             return {"id": summary_id, "episode_id": episode_id, "summary_text": summary_text, "topics": topics, "decisions": decisions, "open_loops": open_loops}
@@ -495,6 +556,11 @@ class TimelineStore:
             rows = connection.execute(
                 """SELECT * FROM conversation_messages
                    WHERE timeline_id = ? AND status = 'completed' AND role IN ('user', 'assistant')
+                     AND NOT (
+                         role = 'user'
+                         AND COALESCE(json_extract(metadata_json, '$.dialogue_scope'), '')
+                             IN ('ambient', 'incomplete')
+                     )
                      AND (created_at < ? OR (created_at = ? AND id <= ?))
                    ORDER BY created_at DESC, id DESC LIMIT ?""",
                 (PRIMARY_TIMELINE_ID, target["created_at"], target["created_at"], target["id"], max(1, limit)),
@@ -631,6 +697,10 @@ class TimelineStore:
                 for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
             }
             reset_tables_child_first = (
+                "conversation_observations",
+                "character_state_events",
+                "character_participant_states",
+                "character_state_snapshots",
                 "memory_usage",
                 "memory_retrieval_runs",
                 "memory_operations",
@@ -699,7 +769,20 @@ class TimelineStore:
         with self._connect() as connection:
             active = self._current_episode_row(connection)
             active_id = active["id"] if active else ""
-            recent = connection.execute("SELECT role, content, corrected_content FROM conversation_messages WHERE timeline_id = ? AND status = 'completed' AND role IN ('user','assistant') ORDER BY created_at DESC, id DESC LIMIT ?", (PRIMARY_TIMELINE_ID, recent_turns * 2)).fetchall()
+            recent = connection.execute(
+                """
+                SELECT m.id, m.role, m.content, m.corrected_content, m.input_mode,
+                       o.decision_action, o.decision_reason, o.speaker_role,
+                       o.addressedness
+                FROM conversation_messages m
+                LEFT JOIN conversation_observations o ON o.message_id = m.id
+                WHERE m.timeline_id = ? AND m.status = 'completed'
+                  AND m.role IN ('user','assistant')
+                ORDER BY m.created_at DESC, m.id DESC
+                LIMIT ?
+                """,
+                (PRIMARY_TIMELINE_ID, recent_turns * 2),
+            ).fetchall()
             terms = self._keywords(user_text)
             if terms:
                 clauses = " OR ".join("s.summary_text LIKE ?" for _ in terms)
@@ -710,12 +793,38 @@ class TimelineStore:
                 summaries = connection.execute("SELECT s.* FROM episode_summaries s WHERE s.superseded_at IS NULL AND s.episode_id != ? ORDER BY s.created_at DESC LIMIT 2", (active_id,)).fetchall()
             rolling_summary = None
             if active_id:
-                active_rows = connection.execute("SELECT role, content, corrected_content FROM conversation_messages WHERE episode_id = ? AND status = 'completed' AND role IN ('user','assistant') ORDER BY created_at, id", (active_id,)).fetchall()
+                active_rows = connection.execute(
+                    """
+                    SELECT m.role, m.content, m.corrected_content,
+                           o.decision_action
+                    FROM conversation_messages m
+                    LEFT JOIN conversation_observations o ON o.message_id = m.id
+                    WHERE m.episode_id = ? AND m.status = 'completed'
+                      AND m.role IN ('user','assistant')
+                    ORDER BY m.created_at, m.id
+                    """,
+                    (active_id,),
+                ).fetchall()
                 older_rows = active_rows[: max(0, len(active_rows) - recent_turns * 2)]
                 if older_rows:
-                    older_user_texts = [(row["corrected_content"] or row["content"]).strip() for row in older_rows if row["role"] == "user"]
-                    rolling_summary = " ".join(older_user_texts[:1] + older_user_texts[-1:])[:700] or None
-        return {"active_episode_id": active_id or None, "recent": list(reversed(recent)), "summaries": [dict(row) for row in summaries], "rolling_summary": rolling_summary}
+                    older_user_texts = [
+                        (row["corrected_content"] or row["content"]).strip()
+                        for row in older_rows
+                        if row["role"] == "user"
+                        and row["decision_action"] not in {
+                            "observe", "avatar_reaction", "defer", "wait_more"
+                        }
+                    ]
+                    rolling_summary = (
+                        " ".join(older_user_texts[:1] + older_user_texts[-1:])[:700]
+                        or None
+                    )
+        return {
+            "active_episode_id": active_id or None,
+            "recent": [dict(row) for row in reversed(recent)],
+            "summaries": [dict(row) for row in summaries],
+            "rolling_summary": rolling_summary,
+        }
 
     @staticmethod
     def _keywords(text: str) -> list[str]:
@@ -732,6 +841,218 @@ class TimelineStore:
         with self._connect() as connection:
             connection.execute("SELECT 1").fetchone()
         return True
+
+    def save_character_state_snapshot(
+        self,
+        relationship_id: str,
+        state: dict[str, object],
+        *,
+        schema_version: int = 1,
+    ) -> None:
+        now = self._now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO character_state_snapshots (relationship_id, schema_version, state_json, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(relationship_id) DO UPDATE SET
+                    schema_version = excluded.schema_version,
+                    state_json = excluded.state_json,
+                    updated_at = excluded.updated_at
+                """,
+                (relationship_id, schema_version, json.dumps(state, ensure_ascii=False), now),
+            )
+
+    def load_character_state_snapshot(self, relationship_id: str) -> dict[str, object] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT schema_version, state_json, updated_at FROM character_state_snapshots WHERE relationship_id = ?",
+                (relationship_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "schema_version": row["schema_version"],
+            "state": json.loads(row["state_json"]),
+            "updated_at": row["updated_at"],
+        }
+
+    def append_character_state_event(
+        self,
+        *,
+        relationship_id: str,
+        participant_key: str | None,
+        event_kind: str,
+        confidence: float,
+        intensity: float,
+        cause_message_ids: list[str],
+        delta: dict[str, object],
+    ) -> str:
+        event_id = uuid4().hex
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO character_state_events (
+                    id, relationship_id, participant_key, event_kind, confidence, intensity,
+                    cause_message_ids_json, delta_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_id,
+                    relationship_id,
+                    participant_key,
+                    event_kind,
+                    confidence,
+                    intensity,
+                    json.dumps(cause_message_ids, ensure_ascii=False),
+                    json.dumps(delta, ensure_ascii=False),
+                    self._now(),
+                ),
+            )
+        return event_id
+
+    def upsert_participant_state(
+        self,
+        *,
+        relationship_id: str,
+        participant_key: str,
+        role: str,
+        facets: dict[str, object],
+        evidence_count: int,
+    ) -> None:
+        now = self._now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO character_participant_states (
+                    relationship_id, participant_key, role, facets_json, evidence_count, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(relationship_id, participant_key) DO UPDATE SET
+                    role = excluded.role,
+                    facets_json = excluded.facets_json,
+                    evidence_count = excluded.evidence_count,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    relationship_id,
+                    participant_key,
+                    role,
+                    json.dumps(facets, ensure_ascii=False),
+                    evidence_count,
+                    now,
+                    now,
+                ),
+            )
+
+    def load_participant_states(self, relationship_id: str) -> list[dict[str, object]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT participant_key, role, facets_json, evidence_count, created_at, updated_at
+                FROM character_participant_states
+                WHERE relationship_id = ?
+                ORDER BY participant_key
+                """,
+                (relationship_id,),
+            ).fetchall()
+        return [
+            {
+                "participant_key": row["participant_key"],
+                "role": row["role"],
+                "facets": json.loads(row["facets_json"]),
+                "evidence_count": row["evidence_count"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+
+    def save_conversation_observation(
+        self,
+        *,
+        message_id: str,
+        session_id: str,
+        turn_id: str,
+        utterance_id: str,
+        generation: int,
+        speaker_role: str,
+        speaker_confidence: float,
+        addressedness: float,
+        addressed_confidence: float,
+        end_of_turn_confidence: float,
+        significance: float,
+        metadata: dict[str, object],
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO conversation_observations (
+                    message_id, session_id, turn_id, utterance_id, generation, speaker_role,
+                    speaker_confidence, addressedness, addressed_confidence, end_of_turn_confidence,
+                    significance, metadata_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(message_id) DO NOTHING
+                """,
+                (
+                    message_id,
+                    session_id,
+                    turn_id,
+                    utterance_id,
+                    generation,
+                    speaker_role,
+                    speaker_confidence,
+                    addressedness,
+                    addressed_confidence,
+                    end_of_turn_confidence,
+                    significance,
+                    json.dumps(metadata, ensure_ascii=False),
+                    self._now(),
+                ),
+            )
+
+    def set_observation_decision(self, message_id: str, action: str, reason: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE conversation_observations
+                SET decision_action = ?, decision_reason = ?
+                WHERE message_id = ?
+                """,
+                (action, reason, message_id),
+            )
+            row = connection.execute(
+                "SELECT metadata_json FROM conversation_messages WHERE id = ?",
+                (message_id,),
+            ).fetchone()
+            if row is not None:
+                metadata = json.loads(row["metadata_json"])
+                metadata["conversation_decision"] = {
+                    "action": action,
+                    "reason": reason,
+                }
+                if action in {"respond", "backchannel"}:
+                    metadata["dialogue_scope"] = "direct"
+                elif action == "wait_more":
+                    metadata["dialogue_scope"] = "incomplete"
+                else:
+                    metadata["dialogue_scope"] = "ambient"
+                connection.execute(
+                    "UPDATE conversation_messages SET metadata_json = ? WHERE id = ?",
+                    (json.dumps(metadata, ensure_ascii=False), message_id),
+                )
+
+    def recent_conversation_observations(self, session_id: str, limit: int = 20) -> list[dict[str, object]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM conversation_observations
+                WHERE session_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (session_id, limit),
+            ).fetchall()
+        return [{**dict(row), "metadata": json.loads(row["metadata_json"])} for row in reversed(rows)]
 
     def _apply_v1(self, connection: sqlite3.Connection) -> None:
         connection.executescript(
@@ -867,6 +1188,63 @@ class TimelineStore:
             );
             CREATE INDEX IF NOT EXISTS idx_semantic_vectors_namespace_model
                 ON semantic_vectors (namespace, model_id, dimension);
+            """
+        )
+
+    def _apply_live_conversation_schema(self, connection: sqlite3.Connection) -> None:
+        """Additive live-conversation state and provenance tables."""
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS character_state_snapshots (
+                relationship_id TEXT PRIMARY KEY,
+                schema_version INTEGER NOT NULL,
+                state_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS character_state_events (
+                id TEXT PRIMARY KEY,
+                relationship_id TEXT NOT NULL,
+                participant_key TEXT,
+                event_kind TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                intensity REAL NOT NULL,
+                cause_message_ids_json TEXT NOT NULL,
+                delta_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_character_state_events_relationship_created
+                ON character_state_events (relationship_id, created_at);
+            CREATE TABLE IF NOT EXISTS character_participant_states (
+                relationship_id TEXT NOT NULL,
+                participant_key TEXT NOT NULL,
+                role TEXT NOT NULL,
+                facets_json TEXT NOT NULL,
+                evidence_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (relationship_id, participant_key)
+            );
+            CREATE TABLE IF NOT EXISTS conversation_observations (
+                message_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                turn_id TEXT NOT NULL,
+                utterance_id TEXT NOT NULL,
+                generation INTEGER NOT NULL,
+                speaker_role TEXT NOT NULL,
+                speaker_confidence REAL NOT NULL,
+                addressedness REAL NOT NULL,
+                addressed_confidence REAL NOT NULL,
+                end_of_turn_confidence REAL NOT NULL,
+                significance REAL NOT NULL,
+                decision_action TEXT,
+                decision_reason TEXT,
+                metadata_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_conversation_observations_session_created
+                ON conversation_observations (session_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_conversation_observations_turn
+                ON conversation_observations (turn_id);
             """
         )
 
@@ -1097,19 +1475,26 @@ class TimelineStore:
     def _now() -> str:
         return datetime.now(UTC).isoformat(timespec="milliseconds")
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self._db_path)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA journal_mode = WAL")
-        return connection
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("PRAGMA journal_mode = WAL")
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     @staticmethod
     def _row_to_message(row: sqlite3.Row) -> StoredTimelineMessage:
         return StoredTimelineMessage(
             id=row["id"], timeline_id=row["timeline_id"], episode_id=row["episode_id"], role=row["role"], content=row["content"],
             corrected_content=row["corrected_content"], client_message_id=row["client_message_id"],
+            utterance_id=row["utterance_id"], generation=row["generation"],
             status=row["status"], input_mode=row["input_mode"], created_at=row["created_at"],
+            language=row["language"],
             completed_at=row["completed_at"], cancelled_at=row["cancelled_at"], metadata=json.loads(row["metadata_json"]),
         )
 

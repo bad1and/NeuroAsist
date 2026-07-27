@@ -18,6 +18,7 @@ class ModelSpec:
     sha256: str
     size_bytes: int
     restart_required: bool = True
+    license: str | None = None
 
 
 SILERO_VAD = ModelSpec(
@@ -30,11 +31,30 @@ SILERO_VAD = ModelSpec(
     size_bytes=2_272_526,
 )
 
+SMART_TURN_V3_2 = ModelSpec(
+    id="smart-turn-v3.2",
+    name="Smart Turn",
+    version="3.2",
+    url=(
+        "https://huggingface.co/pipecat-ai/smart-turn-v3/resolve/"
+        "f766f81d3cfdf7737ac64aad813d91bbfd56bf93/smart-turn-v3.2-cpu.onnx?download=true"
+    ),
+    relative_path="smart-turn/3.2/smart-turn-v3.2-cpu.onnx",
+    sha256="2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f",
+    size_bytes=8_679_182,
+    license="BSD-2-Clause",
+)
+
 
 class ModelManager:
     """Downloads pinned model files outside the repository and verifies every byte."""
 
-    def __init__(self, root: Path, publish=None, specs: tuple[ModelSpec, ...] = (SILERO_VAD,)) -> None:
+    def __init__(
+        self,
+        root: Path,
+        publish=None,
+        specs: tuple[ModelSpec, ...] = (SILERO_VAD, SMART_TURN_V3_2),
+    ) -> None:
         self.root = root
         self._publish = publish or (lambda *_: None)
         self._specs = {spec.id: spec for spec in specs}
@@ -62,6 +82,7 @@ class ModelManager:
             "location": str(path) if path.exists() else None,
             "sha256": spec.sha256,
             "restart_required": spec.restart_required,
+            "license": spec.license,
             "status": progress.get("status", "installed" if installed else "not_installed"),
             "downloaded_bytes": progress.get("downloaded_bytes", path.stat().st_size if installed else 0),
             "total_bytes": progress.get("total_bytes", spec.size_bytes),

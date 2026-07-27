@@ -1,7 +1,7 @@
 :root {
   color: var(--color-text);
   background: var(--color-base-deep);
-  font-family: Inter, "Segoe UI", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--font-ui);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   --bg: var(--color-base);
@@ -1956,5 +1956,92 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .startup-content::before {
     filter: blur(52px);
+  }
+}
+
+/* Hallmark · live conversation controls · pre-emit critique: P5 H5 E5 S5 R5 V5 */
+
+.voice-button {
+  min-height: 44px;
+  padding-inline: 12px;
+  white-space: nowrap;
+}
+
+.voice-button:active:not(:disabled) {
+  transform: scale(.96);
+}
+
+.conversation-debug {
+  width: min(100%, 760px);
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface-soft);
+  font-size: .78rem;
+}
+
+.conversation-debug summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.conversation-debug dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  margin: 10px 0 0;
+}
+
+.conversation-debug dl > div {
+  min-width: 0;
+}
+
+.conversation-debug dt {
+  color: var(--color-text-muted);
+}
+
+.conversation-debug dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.live-conversation-settings {
+  flex-basis: min(100%, 900px);
+  max-width: 900px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+}
+
+.live-conversation-settings legend,
+.live-conversation-settings > small,
+.live-conversation-settings > .settings-checkbox {
+  grid-column: 1 / -1;
+}
+
+.settings-checkbox {
+  min-height: 44px;
+  grid-template-columns: auto minmax(0, 1fr) !important;
+  align-items: center;
+}
+
+@media (max-width: 48rem) {
+  .conversation-debug dl {
+    grid-template-columns: 1fr;
+  }
+
+  .live-conversation-settings {
+    grid-template-columns: 1fr;
+  }
+
+  .live-conversation-settings legend,
+  .live-conversation-settings > small,
+  .live-conversation-settings > .settings-checkbox {
+    grid-column: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-button:active:not(:disabled) {
+    transform: none;
   }
 }

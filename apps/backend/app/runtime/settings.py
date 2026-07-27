@@ -16,6 +16,17 @@ class RuntimeSettings:
     voice_live_playback_prebuffer_ms: int = 0
     memory_mode: str = "balanced"
     memory_incognito: bool = False
+    live_conversation_enabled: bool = False
+    live_conversation_participant_mode: str = "one_to_one"
+    live_conversation_engagement: str = "balanced"
+    live_conversation_initiative: str = "rare"
+    live_conversation_address_strictness: str = "balanced"
+    live_conversation_interruption_sensitivity: str = "balanced"
+    live_conversation_pause_tolerance: str = "natural"
+    live_conversation_emotion_expression: str = "natural"
+    live_conversation_mood_recovery: str = "natural"
+    live_conversation_recent_event_weight: str = "balanced"
+    live_conversation_echo_mode: str = "auto"
     avatar_overlay_visible: bool = True
     avatar_overlay_always_on_top: bool = True
     avatar_overlay_locked: bool = True

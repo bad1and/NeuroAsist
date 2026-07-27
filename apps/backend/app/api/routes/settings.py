@@ -18,6 +18,18 @@ MAX_PREBUFFER_SEGMENTS = 4
 MIN_PREBUFFER_MS = 0
 MAX_PREBUFFER_MS = 1500
 MEMORY_MODES = {"off", "balanced", "automatic", "ask"}
+LIVE_SETTING_VALUES = {
+    "live_conversation_participant_mode": {"one_to_one", "group"},
+    "live_conversation_engagement": {"low", "balanced", "high"},
+    "live_conversation_initiative": {"off", "rare", "balanced"},
+    "live_conversation_address_strictness": {"relaxed", "balanced", "strict"},
+    "live_conversation_interruption_sensitivity": {"low", "balanced", "high"},
+    "live_conversation_pause_tolerance": {"short", "natural", "patient"},
+    "live_conversation_emotion_expression": {"subtle", "natural", "strong"},
+    "live_conversation_mood_recovery": {"slow", "natural", "fast"},
+    "live_conversation_recent_event_weight": {"light", "balanced", "strong"},
+    "live_conversation_echo_mode": {"auto", "half_duplex"},
+}
 
 
 def _available_tts_voices(request: Request) -> list[str]:
@@ -58,6 +70,17 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         memory_enabled=settings.memory_enabled,
         memory_mode=runtime_settings.memory_mode,
         memory_incognito=runtime_settings.memory_incognito,
+        live_conversation_enabled=runtime_settings.live_conversation_enabled,
+        live_conversation_participant_mode=runtime_settings.live_conversation_participant_mode,
+        live_conversation_engagement=runtime_settings.live_conversation_engagement,
+        live_conversation_initiative=runtime_settings.live_conversation_initiative,
+        live_conversation_address_strictness=runtime_settings.live_conversation_address_strictness,
+        live_conversation_interruption_sensitivity=runtime_settings.live_conversation_interruption_sensitivity,
+        live_conversation_pause_tolerance=runtime_settings.live_conversation_pause_tolerance,
+        live_conversation_emotion_expression=runtime_settings.live_conversation_emotion_expression,
+        live_conversation_mood_recovery=runtime_settings.live_conversation_mood_recovery,
+        live_conversation_recent_event_weight=runtime_settings.live_conversation_recent_event_weight,
+        live_conversation_echo_mode=runtime_settings.live_conversation_echo_mode,
         log_level=settings.log_level,
         api_key_configured=bool(settings.llm_api_key),
         available_personalities=AVAILABLE_PERSONALITIES,
@@ -133,6 +156,20 @@ def patch_runtime_settings(
     if payload.memory_incognito is not None:
         runtime_settings.memory_incognito = payload.memory_incognito
 
+    if payload.live_conversation_enabled is not None:
+        runtime_settings.live_conversation_enabled = payload.live_conversation_enabled
+
+    for field_name, allowed_values in LIVE_SETTING_VALUES.items():
+        value = getattr(payload, field_name)
+        if value is None:
+            continue
+        if value not in allowed_values:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported {field_name.replace('_', ' ')}",
+            )
+        setattr(runtime_settings, field_name, value)
+
     try:
         request.app.state.runtime_settings_store.save(runtime_settings)
     except OSError as error:
@@ -155,6 +192,11 @@ def patch_runtime_settings(
             "voice_live_playback_prebuffer_ms": runtime_settings.voice_live_playback_prebuffer_ms,
             "memory_mode": runtime_settings.memory_mode,
             "memory_incognito": runtime_settings.memory_incognito,
+            "live_conversation_enabled": runtime_settings.live_conversation_enabled,
+            **{
+                field_name: getattr(runtime_settings, field_name)
+                for field_name in LIVE_SETTING_VALUES
+            },
         },
     )
 

@@ -91,6 +91,8 @@ export type VoiceServerEvent = {
   metadata?: CharacterMetadataFrame;
   code?: string;
   message?: string;
+  text?: string;
+  generation?: number;
   memory_updates?: MemoryUpdate[];
 };
 
@@ -192,6 +194,17 @@ export type PublicSettings = {
   memory_enabled: boolean;
   memory_mode: string;
   memory_incognito: boolean;
+  live_conversation_enabled: boolean;
+  live_conversation_participant_mode: "one_to_one" | "group";
+  live_conversation_engagement: "low" | "balanced" | "high";
+  live_conversation_initiative: "off" | "rare" | "balanced";
+  live_conversation_address_strictness: "relaxed" | "balanced" | "strict";
+  live_conversation_interruption_sensitivity: "low" | "balanced" | "high";
+  live_conversation_pause_tolerance: "short" | "natural" | "patient";
+  live_conversation_emotion_expression: "subtle" | "natural" | "strong";
+  live_conversation_mood_recovery: "slow" | "natural" | "fast";
+  live_conversation_recent_event_weight: "light" | "balanced" | "strong";
+  live_conversation_echo_mode: "auto" | "half_duplex";
   log_level: string;
   api_key_configured: boolean;
   available_personalities: string[];
@@ -225,6 +238,37 @@ export type ChatMessage = {
   utteranceId?: string;
   ttsStatus?: VoiceTtsStatus;
   ttsError?: string;
+  speakerLabel?: string;
+};
+
+export type ConversationDebug = {
+  phase: string;
+  generation: number;
+  last_decision_source?: string;
+  last_speaker_estimate?: {
+    role: string;
+    confidence: number;
+    reasons: string[];
+  } | null;
+  last_decision?: {
+    action: string;
+    reason: string;
+    confidence: number;
+  } | null;
+  speech_budget?: {
+    initiative_count_10m: number;
+    iris_share_2m: number;
+    cooldown_active: boolean;
+    budget_exceeded: boolean;
+  };
+  deferred_reactions?: Array<{ id: string; topic_key: string; attempts: number }>;
+  active_tasks?: Array<{ name: string; generation: number; reason: string }>;
+  turn_detector?: {
+    provider: string;
+    ready: boolean;
+    fallback: boolean;
+    error?: string | null;
+  };
 };
 
 export type TimelineMessage = {

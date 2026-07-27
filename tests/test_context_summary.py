@@ -88,6 +88,112 @@ def test_context_keeps_turn_pairs_and_uses_rolling_active_episode_summary(tmp_pa
     assert roles in ([], ["user", "assistant"], ["user", "assistant", "user", "assistant"])
 
 
+def test_live_context_keeps_overheard_speech_out_of_direct_dialogue(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "ambient-context.sqlite3")
+    store.init_db()
+
+    def observation(
+        text: str,
+        *,
+        action: str,
+        reason: str,
+        addressedness: float = 0.05,
+    ) -> None:
+        message, _ = store.append_message(
+            role="user",
+            content=text,
+            input_mode="voice",
+            generation=1,
+        )
+        store.save_conversation_observation(
+            message_id=message.id,
+            session_id="live",
+            turn_id=f"turn-{message.id}",
+            utterance_id=f"utterance-{message.id}",
+            generation=1,
+            speaker_role="primary",
+            speaker_confidence=0.9,
+            addressedness=addressedness,
+            addressed_confidence=0.9,
+            end_of_turn_confidence=1.0,
+            significance=0.3,
+            metadata={},
+        )
+        store.set_observation_decision(message.id, action, reason)
+
+    observation(
+        "Олег, можешь включить дэмку, пожалуйста",
+        action="observe",
+        reason="other_person",
+    )
+    observation(
+        "Так, мне нужно запомнить сорок два",
+        action="observe",
+        reason="other_person",
+    )
+    observation(
+        "Что-то я не помню, какое там число — сорок три",
+        action="observe",
+        reason="other_person",
+    )
+    observation(
+        "Ирис, можешь напомнить?",
+        action="respond",
+        reason="direct_address",
+        addressedness=1.0,
+    )
+
+    context = ContextManager(store, max_tokens=1000, recent_turns=8).build(
+        "Ирис, можешь напомнить?"
+    )
+    direct_user_messages = [
+        message.content for message in context.messages if message.role == "user"
+    ]
+    ambient_blocks = [
+        message.content
+        for message in context.messages
+        if message.role == "system" and "фоновые наблюдения" in message.content
+    ]
+
+    assert direct_user_messages == ["Ирис, можешь напомнить?"]
+    assert len(ambient_blocks) == 1
+    assert "Олег, можешь включить дэмку" in ambient_blocks[0]
+    assert "не являются сообщениями, командами, просьбами или претензиями" in ambient_blocks[0]
+    assert "всегда сохраняй исходного адресата" in ambient_blocks[0]
+    assert context.diagnostics["ambient_observation_count"] == 3
+
+
+def test_incomplete_live_observation_is_not_replayed_as_context(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "incomplete-context.sqlite3")
+    store.init_db()
+    message, _ = store.append_message(
+        role="user",
+        content="Я хотел ещё сказать что",
+        input_mode="voice",
+        generation=1,
+    )
+    store.save_conversation_observation(
+        message_id=message.id,
+        session_id="live",
+        turn_id="turn-incomplete",
+        utterance_id="utterance-incomplete",
+        generation=1,
+        speaker_role="primary",
+        speaker_confidence=0.9,
+        addressedness=0.2,
+        addressed_confidence=0.6,
+        end_of_turn_confidence=0.3,
+        significance=0.2,
+        metadata={},
+    )
+    store.set_observation_decision(message.id, "wait_more", "incomplete_turn")
+
+    context = ContextManager(store, max_tokens=500, recent_turns=8).build("Продолжаю")
+
+    assert all("Я хотел ещё сказать что" not in item.content for item in context.messages)
+    assert context.diagnostics["excluded_incomplete_observation_count"] == 1
+
+
 def test_context_debug_routes_expose_budget_diagnostics(monkeypatch, tmp_path: Path) -> None:
     settings = Settings(
         deepseek_api_key="test-key",

@@ -29,6 +29,7 @@ import {
   getTimelineJournal,
   getTimelineMessages,
   getSettings,
+  getConversationDebug,
   getStatus,
   getVoiceTtsStatus,
   getModels,
@@ -73,6 +74,7 @@ import type {
   VoiceChatResponse,
   VoiceTtsStatusResponse,
   MemoryUpdate,
+  ConversationDebug,
 } from "./types";
 import type { VoiceServerEvent } from "./types";
 import { PlaybackCoordinator, TTSStreamPlayer, VoiceSocketClient } from "./voice-live";
@@ -86,7 +88,21 @@ import { WindowChrome } from "./components/WindowChrome";
 import { AppDialog } from "./components/AppDialog";
 
 type AppView = "overview" | "chat" | "journal" | "memory" | "settings";
-type SettingsSection = "general" | "voice" | "memory" | "system";
+type SettingsSection = "general" | "voice" | "conversation" | "memory" | "system";
+type LiveConversationSettings = Pick<
+  PublicSettings,
+  | "live_conversation_enabled"
+  | "live_conversation_participant_mode"
+  | "live_conversation_engagement"
+  | "live_conversation_initiative"
+  | "live_conversation_address_strictness"
+  | "live_conversation_interruption_sensitivity"
+  | "live_conversation_pause_tolerance"
+  | "live_conversation_emotion_expression"
+  | "live_conversation_mood_recovery"
+  | "live_conversation_recent_event_weight"
+  | "live_conversation_echo_mode"
+>;
 type WsState = "connected" | "disconnected" | "reconnecting";
 type LevelFilter = "all" | EventLevel;
 type VoiceState = "idle" | "recording" | "transcribing" | "thinking" | "speaking" | "stopping" | "error";
@@ -495,6 +511,9 @@ function ChatPage({
   const [retryText, setRetryText] = useState<string | null>(null);
   const [memoryNotice, setMemoryNotice] = useState<string | null>(null);
   const [handsFree, setHandsFree] = useState(false);
+  const [liveConversation, setLiveConversation] = useState(false);
+  const [conversationStatus, setConversationStatus] = useState("Микрофон включён");
+  const [conversationDebug, setConversationDebug] = useState<ConversationDebug | null>(null);
   const [vadState, setVadState] = useState<VadState>("idle");
   const listRef = useRef<HTMLDivElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -511,6 +530,35 @@ function ChatPage({
   const avatarOwnsAudioRef = useRef(false);
   const liveAudioStartedRef = useRef(false);
   const liveMetadataRef = useRef({ emotion: "neutral", intent: "unknown" });
+  const pendingSpeakerLabelRef = useRef("Вы");
+  const latestPlaybackSegmentRef = useRef("");
+  const playbackSegmentTextsRef = useRef<string[]>([]);
+  const activeVoiceGenerationRef = useRef<number | undefined>(undefined);
+  const conversationStatusTimerRef = useRef<number | null>(null);
+  const bargeInTimerRef = useRef<number | null>(null);
+
+  const updateConversationStatus = useCallback((status: string, resetAfterMs?: number) => {
+    if (conversationStatusTimerRef.current !== null) {
+      window.clearTimeout(conversationStatusTimerRef.current);
+      conversationStatusTimerRef.current = null;
+    }
+    setConversationStatus(status);
+    if (resetAfterMs !== undefined) {
+      conversationStatusTimerRef.current = window.setTimeout(() => {
+        setConversationStatus("Микрофон включён");
+        conversationStatusTimerRef.current = null;
+      }, resetAfterMs);
+    }
+  }, []);
+
+  useEffect(() => () => {
+    if (conversationStatusTimerRef.current !== null) {
+      window.clearTimeout(conversationStatusTimerRef.current);
+    }
+    if (bargeInTimerRef.current !== null) {
+      window.clearTimeout(bargeInTimerRef.current);
+    }
+  }, []);
 
   const showMemoryUpdates = useCallback((updates?: MemoryUpdate[]) => {
     const update = updates && updates.length ? updates[updates.length - 1] : undefined;
@@ -529,6 +577,25 @@ function ChatPage({
       // The V0.4 compatibility backend may intentionally keep Timeline V2 disabled.
     });
   }, []);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !liveConversation) {
+      setConversationDebug(null);
+      return;
+    }
+    let active = true;
+    const refresh = () => {
+      void getConversationDebug(SESSION_ID)
+        .then((snapshot) => { if (active) setConversationDebug(snapshot); })
+        .catch(() => { if (active) setConversationDebug(null); });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 2000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [liveConversation]);
 
   const voiceSupported =
     typeof navigator !== "undefined" &&
@@ -660,6 +727,7 @@ function ChatPage({
         },
         () => {
           liveSocketRef.current?.send("playback.finished");
+          playbackSegmentTextsRef.current = [];
           playbackCoordinatorRef.current.release(playbackCoordinatorRef.current.snapshot());
           liveSocketRef.current?.clearActive();
           setLoading(false);
@@ -681,6 +749,12 @@ function ChatPage({
         (gapMs) => {
           liveSocketRef.current?.send("playback.underrun", { underrun_ms: gapMs });
         },
+        (text) => {
+          liveSocketRef.current?.send("playback.segment.finished", {
+            text,
+            generation: activeVoiceGenerationRef.current,
+          });
+        },
       );
     }
     livePlayerRef.current.updateOptions({
@@ -700,6 +774,8 @@ function ChatPage({
     if (!liveSocketRef.current) {
       const onEvent = (event: VoiceServerEvent) => {
         if (event.type === "voice.utterance.started") {
+          playbackSegmentTextsRef.current = [];
+          activeVoiceGenerationRef.current = event.generation;
           playbackCoordinatorRef.current.acquire(
             avatarOwnsAudioRef.current ? "unity" : "desktop_ui",
             event.utterance_id,
@@ -735,6 +811,12 @@ function ChatPage({
         } else if (event.type === "voice.text.completed") {
           showMemoryUpdates(event.memory_updates);
         } else if (event.type === "tts.segment.started") {
+          latestPlaybackSegmentRef.current = event.text ?? "";
+          if (event.text) playbackSegmentTextsRef.current.push(event.text);
+          liveSocketRef.current?.send("playback.segment.started", {
+            text: event.text ?? "",
+            generation: event.generation,
+          });
           setVoiceState("speaking");
         } else if (event.type === "voice.utterance.finished") {
           if (avatarOwnsAudioRef.current) {
@@ -1178,27 +1260,89 @@ function ChatPage({
     submitVoiceRef.current = (audio: Blob, endedAt?: number) => { void submitVoice(audio, endedAt); };
   }, [submitVoice]);
 
-  const toggleHandsFree = async () => {
-    if (handsFree) {
+  const toggleHandsFree = async (mode: "hands_free" | "live_conversation" = "hands_free") => {
+    const isLive = mode === "live_conversation";
+    const requestedModeActive = isLive ? liveConversation : handsFree;
+    if (requestedModeActive) {
       vadRecorderRef.current?.stop();
       pcmInputRef.current?.close();
       pcmInputRef.current = null;
       vadRecorderRef.current = null;
       setHandsFree(false);
+      setLiveConversation(false);
       setVadState("idle");
+      updateConversationStatus("Микрофон включён");
       return;
     }
+    vadRecorderRef.current?.stop();
+    pcmInputRef.current?.close();
+    pcmInputRef.current = null;
+    vadRecorderRef.current = null;
+    setHandsFree(false);
+    setLiveConversation(false);
     try {
       await ensureLiveVoice();
-      const input = new PcmInputClient(voiceInputWebSocketUrl(SESSION_ID), (event) => {
+      const input = new PcmInputClient(voiceInputWebSocketUrl(SESSION_ID, isLive ? 2 : 1), (event) => {
         if (event.type === "voice.input.transcript" && event.transcript) {
-          setMessages((current) => [...current, { id: crypto.randomUUID(), role: "user", content: event.transcript! }]);
-          setVoiceState("thinking");
+          setMessages((current) => [...current, {
+            id: crypto.randomUUID(),
+            role: "user",
+            content: event.transcript!,
+            speakerLabel: pendingSpeakerLabelRef.current,
+          }]);
+          if (!isLive || !event.observation_only) {
+            setVoiceState("thinking");
+            updateConversationStatus("Iris отвечает");
+          }
+        } else if (event.type === "voice.input.speech_started") {
+          updateConversationStatus("Слышу вас");
+        } else if (event.type === "voice.input.finalizing") {
+          updateConversationStatus("Распознаю");
+        } else if (event.type === "conversation.turn_candidate") {
+          updateConversationStatus("Проверяю конец фразы");
+        } else if (event.type === "conversation.turn_completed") {
+          updateConversationStatus("Распознаю");
+        } else if (event.type === "conversation.phase" && event.phase) {
+          const labels: Record<string, string> = {
+            listening: "Микрофон включён",
+            endpoint_pending: "Жду продолжения",
+            transcribing: "Распознаю",
+            deciding: "Думаю, стоит ли отвечать",
+            generating: "Iris отвечает",
+            speaking: "Iris отвечает",
+          };
+          updateConversationStatus(labels[event.phase] ?? "Микрофон включён");
+        } else if (event.type === "conversation.observation") {
+          pendingSpeakerLabelRef.current = event.speaker_role === "other"
+            ? "Собеседник"
+            : event.speaker_role === "unknown"
+              ? "Неизвестный голос"
+              : "Вы";
+        } else if (event.type === "conversation.decision") {
+          updateConversationStatus(event.action === "respond" || event.action === "backchannel"
+            ? "Iris отвечает"
+            : "Iris решила промолчать");
+        } else if (event.type === "conversation.silent") {
+          updateConversationStatus("Iris решила промолчать", 1800);
+        } else if (event.type === "conversation.echo_rejected") {
+          updateConversationStatus("Микрофон включён");
+        } else if (event.type === "conversation.noise_ignored") {
+          updateConversationStatus("Короткий шум пропущен", 900);
+        } else if (event.type === "conversation.reaction") {
+          updateConversationStatus(event.initiative ? "Iris вступает в разговор" : "Iris реагирует");
+        } else if (event.type === "conversation.deferred") {
+          updateConversationStatus("Iris подождёт подходящую паузу");
+        } else if (event.type === "conversation.cancelled") {
+          updateConversationStatus("Микрофон включён");
         } else if (event.type === "voice.input.error") {
           setError(event.message ?? "Не удалось обработать голосовой ввод");
         }
       });
-      await input.connect(16000, settings?.voice_language ?? "ru");
+      await input.connect(
+        16000,
+        settings?.voice_language ?? "ru",
+        isLive ? "live_conversation" : "hands_free",
+      );
       pcmInputRef.current = input;
       const recorder = new BrowserVadRecorder();
       vadRecorderRef.current = recorder;
@@ -1206,17 +1350,38 @@ function ChatPage({
         (pcm16) => pcmInputRef.current?.sendPcm(pcm16),
         (nextState, event) => {
           setVadState(nextState);
+          if (
+            nextState !== "speech"
+            && bargeInTimerRef.current !== null
+          ) {
+            window.clearTimeout(bargeInTimerRef.current);
+            bargeInTimerRef.current = null;
+          }
           if (event === "speech_started") {
-            interruptAssistantSpeech();
+            if (isLive) updateConversationStatus("Слышу вас");
+            if (liveSocketRef.current?.activeUtteranceId) {
+              const confirmationMs = {
+                low: 300,
+                balanced: 180,
+                high: 60,
+              }[settings?.live_conversation_interruption_sensitivity ?? "balanced"];
+              bargeInTimerRef.current = window.setTimeout(() => {
+                bargeInTimerRef.current = null;
+                interruptAssistantSpeech();
+              }, confirmationMs);
+            }
           }
         },
       );
-      setHandsFree(true);
+      setHandsFree(!isLive);
+      setLiveConversation(isLive);
+      updateConversationStatus("Микрофон включён");
     } catch (vadError) {
       vadRecorderRef.current?.stop();
       vadRecorderRef.current = null;
       setError(vadError instanceof Error ? vadError.message : "Режим свободных рук недоступен");
       setHandsFree(false);
+      setLiveConversation(false);
       setVadState("idle");
     }
   };
@@ -1234,7 +1399,7 @@ function ChatPage({
         )}
         {messages.map((message) => (
           <article className={`message ${message.role}`} key={message.id}>
-            <div className="message-role">{message.role === "user" ? "Вы" : "Iris"}</div>
+            <div className="message-role">{message.role === "user" ? message.speakerLabel ?? "Вы" : "Iris"}</div>
             <p>{message.content}</p>
             {message.ttsError && <div className="message-error">{message.ttsError}</div>}
             {message.role === "assistant" && (
@@ -1328,17 +1493,47 @@ function ChatPage({
           <button
             className={handsFree ? "voice-button recording" : "secondary voice-button"}
             disabled={!handsFreeSupported || voiceState === "transcribing"}
-            onClick={() => void toggleHandsFree()}
+            onClick={() => void toggleHandsFree("hands_free")}
             type="button"
           >
             {handsFree ? "Свободные руки: вкл." : "Свободные руки"}
           </button>
-          {(handsFree || voiceState !== "idle" || !voiceSupported) && <span>
+          <button
+            className={liveConversation ? "voice-button recording" : "secondary voice-button"}
+            disabled={
+              !handsFreeSupported
+              || voiceState === "transcribing"
+              || !settings?.live_conversation_enabled
+            }
+            onClick={() => void toggleHandsFree("live_conversation")}
+            title={settings?.live_conversation_enabled
+              ? "Естественный разговор с решениями говорить или слушать"
+              : "Включите живой разговор в настройках"}
+            type="button"
+          >
+            {liveConversation ? "Живой разговор: вкл." : "Живой разговор"}
+          </button>
+          {(handsFree || liveConversation || voiceState !== "idle" || !voiceSupported) && <span>
             {voiceSupported
-              ? `Голос: ${settings?.voice_language === "en" ? "английский" : "русский"}${handsFree ? ` · ${vadState}` : ""}`
+              ? liveConversation
+                ? conversationStatus
+                : `Голос: ${settings?.voice_language === "en" ? "английский" : "русский"}${handsFree ? ` · ${vadState}` : ""}`
               : "Голосовой ввод недоступен"}
           </span>}
         </div>
+        {import.meta.env.DEV && liveConversation && conversationDebug && (
+          <details className="conversation-debug">
+            <summary>Диагностика живого разговора</summary>
+            <dl>
+              <div><dt>Phase / generation</dt><dd>{conversationDebug.phase} / {conversationDebug.generation}</dd></div>
+              <div><dt>Decision</dt><dd>{conversationDebug.last_decision?.action ?? "—"} · {conversationDebug.last_decision?.reason ?? "—"} · {conversationDebug.last_decision_source ?? "—"}</dd></div>
+              <div><dt>Speaker</dt><dd>{conversationDebug.last_speaker_estimate?.role ?? "—"} ({conversationDebug.last_speaker_estimate?.confidence?.toFixed(2) ?? "—"})</dd></div>
+              <div><dt>Detector</dt><dd>{conversationDebug.turn_detector?.provider ?? "—"}{conversationDebug.turn_detector?.fallback ? " · fallback" : ""}</dd></div>
+              <div><dt>Budget</dt><dd>{Math.round((conversationDebug.speech_budget?.iris_share_2m ?? 0) * 100)}% · {conversationDebug.speech_budget?.initiative_count_10m ?? 0}/2</dd></div>
+              <div><dt>Deferred / tasks</dt><dd>{conversationDebug.deferred_reactions?.length ?? 0} / {conversationDebug.active_tasks?.length ?? 0}</dd></div>
+            </dl>
+          </details>
+        )}
       </div>
     </section>
   );
@@ -1468,6 +1663,19 @@ function SettingsPage({
   const [prebufferMs, setPrebufferMs] = useState(0);
   const [memoryMode, setMemoryMode] = useState("balanced");
   const [memoryIncognito, setMemoryIncognito] = useState(false);
+  const [liveSettings, setLiveSettings] = useState<LiveConversationSettings>({
+    live_conversation_enabled: false,
+    live_conversation_participant_mode: "one_to_one",
+    live_conversation_engagement: "balanced",
+    live_conversation_initiative: "rare",
+    live_conversation_address_strictness: "balanced",
+    live_conversation_interruption_sensitivity: "balanced",
+    live_conversation_pause_tolerance: "natural",
+    live_conversation_emotion_expression: "natural",
+    live_conversation_mood_recovery: "natural",
+    live_conversation_recent_event_weight: "balanced",
+    live_conversation_echo_mode: "auto",
+  });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -1483,6 +1691,19 @@ function SettingsPage({
       setPrebufferMs(settings.voice_live_playback_prebuffer_ms);
       setMemoryMode(settings.memory_mode);
       setMemoryIncognito(settings.memory_incognito);
+      setLiveSettings({
+        live_conversation_enabled: settings.live_conversation_enabled,
+        live_conversation_participant_mode: settings.live_conversation_participant_mode,
+        live_conversation_engagement: settings.live_conversation_engagement,
+        live_conversation_initiative: settings.live_conversation_initiative,
+        live_conversation_address_strictness: settings.live_conversation_address_strictness,
+        live_conversation_interruption_sensitivity: settings.live_conversation_interruption_sensitivity,
+        live_conversation_pause_tolerance: settings.live_conversation_pause_tolerance,
+        live_conversation_emotion_expression: settings.live_conversation_emotion_expression,
+        live_conversation_mood_recovery: settings.live_conversation_mood_recovery,
+        live_conversation_recent_event_weight: settings.live_conversation_recent_event_weight,
+        live_conversation_echo_mode: settings.live_conversation_echo_mode,
+      });
     }
   }, [settings]);
 
@@ -1491,6 +1712,13 @@ function SettingsPage({
       .then((result) => setPronunciationsText(formatPronunciations(result.pronunciations)))
       .catch(() => setPronunciationsText(""));
   }, []);
+
+  const updateLiveSetting = <K extends keyof LiveConversationSettings>(
+    key: K,
+    value: LiveConversationSettings[K],
+  ) => {
+    setLiveSettings((current) => ({ ...current, [key]: value }));
+  };
 
   const saveSettings = async () => {
     setSaving(true);
@@ -1505,6 +1733,7 @@ function SettingsPage({
         voice_live_playback_prebuffer_ms: prebufferMs,
         memory_mode: memoryMode,
         memory_incognito: memoryIncognito,
+        ...liveSettings,
       });
       onSettingsChanged(nextSettings);
       setMessage("Настройки сохранены.");
@@ -1580,6 +1809,10 @@ function SettingsPage({
       title: "Голос",
       description: "Звучание, темп и произношение речи.",
     },
+    conversation: {
+      title: "Живой разговор",
+      description: "Когда Iris слушает, вступает в разговор и выражает эмоции.",
+    },
     memory: {
       title: "Память",
       description: "Какие сведения Iris может сохранять между разговорами.",
@@ -1596,6 +1829,7 @@ function SettingsPage({
       <nav className="settings-navigation" aria-label="Разделы настроек">
         <SettingsSectionButton section="general" current={activeSection} label="Общее" icon={SlidersHorizontal} onClick={setActiveSection} />
         <SettingsSectionButton section="voice" current={activeSection} label="Голос" icon={Volume2} onClick={setActiveSection} />
+        <SettingsSectionButton section="conversation" current={activeSection} label="Живой разговор" icon={MessageCircle} onClick={setActiveSection} />
         <SettingsSectionButton section="memory" current={activeSection} label="Память" icon={Brain} onClick={setActiveSection} />
         <SettingsSectionButton section="system" current={activeSection} label="Система" icon={MonitorCog} onClick={setActiveSection} />
       </nav>
@@ -1770,6 +2004,169 @@ function SettingsPage({
               value={prebufferMs}
               onChange={(event) => setPrebufferMs(Number(event.target.value))}
             />
+          </label>
+        </fieldset>
+
+        <fieldset className="settings-group live-conversation-settings" hidden={activeSection !== "conversation"}>
+          <legend>Живой разговор</legend>
+          <label className="settings-checkbox">
+            <input
+              type="checkbox"
+              checked={liveSettings.live_conversation_enabled}
+              onChange={(event) => updateLiveSetting("live_conversation_enabled", event.target.checked)}
+            />
+            Включить отдельный режим «Живой разговор»
+          </label>
+          <small>
+            Текстовый чат, голосовые сообщения и «Свободные руки» сохраняют прежнее поведение.
+          </small>
+
+          <label>
+            Участники
+            <select
+              value={liveSettings.live_conversation_participant_mode}
+              onChange={(event) => updateLiveSetting(
+                "live_conversation_participant_mode",
+                event.target.value as LiveConversationSettings["live_conversation_participant_mode"],
+              )}
+            >
+              <option value="one_to_one">Один на один</option>
+              <option value="group">Несколько собеседников</option>
+            </select>
+          </label>
+
+          <label>
+            Охотность вступать
+            <select
+              value={liveSettings.live_conversation_engagement}
+              onChange={(event) => updateLiveSetting(
+                "live_conversation_engagement",
+                event.target.value as LiveConversationSettings["live_conversation_engagement"],
+              )}
+            >
+              <option value="low">Сдержанная</option>
+              <option value="balanced">Сбалансированная</option>
+              <option value="high">Разговорчивая</option>
+            </select>
+          </label>
+
+          <label>
+            Инициативность
+            <select
+              value={liveSettings.live_conversation_initiative}
+              onChange={(event) => updateLiveSetting(
+                "live_conversation_initiative",
+                event.target.value as LiveConversationSettings["live_conversation_initiative"],
+              )}
+            >
+              <option value="off">Выключена</option>
+              <option value="rare">Редкая</option>
+              <option value="balanced">Сбалансированная</option>
+            </select>
+          </label>
+
+          <label>
+            Прямое обращение
+            <select
+              value={liveSettings.live_conversation_address_strictness}
+              onChange={(event) => updateLiveSetting(
+                "live_conversation_address_strictness",
+                event.target.value as LiveConversationSettings["live_conversation_address_strictness"],
+              )}
+            >
+              <option value="relaxed">Свободное</option>
+              <option value="balanced">Сбалансированное</option>
+              <option value="strict">Строгое</option>
+            </select>
+          </label>
+
+          <label>
+            Чувствительность к перебиванию
+            <select
+              value={liveSettings.live_conversation_interruption_sensitivity}
+              onChange={(event) => updateLiveSetting(
+                "live_conversation_interruption_sensitivity",
+                event.target.value as LiveConversationSettings["live_conversation_interruption_sensitivity"],
+              )}
+            >
+              <option value="low">Низкая</option>
+              <option value="balanced">Сбалансированная</option>
+              <option value="high">Высокая</option>
+            </select>
+          </label>
+
+          <label>
+            Терпимость к паузам
+            <select
+              value={liveSettings.live_conversation_pause_tolerance}
+              onChange={(event) => updateLiveSetting(
+                "live_conversation_pause_tolerance",
+                event.target.value as LiveConversationSettings["live_conversation_pause_tolerance"],
+              )}
+            >
+              <option value="short">Короткая</option>
+              <option value="natural">Естественная</option>
+              <option value="patient">Терпеливая</option>
+            </select>
+          </label>
+
+          <label>
+            Выраженность эмоций
+            <select
+              value={liveSettings.live_conversation_emotion_expression}
+              onChange={(event) => updateLiveSetting(
+                "live_conversation_emotion_expression",
+                event.target.value as LiveConversationSettings["live_conversation_emotion_expression"],
+              )}
+            >
+              <option value="subtle">Тонкая</option>
+              <option value="natural">Естественная</option>
+              <option value="strong">Яркая</option>
+            </select>
+          </label>
+
+          <label>
+            Восстановление настроения
+            <select
+              value={liveSettings.live_conversation_mood_recovery}
+              onChange={(event) => updateLiveSetting(
+                "live_conversation_mood_recovery",
+                event.target.value as LiveConversationSettings["live_conversation_mood_recovery"],
+              )}
+            >
+              <option value="slow">Медленное</option>
+              <option value="natural">Естественное</option>
+              <option value="fast">Быстрое</option>
+            </select>
+          </label>
+
+          <label>
+            Влияние недавних событий
+            <select
+              value={liveSettings.live_conversation_recent_event_weight}
+              onChange={(event) => updateLiveSetting(
+                "live_conversation_recent_event_weight",
+                event.target.value as LiveConversationSettings["live_conversation_recent_event_weight"],
+              )}
+            >
+              <option value="light">Слабое</option>
+              <option value="balanced">Сбалансированное</option>
+              <option value="strong">Сильное</option>
+            </select>
+          </label>
+
+          <label>
+            Защита от собственного голоса
+            <select
+              value={liveSettings.live_conversation_echo_mode}
+              onChange={(event) => updateLiveSetting(
+                "live_conversation_echo_mode",
+                event.target.value as LiveConversationSettings["live_conversation_echo_mode"],
+              )}
+            >
+              <option value="auto">Автоматически</option>
+              <option value="half_duplex">Не слушать во время ответа</option>
+            </select>
           </label>
         </fieldset>
 

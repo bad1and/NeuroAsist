@@ -133,10 +133,41 @@ class MemoryService:
             or message is None
             or message.role != "user"
             or message.status != "completed"
+            or not self.is_eligible_automatic_source(message)
         ):
             return False
         self._store.enqueue_memory_extraction_job(message.id)
         return True
+
+    @staticmethod
+    def is_eligible_automatic_source(
+        message: StoredTimelineMessage | None,
+    ) -> bool:
+        """Exclude overheard and incomplete live speech from factual memory."""
+        if message is None:
+            return False
+        scope = str(message.metadata.get("dialogue_scope", ""))
+        if scope in {"ambient", "incomplete"}:
+            return False
+        decision = message.metadata.get("conversation_decision")
+        if isinstance(decision, dict) and decision.get("reason") in {
+            "ambient_speech",
+            "self_talk",
+            "other_person",
+            "incomplete_turn",
+        }:
+            return False
+        return True
+
+    def _memory_has_eligible_source(self, memory: dict[str, object]) -> bool:
+        source_ids = [str(item) for item in memory.get("source_message_ids", [])]
+        if not source_ids:
+            return True
+        sources = [self._store.get_message(message_id) for message_id in source_ids]
+        existing = [source for source in sources if source is not None]
+        return not existing or any(
+            self.is_eligible_automatic_source(source) for source in existing
+        )
 
     @property
     def semantic_enabled(self) -> bool:
@@ -151,6 +182,10 @@ class MemoryService:
             memories = self._attach_retrieval(memories, {str(item["id"]): 1.0 for item in memories}, {}, temporal=False)
         else:
             memories = self._hybrid_retrieve(query, limit)
+        memories = [
+            memory for memory in memories
+            if self._memory_has_eligible_source(memory)
+        ]
         selected: list[dict[str, object]] = []
         used_tokens = 0
         for memory in memories:
@@ -177,7 +212,11 @@ class MemoryService:
     def extract_from_message(self, message: StoredTimelineMessage | None) -> list[dict[str, object]]:
         if not self._enabled or self.incognito or self._runtime.memory_mode == "off" or message is None:
             return []
-        if message.role != "user" or message.status != "completed":
+        if (
+            message.role != "user"
+            or message.status != "completed"
+            or not self.is_eligible_automatic_source(message)
+        ):
             return []
         candidates = self._extract_candidates(message.effective_content)
         saved: list[dict[str, object]] = []
@@ -200,7 +239,11 @@ class MemoryService:
         """
         if not self._enabled or self.incognito or self._runtime.memory_mode == "off" or message is None:
             return []
-        if message.role != "user" or message.status != "completed":
+        if (
+            message.role != "user"
+            or message.status != "completed"
+            or not self.is_eligible_automatic_source(message)
+        ):
             return []
         saved: list[dict[str, object]] = []
         for candidate in self._extract_candidates(message.effective_content):
@@ -220,7 +263,11 @@ class MemoryService:
         """Validate model proposals through the same policy path as all other writes."""
         if not self._enabled or self.incognito or self._runtime.memory_mode == "off" or source_message is None:
             return []
-        if source_message.role != "user" or source_message.status != "completed":
+        if (
+            source_message.role != "user"
+            or source_message.status != "completed"
+            or not self.is_eligible_automatic_source(source_message)
+        ):
             return []
         allowed_kinds = {
             "identity", "preference", "relationship", "goal", "constraint", "skill", "interest",
@@ -286,7 +333,11 @@ class MemoryService:
         """
         if not self._enabled or self.incognito or self._runtime.memory_mode == "off" or message is None:
             return []
-        if message.role != "user" or message.status != "completed":
+        if (
+            message.role != "user"
+            or message.status != "completed"
+            or not self.is_eligible_automatic_source(message)
+        ):
             return []
         text, _ = self.sanitize_for_llm_extraction(message.effective_content)
         # The marker is useful instruction for the LLM, but must never leak

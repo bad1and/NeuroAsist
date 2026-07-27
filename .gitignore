@@ -47,6 +47,10 @@ htmlcov/
 .cache
 nosetests.xml
 coverage.xml
+output/live-soak*.json
+output/live-soak*.md
+output/live-soak*.stdout.log
+output/live-soak*.stderr.log
 *.cover
 *.py,cover
 .hypothesis/

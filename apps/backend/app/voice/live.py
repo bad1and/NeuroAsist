@@ -5,6 +5,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastapi import WebSocket
@@ -23,6 +24,7 @@ from apps.backend.app.voice.directives import (
 from apps.backend.app.voice.style import VoiceStyle, coerce_voice_style, resolve_voice_style
 
 logger = logging.getLogger(__name__)
+TextCompletedHandler = Callable[[str, str, int, str], Awaitable[None]]
 
 
 @dataclass
@@ -45,6 +47,7 @@ class VoiceConnection:
 class UtteranceContext:
     session_id: str
     utterance_id: str
+    generation: int = 0
     task: asyncio.Task | None = None
     cancelled: bool = False
     audio_started: bool = False
@@ -106,9 +109,16 @@ class VoiceSessionManager:
         self._active: dict[str, UtteranceContext] = {}
         self._avatar_service = avatar_service
         self._event_publisher = event_publisher
+        self._text_completed_handler: TextCompletedHandler | None = None
 
     def bind_avatar_service(self, avatar_service) -> None:
         self._avatar_service = avatar_service
+
+    def bind_text_completed_handler(
+        self,
+        handler: TextCompletedHandler | None,
+    ) -> None:
+        self._text_completed_handler = handler
 
     async def register(self, session_id: str, websocket: WebSocket) -> VoiceConnection:
         previous = self._connections.get(session_id)
@@ -138,14 +148,22 @@ class VoiceSessionManager:
         agent: CharacterAgent,
         input_mode: str = "voice",
         style_override: str | VoiceStyle = VoiceStyle.AUTO,
+        generation: int = 0,
+        source_message=None,
+        state_context: str | None = None,
     ) -> None:
         if not self.connected(session_id):
             raise RuntimeError("Voice WebSocket is not connected")
         await self.cancel(session_id)
-        context = UtteranceContext(session_id, utterance_id, voice_style=coerce_voice_style(style_override))
+        context = UtteranceContext(
+            session_id,
+            utterance_id,
+            generation=generation,
+            voice_style=coerce_voice_style(style_override),
+        )
         self._active[session_id] = context
         context.task = asyncio.create_task(
-            self._run(context, transcript, language, voice, agent, input_mode),
+            self._run(context, transcript, language, voice, agent, input_mode, source_message, state_context),
             name=f"voice-{utterance_id}",
         )
 
@@ -175,6 +193,8 @@ class VoiceSessionManager:
         voice: str,
         agent: CharacterAgent,
         input_mode: str,
+        source_message,
+        state_context: str | None,
     ) -> None:
         started = time.perf_counter()
         queue: asyncio.Queue[str | None] = asyncio.Queue(self._queue_size)
@@ -203,6 +223,8 @@ class VoiceSessionManager:
                 intensity=directive.intensity,
             )
             if self._avatar_service is not None:
+                if not self._is_active(context):
+                    raise asyncio.CancelledError
                 await self._avatar_service.stream_metadata(
                     session_id=context.session_id,
                     utterance_id=context.utterance_id,
@@ -210,6 +232,12 @@ class VoiceSessionManager:
                     gesture=directive.gesture,
                     gesture_intensity=directive.intensity,
                 )
+                if not self._is_active(context):
+                    await self._avatar_service.stop(
+                        session_id=context.session_id,
+                        utterance_id=context.utterance_id,
+                    )
+                    raise asyncio.CancelledError
             await self._send(
                 context,
                 "voice.metadata",
@@ -235,6 +263,8 @@ class VoiceSessionManager:
             await self._send(context, "voice.utterance.started")
             intent = agent.classify_intent(transcript)
             if self._avatar_service is not None:
+                if not self._is_active(context):
+                    raise asyncio.CancelledError
                 await self._avatar_service.stream_start(
                     session_id=context.session_id,
                     utterance_id=context.utterance_id,
@@ -245,6 +275,9 @@ class VoiceSessionManager:
                 transcript,
                 stored_reply_transform=clean_live_reply,
                 input_mode=input_mode,
+                source_message=source_message,
+                state_context=state_context,
+                schedule_memory=source_message is None,
             ).__aiter__()
             pending = asyncio.create_task(anext(iterator))
             while True:
@@ -284,17 +317,25 @@ class VoiceSessionManager:
                 segment = normalizer.normalize(raw_segment)
                 if segment:
                     await self._enqueue_tts_text(queue, worker, segment)
+            completed_reply = "".join(reply_parts).strip()
+            if self._text_completed_handler is not None and self._is_active(context):
+                await self._text_completed_handler(
+                    context.session_id,
+                    context.utterance_id,
+                    context.generation,
+                    completed_reply,
+                )
             await self._send(
                 context,
                 "voice.text.completed",
-                reply="".join(reply_parts).strip(),
+                reply=completed_reply,
                 memory_updates=agent.last_memory_updates,
             )
             context.text_completed = True
             await self._enqueue(queue, worker, None)
             await worker
             await self._send(context, "voice.utterance.finished")
-            if self._avatar_service is not None:
+            if self._avatar_service is not None and self._is_active(context):
                 await self._avatar_service.stream_end(
                     session_id=context.session_id, utterance_id=context.utterance_id
                 )
@@ -420,12 +461,18 @@ class VoiceSessionManager:
     ) -> None:
         part_text, audio, audio_format, duration, attempts = part
         connection = self._connections.get(context.session_id)
-        if connection is None or context.cancelled:
+        active_context = self._active.get(context.session_id)
+        if (
+            connection is None
+            or context.cancelled
+            or active_context is not context
+        ):
             raise asyncio.CancelledError
         base = self._event(context, segment_id=segment_id, format=audio_format)
         started = {
             **base,
             "type": "tts.segment.started",
+            "text": part_text,
             "text_length": len(part_text),
             "queue_depth": queue_depth,
             "tts_concurrency": self._tts_concurrency,
@@ -441,6 +488,8 @@ class VoiceSessionManager:
         sent_started = time.perf_counter()
         await connection.segment(started, audio, finished)
         if self._avatar_service is not None:
+            if not self._is_active(context):
+                raise asyncio.CancelledError
             await self._avatar_service.stream_segment(
                 session_id=context.session_id,
                 utterance_id=context.utterance_id,
@@ -450,6 +499,12 @@ class VoiceSessionManager:
                 sample_rate=getattr(self._tts_provider, "sample_rate", 24000),
                 is_final=False,
             )
+            if not self._is_active(context):
+                await self._avatar_service.stop(
+                    session_id=context.session_id,
+                    utterance_id=context.utterance_id,
+                )
+                raise asyncio.CancelledError
         self._publish_latency(
             context,
             "voice.tts_first_segment_ready" if segment_id == 0 else "voice.tts_segment_ready",
@@ -730,15 +785,22 @@ class VoiceSessionManager:
             "version": 1,
             "session_id": context.session_id,
             "utterance_id": context.utterance_id,
+            "generation": context.generation,
             "timestamp_ms": int(time.monotonic() * 1000),
             **payload,
         }
 
     async def _send(self, context: UtteranceContext, event_type: str, **payload: Any) -> None:
         connection = self._connections.get(context.session_id)
-        if connection is None:
+        if connection is None or not self._is_active(context):
             return
         await connection.json({**self._event(context, **payload), "type": event_type})
+
+    def _is_active(self, context: UtteranceContext) -> bool:
+        return (
+            not context.cancelled
+            and self._active.get(context.session_id) is context
+        )
 
     def _publish_latency(self, context: UtteranceContext, event_type: str, **payload: Any) -> None:
         if self._event_publisher is None:

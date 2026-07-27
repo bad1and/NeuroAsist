@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import re
+import sqlite3
 import time
 
 from fastapi import FastAPI, Request
@@ -18,6 +20,7 @@ from apps.backend.app.api.routes.context_debug import router as context_debug_ro
 from apps.backend.app.api.routes.memory import router as memory_router
 from apps.backend.app.api.routes.models import router as models_router
 from apps.backend.app.api.routes.maintenance import router as maintenance_router
+from apps.backend.app.api.routes.conversation import router as conversation_router
 from apps.backend.app.api.websocket import router as websocket_router
 from apps.backend.app.core.config import get_settings
 from apps.backend.app.core.logging import configure_logging
@@ -30,7 +33,12 @@ from apps.backend.app.runtime.settings import RuntimeSettings, RuntimeSettingsSt
 from apps.backend.app.model_manager.service import ModelManager
 from apps.backend.app.storage.backups import BackupService
 from apps.backend.app.storage.sqlite_history import SQLiteMessageHistory
-from apps.backend.app.storage.timeline import EpisodePolicy, TimelineHistoryAdapter, TimelineStore
+from apps.backend.app.storage.timeline import (
+    LATEST_SCHEMA_VERSION,
+    EpisodePolicy,
+    TimelineHistoryAdapter,
+    TimelineStore,
+)
 from apps.backend.app.context.manager import ContextManager
 from apps.backend.app.runtime.summary_worker import SummaryWorker
 from apps.backend.app.memory.service import MemoryService
@@ -44,6 +52,9 @@ from apps.backend.app.voice.live import VoiceSessionManager
 from apps.backend.app.voice.input import SileroVadProvider, VadProvider, VoiceInputSessionManager
 from apps.backend.app.voice.orchestrator import SpeechOrchestrator
 from apps.backend.app.agents.character.agent import CharacterAgent
+from apps.backend.app.conversation.schemas import ConversationAction, ConversationPhase, SpeakerRole
+from apps.backend.app.conversation.service import LiveConversationService
+from apps.backend.app.conversation.turn import SmartTurnDetector
 from apps.backend.app.llm.providers.deepseek import DeepSeekProvider
 
 logger = logging.getLogger(__name__)
@@ -152,6 +163,13 @@ def create_app() -> FastAPI:
         and settings.memory_llm_extraction_enabled
         and settings.memory_async_extraction_enabled
     ) else None
+    conversation_service = LiveConversationService(
+        timeline_store,
+        runtime_settings,
+        memory_service=memory_service,
+        event_publisher=event_bus.publish,
+        llm_provider=DeepSeekProvider(settings) if settings.llm_api_key else None,
+    ) if timeline_store is not None else None
     voice_service = VoiceService(settings)
     available_tts_voices = voice_service.available_tts_voices()
     if runtime_settings.voice_tts_voice not in available_tts_voices:
@@ -206,6 +224,76 @@ def create_app() -> FastAPI:
     voice_session_manager.bind_avatar_service(avatar_service)
     speech_orchestrator = SpeechOrchestrator(voice_service, event_bus, settings, avatar_service)
 
+    if conversation_service is not None:
+        voice_session_manager.bind_text_completed_handler(
+            conversation_service.assistant_text_generated
+        )
+        avatar_service.bind_playback_finished_handler(
+            conversation_service.avatar_playback_finished
+        )
+
+        async def conversation_avatar_reaction(
+            session_id: str,
+            emotion: str,
+            intensity: float,
+            generation: int,
+        ) -> None:
+            if conversation_service.session(session_id).generation != generation:
+                return
+            await avatar_service.set_emotion(
+                session_id=session_id,
+                emotion=emotion,
+                intensity=intensity,
+            )
+            if conversation_service.session(session_id).generation != generation:
+                await avatar_service.stop(session_id=session_id)
+
+        async def conversation_deferred_response(
+            session_id: str,
+            reaction,
+            generation: int,
+            utterance_id: str,
+        ) -> None:
+            if (
+                conversation_service.session(session_id).generation != generation
+                or not voice_session_manager.connected(session_id)
+            ):
+                return
+            agent = CharacterAgent(
+                llm_provider=DeepSeekProvider(settings),
+                history=history,
+                history_limit=settings.chat_history_limit,
+                event_publisher=event_bus.publish,
+                context_manager=context_manager,
+                memory_service=memory_service,
+                persona_name=runtime_settings.personality,
+            )
+            source_message = (
+                timeline_store.get_message(reaction.source_message_id)
+                if reaction.source_message_id
+                else None
+            )
+            voice = voice_service.resolve_tts_voice(
+                reaction.language,
+                runtime_settings.voice_tts_voice,
+            )
+            await voice_session_manager.start(
+                session_id=session_id,
+                utterance_id=utterance_id,
+                transcript=reaction.transcript,
+                language=reaction.language,
+                voice=voice,
+                agent=agent,
+                generation=generation,
+                source_message=source_message,
+                state_context=reaction.state_context,
+            )
+
+        conversation_service.bind_action_handlers(
+            avatar_reaction=conversation_avatar_reaction,
+            deferred_response=conversation_deferred_response,
+        )
+
     async def interrupt_voice_session(session_id: str, utterance_id: str | None = None) -> dict[str, int]:
         """Unified barge-in cancellation for streaming, batch TTS and avatar audio."""
         await voice_session_manager.cancel(session_id, utterance_id)
@@ -221,11 +309,34 @@ def create_app() -> FastAPI:
 
     vad_model_path = settings.voice_silero_vad_model or model_manager.path_for("silero-vad")
     vad_provider = SileroVadProvider(vad_model_path) if settings.voice_vad_provider == "silero" else VadProvider()
+    turn_detector = SmartTurnDetector(model_manager.path_for("smart-turn-v3.2"))
+    if conversation_service is not None:
+        conversation_service.bind_turn_detector(turn_detector)
 
     async def process_pcm_utterance(session_id, audio_path, language, connection) -> None:
+        if conversation_service is not None and connection.mode == "live_conversation":
+            await conversation_service.phase(session_id, ConversationPhase.TRANSCRIBING, connection.send)
         stt_result = await voice_service.stt_provider.transcribe(audio_path, language)
-        if not stt_result.text.strip():
-            await connection.send({"type": "voice.input.error", "message": "Could not transcribe speech"})
+        transcript = stt_result.text.strip()
+        transcript_signal = re.sub(r"(?u)[^\w]+", "", transcript)
+        if not transcript or len(transcript_signal) <= 1:
+            if (
+                conversation_service is not None
+                and connection.version == 2
+                and connection.mode == "live_conversation"
+            ):
+                await connection.send({
+                    "type": "conversation.noise_ignored",
+                    "reason": "empty_transcript" if not transcript else "too_short_transcript",
+                    "generation": connection.generation,
+                })
+                await conversation_service.phase(
+                    session_id,
+                    ConversationPhase.LISTENING,
+                    connection.send,
+                )
+            else:
+                await connection.send({"type": "voice.input.error", "message": "Could not transcribe speech"})
             return
         if not voice_session_manager.connected(session_id):
             await connection.send({"type": "voice.input.error", "message": "Live output WebSocket is not connected"})
@@ -237,18 +348,100 @@ def create_app() -> FastAPI:
         )
         utterance_id = __import__("uuid").uuid4().hex
         voice = voice_service.resolve_tts_voice(language, runtime_settings.voice_tts_voice)
-        await connection.send({"type": "voice.input.transcript", "transcript": stt_result.text, "utterance_id": utterance_id})
+        if (
+            conversation_service is not None
+            and connection.version == 2
+            and connection.mode == "live_conversation"
+            and runtime_settings.live_conversation_enabled
+        ):
+            result = await conversation_service.ingest_observation(
+                session_id=session_id,
+                transcript=stt_result.text,
+                language=stt_result.language,
+                send=connection.send,
+                expected_generation=connection.generation,
+                speaker_role=(
+                    SpeakerRole.UNKNOWN
+                    if runtime_settings.live_conversation_participant_mode == "group"
+                    else SpeakerRole.PRIMARY
+                ),
+                speaker_confidence=(
+                    0.55
+                    if runtime_settings.live_conversation_participant_mode == "group"
+                    else 0.9
+                ),
+            )
+            if result.generation != conversation_service.session(session_id).generation:
+                return
+            await connection.send({
+                "type": "voice.input.transcript",
+                "transcript": stt_result.text,
+                "utterance_id": result.utterance_id,
+                "generation": result.generation,
+                "observation_only": result.decision.action not in {
+                    ConversationAction.BACKCHANNEL,
+                    ConversationAction.RESPOND,
+                },
+            })
+            if result.decision.action not in {
+                ConversationAction.BACKCHANNEL,
+                ConversationAction.RESPOND,
+            }:
+                return
+            utterance_id = result.utterance_id
+            await voice_session_manager.start(
+                session_id=session_id,
+                utterance_id=utterance_id,
+                transcript=stt_result.text,
+                language=stt_result.language,
+                voice=voice,
+                agent=agent,
+                generation=result.generation,
+                source_message=result.message,
+                state_context=result.state_context,
+            )
+            return
+        await connection.send({
+            "type": "voice.input.transcript",
+            "transcript": stt_result.text,
+            "utterance_id": utterance_id,
+        })
         await voice_session_manager.start(
             session_id=session_id, utterance_id=utterance_id, transcript=stt_result.text,
             language=stt_result.language, voice=voice, agent=agent,
         )
 
-    async def pcm_speech_started(session_id: str) -> None:
+    async def pcm_speech_started(session_id: str) -> int | None:
+        generation = (
+            await conversation_service.speech_started(session_id)
+            if conversation_service is not None
+            else None
+        )
         await interrupt_voice_session(session_id)
+        return generation
+
+    def barge_in_guard_active(session_id: str) -> bool:
+        return bool(
+            conversation_service is not None
+            and conversation_service.session(session_id).phase
+            in {ConversationPhase.GENERATING, ConversationPhase.SPEAKING}
+        )
 
     voice_input_session_manager = VoiceInputSessionManager(
         voice_service, process_pcm_utterance, pcm_speech_started,
         vad=vad_provider, vad_threshold=settings.voice_vad_threshold, pre_roll_ms=settings.voice_vad_pre_roll_ms,
+        max_turn_silence_ms={
+            "short": 1500,
+            "natural": 2500,
+            "patient": 4000,
+        }.get(runtime_settings.live_conversation_pause_tolerance, 2500),
+        barge_in_guard=barge_in_guard_active,
+        barge_in_confirmation_ms={
+            "low": 300,
+            "balanced": 180,
+            "high": 60,
+        }.get(runtime_settings.live_conversation_interruption_sensitivity, 180),
+        turn_detector=turn_detector,
     )
     tts_audio_cleanup_task: asyncio.Task[None] | None = None
     summary_worker_task: asyncio.Task[None] | None = None
@@ -306,6 +499,40 @@ def create_app() -> FastAPI:
             logger.info("Generated WAV startup cleanup complete: removed=%s", removed)
 
         try:
+            if timeline_store is not None and settings.database_path.exists():
+                with sqlite3.connect(settings.database_path) as migration_connection:
+                    has_migrations = migration_connection.execute(
+                        """
+                        SELECT 1 FROM sqlite_master
+                        WHERE type = 'table' AND name = 'schema_migrations'
+                        """
+                    ).fetchone()
+                    latest_schema = (
+                        migration_connection.execute(
+                            "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
+                        ).fetchone()[0]
+                        if has_migrations
+                        else 0
+                    )
+                    has_latest_schema = bool(
+                        has_migrations
+                        and migration_connection.execute(
+                            "SELECT 1 FROM schema_migrations WHERE version = ?",
+                            (LATEST_SCHEMA_VERSION,),
+                        ).fetchone()
+                    )
+                if not has_latest_schema:
+                    backup = await asyncio.to_thread(backup_service.create)
+                    event_bus.publish(
+                        "storage.pre_migration_backup",
+                        "info",
+                        f"Backup created before schema v{LATEST_SCHEMA_VERSION} migration",
+                        {
+                            "name": backup["name"],
+                            "from_version": latest_schema,
+                            "to_version": LATEST_SCHEMA_VERSION,
+                        },
+                    )
             history.init_db()
             if timeline_store is not None:
                 timeline_store.recover_active_episode()
@@ -414,6 +641,8 @@ def create_app() -> FastAPI:
 
     @app.on_event("shutdown")
     async def shutdown() -> None:
+        if conversation_service is not None:
+            await conversation_service.close()
         if timeline_store is not None:
             await asyncio.to_thread(timeline_store.close_current_episode, "application_shutdown")
         if summary_worker is not None:
@@ -457,6 +686,7 @@ def create_app() -> FastAPI:
     app.state.timeline_store = timeline_store
     app.state.context_manager = context_manager
     app.state.memory_service = memory_service
+    app.state.conversation_service = conversation_service
     app.state.event_bus = event_bus
     app.state.runtime_settings = runtime_settings
     app.state.runtime_settings_store = runtime_settings_store
@@ -480,6 +710,7 @@ def create_app() -> FastAPI:
     app.include_router(memory_router)
     app.include_router(models_router)
     app.include_router(maintenance_router)
+    app.include_router(conversation_router)
     app.include_router(websocket_router)
     return app
 
