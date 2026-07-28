@@ -221,7 +221,7 @@ export default function App() {
   useEffect(() => {
     if (!desktopManaged || coreStatus !== "ready") return;
     const elapsed = Date.now() - startupStartedAt.current;
-    const timer = window.setTimeout(() => setShowStartup(false), Math.max(0, 800 - elapsed) + 380);
+    const timer = window.setTimeout(() => setShowStartup(false), Math.max(0, 2000 - elapsed));
     return () => window.clearTimeout(timer);
   }, [coreStatus, desktopManaged]);
 
