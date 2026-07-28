@@ -18,6 +18,7 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 import { StartupScreen } from "./components/StartupScreen";
+import { IrisLoader } from "./components/IrisLoader";
 import { WindowChrome } from "./components/WindowChrome";
 
 beforeEach(() => {
@@ -34,6 +35,11 @@ afterEach(() => {
 });
 
 describe("desktop chrome и запуск", () => {
+  it("оставляет брендовый loader переиспользуемым и доступным", () => {
+    render(<IrisLoader size="compact" label="Загрузка данных" />);
+    expect(screen.getByRole("status", { name: "Загрузка данных" })).toHaveClass("iris-loader-compact");
+  });
+
   it("показывает реальный переход starting → ready", () => {
     const { rerender } = render(<StartupScreen status="starting" retrying={false} onRetry={vi.fn()} />);
     expect(screen.getByRole("heading", { name: "Запускаю Iris" })).toBeInTheDocument();
