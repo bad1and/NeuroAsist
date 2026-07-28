@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+from difflib import SequenceMatcher
 from dataclasses import dataclass
 from collections.abc import AsyncIterator
 from typing import Any, Callable
@@ -50,12 +51,40 @@ class CharacterAgent:
         self.last_turn: CharacterTurn | None = None
         self.last_memory_updates: list[dict[str, str]] = []
         self._last_user_message = None
+        self._active_turn_id: str | None = None
 
-    async def handle_user_message(self, session_id: str, user_text: str, input_mode: str = "text") -> dict[str, Any]:
+    async def handle_user_message(
+        self,
+        session_id: str,
+        user_text: str,
+        input_mode: str = "text",
+        *,
+        source_message=None,
+        persist_reply: bool = True,
+        persist_reply_callback: Callable[[str], Any] | None = None,
+    ) -> dict[str, Any]:
         interpreted = self._voice_input.interpret(user_text, input_mode)
         effective_text = interpreted.text
-        context = self._context_manager.build(effective_text).messages if self._context_manager else self._history.get_recent_messages(session_id, limit=self._history_limit)
-        self.last_memory_updates = self._persist_user_message(session_id, user_text, input_mode, interpreted)
+        if source_message is None:
+            self.last_memory_updates = self._persist_user_message(session_id, user_text, input_mode, interpreted)
+        else:
+            # The route/coordinator owns durable acceptance.  The agent only
+            # consumes that source message to construct causal context.
+            self._last_user_message = source_message
+            self._active_turn_id = getattr(source_message, "turn_id", None)
+            self.last_memory_updates = []
+        built_context = (
+            self._context_manager.build(effective_text, session_id=session_id, current_message_id=getattr(self._last_user_message, "id", None))
+            if self._context_manager else None
+        )
+        context = built_context.messages if built_context is not None else self._history.get_recent_messages(session_id, limit=self._history_limit)
+        pending_followup = bool(built_context and built_context.diagnostics.get("pending_direct_message_count"))
+        previous_assistant_reply = self._previous_assistant_reply(context)
+        previous_assistant_id = (
+            str(built_context.diagnostics.get("previous_assistant_message_id"))
+            if built_context and built_context.diagnostics.get("previous_assistant_message_id")
+            else None
+        )
         messages = [
             ChatMessage(role="system", content=character_json_prompt(self._persona)),
             *context,
@@ -104,6 +133,51 @@ class CharacterAgent:
             ):
                 parsed = first_invalid
 
+        needs_continuity_retry = parsed.valid and (
+            self._has_unconfirmed_continuity_accusation(parsed.payload["reply"])
+            or self._has_unconfirmed_assistant_content_attribution(
+                parsed.payload["reply"], previous_assistant_reply, effective_text,
+            )
+        )
+        needs_pending_retry = parsed.valid and pending_followup and self._appears_to_ignore_pending_followup(parsed.payload["reply"])
+        duplicate = self._stale_duplicate_assessment(
+            parsed.payload["reply"] if parsed.valid else "", previous_assistant_reply, effective_text,
+        )
+        needs_duplicate_retry = bool(parsed.valid and duplicate["stale"])
+        if needs_continuity_retry or needs_pending_retry or needs_duplicate_retry:
+            # This is deliberately invisible: a snarky but ungrounded opening
+            # is worse than one extra model pass, and must not reach TTS.
+            self._publish_relevance_guard(
+                "detected", previous_assistant_id, duplicate, pending_followup,
+                "stale_duplicate" if needs_duplicate_retry else "continuity",
+            )
+            try:
+                guarded = await self._llm_provider.generate([
+                    *messages,
+                    ChatMessage(role="system", content=self._guard_retry_instruction(needs_pending_retry, needs_duplicate_retry)),
+                ])
+                repaired = self._parse_response_result(
+                    guarded.content, session_id=session_id, user_text=effective_text,
+                    empty_fallback_reply=empty_reply, report_invalid=False,
+                )
+            except Exception:
+                repaired = None
+            if (
+                repaired is not None
+                and repaired.valid
+                and not self._has_unconfirmed_continuity_accusation(repaired.payload["reply"])
+                and not self._has_unconfirmed_assistant_content_attribution(
+                    repaired.payload["reply"], previous_assistant_reply, effective_text,
+                )
+                and (not pending_followup or not self._appears_to_ignore_pending_followup(repaired.payload["reply"]))
+                and not self._stale_duplicate_assessment(repaired.payload["reply"], previous_assistant_reply, effective_text)["stale"]
+            ):
+                parsed = repaired
+                self._publish_relevance_guard("applied", previous_assistant_id, duplicate, pending_followup, "retry_accepted")
+            elif needs_duplicate_retry:
+                parsed = self._stale_reply_fallback()
+                self._publish_relevance_guard("fallback", previous_assistant_id, duplicate, pending_followup, "retry_rejected")
+
         # The modern path deliberately has one writer: the background extractor.
         # Keeping Character Protocol candidates on that path as well prevents a
         # normal text turn from being saved twice by two independent DeepSeek calls.
@@ -125,13 +199,20 @@ class CharacterAgent:
         # A user-visible fallback is still an assistant turn.  Persist it and
         # schedule extraction so a malformed visible reply never drops a useful
         # user fact such as a current goal.
-        if self._should_persist_timeline():
-            self._save_message(session_id, "assistant", parsed.payload["reply"], input_mode)
+        if persist_reply_callback is not None:
+            assistant_message = persist_reply_callback(parsed.payload["reply"])
+        elif self._should_persist_timeline() and persist_reply:
+            assistant_message = self._save_message(
+                session_id, "assistant", parsed.payload["reply"], input_mode,
+                turn_id=self._active_turn_id, reply_to_message_id=getattr(self._last_user_message, "id", None),
+            )
+        else:
+            assistant_message = None
         if self._memory_service is not None:
             if self._memory_service.uses_background_extraction:
                 created = self._memory_service.extract_high_precision_from_message(self._last_user_message)
                 self.last_memory_updates.extend(self._memory_service.memory_update(memory) for memory in created)
-            self._memory_service.schedule_extraction(self._last_user_message)
+            self._memory_service.schedule_extraction(assistant_message)
 
         self.last_turn = parsed.turn
 
@@ -144,18 +225,29 @@ class CharacterAgent:
         source_message=None,
         state_context: str | None = None,
         schedule_memory: bool = True,
+        persist_reply: bool | None = None,
     ) -> AsyncIterator[str]:
         """Stream plain reply text and commit history only after clean completion."""
         interpreted = self._voice_input.interpret(user_text, input_mode)
         effective_text = interpreted.text
-        context = self._context_manager.build(effective_text).messages if self._context_manager else self._history.get_recent_messages(session_id, limit=self._history_limit)
         if source_message is None:
             self.last_memory_updates = self._persist_user_message(session_id, user_text, input_mode, interpreted)
         else:
             self._last_user_message = source_message
+            self._active_turn_id = getattr(source_message, "turn_id", None)
             self.last_memory_updates = []
-            if context and context[-1].role == "user" and context[-1].content == effective_text:
-                context = context[:-1]
+        built_context = (
+            self._context_manager.build(effective_text, session_id=session_id, current_message_id=getattr(self._last_user_message, "id", None))
+            if self._context_manager else None
+        )
+        context = built_context.messages if built_context is not None else self._history.get_recent_messages(session_id, limit=self._history_limit)
+        pending_followup = bool(built_context and built_context.diagnostics.get("pending_direct_message_count"))
+        previous_assistant_reply = self._previous_assistant_reply(context)
+        previous_assistant_id = (
+            str(built_context.diagnostics.get("previous_assistant_message_id"))
+            if built_context and built_context.diagnostics.get("previous_assistant_message_id")
+            else None
+        )
         system_prompt = character_live_prompt(self._persona, state_context)
         messages = [
             ChatMessage(role="system", content=system_prompt),
@@ -163,7 +255,13 @@ class CharacterAgent:
             ChatMessage(role="user", content=effective_text),
         ]
         chunks: list[str] = []
-        async for delta in self._llm_provider.stream(messages):
+        async for delta in self._guarded_live_stream(
+            messages,
+            require_pending_response=pending_followup,
+            previous_assistant_reply=previous_assistant_reply,
+            previous_assistant_id=previous_assistant_id,
+            user_text=effective_text,
+        ):
             if not delta:
                 continue
             chunks.append(delta)
@@ -174,13 +272,20 @@ class CharacterAgent:
         if not reply:
             reply = self._empty_model_fallback(effective_text)
             yield reply
-        if self._should_persist_timeline() and source_message is None:
-            self._save_message(session_id, "assistant", reply, input_mode)
+        if persist_reply is None:
+            persist_reply = source_message is None
+        if self._should_persist_timeline() and persist_reply:
+            assistant_message = self._save_message(
+                session_id, "assistant", reply, input_mode,
+                turn_id=self._active_turn_id, reply_to_message_id=getattr(self._last_user_message, "id", None),
+            )
+        else:
+            assistant_message = None
         if self._memory_service is not None and schedule_memory:
             if self._memory_service.uses_background_extraction:
                 created = self._memory_service.extract_high_precision_from_message(self._last_user_message)
                 self.last_memory_updates.extend(self._memory_service.memory_update(memory) for memory in created)
-            self._memory_service.schedule_extraction(self._last_user_message)
+            self._memory_service.schedule_extraction(assistant_message)
         if (
             schedule_memory
             and
@@ -196,6 +301,7 @@ class CharacterAgent:
 
     def _persist_user_message(self, session_id: str, user_text: str, input_mode: str, interpreted) -> list[dict[str, str]]:
         user_message = self._save_message(session_id, "user", user_text, input_mode)
+        self._active_turn_id = getattr(user_message, "turn_id", None)
         if user_message is not None and interpreted.changed:
             apply_interpretation = getattr(self._history, "apply_voice_interpretation", None)
             if callable(apply_interpretation):
@@ -211,11 +317,17 @@ class CharacterAgent:
             return []
         return [self._memory_service.memory_update(memory) for memory in self._memory_service.extract_from_message(user_message)]
 
-    def _save_message(self, session_id: str, role: str, content: str, input_mode: str):
+    def _save_message(
+        self, session_id: str, role: str, content: str, input_mode: str,
+        *, turn_id: str | None = None, reply_to_message_id: str | None = None,
+    ):
         if not self._should_persist_timeline():
             return None
         try:
-            return self._history.save_message(session_id, role, content, input_mode=input_mode)
+            return self._history.save_message(
+                session_id, role, content, input_mode=input_mode,
+                turn_id=turn_id, reply_to_message_id=reply_to_message_id,
+            )
         except TypeError:
             # V0.4 test doubles and the legacy history implementation only expose three arguments.
             return self._history.save_message(session_id, role, content)
@@ -376,6 +488,248 @@ class CharacterAgent:
     @staticmethod
     def _looks_like_structured_content(value: str) -> bool:
         return value.startswith(("{", "[", "```"))
+
+    async def _guarded_live_stream(
+        self, messages: list[ChatMessage], *, require_pending_response: bool = False,
+        previous_assistant_reply: str = "", previous_assistant_id: str | None = None,
+        user_text: str = "",
+    ) -> AsyncIterator[str]:
+        """Reject continuity or stale-repetition failures before UI/TTS sees text."""
+        buffered: list[str] = []
+        released = False
+        async for delta in self._llm_provider.stream(messages):
+            if released:
+                yield delta
+                continue
+            buffered.append(delta)
+            opening = "".join(buffered)
+            # A bare greeting often ends the first sentence ("Ну? Я здесь.")
+            # and the actual accusation follows immediately. Extend the hold
+            # only for that suspicious opener; ordinary streaming keeps its
+            # original first-sentence latency and delta cadence.
+            sentence_count = len(re.findall(r"[.!?…](?:\s|$)", opening))
+            suspicious_opener = bool(re.search(r"(?:^|\n)\s*(?:ну|а)\?\s*(?:я\s+здесь)?", opening.lower()))
+            duplicate_guard = bool(previous_assistant_reply and not self._user_allows_repetition(user_text, previous_assistant_reply))
+            required_sentences = 2 if suspicious_opener or require_pending_response or duplicate_guard else 1
+            if sentence_count < required_sentences and len(opening) < 220:
+                continue
+            duplicate = self._stale_duplicate_assessment(opening, previous_assistant_reply, user_text)
+            if self._has_unconfirmed_continuity_accusation(opening) or self._has_unconfirmed_assistant_content_attribution(
+                opening, previous_assistant_reply, user_text,
+            ) or (
+                require_pending_response and self._appears_to_ignore_pending_followup(opening)
+            ) or duplicate["stale"]:
+                reason = "stale_duplicate" if duplicate["stale"] else "continuity"
+                self._publish_relevance_guard("detected", previous_assistant_id, duplicate, require_pending_response, reason)
+                retry = await self._live_guard_retry(
+                    messages, previous_assistant_reply, user_text, require_pending_response,
+                )
+                if retry == self._stale_reply_fallback().payload["reply"]:
+                    self._publish_relevance_guard("fallback", previous_assistant_id, duplicate, require_pending_response, "retry_rejected")
+                else:
+                    self._publish_relevance_guard("applied", previous_assistant_id, duplicate, require_pending_response, "retry_accepted")
+                yield retry
+                return
+            released = True
+            yield opening
+        if not released and buffered:
+            opening = "".join(buffered)
+            duplicate = self._stale_duplicate_assessment(opening, previous_assistant_reply, user_text)
+            if self._has_unconfirmed_continuity_accusation(opening) or self._has_unconfirmed_assistant_content_attribution(
+                opening, previous_assistant_reply, user_text,
+            ) or (
+                require_pending_response and self._appears_to_ignore_pending_followup(opening)
+            ) or duplicate["stale"]:
+                self._publish_relevance_guard("detected", previous_assistant_id, duplicate, require_pending_response, "stale_duplicate" if duplicate["stale"] else "continuity")
+                retry = await self._live_guard_retry(
+                    messages, previous_assistant_reply, user_text, require_pending_response,
+                )
+                yield retry
+            else:
+                yield opening
+
+    async def _live_guard_retry(
+        self, messages: list[ChatMessage], previous_assistant_reply: str,
+        user_text: str, require_pending_response: bool,
+    ) -> str:
+        """A retry is fully buffered so a second stale answer cannot reach TTS."""
+        try:
+            chunks = [
+                delta async for delta in self._llm_provider.stream([
+                    *messages,
+                    ChatMessage(role="system", content=self._guard_retry_instruction(require_pending_response, True)),
+                ])
+            ]
+        except Exception:
+            return self._stale_reply_fallback().payload["reply"]
+        reply = "".join(chunks).strip()
+        if (
+            not reply
+            or self._has_unconfirmed_continuity_accusation(reply)
+            or self._has_unconfirmed_assistant_content_attribution(reply, previous_assistant_reply, user_text)
+            or (require_pending_response and self._appears_to_ignore_pending_followup(reply))
+            or self._stale_duplicate_assessment(reply, previous_assistant_reply, user_text)["stale"]
+        ):
+            return self._stale_reply_fallback().payload["reply"]
+        return reply
+
+    @staticmethod
+    def _has_unconfirmed_continuity_accusation(reply: str) -> bool:
+        return bool(re.search(
+            r"\b(?:ты\s+(?:опять|снова)\s+(?:начал|повторяешь|забыл)|"
+            r"(?:опять|снова)\s+зов[её]шь|"
+            r"я\s+уже\s+(?:сказала|говорила)|(?:снова|опять)\s+начал\s+(?:разговор|заново)|"
+            r"заинтриговал\s+и\s+замолчал)",
+            reply.lower(),
+        ))
+
+    @classmethod
+    def _has_unconfirmed_assistant_content_attribution(
+        cls, reply: str, previous_assistant_reply: str, user_text: str,
+    ) -> bool:
+        """Reject hallucinations that attribute Iris's example to the user.
+
+        A criticism often refers to a detail Iris introduced one turn ago.
+        Mentioning that detail is fine when Iris owns it; it becomes a
+        continuity error only when the reply simultaneously says that the user
+        asked for/said that assistant-only detail.
+        """
+        if not previous_assistant_reply:
+            return False
+        normalized_reply = reply.lower().replace("ё", "е")
+        attribution = re.search(
+            r"\b(?:ты\s+)?(?:сам\s+)?(?:попросил|просил|хотел|сказал|назвал|принес|выдал)\b",
+            normalized_reply,
+        )
+        if attribution is None:
+            return False
+        assistant_terms = cls._content_stems(previous_assistant_reply)
+        user_terms = cls._content_stems(user_text)
+        reply_terms = cls._content_stems(reply)
+        # Four/five-character stems deliberately handle normal Russian
+        # inflection (ёжик/ёжика, скелеты/скелетами) without pretending to be
+        # a semantic parser.  The attribution phrase keeps this conservative.
+        assistant_only = assistant_terms - user_terms
+        return bool(assistant_only & reply_terms)
+
+    @staticmethod
+    def _content_stems(value: str) -> set[str]:
+        stop_words = {
+            "когда", "котор", "этот", "этим", "этого", "вообще", "потом", "сам", "сама",
+            "попрос", "просил", "хотел", "сказал", "назвал", "была", "было", "были",
+            "тебе", "тебя", "твой", "твоя", "моей", "моя", "своей", "свою", "только",
+            "анекд", "шутк", "бред", "какая", "какой", "полная", "следую",
+        }
+        words = re.findall(r"[^\W_]+", value.lower().replace("ё", "е"), flags=re.UNICODE)
+        stop_stems = {word[:4] for word in stop_words}
+        return {
+            word[:4]
+            for word in words
+            if len(word) >= 4 and word[:4] not in stop_stems
+        }
+
+    @staticmethod
+    def _appears_to_ignore_pending_followup(reply: str) -> bool:
+        opening = reply.lower().strip()[:240]
+        return bool(
+            re.search(r"\b(?:опять|снова)\s+зов[её]шь\b", opening)
+            or "есть что сказать" in opening
+            or re.fullmatch(r"(?:ну[!?., ]*|да[!?., ]*)?(?:я\s+)?(?:здесь|слушаю|говори)[.!?… ]*", opening)
+        )
+
+    @staticmethod
+    def _guard_retry_instruction(require_pending_response: bool, stale_duplicate: bool = False) -> str:
+        instruction = CharacterAgent._continuity_retry_instruction()
+        if stale_duplicate:
+            instruction += (
+                " Твой черновик слишком похож на предыдущий ответ Iris. Не повторяй его "
+                "и ответь на новую последнюю реплику пользователя по существу."
+            )
+        if require_pending_response:
+            instruction += (
+                " Пользователь только позвал тебя после неотвеченной прямой реплики: "
+                "содержательно ответь на эту реплику, а не на само обращение по имени."
+            )
+        return instruction
+
+    @staticmethod
+    def _previous_assistant_reply(context: list[ChatMessage]) -> str:
+        return next((message.content for message in reversed(context) if message.role == "assistant"), "")
+
+    @staticmethod
+    def _normalized_for_similarity(value: str) -> str:
+        return " ".join(re.findall(r"[^\W_]+", value.lower(), flags=re.UNICODE))
+
+    @classmethod
+    def _user_allows_repetition(cls, user_text: str, previous_assistant_reply: str) -> bool:
+        normalized = cls._normalized_for_similarity(user_text)
+        if any(marker in normalized for marker in ("повтори", "повтор", "процитируй", "цитат", "перескажи", "пересказ")):
+            return True
+        previous = cls._normalized_for_similarity(previous_assistant_reply)
+        return (
+            len(normalized) >= 40
+            and len(previous) >= 40
+            and SequenceMatcher(None, normalized, previous).ratio() >= 0.82
+        )
+
+    @classmethod
+    def _stale_duplicate_assessment(
+        cls, candidate: str, previous_assistant_reply: str, user_text: str,
+    ) -> dict[str, object]:
+        candidate_normalized = cls._normalized_for_similarity(candidate)
+        previous_normalized = cls._normalized_for_similarity(previous_assistant_reply)
+        if not candidate_normalized or not previous_normalized or cls._user_allows_repetition(user_text, previous_assistant_reply):
+            return {"stale": False, "similarity": 0.0, "reason": "exempt_or_empty"}
+        shorter = min(len(candidate_normalized), len(previous_normalized))
+        similarity = SequenceMatcher(None, candidate_normalized, previous_normalized).ratio()
+        exact = candidate_normalized == previous_normalized and shorter >= 24
+        repeated_prefix = (
+            shorter >= 96
+            and (candidate_normalized in previous_normalized or previous_normalized in candidate_normalized)
+        )
+        near_duplicate = shorter >= 120 and similarity >= 0.90
+        return {
+            "stale": exact or repeated_prefix or near_duplicate,
+            "similarity": round(similarity, 4),
+            "reason": "exact" if exact else "prefix" if repeated_prefix else "near_duplicate" if near_duplicate else "distinct",
+        }
+
+    def _publish_relevance_guard(
+        self, outcome: str, previous_assistant_id: str | None, assessment: dict[str, object],
+        pending_followup: bool, reason: str,
+    ) -> None:
+        if self._event_publisher is None:
+            return
+        self._event_publisher(
+            "llm.relevance_guard",
+            "warning" if outcome in {"detected", "fallback"} else "info",
+            "LLM response relevance guard evaluated",
+            {
+                "outcome": outcome,
+                "reason": reason,
+                "previous_assistant_message_id": previous_assistant_id,
+                "similarity": assessment.get("similarity", 0.0),
+                "similarity_reason": assessment.get("reason"),
+                "pending_followup": pending_followup,
+            },
+        )
+
+    @staticmethod
+    def _stale_reply_fallback() -> _ParseResult:
+        return _ParseResult(
+            {"reply": "Похоже, я зациклилась на прошлом ответе. Не хочу повторять его вместо реакции на твоё сообщение.", "emotion": "neutral", "intent": "unknown"},
+            valid=False,
+            reason="stale_duplicate_retry_failed",
+        )
+
+    @staticmethod
+    def _continuity_retry_instruction() -> str:
+        return (
+            "Переформулируй ответ без обвинений пользователя в повторе, забывчивости "
+            "или смене темы: они не подтверждены контекстом. Не приписывай пользователю "
+            "детали из предыдущего ответа Iris как его собственные слова или запрос. "
+            "Продолжи тему предыдущего завершённого хода либо коротко уточни связь."
+        )
 
     def _empty_model_fallback(self, _user_text: str) -> str:
         # Do not echo a potentially sensitive user message back into the UI.

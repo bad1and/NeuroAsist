@@ -41,6 +41,8 @@ class VoiceLiveResponse(BaseModel):
     utterance_id: str
     voice_request_id: str
     transcript: str
+    message_id: str | None = None
+    turn_id: str | None = None
     status: str = "streaming"
 
 

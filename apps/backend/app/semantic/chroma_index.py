@@ -51,7 +51,7 @@ class ChromaVectorIndex:
         self._collection(namespace).delete(ids=[item_id])
 
     def search_sync(self, query: str, namespace: str, limit: int) -> list[VectorSearchResult]:
-        query_embedding = self._provider.embed(query)
+        query_embedding = getattr(self._provider, "embed_query", self._provider.embed)(query)
         result = self._collection(namespace).query(
             query_embeddings=[query_embedding], n_results=max(1, limit), include=["distances"],
         )

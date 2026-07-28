@@ -43,7 +43,7 @@ from apps.backend.app.context.manager import ContextManager
 from apps.backend.app.runtime.summary_worker import SummaryWorker
 from apps.backend.app.memory.service import MemoryService
 from apps.backend.app.memory.extraction_worker import MemoryExtractionWorker
-from apps.backend.app.semantic.embedding import HashEmbeddingProvider
+from apps.backend.app.semantic.embedding import HashEmbeddingProvider, LocalE5EmbeddingProvider
 from apps.backend.app.semantic.chroma_index import ChromaVectorIndex
 from apps.backend.app.semantic.sync_worker import SemanticSyncWorker
 from apps.backend.app.semantic.vector_index import NullVectorIndex, SqliteVecIndex
@@ -54,6 +54,7 @@ from apps.backend.app.voice.orchestrator import SpeechOrchestrator
 from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.conversation.schemas import ConversationAction, ConversationPhase, SpeakerRole
 from apps.backend.app.conversation.service import LiveConversationService
+from apps.backend.app.conversation.turn_coordinator import ConversationTurnCoordinator
 from apps.backend.app.conversation.turn import SmartTurnDetector
 from apps.backend.app.llm.providers.deepseek import DeepSeekProvider
 
@@ -126,12 +127,24 @@ def create_app() -> FastAPI:
     semantic_mode_enabled = settings.semantic_retrieval_enabled and settings.semantic_retrieval_eval_passed
     if settings.semantic_vector_backend == "chroma":
         ChromaVectorIndex.clear_pending_reset(settings.semantic_chroma_directory)
-    if timeline_store is not None and semantic_mode_enabled and settings.semantic_embedding_provider == "hash":
-        embedding_provider = HashEmbeddingProvider(settings.semantic_embedding_model_id, settings.semantic_embedding_dimension)
-        if settings.semantic_vector_backend == "chroma":
+    if timeline_store is not None and semantic_mode_enabled and settings.semantic_embedding_provider in {"hash", "e5"}:
+        try:
+            embedding_provider = (
+                LocalE5EmbeddingProvider(settings.semantic_e5_model_directory, settings.semantic_e5_revision)
+                if settings.semantic_embedding_provider == "e5"
+                else HashEmbeddingProvider(settings.semantic_embedding_model_id, settings.semantic_embedding_dimension)
+            )
+        except Exception:
+            # Semantic retrieval is an optional cache. FTS remains available
+            # when a local model is absent or cannot be loaded.
+            semantic_mode_enabled = False
+            embedding_provider = None
+        if embedding_provider is not None and settings.semantic_vector_backend == "chroma":
             vector_index = ChromaVectorIndex(settings.semantic_chroma_directory, embedding_provider, timeline_store.semantic_index_items)
-        else:
+        elif embedding_provider is not None:
             vector_index = SqliteVecIndex(settings.database_path, embedding_provider, timeline_store.semantic_index_items)
+        else:
+            vector_index = NullVectorIndex()
     else:
         vector_index = NullVectorIndex()
     memory_service = MemoryService(
@@ -170,6 +183,7 @@ def create_app() -> FastAPI:
         event_publisher=event_bus.publish,
         llm_provider=DeepSeekProvider(settings) if settings.llm_api_key else None,
     ) if timeline_store is not None else None
+    turn_coordinator = ConversationTurnCoordinator(timeline_store, event_bus.publish) if timeline_store is not None else None
     voice_service = VoiceService(settings)
     available_tts_voices = voice_service.available_tts_voices()
     if runtime_settings.voice_tts_voice not in available_tts_voices:
@@ -684,6 +698,7 @@ def create_app() -> FastAPI:
     app.state.settings = settings
     app.state.history = history
     app.state.timeline_store = timeline_store
+    app.state.turn_coordinator = turn_coordinator
     app.state.context_manager = context_manager
     app.state.memory_service = memory_service
     app.state.conversation_service = conversation_service

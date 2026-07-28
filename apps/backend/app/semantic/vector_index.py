@@ -106,7 +106,8 @@ class SqliteVecIndex:
             connection.execute("DELETE FROM semantic_vectors WHERE namespace = ? AND item_id = ?", (namespace, item_id))
 
     def search_sync(self, query: str, namespace: str, limit: int) -> list[VectorSearchResult]:
-        query_vector = self._provider.embed(query)
+        embed_query = getattr(self._provider, "embed_query", self._provider.embed)
+        query_vector = embed_query(query)
         with self._connect() as connection:
             state = connection.execute("SELECT model_id, dimension FROM semantic_index_state WHERE namespace = ?", (namespace,)).fetchone()
             if state is None:

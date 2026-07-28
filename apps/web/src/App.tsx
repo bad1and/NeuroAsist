@@ -39,6 +39,7 @@ import {
   isDesktopManaged,
   removeModel,
   reindexMemories,
+  resetConversationSession,
   resetAllCompanionData,
   resolveApiUrl,
   saveDesktopApiKey,
@@ -107,7 +108,6 @@ type WsState = "connected" | "disconnected" | "reconnecting";
 type LevelFilter = "all" | EventLevel;
 type VoiceState = "idle" | "recording" | "transcribing" | "thinking" | "speaking" | "stopping" | "error";
 
-const SESSION_ID = "default";
 const AVATAR_EMOTION_LABELS: Record<string, string> = {
   neutral: "Нейтральная", happy: "Радость", sad: "Грусть", angry: "Злость",
   annoyed: "Раздражение", smirk: "Улыбка", thinking: "Задумчивость", surprised: "Удивление",
@@ -179,7 +179,13 @@ function isLiveVoiceTransportError(error: unknown): boolean {
   return (
     error.message.includes("Live voice connection failed") ||
     error.message.includes("Voice WebSocket must be connected") ||
-    error.message.includes("Live text requires backend TTS")
+    error.message.includes("Live text requires backend TTS") ||
+    // A closed HTTP body during /chat/live is a transport failure, not a
+    // failed user message. Fall back to the ordinary /chat request so typing
+    // remains reliable while the live socket/core reconnects.
+    error.message.includes("incomplete chunked read") ||
+    error.message.includes("peer closed connection") ||
+    error.message.includes("Failed to fetch")
   );
 }
 
@@ -197,6 +203,8 @@ export default function App() {
   const [events, setEvents] = useState<BackendEvent[]>([]);
   const [wsState, setWsState] = useState<WsState>("disconnected");
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [startingSession, setStartingSession] = useState(false);
   const servicesReady = !desktopManaged || coreStatus === "ready";
   const setupRequired = Boolean(settings && !settings.api_key_configured && isDesktopManaged());
 
@@ -276,6 +284,23 @@ export default function App() {
     }, 10000);
     return () => window.clearInterval(timer);
   }, [refreshEvents, refreshOverview, servicesReady]);
+
+  const startFreshSession = useCallback(async () => {
+    setStartingSession(true);
+    try {
+      const session = await resetConversationSession();
+      setSessionId(session.session_id);
+    } finally {
+      setStartingSession(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!servicesReady || !settings || setupRequired || sessionId || startingSession) return;
+    void startFreshSession().catch((error) => {
+      setStatusError(error instanceof Error ? error.message : "Не удалось начать новую сессию.");
+    });
+  }, [servicesReady, settings, setupRequired, sessionId, startingSession, startFreshSession]);
 
   useEffect(() => {
     if (!servicesReady) return;
@@ -365,6 +390,9 @@ export default function App() {
           )}
           {activeView === "chat" && (
             <ChatPage
+              key={sessionId ?? "starting"}
+              sessionId={sessionId}
+              sessionStarting={startingSession}
               events={events}
               settings={settings}
               avatarStatus={avatarStatus}
@@ -386,6 +414,7 @@ export default function App() {
                 void refreshOverview();
                 void refreshEvents();
               }}
+              onResetSession={startFreshSession}
             />
           )}
         </main>
@@ -491,12 +520,16 @@ function NavigationButton({
 }
 
 function ChatPage({
+  sessionId,
+  sessionStarting,
   events,
   settings,
   avatarStatus,
   onRefreshEvents,
   onOpenMemory,
 }: {
+  sessionId: string | null;
+  sessionStarting: boolean;
   events: BackendEvent[];
   settings: PublicSettings | null;
   avatarStatus: AvatarStatusResponse | null;
@@ -569,23 +602,25 @@ function ChatPage({
   }, []);
 
   useEffect(() => {
-    void getTimelineMessages().then((payload) => {
+      if (!sessionId) return;
+      void getTimelineMessages().then((payload) => {
       setMessages(payload.items
         .filter((message) => message.role === "user" || message.role === "assistant")
         .map((message) => ({ id: message.id, role: message.role as "user" | "assistant", content: message.content })));
     }).catch(() => {
       // The V0.4 compatibility backend may intentionally keep Timeline V2 disabled.
     });
-  }, []);
+  }, [sessionId]);
 
   useEffect(() => {
-    if (!import.meta.env.DEV || !liveConversation) {
+    if (!import.meta.env.DEV || !liveConversation || !settings?.conversation_diagnostics_enabled) {
       setConversationDebug(null);
       return;
     }
     let active = true;
     const refresh = () => {
-      void getConversationDebug(SESSION_ID)
+      if (!sessionId) return;
+      void getConversationDebug(sessionId)
         .then((snapshot) => { if (active) setConversationDebug(snapshot); })
         .catch(() => { if (active) setConversationDebug(null); });
     };
@@ -595,7 +630,7 @@ function ChatPage({
       active = false;
       window.clearInterval(timer);
     };
-  }, [liveConversation]);
+  }, [liveConversation, sessionId, settings?.conversation_diagnostics_enabled]);
 
   const voiceSupported =
     typeof navigator !== "undefined" &&
@@ -640,10 +675,10 @@ function ChatPage({
     setLoading(false);
     // A live socket normally carries the cancellation.  REST covers a batch
     // fallback (or a temporarily disconnected socket), including Unity audio.
-    if (!sentOverLiveSocket) {
-      void interruptVoiceSession(SESSION_ID, utteranceId).catch(() => undefined);
+    if (!sentOverLiveSocket && sessionId) {
+      void interruptVoiceSession(sessionId, utteranceId).catch(() => undefined);
     }
-  }, [stopVoicePlayback]);
+  }, [sessionId, stopVoicePlayback]);
 
   const playAudioUrl = useCallback(
     async (audioUrl: string): Promise<boolean> => {
@@ -770,6 +805,7 @@ function ChatPage({
   ]);
 
   const ensureLiveVoice = useCallback(async () => {
+    if (!sessionId) throw new Error("Сессия ещё создаётся");
     const player = ensureLivePlayer();
     if (!liveSocketRef.current) {
       const onEvent = (event: VoiceServerEvent) => {
@@ -851,7 +887,7 @@ function ChatPage({
         }
       };
       liveSocketRef.current = new VoiceSocketClient(
-        voiceWebSocketUrl(SESSION_ID),
+        voiceWebSocketUrl(sessionId),
         onEvent,
         (audio, segment) => {
           if (
@@ -867,7 +903,7 @@ function ChatPage({
     }
     await player.unlock();
     await liveSocketRef.current.connect();
-  }, [ensureLivePlayer, showMemoryUpdates, speakTextInBrowser, stopVoicePlayback]);
+  }, [ensureLivePlayer, sessionId, showMemoryUpdates, speakTextInBrowser, stopVoicePlayback]);
 
   useEffect(() => () => {
     livePlayerRef.current?.stop();
@@ -1057,7 +1093,7 @@ function ChatPage({
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
     const text = draft.trim();
-    if (!text || loading) {
+    if (!text || !sessionId) {
       return;
     }
 
@@ -1077,7 +1113,12 @@ function ChatPage({
         await ensureLiveVoice();
         liveSocketRef.current?.clearActive();
         liveAudioStartedRef.current = false;
-        const response = await sendLiveTextMessage(SESSION_ID, text);
+        const response = await sendLiveTextMessage(sessionId, text, userMessage.id);
+        if (response.message_id) {
+          setMessages((current) => current.map((message) =>
+            message.id === userMessage.id ? { ...message, id: response.message_id! } : message,
+          ));
+        }
         liveSocketRef.current?.activate(response.utterance_id);
         setVoiceState("thinking");
         return;
@@ -1089,12 +1130,14 @@ function ChatPage({
         liveSocketRef.current = null;
         setError("Потоковый режим недоступен: использован обычный ответ.");
       }
-      const response = await sendChatMessage(SESSION_ID, text);
+      const response = await sendChatMessage(sessionId, text, userMessage.id);
       showMemoryUpdates(response.memory_updates);
       setMessages((current) => [
-        ...current,
+        ...current.map((message) => message.id === userMessage.id && response.message_id
+          ? { ...message, id: response.message_id }
+          : message),
         {
-          id: crypto.randomUUID(),
+          id: response.assistant_message_id ?? crypto.randomUUID(),
           role: "assistant",
           content: response.reply,
           emotion: response.emotion,
@@ -1110,7 +1153,9 @@ function ChatPage({
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Не удалось отправить сообщение");
       setRetryText(text);
-      setMessages((current) => current.filter((message) => message.id !== userMessage.id));
+      // A transport failure is ambiguous: the server may already have
+      // accepted the client id.  Keep the optimistic user bubble so retry
+      // cannot silently erase a durable turn.
     } finally {
       if (!liveSocketRef.current?.activeUtteranceId) {
         setLoading(false);
@@ -1185,6 +1230,7 @@ function ChatPage({
   };
 
   const submitVoice = async (audio: Blob, endOfSpeechUnixMs?: number) => {
+    if (!sessionId) return;
     if (audio.size === 0) {
       setError("Запись пуста");
       setVoiceState("idle");
@@ -1209,7 +1255,7 @@ function ChatPage({
         liveSocketRef.current?.clearActive();
         liveAudioStartedRef.current = false;
         response = await sendVoiceMessage(
-          SESSION_ID,
+          sessionId,
           audio,
           settings?.voice_language ?? "ru",
           true,
@@ -1222,7 +1268,7 @@ function ChatPage({
         liveSocketRef.current?.close();
         liveSocketRef.current = null;
         response = await sendVoiceMessage(
-          SESSION_ID,
+          sessionId,
           audio,
           settings?.voice_language ?? "ru",
           false,
@@ -1261,6 +1307,7 @@ function ChatPage({
   }, [submitVoice]);
 
   const toggleHandsFree = async (mode: "hands_free" | "live_conversation" = "hands_free") => {
+    if (!sessionId) return;
     const isLive = mode === "live_conversation";
     const requestedModeActive = isLive ? liveConversation : handsFree;
     if (requestedModeActive) {
@@ -1282,7 +1329,7 @@ function ChatPage({
     setLiveConversation(false);
     try {
       await ensureLiveVoice();
-      const input = new PcmInputClient(voiceInputWebSocketUrl(SESSION_ID, isLive ? 2 : 1), (event) => {
+      const input = new PcmInputClient(voiceInputWebSocketUrl(sessionId, isLive ? 2 : 1), (event) => {
         if (event.type === "voice.input.transcript" && event.transcript) {
           setMessages((current) => [...current, {
             id: crypto.randomUUID(),
@@ -1472,9 +1519,9 @@ function ChatPage({
           <button
             className="primary-button send-button"
             type="submit"
-            disabled={loading || draft.trim().length === 0}
-            aria-label={loading ? "Отправка сообщения" : "Отправить сообщение"}
-            title={loading ? "Отправка сообщения" : "Отправить сообщение"}
+            disabled={!sessionId || sessionStarting || loading || draft.trim().length === 0}
+            aria-label={sessionStarting ? "Подготавливаем сессию" : loading ? "Отправка сообщения" : "Отправить сообщение"}
+            title={sessionStarting ? "Подготавливаем сессию" : loading ? "Отправка сообщения" : "Отправить сообщение"}
           >
             <SendHorizontal size={18} aria-hidden="true" />
           </button>
@@ -1643,6 +1690,7 @@ function SettingsPage({
   onRefreshEvents,
   onRefreshAvatar,
   onSettingsChanged,
+  onResetSession,
 }: {
   settings: PublicSettings | null;
   avatarStatus: AvatarStatusResponse | null;
@@ -1650,6 +1698,7 @@ function SettingsPage({
   onRefreshEvents: () => Promise<void>;
   onRefreshAvatar: () => Promise<void>;
   onSettingsChanged: (settings: PublicSettings) => void;
+  onResetSession: () => Promise<void>;
 }) {
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
   const [personality, setPersonality] = useState("");
@@ -1678,6 +1727,7 @@ function SettingsPage({
   });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [resetSessionDialog, setResetSessionDialog] = useState(false);
 
   useEffect(() => {
     if (settings) {
@@ -1821,6 +1871,20 @@ function SettingsPage({
       title: "Система",
       description: "Модели, резервные копии и состояние компонентов.",
     },
+  };
+
+  const resetSession = async () => {
+    setSaving(true);
+    setMessage(null);
+    try {
+      await onResetSession();
+      setMessage("Новая сессия начата. Диалог удалён, память Iris сохранена.");
+      setResetSessionDialog(false);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Не удалось сбросить сессию.");
+    } finally {
+      setSaving(false);
+    }
   };
   const activeSettingsMeta = settingsSectionMeta[activeSection];
 
@@ -2168,6 +2232,13 @@ function SettingsPage({
               <option value="half_duplex">Не слушать во время ответа</option>
             </select>
           </label>
+          <div className="settings-danger-action">
+            <strong>Новая сессия</strong>
+            <small>Удалит текущий диалог и начнёт разговор с чистого листа. Долгосрочная память Iris сохранится.</small>
+            <button className="secondary danger-button" type="button" disabled={saving} onClick={() => setResetSessionDialog(true)}>
+              Сбросить сессию
+            </button>
+          </div>
         </fieldset>
 
         <fieldset className="settings-group" hidden={activeSection !== "memory"}>
@@ -2192,6 +2263,17 @@ function SettingsPage({
         </div>
 
         {message && <div className="notice" role="status">{message}</div>}
+        <AppDialog
+          open={resetSessionDialog}
+          title="Сбросить текущую сессию?"
+          description="Все сообщения и сводки текущего диалога будут удалены без возможности восстановления. Долгосрочная память Iris останется."
+          onClose={() => !saving && setResetSessionDialog(false)}
+        >
+          <div className="dialog-actions">
+            <button className="secondary" type="button" disabled={saving} onClick={() => setResetSessionDialog(false)}>Отмена</button>
+            <button className="danger-button" type="button" disabled={saving} onClick={() => void resetSession()}>{saving ? "Сбрасываю…" : "Сбросить сессию"}</button>
+          </div>
+        </AppDialog>
       </div>
     </section>
   );

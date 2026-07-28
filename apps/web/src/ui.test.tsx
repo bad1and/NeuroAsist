@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   getVoiceTtsStatus: vi.fn(), sendChatMessage: vi.fn(), sendVoiceMessage: vi.fn(),
   installModel: vi.fn(), removeModel: vi.fn(), createBackup: vi.fn(),
   clearMemories: vi.fn(), reindexMemories: vi.fn(), resetAllCompanionData: vi.fn(),
+  resetConversationSession: vi.fn(),
   confirmMemory: vi.fn(), rejectMemory: vi.fn(), deleteMemory: vi.fn(), restoreMemory: vi.fn(), updateMemory: vi.fn(),
   deleteTimelineRange: vi.fn(), saveDesktopApiKey: vi.fn(), sendAvatarTestEmotion: vi.fn(),
   sendAvatarTestGesture: vi.fn(), sendAvatarTestPhrase: vi.fn(), stopAvatar: vi.fn(), updateAvatarOverlay: vi.fn(),
@@ -61,6 +62,7 @@ beforeEach(() => {
   api.getAvatarStatus.mockResolvedValue({ enabled: false, protocol_version: 1, broadcast_policy: "", client_count: 0, clients: [], emotion_engine: { mapping_valid: true, current_emotion: "neutral", target_emotion: "neutral", intensity: 0, gesture: "", motion_profile: "", attack_ms: 0, minimum_hold_ms: 0, release_ms: 0, generation: 0, speaking: false } });
   api.getEvents.mockResolvedValue({ events: [] });
   api.getTimelineMessages.mockResolvedValue({ items: [], next_offset: null });
+  api.resetConversationSession.mockResolvedValue({ session_id: "test-session", messages: 0, episodes: 0 });
   api.getModels.mockResolvedValue({ models: [] });
   api.getBackups.mockResolvedValue([]);
   api.getAvatarOverlay.mockResolvedValue({ visible: true, always_on_top: true, locked: true, scale: 1, monitor: "", x: 0, y: 0, width: 0, height: 0 });
@@ -159,6 +161,19 @@ describe("русский интерфейс", () => {
     fireEvent.click(screen.getByRole("button", { name: "На проверке" }));
 
     await waitFor(() => expect(api.getMemories).toHaveBeenLastCalledWith("candidate", undefined));
+  });
+
+  it("подтверждает сброс сессии и сохраняет память", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
+    fireEvent.click(screen.getByRole("button", { name: "Живой разговор" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Сбросить сессию" }));
+    expect(screen.getByRole("heading", { name: "Сбросить текущую сессию?" })).toBeInTheDocument();
+    expect(screen.getByText(/Долгосрочная память Iris останется/)).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Сбросить сессию" })[1]);
+
+    await waitFor(() => expect(api.resetConversationSession).toHaveBeenCalledTimes(2));
   });
 
   it("редактирует память во встроенном диалоге", async () => {

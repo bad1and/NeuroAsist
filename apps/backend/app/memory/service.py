@@ -11,6 +11,7 @@ from threading import RLock
 from typing import Any
 
 from apps.backend.app.runtime.settings import RuntimeSettings
+from apps.backend.app.memory.consolidation import CommitmentProposal, ConsolidationResult, FactProposal, TopicProposal
 from apps.backend.app.semantic.vector_index import NullVectorIndex, VectorDimensionMismatch
 from apps.backend.app.storage.timeline import StoredTimelineMessage, TimelineStore
 
@@ -131,12 +132,14 @@ class MemoryService:
             or self.incognito
             or self._runtime.memory_mode == "off"
             or message is None
-            or message.role != "user"
             or message.status != "completed"
             or not self.is_eligible_automatic_source(message)
         ):
             return False
-        self._store.enqueue_memory_extraction_job(message.id)
+        # Consolidation is the sole LLM write path.  The old per-message job
+        # was left alongside it during the first v11 draft, which doubled API
+        # calls and retried the same malformed model output independently.
+        self._store.enqueue_consolidation_job(message.id)
         return True
 
     @staticmethod
@@ -182,19 +185,41 @@ class MemoryService:
             memories = self._attach_retrieval(memories, {str(item["id"]): 1.0 for item in memories}, {}, temporal=False)
         else:
             memories = self._hybrid_retrieve(query, limit)
+        # Separate namespaces prevent a free-form topic reflection from being
+        # treated as a factual assertion.  Topic and commitment rows use a
+        # small common display contract for ContextManager and diagnostics.
+        topic_rows = self._store.list_topics(status="active", query=query, limit=limit)
+        commitment_rows = self._store.list_commitments(status="open", limit=limit)
+        query_terms = set(re.findall(r"[^\W_]+", self._normalize(query), flags=re.UNICODE))
+        for topic in topic_rows:
+            text = f"{topic['title']} {topic['summary_text']}"
+            overlap = len(query_terms & set(re.findall(r"[^\W_]+", self._normalize(text), flags=re.UNICODE)))
+            if overlap:
+                memories.append({"id": f"topic:{topic['id']}", "namespace": "topic_memory", "predicate": str(topic["title"]), "value_text": str(topic["summary_text"]), "importance": .7, "confidence": 1.0, "status": "active", "source_message_ids": [], "retrieval": {"score": round(.35 + .1 * overlap, 4), "components": {"exact": 0, "fts": overlap, "semantic": 0, "importance": .7}, "reasons": ["topic_fts"]}})
+        for commitment in commitment_rows:
+            text = f"{commitment['title']} {commitment['details']}"
+            overlap = len(query_terms & set(re.findall(r"[^\W_]+", self._normalize(text), flags=re.UNICODE)))
+            if overlap or any(marker in self._normalize(query) for marker in ("план", "обещ", "задач", "loop", "обяз")):
+                memories.append({"id": f"commitment:{commitment['id']}", "namespace": "commitment_memory", "predicate": str(commitment["title"]), "value_text": str(commitment["details"] or commitment["title"]), "importance": float(commitment["importance"]), "confidence": float(commitment["confidence"]), "status": "active", "source_message_ids": [], "retrieval": {"score": round(.5 + .1 * overlap + .1 * float(commitment["importance"]), 4), "components": {"open_loop": 1, "fts": overlap, "importance": commitment["importance"]}, "reasons": ["open_commitment"]}})
         memories = [
             memory for memory in memories
             if self._memory_has_eligible_source(memory)
         ]
         selected: list[dict[str, object]] = []
         used_tokens = 0
-        for memory in memories:
+        seen: set[str] = set()
+        for memory in sorted(memories, key=lambda item: float(dict(item.get("retrieval", {})).get("score", 0)), reverse=True):
+            fingerprint = self._fingerprint(str(memory.get("namespace", "factual_memory")), str(memory["predicate"]), str(memory["value_text"]))
+            if fingerprint in seen:
+                continue
+            seen.add(fingerprint)
             estimate = max(1, len(str(memory["value_text"])) // 4)
             if selected and used_tokens + estimate > self._context_max_tokens:
                 continue
             used_tokens += estimate
             selected.append(memory)
-            self._record_retrieval(memory)
+            if not str(memory["id"]).startswith(("topic:", "commitment:")):
+                self._record_retrieval(memory)
         return selected
 
     def explain_retrieval(self, query: str, limit: int = 8) -> dict[str, object]:
@@ -205,6 +230,9 @@ class MemoryService:
             "semantic_enabled": self.semantic_enabled,
             "semantic_degraded_reason": self._semantic_degraded_reason,
             "backend": getattr(self._vector_index, "backend", "null"),
+            "provider": getattr(getattr(self._vector_index, "embedding_provider", None), "model_id", "none"),
+            "fallback_state": "fts_only" if not self.semantic_enabled else "hybrid",
+            "considered_ids": [item["id"] for item in items],
             "latency_ms": round((time.perf_counter() - started) * 1000, 2),
             "items": items,
         }
@@ -321,6 +349,61 @@ class MemoryService:
             if memory["status"] == "active":
                 self._schedule_vector_sync(memory)
         return saved
+
+    def apply_consolidation(self, result: ConsolidationResult, messages: list[StoredTimelineMessage], *, model: str | None = None) -> dict[str, int]:
+        """Apply independently valid structured sections without trusting model IDs.
+
+        A bad proposal is recorded as a conflict/review item where possible;
+        it must never roll back unrelated, valid proposals from the same pass.
+        """
+        by_id = {message.id: message for message in messages}
+        saved_facts = saved_topics = saved_commitments = conflicts = 0
+        for proposal in result.facts:
+            source_ids = [item for item in proposal.source_message_ids if item in by_id]
+            if not source_ids:
+                continue
+            source = by_id[source_ids[-1]]
+            values = proposal.model_dump()
+            values.update({
+                "scope": "user_profile", "source_message_ids": source_ids, "source_episode_id": source.episode_id,
+                "extractor_version": "consolidation-v11", "extraction_model": model,
+                "claim_fingerprint": self._fingerprint(proposal.subject, proposal.predicate, proposal.value_text),
+                "source_quality": self._source_quality(source),
+            })
+            try:
+                self._apply_candidate(values, actor="extractor", sync_vector=False)
+                saved_facts += 1
+            except (KeyError, TypeError, ValueError):
+                self._store.create_conflict({"reason": "invalid fact proposal", "proposed_entity_type": "fact", "status": "resolved", "resolution": "discarded"})
+                conflicts += 1
+        for proposal in result.topics:
+            source_ids = [item for item in proposal.source_message_ids if item in by_id]
+            try:
+                topic = self._apply_topic_proposal(proposal, source_ids)
+                if topic:
+                    saved_topics += 1
+            except (KeyError, TypeError, ValueError):
+                self._store.create_conflict({"reason": "invalid topic proposal", "proposed_entity_type": "topic", "status": "resolved", "resolution": "discarded"})
+                conflicts += 1
+        for proposal in result.commitments:
+            source_ids = [item for item in proposal.source_message_ids if item in by_id]
+            if not source_ids:
+                continue
+            try:
+                self._store.create_commitment({**proposal.model_dump(), "source_message_ids": source_ids, "source_episode_id": by_id[source_ids[-1]].episode_id, "extractor_version": "consolidation-v11"})
+                saved_commitments += 1
+            except (KeyError, TypeError, ValueError):
+                self._store.create_conflict({"reason": "invalid commitment proposal", "proposed_entity_type": "commitment", "status": "resolved", "resolution": "discarded"})
+                conflicts += 1
+        for proposal in result.conflicts:
+            existing = self._store.get_memory(proposal.existing_id) if proposal.existing_id else None
+            if existing is not None and existing.get("user_locked"):
+                resolution = "review"
+            else:
+                resolution = proposal.resolution
+            self._store.create_conflict({"existing_entity_type": "fact" if existing else None, "existing_entity_id": proposal.existing_id, "proposed_entity_type": proposal.proposed_kind, "reason": proposal.reason, "status": "open" if resolution == "review" else "resolved", "resolution": resolution})
+            conflicts += 1
+        return {"facts": saved_facts, "topics": saved_topics, "commitments": saved_commitments, "conflicts": conflicts}
 
     def extract_resilient_facts_from_message(
         self, message: StoredTimelineMessage | None,
@@ -480,7 +563,9 @@ class MemoryService:
         if source_ids and not values.get("source_episode_id"):
             source = self._store.get_message(source_ids[0])
             values = {**values, "source_episode_id": source.episode_id if source else None}
-        values = {**values, "status": "active", "user_locked": True, "extractor_version": "manual-v1"}
+        values = {"scope": "user_profile", "subject": "user", "importance": 0.6, "confidence": 1.0,
+                  "sensitivity": "normal", **values, "status": "active", "user_locked": True,
+                  "extractor_version": "manual-v1"}
         return self._apply_candidate(values, actor="user", action="activated")
 
     def confirm(self, memory_id: str) -> dict[str, object]:
@@ -579,6 +664,10 @@ class MemoryService:
             if actor == "extractor":
                 sensitive = values.get("sensitivity") == "sensitive"
                 status = "active" if self._should_auto_activate(values, sensitive) else "candidate"
+                if float(values.get("source_quality", 1.0)) < 0.80:
+                    # Speech recognition uncertainty is useful evidence, but
+                    # never strong enough to silently alter the profile.
+                    status = "candidate"
                 if conflict is not None and conflict["user_locked"]:
                     status = "candidate"
             values["status"] = status
@@ -685,9 +774,12 @@ class MemoryService:
             fts_score = fts_scores.get(memory_id, 0.0)
             semantic_score = max(0.0, semantic_scores.get(memory_id, 0.0))
             temporal_score = self._temporal_score(str(memory["created_at"])) if temporal else 0.0
-            score = 0.55 * semantic_score + 0.25 * fts_score + 0.10 * float(memory["importance"]) + 0.10 * float(memory["confidence"]) + temporal_score
+            recency = self._temporal_score(str(memory["updated_at"])) * 10
+            source_quality = float(memory.get("source_quality", 1.0))
+            recent_use_penalty = min(.08, float(memory.get("access_count", 0)) * .002)
+            score = 0.45 * semantic_score + 0.22 * fts_score + 0.10 * float(memory["importance"]) + 0.08 * float(memory["confidence"]) + .08 * source_quality + recency + temporal_score - recent_use_penalty
             reasons = (["semantic"] if semantic_score else []) + (["fts"] if fts_score else []) + (["temporal"] if temporal else [])
-            ranked.append({**memory, "retrieval": {"score": round(score, 4), "semantic_score": round(semantic_score, 4), "fts_score": round(fts_score, 4), "reasons": reasons}})
+            ranked.append({**memory, "namespace": "factual_memory", "retrieval": {"score": round(score, 4), "semantic_score": round(semantic_score, 4), "fts_score": round(fts_score, 4), "components": {"exact": 0.0, "fts": round(fts_score, 4), "semantic": round(semantic_score, 4), "importance": float(memory["importance"]), "confidence": float(memory["confidence"]), "recency": round(recency, 4), "source_quality": source_quality, "recent_use_penalty": round(recent_use_penalty, 4)}, "reasons": reasons}})
         return sorted(ranked, key=lambda item: item["retrieval"]["score"], reverse=True)
 
     def _sync_vector(self, memory: dict[str, object]) -> None:
@@ -741,7 +833,7 @@ class MemoryService:
                 exact = item
             # A profile name and an explicit correction are single-valued;
             # independent interests and notes must coexist.
-            elif item["status"] == "active" and predicate in self._SINGLE_VALUE_PREDICATES:
+            elif item["status"] == "active" and (predicate in self._SINGLE_VALUE_PREDICATES or values.get("cardinality") == "single" or values.get("temporal_semantics") in {"current", "period"}):
                 conflict = item
         return exact, conflict
 
@@ -752,8 +844,42 @@ class MemoryService:
             raise ValueError("Memory requires at least one source user message")
         for message_id in source_ids:
             message = self._store.get_message(message_id)
-            if message is None or message.role != "user":
-                raise ValueError("Memory sources must be existing user messages")
+            if message is None or message.role not in {"user", "assistant"} or message.status != "completed":
+                raise ValueError("Memory sources must be completed dialogue messages")
+
+    def _apply_topic_proposal(self, proposal: TopicProposal, source_ids: list[str]) -> dict[str, object] | None:
+        if not source_ids:
+            return None
+        candidates = self._store.list_topics(status="active", query=proposal.title, limit=5)
+        target = next((item for item in candidates if self._normalize(str(item["title"])) == self._normalize(proposal.title)), None)
+        if proposal.topic_id:
+            target = self._store.get_topic(proposal.topic_id)
+        if target is not None:
+            if target.get("user_locked"):
+                return target
+            topic = self._store.update_topic(str(target["id"]), {"title": proposal.title, "summary_text": proposal.summary_text}, actor="consolidation")
+        else:
+            topic = self._store.create_topic({"title": proposal.title, "summary_text": proposal.summary_text, "extractor_version": "consolidation-v11"}, actor="consolidation")
+        for source_id in source_ids:
+            self._store.link_topic(str(topic["id"]), "message", source_id)
+        return topic
+
+    @classmethod
+    def _fingerprint(cls, subject: str, predicate: str, value: str) -> str:
+        return "|".join(cls._normalize(part) for part in (subject, predicate, value))
+
+    @staticmethod
+    def _source_quality(message: StoredTimelineMessage) -> float:
+        if message.input_mode != "voice":
+            return 1.0
+        raw = message.metadata.get("stt_confidence")
+        try:
+            return max(0.0, min(1.0, float(raw)))
+        except (TypeError, ValueError):
+            # A missing score is not evidence of uncertainty. Explicit
+            # ``stt_uncertain`` is filtered before scheduling; only a supplied
+            # low confidence score should force review.
+            return 1.0
 
     def _record_retrieval(self, memory: dict[str, object]) -> None:
         self._store.record_memory_retrieval(str(memory["id"]))

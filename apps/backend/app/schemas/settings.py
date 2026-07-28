@@ -27,6 +27,7 @@ class PublicSettingsResponse(BaseModel):
     memory_enabled: bool
     memory_mode: str
     memory_incognito: bool
+    conversation_diagnostics_enabled: bool
     live_conversation_enabled: bool
     live_conversation_participant_mode: str
     live_conversation_engagement: str

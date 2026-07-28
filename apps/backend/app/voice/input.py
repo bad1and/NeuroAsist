@@ -195,6 +195,11 @@ class VoiceInputSessionManager:
             session.finalize_tasks.clear()
             session.endpoint_task = None
 
+    async def close_session(self, session_id: str) -> None:
+        session = self._sessions.get(session_id)
+        if session is not None:
+            await self.unregister(session_id, session.connection)
+
     async def start(
         self,
         session_id: str,

@@ -17,6 +17,11 @@ def _desktop_token_is_valid(websocket: WebSocket, token: str | None) -> bool:
     return not expected_token or (token is not None and secrets.compare_digest(token, expected_token))
 
 
+def _session_is_active(websocket: WebSocket, session_id: str) -> bool:
+    store = getattr(websocket.app.state, "timeline_store", None)
+    return store is None or store.active_session_id() in {None, session_id}
+
+
 @router.websocket("/ws/avatar")
 async def websocket_avatar(websocket: WebSocket, version: int = 1, token: str | None = None) -> None:
     if not _desktop_token_is_valid(websocket, token):
@@ -57,7 +62,7 @@ async def websocket_avatar(websocket: WebSocket, version: int = 1, token: str | 
 
 @router.websocket("/ws/voice/{session_id}")
 async def websocket_voice(websocket: WebSocket, session_id: str, version: int = 1, token: str | None = None) -> None:
-    if not _desktop_token_is_valid(websocket, token):
+    if not _desktop_token_is_valid(websocket, token) or not _session_is_active(websocket, session_id):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     if version != 1:
@@ -120,7 +125,7 @@ async def websocket_voice(websocket: WebSocket, session_id: str, version: int = 
 
 @router.websocket("/ws/voice-input/{session_id}")
 async def websocket_voice_input(websocket: WebSocket, session_id: str, version: int = 1, token: str | None = None) -> None:
-    if not _desktop_token_is_valid(websocket, token) or version not in {1, 2}:
+    if not _desktop_token_is_valid(websocket, token) or not _session_is_active(websocket, session_id) or version not in {1, 2}:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     await websocket.accept()

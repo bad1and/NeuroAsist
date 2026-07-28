@@ -30,6 +30,10 @@ export type ChatResponse = {
   reply_audio_url?: string | null;
   tts_status?: VoiceTtsStatus | null;
   memory_updates?: MemoryUpdate[];
+  message_id?: string | null;
+  assistant_message_id?: string | null;
+  turn_id?: string | null;
+  generation?: number | null;
 };
 
 export type MemoryUpdate = {
@@ -70,7 +74,9 @@ export type VoiceLiveResponse = {
   utterance_id: string;
   voice_request_id: string;
   transcript: string;
-  status: "streaming";
+  message_id?: string | null;
+  turn_id?: string | null;
+  status: "streaming" | "completed" | "interrupted" | "failed";
 };
 
 export type VoiceServerEvent = {
@@ -194,6 +200,7 @@ export type PublicSettings = {
   memory_enabled: boolean;
   memory_mode: string;
   memory_incognito: boolean;
+  conversation_diagnostics_enabled: boolean;
   live_conversation_enabled: boolean;
   live_conversation_participant_mode: "one_to_one" | "group";
   live_conversation_engagement: "low" | "balanced" | "high";
@@ -323,4 +330,25 @@ export type MemoryAuditItem = {
   reason?: string | null;
   source_message_ids: string[];
   created_at: string;
+};
+
+export type MemoryTopic = {
+  id: string;
+  title: string;
+  summary_text: string;
+  status: string;
+  user_locked: boolean;
+  links: Array<{ entity_type: string; entity_id: string }>;
+  evidence: Array<{ message_id?: string | null; source_role: string; source_quality: number }>;
+};
+
+export type MemoryCommitment = {
+  id: string;
+  kind: string;
+  title: string;
+  details: string;
+  status: "open" | "completed" | "cancelled";
+  importance: number;
+  confidence: number;
+  user_locked: boolean;
 };

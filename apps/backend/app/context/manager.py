@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from apps.backend.app.llm.base import ChatMessage
@@ -21,8 +22,10 @@ class ContextManager:
         self._memory_service = memory_service
         self.last: BuiltContext | None = None
 
-    def build(self, user_text: str) -> BuiltContext:
-        material = self._store.context_material(user_text, self._recent_turns)
+    def build(self, user_text: str, *, session_id: str | None = None, current_message_id: str | None = None) -> BuiltContext:
+        material = self._store.context_material(
+            user_text, self._recent_turns, session_id=session_id, current_message_id=current_message_id,
+        )
         identity = ChatMessage(
             role="system",
             content=(
@@ -30,7 +33,12 @@ class ContextManager:
                 "Keep direct dialogue with Iris separate from ambient speech."
             ),
         )
-        rolling = material["rolling_summary"]
+        checkpoint = material.get("checkpoint")
+        rolling = (
+            str(checkpoint["summary_text"])
+            if checkpoint is not None
+            else material["rolling_summary"]
+        )
         rolling_message = ChatMessage(role="system", content=f"Current episode earlier context: {rolling}") if rolling else None
         selected_summaries: list[tuple[str, ChatMessage]] = []
         for summary in material["summaries"]:
@@ -47,15 +55,29 @@ class ContextManager:
                 ),
             ))
         selected_memories: list[tuple[str, ChatMessage]] = []
+        selected_topics: list[tuple[str, ChatMessage]] = []
+        selected_loops: list[tuple[str, ChatMessage]] = []
         memory_retrieval: dict[str, object] = {}
         if self._memory_service is not None:
-            for memory in self._memory_service.retrieve(user_text):
+            # Pronouns and short follow-ups inherit topic terms from the last
+            # completed direct turn, which is already inside ``recent``.
+            recent_text = " ".join(
+                str(row.get("corrected_content") or row.get("content") or "")
+                for row in material["recent"][-2:]
+                if row.get("role") in {"user", "assistant"}
+            )
+            retrieval_query = f"{recent_text} {user_text}".strip()
+            for memory in self._memory_service.retrieve(retrieval_query):
                 memory_id = str(memory["id"])
                 memory_retrieval[memory_id] = memory.get("retrieval", {"reasons": ["exact_profile"]})
-                selected_memories.append((memory_id, ChatMessage(
-                    role="system",
-                    content=f"Relevant long-term memory: {memory['predicate']} — {memory['value_text']}",
-                )))
+                namespace = str(memory.get("namespace", "factual_memory"))
+                item = (memory_id, ChatMessage(role="system", content=f"Relevant long-term memory: {memory['predicate']} — {memory['value_text']}"))
+                if namespace == "topic_memory":
+                    selected_topics.append(item)
+                elif namespace == "commitment_memory":
+                    selected_loops.append(item)
+                else:
+                    selected_memories.append(item)
         ambient_rows = [
             row for row in material["recent"]
             if self._is_ambient_observation(row)
@@ -73,6 +95,39 @@ class ContextManager:
             if not self._is_ambient_observation(row)
             and row.get("decision_action") != "wait_more"
         ]
+        name_only_followup = self._is_name_only_followup(user_text)
+        pending_direct_rows: list[dict[str, object]] = []
+        if name_only_followup:
+            for row in reversed(material["recent"]):
+                if row.get("role") == "assistant":
+                    break
+                if self._is_pending_followup_candidate(row):
+                    pending_direct_rows.append(row)
+        pending_direct_rows.reverse()
+        previous_assistant_row = next(
+            (
+                row for row in reversed(material["recent"])
+                if row.get("role") == "assistant"
+                and not self._is_ambient_observation(row)
+            ),
+            None,
+        )
+        pending_followup_message = (
+            ChatMessage(
+                role="system",
+                content=(
+                    "Пользователь после этих прямых реплик только обратился к тебе по имени. "
+                    "Это сигнал вернуться к неотвеченной мысли: ответь по существу на неё, "
+                    "не спрашивай, зачем он тебя позвал, и не упрекай его за повтор.\n"
+                    + "\n".join(
+                        f"- user: {row['corrected_content'] or row['content']}"
+                        for row in pending_direct_rows[-4:]
+                    )
+                ),
+            )
+            if pending_direct_rows
+            else None
+        )
         recent_turns = self._group_turns(recent)
         ambient_entries = [self._ambient_entry(row) for row in ambient_rows[-6:]]
         dropped_summary_ids: list[str] = []
@@ -96,23 +151,42 @@ class ContextManager:
 
         def assemble() -> list[ChatMessage]:
             messages = [identity]
+            if pending_followup_message is not None:
+                messages.append(pending_followup_message)
             messages.extend(message for _, message in selected_memories)
+            messages.extend(message for _, message in selected_topics)
             if rolling_message is not None:
                 messages.append(rolling_message)
             messages.extend(message for _, message in selected_summaries)
+            messages.extend(message for _, message in selected_loops)
             observed = ambient_message()
             if observed is not None:
                 messages.append(observed)
             messages.extend(message for turn in recent_turns for message in turn)
             return messages
 
+        # Every continuity block has an independent cap before the final
+        # context cap is enforced. This prevents verbose topics from evicting
+        # identity, factual profile or open loops.
+        def trim_block(items: list[tuple[str, ChatMessage]], budget: int) -> list[str]:
+            dropped: list[str] = []
+            while self._estimate([message for _, message in items]) > budget and items:
+                dropped.append(items.pop()[0])
+            return dropped
+
+        dropped_memory_ids = trim_block(selected_memories, 450)
+        dropped_topic_ids = trim_block(selected_topics, 500)
+        dropped_loop_ids = trim_block(selected_loops, 250)
+        dropped_summary_ids: list[str] = trim_block(selected_summaries, 300)
         messages = assemble()
         while self._estimate(messages) > self._max_tokens and selected_summaries:
             dropped_summary_ids.append(selected_summaries.pop()[0])
             messages = assemble()
-        dropped_memory_ids: list[str] = []
         while self._estimate(messages) > self._max_tokens and selected_memories:
             dropped_memory_ids.append(selected_memories.pop()[0])
+            messages = assemble()
+        while self._estimate(messages) > self._max_tokens and selected_topics:
+            dropped_topic_ids.append(selected_topics.pop()[0])
             messages = assemble()
         while self._estimate(messages) > self._max_tokens and recent_turns:
             recent_turns.pop(0)
@@ -125,8 +199,19 @@ class ContextManager:
             messages = assemble()
         built = BuiltContext(messages, self._estimate(messages), {
             "active_episode_id": material["active_episode_id"],
+            "current_message_id": current_message_id,
+            "current_sequence": material.get("causal_upper_bound"),
+            "causal_upper_bound": material.get("causal_upper_bound"),
+            "name_only_followup": name_only_followup,
+            "pending_direct_message_count": len(pending_direct_rows),
+            "previous_assistant_message_id": previous_assistant_row.get("id") if previous_assistant_row else None,
+            "retrieval_query_terms": len(retrieval_query.split()) if self._memory_service is not None else 0,
+            "checkpoint_id": checkpoint["id"] if checkpoint is not None else None,
+            "checkpoint_through_sequence": checkpoint["through_sequence"] if checkpoint is not None else None,
             "selected_summary_ids": [summary_id for summary_id, _ in selected_summaries],
             "selected_memory_ids": [memory_id for memory_id, _ in selected_memories],
+            "selected_topic_ids": [topic_id for topic_id, _ in selected_topics],
+            "selected_open_loop_ids": [loop_id for loop_id, _ in selected_loops],
             "memory_retrieval": {memory_id: memory_retrieval[memory_id] for memory_id, _ in selected_memories},
             "rolling_summary_included": rolling_message is not None,
             "recent_message_count": sum(len(turn) for turn in recent_turns),
@@ -135,8 +220,11 @@ class ContextManager:
             "excluded_incomplete_observation_count": incomplete_count,
             "dropped_summary_ids": dropped_summary_ids,
             "dropped_memory_ids": dropped_memory_ids,
+            "dropped_topic_ids": dropped_topic_ids,
+            "dropped_open_loop_ids": dropped_loop_ids,
             "dropped_turn_count": dropped_turn_count,
             "budget": self._max_tokens,
+            "block_budgets": {"profile": 250, "facts": 450, "topics": 500, "episodes": 300, "recent": 1000, "open_loops": 250, "ambient": 200},
         })
         self.last = built
         return built
@@ -147,6 +235,29 @@ class ContextManager:
             "observe",
             "avatar_reaction",
             "defer",
+        }
+
+    @staticmethod
+    def _is_name_only_followup(text: str) -> bool:
+        normalized = re.sub(r"[^\wа-яё]", "", text.lower(), flags=re.IGNORECASE)
+        return normalized in {"iris", "ирис", "айрис", "ириска"}
+
+    @staticmethod
+    def _is_pending_followup_candidate(row: dict[str, object]) -> bool:
+        """Allow a direct call to revive an earlier primary-user observation.
+
+        Live conversation can legitimately classify an opening thought as
+        ``observe`` while Iris stays quiet.  It is not ambient speech merely
+        because no immediate reply was warranted.  A subsequent name-only
+        address makes that thought actionable, while actual third-party and
+        incomplete speech remains excluded.
+        """
+        if row.get("role") != "user" or row.get("decision_action") == "wait_more":
+            return False
+        if row.get("speaker_role") in {"other", "unknown"}:
+            return False
+        return row.get("decision_reason") not in {
+            "other_person", "self_talk", "ambient_speech", "incomplete_turn",
         }
 
     @staticmethod
