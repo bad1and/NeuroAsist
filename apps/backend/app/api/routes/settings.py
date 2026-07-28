@@ -70,6 +70,7 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         memory_enabled=settings.memory_enabled,
         memory_mode=runtime_settings.memory_mode,
         memory_incognito=runtime_settings.memory_incognito,
+        conversation_diagnostics_enabled=settings.conversation_diagnostics_enabled,
         live_conversation_enabled=runtime_settings.live_conversation_enabled,
         live_conversation_participant_mode=runtime_settings.live_conversation_participant_mode,
         live_conversation_engagement=runtime_settings.live_conversation_engagement,

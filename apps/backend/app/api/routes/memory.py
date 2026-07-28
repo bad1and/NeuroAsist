@@ -1,6 +1,9 @@
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from apps.backend.app.schemas.memory import MemoryClear, MemoryCreate, MemoryPatch
+from apps.backend.app.schemas.memory import (
+    CommitmentCreate, CommitmentPatch, MemoryClear, MemoryCreate, MemoryMerge, MemoryPatch,
+    TopicCreate, TopicPatch,
+)
 
 
 router = APIRouter(prefix="/memory", tags=["memory"])
@@ -73,6 +76,80 @@ def reject_memory(memory_id: str, request: Request) -> dict[str, object]:
         raise HTTPException(status_code=404, detail="Memory not found") from exc
 
 
+@router.get("/profile")
+def memory_profile(request: Request) -> dict[str, object]:
+    return _service(request).store.derive_profile()
+
+
+@router.post("/merge")
+def merge_memory(payload: MemoryMerge, request: Request) -> dict[str, object]:
+    service = _service(request)
+    survivor, merged = service.store.get_memory(payload.survivor_id), service.store.get_memory(payload.merged_id)
+    if survivor is None or merged is None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    if survivor.get("user_locked") is False and merged.get("user_locked") is True:
+        raise HTTPException(status_code=422, detail="A locked memory must be the merge survivor")
+    service.store.supersede_memory(payload.merged_id, payload.survivor_id)
+    return {"memory": service.store.get_memory(payload.survivor_id)}
+
+
+@router.get("/topics")
+def list_topics(request: Request, status: str | None = None, q: str | None = Query(default=None, max_length=200)) -> dict[str, object]:
+    return {"items": _service(request).store.list_topics(status=status, query=q)}
+
+
+@router.post("/topics")
+def create_topic(payload: TopicCreate, request: Request) -> dict[str, object]:
+    return {"topic": _service(request).store.create_topic(payload.model_dump(), actor="user")}
+
+
+@router.patch("/topics/{topic_id}")
+def patch_topic(topic_id: str, payload: TopicPatch, request: Request) -> dict[str, object]:
+    try:
+        return {"topic": _service(request).store.update_topic(topic_id, payload.model_dump(exclude_none=True))}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Topic not found") from exc
+
+
+@router.post("/topics/{topic_id}/merge/{merged_id}")
+def merge_topics(topic_id: str, merged_id: str, request: Request) -> dict[str, object]:
+    try:
+        return {"topic": _service(request).store.merge_topics(topic_id, merged_id)}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Topic not found") from exc
+
+
+@router.get("/commitments")
+def list_commitments(request: Request, status: str | None = None) -> dict[str, object]:
+    return {"items": _service(request).store.list_commitments(status=status)}
+
+
+@router.post("/commitments")
+def create_commitment(payload: CommitmentCreate, request: Request) -> dict[str, object]:
+    return {"commitment": _service(request).store.create_commitment(payload.model_dump())}
+
+
+@router.patch("/commitments/{commitment_id}")
+def patch_commitment(commitment_id: str, payload: CommitmentPatch, request: Request) -> dict[str, object]:
+    try:
+        return {"commitment": _service(request).store.update_commitment(commitment_id, payload.model_dump(exclude_none=True))}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Commitment not found") from exc
+
+
+@router.post("/commitments/{commitment_id}/close")
+def close_commitment(commitment_id: str, request: Request) -> dict[str, object]:
+    try:
+        return {"commitment": _service(request).store.update_commitment(commitment_id, {"status": "completed"})}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Commitment not found") from exc
+
+
+@router.get("/conflicts")
+def list_conflicts(request: Request, status: str | None = None) -> dict[str, object]:
+    return {"items": _service(request).store.list_conflicts(status=status)}
+
+
 @router.get("/retrieval/explain")
 def explain_retrieval(request: Request, q: str = Query(min_length=1, max_length=200), limit: int = Query(default=8, ge=1, le=50)) -> dict[str, object]:
     return _service(request).explain_retrieval(q, limit)
@@ -89,6 +166,12 @@ def memory_audit(memory_id: str, request: Request) -> dict[str, object]:
 @router.post("/reindex")
 def reindex_memory(request: Request) -> dict[str, object]:
     return _service(request).reindex()
+
+
+@router.get("/index/status")
+def index_status(request: Request) -> dict[str, object]:
+    service = _service(request)
+    return {"semantic_enabled": service.semantic_enabled, "semantic_degraded_reason": getattr(service, "_semantic_degraded_reason", None), "stale_vector_count": 0}
 
 
 @router.post("/clear")

@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     semantic_embedding_provider: str = "hash"
     semantic_embedding_model_id: str = "hash-multilingual-v1"
     semantic_embedding_dimension: int = 256
+    semantic_e5_model_path: str | None = None
+    semantic_e5_revision: str | None = None
     semantic_retrieval_limit: int = 8
     log_level: str = "INFO"
     log_to_file: bool = False
@@ -165,6 +167,12 @@ class Settings(BaseSettings):
         if self.semantic_chroma_path:
             return Path(self.semantic_chroma_path).expanduser()
         return ROOT_DIR / "data" / "chroma"
+
+    @property
+    def semantic_e5_model_directory(self) -> Path:
+        if self.semantic_e5_model_path:
+            return Path(self.semantic_e5_model_path).expanduser()
+        return self.app_data_path / "models" / "multilingual-e5-small"
 
     @property
     def avatar_emotion_mapping(self) -> Path:

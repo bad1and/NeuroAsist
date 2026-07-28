@@ -12,6 +12,8 @@ import type {
   TimelineMessage,
   MemoryAuditItem,
   MemoryItem,
+  MemoryTopic,
+  MemoryCommitment,
   ConversationDebug,
 } from "./types";
 
@@ -122,6 +124,10 @@ export function getConversationDebug(sessionId: string): Promise<ConversationDeb
   );
 }
 
+export function resetConversationSession(): Promise<{ session_id: string; messages: number; episodes: number }> {
+  return requestJson("/conversation/session/reset", { method: "POST" });
+}
+
 export function updateRuntimeSettings(payload: {
   personality?: string;
   voice_language?: string;
@@ -187,12 +193,14 @@ export function getVoiceTtsStatus(
 export function sendChatMessage(
   sessionId: string,
   message: string,
+  clientMessageId?: string,
 ): Promise<ChatResponse> {
   return requestJson<ChatResponse>("/chat", {
     method: "POST",
     body: JSON.stringify({
       session_id: sessionId,
       message,
+      client_message_id: clientMessageId,
     }),
   });
 }
@@ -200,12 +208,14 @@ export function sendChatMessage(
 export function sendLiveTextMessage(
   sessionId: string,
   message: string,
+  clientMessageId?: string,
 ): Promise<VoiceLiveResponse> {
   return requestJson<VoiceLiveResponse>("/chat/live", {
     method: "POST",
     body: JSON.stringify({
       session_id: sessionId,
       message,
+      client_message_id: clientMessageId,
     }),
   });
 }
@@ -352,6 +362,26 @@ export function resetAllCompanionData(): Promise<{ messages: number; memories: n
 
 export function reindexMemories(): Promise<{ indexed: number }> {
   return requestJson("/memory/reindex", { method: "POST" });
+}
+
+export function getMemoryTopics(): Promise<{ items: MemoryTopic[] }> {
+  return requestJson("/memory/topics");
+}
+
+export function getMemoryCommitments(status?: string): Promise<{ items: MemoryCommitment[] }> {
+  return requestJson(`/memory/commitments${status ? `?status=${encodeURIComponent(status)}` : ""}`);
+}
+
+export function closeMemoryCommitment(id: string): Promise<{ commitment: MemoryCommitment }> {
+  return requestJson(`/memory/commitments/${encodeURIComponent(id)}/close`, { method: "POST" });
+}
+
+export function getMemoryConflicts(): Promise<{ items: Array<{ id: string; reason: string; status: string }> }> {
+  return requestJson("/memory/conflicts");
+}
+
+export function getMemoryProfile(): Promise<{ facts: MemoryItem[]; topics: MemoryTopic[]; commitments: MemoryCommitment[] }> {
+  return requestJson("/memory/profile");
 }
 
 export function getAvatarStatus(): Promise<AvatarStatusResponse> {

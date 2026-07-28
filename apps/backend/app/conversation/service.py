@@ -384,6 +384,7 @@ class LiveConversationService:
                 input_mode="voice",
                 utterance_id=utterance_id,
                 generation=generation,
+                turn_id=turn_id,
                 language=language,
                 metadata=metadata,
             )
@@ -1042,7 +1043,8 @@ class LiveConversationService:
             return
         if self._memory_service.uses_background_extraction:
             self._memory_service.extract_high_precision_from_message(message)
-        self._memory_service.schedule_extraction(message)
+        # The durable LLM consolidator must be anchored at the terminal Iris
+        # reply, not this user message.  See _commit_assistant.
 
     def _commit_assistant(
         self,
@@ -1055,15 +1057,20 @@ class LiveConversationService:
     ) -> None:
         if self._runtime.memory_incognito or not content:
             return
-        self._store.append_message(
+        source = self._store.message_for_utterance(utterance_id)
+        assistant, _ = self._store.append_message(
             role="assistant",
             content=content,
             input_mode="voice",
             status=status,
             utterance_id=utterance_id,
             generation=generation,
+            turn_id=source.turn_id if source is not None else None,
+            reply_to_message_id=source.id if source is not None else None,
             metadata={"playback_acknowledged": True},
         )
+        if status == "completed" and self._memory_service is not None:
+            self._memory_service.schedule_extraction(assistant)
 
     def _persist_state(self, session: ConversationSession, appraisal, relationship_delta: dict[str, float]) -> None:
         self._store.save_character_state_snapshot(

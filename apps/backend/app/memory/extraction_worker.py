@@ -1,4 +1,4 @@
-"""Asynchronous, policy-controlled long-term memory extraction."""
+"""Asynchronous, policy-controlled long-term memory consolidation."""
 
 from __future__ import annotations
 
@@ -8,57 +8,31 @@ import logging
 from collections.abc import Callable
 
 from apps.backend.app.llm.base import ChatMessage, LLMProvider
+from apps.backend.app.memory.consolidation import ConsolidationResult
 from apps.backend.app.storage.timeline import TimelineStore
 
 
 logger = logging.getLogger(__name__)
 
 
-MEMORY_EXTRACTION_PROMPT = """Ты — внутренний модуль долговременной памяти AI-компаньона.
-Верни только один JSON-объект вида {"memories": [...]}.
-
-Извлекай исключительно явно сказанные пользователем, самодостаточные и полезные в будущем
-факты. Подходят: имя и способ обращения, устойчивые предпочтения, цели и проекты,
-ограничения, навыки, интересы, отношения, решения и исправления. Не сохраняй приветствия,
-одноразовое настроение, случайные детали, предположения, оценки личности или информацию из
-реплики ассистента. Если сохранять нечего, верни {"memories": []}.
-
-Ниже может быть короткий контекст до текущей реплики. Он нужен только чтобы понять, к кому
-относятся имена и местоимения; источником факта является исключительно текущая реплика
-пользователя. Не выводи отношения из неоднозначной конструкции или эмоциональной оценки.
-Например, не сохраняй «X — друг пользователя», если имя и роль смешаны с другой мыслью;
-сохраняй отношение только при однозначном, самостоятельном утверждении. Пароли, коды,
-токены и другие секреты не возвращай вообще, даже как sensitive-кандидаты.
-Маркер «[секрет удалён]» означает, что исходное содержание секрета уже
-вырезано до запроса: проигнорируй его, но не пропускай другие независимые
-факты из этой же реплики.
-Пример допустимой связи: «Лука — мой друг.»; фраза «моего друга Федю и мы делаем проект»
-слишком неоднозначна для автоматической долговременной памяти.
-
-Каждый элемент должен иметь: kind, subject, predicate, value_text, importance (0..1),
-confidence (0..1), sensitivity (normal|sensitive). Используй subject="user", если факт о
-пользователе. Медицинские, финансовые, адресные и политические данные всегда помечай
-sensitivity="sensitive". Не используй местоимения без референта, «пользователь сказал» и
-«запомни» в value_text. Максимум 3 разных факта.
-
-Примеры:
-«Я предпочитаю короткие ответы» → {"kind":"preference","subject":"user","predicate":"prefers_response_length","value_text":"короткие ответы","importance":0.7,"confidence":0.95,"sensitivity":"normal"}
-«В этом месяце хочу закончить память NeuroAsist» → {"kind":"goal","subject":"user","predicate":"current_goal","value_text":"закончить память NeuroAsist в этом месяце","importance":0.8,"confidence":0.9,"sensitivity":"normal"}
-Если в одной реплике несколько независимых фактов, верни каждый отдельным
-элементом массива (до трёх), а не только первый.
-"""
+MEMORY_EXTRACTION_PROMPT = """Ты — внутренний модуль консолидации памяти AI-компаньона.
+Верни только JSON вида {"facts":[],"topics":[],"commitments":[],"conflicts":[]}.
+Используй только явные сведения из завершённого прямого диалога. В окне есть user и Iris;
+обе роли допустимы как provenance для общих решений, обещаний и milestones. Не используй
+ambient/incomplete/echo, секреты, догадки или субъективные оценки. Каждый факт содержит kind,
+subject, predicate, value_text, importance, confidence, sensitivity, source_message_ids,
+cardinality (single|multi) и temporal_semantics (atemporal|current|period). Topics имеют
+title, summary_text, optional topic_id, source_message_ids. Commitments имеют kind
+(milestone|promise|decision|open_loop), title, details, status, importance, confidence,
+source_message_ids. Conflicts имеют existing_id, proposed_kind, reason и resolution.
+Не добавляй неизвестные ключи. Если сохранять нечего, верни пустые массивы."""
 
 
 class MemoryExtractionWorker:
     """Processes durable jobs after the visible chat or voice reply was sent."""
 
-    def __init__(
-        self,
-        store: TimelineStore,
-        memory_service,
-        llm_provider: LLMProvider,
-        event_publisher: Callable[[str, str, str, dict[str, object]], None] | None = None,
-    ) -> None:
+    def __init__(self, store: TimelineStore, memory_service, llm_provider: LLMProvider,
+                 event_publisher: Callable[[str, str, str, dict[str, object]], None] | None = None) -> None:
         self._store = store
         self._memory_service = memory_service
         self._llm_provider = llm_provider
@@ -70,84 +44,117 @@ class MemoryExtractionWorker:
             return False
         job_id = str(job["id"])
         try:
-            message_id = str(json.loads(str(job["payload_json"]))["message_id"])
+            payload = json.loads(str(job["payload_json"]))
+            message_id = str(payload.get("end_message_id") or payload.get("message_id"))
             message = await asyncio.to_thread(self._store.get_message, message_id)
-            if (
-                message is None
-                or message.role != "user"
-                or message.status != "completed"
-                or not self._memory_service.is_eligible_automatic_source(message)
-            ):
+            if message is None or message.status != "completed" or not self._memory_service.is_eligible_automatic_source(message):
                 await asyncio.to_thread(self._store.complete_summary_job, job_id)
                 return True
-            context = await asyncio.to_thread(self._store.memory_extraction_context, message_id)
+            context = await asyncio.to_thread(self._store.memory_extraction_context, message_id, 20)
             prompt, redacted_secrets = self._format_input(message.effective_content, context)
             response = await self._llm_provider.generate([
                 ChatMessage(role="system", content=MEMORY_EXTRACTION_PROMPT),
                 ChatMessage(role="user", content=prompt),
             ])
-            candidates = self._parse_candidates(response.content)
-            saved = await asyncio.to_thread(self._memory_service.apply_llm_candidates, candidates, message)
-            resilient_saved = await asyncio.to_thread(
-                self._memory_service.extract_resilient_facts_from_message,
-                message,
-            )
+            try:
+                result = self._parse_result(response.content)
+            except ValueError:
+                # One, and only one, repair retry for malformed structured output.
+                response = await self._llm_provider.generate([
+                    ChatMessage(role="system", content="Исправь JSON по указанной строгой схеме. Верни только JSON."),
+                    ChatMessage(role="user", content=prompt),
+                ])
+                try:
+                    result = self._parse_result(response.content)
+                except ValueError:
+                    # The repair budget is exhausted.  Invalid structured
+                    # output is not an operational failure: no canonical data
+                    # was changed, so complete the idempotent job instead of
+                    # creating noisy retry loops every few seconds.
+                    await asyncio.to_thread(self._store.complete_summary_job, job_id)
+                    self._publish("memory.invalid_structured_output", "warning", "Memory consolidation output was discarded", {
+                        "job_id": job_id, "model": response.model, "repair_exhausted": True,
+                    })
+                    return True
+            result = self._replace_legacy_source(result, message.id)
+            proposed = len(result.facts) + len(result.topics) + len(result.commitments) + len(result.conflicts)
+            if str(job.get("type")) == "memory_consolidation":
+                counts = await asyncio.to_thread(self._memory_service.apply_consolidation, result, context, model=response.model)
+                # Deterministic high-precision extraction is intentionally
+                # local and fills only a few explicit facts the model may have
+                # skipped. It remains safe to run with consolidation because
+                # policy deduplicates the canonical claim.
+                source_user = next((item for item in reversed(context) if item.role == "user"), None)
+                resilient = await asyncio.to_thread(self._memory_service.extract_resilient_facts_from_message, source_user)
+                saved = sum(counts.values()) + len(resilient)
+            else:
+                # v10 compatibility: legacy jobs still write only facts, but
+                # their outputs are parsed through v11's strict schema.
+                facts = [fact.model_dump(exclude={"source_message_ids", "cardinality", "temporal_semantics"}) for fact in result.facts]
+                applied = await asyncio.to_thread(self._memory_service.apply_llm_candidates, facts, message)
+                resilient = await asyncio.to_thread(self._memory_service.extract_resilient_facts_from_message, message)
+                saved = len(applied) + len(resilient)
             await asyncio.to_thread(self._store.complete_summary_job, job_id)
-            self._publish(
-                "memory.extraction_completed",
-                "info",
-                "Background memory extraction completed",
-                {
-                    "message_id": message_id,
-                    "proposed": len(candidates),
-                    "saved": len(saved) + len(resilient_saved),
-                    "model": response.model,
-                    "redacted_secrets": redacted_secrets,
-                },
-            )
+            self._publish("memory.consolidation_completed", "info", "Background memory consolidation completed", {
+                "job_id": job_id, "proposed": proposed, "saved": saved, "model": response.model,
+                "redacted_secrets": redacted_secrets,
+            })
         except Exception as exc:
-            logger.warning("Background memory extraction failed: exception_type=%s", type(exc).__name__)
+            logger.warning("Background memory consolidation failed: exception_type=%s", type(exc).__name__)
             await asyncio.to_thread(self._store.fail_summary_job, job_id, str(exc))
-            self._publish(
-                "memory.extraction_failed",
-                "warning",
-                "Background memory extraction failed",
-                {"job_id": job_id, "exception_type": type(exc).__name__},
-            )
+            self._publish("memory.consolidation_failed", "warning", "Background memory consolidation failed", {"job_id": job_id, "exception_type": type(exc).__name__})
         return True
 
     @staticmethod
     def _parse_candidates(content: str) -> list[object]:
+        """Compatibility helper retained for integrations using the old worker API."""
+        return [fact.model_dump() for fact in MemoryExtractionWorker._parse_result(content).facts]
+
+    @staticmethod
+    def _parse_result(content: str) -> ConsolidationResult:
         try:
             payload = json.loads(content)
         except json.JSONDecodeError as exc:
             raise ValueError("Memory extractor returned invalid JSON") from exc
         if not isinstance(payload, dict):
             raise ValueError("Memory extractor returned a non-object JSON value")
-        candidates = payload.get("memories", payload.get("memory_candidates", []))
-        if not isinstance(candidates, list):
-            raise ValueError("Memory extractor memories must be an array")
-        return candidates[:3]
+        if "memories" in payload or "memory_candidates" in payload:
+            raw = payload.get("memories", payload.get("memory_candidates", []))
+            if not isinstance(raw, list):
+                raise ValueError("Memory extractor memories must be an array")
+            payload = {
+                "facts": [{**item, "source_message_ids": item.get("source_message_ids", ["legacy-source"]),
+                            "cardinality": item.get("cardinality", "multi"),
+                            "temporal_semantics": item.get("temporal_semantics", "atemporal")}
+                          for item in raw if isinstance(item, dict)],
+                "topics": [], "commitments": [], "conflicts": [],
+            }
+        try:
+            return ConsolidationResult.model_validate(payload)
+        except Exception as exc:
+            raise ValueError("Memory extractor returned invalid structured output") from exc
+
+    @staticmethod
+    def _replace_legacy_source(result: ConsolidationResult, message_id: str) -> ConsolidationResult:
+        """Make a legacy ``memories`` response usable in the v11 window."""
+        payload = result.model_dump()
+        for fact in payload["facts"]:
+            if fact.get("source_message_ids") == ["legacy-source"]:
+                fact["source_message_ids"] = [message_id]
+        return ConsolidationResult.model_validate(payload)
 
     def _format_input(self, current_text: str, context) -> tuple[str, bool]:
-        prior = [item for item in context if item.effective_content != current_text]
-        redacted_secrets = False
-        rendered_prior: list[str] = []
-        for item in prior[-3:]:
-            safe_text, was_redacted = self._memory_service.sanitize_for_llm_extraction(item.effective_content)
-            redacted_secrets = redacted_secrets or was_redacted
-            rendered_prior.append(f"{item.role}: {safe_text}")
-        safe_current, was_redacted = self._memory_service.sanitize_for_llm_extraction(current_text)
-        redacted_secrets = redacted_secrets or was_redacted
-        rendered_context = "\n".join(rendered_prior)
-        context_block = rendered_context or "(нет)"
-        return (
-            "Контекст до текущей реплики (не является источником памяти):\n"
-            f"{context_block}\n\n"
-            "Текущая реплика пользователя — единственный источник фактов:\n"
-            f"{safe_current}",
-            redacted_secrets,
-        )
+        redacted = False
+        rendered: list[str] = []
+        for item in context[-20:]:
+            safe, was_redacted = self._memory_service.sanitize_for_llm_extraction(item.effective_content)
+            redacted = redacted or was_redacted
+            rendered.append(f"[{item.id}] {item.role}: {safe}")
+        if not rendered:
+            safe, was_redacted = self._memory_service.sanitize_for_llm_extraction(current_text)
+            redacted = redacted or was_redacted
+            rendered.append(f"[unknown] user: {safe}")
+        return "Окно завершённого диалога:\n" + "\n".join(rendered), redacted
 
     def _publish(self, event_type: str, level: str, message: str, details: dict[str, object]) -> None:
         if self._event_publisher is not None:

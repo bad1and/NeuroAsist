@@ -4,7 +4,8 @@ import anyio
 import pytest
 
 from apps.backend.app.agents.character.agent import CharacterAgent
-from apps.backend.app.llm.base import LLMResponse
+from apps.backend.app.context.manager import BuiltContext
+from apps.backend.app.llm.base import ChatMessage, LLMResponse
 
 
 @pytest.fixture
@@ -94,6 +95,15 @@ def test_parse_response_unwraps_json_accidentally_put_in_reply(agent: CharacterA
     assert result["reply"] == "Привет"
 
 
+@pytest.mark.parametrize("reply", [
+    "Ну? Я здесь. Опять зовёшь или есть что сказать?",
+    "Ты снова начал разговор заново.",
+    "Я уже говорила об этом.",
+])
+def test_continuity_guard_rejects_unconfirmed_accusations(agent: CharacterAgent, reply: str) -> None:
+    assert agent._has_unconfirmed_continuity_accusation(reply) is True
+
+
 class SequencedLLMProvider:
     def __init__(self, responses: list[str]) -> None:
         self.responses = responses
@@ -179,6 +189,133 @@ def test_handle_user_message_uses_json_persona_prompt() -> None:
     assert '"intent"' in system_prompt
     assert "Не возвращай JSON" not in system_prompt
     assert "голосовых расшифровках возможны опечатки" in system_prompt
+
+
+def test_handle_user_message_retries_unconfirmed_continuity_accusation() -> None:
+    provider = SequencedLLMProvider([
+        '{"reply":"Ну? Я здесь. Опять зовёшь или есть что сказать?","emotion":"annoyed","intent":"casual_chat"}',
+        '{"reply":"Я здесь. Кстати, двадцать больших кружек чая — это уже перебор.","emotion":"concerned","intent":"casual_chat"}',
+    ])
+    agent = CharacterAgent(provider, InMemoryHistory(), history_limit=0)
+
+    result = anyio.run(agent.handle_user_message, "s1", "Ирис")
+
+    assert provider.calls == 2
+    assert result["reply"] == "Я здесь. Кстати, двадцать больших кружек чая — это уже перебор."
+
+
+def test_handle_user_message_retries_false_attribution_of_its_own_joke() -> None:
+    previous = (
+        "Идёт ёжик по лесу, видит — дом горит. Заходит, а там сидят три скелета "
+        "и в карты играют."
+    )
+
+    class RecentContext:
+        def build(self, *_args, **_kwargs):
+            return BuiltContext(
+                [ChatMessage(role="assistant", content=previous)], 0,
+                {"previous_assistant_message_id": "assistant-joke", "pending_direct_message_count": 0},
+            )
+
+    provider = SequencedLLMProvider([
+        '{"reply":"Сам попросил анекдот, а не бред ёжика со скелетами.","emotion":"annoyed","intent":"casual_chat"}',
+        '{"reply":"Да, моя шутка с ёжиком была совсем мимо. Давай лучше другую.","emotion":"annoyed","intent":"casual_chat"}',
+    ])
+    agent = CharacterAgent(provider, InMemoryHistory(), history_limit=0, context_manager=RecentContext())
+
+    result = anyio.run(agent.handle_user_message, "s1", "Это вообще не анекдот, а полная бредятина")
+
+    assert provider.calls == 2
+    assert result["reply"] == "Да, моя шутка с ёжиком была совсем мимо. Давай лучше другую."
+
+
+def test_assistant_content_attribution_allows_user_owned_detail(agent: CharacterAgent) -> None:
+    assert agent._has_unconfirmed_assistant_content_attribution(
+        "Ты сам попросил анекдот про ёжика.",
+        "Ладно, вот анекдот про ёжика.",
+        "Расскажи анекдот про ёжика.",
+    ) is False
+
+
+def test_name_only_followup_retries_a_reply_that_ignores_pending_message() -> None:
+    class PendingContext:
+        def build(self, *_args, **_kwargs):
+            return BuiltContext([], 0, {"pending_direct_message_count": 1})
+
+    provider = SequencedLLMProvider([
+        '{"reply":"Ну? Я здесь. Опять зовёшь или есть что сказать?","emotion":"annoyed","intent":"casual_chat"}',
+        '{"reply":"Двадцать больших кружек чая в день — это очень много; давай хотя бы часть заменить водой.","emotion":"concerned","intent":"casual_chat"}',
+    ])
+    agent = CharacterAgent(provider, InMemoryHistory(), history_limit=0, context_manager=PendingContext())
+
+    result = anyio.run(agent.handle_user_message, "s1", "Ирис")
+
+    assert provider.calls == 2
+    assert "Двадцать" in result["reply"]
+
+
+def test_handle_user_message_retries_stale_previous_assistant_reply() -> None:
+    previous = "Горячим — это уже другой разговор. Ты каждый раз делаешь новую заварку или доливаешь кипяток?"
+
+    class RecentContext:
+        def build(self, *_args, **_kwargs):
+            return BuiltContext(
+                [ChatMessage(role="assistant", content=previous)], 0,
+                {"previous_assistant_message_id": "assistant-old", "pending_direct_message_count": 0},
+            )
+
+    provider = SequencedLLMProvider([
+        '{"reply":"' + previous + '","emotion":"smirk","intent":"casual_chat"}',
+        '{"reply":"Вот это правильно: новая заварка — без компромиссов.","emotion":"happy","intent":"casual_chat"}',
+    ])
+    events: list[dict] = []
+    agent = CharacterAgent(
+        provider, InMemoryHistory(), history_limit=0, context_manager=RecentContext(),
+        event_publisher=lambda *_args: events.append(_args[-1]),
+    )
+
+    result = anyio.run(agent.handle_user_message, "s1", "каждый раз новую, естественно")
+
+    assert provider.calls == 2
+    assert result["reply"] == "Вот это правильно: новая заварка — без компромиссов."
+    assert any(event["reason"] == "stale_duplicate" and event["previous_assistant_message_id"] == "assistant-old" for event in events)
+
+
+def test_explicit_request_to_repeat_does_not_trigger_stale_guard() -> None:
+    previous = "Горячим — это уже другой разговор. Ты каждый раз делаешь новую заварку?"
+
+    class RecentContext:
+        def build(self, *_args, **_kwargs):
+            return BuiltContext([ChatMessage(role="assistant", content=previous)], 0, {})
+
+    provider = SequencedLLMProvider([
+        '{"reply":"' + previous + '","emotion":"neutral","intent":"casual_chat"}',
+    ])
+    agent = CharacterAgent(provider, InMemoryHistory(), history_limit=0, context_manager=RecentContext())
+
+    result = anyio.run(agent.handle_user_message, "s1", "Повтори, пожалуйста, свой прошлый вопрос")
+
+    assert provider.calls == 1
+    assert result["reply"] == previous
+
+
+def test_stale_duplicate_retry_failure_uses_safe_fallback() -> None:
+    previous = "Горячим — это уже другой разговор. Ты каждый раз делаешь новую заварку или доливаешь кипяток?"
+
+    class RecentContext:
+        def build(self, *_args, **_kwargs):
+            return BuiltContext([ChatMessage(role="assistant", content=previous)], 0, {})
+
+    provider = SequencedLLMProvider([
+        '{"reply":"' + previous + '","emotion":"smirk","intent":"casual_chat"}',
+        '{"reply":"' + previous + '","emotion":"smirk","intent":"casual_chat"}',
+    ])
+    agent = CharacterAgent(provider, InMemoryHistory(), history_limit=0, context_manager=RecentContext())
+
+    result = anyio.run(agent.handle_user_message, "s1", "каждый раз новую")
+
+    assert provider.calls == 2
+    assert "зациклилась" in result["reply"]
 
 
 def test_handle_user_message_uses_deterministic_fallback_for_empty_model_response() -> None:

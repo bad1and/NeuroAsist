@@ -25,6 +25,7 @@ from apps.backend.app.voice.style import VoiceStyle, coerce_voice_style, resolve
 
 logger = logging.getLogger(__name__)
 TextCompletedHandler = Callable[[str, str, int, str], Awaitable[None]]
+AssistantTerminalHandler = Callable[[str], Awaitable[None]]
 
 
 @dataclass
@@ -151,7 +152,10 @@ class VoiceSessionManager:
         generation: int = 0,
         source_message=None,
         state_context: str | None = None,
-    ) -> None:
+        persist_reply: bool | None = None,
+        on_assistant_completed: AssistantTerminalHandler | None = None,
+        on_assistant_interrupted: AssistantTerminalHandler | None = None,
+    ) -> asyncio.Task[None]:
         if not self.connected(session_id):
             raise RuntimeError("Voice WebSocket is not connected")
         await self.cancel(session_id)
@@ -163,9 +167,13 @@ class VoiceSessionManager:
         )
         self._active[session_id] = context
         context.task = asyncio.create_task(
-            self._run(context, transcript, language, voice, agent, input_mode, source_message, state_context),
+            self._run(
+                context, transcript, language, voice, agent, input_mode, source_message, state_context,
+                persist_reply, on_assistant_completed, on_assistant_interrupted,
+            ),
             name=f"voice-{utterance_id}",
         )
+        return context.task
 
     async def cancel(self, session_id: str, utterance_id: str | None = None, notify: bool = True) -> None:
         context = self._active.get(session_id)
@@ -195,6 +203,9 @@ class VoiceSessionManager:
         input_mode: str,
         source_message,
         state_context: str | None,
+        persist_reply: bool | None,
+        on_assistant_completed: AssistantTerminalHandler | None,
+        on_assistant_interrupted: AssistantTerminalHandler | None,
     ) -> None:
         started = time.perf_counter()
         queue: asyncio.Queue[str | None] = asyncio.Queue(self._queue_size)
@@ -278,6 +289,7 @@ class VoiceSessionManager:
                 source_message=source_message,
                 state_context=state_context,
                 schedule_memory=source_message is None,
+                persist_reply=persist_reply,
             ).__aiter__()
             pending = asyncio.create_task(anext(iterator))
             while True:
@@ -318,6 +330,8 @@ class VoiceSessionManager:
                 if segment:
                     await self._enqueue_tts_text(queue, worker, segment)
             completed_reply = "".join(reply_parts).strip()
+            if on_assistant_completed is not None:
+                await on_assistant_completed(completed_reply)
             if self._text_completed_handler is not None and self._is_active(context):
                 await self._text_completed_handler(
                     context.session_id,
@@ -340,11 +354,15 @@ class VoiceSessionManager:
                     session_id=context.session_id, utterance_id=context.utterance_id
                 )
         except asyncio.CancelledError:
+            if on_assistant_interrupted is not None:
+                await on_assistant_interrupted("".join(reply_parts).strip())
             worker.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await worker
             raise
         except Exception as exc:
+            if on_assistant_interrupted is not None:
+                await on_assistant_interrupted("".join(reply_parts).strip())
             worker.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await worker

@@ -312,6 +312,41 @@ async def test_streaming_agent_uses_character_persona_prompt(tmp_path: Path) -> 
     assert "Не упоминай тесты" in system_prompt
 
 
+@pytest.mark.anyio
+async def test_live_stream_retries_stale_reply_before_emitting_delta(tmp_path: Path) -> None:
+    previous = "Горячим — это уже другой разговор. Ты каждый раз делаешь новую заварку или доливаешь кипяток?"
+
+    class RecentContext:
+        def build(self, *_args, **_kwargs):
+            from apps.backend.app.context.manager import BuiltContext
+            return BuiltContext([ChatMessage(role="assistant", content=previous)], 0, {"previous_assistant_message_id": "old"})
+
+    class StaleThenFreshProvider(LLMProvider):
+        def __init__(self):
+            self.calls = 0
+
+        async def generate(self, _messages):
+            return LLMResponse(content="unused", model="test")
+
+        async def stream(self, _messages):
+            self.calls += 1
+            if self.calls == 1:
+                yield previous
+            else:
+                yield "Вот это правильно: каждый раз свежая заварка."
+
+    provider = StaleThenFreshProvider()
+    history = SQLiteMessageHistory(tmp_path / "history.sqlite3")
+    history.init_db()
+    agent = CharacterAgent(provider, history, history_limit=10, context_manager=RecentContext())
+
+    result = [delta async for delta in agent.stream_user_message("s", "каждый раз новую")]
+
+    assert provider.calls == 2
+    assert "Горячим" not in "".join(result)
+    assert "свежая заварка" in "".join(result)
+
+
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
@@ -359,7 +394,9 @@ def test_live_rest_and_websocket_stream_protocol(monkeypatch, tmp_path: Path) ->
                 assert event_types[:3] == [
                     "voice.utterance.started", "voice.metadata", "voice.text.delta",
                 ]
-                assert event_types[3] in {"voice.text.delta", "tts.segment.started"}
+                # The relevance guard may release a short safe reply in one
+                # buffered delta, followed immediately by completion.
+                assert event_types[3] in {"voice.text.delta", "tts.segment.started", "voice.text.completed"}
                 assert all(event["utterance_id"] == body["utterance_id"] for event in events)
     finally:
         app.state.voice_service.clear_audio_dir()

@@ -88,6 +88,78 @@ def test_context_keeps_turn_pairs_and_uses_rolling_active_episode_summary(tmp_pa
     assert roles in ([], ["user", "assistant"], ["user", "assistant", "user", "assistant"])
 
 
+def test_context_excludes_current_saved_message_by_id(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "current-id.sqlite3")
+    store.init_db()
+    old_user, _ = store.append_message(role="user", content="Давай обсудим идею контекста", input_mode="text")
+    store.append_message(role="assistant", content="Да, идея про устойчивый контекст", input_mode="text", turn_id=old_user.turn_id, reply_to_message_id=old_user.id)
+    current, _ = store.append_message(role="user", content="Так это и была идея", input_mode="text")
+
+    context = ContextManager(store, max_tokens=500, recent_turns=8).build(
+        current.content, current_message_id=current.id,
+    )
+
+    visible = [message.content for message in context.messages if message.role in {"user", "assistant"}]
+    assert current.content not in visible
+    assert "идею контекста" in " ".join(visible)
+    assert context.diagnostics["current_message_id"] == current.id
+
+
+def test_name_only_followup_surfaces_unanswered_direct_messages(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "name-followup.sqlite3")
+    store.init_db()
+    question, _ = store.append_message(role="user", content="Какой чай ты любишь?", input_mode="text")
+    store.append_message(role="assistant", content="А ты какой обычно пьёшь?", input_mode="text", turn_id=question.turn_id, reply_to_message_id=question.id)
+    store.append_message(role="user", content="Заварной и пакетики, но иногда выходит двадцать кружек.", input_mode="text")
+    current, _ = store.append_message(role="user", content="Ирис", input_mode="text")
+
+    context = ContextManager(store, max_tokens=800, recent_turns=8).build(
+        current.content, current_message_id=current.id,
+    )
+
+    pending_blocks = [item.content for item in context.messages if item.role == "system" and "неотвеченной мысли" in item.content]
+    assert len(pending_blocks) == 1
+    assert "двадцать кружек" in pending_blocks[0]
+    assert context.diagnostics["name_only_followup"] is True
+    assert context.diagnostics["pending_direct_message_count"] == 1
+
+
+def test_name_only_followup_revives_primary_observation_but_not_ambient_speech(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "observed-followup.sqlite3")
+    store.init_db()
+    observed, _ = store.append_message(
+        role="user", content="Я тебе интеллект прокачал, между прочим.", input_mode="voice",
+    )
+    store.save_conversation_observation(
+        message_id=observed.id, session_id="live", turn_id=observed.turn_id or "turn-observed",
+        utterance_id="observed", generation=1, speaker_role="primary", speaker_confidence=.9,
+        addressedness=.45, addressed_confidence=.7, end_of_turn_confidence=.9, significance=.5,
+        metadata={},
+    )
+    store.set_observation_decision(observed.id, "observe", "relevant_opening")
+    ambient, _ = store.append_message(
+        role="user", content="Олег, включи чайник.", input_mode="voice",
+    )
+    store.save_conversation_observation(
+        message_id=ambient.id, session_id="live", turn_id=ambient.turn_id or "turn-ambient",
+        utterance_id="ambient", generation=1, speaker_role="other", speaker_confidence=.9,
+        addressedness=.05, addressed_confidence=.9, end_of_turn_confidence=.9, significance=.2,
+        metadata={},
+    )
+    store.set_observation_decision(ambient.id, "observe", "other_person")
+    current, _ = store.append_message(role="user", content="Ирис", input_mode="voice")
+
+    context = ContextManager(store, max_tokens=800, recent_turns=8).build(
+        current.content, current_message_id=current.id,
+    )
+
+    pending_blocks = [item.content for item in context.messages if item.role == "system" and "неотвеченной мысли" in item.content]
+    assert len(pending_blocks) == 1
+    assert "интеллект прокачал" in pending_blocks[0]
+    assert "Олег, включи чайник" not in pending_blocks[0]
+    assert context.diagnostics["pending_direct_message_count"] == 1
+
+
 def test_live_context_keeps_overheard_speech_out_of_direct_dialogue(tmp_path: Path) -> None:
     store = TimelineStore(tmp_path / "ambient-context.sqlite3")
     store.init_db()

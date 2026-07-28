@@ -1,14 +1,15 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Archive, Brain, Check, CheckCircle2, CircleHelp, ClipboardCheck, MoreHorizontal, Pencil, Pin, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { Archive, Brain, Check, CheckCircle2, CircleHelp, ClipboardCheck, ListChecks, MoreHorizontal, Pencil, Pin, Plus, RotateCcw, Search, Tag, Trash2, X } from "lucide-react";
 
 import {
   confirmMemory, createMemory, deleteMemory, getMemories, getMemoryAudit,
+  closeMemoryCommitment, getMemoryCommitments, getMemoryConflicts, getMemoryTopics,
   rejectMemory, restoreMemory, updateMemory,
 } from "./api";
-import type { MemoryAuditItem, MemoryItem, MemoryStatus } from "./types";
+import type { MemoryAuditItem, MemoryCommitment, MemoryItem, MemoryStatus, MemoryTopic } from "./types";
 import { AppDialog } from "./components/AppDialog";
 
-type MemorySection = "all" | "active" | "candidate" | "archive";
+type MemorySection = "all" | "active" | "topics" | "commitments" | "candidate" | "archive" | "diagnostics";
 
 const STATUS_LABELS: Record<MemoryStatus | "all", string> = {
   all: "Все", active: "Сохранённые", candidate: "На проверке", superseded: "Заменённые", deleted: "Удалённые", rejected: "Отклонённые", expired: "Истёкшие",
@@ -17,12 +18,18 @@ const STATUS_LABELS: Record<MemoryStatus | "all", string> = {
 const MEMORY_SECTIONS: Array<{ id: MemorySection; label: string; icon: typeof Brain }> = [
   { id: "all", label: "Все", icon: Brain },
   { id: "active", label: "Сохранённые", icon: CheckCircle2 },
+  { id: "topics", label: "Темы", icon: Tag },
+  { id: "commitments", label: "Планы и обещания", icon: ListChecks },
   { id: "candidate", label: "На проверке", icon: ClipboardCheck },
   { id: "archive", label: "Архив", icon: Archive },
+  { id: "diagnostics", label: "Диагностика", icon: CircleHelp },
 ];
 
 export function MemoryPage() {
   const [items, setItems] = useState<MemoryItem[]>([]);
+  const [topics, setTopics] = useState<MemoryTopic[]>([]);
+  const [commitments, setCommitments] = useState<MemoryCommitment[]>([]);
+  const [conflicts, setConflicts] = useState<Array<{ id: string; reason: string; status: string }>>([]);
   const [section, setSection] = useState<MemorySection>("all");
   const [query, setQuery] = useState("");
   const [audit, setAudit] = useState<Record<string, MemoryAuditItem[]>>({});
@@ -37,6 +44,9 @@ export function MemoryPage() {
 
   const refresh = async () => {
     try {
+      if (section === "topics") { setTopics((await getMemoryTopics()).items); setMessage(null); return; }
+      if (section === "commitments") { setCommitments((await getMemoryCommitments()).items); setMessage(null); return; }
+      if (section === "diagnostics") { setConflicts((await getMemoryConflicts()).items); setMessage(null); return; }
       const result = await getMemories(section === "all" || section === "archive" ? undefined : section, query || undefined);
       setItems(
         section === "archive"
@@ -99,6 +109,10 @@ export function MemoryPage() {
     </form>}
     {message && <p className="error-text" role="alert">{message}</p>}
     <div className="memory-list">
+      {section === "topics" && topics.map((topic) => <article className="memory-card" key={topic.id}><div className="memory-card-main"><div className="memory-card-heading"><span className="memory-status active">{topic.status}</span>{topic.user_locked && <Pin size={14} />}</div><strong>{topic.title}</strong><p>{topic.summary_text || "Краткое описание ещё не сформировано."}</p><small>Связи: {topic.links.length} · доказательства: {topic.evidence.length}</small></div></article>)}
+      {section === "commitments" && commitments.map((commitment) => <article className="memory-card" key={commitment.id}><div className="memory-card-main"><div className="memory-card-heading"><span className={`memory-status ${commitment.status === "open" ? "candidate" : "active"}`}>{commitment.status}</span></div><strong>{commitment.title}</strong><p>{commitment.details}</p><small>{commitment.kind} · уверенность: {Math.round(commitment.confidence * 100)}%</small></div>{commitment.status === "open" && <div className="memory-actions"><button className="primary-button" onClick={() => void action(() => closeMemoryCommitment(commitment.id))}><Check size={16} />Закрыть</button></div>}</article>)}
+      {section === "diagnostics" && <>{conflicts.map((conflict) => <article className="memory-card" key={conflict.id}><div className="memory-card-main"><strong>Конфликт: {conflict.status}</strong><p>{conflict.reason}</p></div></article>)}{!conflicts.length && <div className="empty-state"><CircleHelp size={28} /><strong>Открытых конфликтов нет</strong><span>Здесь появятся записи, требующие проверки.</span></div>}</>}
+      {!(["topics", "commitments", "diagnostics"] as MemorySection[]).includes(section) && <>
       {items.length ? items.map((memory) => <article className="memory-card" key={memory.id}>
         <div className="memory-card-main"><div className="memory-card-heading"><span className={`memory-status ${memory.status}`}>{STATUS_LABELS[memory.status]}</span>{memory.user_locked && <Pin size={14} aria-label="Закреплённая запись" />}</div><strong>{memory.predicate}</strong><p>{memory.value_text}</p><small>{memory.source_message_ids.length ? `Источник: ${memory.source_message_ids.length} сообщ.` : "Источник не указан"} · использовано: {memory.access_count}</small></div>
         <div className="memory-actions">
@@ -117,6 +131,7 @@ export function MemoryPage() {
         </div>
         {audit[memory.id] && <details className="memory-audit" open><summary>История записи</summary><p>{audit[memory.id].map((item) => `${item.action} (${item.actor})`).join(" → ")}</p></details>}
       </article>) : <div className="empty-state"><Brain size={28} aria-hidden="true" /><strong>Записей пока нет</strong><span>Помощник предложит факты для сохранения после разговора.</span></div>}
+      </>}
     </div>
     <AppDialog open={Boolean(editing)} title="Изменить запись" description="После сохранения запись будет закреплена, чтобы Iris не заменила её автоматически." onClose={() => !editBusy && setEditing(null)}>
       <form className="dialog-form" onSubmit={async (event) => {

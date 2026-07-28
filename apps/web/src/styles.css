@@ -137,6 +137,7 @@ select { appearance: auto; }
 .icon-button { min-width: 38px; padding: 8px; }
 .text-button { min-height: auto; padding: 2px 0; color: var(--color-focus); background: transparent; text-decoration: underline; text-underline-offset: 3px; }
 .danger-button { color: var(--color-danger-text); border-color: var(--color-danger-border); background: var(--danger-soft); }
+.settings-danger-action { display: grid; gap: 7px; margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--border); }.settings-danger-action small { color: var(--subtle); line-height: 1.4; }.settings-danger-action .danger-button { justify-self: start; }
 
 .chat-panel { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; height: 100%; max-height: 100%; }
 .message-list { display: flex; flex: 1 1 auto; flex-direction: column; gap: 10px; min-height: 0; overflow: auto; padding: 8px 0 14px; background: transparent; }
