@@ -12,6 +12,8 @@ class BuiltContext:
     messages: list[ChatMessage]
     token_estimate: int
     diagnostics: dict[str, object]
+    effective_user_text: str | None = None
+    pending_user_message_ids: tuple[str, ...] = ()
 
 
 class ContextManager:
@@ -26,6 +28,23 @@ class ContextManager:
         material = self._store.context_material(
             user_text, self._recent_turns, session_id=session_id, current_message_id=current_message_id,
         )
+        pending_user_rows: list[dict[str, object]] = []
+        for row in reversed(material.get("pending_user_rows", [])):
+            if not self._is_burst_candidate(row):
+                break
+            pending_user_rows.append(row)
+        pending_user_rows.reverse()
+        pending_user_message_ids = tuple(str(row["id"]) for row in pending_user_rows)
+        burst_compacted = len(pending_user_rows) > 1
+        effective_user_text = (
+            "\n".join(
+                str(row.get("corrected_content") or row.get("content") or "").strip()
+                for row in pending_user_rows
+            ).strip()
+            if burst_compacted
+            else user_text
+        )
+        pending_user_id_set = set(pending_user_message_ids)
         identity = ChatMessage(
             role="system",
             content=(
@@ -67,7 +86,7 @@ class ContextManager:
                 for row in material["recent"][-2:]
                 if row.get("role") in {"user", "assistant"}
             )
-            retrieval_query = f"{recent_text} {user_text}".strip()
+            retrieval_query = f"{recent_text} {effective_user_text}".strip()
             for memory in self._memory_service.retrieve(retrieval_query):
                 memory_id = str(memory["id"])
                 memory_retrieval[memory_id] = memory.get("retrieval", {"reasons": ["exact_profile"]})
@@ -81,7 +100,7 @@ class ContextManager:
                     selected_memories.append(item)
             factual_query = bool(re.search(
                 r"\b(?:как меня зовут|кто я|что я люблю|какие факты|что ты знаешь обо мне)\b",
-                user_text,
+                effective_user_text,
                 flags=re.IGNORECASE,
             ))
             if not self._memory_service.incognito and not factual_query:
@@ -121,6 +140,7 @@ class ContextManager:
             for row in material["recent"]
             if not self._is_ambient_observation(row)
             and row.get("decision_action") != "wait_more"
+            and str(row.get("id")) not in pending_user_id_set
         ]
         name_only_followup = self._is_name_only_followup(user_text)
         pending_direct_rows: list[dict[str, object]] = []
@@ -234,6 +254,9 @@ class ContextManager:
             "current_message_id": current_message_id,
             "current_sequence": material.get("causal_upper_bound"),
             "causal_upper_bound": material.get("causal_upper_bound"),
+            "pending_user_message_ids": list(pending_user_message_ids),
+            "pending_user_message_count": len(pending_user_message_ids),
+            "burst_compacted": burst_compacted,
             "name_only_followup": name_only_followup,
             "pending_direct_message_count": len(pending_direct_rows),
             "previous_assistant_message_id": previous_assistant_row.get("id") if previous_assistant_row else None,
@@ -258,7 +281,7 @@ class ContextManager:
             "dropped_turn_count": dropped_turn_count,
             "budget": self._max_tokens,
             "block_budgets": {"profile": 250, "facts": 450, "topics": 500, "episodes": 300, "recent": 1000, "open_loops": 250, "ambient": 200},
-        })
+        }, effective_user_text, pending_user_message_ids)
         self.last = built
         return built
 
@@ -293,6 +316,18 @@ class ContextManager:
             return False
         if cls._is_recoverable_primary_direct(row):
             return True
+        return row.get("decision_reason") not in {
+            "other_person", "self_talk", "ambient_speech", "incomplete_turn",
+        }
+
+    @classmethod
+    def _is_burst_candidate(cls, row: dict[str, object]) -> bool:
+        if row.get("role") != "user" or row.get("decision_action") == "wait_more":
+            return False
+        if row.get("speaker_role") in {"other", "unknown"}:
+            return False
+        if cls._is_ambient_observation(row):
+            return False
         return row.get("decision_reason") not in {
             "other_person", "self_talk", "ambient_speech", "incomplete_turn",
         }

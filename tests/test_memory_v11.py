@@ -41,6 +41,94 @@ def test_topic_commitment_and_profile_are_canonical(tmp_path: Path) -> None:
     assert profile["topics"][0]["id"] == topic["id"]
 
 
+def test_v17_normalizes_developer_aliases_and_repair_is_idempotent(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    name_source, _ = store.append_message(role="user", content="Меня зовут Фёдор", input_mode="text")
+    service.create_manual({
+        "kind": "identity", "predicate": "name", "value_text": "Фёдор",
+        "source_message_ids": [name_source.id],
+    })
+    user_source, _ = store.append_message(role="user", content="я твой разработчик", input_mode="text")
+    oleg_source, _ = store.append_message(
+        role="user", content="второго разработчика зовут олег", input_mode="text",
+    )
+    result = ConsolidationResult.model_validate({
+        "facts": [
+            {
+                "kind": "relationship", "subject": "user", "predicate": "is_developer_of",
+                "value_text": "Iris", "importance": .9, "confidence": .99,
+                "sensitivity": "normal", "source_message_ids": [user_source.id],
+                "cardinality": "multi", "temporal_semantics": "atemporal",
+            },
+            {
+                "kind": "identity", "subject": "oleg", "predicate": "name",
+                "value_text": "Oleg", "importance": .9, "confidence": .99,
+                "sensitivity": "normal", "source_message_ids": [oleg_source.id],
+                "cardinality": "single", "temporal_semantics": "atemporal",
+            },
+        ],
+        "topics": [], "commitments": [], "conflicts": [],
+    })
+
+    service.apply_consolidation(result, [user_source, oleg_source], model="fixture")
+    active = store.list_memories(status="active", limit=100)
+    developers = {
+        (item["object_key"], item["value_text"])
+        for item in active if item.get("slot_key") == "assistant.developer"
+    }
+    counts = [
+        item for item in active if item.get("slot_key") == "assistant.developer_count"
+    ]
+    assert developers == {("user", "Федор"), ("person:олег", "Олег")}
+    assert len(counts) == 1 and counts[0]["value_text"] == "2"
+    assert {item["value_text"] for item in service.retrieve("как зовут второго?")} >= {"Олег"}
+    assert {item["value_text"] for item in service.retrieve("кто я?")} >= {"Федор"}
+
+    first = service.repair_v17_canonical_memory()
+    total_after_first = len(store.list_memories(limit=500))
+    second = service.repair_v17_canonical_memory()
+    assert len(store.list_memories(limit=500)) == total_after_first
+    assert second["idempotent_noop"] is True
+    assert first["canonicalized"] >= 1
+
+
+def test_v17_assigns_ttl_and_closes_name_loop_when_slot_is_filled(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    mood_source, _ = store.append_message(role="user", content="Сейчас я бодрый", input_mode="text")
+    mood_result = ConsolidationResult.model_validate({
+        "facts": [{
+            "kind": "preference", "subject": "user", "predicate": "mood",
+            "value_text": "бодрый", "importance": .7, "confidence": .99,
+            "sensitivity": "normal", "source_message_ids": [mood_source.id],
+            "cardinality": "single", "temporal_semantics": "current",
+        }],
+        "topics": [], "commitments": [], "conflicts": [],
+    })
+    service.apply_consolidation(mood_result, [mood_source], model="fixture")
+    mood = next(
+        item for item in store.list_memories(status="active")
+        if item.get("slot_key") == "user.current_mood"
+    )
+    assert mood["expires_at"]
+    store.update_memory(mood["id"], {"expires_at": "2000-01-01T00:00:00+00:00"})
+    assert service.expire_due_memories() == 1
+    assert store.get_memory(mood["id"])["status"] == "expired"
+
+    commitment = store.create_commitment({
+        "kind": "open_loop",
+        "title": "Assistant asked user to provide their name",
+        "details": "Как тебя зовут?",
+        "target_slot": "user.name",
+        "source_message_ids": [mood_source.id],
+    })
+    name_source, _ = store.append_message(role="user", content="Меня зовут Федор", input_mode="text")
+    service.create_manual({
+        "kind": "identity", "predicate": "name", "value_text": "Федор",
+        "source_message_ids": [name_source.id],
+    })
+    assert store.get_commitment(commitment["id"])["status"] == "completed"
+
+
 def test_expired_lease_is_reclaimed_atomically(tmp_path: Path) -> None:
     store, _ = _service(tmp_path)
     now = "2020-01-01T00:00:00.000+00:00"

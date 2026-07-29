@@ -331,6 +331,9 @@ export type MemoryItem = {
   updated_at: string;
   last_accessed_at?: string | null;
   access_count: number;
+  slot_key?: string | null;
+  object_key?: string | null;
+  normalization_version?: number | null;
 };
 
 export type MemoryAuditItem = {
@@ -398,4 +401,27 @@ export type MemoryDiagnosticRun = {
 export type MemoryDiagnostics = {
   queue: Record<string, number>;
   runs: MemoryDiagnosticRun[];
+  active_by_namespace?: Record<string, number>;
+  repair?: {
+    repair_key: string;
+    status: string;
+    created_at: string;
+    completed_at?: string | null;
+    result: Record<string, number | boolean | string>;
+  } | null;
+  index_health?: {
+    state: "healthy" | "degraded" | "rebuilding";
+    semantic_enabled: boolean;
+    degraded_reason?: string | null;
+    missing_ids: string[];
+    stale_ids: string[];
+    namespaces: Record<string, {
+      count?: number;
+      source_count: number;
+      fingerprint?: string;
+      source_fingerprint: string;
+      last_successful_sync?: string | null;
+      error?: string;
+    }>;
+  };
 };

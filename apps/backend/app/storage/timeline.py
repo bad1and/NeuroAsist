@@ -18,7 +18,7 @@ from apps.backend.app.llm.base import ChatMessage
 
 PRIMARY_RELATIONSHIP_ID = "primary"
 PRIMARY_TIMELINE_ID = "primary-timeline"
-LATEST_SCHEMA_VERSION = 16
+LATEST_SCHEMA_VERSION = 17
 
 
 @dataclass(frozen=True)
@@ -170,6 +170,9 @@ class TimelineStore:
             if 16 not in applied:
                 self._apply_v16_memory_observability_schema(connection)
                 connection.execute("INSERT INTO schema_migrations (version, applied_at) VALUES (16, ?)", (self._now(),))
+            if 17 not in applied:
+                self._apply_v17_canonical_memory_schema(connection)
+                connection.execute("INSERT INTO schema_migrations (version, applied_at) VALUES (17, ?)", (self._now(),))
             # v12 reached some development databases before all of its
             # additive objects existed.  Keep this repair idempotent and run
             # it even when the migration marker is already present.
@@ -178,6 +181,7 @@ class TimelineStore:
             self._apply_v14_character_state_schema(connection)
             self._apply_v15_reflection_schema(connection)
             self._apply_v16_memory_observability_schema(connection)
+            self._apply_v17_canonical_memory_schema(connection)
             self._ensure_primary_timeline(connection)
             self._migrate_legacy_messages(connection)
             # Legacy V0.4 rows are imported after migrations, so backfill their
@@ -669,13 +673,16 @@ class TimelineStore:
     def claim_summary_job(self) -> dict[str, object] | None:
         return self._claim_job("episode_summary")
 
-    def enqueue_memory_index_job(self, memory_id: str) -> None:
+    def enqueue_memory_index_job(self, memory_id: str, namespace: str = "memory") -> None:
         """Durably coalesce Chroma updates; SQLite remains the source of truth."""
         now = self._now()
         with self._connect() as connection:
             connection.execute(
-                "UPDATE background_jobs SET status = 'completed' WHERE type = 'memory_index' AND status = 'pending' AND json_extract(payload_json, '$.memory_id') = ?",
-                (memory_id,),
+                """UPDATE background_jobs SET status = 'completed'
+                   WHERE type = 'memory_index' AND status = 'pending'
+                     AND json_extract(payload_json, '$.memory_id') = ?
+                     AND COALESCE(json_extract(payload_json, '$.namespace'), 'memory') = ?""",
+                (memory_id, namespace),
             )
             connection.execute(
                 """INSERT INTO background_jobs (id, type, status, payload_json, idempotency_key, available_at, created_at, updated_at)
@@ -683,7 +690,12 @@ class TimelineStore:
                    ON CONFLICT(type, idempotency_key) WHERE idempotency_key IS NOT NULL DO UPDATE SET
                      status = 'pending', payload_json = excluded.payload_json, available_at = excluded.available_at,
                      updated_at = excluded.updated_at, lease_owner = NULL, lease_until = NULL""",
-                (uuid4().hex, json.dumps({"memory_id": memory_id}), f"memory-index:{memory_id}", now, now, now),
+                (
+                    uuid4().hex,
+                    json.dumps({"memory_id": memory_id, "namespace": namespace}),
+                    f"memory-index:{namespace}:{memory_id}",
+                    now, now, now,
+                ),
             )
 
     def enqueue_memory_extraction_job(self, message_id: str) -> None:
@@ -918,6 +930,24 @@ class TimelineStore:
                    ORDER BY created_at DESC LIMIT ?""",
                 (bounded,),
             ).fetchall()
+            repair = connection.execute(
+                """SELECT repair_key, status, result_json, created_at, completed_at
+                   FROM memory_repair_runs ORDER BY created_at DESC LIMIT 1"""
+            ).fetchone()
+            namespace_counts = {
+                "memory": int(connection.execute(
+                    "SELECT COUNT(*) FROM memory_items WHERE status = 'active'"
+                ).fetchone()[0]),
+                "topic_memory": int(connection.execute(
+                    "SELECT COUNT(*) FROM memory_topics WHERE status = 'active'"
+                ).fetchone()[0]),
+                "commitment_memory": int(connection.execute(
+                    "SELECT COUNT(*) FROM memory_commitments WHERE status = 'open'"
+                ).fetchone()[0]),
+                "episode_summary": int(connection.execute(
+                    "SELECT COUNT(*) FROM episode_summaries WHERE superseded_at IS NULL"
+                ).fetchone()[0]),
+            }
         runs: list[dict[str, object]] = []
         for row in rows:
             item = dict(row)
@@ -927,7 +957,40 @@ class TimelineStore:
             # exposes stable error codes from diagnostics instead.
             item.pop("error_text", None)
             runs.append(item)
-        return {"queue": {str(row["status"]): int(row["count"]) for row in queue_rows}, "runs": runs}
+        repair_result = None
+        if repair is not None:
+            repair_result = dict(repair)
+            repair_result["result"] = json.loads(str(repair_result.pop("result_json") or "{}"))
+        return {
+            "queue": {str(row["status"]): int(row["count"]) for row in queue_rows},
+            "runs": runs,
+            "repair": repair_result,
+            "active_by_namespace": namespace_counts,
+        }
+
+    def memory_repair_run(self, repair_key: str) -> dict[str, object] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM memory_repair_runs WHERE repair_key = ?", (repair_key,),
+            ).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        result["result"] = json.loads(str(result.pop("result_json") or "{}"))
+        return result
+
+    def finish_memory_repair(self, repair_key: str, result: dict[str, object]) -> None:
+        now = self._now()
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO memory_repair_runs
+                   (repair_key, status, result_json, created_at, completed_at)
+                   VALUES (?, 'completed', ?, ?, ?)
+                   ON CONFLICT(repair_key) DO UPDATE SET
+                     status = 'completed', result_json = excluded.result_json,
+                     completed_at = excluded.completed_at""",
+                (repair_key, json.dumps(result, ensure_ascii=False), now, now),
+            )
 
     def _claim_job(
         self,
@@ -1133,6 +1196,7 @@ class TimelineStore:
         source_ids = list(values.get("source_message_ids", []))
         source_episode_id = values.get("source_episode_id")
         canonical = str(values.get("canonical_text") or f"{values['subject']} {values['predicate']} {values['value_text']}")
+        search_text = str(values.get("search_text") or canonical)
         with self._connect() as connection:
             connection.execute(
                 """INSERT INTO memory_items (
@@ -1140,17 +1204,20 @@ class TimelineStore:
                     importance, confidence, sensitivity, status, user_locked, valid_from, valid_to, expires_at,
                     source_episode_id, source_message_ids_json, extractor_version, supersedes_id, superseded_by_id,
                     created_at, updated_at, last_accessed_at, access_count, metadata_json,
-                    extraction_model, cardinality, temporal_semantics, source_quality, claim_fingerprint
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, NULL, 0, '{}', ?, ?, ?, ?, ?)""",
+                    extraction_model, cardinality, temporal_semantics, source_quality, claim_fingerprint,
+                    slot_key, object_key, normalization_version, search_text
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, NULL, 0, '{}', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (memory_id, PRIMARY_RELATIONSHIP_ID, values["scope"], values["kind"], values["subject"], values["predicate"],
                  values["value_text"], canonical, values.get("importance", 0.5), values.get("confidence", 0.5),
                  values.get("sensitivity", "normal"), values.get("status", "candidate"), int(bool(values.get("user_locked", False))),
                  values.get("valid_from"), values.get("valid_to"), values.get("expires_at"), source_episode_id,
                  json.dumps(source_ids, ensure_ascii=False), values.get("extractor_version", "memory-v1"), now, now,
                  values.get("extraction_model"), values.get("cardinality", "multi"), values.get("temporal_semantics", "atemporal"),
-                 values.get("source_quality", 1.0), values.get("claim_fingerprint")),
+                  values.get("source_quality", 1.0), values.get("claim_fingerprint"),
+                  values.get("slot_key"), values.get("object_key"), values.get("normalization_version", 1),
+                  search_text),
             )
-            self._index_memory(connection, memory_id, canonical)
+            self._index_memory(connection, memory_id, search_text)
             for message_id in source_ids:
                 self._add_evidence(connection, "fact", memory_id, str(message_id), source_episode_id,
                                    str(values.get("source_role", "user")), float(values.get("source_quality", 1.0)),
@@ -1160,7 +1227,12 @@ class TimelineStore:
             return self._memory_row(row)
 
     def update_memory(self, memory_id: str, changes: dict[str, object], *, actor: str = "user", action: str = "edited") -> dict[str, object]:
-        allowed = {"value_text", "importance", "confidence", "user_locked", "expires_at"}
+        allowed = {
+            "value_text", "importance", "confidence", "user_locked", "expires_at",
+            "slot_key", "object_key", "normalization_version", "search_text",
+            "claim_fingerprint", "canonical_text", "subject", "predicate",
+            "cardinality", "temporal_semantics",
+        }
         updates = {key: value for key, value in changes.items() if key in allowed and value is not None}
         if not updates:
             memory = self.get_memory(memory_id)
@@ -1174,11 +1246,13 @@ class TimelineStore:
             before = self._memory_row(row)
             if "value_text" in updates:
                 updates["canonical_text"] = f"{row['subject']} {row['predicate']} {updates['value_text']}"
+                if "search_text" not in updates:
+                    updates["search_text"] = updates["canonical_text"]
             updates["updated_at"] = self._now()
             assignments = ", ".join(f"{key} = ?" for key in updates)
             connection.execute(f"UPDATE memory_items SET {assignments} WHERE id = ?", (*updates.values(), memory_id))
             row = connection.execute("SELECT * FROM memory_items WHERE id = ?", (memory_id,)).fetchone()
-            self._index_memory(connection, memory_id, row["canonical_text"])
+            self._index_memory(connection, memory_id, row["search_text"] or row["canonical_text"])
             after = self._memory_row(row)
             self._audit_memory(connection, memory_id, action, actor, before, after, None, after["source_message_ids"])
             return after
@@ -1196,6 +1270,17 @@ class TimelineStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def reinforce_memory_evidence(
+        self, memory_id: str, source_message_ids: list[str], source_episode_id: str | None,
+        source_quality: float = 1.0,
+    ) -> None:
+        with self._connect() as connection:
+            for message_id in source_message_ids:
+                self._add_evidence(
+                    connection, "fact", memory_id, message_id, source_episode_id,
+                    "user", source_quality, "overlap_reinforcement", None,
+                )
+
     def create_topic(self, values: dict[str, object], *, actor: str = "system") -> dict[str, object]:
         now = self._now()
         topic_id = str(values.get("id") or uuid4().hex)
@@ -1204,10 +1289,11 @@ class TimelineStore:
             raise ValueError("Topic title cannot be empty")
         with self._connect() as connection:
             connection.execute(
-                """INSERT INTO memory_topics (id, relationship_id, title, summary_text, status, user_locked, extractor_version, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO memory_topics (id, relationship_id, title, summary_text, status, user_locked, extractor_version, created_at, updated_at, topic_key)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (topic_id, PRIMARY_RELATIONSHIP_ID, title, summary, values.get("status", "active"),
-                 int(bool(values.get("user_locked", False))), values.get("extractor_version", "manual-v1"), now, now),
+                  int(bool(values.get("user_locked", False))), values.get("extractor_version", "manual-v1"), now, now,
+                  values.get("topic_key")),
             )
             connection.execute("INSERT INTO memory_topic_versions (id, topic_id, version, title, summary_text, reason, created_at) VALUES (?, ?, 1, ?, ?, ?, ?)",
                                (uuid4().hex, topic_id, title, summary, f"created:{actor}", now))
@@ -1232,7 +1318,10 @@ class TimelineStore:
         return self._topic_row(row) if row is not None else None
 
     def update_topic(self, topic_id: str, changes: dict[str, object], *, actor: str = "user") -> dict[str, object]:
-        allowed = {key: value for key, value in changes.items() if key in {"title", "summary_text", "status", "user_locked"} and value is not None}
+        allowed = {
+            key: value for key, value in changes.items()
+            if key in {"title", "summary_text", "status", "user_locked", "topic_key"} and value is not None
+        }
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM memory_topics WHERE id = ?", (topic_id,)).fetchone()
             if row is None:
@@ -1269,9 +1358,9 @@ class TimelineStore:
     def create_commitment(self, values: dict[str, object]) -> dict[str, object]:
         now, commitment_id = self._now(), str(values.get("id") or uuid4().hex)
         with self._connect() as connection:
-            connection.execute("""INSERT INTO memory_commitments (id, relationship_id, kind, title, details, status, importance, confidence, user_locked, due_at, source_episode_id, extractor_version, created_at, updated_at, completed_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                               (commitment_id, PRIMARY_RELATIONSHIP_ID, values.get("kind", "open_loop"), values["title"], values.get("details", ""), values.get("status", "open"), values.get("importance", .6), values.get("confidence", .7), int(bool(values.get("user_locked", False))), values.get("due_at"), values.get("source_episode_id"), values.get("extractor_version", "manual-v1"), now, now, now if values.get("status") == "completed" else None))
+            connection.execute("""INSERT INTO memory_commitments (id, relationship_id, kind, title, details, status, importance, confidence, user_locked, due_at, source_episode_id, extractor_version, created_at, updated_at, completed_at, target_slot)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                               (commitment_id, PRIMARY_RELATIONSHIP_ID, values.get("kind", "open_loop"), values["title"], values.get("details", ""), values.get("status", "open"), values.get("importance", .6), values.get("confidence", .7), int(bool(values.get("user_locked", False))), values.get("due_at"), values.get("source_episode_id"), values.get("extractor_version", "manual-v1"), now, now, now if values.get("status") == "completed" else None, values.get("target_slot")))
             self._index_commitment(connection, commitment_id, f"{values['title']} {values.get('details', '')}")
             for message_id in values.get("source_message_ids", []):
                 self._add_evidence(connection, "commitment", commitment_id, str(message_id), values.get("source_episode_id"), "user", float(values.get("source_quality", 1.0)), "commitment", None)
@@ -1288,7 +1377,7 @@ class TimelineStore:
         return (dict(row) | {"user_locked": bool(row["user_locked"]), "evidence": self.memory_evidence("commitment", commitment_id)}) if row else None
 
     def update_commitment(self, commitment_id: str, changes: dict[str, object]) -> dict[str, object]:
-        allowed = {key: value for key, value in changes.items() if key in {"title", "details", "status", "importance", "confidence", "user_locked", "due_at"} and value is not None}
+        allowed = {key: value for key, value in changes.items() if key in {"title", "details", "status", "importance", "confidence", "user_locked", "due_at", "target_slot"} and value is not None}
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM memory_commitments WHERE id = ?", (commitment_id,)).fetchone()
             if row is None:
@@ -1488,8 +1577,14 @@ class TimelineStore:
     def reindex_memories(self) -> int:
         with self._connect() as connection:
             connection.execute("DELETE FROM memory_fts")
-            rows = connection.execute("SELECT id, canonical_text FROM memory_items WHERE status IN ('candidate', 'active')").fetchall()
-            connection.executemany("INSERT INTO memory_fts (memory_id, text) VALUES (?, ?)", [(row["id"], row["canonical_text"]) for row in rows])
+            rows = connection.execute(
+                """SELECT id, COALESCE(NULLIF(search_text, ''), canonical_text) AS index_text
+                   FROM memory_items WHERE status IN ('candidate', 'active')"""
+            ).fetchall()
+            connection.executemany(
+                "INSERT INTO memory_fts (memory_id, text) VALUES (?, ?)",
+                [(row["id"], row["index_text"]) for row in rows],
+            )
             connection.execute("DELETE FROM memory_topic_fts")
             connection.execute("INSERT INTO memory_topic_fts (topic_id, text) SELECT id, title || ' ' || summary_text FROM memory_topics WHERE status = 'active'")
             connection.execute("DELETE FROM memory_commitment_fts")
@@ -1499,7 +1594,9 @@ class TimelineStore:
     def semantic_index_items(self, namespace: str) -> list[tuple[str, str]]:
         with self._connect() as connection:
             if namespace == "memory":
-                rows = connection.execute("SELECT id, canonical_text FROM memory_items WHERE status = 'active'").fetchall()
+                rows = connection.execute(
+                    "SELECT id, COALESCE(NULLIF(search_text, ''), canonical_text) FROM memory_items WHERE status = 'active'"
+                ).fetchall()
             elif namespace == "episode_summary":
                 rows = connection.execute("SELECT id, summary_text FROM episode_summaries WHERE superseded_at IS NULL").fetchall()
             elif namespace == "topic_memory":
@@ -1544,6 +1641,27 @@ class TimelineStore:
                 """,
                 (PRIMARY_TIMELINE_ID, session_id, session_id, current_sequence, current_sequence, recent_turns * 2),
             ).fetchall()
+            pending_user_rows: list[sqlite3.Row] = []
+            if current_sequence is not None:
+                previous_assistant = connection.execute(
+                    """SELECT MAX(sequence_no) AS sequence_no FROM conversation_messages
+                       WHERE timeline_id = ? AND (? IS NULL OR session_id = ?)
+                         AND role = 'assistant' AND status IN ('completed', 'interrupted')
+                         AND sequence_no < ?""",
+                    (PRIMARY_TIMELINE_ID, session_id, session_id, current_sequence),
+                ).fetchone()
+                lower = int(previous_assistant["sequence_no"] or 0) if previous_assistant else 0
+                pending_user_rows = connection.execute(
+                    """SELECT m.id, m.role, m.content, m.corrected_content, m.input_mode, m.sequence_no,
+                              o.decision_action, o.decision_reason, o.speaker_role, o.addressedness
+                       FROM conversation_messages m
+                       LEFT JOIN conversation_observations o ON o.message_id = m.id
+                       WHERE m.timeline_id = ? AND (? IS NULL OR m.session_id = ?)
+                         AND m.role = 'user' AND m.status = 'completed'
+                         AND m.sequence_no > ? AND m.sequence_no <= ?
+                       ORDER BY m.sequence_no""",
+                    (PRIMARY_TIMELINE_ID, session_id, session_id, lower, current_sequence),
+                ).fetchall()
             terms = self._keywords(user_text)
             if terms:
                 clauses = " OR ".join("s.summary_text LIKE ?" for _ in terms)
@@ -1589,6 +1707,7 @@ class TimelineStore:
             "active_episode_id": active_id or None,
             "causal_upper_bound": current_sequence,
             "recent": [dict(row) for row in reversed(recent)],
+            "pending_user_rows": [dict(row) for row in pending_user_rows],
             "summaries": [dict(row) for row in summaries],
             "rolling_summary": rolling_summary,
             "checkpoint": dict(checkpoint) if checkpoint is not None else None,
@@ -2483,6 +2602,45 @@ class TimelineStore:
         connection.execute(
             """CREATE INDEX IF NOT EXISTS idx_consolidation_runs_status_applied
                ON consolidation_runs(status, applied_at DESC)"""
+        )
+
+    def _apply_v17_canonical_memory_schema(self, connection: sqlite3.Connection) -> None:
+        """Add language-neutral slots and idempotent repair bookkeeping."""
+        memory_columns = {row["name"] for row in connection.execute("PRAGMA table_info(memory_items)")}
+        for name, declaration in {
+            "slot_key": "TEXT",
+            "object_key": "TEXT",
+            "normalization_version": "INTEGER NOT NULL DEFAULT 1",
+            "search_text": "TEXT",
+        }.items():
+            if name not in memory_columns:
+                connection.execute(f"ALTER TABLE memory_items ADD COLUMN {name} {declaration}")
+        topic_columns = {row["name"] for row in connection.execute("PRAGMA table_info(memory_topics)")}
+        if "topic_key" not in topic_columns:
+            connection.execute("ALTER TABLE memory_topics ADD COLUMN topic_key TEXT")
+        commitment_columns = {row["name"] for row in connection.execute("PRAGMA table_info(memory_commitments)")}
+        if "target_slot" not in commitment_columns:
+            connection.execute("ALTER TABLE memory_commitments ADD COLUMN target_slot TEXT")
+        connection.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS idx_memory_items_slot_status
+                ON memory_items(relationship_id, slot_key, status, updated_at);
+            CREATE INDEX IF NOT EXISTS idx_memory_items_object_status
+                ON memory_items(relationship_id, object_key, status, updated_at);
+            CREATE INDEX IF NOT EXISTS idx_memory_topics_key_status
+                ON memory_topics(relationship_id, topic_key, status, updated_at);
+            CREATE TABLE IF NOT EXISTS memory_repair_runs (
+                repair_key TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                result_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                completed_at TEXT
+            );
+            """
+        )
+        connection.execute(
+            """UPDATE memory_items SET search_text = canonical_text
+               WHERE search_text IS NULL OR trim(search_text) = ''"""
         )
 
     @staticmethod

@@ -152,7 +152,11 @@ def list_conflicts(request: Request, status: str | None = None) -> dict[str, obj
 
 @router.get("/diagnostics")
 def memory_diagnostics(request: Request, limit: int = Query(default=20, ge=1, le=100)) -> dict[str, object]:
-    return _service(request).store.memory_diagnostics(limit=limit)
+    service = _service(request)
+    return {
+        **service.store.memory_diagnostics(limit=limit),
+        "index_health": service.semantic_diagnostics(),
+    }
 
 
 @router.get("/retrieval/explain")
@@ -176,7 +180,7 @@ def reindex_memory(request: Request) -> dict[str, object]:
 @router.get("/index/status")
 def index_status(request: Request) -> dict[str, object]:
     service = _service(request)
-    return {"semantic_enabled": service.semantic_enabled, "semantic_degraded_reason": getattr(service, "_semantic_degraded_reason", None), "stale_vector_count": 0}
+    return service.semantic_diagnostics()
 
 
 @router.post("/clear")

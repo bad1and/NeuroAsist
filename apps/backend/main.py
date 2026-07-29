@@ -22,7 +22,7 @@ from apps.backend.app.api.routes.models import router as models_router
 from apps.backend.app.api.routes.maintenance import router as maintenance_router
 from apps.backend.app.api.routes.conversation import router as conversation_router
 from apps.backend.app.api.websocket import router as websocket_router
-from apps.backend.app.core.config import get_settings
+from apps.backend.app.core.config import ROOT_DIR, get_settings
 from apps.backend.app.core.logging import configure_logging
 from apps.backend.app.events.bus import EventBus
 from apps.backend.app.avatar.connection_manager import AvatarConnectionManager
@@ -127,7 +127,21 @@ def create_app() -> FastAPI:
     )
     semantic_mode_enabled = settings.semantic_retrieval_enabled and settings.semantic_retrieval_eval_passed
     if settings.semantic_vector_backend == "chroma":
+        installed_data_dir = (settings.app_data_path / "data").resolve()
+        if settings.database_path.parent.resolve() == installed_data_dir:
+            legacy_removed = ChromaVectorIndex.remove_legacy_storage_if_safe(
+                ROOT_DIR / "data" / "chroma",
+                settings.semantic_chroma_directory,
+            )
+            if legacy_removed:
+                event_bus.publish(
+                    "memory.legacy_index_removed",
+                    "info",
+                    "Obsolete shared Chroma index removed after namespace validation",
+                    {"path": str(ROOT_DIR / "data" / "chroma")},
+                )
         ChromaVectorIndex.clear_pending_reset(settings.semantic_chroma_directory)
+    semantic_init_error: str | None = None
     if timeline_store is not None and semantic_mode_enabled and settings.semantic_embedding_provider in {"hash", "e5"}:
         try:
             embedding_provider = (
@@ -140,11 +154,16 @@ def create_app() -> FastAPI:
             # when a local model is absent or cannot be loaded.
             semantic_mode_enabled = False
             embedding_provider = None
-        if embedding_provider is not None and settings.semantic_vector_backend == "chroma":
-            vector_index = ChromaVectorIndex(settings.semantic_chroma_directory, embedding_provider, timeline_store.semantic_index_items)
-        elif embedding_provider is not None:
-            vector_index = SqliteVecIndex(settings.database_path, embedding_provider, timeline_store.semantic_index_items)
-        else:
+        try:
+            if embedding_provider is not None and settings.semantic_vector_backend == "chroma":
+                vector_index = ChromaVectorIndex(settings.semantic_chroma_directory, embedding_provider, timeline_store.semantic_index_items)
+            elif embedding_provider is not None:
+                vector_index = SqliteVecIndex(settings.database_path, embedding_provider, timeline_store.semantic_index_items)
+            else:
+                vector_index = NullVectorIndex()
+        except Exception as exc:
+            semantic_init_error = f"{type(exc).__name__}: {exc}"[:300]
+            semantic_mode_enabled = False
             vector_index = NullVectorIndex()
     else:
         vector_index = NullVectorIndex()
@@ -188,6 +207,8 @@ def create_app() -> FastAPI:
         event_publisher=event_bus.publish,
         reflection_llm_provider=DeepSeekProvider(settings) if settings.llm_api_key else None,
     ) if timeline_store is not None else None
+    if memory_service is not None and semantic_init_error:
+        memory_service._semantic_degraded_reason = semantic_init_error
     conversation_service = LiveConversationService(
         timeline_store,
         runtime_settings,
@@ -616,6 +637,28 @@ def create_app() -> FastAPI:
                         "Ambiguous relationship memories moved to review",
                         {"count": len(repaired_relationships)},
                     )
+                repair_v17 = memory_service.repair_v17_canonical_memory()
+                event_bus.publish(
+                    "memory.v17_repair",
+                    "info",
+                    "Canonical memory v17 repair checked",
+                    repair_v17,
+                )
+                expired = memory_service.expire_due_memories()
+                if expired:
+                    event_bus.publish(
+                        "memory.temporal_expired",
+                        "info",
+                        "Expired temporal memories archived",
+                        {"count": expired},
+                    )
+                index_repair = await asyncio.to_thread(memory_service.reindex)
+                event_bus.publish(
+                    "memory.index_reconciled",
+                    "info" if index_repair.get("semantic_enabled") else "warning",
+                    "Rebuildable memory index reconciled with SQLite",
+                    index_repair,
+                )
         except Exception:
             logger.critical("Storage initialization failed", exc_info=True)
             event_bus.publish(

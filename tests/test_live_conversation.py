@@ -46,7 +46,7 @@ def test_live_schema_is_additive_and_idempotent(tmp_path: Path) -> None:
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
 
-    assert versions == [(1,), (2,), (3,), (4,), (5,), (6,), (10,), (11,), (12,), (13,), (14,), (15,), (16,)]
+    assert versions == [(1,), (2,), (3,), (4,), (5,), (6,), (10,), (11,), (12,), (13,), (14,), (15,), (16,), (17,)]
     assert {
         "character_state_snapshots",
         "character_state_events",
@@ -90,7 +90,7 @@ def test_schema_v10_repairs_database_with_preexisting_versions(tmp_path: Path) -
             (stored.id,),
         ).fetchone()
 
-    assert versions == set(range(1, 17))
+    assert versions == set(range(1, 18))
     assert {
         "character_state_snapshots",
         "character_state_events",
