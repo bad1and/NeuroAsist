@@ -46,7 +46,7 @@ def test_live_schema_is_additive_and_idempotent(tmp_path: Path) -> None:
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
 
-    assert versions == [(1,), (2,), (3,), (4,), (5,), (6,), (10,), (11,), (12,), (13,)]
+    assert versions == [(1,), (2,), (3,), (4,), (5,), (6,), (10,), (11,), (12,), (13,), (14,), (15,), (16,)]
     assert {
         "character_state_snapshots",
         "character_state_events",
@@ -90,7 +90,7 @@ def test_schema_v10_repairs_database_with_preexisting_versions(tmp_path: Path) -
             (stored.id,),
         ).fetchone()
 
-    assert versions == set(range(1, 14))
+    assert versions == set(range(1, 17))
     assert {
         "character_state_snapshots",
         "character_state_events",
@@ -142,6 +142,20 @@ def test_stt_question_without_punctuation_is_an_implicit_address() -> None:
         ),
     )
     assert decision.action is ConversationAction.RESPOND
+
+
+def test_question_word_is_not_mistaken_for_another_person_vocative() -> None:
+    engine = ConversationDecisionEngine()
+    transcript = "откуда ты знаешь про шины и босса это вообще про что"
+    assert engine.is_addressed_to_other(transcript) is False
+    assert engine.is_implicit_address(transcript) is True
+
+
+def test_discourse_filler_and_stt_iris_alias_remain_direct_addresses() -> None:
+    engine = ConversationDecisionEngine()
+    assert engine.is_implicit_address("кстати ну как меня зовут ты же помнишь") is True
+    assert engine.addressedness("иреск ты помнишь как меня зовут") == 1.0
+    assert engine.is_addressed_to_other("иреск ты помнишь как меня зовут") is False
 
 
 def test_vocative_to_another_person_overrides_implicit_request() -> None:
@@ -442,6 +456,31 @@ async def test_barge_in_commits_only_acknowledged_prefix_as_interrupted(tmp_path
     assert messages[-1].role == "assistant"
     assert messages[-1].content == "Начало ответа."
     assert messages[-1].status == "interrupted"
+
+
+@pytest.mark.anyio
+async def test_visible_generated_reply_is_committed_before_next_user_turn(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "visible-generated.sqlite3")
+    store.init_db()
+    service = LiveConversationService(store, runtime())
+    generation = await service.speech_started("session")
+    observation = await service.ingest_observation(
+        session_id="session",
+        transcript="ирис ответь на это",
+        language="ru",
+        expected_generation=generation,
+    )
+    generated = "Это моя странная шутка про шины и босса, она была мимо."
+    await service.assistant_text_generated(
+        "session", observation.utterance_id, generation, generated,
+    )
+
+    await service.speech_started("session")
+
+    messages, _ = store.list_messages(20)
+    assert messages[-1].role == "assistant"
+    assert messages[-1].content == generated
+    assert messages[-1].status == "completed"
 
 
 def test_group_speaker_estimator_is_conservative() -> None:

@@ -86,19 +86,33 @@ class ConversationDecision(BaseModel):
 class EventAppraisal(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    version: Literal[1] = 1
+    # v1 payloads remain readable so already queued live observations do not
+    # become poison messages during an upgrade.  All new appraisals are v2.
+    version: Literal[1, 2] = 2
     event_kind: Literal[
         "support",
         "apology",
         "insult",
         "teasing",
-        "interruption",
         "praise",
         "disagreement",
-        "promise",
+        "rejection",
+        "promise_made",
+        "broken_promise",
+        "fulfilled_promise",
+        "vulnerability",
+        "affection",
+        "user_frustration",
+        "iris_mistake_corrected",
+        "shared_success",
+        "important_negative_event",
         "important_news",
+        # Kept solely as a v1 compatibility spelling.
+        "promise",
+        "interruption",
         "neutral",
     ] = "neutral"
+    direction: Literal["toward_iris", "from_iris", "external", "unknown"] = "unknown"
     target_participant: str = "primary"
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     intensity: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -107,6 +121,9 @@ class EventAppraisal(BaseModel):
     emotion_impulses: dict[str, float] = Field(default_factory=dict)
     relationship_impulses: dict[str, float] = Field(default_factory=dict)
     cause_message_ids: list[str] = Field(default_factory=list, max_length=5)
+    serious: bool = False
+    stt_uncertain: bool = False
+    addressedness: float = Field(default=1.0, ge=0.0, le=1.0)
 
 
 class ConversationAdjudicationV1(BaseModel):

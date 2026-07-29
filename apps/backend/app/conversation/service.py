@@ -12,6 +12,7 @@ from typing import Awaitable, Callable
 from uuid import uuid4
 
 from apps.backend.app.conversation.adjudicator import StructuredConversationAdjudicator
+from apps.backend.app.conversation.behavior import StateToBehaviorRenderer
 from apps.backend.app.conversation.decision import ConversationDecisionEngine, DecisionContext
 from apps.backend.app.conversation.schemas import (
     ConversationAction,
@@ -23,6 +24,7 @@ from apps.backend.app.conversation.schemas import (
 )
 from apps.backend.app.conversation.speaker import SpeakerRoleEstimator
 from apps.backend.app.conversation.state import AffectState, CharacterStateReducer, ParticipantState
+from apps.backend.app.conversation.state_service import CharacterStateService
 from apps.backend.app.storage.timeline import PRIMARY_RELATIONSHIP_ID, StoredTimelineMessage, TimelineStore
 
 
@@ -129,6 +131,7 @@ class LiveConversationService:
         memory_service=None,
         event_publisher=None,
         llm_provider=None,
+        state_service: CharacterStateService | None = None,
     ) -> None:
         self._store = store
         self._runtime = runtime_settings
@@ -139,6 +142,7 @@ class LiveConversationService:
         self._adjudicator = StructuredConversationAdjudicator(llm_provider)
         self._speaker = SpeakerRoleEstimator()
         self._reducer = CharacterStateReducer()
+        self._state_service = state_service
         self._turn_detector = None
         self._stt_semaphore = asyncio.Semaphore(2)
         self._decision_semaphore = asyncio.Semaphore(4)
@@ -170,17 +174,28 @@ class LiveConversationService:
         async with session.lock:
             if send is not None:
                 session.event_sender = send
-            interrupted = [
-                (
+            interrupted: list[tuple[str, str, int, str]] = []
+            for utterance_id in session.live_utterance_ids:
+                if utterance_id in session.committed_assistant_utterances:
+                    continue
+                generated = session.generated_assistant_replies.get(utterance_id, "").strip()
+                acknowledged = " ".join(
+                    session.acknowledged_prefixes.get(utterance_id, [])
+                ).strip()
+                content = generated or acknowledged
+                if not content:
+                    continue
+                # Generated text was already visible in the chat even when
+                # playback had not started. It is a completed conversational
+                # turn; playback-only prefixes remain interrupted.
+                status = "completed" if generated else "interrupted"
+                interrupted.append((
                     utterance_id,
-                    " ".join(session.acknowledged_prefixes.get(utterance_id, [])).strip(),
+                    content,
                     session.utterance_generations.get(utterance_id, session.generation),
-                )
-                for utterance_id in session.live_utterance_ids
-                if utterance_id not in session.committed_assistant_utterances
-                and session.acknowledged_prefixes.get(utterance_id)
-            ]
-            for utterance_id, _, _ in interrupted:
+                    status,
+                ))
+            for utterance_id, _, _, _ in interrupted:
                 session.committed_assistant_utterances.add(utterance_id)
             session.generation += 1
             session.phase = ConversationPhase.LISTENING
@@ -203,13 +218,13 @@ class LiveConversationService:
                 "cancelled_tasks": cancelled_tasks,
                 "discarded_deferred": discarded_deferred,
             }
-        for utterance_id, prefix, utterance_generation in interrupted:
+        for utterance_id, prefix, utterance_generation, status in interrupted:
             self._commit_assistant(
                 session,
                 utterance_id,
                 prefix,
                 utterance_generation,
-                status="interrupted",
+                status=status,
             )
         if send is not None:
             await send(self._event(session, "conversation.phase", payload={"phase": session.phase.value}))
@@ -506,11 +521,28 @@ class LiveConversationService:
             and speaker_confidence >= 0.7
         )
         if state_applied:
-            session.affect = self._reducer.decay(
-                session.affect,
-                recovery=self._runtime.live_conversation_mood_recovery,
-            )
-            self._reducer.apply_affect(session.affect, appraisal)
+            if self._state_service is not None and message is not None:
+                shared = self._state_service.prepare(
+                    transcript=corrected_content or transcript,
+                    message_id=message.id,
+                    participant_key=appraisal.target_participant,
+                    speaker_role=speaker_role,
+                    speaker_confidence=speaker_confidence,
+                    addressedness=addressedness,
+                    stt_uncertain=stt_uncertain,
+                    serious=appraisal.serious,
+                )
+                session.affect = shared.affect
+                session.participants[appraisal.target_participant] = shared.relationship
+                relationship_delta = {}
+                state_applied = shared.state_applied
+            else:
+                session.affect = self._reducer.decay(
+                    session.affect,
+                    recovery=self._runtime.live_conversation_mood_recovery,
+                )
+                self._reducer.apply_affect(session.affect, appraisal)
+        if state_applied and self._state_service is None:
             participant = session.participants.setdefault(
                 appraisal.target_participant,
                 ParticipantState(
@@ -598,7 +630,7 @@ class LiveConversationService:
 
         if message is not None and not stale:
             self._store.set_observation_decision(message.id, decision.action.value, decision.reason.value)
-            if state_applied:
+            if state_applied and self._state_service is None:
                 self._persist_state(session, appraisal, relationship_delta)
             self._schedule_memory(
                 message,
@@ -1166,12 +1198,9 @@ class LiveConversationService:
             else ""
         )
         return (
-            f"allowed_action={decision.action.value}; emotion={CharacterStateReducer.display_emotion(affect)}; "
-            f"valence={affect.valence:.2f}; arousal={affect.arousal:.2f}; "
-            f"openness={affect.social_openness:.2f}; desire_for_silence={affect.desire_for_silence:.2f}; "
-            f"relationship_warmth={participant.warmth:.2f}; tension={participant.tension:.2f}."
-            f"{prior_reply_context} "
-            "Не проговаривай эти служебные значения."
+            StateToBehaviorRenderer().render(affect, participant).prompt_block(allowed_action=decision.action.value)
+            + prior_reply_context
+            + " Не проговаривай служебную рамку."
         )
 
     @staticmethod

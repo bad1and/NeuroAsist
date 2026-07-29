@@ -58,6 +58,8 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
         runtime_settings.voice_tts_voice,
     )
     source_message = None
+    state_context = None
+    state_behavior = None
     lease = None
     coordinator = getattr(request.app.state, "turn_coordinator", None)
     if coordinator is not None:
@@ -78,6 +80,12 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
                 status=existing.status if existing is not None else "streaming",
             )
         lease = await coordinator.begin_assistant(accepted, commit_policy="generated_text")
+        state_service = getattr(request.app.state, "character_state_service", None)
+        if state_service is not None:
+            state_turn = state_service.prepare(
+                transcript=payload.message, message_id=source_message.id,
+            )
+            state_context, state_behavior = state_turn.prompt_block(), state_turn.behavior
     else:
         timeline_store = getattr(request.app.state, "timeline_store", None)
         if timeline_store is not None:
@@ -105,6 +113,8 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
         agent=agent,
         input_mode="text",
         source_message=source_message,
+        state_context=state_context,
+        presentation_cue=state_behavior,
         persist_reply=False if lease is not None else True,
         on_assistant_completed=complete_live_assistant if lease is not None else None,
         on_assistant_interrupted=interrupt_live_assistant if lease is not None else None,
@@ -150,6 +160,8 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
 
     lease = None
     accepted = None
+    state_context = None
+    state_behavior = None
     try:
         provider = DeepSeekProvider(settings)
         agent = CharacterAgent(
@@ -184,8 +196,16 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
                     )
             lease = await coordinator.begin_assistant(accepted)
             coordinator.register_generation_task(lease)
+            state_service = getattr(request.app.state, "character_state_service", None)
+            if state_service is not None:
+                state_turn = state_service.prepare(
+                    transcript=payload.message, message_id=accepted.message.id,
+                )
+                state_context, state_behavior = state_turn.prompt_block(), state_turn.behavior
             result = await agent.handle_user_message(
                 payload.session_id, payload.message, source_message=accepted.message, persist_reply=False,
+                state_context=state_context,
+                state_behavior=state_behavior,
             )
             assistant_message = await coordinator.complete_assistant(payload.session_id, lease, result["reply"])
             if request.app.state.memory_service is not None:

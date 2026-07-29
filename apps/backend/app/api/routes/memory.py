@@ -150,6 +150,11 @@ def list_conflicts(request: Request, status: str | None = None) -> dict[str, obj
     return {"items": _service(request).store.list_conflicts(status=status)}
 
 
+@router.get("/diagnostics")
+def memory_diagnostics(request: Request, limit: int = Query(default=20, ge=1, le=100)) -> dict[str, object]:
+    return _service(request).store.memory_diagnostics(limit=limit)
+
+
 @router.get("/retrieval/explain")
 def explain_retrieval(request: Request, q: str = Query(min_length=1, max_length=200), limit: int = Query(default=8, ge=1, le=50)) -> dict[str, object]:
     return _service(request).explain_retrieval(q, limit)

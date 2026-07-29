@@ -204,6 +204,31 @@ def test_handle_user_message_retries_unconfirmed_continuity_accusation() -> None
     assert result["reply"] == "Я здесь. Кстати, двадцать больших кружек чая — это уже перебор."
 
 
+def test_status_check_retries_invented_personal_specifics() -> None:
+    provider = SequencedLLMProvider([
+        '{"reply":"Да всё пучком. У тебя как? Шины не пробил, босс не бесит?","emotion":"smirk","intent":"casual_chat"}',
+        '{"reply":"У меня всё спокойно, сижу и слушаю. А у тебя как дела?","emotion":"neutral","intent":"casual_chat"}',
+    ])
+    agent = CharacterAgent(provider, InMemoryHistory(), history_limit=0)
+
+    result = anyio.run(agent.handle_user_message, "s1", "ирис как делишки у тебя рассказывай че как")
+
+    assert provider.calls == 2
+    assert "шины" not in result["reply"].lower()
+    assert result["reply"] == "У меня всё спокойно, сижу и слушаю. А у тебя как дела?"
+
+
+def test_status_check_uses_grounded_fallback_when_retry_invents_again() -> None:
+    invented = '{"reply":"Я норм. У тебя как? Босс опять бесит?","emotion":"smirk","intent":"casual_chat"}'
+    provider = SequencedLLMProvider([invented, invented])
+    agent = CharacterAgent(provider, InMemoryHistory(), history_limit=0)
+
+    result = anyio.run(agent.handle_user_message, "s1", "ирис че как")
+
+    assert provider.calls == 2
+    assert result["reply"] == "У меня всё нормально, я здесь и слушаю. А у тебя как дела?"
+
+
 def test_handle_user_message_retries_false_attribution_of_its_own_joke() -> None:
     previous = (
         "Идёт ёжик по лесу, видит — дом горит. Заходит, а там сидят три скелета "

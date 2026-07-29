@@ -15,6 +15,8 @@ import type {
   MemoryTopic,
   MemoryCommitment,
   ConversationDebug,
+  CharacterStateView,
+  CharacterStateEvent,
 } from "./types";
 
 const DESKTOP_RUNTIME =
@@ -123,6 +125,15 @@ export function getConversationDebug(sessionId: string): Promise<ConversationDeb
     `/conversation/debug/${encodeURIComponent(sessionId)}`,
   );
 }
+
+export function getCharacterState(): Promise<CharacterStateView> { return requestJson("/conversation/state"); }
+export function getCharacterStateEvents(): Promise<{ events: CharacterStateEvent[] }> { return requestJson("/conversation/state/events"); }
+export function resetCharacterState(scope: "mood" | "relationship"): Promise<CharacterStateView> { return requestJson("/conversation/state/reset", { method: "POST", body: JSON.stringify({ scope }) }); }
+export function getCharacterReflections(): Promise<{ reflections: import("./types").CharacterReflection[] }> { return requestJson("/conversation/state/reflections"); }
+export function deleteCharacterReflection(id: string): Promise<{ deleted: boolean }> { return requestJson(`/conversation/state/reflections/${encodeURIComponent(id)}`, { method: "DELETE" }); }
+export type ReflectionSettings = { enabled: boolean; min_significance: number };
+export function getReflectionSettings(): Promise<ReflectionSettings> { return requestJson("/conversation/state/reflections/settings"); }
+export function updateReflectionSettings(payload: ReflectionSettings): Promise<ReflectionSettings> { return requestJson("/conversation/state/reflections/settings", { method: "PATCH", body: JSON.stringify(payload) }); }
 
 export function resetConversationSession(): Promise<{ session_id: string; messages: number; episodes: number }> {
   return requestJson("/conversation/session/reset", { method: "POST" });
@@ -378,6 +389,10 @@ export function closeMemoryCommitment(id: string): Promise<{ commitment: MemoryC
 
 export function getMemoryConflicts(): Promise<{ items: Array<{ id: string; reason: string; status: string }> }> {
   return requestJson("/memory/conflicts");
+}
+
+export function getMemoryDiagnostics(): Promise<import("./types").MemoryDiagnostics> {
+  return requestJson("/memory/diagnostics");
 }
 
 export function getMemoryProfile(): Promise<{ facts: MemoryItem[]; topics: MemoryTopic[]; commitments: MemoryCommitment[] }> {

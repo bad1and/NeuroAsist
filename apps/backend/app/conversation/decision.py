@@ -39,7 +39,9 @@ class ConversationDecisionEngine:
     reducer remains the authority and always has a conservative local fallback.
     """
 
-    _name = re.compile(r"(?iu)(?:^|[\s,!.?—-])(?:iris|ирис|ириска)(?:$|[\s,!.?—-])")
+    _name = re.compile(
+        r"(?iu)(?:^|[\s,!.?—-])(?:iris|айрис|ирис|ириска|ириск|ирес|иреск)(?:$|[\s,!.?—-])"
+    )
     _invitation = re.compile(
         r"(?iu)\b(?:что думаешь|как считаешь|тво[её] мнение|скажи|ответь|прокомментируй|а ты)\b"
     )
@@ -47,8 +49,9 @@ class ConversationDecisionEngine:
         r"(?iu)(?:"
         r"\b(?:можешь|могла\s+бы|подскажи|расскажи|объясни|покажи|скинь|пришли|"
         r"дай|помоги|посоветуй|найди|открой|включи|выключи)\b|"
-        r"^\s*(?:а\s+)?(?:что|кто|где|куда|откуда|когда|почему|зачем|как|"
-        r"какой|какая|какие|сколько|чем)\b"
+        r"^\s*(?:(?:а|ну|кстати|слушай|смотри|короче)\s+){0,3}"
+        r"(?:что|кто|где|куда|откуда|когда|почему|зачем|как|"
+        r"какой|какая|какие|сколько|чем)(?=\s|[?？])"
         r")"
     )
     _self_talk = re.compile(r"(?iu)\b(?:думаю вслух|сам с собой|не обращай внимания)\b")
@@ -69,8 +72,10 @@ class ConversationDecisionEngine:
         r"давай|давайте|привет|пока)\b"
     )
     _non_names = {
-        "iris", "ирис", "ириска", "а", "ну", "так", "да", "нет", "блин",
-        "слушай", "смотри", "кстати", "короче",
+        "iris", "айрис", "ирис", "ириска", "ириск", "ирес", "иреск",
+        "а", "ну", "так", "да", "нет", "блин", "слушай", "смотри", "кстати",
+        "короче", "что", "кто", "где", "куда", "откуда", "когда", "почему",
+        "зачем", "как", "какой", "какая", "какие", "сколько", "чем",
     }
 
     def decide(
@@ -238,13 +243,46 @@ class ConversationDecisionEngine:
         return bool(match and match.group("name").casefold() not in self._non_names)
 
     @staticmethod
-    def appraise(transcript: str, message_id: str, participant: str = "primary") -> EventAppraisal:
+    def appraise(
+        transcript: str,
+        message_id: str,
+        participant: str = "primary",
+        previous_assistant_text: str | None = None,
+    ) -> EventAppraisal:
         text = transcript.casefold()
+        affection = bool(re.search(r"\b(?:я\s+)?тебя\s+люблю\b|\bлюблю\s+тебя\b|\bобнимаю\s+тебя\b", text))
+        if affection:
+            return EventAppraisal(
+                event_kind="affection", confidence=.92,
+                intensity=min(1.0, 0.45 + len(text) / 500), valence=.55, arousal=.55,
+                direction="toward_iris", target_participant=participant,
+                emotion_impulses={"joy": .35, "playfulness": .12},
+                relationship_impulses={"warmth": .25}, cause_message_ids=[message_id],
+            )
+        correction = re.search(r"\bне\s+([\w.ё-]+)\s*,?\s+а\s+([\w.ё-]+)\b", text)
+        if correction and previous_assistant_text:
+            old_value = correction.group(1).strip(".").casefold()
+            if old_value and old_value in previous_assistant_text.casefold():
+                return EventAppraisal(
+                    event_kind="iris_mistake_corrected", confidence=.93, intensity=.58,
+                    valence=-.12, arousal=.35, direction="toward_iris",
+                    target_participant=participant,
+                    emotion_impulses={"embarrassment": .35, "interest": .18},
+                    relationship_impulses={"tension": -.03}, cause_message_ids=[message_id],
+                )
         mappings = (
-            (("извини", "прости"), "apology", 0.55, {"hurt": -0.45, "irritation": -0.35}, {"trust": 0.25, "tension": -0.35}),
-            (("спасибо", "молодец", "умница"), "praise", 0.45, {"joy": 0.5}, {"warmth": 0.3}),
-            (("ненавижу", "дура", "тупая", "заткнись"), "insult", -0.75, {"hurt": 0.7, "irritation": 0.45}, {"trust": -0.35, "tension": 0.5}),
-            (("обещаю",), "promise", 0.35, {"interest": 0.35}, {"trust": 0.15}),
+            (("помогу", "я рядом", "держись"), "support", .32, {"joy": .16, "interest": .18}, {"warmth": .14}),
+            (("извини", "прости", "виноват"), "apology", .55, {"hurt": -.45, "irritation": -.35}, {"tension": -.35}),
+            (("спасибо", "молодец", "умница", "классно"), "praise", .45, {"joy": .5}, {"warmth": .3}),
+            (("ненавижу", "дура", "тупая", "заткнись"), "insult", -.75, {"hurt": .7, "irritation": .45}, {"trust": -.35, "tension": .5}),
+            (("обещаю",), "promise_made", .35, {"interest": .35}, {"trust": .15}),
+            (("не выполнил", "не сдержал обещание"), "broken_promise", -.65, {"hurt": .55, "anxiety": .25}, {"trust": -.4, "tension": .35}),
+            (("сделал", "получилось", "закончили"), "shared_success", .55, {"joy": .55, "energy": .2}, {"warmth": .16}),
+            (("боюсь", "мне плохо", "тяжело"), "vulnerability", -.25, {"anxiety": .18, "interest": .2}, {"warmth": .12}),
+            (("ты ошиблась", "ты не про того", "не это"), "iris_mistake_corrected", -.12, {"embarrassment": .35, "interest": .18}, {"tension": -.03}),
+            (("не согласен", "неправильно"), "disagreement", -.15, {"irritation": .08, "interest": .16}, {}),
+            (("отстань", "не хочу с тобой"), "rejection", -.55, {"hurt": .4}, {"warmth": -.2, "tension": .2}),
+            (("бесит эта", "ненавижу эту", "достало это"), "user_frustration", -.18, {"anxiety": .08, "interest": .14}, {"warmth": .04}),
         )
         for needles, kind, valence, emotions, relations in mappings:
             if any(needle in text for needle in needles):
@@ -254,6 +292,7 @@ class ConversationDecisionEngine:
                     intensity=min(1.0, 0.45 + len(text) / 500),
                     valence=valence,
                     arousal=abs(valence),
+                    direction="toward_iris",
                     target_participant=participant,
                     emotion_impulses=emotions,
                     relationship_impulses=relations,
@@ -264,6 +303,7 @@ class ConversationDecisionEngine:
             confidence=0.7,
             intensity=0.1,
             target_participant=participant,
+            direction="unknown",
             cause_message_ids=[message_id],
         )
 

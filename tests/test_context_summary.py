@@ -160,6 +160,77 @@ def test_name_only_followup_revives_primary_observation_but_not_ambient_speech(t
     assert context.diagnostics["pending_direct_message_count"] == 1
 
 
+def test_context_recovers_question_word_and_stt_iris_alias_from_false_ambient_labels(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "recover-direct.sqlite3")
+    store.init_db()
+    opening, _ = store.append_message(role="user", content="ирис как дела", input_mode="voice")
+    store.append_message(
+        role="assistant", content="У меня нормально. Шины не пробил, босс не бесит?",
+        input_mode="voice", reply_to_message_id=opening.id,
+    )
+    texts = [
+        ("откуда ты знаешь про шины и босса это вообще про что", "other_person"),
+        ("кстати ну как меня зовут ты же помнишь", "relevant_opening"),
+        ("иреск ты помнишь как меня зовут", "other_person"),
+    ]
+    for index, (text, reason) in enumerate(texts):
+        message, _ = store.append_message(role="user", content=text, input_mode="voice")
+        store.save_conversation_observation(
+            message_id=message.id, session_id="live", turn_id=message.turn_id or f"turn-{index}",
+            utterance_id=f"utterance-{index}", generation=1, speaker_role="primary",
+            speaker_confidence=.9, addressedness=.08, addressed_confidence=.65,
+            end_of_turn_confidence=1.0, significance=.3, metadata={},
+        )
+        store.set_observation_decision(message.id, "observe", reason)
+    current, _ = store.append_message(role="user", content="ирис", input_mode="voice")
+
+    context = ContextManager(store, max_tokens=1000, recent_turns=8).build(
+        current.content, current_message_id=current.id,
+    )
+
+    direct_text = "\n".join(item.content for item in context.messages if item.role == "user")
+    assert "откуда ты знаешь" in direct_text
+    assert "иреск ты помнишь" in direct_text
+    ambient_blocks = [
+        item.content for item in context.messages
+        if item.role == "system" and "фоновые наблюдения" in item.content
+    ]
+    assert not ambient_blocks
+    pending = [
+        item.content for item in context.messages
+        if item.role == "system" and "неотвеченной мысли" in item.content
+    ]
+    assert len(pending) == 1
+    assert "как меня зовут" in pending[0]
+    assert context.diagnostics["pending_direct_message_count"] == 2
+
+
+def test_interrupted_assistant_prefix_remains_in_recent_conversation_context(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "interrupted-assistant.sqlite3")
+    store.init_db()
+    user, _ = store.append_message(role="user", content="ирис как дела", input_mode="voice")
+    interrupted, _ = store.append_message(
+        role="assistant",
+        content="Да всё нормально. Шины не пробил, босс не бесит?",
+        input_mode="voice",
+        status="interrupted",
+        reply_to_message_id=user.id,
+    )
+    current, _ = store.append_message(
+        role="user",
+        content="откуда ты знаешь про шины и босса это вообще про что",
+        input_mode="voice",
+    )
+
+    context = ContextManager(store, max_tokens=800, recent_turns=8).build(
+        current.content, current_message_id=current.id,
+    )
+
+    assistant_messages = [item.content for item in context.messages if item.role == "assistant"]
+    assert interrupted.content in assistant_messages
+    assert context.diagnostics["previous_assistant_message_id"] == interrupted.id
+
+
 def test_live_context_keeps_overheard_speech_out_of_direct_dialogue(tmp_path: Path) -> None:
     store = TimelineStore(tmp_path / "ambient-context.sqlite3")
     store.init_db()

@@ -3,10 +3,10 @@ import { Archive, Brain, Check, CheckCircle2, CircleHelp, ClipboardCheck, ListCh
 
 import {
   confirmMemory, createMemory, deleteMemory, getMemories, getMemoryAudit,
-  closeMemoryCommitment, getMemoryCommitments, getMemoryConflicts, getMemoryTopics,
+  closeMemoryCommitment, getMemoryCommitments, getMemoryConflicts, getMemoryDiagnostics, getMemoryTopics,
   rejectMemory, restoreMemory, updateMemory,
 } from "./api";
-import type { MemoryAuditItem, MemoryCommitment, MemoryItem, MemoryStatus, MemoryTopic } from "./types";
+import type { MemoryAuditItem, MemoryCommitment, MemoryDiagnostics, MemoryItem, MemoryStatus, MemoryTopic } from "./types";
 import { AppDialog } from "./components/AppDialog";
 
 type MemorySection = "all" | "active" | "topics" | "commitments" | "candidate" | "archive" | "diagnostics";
@@ -30,6 +30,7 @@ export function MemoryPage() {
   const [topics, setTopics] = useState<MemoryTopic[]>([]);
   const [commitments, setCommitments] = useState<MemoryCommitment[]>([]);
   const [conflicts, setConflicts] = useState<Array<{ id: string; reason: string; status: string }>>([]);
+  const [diagnostics, setDiagnostics] = useState<MemoryDiagnostics>({ queue: {}, runs: [] });
   const [section, setSection] = useState<MemorySection>("all");
   const [query, setQuery] = useState("");
   const [audit, setAudit] = useState<Record<string, MemoryAuditItem[]>>({});
@@ -46,7 +47,10 @@ export function MemoryPage() {
     try {
       if (section === "topics") { setTopics((await getMemoryTopics()).items); setMessage(null); return; }
       if (section === "commitments") { setCommitments((await getMemoryCommitments()).items); setMessage(null); return; }
-      if (section === "diagnostics") { setConflicts((await getMemoryConflicts()).items); setMessage(null); return; }
+      if (section === "diagnostics") {
+        const [conflictData, diagnosticData] = await Promise.all([getMemoryConflicts(), getMemoryDiagnostics()]);
+        setConflicts(conflictData.items); setDiagnostics(diagnosticData); setMessage(null); return;
+      }
       const result = await getMemories(section === "all" || section === "archive" ? undefined : section, query || undefined);
       setItems(
         section === "archive"
@@ -111,7 +115,11 @@ export function MemoryPage() {
     <div className="memory-list">
       {section === "topics" && topics.map((topic) => <article className="memory-card" key={topic.id}><div className="memory-card-main"><div className="memory-card-heading"><span className="memory-status active">{topic.status}</span>{topic.user_locked && <Pin size={14} />}</div><strong>{topic.title}</strong><p>{topic.summary_text || "Краткое описание ещё не сформировано."}</p><small>Связи: {topic.links.length} · доказательства: {topic.evidence.length}</small></div></article>)}
       {section === "commitments" && commitments.map((commitment) => <article className="memory-card" key={commitment.id}><div className="memory-card-main"><div className="memory-card-heading"><span className={`memory-status ${commitment.status === "open" ? "candidate" : "active"}`}>{commitment.status}</span></div><strong>{commitment.title}</strong><p>{commitment.details}</p><small>{commitment.kind} · уверенность: {Math.round(commitment.confidence * 100)}%</small></div>{commitment.status === "open" && <div className="memory-actions"><button className="primary-button" onClick={() => void action(() => closeMemoryCommitment(commitment.id))}><Check size={16} />Закрыть</button></div>}</article>)}
-      {section === "diagnostics" && <>{conflicts.map((conflict) => <article className="memory-card" key={conflict.id}><div className="memory-card-main"><strong>Конфликт: {conflict.status}</strong><p>{conflict.reason}</p></div></article>)}{!conflicts.length && <div className="empty-state"><CircleHelp size={28} /><strong>Открытых конфликтов нет</strong><span>Здесь появятся записи, требующие проверки.</span></div>}</>}
+      {section === "diagnostics" && <>
+        {diagnostics.runs.map((run) => <article className="memory-card" key={run.id}><div className="memory-card-main"><div className="memory-card-heading"><span className={`memory-status ${run.result.outcome === "applied" ? "active" : "candidate"}`}>{run.result.outcome ?? run.status}</span></div><strong>Консолидация памяти</strong><p>Предложено: {run.result.proposed ?? 0} · сохранено: {run.result.saved ?? 0} · отклонено: {run.result.discarded ?? 0}</p><small>{run.diagnostics.error_codes?.length ? `Причина: ${run.diagnostics.error_codes.join(", ")}` : "Ошибок нет"} · {run.diagnostics.model ?? "локальный путь"}</small></div></article>)}
+        {conflicts.map((conflict) => <article className="memory-card" key={conflict.id}><div className="memory-card-main"><strong>Конфликт: {conflict.status}</strong><p>{conflict.reason}</p></div></article>)}
+        {!diagnostics.runs.length && !conflicts.length && <div className="empty-state"><CircleHelp size={28} /><strong>Диагностических записей пока нет</strong><span>Здесь появятся результаты фоновой консолидации и понятные причины нулевой записи.</span></div>}
+      </>}
       {!(["topics", "commitments", "diagnostics"] as MemorySection[]).includes(section) && <>
       {items.length ? items.map((memory) => <article className="memory-card" key={memory.id}>
         <div className="memory-card-main"><div className="memory-card-heading"><span className={`memory-status ${memory.status}`}>{STATUS_LABELS[memory.status]}</span>{memory.user_locked && <Pin size={14} aria-label="Закреплённая запись" />}</div><strong>{memory.predicate}</strong><p>{memory.value_text}</p><small>{memory.source_message_ids.length ? `Источник: ${memory.source_message_ids.length} сообщ.` : "Источник не указан"} · использовано: {memory.access_count}</small></div>
