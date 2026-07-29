@@ -93,7 +93,7 @@ async def voice_chat(
             {"session_id": session_id},
         )
         stt_result = await asyncio.wait_for(
-            voice_service.stt_provider.transcribe(upload_path, selected_language),
+            voice_service.transcribe_path(upload_path, selected_language),
             timeout=settings.voice_stt_timeout_seconds,
         )
         if not stt_result.text:
@@ -135,7 +135,9 @@ async def voice_chat(
         if coordinator is not None:
             try:
                 accepted = await coordinator.accept_user_turn(
-                    session_id=session_id, content=stt_result.text, input_mode="voice",
+                    session_id=session_id,
+                    content=stt_result.raw_text or stt_result.text,
+                    input_mode="voice",
                     client_message_id=client_message_id, utterance_id=utterance_id, language=stt_result.language,
                 )
             except ValueError as exc:
@@ -152,6 +154,8 @@ async def voice_chat(
                 return VoiceLiveResponse(
                     session_id=session_id, utterance_id=utterance_id, voice_request_id=voice_request_id,
                     transcript=stt_result.text, message_id=accepted.user_message_id, turn_id=accepted.turn_id,
+                    raw_transcript=stt_result.raw_text,
+                    corrections=list(stt_result.corrections),
                     status=existing.status if existing is not None else "streaming",
                 )
             live_lease = await coordinator.begin_assistant(accepted, commit_policy="generated_text") if accepted is not None else None
@@ -189,6 +193,9 @@ async def voice_chat(
                 persist_reply=False if live_lease is not None else None,
                 on_assistant_completed=complete_live_assistant if live_lease is not None else None,
                 on_assistant_interrupted=interrupt_live_assistant if live_lease is not None else None,
+                raw_transcript=stt_result.raw_text,
+                transcript_corrections=stt_result.corrections,
+                playback_rate=request.app.state.runtime_settings.voice_playback_rate,
             )
             if live_lease is not None:
                 coordinator.register_generation_task(live_lease, task)
@@ -209,6 +216,8 @@ async def voice_chat(
                 utterance_id=utterance_id,
                 voice_request_id=voice_request_id,
                 transcript=stt_result.text,
+                raw_transcript=stt_result.raw_text,
+                corrections=list(stt_result.corrections),
             )
         event_bus.publish(
             "chat.started",
@@ -238,6 +247,8 @@ async def voice_chat(
                         session_id, stt_result.text, input_mode="voice",
                         source_message=accepted.message, persist_reply=False, state_context=state_context,
                         state_behavior=state_behavior,
+                        raw_user_text=stt_result.raw_text,
+                        voice_corrections=stt_result.corrections,
                     ),
                     timeout=settings.voice_llm_timeout_seconds,
                 )
@@ -246,7 +257,13 @@ async def voice_chat(
                     request.app.state.memory_service.schedule_extraction(assistant_message)
         else:
             result = await asyncio.wait_for(
-                agent.handle_user_message(session_id, stt_result.text, input_mode="voice"),
+                agent.handle_user_message(
+                    session_id,
+                    stt_result.text,
+                    input_mode="voice",
+                    raw_user_text=stt_result.raw_text,
+                    voice_corrections=stt_result.corrections,
+                ),
                 timeout=settings.voice_llm_timeout_seconds,
             )
         result["memory_updates"] = agent.last_memory_updates
@@ -261,6 +278,8 @@ async def voice_chat(
                 emotion=result["emotion"], intent=result["intent"],
                 gesture=result.get("gesture", "auto"), voice=voice,
                 style=resolve_turn_voice_style(getattr(request.app.state, "voice_tts_style", "auto"), agent.last_turn),
+                delivery=agent.last_turn.delivery if agent.last_turn is not None else None,
+                playback_rate=request.app.state.runtime_settings.voice_playback_rate,
             )
         elif not result["reply"].strip():
             tts_status = "skipped"
@@ -358,6 +377,8 @@ async def voice_chat(
     return VoiceChatResponse(
         voice_request_id=voice_request_id,
         transcript=stt_result.text,
+        raw_transcript=stt_result.raw_text,
+        corrections=list(stt_result.corrections),
         reply=result["reply"],
         emotion=result["emotion"],
         intent=result["intent"],

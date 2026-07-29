@@ -271,6 +271,9 @@ ceiling. The editable pronunciation dictionary is created at
 |---|---|
 | `VOICE_LIVE_QUEUE_SIZE` | Internal live-response queue size. |
 | `VOICE_LIVE_IDLE_FLUSH_MS` | Flush delay for the last partial live segment. |
+| `VOICE_LIVE_FIRST_IDLE_FLUSH_MS` | First speakable-fragment idle flush; default `180` ms. |
+| `VOICE_LIVE_NEXT_IDLE_FLUSH_MS` | Following-fragment idle flush; default `350` ms. |
+| `VOICE_LIVE_PLAYBACK_START_LEAD_MS` | Browser scheduling lead for backend audio; default `30` ms. |
 | `VOICE_LIVE_FIRST_SEGMENT_CHARS` | Target size for the first live TTS segment. |
 | `VOICE_LIVE_NEXT_SEGMENT_CHARS` | Target size for following live TTS segments. |
 | `VOICE_LIVE_MAX_SEGMENT_CHARS` | Hard character limit for one live TTS segment. |
@@ -283,8 +286,16 @@ ceiling. The editable pronunciation dictionary is created at
 | `VOICE_LIVE_PLAYBACK_PREBUFFER_SEGMENTS` | Number of decoded live audio segments buffered before playback starts. Runtime-editable in Settings. |
 | `VOICE_LIVE_PLAYBACK_PREBUFFER_MS` | Additional live playback prebuffer delay in milliseconds. Runtime-editable in Settings. |
 | `VOICE_VAD_PROVIDER` | Live PCM input VAD provider: `silero` (with safe energy fallback) or `energy`. |
-| `VOICE_SILERO_VAD_MODEL_PATH` | Optional local 16 kHz Silero TorchScript model. It is never downloaded implicitly. |
+| `VOICE_SILERO_VAD_MODEL_PATH` | Optional local 16 kHz Silero TorchScript override. If loading fails, packaged `silero-vad==6.2.1` is tried before energy fallback. |
+| `VOICE_SILERO_VAD_START_THRESHOLD` / `VOICE_SILERO_VAD_END_THRESHOLD` | Silero streaming start/end probabilities. Defaults: `0.55` / `0.35`. |
+| `VOICE_ENERGY_VAD_START_RMS` / `VOICE_ENERGY_VAD_END_RMS` | RMS thresholds used only by explicit/runtime energy fallback. Defaults: `0.018` / `0.012`. |
 | `VOICE_VAD_PRE_ROLL_MS` | RAM-only PCM ring-buffer duration preserved before detected speech. |
+| `VOICE_VAD_POST_ROLL_MS` | Silence retained after speech. Only this tail, not all endpoint silence, is sent to STT. |
+| `VOICE_VAD_END_SILENCE_MS` / `VOICE_VAD_LIVE_END_SILENCE_MS` | Hands-free and SmartTurn-backed live endpoint delays. |
+| `VOICE_VAD_LIVE_FALLBACK_END_SILENCE_MS` | Conservative live delay when SmartTurn is unavailable. |
+| `VOICE_TORCH_CPU_THREADS` / `VOICE_TORCH_INTEROP_THREADS` | Process-wide PyTorch threading, configured before STT/VAD/TTS model loading. Defaults: `4` / `1`. |
+| `VOICE_STT_TERMS_PATH` | Optional exact-alias STT dictionary path. Defaults to private app data `stt-terms.json`. |
+| `VOICE_INPUT_DIAGNOSTIC_AUDIO` | Persist canonical diagnostic WAV+JSON in the private diagnostics directory. Disabled by default. |
 
 #### Unity avatar bridge
 
@@ -499,6 +510,19 @@ python scripts/benchmark_tts.py --provider silero --device cuda --runs 5
 ```
 
 The benchmark writes results to `data/tts_benchmark.json` and reports P50/P95 synthesis time and real-time factor.
+
+For STT, open Settings → Voice → “Collect private STT corpus”. The guided
+capture uses the same `BrowserVadRecorder`, keeps recordings in browser
+IndexedDB, and exports WAV files plus a manifest. Then run:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/benchmark_stt.py baseline --manifest path\to\stt-manifest.json --output data\stt-baseline.json --streaming-replay
+.\.venv\Scripts\python.exe scripts/benchmark_stt.py candidate --manifest path\to\stt-manifest.json --output data\stt-candidate.json --streaming-replay
+.\.venv\Scripts\python.exe scripts/benchmark_stt.py compare --baseline data\stt-baseline.json --candidate data\stt-candidate.json --output data\stt-compare.json
+```
+
+Use the `threads` action to benchmark 1/2/4/8 PyTorch threads in isolated
+subprocesses. Recordings and diagnostic audio are private and ignored by Git.
 
 ## Troubleshooting
 

@@ -78,9 +78,46 @@
           "minimum": 0.0,
           "title": "Emphasis",
           "type": "number"
+        },
+        "overrides": {
+          "items": {
+            "$ref": "#/$defs/DeliveryOverride"
+          },
+          "maxItems": 3,
+          "title": "Overrides",
+          "type": "array"
         }
       },
       "title": "DeliveryCue",
+      "type": "object"
+    },
+    "DeliveryOverride": {
+      "additionalProperties": false,
+      "description": "Restrained delivery change for one 1-based spoken sentence.",
+      "properties": {
+        "segment": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Segment",
+          "type": "integer"
+        },
+        "pace": {
+          "default": "normal",
+          "pattern": "^(slow|normal|fast)$",
+          "title": "Pace",
+          "type": "string"
+        },
+        "emphasis": {
+          "default": "none",
+          "pattern": "^(none|light)$",
+          "title": "Emphasis",
+          "type": "string"
+        }
+      },
+      "required": [
+        "segment"
+      ],
+      "title": "DeliveryOverride",
       "type": "object"
     },
     "Emotion": {

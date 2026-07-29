@@ -88,6 +88,38 @@ async def websocket_voice(websocket: WebSocket, session_id: str, version: int = 
                     message.get("utterance_id"),
                     message.get("underrun_ms"),
                 )
+                websocket.app.state.event_bus.publish(
+                    "voice.playback_underrun",
+                    "warning",
+                    "Live playback underrun",
+                    {
+                        "session_id": session_id,
+                        "utterance_id": message.get("utterance_id"),
+                        "underrun_ms": message.get("underrun_ms"),
+                    },
+                )
+            elif message.get("type") == "playback.segment.decoded":
+                websocket.app.state.event_bus.publish(
+                    "voice.playback_segment_decoded",
+                    "info",
+                    "Live playback segment decoded",
+                    {
+                        "session_id": session_id,
+                        "utterance_id": message.get("utterance_id"),
+                        "segment_id": message.get("segment_id"),
+                        "decode_ms": message.get("decode_ms"),
+                    },
+                )
+            elif message.get("type") == "playback.started":
+                websocket.app.state.event_bus.publish(
+                    "voice.playback_started",
+                    "info",
+                    "Live playback started",
+                    {
+                        "session_id": session_id,
+                        "utterance_id": message.get("utterance_id"),
+                    },
+                )
             elif message.get("type") == "playback.segment.started":
                 service = getattr(websocket.app.state, "conversation_service", None)
                 if service is not None:
@@ -145,8 +177,20 @@ async def websocket_voice_input(websocket: WebSocket, session_id: str, version: 
                     channels=int(payload.get("channels", 1)),
                     language=str(payload.get("language", "ru")),
                     mode=str(payload.get("mode", "hands_free")),
+                    audio_format=str(payload.get("format", "pcm_s16le")),
+                    capture_profile=str(payload.get("capture_profile", "balanced")),
+                    capture_settings=payload.get("capture_settings")
+                    if isinstance(payload.get("capture_settings"), dict)
+                    else {},
+                    capture_constraints=payload.get("capture_constraints")
+                    if isinstance(payload.get("capture_constraints"), dict)
+                    else {},
+                    capture_supported_constraints=payload.get("supported_constraints")
+                    if isinstance(payload.get("supported_constraints"), dict)
+                    else {},
                 )
             elif payload.get("type") == "voice.input.stop":
+                await manager.stop(session_id)
                 break
     except (WebSocketDisconnect, RuntimeError, json.JSONDecodeError, ValueError) as exc:
         if not isinstance(exc, WebSocketDisconnect):

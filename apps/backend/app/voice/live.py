@@ -21,6 +21,14 @@ from apps.backend.app.voice.text import TextChunker, TextNormalizer
 from apps.backend.app.voice.directives import (
     AvatarDirective, LiveDirectiveParser, clean_live_reply, make_live_directive_expressive,
 )
+from apps.backend.app.voice.delivery import (
+    LiveVoiceDirectiveParser,
+    SpeechPace,
+    SpeechSegment,
+    VoiceDirective,
+    coerce_speech_pace,
+    make_speech_segment,
+)
 from apps.backend.app.voice.style import VoiceStyle, coerce_voice_style, resolve_voice_style
 
 logger = logging.getLogger(__name__)
@@ -56,13 +64,15 @@ class UtteranceContext:
     audio_started: bool = False
     text_completed: bool = False
     voice_style: VoiceStyle = VoiceStyle.AUTO
+    base_pace: SpeechPace = SpeechPace.NORMAL
+    playback_rate: float = 1.0
     started_at: float = field(default_factory=time.perf_counter)
 
 
 @dataclass
 class TTSJob:
     index: int
-    text: str
+    segment: SpeechSegment
     queue: asyncio.Queue
     task: asyncio.Task
 
@@ -79,6 +89,8 @@ class VoiceSessionManager:
         tts_timeout: float = 20,
         retry_count: int = 0,
         idle_flush_ms: int = 500,
+        first_idle_flush_ms: int | None = None,
+        next_idle_flush_ms: int | None = None,
         first_segment_chars: int = 40,
         next_segment_chars: int = 75,
         max_segment_chars: int = 110,
@@ -94,7 +106,12 @@ class VoiceSessionManager:
         self._queue_size = queue_size
         self._tts_timeout = tts_timeout
         self._retry_count = retry_count
-        self._idle_flush_seconds = idle_flush_ms / 1000
+        self._first_idle_flush_seconds = (
+            first_idle_flush_ms if first_idle_flush_ms is not None else idle_flush_ms
+        ) / 1000
+        self._next_idle_flush_seconds = (
+            next_idle_flush_ms if next_idle_flush_ms is not None else idle_flush_ms
+        ) / 1000
         self._chunker_options = {
             "first_target": first_segment_chars,
             "next_target": next_segment_chars,
@@ -158,6 +175,9 @@ class VoiceSessionManager:
         persist_reply: bool | None = None,
         on_assistant_completed: AssistantTerminalHandler | None = None,
         on_assistant_interrupted: AssistantTerminalHandler | None = None,
+        raw_transcript: str | None = None,
+        transcript_corrections: tuple[dict[str, object], ...] = (),
+        playback_rate: float = 1.0,
     ) -> asyncio.Task[None]:
         if not self.connected(session_id):
             raise RuntimeError("Voice WebSocket is not connected")
@@ -167,12 +187,15 @@ class VoiceSessionManager:
             utterance_id,
             generation=generation,
             voice_style=coerce_voice_style(style_override),
+            base_pace=self._pace_for_style(style_override),
+            playback_rate=max(0.75, min(1.25, float(playback_rate))),
         )
         self._active[session_id] = context
         context.task = asyncio.create_task(
             self._run(
                 context, transcript, language, voice, agent, input_mode, source_message, state_context, presentation_cue,
                 persist_reply, on_assistant_completed, on_assistant_interrupted,
+                raw_transcript, transcript_corrections,
             ),
             name=f"voice-{utterance_id}",
         )
@@ -210,9 +233,11 @@ class VoiceSessionManager:
         persist_reply: bool | None,
         on_assistant_completed: AssistantTerminalHandler | None,
         on_assistant_interrupted: AssistantTerminalHandler | None,
+        raw_transcript: str | None,
+        transcript_corrections: tuple[dict[str, object], ...],
     ) -> None:
         started = time.perf_counter()
-        queue: asyncio.Queue[str | None] = asyncio.Queue(self._queue_size)
+        queue: asyncio.Queue[SpeechSegment | None] = asyncio.Queue(self._queue_size)
         worker = asyncio.create_task(self._tts_worker(context, queue, language, voice))
         reply_parts: list[str] = []
         chunker = TextChunker(**self._chunker_options)
@@ -220,7 +245,10 @@ class VoiceSessionManager:
         pending: asyncio.Task | None = None
         first_delta_seen = False
         directive_parser = LiveDirectiveParser()
+        voice_directive_parser = LiveVoiceDirectiveParser()
         directive_sent = False
+        pending_voice_directive: VoiceDirective | None = None
+        speech_sequence = 0
 
         async def apply_directive(directive: AvatarDirective) -> None:
             nonlocal directive_sent
@@ -241,6 +269,8 @@ class VoiceSessionManager:
                 pace=presentation_cue.tts_pace if presentation_cue is not None else None,
                 emphasis=presentation_cue.tts_emphasis if presentation_cue is not None else 0.0,
             )
+            if presentation_cue is not None:
+                context.base_pace = coerce_speech_pace(presentation_cue.tts_pace)
             frame = metadata_frame(
                 intent=intent,
                 emotion=directive.emotion.value,
@@ -273,16 +303,57 @@ class VoiceSessionManager:
                 intent=intent,
             )
 
+        async def enqueue_spoken_segment(raw_segment: str) -> None:
+            nonlocal pending_voice_directive, speech_sequence
+            segment_text = normalizer.normalize(raw_segment)
+            if not segment_text:
+                return
+            segment = make_speech_segment(
+                segment_text,
+                sequence=speech_sequence,
+                base_pace=context.base_pace,
+                directive=pending_voice_directive,
+                forced_clause_split=segment_text.rstrip().endswith((",", ";", ":")),
+            )
+            paragraph_pause = 180 if "\n\n" in raw_segment else segment.pause_after_ms
+            segment = SpeechSegment(
+                text=segment.text,
+                pace=segment.pace,
+                tempo=max(0.75, min(1.25, segment.tempo * context.playback_rate)),
+                emphasis=segment.emphasis,
+                pause_before_ms=segment.pause_before_ms,
+                pause_after_ms=paragraph_pause,
+                sequence=segment.sequence,
+            )
+            if speech_sequence == 0:
+                self._publish_latency(
+                    context,
+                    "voice.first_speakable_segment",
+                    first_speakable_segment_ms=int(
+                        (time.perf_counter() - context.started_at) * 1000
+                    ),
+                    text_length=len(segment.text),
+                )
+            pending_voice_directive = None
+            speech_sequence += 1
+            await self._enqueue_tts_segment(queue, worker, segment)
+
         async def consume_spoken(parts: list[str]) -> None:
+            nonlocal pending_voice_directive
             for spoken in parts:
                 if not spoken:
                     continue
-                reply_parts.append(spoken)
-                await self._send(context, "voice.text.delta", delta=spoken)
-                for raw_segment in chunker.feed(spoken):
-                    segment = normalizer.normalize(raw_segment)
-                    if segment:
-                        await self._enqueue_tts_text(queue, worker, segment)
+                for item in voice_directive_parser.feed(spoken):
+                    if isinstance(item, VoiceDirective):
+                        if chunker.has_pending_text:
+                            for raw_segment in chunker.flush():
+                                await enqueue_spoken_segment(raw_segment)
+                        pending_voice_directive = item
+                        continue
+                    reply_parts.append(item)
+                    await self._send(context, "voice.text.delta", delta=item)
+                    for raw_segment in chunker.feed(item):
+                        await enqueue_spoken_segment(raw_segment)
 
         try:
             await self._send(context, "voice.utterance.started")
@@ -304,15 +375,20 @@ class VoiceSessionManager:
                 state_context=state_context,
                 schedule_memory=source_message is None,
                 persist_reply=persist_reply,
+                raw_user_text=raw_transcript,
+                voice_corrections=transcript_corrections,
             ).__aiter__()
             pending = asyncio.create_task(anext(iterator))
             while True:
-                done, _ = await asyncio.wait({pending}, timeout=self._idle_flush_seconds)
+                idle_timeout = (
+                    self._next_idle_flush_seconds
+                    if chunker.emitted
+                    else self._first_idle_flush_seconds
+                )
+                done, _ = await asyncio.wait({pending}, timeout=idle_timeout)
                 if not done:
                     for raw_segment in chunker.flush_idle():
-                        segment = normalizer.normalize(raw_segment)
-                        if segment:
-                            await self._enqueue_tts_text(queue, worker, segment)
+                        await enqueue_spoken_segment(raw_segment)
                     continue
                 try:
                     delta = pending.result()
@@ -337,12 +413,21 @@ class VoiceSessionManager:
             if directive is not None:
                 await apply_directive(directive)
             await consume_spoken(spoken)
+            for item in voice_directive_parser.finish():
+                if isinstance(item, VoiceDirective):
+                    if chunker.has_pending_text:
+                        for raw_segment in chunker.flush():
+                            await enqueue_spoken_segment(raw_segment)
+                    pending_voice_directive = item
+                elif item:
+                    reply_parts.append(item)
+                    await self._send(context, "voice.text.delta", delta=item)
+                    for raw_segment in chunker.feed(item):
+                        await enqueue_spoken_segment(raw_segment)
             if not directive_sent:
                 await apply_directive(AvatarDirective())
             for raw_segment in chunker.flush():
-                segment = normalizer.normalize(raw_segment)
-                if segment:
-                    await self._enqueue_tts_text(queue, worker, segment)
+                await enqueue_spoken_segment(raw_segment)
             completed_reply = "".join(reply_parts).strip()
             if on_assistant_completed is not None:
                 await on_assistant_completed(completed_reply)
@@ -400,18 +485,20 @@ class VoiceSessionManager:
             nonlocal input_finished, next_job_index
             while not input_finished and len(jobs) < self._tts_concurrency:
                 if block:
-                    text = await queue.get()
+                    segment = await queue.get()
                     block = False
                 else:
                     try:
-                        text = queue.get_nowait()
+                        segment = queue.get_nowait()
                     except asyncio.QueueEmpty:
                         return
-                if text is None:
+                if segment is None:
                     input_finished = True
                     return
+                if isinstance(segment, str):
+                    segment = make_speech_segment(segment, sequence=next_job_index)
                 jobs[next_job_index] = self._create_tts_job(
-                    next_job_index, text, language, voice, context.voice_style
+                    next_job_index, segment, language, voice, context.voice_style
                 )
                 logger.info(
                     "Live TTS job started: session_id=%s utterance_id=%s job_index=%s "
@@ -419,8 +506,8 @@ class VoiceSessionManager:
                     context.session_id,
                     context.utterance_id,
                     next_job_index,
-                    len(text),
-                    len(text.split()),
+                    len(segment.text),
+                    len(segment.text.split()),
                     queue.qsize(),
                     self._tts_concurrency,
                 )
@@ -460,14 +547,14 @@ class VoiceSessionManager:
                     await job.task
 
     def _create_tts_job(
-        self, index: int, text: str, language: str, voice: str, style: VoiceStyle
+        self, index: int, segment: SpeechSegment, language: str, voice: str, style: VoiceStyle
     ) -> TTSJob:
         output: asyncio.Queue = asyncio.Queue()
 
         async def produce() -> None:
             started = time.perf_counter()
             try:
-                async for part in self._synthesize_part_stream(text, language, voice, style=style):
+                async for part in self._synthesize_part_stream(segment, language, voice, style=style):
                     synth_ms = int((time.perf_counter() - started) * 1000)
                     await output.put((part, synth_ms))
             except Exception as exc:
@@ -477,7 +564,7 @@ class VoiceSessionManager:
 
         return TTSJob(
             index=index,
-            text=text,
+            segment=segment,
             queue=output,
             task=asyncio.create_task(produce(), name=f"tts-job-{index}"),
         )
@@ -486,12 +573,11 @@ class VoiceSessionManager:
         self,
         context: UtteranceContext,
         segment_id: int,
-        part: tuple[str, bytes, str, float, int],
+        part: tuple[SpeechSegment, bytes, str, float, int, int],
         *,
         queue_depth: int,
         synth_ms: int,
     ) -> None:
-        part_text, audio, audio_format, duration, attempts = part
         connection = self._connections.get(context.session_id)
         active_context = self._active.get(context.session_id)
         if (
@@ -500,15 +586,32 @@ class VoiceSessionManager:
             or active_context is not context
         ):
             raise asyncio.CancelledError
+        if len(part) == 5:
+            part_text, audio, audio_format, duration, attempts = part
+            tempo_processing_ms = 0
+        else:
+            part_text, audio, audio_format, duration, attempts, tempo_processing_ms = part
+        if isinstance(part_text, str):
+            part_text = make_speech_segment(part_text, sequence=segment_id)
         base = self._event(context, segment_id=segment_id, format=audio_format)
         started = {
             **base,
             "type": "tts.segment.started",
-            "text": part_text,
-            "text_length": len(part_text),
+            "text": part_text.text,
+            "text_length": len(part_text.text),
             "queue_depth": queue_depth,
             "tts_concurrency": self._tts_concurrency,
             "synth_ms": synth_ms,
+            "pace": part_text.pace.value,
+            "tempo": part_text.tempo,
+            "emphasis": part_text.emphasis.value,
+            "pause_after_ms": part_text.pause_after_ms,
+            "provider": getattr(
+                self._tts_provider,
+                "name",
+                self._tts_provider.__class__.__name__.removesuffix("Provider").lower(),
+            ),
+            "tempo_processing_ms": tempo_processing_ms,
         }
         finished = {
             **base,
@@ -519,6 +622,7 @@ class VoiceSessionManager:
         }
         sent_started = time.perf_counter()
         await connection.segment(started, audio, finished)
+        websocket_send_ms = int((time.perf_counter() - sent_started) * 1000)
         if self._avatar_service is not None:
             if not self._is_active(context):
                 raise asyncio.CancelledError
@@ -542,6 +646,8 @@ class VoiceSessionManager:
             "voice.tts_first_segment_ready" if segment_id == 0 else "voice.tts_segment_ready",
             segment_id=segment_id,
             tts_synthesis_ms=synth_ms,
+            tempo_processing_ms=tempo_processing_ms,
+            websocket_send_ms=websocket_send_ms,
             pipeline_elapsed_ms=int((time.perf_counter() - context.started_at) * 1000),
         )
         logger.info(
@@ -551,40 +657,63 @@ class VoiceSessionManager:
             context.session_id,
             context.utterance_id,
             segment_id,
-            len(part_text),
-            len(part_text.split()),
+            len(part_text.text),
+            len(part_text.text.split()),
             len(audio),
             duration,
             attempts,
             synth_ms,
-            int((time.perf_counter() - sent_started) * 1000),
+            websocket_send_ms,
             queue_depth,
             self._tts_concurrency,
         )
 
     async def _synthesize_parts(
-        self, text: str, language: str, voice: str, depth: int = 0, style: VoiceStyle = VoiceStyle.AUTO
-    ) -> list[tuple[str, bytes, str, float, int]]:
-        return [
-            part async for part in self._synthesize_part_stream(text, language, voice, depth, style)
+        self, segment: SpeechSegment | str, language: str, voice: str, depth: int = 0, style: VoiceStyle = VoiceStyle.AUTO
+    ) -> list[tuple[SpeechSegment | str, bytes, str, float, int, int]]:
+        legacy_text_result = isinstance(segment, str)
+        if legacy_text_result:
+            segment = make_speech_segment(segment)
+        parts = [
+            part async for part in self._synthesize_part_stream(segment, language, voice, depth, style)
         ]
+        if legacy_text_result:
+            return [(part[0].text, *part[1:]) for part in parts]
+        return parts
 
     async def _synthesize_part_stream(
-        self, text: str, language: str, voice: str, depth: int = 0, style: VoiceStyle = VoiceStyle.AUTO
+        self, segment: SpeechSegment | str, language: str, voice: str, depth: int = 0, style: VoiceStyle = VoiceStyle.AUTO
     ):
+        if isinstance(segment, str):
+            segment = make_speech_segment(segment)
+        text = segment.text
         words = text.split()
-        request = TTSRequest(text=text, language=language, voice=voice, style=style)
+        request = TTSRequest(
+            text=text,
+            language=language,
+            voice=voice,
+            style=style,
+            pace=segment.pace,
+            tempo=segment.tempo,
+            emphasis=segment.emphasis,
+            pause_before_ms=segment.pause_before_ms,
+            pause_after_ms=segment.pause_after_ms,
+        )
         last_error: Exception | None = None
         for attempt in range(1, self._retry_count + 2):
             chunks: list[bytes] = []
             audio_format = "mp3"
+            tempo_processing_ms = 0
 
             async def collect() -> None:
-                nonlocal audio_format
+                nonlocal audio_format, tempo_processing_ms
                 async for chunk in self._tts_provider.stream(request):
                     if chunk.data:
                         chunks.append(chunk.data)
                         audio_format = chunk.format
+                        tempo_processing_ms += int(
+                            (chunk.metadata or {}).get("tempo_processing_ms", 0)
+                        )
 
             last_error: Exception | None = None
             try:
@@ -594,7 +723,14 @@ class VoiceSessionManager:
                 duration = await asyncio.to_thread(
                     self._validate_audio, audio, audio_format, text
                 )
-                yield (text, audio, audio_format, duration, attempt)
+                yield (
+                    segment,
+                    audio,
+                    audio_format,
+                    duration,
+                    attempt,
+                    tempo_processing_ms,
+                )
                 return
             except Exception as exc:
                 last_error = exc
@@ -607,12 +743,13 @@ class VoiceSessionManager:
             "Adaptive live TTS split: text_length=%s words=%s depth=%s error_type=%s",
             len(text), len(words), depth, type(last_error).__name__,
         )
-        async for part in self._split_and_synthesize(text, language, voice, depth, style):
+        async for part in self._split_and_synthesize(segment, language, voice, depth, style):
             yield part
 
     async def _split_and_synthesize(
-        self, text: str, language: str, voice: str, depth: int, style: VoiceStyle
+        self, segment: SpeechSegment, language: str, voice: str, depth: int, style: VoiceStyle
     ):
+        text = segment.text
         words = self._SOFT_PAUSE_RE.sub(" ", text).split()
         split_at = self._adaptive_split_index(text, words)
         minimum = min(5, max(1, len(words) // 2))
@@ -630,11 +767,23 @@ class VoiceSessionManager:
             keep_final_punctuation=bool(final_punctuation),
         )
         right_task = asyncio.create_task(
-            self._synthesize_parts(right, language, voice, depth + 1, style),
+            self._synthesize_parts(
+                self._segment_child(segment, right, final=True),
+                language,
+                voice,
+                depth + 1,
+                style,
+            ),
             name=f"tts-adaptive-right-{depth + 1}",
         )
         try:
-            async for part in self._synthesize_part_stream(left, language, voice, depth + 1, style):
+            async for part in self._synthesize_part_stream(
+                self._segment_child(segment, left, final=False),
+                language,
+                voice,
+                depth + 1,
+                style,
+            ):
                 yield part
         except Exception:
             right_task.cancel()
@@ -686,6 +835,32 @@ class VoiceSessionManager:
                 jobs[-2] = candidate
                 jobs.pop()
         return jobs or [text]
+
+    @staticmethod
+    def _pace_for_style(style: str | None) -> SpeechPace:
+        normalized = coerce_voice_style(style)
+        if normalized in {"calm", "thoughtful"}:
+            return SpeechPace.SLOW
+        if normalized == "energetic":
+            return SpeechPace.FAST
+        return SpeechPace.NORMAL
+
+    @staticmethod
+    def _segment_child(
+        parent: SpeechSegment,
+        text: str,
+        *,
+        final: bool,
+    ) -> SpeechSegment:
+        return SpeechSegment(
+            text=text,
+            pace=parent.pace,
+            tempo=parent.tempo,
+            emphasis=parent.emphasis,
+            pause_before_ms=0 if final else parent.pause_before_ms,
+            pause_after_ms=parent.pause_after_ms if final else 60,
+            sequence=parent.sequence,
+        )
 
     def _preferred_split_offset(self, text: str, *, target_words: int, max_words: int) -> int:
         words = text.split()
@@ -791,26 +966,51 @@ class VoiceSessionManager:
             worker.result()
         await put
         if job is not None:
+            job_text = job.text if isinstance(job, SpeechSegment) else str(job)
             logger.info(
                 "Live TTS chunk queued: text_length=%s words=%s queue_depth=%s chunk_queued_ms=%s",
-                len(job),
-                len(job.split()),
+                len(job_text),
+                len(job_text.split()),
                 queue.qsize(),
                 int((time.perf_counter() - queued_started) * 1000),
             )
 
-    async def _enqueue_tts_text(self, queue: asyncio.Queue, worker: asyncio.Task, text: str) -> None:
-        jobs = self._split_tts_jobs(text)
-        for job in jobs:
+    async def _enqueue_tts_segment(
+        self,
+        queue: asyncio.Queue,
+        worker: asyncio.Task,
+        segment: SpeechSegment,
+    ) -> None:
+        jobs = self._split_tts_jobs(segment.text)
+        for index, text in enumerate(jobs):
+            is_first = index == 0
+            is_last = index == len(jobs) - 1
+            job = SpeechSegment(
+                text=text,
+                pace=segment.pace,
+                tempo=segment.tempo,
+                emphasis=segment.emphasis,
+                pause_before_ms=segment.pause_before_ms if is_first else 0,
+                pause_after_ms=segment.pause_after_ms if is_last else 60,
+                sequence=segment.sequence + index,
+            )
             await self._enqueue(queue, worker, job)
         if len(jobs) > 1:
             logger.info(
                 "Live TTS safe pre-split queued: source_length=%s source_words=%s jobs=%s safe_words=%s",
-                len(text),
-                len(text.split()),
+                len(segment.text),
+                len(segment.text.split()),
                 len(jobs),
                 self._safe_segment_words,
             )
+
+    async def _enqueue_tts_text(self, queue: asyncio.Queue, worker: asyncio.Task, text: str) -> None:
+        """Backward-compatible adapter used by existing tests."""
+        await self._enqueue_tts_segment(
+            queue,
+            worker,
+            make_speech_segment(text, sequence=0),
+        )
 
     def _event(self, context: UtteranceContext, **payload: Any) -> dict[str, Any]:
         return {

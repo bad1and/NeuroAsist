@@ -264,6 +264,7 @@ class LiveConversationService:
         language: str,
         send: EventSender | None = None,
         corrected_content: str | None = None,
+        transcript_corrections: tuple[dict[str, object], ...] = (),
         speaker_role: SpeakerRole = SpeakerRole.PRIMARY,
         speaker_confidence: float = 0.9,
         end_of_turn_confidence: float = 1.0,
@@ -400,6 +401,12 @@ class LiveConversationService:
             "assistant_echo": echo,
             "silent_observation": True,
         }
+        if corrected_content:
+            metadata["voice_interpretation"] = {
+                "version": "v2",
+                "replacement_count": len(transcript_corrections),
+                "replacements": list(transcript_corrections),
+            }
         message: StoredTimelineMessage | None = None
         if not self._runtime.memory_incognito and not echo:
             message, _ = self._store.append_message(

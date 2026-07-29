@@ -539,7 +539,11 @@ class TimelineStore:
             return self._row_to_message(connection.execute("SELECT * FROM conversation_messages WHERE id = ?", (message_id,)).fetchone())
 
     def apply_voice_interpretation(
-        self, message_id: str, corrected_content: str, replacement_count: int,
+        self,
+        message_id: str,
+        corrected_content: str,
+        replacement_count: int,
+        replacements: list[dict[str, object]] | None = None,
     ) -> StoredTimelineMessage:
         """Store an automatic STT interpretation without overwriting raw audio text."""
         if not corrected_content.strip() or replacement_count < 1:
@@ -554,10 +558,18 @@ class TimelineStore:
             if row["role"] != "user" or row["input_mode"] != "voice":
                 raise ValueError("Voice interpretation is only valid for user voice messages")
             metadata = json.loads(row["metadata_json"])
-            metadata["voice_interpretation"] = {
-                "version": "v1",
-                "replacement_count": replacement_count,
-            }
+            metadata["voice_interpretation"] = (
+                {
+                    "version": "v2",
+                    "replacement_count": replacement_count,
+                    "replacements": list(replacements),
+                }
+                if replacements
+                else {
+                    "version": "v1",
+                    "replacement_count": replacement_count,
+                }
+            )
             connection.execute(
                 "UPDATE conversation_messages SET corrected_content = ?, metadata_json = ? WHERE id = ?",
                 (corrected_content, json.dumps(metadata, ensure_ascii=False), message_id),
@@ -3612,9 +3624,18 @@ class TimelineHistoryAdapter:
         return message
 
     def apply_voice_interpretation(
-        self, message_id: str, corrected_content: str, replacement_count: int,
+        self,
+        message_id: str,
+        corrected_content: str,
+        replacement_count: int,
+        replacements: list[dict[str, object]] | None = None,
     ) -> StoredTimelineMessage:
-        return self._store.apply_voice_interpretation(message_id, corrected_content, replacement_count)
+        return self._store.apply_voice_interpretation(
+            message_id,
+            corrected_content,
+            replacement_count,
+            replacements,
+        )
 
     def get_recent_messages(self, session_id: str, limit: int) -> list[ChatMessage]:
         return self._store.get_recent_messages(session_id, limit)

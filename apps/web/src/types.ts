@@ -54,6 +54,8 @@ export type VoiceTtsStatus =
 export type VoiceChatResponse = ChatResponse & {
   voice_request_id: string;
   transcript: string;
+  raw_transcript?: string | null;
+  corrections?: Array<{ source: string; target: string; start: number; end: number }>;
   reply_audio_url?: string | null;
   tts_status: VoiceTtsStatus;
   stt: {
@@ -74,6 +76,8 @@ export type VoiceLiveResponse = {
   utterance_id: string;
   voice_request_id: string;
   transcript: string;
+  raw_transcript?: string | null;
+  corrections?: Array<{ source: string; target: string; start: number; end: number }>;
   message_id?: string | null;
   turn_id?: string | null;
   status: "streaming" | "completed" | "interrupted" | "failed";
@@ -108,6 +112,11 @@ export type VoiceServerEvent = {
   code?: string;
   message?: string;
   text?: string;
+  pace?: "slow" | "normal" | "fast";
+  tempo?: number;
+  emphasis?: "none" | "light";
+  pause_after_ms?: number;
+  provider?: string;
   generation?: number;
   memory_updates?: MemoryUpdate[];
 };
@@ -189,6 +198,19 @@ export type PublicSettings = {
   model: string;
   personality: string;
   voice_language: string;
+  voice_microphone_profile: "headset" | "balanced" | "speakers";
+  voice_vad: {
+    configured_provider: string;
+    active_provider: string;
+    ready: boolean;
+    fallback: boolean;
+    fallback_reason?: string | null;
+    sample_rate?: number;
+    window_samples?: number | null;
+    model?: string | null;
+    version?: string | null;
+  };
+  voice_input_diagnostic_audio_enabled: boolean;
   voice_stt_model: string;
   voice_tts_enabled: boolean;
   voice_tts_provider: string;
@@ -201,6 +223,7 @@ export type PublicSettings = {
   voice_playback_rate: number;
   voice_live_playback_prebuffer_segments: number;
   voice_live_playback_prebuffer_ms: number;
+  voice_live_playback_start_lead_ms: number;
   chat_history_limit: number;
   episodes_enabled: boolean;
   episode_soft_inactivity_minutes: number;

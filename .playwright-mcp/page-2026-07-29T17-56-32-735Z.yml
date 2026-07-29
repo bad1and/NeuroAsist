@@ -1,0 +1,49 @@
+- generic [ref=e3]:
+  - complementary "Основная навигация" [ref=e4]:
+    - generic [ref=e5]:
+      - img "Iris" [ref=e6]
+      - generic [ref=e7]:
+        - text: ириска
+        - superscript [ref=e8]: "*"
+      - button "Закрыть меню" [ref=e9] [cursor=pointer]
+    - navigation "Разделы приложения" [ref=e13]:
+      - button "Обзор" [ref=e14] [cursor=pointer]
+      - button "Диалог" [ref=e21] [cursor=pointer]
+      - button "История" [ref=e25] [cursor=pointer]
+      - button "Память" [ref=e31] [cursor=pointer]
+      - button "Состояние" [ref=e43] [cursor=pointer]
+    - button "Настройки" [ref=e47] [cursor=pointer]
+  - button "Закрыть меню" [ref=e117] [cursor=pointer]
+  - banner [ref=e52]:
+    - button "Открыть меню" [active] [ref=e54] [cursor=pointer]
+  - main [ref=e57]:
+    - generic [ref=e58]:
+      - generic [ref=e59]:
+        - generic [ref=e60]:
+          - paragraph [ref=e61]: Добрый вечер
+          - heading "О чём поговорим?" [level=2] [ref=e62]
+          - generic [ref=e63]: Iris рядом, когда хочется обсудить идею, разобрать задачу или просто выговориться.
+          - button "Начать диалог" [ref=e64] [cursor=pointer]
+        - figure [ref=e67]
+      - alert [ref=e118]:
+        - text: Не удалось обновить обзор. Проверь подключение к Iris.
+        - button "Повторить" [ref=e119] [cursor=pointer]
+      - generic [ref=e68]:
+        - article [ref=e69]:
+          - generic [ref=e73]:
+            - text: Последний разговор
+            - heading "История пока пуста" [level=3] [ref=e74]
+            - paragraph [ref=e75]: Начни диалог — он появится здесь.
+          - button "Начать разговор" [ref=e76] [cursor=pointer]
+        - article [ref=e79]:
+          - generic [ref=e91]:
+            - text: Память
+            - heading "Нет сохранённых записей" [level=3] [ref=e92]
+            - paragraph [ref=e93]: Iris самостоятельно поддерживает актуальность фактов.
+          - button "Открыть память" [ref=e94] [cursor=pointer]
+        - article [ref=e97]:
+          - generic [ref=e105]:
+            - text: Система
+            - heading "Backend недоступен" [level=3] [ref=e106]
+            - paragraph [ref=e107]: Аватар отключён
+          - button "Диагностика" [ref=e108] [cursor=pointer]
