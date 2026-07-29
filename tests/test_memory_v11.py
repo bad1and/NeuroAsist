@@ -4,6 +4,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from apps.backend.app.memory.consolidation import ConsolidationResult
 from apps.backend.app.memory.service import MemoryService
 from apps.backend.app.runtime.settings import RuntimeSettings
@@ -90,6 +92,71 @@ def test_v17_normalizes_developer_aliases_and_repair_is_idempotent(tmp_path: Pat
     assert len(store.list_memories(limit=500)) == total_after_first
     assert second["idempotent_noop"] is True
     assert first["canonicalized"] >= 1
+
+
+def test_v18_repairs_released_duplicate_and_provenance_pattern(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    name_source, _ = store.append_message(
+        role="user", content="Зови меня Федя", input_mode="text",
+    )
+    service.create_manual({
+        "kind": "identity", "predicate": "name", "value_text": "Федя",
+        "source_message_ids": [name_source.id],
+    })
+    legacy_source, _ = store.append_message(
+        role="user", content="Я твой разработчик", input_mode="text",
+    )
+    legacy = store.create_memory({
+        "scope": "relationship", "kind": "relationship", "subject": "user",
+        "predicate": "is_developer_of", "value_text": "Iris",
+        "status": "active", "source_message_ids": [legacy_source.id],
+        "source_episode_id": legacy_source.episode_id,
+        "extractor_version": "consolidation-v11",
+    }, actor="extractor")
+    old_label = store.create_memory({
+        "scope": "relationship", "kind": "relationship", "subject": "assistant",
+        "predicate": "developer", "value_text": "Федор", "status": "active",
+        "source_message_ids": [], "extractor_version": "consolidation-v11",
+        "slot_key": "assistant.developer", "object_key": "user",
+        "cardinality": "multi", "normalization_version": 17,
+    }, actor="migration")
+    store.supersede_memory(str(legacy["id"]), str(old_label["id"]))
+    current_label = store.create_memory({
+        "scope": "relationship", "kind": "relationship", "subject": "assistant",
+        "predicate": "developer", "value_text": "Федя", "status": "active",
+        "source_message_ids": [name_source.id],
+        "source_episode_id": name_source.episode_id,
+        "extractor_version": "consolidation-v11",
+        "slot_key": "assistant.developer", "object_key": "user",
+        "cardinality": "multi", "normalization_version": 17,
+    }, actor="migration")
+
+    before = store.memory_integrity()
+    first = service.repair_v18_memory_integrity()
+    second = service.repair_v18_memory_integrity()
+
+    assert before["active_conflicts"] == 1
+    assert first["duplicates_superseded"] == 1
+    assert second["idempotent_noop"] is True
+    assert store.memory_integrity()["state"] == "healthy"
+    developers = [
+        item for item in store.list_memories(status="active", limit=100)
+        if item.get("slot_key") == "assistant.developer"
+        and item.get("object_key") == "user"
+    ]
+    assert len(developers) == 1
+    assert developers[0]["id"] == current_label["id"]
+    assert developers[0]["value_text"] == "Федя"
+    assert developers[0]["source_count"] == 2
+    with pytest.raises(sqlite3.IntegrityError):
+        store.create_memory({
+            "scope": "relationship", "kind": "relationship",
+            "subject": "assistant", "predicate": "developer",
+            "value_text": "Дубликат", "status": "active",
+            "source_message_ids": [], "extractor_version": "test",
+            "slot_key": "assistant.developer", "object_key": "user",
+            "cardinality": "multi", "normalization_version": 18,
+        }, actor="test")
 
 
 def test_v17_assigns_ttl_and_closes_name_loop_when_slot_is_filled(tmp_path: Path) -> None:

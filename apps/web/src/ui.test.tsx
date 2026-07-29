@@ -156,11 +156,39 @@ describe("русский интерфейс", () => {
 
   it("переключает раздел памяти в таком же меню", async () => {
     render(<MemoryPage />);
-    await screen.findByRole("button", { name: "Все" });
+    await screen.findByRole("button", { name: "Текущие" });
 
     fireEvent.click(screen.getByRole("button", { name: "На проверке" }));
 
     await waitFor(() => expect(api.getMemories).toHaveBeenLastCalledWith("candidate", undefined));
+  });
+
+  it("скрывает заменённые записи из текущей памяти и объясняет архив", async () => {
+    api.getMemories.mockResolvedValue({
+      items: [
+        {
+          id: "active", status: "active", predicate: "name", slot_key: "user.name",
+          value_text: "Федя", source_message_ids: ["source"], source_count: 1,
+          access_count: 2, user_locked: false,
+        },
+        {
+          id: "old", status: "superseded", predicate: "name", slot_key: "user.name",
+          value_text: "Федор", source_message_ids: ["source"], source_count: 1,
+          access_count: 3, user_locked: false,
+          replacement: { id: "active", predicate: "name", value_text: "Федя", status: "active" },
+        },
+      ],
+    });
+    render(<MemoryPage />);
+
+    expect(await screen.findByText("Федя")).toBeInTheDocument();
+    expect(screen.queryByText("Федор")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Архив" }));
+
+    expect(await screen.findByText("Федор")).toBeInTheDocument();
+    expect(screen.getByText("Заменено на: Федя")).toBeInTheDocument();
+    expect(screen.getByText("Имя пользователя")).toBeInTheDocument();
+    expect(screen.getByText(/использовалось до замены: 3/)).toBeInTheDocument();
   });
 
   it("подтверждает сброс сессии и сохраняет память", async () => {

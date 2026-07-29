@@ -327,6 +327,13 @@ export type MemoryItem = {
   user_locked: boolean;
   source_episode_id?: string | null;
   source_message_ids: string[];
+  source_count?: number;
+  replacement?: {
+    id: string;
+    predicate: string;
+    value_text: string;
+    status: MemoryStatus;
+  } | null;
   created_at: string;
   updated_at: string;
   last_accessed_at?: string | null;
@@ -409,6 +416,14 @@ export type MemoryDiagnostics = {
     completed_at?: string | null;
     result: Record<string, number | boolean | string>;
   } | null;
+  integrity?: {
+    state: "healthy" | "degraded";
+    active_conflicts: number;
+    noncanonical_active: number;
+    provenance_missing: number;
+    source_count_mismatches: number;
+    guards_installed: boolean;
+  };
   index_health?: {
     state: "healthy" | "degraded" | "rebuilding";
     semantic_enabled: boolean;

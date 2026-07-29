@@ -29,7 +29,15 @@ class MemoryService:
     )
     _SECRET_WORDS = ("парол", "password", "код подтверждения", "код из смс", "cvv", "токен", "token", "api key")
     _SINGLE_VALUE_PREDICATES = {"name", "current_statement", "current_goal", "prefers_response_length"}
-    _CANONICAL_VERSION = 17
+    _CANONICAL_VERSION = 18
+    _SINGLE_VALUE_SLOTS = {
+        "user.name",
+        "assistant.developer_count",
+        "user.current_mood",
+        "user.current_activity",
+        "user.current_goal",
+        "user.prefers_response_length",
+    }
     _KNOWN_SLOTS = {
         "user.name",
         "assistant.developer",
@@ -796,6 +804,170 @@ class MemoryService:
             self._store.finish_memory_repair(repair_key, result)
         return result
 
+    def repair_v18_memory_integrity(self) -> dict[str, object]:
+        """Reconcile released provenance and logical-key conflicts without data loss."""
+        repair_key = "canonical-memory-v18"
+        previous = self._store.memory_repair_run(repair_key)
+        if previous is not None and previous.get("status") == "completed":
+            return dict(previous.get("result", {})) | {"idempotent_noop": True}
+        result: dict[str, object] = {
+            "canonicalized": 0,
+            "evidence_copied": 0,
+            "sources_synchronized": 0,
+            "duplicates_superseded": 0,
+            "developer_labels_updated": 0,
+            "index_jobs": 0,
+        }
+        with self._write_lock, self._store.consolidation_transaction():
+            current = [
+                *self._store.list_memories(status="active", limit=500),
+                *self._store.list_memories(status="candidate", limit=500),
+            ]
+            original_priority = {
+                str(item["id"]): (
+                    int(bool(item.get("user_locked"))),
+                    int(item.get("source_count", 0)),
+                    str(item.get("updated_at", "")),
+                    str(item["id"]),
+                )
+                for item in current
+            }
+            for item in current:
+                source = next(
+                    (
+                        message
+                        for message in reversed([
+                            self._store.get_message(str(message_id))
+                            for message_id in item.get("source_message_ids", [])
+                        ])
+                        if message is not None
+                    ),
+                    None,
+                )
+                candidates = self._canonical_candidates(item, source)
+                if len(candidates) != 1:
+                    continue
+                canonical = candidates[0]
+                self._store.update_memory(
+                    str(item["id"]),
+                    self._canonical_fields(canonical),
+                    actor="migration",
+                    action="canonicalized_v18",
+                )
+                result["canonicalized"] = int(result["canonicalized"]) + 1
+
+            current = [
+                *self._store.list_memories(status="active", limit=500),
+                *self._store.list_memories(status="candidate", limit=500),
+            ]
+            for item in current:
+                ancestor_id = item.get("supersedes_id")
+                visited = {str(item["id"])}
+                while ancestor_id and str(ancestor_id) not in visited:
+                    visited.add(str(ancestor_id))
+                    result["evidence_copied"] = int(result["evidence_copied"]) + self._store.copy_memory_evidence(
+                        str(ancestor_id), str(item["id"]),
+                    )
+                    ancestor = self._store.get_memory(str(ancestor_id))
+                    ancestor_id = ancestor.get("supersedes_id") if ancestor else None
+
+            active = self._store.list_memories(status="active", limit=500)
+            active_name = next(
+                (
+                    str(item["value_text"])
+                    for item in active
+                    if item.get("slot_key") == "user.name"
+                ),
+                None,
+            )
+            groups: dict[tuple[str, ...], list[dict[str, object]]] = {}
+            for item in active:
+                slot = str(item.get("slot_key") or "")
+                object_key = str(item.get("object_key") or "")
+                if not slot:
+                    continue
+                if slot in self._SINGLE_VALUE_SLOTS or item.get("cardinality") == "single":
+                    key = ("single", slot)
+                elif object_key:
+                    key = ("multi", slot, object_key)
+                else:
+                    continue
+                groups.setdefault(key, []).append(item)
+
+            for key, items in groups.items():
+                if len(items) < 2:
+                    continue
+
+                def survivor_rank(item: dict[str, object]) -> tuple[object, ...]:
+                    matches_name = int(
+                        key == ("multi", "assistant.developer", "user")
+                        and active_name is not None
+                        and self._normalize(str(item["value_text"]))
+                        == self._normalize(active_name)
+                    )
+                    return (
+                        original_priority.get(str(item["id"]), (0, 0, "", ""))[0],
+                        matches_name,
+                        *original_priority.get(str(item["id"]), (0, 0, "", ""))[1:],
+                    )
+
+                survivor = max(items, key=survivor_rank)
+                for loser in items:
+                    if loser["id"] == survivor["id"]:
+                        continue
+                    result["evidence_copied"] = int(result["evidence_copied"]) + self._store.copy_memory_evidence(
+                        str(loser["id"]), str(survivor["id"]),
+                    )
+                    self._store.supersede_memory(
+                        str(loser["id"]), str(survivor["id"]),
+                    )
+                    result["duplicates_superseded"] = int(result["duplicates_superseded"]) + 1
+
+            active = self._store.list_memories(status="active", limit=500)
+            active_name = next(
+                (
+                    str(item["value_text"])
+                    for item in active
+                    if item.get("slot_key") == "user.name"
+                ),
+                active_name,
+            )
+            if active_name:
+                for item in active:
+                    if (
+                        item.get("slot_key") == "assistant.developer"
+                        and item.get("object_key") == "user"
+                        and self._normalize(str(item["value_text"]))
+                        != self._normalize(active_name)
+                    ):
+                        canonical = self._canonicalize_single({
+                            **item, "value_text": active_name,
+                        })
+                        self._store.update_memory(
+                            str(item["id"]),
+                            self._canonical_fields(canonical),
+                            actor="migration",
+                            action="developer_label_synced_v18",
+                        )
+                        result["developer_labels_updated"] = int(result["developer_labels_updated"]) + 1
+
+            for item in [
+                *self._store.list_memories(status="active", limit=500),
+                *self._store.list_memories(status="candidate", limit=500),
+            ]:
+                before = list(item.get("source_message_ids", []))
+                synchronized = self._store.synchronize_memory_sources(str(item["id"]))
+                if synchronized.get("source_message_ids") != before:
+                    result["sources_synchronized"] = int(result["sources_synchronized"]) + 1
+
+            self._store.reindex_memories()
+            self._store.ensure_memory_integrity_indexes()
+            for item in self._store.list_memories(status="active", limit=500):
+                self._schedule_vector_sync(item)
+                result["index_jobs"] = int(result["index_jobs"]) + 1
+            self._store.finish_memory_repair(repair_key, result)
+        return result
+
     @staticmethod
     def memory_update(memory: dict[str, object]) -> dict[str, str]:
         status = str(memory["status"])
@@ -808,7 +980,7 @@ class MemoryService:
 
     def create_manual(self, values: dict[str, object]) -> dict[str, object]:
         source_ids = list(values.get("source_message_ids", []))
-        self._validate_sources(source_ids, manual=False)
+        self._validate_sources(source_ids, manual=True)
         if source_ids and not values.get("source_episode_id"):
             source = self._store.get_message(source_ids[0])
             values = {**values, "source_episode_id": source.episode_id if source else None}
@@ -818,13 +990,27 @@ class MemoryService:
         return self._apply_candidate(values, actor="user", action="activated")
 
     def confirm(self, memory_id: str) -> dict[str, object]:
-        memory = self._store.get_memory(memory_id)
-        if memory is None:
-            raise KeyError(memory_id)
-        if memory["status"] != "candidate":
-            return memory
-        self._resolve_conflict(memory_id, memory)
-        confirmed = self._store.set_memory_status(memory_id, "active", actor="user", action="confirmed")
+        with self._write_lock, self._store.consolidation_transaction():
+            memory = self._store.get_memory(memory_id)
+            if memory is None:
+                raise KeyError(memory_id)
+            if memory["status"] != "candidate":
+                return memory
+            canonical = self._canonicalize_single(memory)
+            self._store.update_memory(
+                memory_id, self._canonical_fields(canonical),
+                actor="user", action="confirmed_canonicalized",
+            )
+            exact, conflict = self._match_existing(canonical, exclude_id=memory_id)
+            if exact is not None and exact["status"] == "active":
+                self._store.copy_memory_evidence(memory_id, str(exact["id"]))
+                self._store.supersede_memory(memory_id, str(exact["id"]))
+                return self._store.get_memory(str(exact["id"])) or exact
+            if conflict is not None:
+                self._store.supersede_memory(str(conflict["id"]), memory_id)
+            confirmed = self._store.set_memory_status(
+                memory_id, "active", actor="user", action="confirmed",
+            )
         self._sync_vector(confirmed)
         return confirmed
 
@@ -837,12 +1023,63 @@ class MemoryService:
         return memory
 
     def restore(self, memory_id: str) -> dict[str, object]:
-        memory = self._store.set_memory_status(memory_id, "active", actor="user", action="restored")
+        with self._write_lock, self._store.consolidation_transaction():
+            existing = self._store.get_memory(memory_id)
+            if existing is None:
+                raise KeyError(memory_id)
+            canonical = self._canonicalize_single({
+                **existing,
+                "user_locked": True,
+            })
+            self._store.update_memory(
+                memory_id,
+                {**self._canonical_fields(canonical), "user_locked": True},
+                actor="user",
+                action="restored_canonicalized",
+            )
+            exact, conflict = self._match_existing(canonical, exclude_id=memory_id)
+            if exact is not None and exact["status"] == "active":
+                self._store.copy_memory_evidence(memory_id, str(exact["id"]))
+                self._store.supersede_memory(memory_id, str(exact["id"]))
+                return self._store.get_memory(str(exact["id"])) or exact
+            if conflict is not None:
+                self._store.supersede_memory(str(conflict["id"]), memory_id)
+            memory = self._store.set_memory_status(
+                memory_id, "active", actor="user", action="restored",
+            )
         self._sync_vector(memory)
         return memory
 
     def edit(self, memory_id: str, changes: dict[str, object]) -> dict[str, object]:
-        memory = self._store.update_memory(memory_id, changes)
+        with self._write_lock, self._store.consolidation_transaction():
+            existing = self._store.get_memory(memory_id)
+            if existing is None:
+                raise KeyError(memory_id)
+            canonical = self._canonicalize_single({
+                **existing,
+                **changes,
+                "user_locked": changes.get("user_locked", True),
+            })
+            exact, conflict = self._match_existing(canonical, exclude_id=memory_id)
+            if (
+                existing["status"] == "active"
+                and exact is not None
+                and exact["status"] == "active"
+            ):
+                self._store.copy_memory_evidence(str(exact["id"]), memory_id)
+                self._store.supersede_memory(str(exact["id"]), memory_id)
+            if existing["status"] == "active" and conflict is not None:
+                self._store.supersede_memory(str(conflict["id"]), memory_id)
+            memory = self._store.update_memory(
+                memory_id,
+                {
+                    **changes,
+                    **self._canonical_fields(canonical),
+                    "user_locked": changes.get("user_locked", True),
+                },
+                actor="user",
+                action="edited_canonical",
+            )
         if memory["status"] == "active":
             self._sync_vector(memory)
         return memory
@@ -898,7 +1135,7 @@ class MemoryService:
     def _apply_candidate(
         self, values: dict[str, object], *, actor: str, action: str = "candidate_created", sync_vector: bool = True,
     ) -> dict[str, object]:
-        with self._write_lock:
+        with self._write_lock, self._store.consolidation_transaction():
             self._validate_sources(
                 list(values.get("source_message_ids", [])),
                 manual=actor in {"user", "migration"},
@@ -910,13 +1147,31 @@ class MemoryService:
             })
             exact, conflict = self._match_existing(values)
             if exact is not None:
-                self._store.reinforce_memory_evidence(
+                exact = self._store.reinforce_memory_evidence(
                     str(exact["id"]),
                     [str(item) for item in values.get("source_message_ids", [])],
                     values.get("source_episode_id"),
                     float(values.get("source_quality", 1.0)),
                 )
-                self._store.update_memory(exact["id"], {}, actor="policy", action="retrieved")
+                if actor == "user":
+                    exact = self._store.update_memory(
+                        str(exact["id"]),
+                        {
+                            **self._canonical_fields(values),
+                            "user_locked": bool(values.get("user_locked", True)),
+                        },
+                        actor="user",
+                        action="manual_duplicate_confirmed",
+                    )
+                    if exact["status"] == "candidate":
+                        if conflict is not None:
+                            self._store.supersede_memory(
+                                str(conflict["id"]), str(exact["id"]),
+                            )
+                        exact = self._store.set_memory_status(
+                            str(exact["id"]), "active",
+                            actor="user", action="confirmed",
+                        )
                 return exact
             status = str(values.get("status", "candidate"))
             if actor == "extractor":
@@ -931,11 +1186,24 @@ class MemoryService:
                 if str(values.get("slot_key") or "") not in self._KNOWN_SLOTS:
                     status = "candidate"
             values["status"] = status
-            memory = self._store.create_memory(values, actor=actor, action=action if status == "active" else "candidate_created")
+            create_status = (
+                "candidate"
+                if status == "active" and conflict is not None
+                else status
+            )
+            values["status"] = create_status
+            memory = self._store.create_memory(
+                values,
+                actor=actor,
+                action=action if create_status == "active" else "candidate_created",
+            )
             if status == "active" and conflict is not None:
                 self._store.supersede_memory(str(conflict["id"]), str(memory["id"]))
                 self._schedule_vector_sync(conflict)
-                memory = self._store.get_memory(str(memory["id"])) or memory
+                memory = self._store.set_memory_status(
+                    str(memory["id"]), "active",
+                    actor=actor, action=action,
+                )
             if sync_vector and memory["status"] == "active":
                 self._sync_vector(memory)
             if memory["status"] == "active":
@@ -1136,15 +1404,36 @@ class MemoryService:
         review = self._store.list_memories(status="candidate", limit=250)
         subject, predicate = str(values["subject"]), str(values["predicate"])
         candidate_value = self._normalize(str(values["value_text"]))
+        slot_key = str(values.get("slot_key") or "")
+        object_key = str(values.get("object_key") or "")
+        single = (
+            slot_key in self._SINGLE_VALUE_SLOTS
+            or predicate in self._SINGLE_VALUE_PREDICATES
+            or values.get("cardinality") == "single"
+            or values.get("temporal_semantics") in {"current", "period"}
+        )
         exact = conflict = None
         for item in [*active, *review]:
-            if item["id"] == exclude_id or item["subject"] != subject or item["predicate"] != predicate:
+            if item["id"] == exclude_id:
+                continue
+            item_slot = str(item.get("slot_key") or "")
+            item_object = str(item.get("object_key") or "")
+            if slot_key:
+                same_logical_key = (
+                    item_slot == slot_key
+                    and (single or (bool(object_key) and item_object == object_key))
+                )
+            else:
+                same_logical_key = (
+                    item["subject"] == subject and item["predicate"] == predicate
+                )
+            if not same_logical_key:
                 continue
             if self._normalize(str(item["value_text"])) == candidate_value:
                 exact = item
-            # A profile name and an explicit correction are single-valued;
-            # independent interests and notes must coexist.
-            elif item["status"] == "active" and (predicate in self._SINGLE_VALUE_PREDICATES or values.get("cardinality") == "single" or values.get("temporal_semantics") in {"current", "period"}):
+            elif item["status"] == "active" and (
+                single or (slot_key and object_key and item_object == object_key)
+            ):
                 conflict = item
         return exact, conflict
 
@@ -1389,6 +1678,25 @@ class MemoryService:
         result = dict(values)
         subject = self._normalize(str(result.get("subject", "user")))
         predicate = self._normalize(str(result.get("predicate", ""))).replace(" ", "_")
+        qualified_aliases = {
+            "user.name": ("user", "name"),
+            "user.current_mood": ("user", "mood"),
+            "user.current_activity": ("user", "current_activity"),
+            "user.current_goal": ("user", "current_goal"),
+            "user.prefers_response_length": ("user", "prefers_response_length"),
+            "assistant.developer": ("assistant", "developer"),
+            "assistant.developers": ("assistant", "developer"),
+            "assistant.developer_count": ("assistant", "developer_count"),
+        }
+        if predicate in qualified_aliases:
+            subject, predicate = qualified_aliases[predicate]
+        predicate = {
+            "note": "explicit_memory",
+            "заметка": "explicit_memory",
+            "предпочтение": "preference",
+            "имя": "name",
+            "цель": "current_goal",
+        }.get(predicate, predicate)
         value = str(result.get("value_text", "")).strip()
         slot = str(result.get("slot_key") or "")
         object_key = str(result.get("object_key") or "")
@@ -1443,6 +1751,10 @@ class MemoryService:
             "user.prefers_response_length",
         }:
             result["temporal_semantics"] = "atemporal"
+        if slot in self._SINGLE_VALUE_SLOTS:
+            result["cardinality"] = "single"
+        elif slot:
+            result["cardinality"] = "multi"
         temporal = str(result.get("temporal_semantics", "atemporal"))
         if not result.get("expires_at") and temporal in {"current", "period"}:
             days = 1 if slot in {"user.current_mood", "user.current_activity"} else 7 if temporal == "current" else 30
@@ -1476,6 +1788,19 @@ class MemoryService:
             slot or subject, object_key or predicate, value,
         )
         return result
+
+    @staticmethod
+    def _canonical_fields(values: dict[str, object]) -> dict[str, object]:
+        return {
+            key: values.get(key)
+            for key in (
+                "subject", "predicate", "value_text", "slot_key", "object_key",
+                "normalization_version", "search_text", "claim_fingerprint",
+                "canonical_text", "expires_at", "cardinality",
+                "temporal_semantics",
+            )
+            if values.get(key) is not None
+        }
 
     def _active_user_name(self) -> str | None:
         return next(
@@ -1733,4 +2058,4 @@ class MemoryService:
 
     @staticmethod
     def _normalize(value: str) -> str:
-        return " ".join(value.strip().lower().split())
+        return " ".join(value.strip().lower().replace("ё", "е").split())

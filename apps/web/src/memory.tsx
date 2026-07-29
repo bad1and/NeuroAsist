@@ -16,7 +16,7 @@ const STATUS_LABELS: Record<MemoryStatus | "all", string> = {
 };
 
 const MEMORY_SECTIONS: Array<{ id: MemorySection; label: string; icon: typeof Brain }> = [
-  { id: "all", label: "Все", icon: Brain },
+  { id: "all", label: "Текущие", icon: Brain },
   { id: "active", label: "Сохранённые", icon: CheckCircle2 },
   { id: "topics", label: "Темы", icon: Tag },
   { id: "commitments", label: "Планы и обещания", icon: ListChecks },
@@ -24,6 +24,31 @@ const MEMORY_SECTIONS: Array<{ id: MemorySection; label: string; icon: typeof Br
   { id: "archive", label: "Архив", icon: Archive },
   { id: "diagnostics", label: "Диагностика", icon: CircleHelp },
 ];
+
+const MEMORY_LABELS: Record<string, string> = {
+  "user.name": "Имя пользователя",
+  "assistant.developer": "Разработчик Iris",
+  "assistant.developer_count": "Количество разработчиков Iris",
+  "user.likes_category": "Любимый жанр",
+  "user.likes_game": "Любимая игра",
+  "user.preference": "Предпочтение",
+  "user.note": "Заметка",
+  "user.relationship.friend": "Друг",
+  "user.game_detail": "Деталь игры",
+  "user.current_mood": "Текущее настроение",
+  "user.current_activity": "Текущее занятие",
+  "user.current_goal": "Текущая цель",
+  "user.prefers_response_length": "Стиль ответов",
+  name: "Имя пользователя",
+  developer: "Разработчик Iris",
+  developers: "Разработчики Iris",
+  developerof: "Разработчик Iris",
+  is_developer_of: "Разработчик Iris",
+};
+
+function memoryLabel(memory: MemoryItem): string {
+  return MEMORY_LABELS[memory.slot_key ?? ""] ?? MEMORY_LABELS[memory.predicate] ?? memory.predicate;
+}
 
 export function MemoryPage() {
   const [items, setItems] = useState<MemoryItem[]>([]);
@@ -55,7 +80,9 @@ export function MemoryPage() {
       setItems(
         section === "archive"
           ? result.items.filter((item) => !["active", "candidate"].includes(item.status))
-          : result.items,
+          : section === "all"
+            ? result.items.filter((item) => ["active", "candidate"].includes(item.status))
+            : result.items,
       );
       setMessage(null);
     } catch (error) {
@@ -116,15 +143,16 @@ export function MemoryPage() {
       {section === "topics" && topics.map((topic) => <article className="memory-card" key={topic.id}><div className="memory-card-main"><div className="memory-card-heading"><span className="memory-status active">{topic.status}</span>{topic.user_locked && <Pin size={14} />}</div><strong>{topic.title}</strong><p>{topic.summary_text || "Краткое описание ещё не сформировано."}</p><small>Связи: {topic.links.length} · доказательства: {topic.evidence.length}</small></div></article>)}
       {section === "commitments" && commitments.map((commitment) => <article className="memory-card" key={commitment.id}><div className="memory-card-main"><div className="memory-card-heading"><span className={`memory-status ${commitment.status === "open" ? "candidate" : "active"}`}>{commitment.status}</span></div><strong>{commitment.title}</strong><p>{commitment.details}</p><small>{commitment.kind} · уверенность: {Math.round(commitment.confidence * 100)}%</small></div>{commitment.status === "open" && <div className="memory-actions"><button className="primary-button" onClick={() => void action(() => closeMemoryCommitment(commitment.id))}><Check size={16} />Закрыть</button></div>}</article>)}
       {section === "diagnostics" && <>
+        {diagnostics.integrity && <article className="memory-card"><div className="memory-card-main"><div className="memory-card-heading"><span className={`memory-status ${diagnostics.integrity.state === "healthy" ? "active" : "candidate"}`}>{diagnostics.integrity.state}</span></div><strong>Целостность памяти</strong><p>Активные конфликты: {diagnostics.integrity.active_conflicts} · без канонического слота: {diagnostics.integrity.noncanonical_active} · без источников: {diagnostics.integrity.provenance_missing}</p><small>Рассинхронизация источников: {diagnostics.integrity.source_count_mismatches} · ограничения: {diagnostics.integrity.guards_installed ? "включены" : "не установлены"}</small></div></article>}
         {diagnostics.index_health && <article className="memory-card"><div className="memory-card-main"><div className="memory-card-heading"><span className={`memory-status ${diagnostics.index_health.state === "healthy" ? "active" : "candidate"}`}>{diagnostics.index_health.state}</span></div><strong>Здоровье поискового индекса</strong><p>SQLite: {Object.values(diagnostics.active_by_namespace ?? {}).reduce((sum, count) => sum + count, 0)} · отсутствует: {diagnostics.index_health.missing_ids.length} · устарело: {diagnostics.index_health.stale_ids.length}</p><small>{diagnostics.index_health.degraded_reason ?? "Chroma синхронизирована; SQLite остаётся источником истины."}</small></div></article>}
-        {diagnostics.repair && <article className="memory-card"><div className="memory-card-main"><div className="memory-card-heading"><span className="memory-status active">{diagnostics.repair.status}</span></div><strong>Автопочинка Memory v17</strong><p>Канонизировано: {Number(diagnostics.repair.result.canonicalized ?? 0)} · объединено: {Number(diagnostics.repair.result.topics_merged ?? 0)} · архивировано: {Number(diagnostics.repair.result.topics_archived ?? 0)}</p><small>{diagnostics.repair.repair_key}</small></div></article>}
+        {diagnostics.repair && <article className="memory-card"><div className="memory-card-main"><div className="memory-card-heading"><span className="memory-status active">{diagnostics.repair.status}</span></div><strong>Автопочинка памяти</strong><p>Канонизировано: {Number(diagnostics.repair.result.canonicalized ?? 0)} · устранено дублей: {Number(diagnostics.repair.result.duplicates_superseded ?? diagnostics.repair.result.topics_merged ?? 0)} · перенесено доказательств: {Number(diagnostics.repair.result.evidence_copied ?? 0)}</p><small>{diagnostics.repair.repair_key}</small></div></article>}
         {diagnostics.runs.map((run) => <article className="memory-card" key={run.id}><div className="memory-card-main"><div className="memory-card-heading"><span className={`memory-status ${run.result.outcome === "applied" ? "active" : "candidate"}`}>{run.result.outcome ?? run.status}</span></div><strong>Консолидация памяти</strong><p>Предложено: {run.result.proposed ?? 0} · сохранено: {run.result.saved ?? 0} · отклонено: {run.result.discarded ?? 0}</p><small>{run.diagnostics.error_codes?.length ? `Причина: ${run.diagnostics.error_codes.join(", ")}` : "Ошибок нет"} · {run.diagnostics.model ?? "локальный путь"}</small></div></article>)}
         {conflicts.map((conflict) => <article className="memory-card" key={conflict.id}><div className="memory-card-main"><strong>Конфликт: {conflict.status}</strong><p>{conflict.reason}</p></div></article>)}
         {!diagnostics.runs.length && !conflicts.length && <div className="empty-state"><CircleHelp size={28} /><strong>Диагностических записей пока нет</strong><span>Здесь появятся результаты фоновой консолидации и понятные причины нулевой записи.</span></div>}
       </>}
       {!(["topics", "commitments", "diagnostics"] as MemorySection[]).includes(section) && <>
       {items.length ? items.map((memory) => <article className="memory-card" key={memory.id}>
-        <div className="memory-card-main"><div className="memory-card-heading"><span className={`memory-status ${memory.status}`}>{STATUS_LABELS[memory.status]}</span>{memory.user_locked && <Pin size={14} aria-label="Закреплённая запись" />}</div><strong>{memory.predicate}</strong><p>{memory.value_text}</p><small>{memory.source_message_ids.length ? `Источник: ${memory.source_message_ids.length} сообщ.` : "Источник не указан"} · использовано: {memory.access_count}</small></div>
+        <div className="memory-card-main"><div className="memory-card-heading"><span className={`memory-status ${memory.status}`}>{STATUS_LABELS[memory.status]}</span>{memory.user_locked && <Pin size={14} aria-label="Закреплённая запись" />}</div><strong>{memoryLabel(memory)}</strong><p>{memory.value_text}</p>{section === "archive" && memory.replacement && <p className="memory-replacement">Заменено на: {memory.replacement.value_text}</p>}<small>{(memory.source_count ?? memory.source_message_ids.length) ? `Источник: ${memory.source_count ?? memory.source_message_ids.length} сообщ.` : "Источник не указан"} · {section === "archive" ? "использовалось до замены" : "использовано"}: {memory.access_count}</small></div>
         <div className="memory-actions">
           {memory.status === "candidate" && <><button className="primary-button" onClick={() => void action(() => confirmMemory(memory.id))}><Check size={16} aria-hidden="true" />Подтвердить</button><button className="secondary" onClick={() => void action(() => rejectMemory(memory.id))}><X size={16} aria-hidden="true" />Отклонить</button></>}
           {memory.status === "deleted"
@@ -132,8 +160,8 @@ export function MemoryPage() {
             : <details className="memory-action-menu">
                 <summary className="icon-button" role="button" aria-label="Дополнительные действия"><MoreHorizontal size={17} aria-hidden="true" /></summary>
                 <div>
-                  <button type="button" onClick={() => { setEditing(memory); setEditValue(memory.value_text); }}><Pencil size={16} aria-hidden="true" />Изменить</button>
-                  {!memory.user_locked && <button type="button" onClick={() => void action(() => updateMemory(memory.id, { user_locked: true }))}><Pin size={16} aria-hidden="true" />Закрепить</button>}
+                  {["active", "candidate"].includes(memory.status) && <button type="button" onClick={() => { setEditing(memory); setEditValue(memory.value_text); }}><Pencil size={16} aria-hidden="true" />Изменить</button>}
+                  {["active", "candidate"].includes(memory.status) && !memory.user_locked && <button type="button" onClick={() => void action(() => updateMemory(memory.id, { user_locked: true }))}><Pin size={16} aria-hidden="true" />Закрепить</button>}
                   <button type="button" onClick={async () => { const nextAudit = await getMemoryAudit(memory.id); setAudit((current) => ({ ...current, [memory.id]: nextAudit.items })); }}><CircleHelp size={16} aria-hidden="true" />История записи</button>
                   <button className="is-danger" type="button" onClick={() => void action(() => deleteMemory(memory.id))}><Trash2 size={16} aria-hidden="true" />Забыть</button>
                 </div>

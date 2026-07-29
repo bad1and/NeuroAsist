@@ -19,7 +19,7 @@ from apps.backend.app.conversation.turn import SmartTurnDetector
 from apps.backend.app.core.config import Settings
 from apps.backend.app.llm.base import LLMResponse
 from apps.backend.app.model_manager.service import ModelManager
-from apps.backend.app.storage.timeline import TimelineStore
+from apps.backend.app.storage.timeline import LATEST_SCHEMA_VERSION, TimelineStore
 
 
 def runtime(**overrides):
@@ -46,7 +46,9 @@ def test_live_schema_is_additive_and_idempotent(tmp_path: Path) -> None:
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
 
-    assert versions == [(1,), (2,), (3,), (4,), (5,), (6,), (10,), (11,), (12,), (13,), (14,), (15,), (16,), (17,)]
+    assert versions == [
+        (version,) for version in (*range(1, 7), *range(10, LATEST_SCHEMA_VERSION + 1))
+    ]
     assert {
         "character_state_snapshots",
         "character_state_events",
@@ -90,7 +92,7 @@ def test_schema_v10_repairs_database_with_preexisting_versions(tmp_path: Path) -
             (stored.id,),
         ).fetchone()
 
-    assert versions == set(range(1, 18))
+    assert versions == set(range(1, LATEST_SCHEMA_VERSION + 1))
     assert {
         "character_state_snapshots",
         "character_state_events",
