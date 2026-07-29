@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import datetime
 
+from apps.backend.app.conversation.decision import ConversationDecisionEngine
 from apps.backend.app.llm.base import ChatMessage
 from apps.backend.app.storage.timeline import TimelineStore
 
@@ -14,9 +16,14 @@ class BuiltContext:
     diagnostics: dict[str, object]
     effective_user_text: str | None = None
     pending_user_message_ids: tuple[str, ...] = ()
+    response_target_text: str | None = None
+    response_target_message_ids: tuple[str, ...] = ()
+    response_target_anchors: tuple[str, ...] = ()
 
 
 class ContextManager:
+    _addressing = ConversationDecisionEngine()
+
     def __init__(self, store: TimelineStore, max_tokens: int = 3000, recent_turns: int = 8, memory_service=None) -> None:
         self._store = store
         self._max_tokens = max_tokens
@@ -27,6 +34,25 @@ class ContextManager:
     def build(self, user_text: str, *, session_id: str | None = None, current_message_id: str | None = None) -> BuiltContext:
         material = self._store.context_material(
             user_text, self._recent_turns, session_id=session_id, current_message_id=current_message_id,
+        )
+        name_only_followup = self._is_name_only_followup(user_text)
+        pending_direct_rows = (
+            self._pending_followup_rows(material)
+            if name_only_followup
+            else []
+        )
+        response_target_text = (
+            "\n".join(
+                str(row.get("corrected_content") or row.get("content") or "").strip()
+                for row in pending_direct_rows
+            ).strip()
+            or None
+        )
+        response_target_message_ids = tuple(
+            str(row["id"]) for row in pending_direct_rows
+        )
+        response_target_anchors = tuple(
+            self._response_target_anchors(response_target_text or "")
         )
         pending_user_rows: list[dict[str, object]] = []
         for row in reversed(material.get("pending_user_rows", [])):
@@ -44,6 +70,10 @@ class ContextManager:
             if burst_compacted
             else user_text
         )
+        if response_target_text is not None:
+            # The name is a wake signal. The unanswered thought is the actual
+            # request that retrieval and the response model must process.
+            effective_user_text = response_target_text
         pending_user_id_set = set(pending_user_message_ids)
         identity = ChatMessage(
             role="system",
@@ -151,18 +181,6 @@ class ContextManager:
             and row.get("decision_action") != "wait_more"
             and str(row.get("id")) not in pending_user_id_set
         ]
-        name_only_followup = self._is_name_only_followup(user_text)
-        pending_direct_rows: list[dict[str, object]] = []
-        if name_only_followup:
-            for row in reversed(material["recent"]):
-                if row.get("role") == "assistant":
-                    break
-                if self._is_pending_followup_candidate(row):
-                    pending_direct_rows.append(row)
-        pending_direct_rows.reverse()
-        # A name-only call should revive the nearest unresolved thought, not
-        # dump every unanswered utterance into one instruction.
-        pending_direct_rows = pending_direct_rows[-2:]
         previous_assistant_row = next(
             (
                 row for row in reversed(material["recent"])
@@ -269,7 +287,12 @@ class ContextManager:
             "pending_user_message_count": len(pending_user_message_ids),
             "burst_compacted": burst_compacted,
             "name_only_followup": name_only_followup,
+            "addressing_reasons": (
+                ["name_only_resume"] if pending_direct_rows else []
+            ),
             "pending_direct_message_count": len(pending_direct_rows),
+            "response_target_message_ids": list(response_target_message_ids),
+            "response_target_anchors": list(response_target_anchors),
             "previous_assistant_message_id": previous_assistant_row.get("id") if previous_assistant_row else None,
             "retrieval_query_terms": len(retrieval_query.split()) if self._memory_service is not None else 0,
             "checkpoint_id": checkpoint["id"] if checkpoint is not None else None,
@@ -293,7 +316,13 @@ class ContextManager:
             "dropped_turn_count": dropped_turn_count,
             "budget": self._max_tokens,
             "block_budgets": {"profile": 250, "facts": 450, "topics": 500, "episodes": 300, "recent": 1000, "open_loops": 250, "ambient": 200},
-        }, effective_user_text, pending_user_message_ids)
+        },
+            effective_user_text,
+            pending_user_message_ids,
+            response_target_text,
+            response_target_message_ids,
+            response_target_anchors,
+        )
         self.last = built
         return built
 
@@ -313,24 +342,93 @@ class ContextManager:
         return normalized in {"iris", "ирис", "айрис", "ириска", "ириск", "ирес", "иреск"}
 
     @classmethod
-    def _is_pending_followup_candidate(cls, row: dict[str, object]) -> bool:
-        """Allow a direct call to revive an earlier primary-user observation.
+    def _pending_followup_rows(
+        cls,
+        material: dict[str, object],
+    ) -> list[dict[str, object]]:
+        """Select one contiguous, recent Iris-directed thought.
 
-        Live conversation can legitimately classify an opening thought as
-        ``observe`` while Iris stays quiet.  It is not ambient speech merely
-        because no immediate reply was warranted.  A subsequent name-only
-        address makes that thought actionable, while actual third-party and
-        incomplete speech remains excluded.
+        Re-analysis repairs stale false ``other_person`` labels, while a real
+        ambient/third-party utterance is a hard boundary and cannot be crossed.
         """
-        if row.get("role") != "user" or row.get("decision_action") == "wait_more":
-            return False
-        if row.get("speaker_role") in {"other", "unknown"}:
-            return False
-        if cls._is_recoverable_primary_direct(row):
+        selected: list[dict[str, object]] = []
+        current_created_at = material.get("current_created_at")
+        for row in reversed(material["recent"]):
+            if row.get("role") == "assistant":
+                break
+            if not cls._within_followup_window(
+                row.get("created_at"),
+                current_created_at,
+            ):
+                break
+            if row.get("role") != "user":
+                break
+            if row.get("decision_action") == "wait_more":
+                break
+            if row.get("speaker_role") in {"other", "unknown"}:
+                break
+            text = str(
+                row.get("corrected_content") or row.get("content") or ""
+            ).strip()
+            addressing = cls._addressing.analyze_addressing(text)
+            recoverable = cls._is_recoverable_primary_direct(row)
+            reason = str(row.get("decision_reason") or "")
+            if (
+                addressing.other_person
+                or reason in {"self_talk", "ambient_speech", "incomplete_turn"}
+                or (reason == "other_person" and not recoverable)
+            ):
+                break
+            if (
+                recoverable
+                or addressing.direct_iris
+                or addressing.implicit_iris
+                or reason == "relevant_opening"
+                or row.get("decision_action") is None
+            ):
+                selected.append(row)
+                if len(selected) >= 2:
+                    break
+                continue
+            break
+        selected.reverse()
+        return selected
+
+    @staticmethod
+    def _within_followup_window(
+        earlier: object,
+        current: object,
+        *,
+        maximum_seconds: float = 30.0,
+    ) -> bool:
+        if not earlier or not current:
             return True
-        return row.get("decision_reason") not in {
-            "other_person", "self_talk", "ambient_speech", "incomplete_turn",
+        try:
+            earlier_at = datetime.fromisoformat(str(earlier).replace("Z", "+00:00"))
+            current_at = datetime.fromisoformat(str(current).replace("Z", "+00:00"))
+        except ValueError:
+            return True
+        elapsed = (current_at - earlier_at).total_seconds()
+        return 0 <= elapsed <= maximum_seconds
+
+    @staticmethod
+    def _response_target_anchors(text: str) -> list[str]:
+        stop_words = {
+            "какой", "какая", "какое", "какие", "какую", "какого", "какому",
+            "каким", "каких", "который", "которая", "которую", "которые",
+            "тебе", "тебя", "твой", "твоя", "мне", "меня", "себе", "этот",
+            "эта", "это", "эти", "просто", "помню", "забыл", "забыла",
         }
+        anchors: list[str] = []
+        for word in re.findall(
+            r"[^\W_]+",
+            text.casefold().replace("ё", "е"),
+            flags=re.UNICODE,
+        ):
+            if len(word) < 5 or word in stop_words:
+                continue
+            anchors.append(word[:6])
+        return list(dict.fromkeys(anchors))[:6]
 
     @classmethod
     def _is_burst_candidate(cls, row: dict[str, object]) -> bool:
@@ -338,6 +436,8 @@ class ContextManager:
             return False
         if row.get("speaker_role") in {"other", "unknown"}:
             return False
+        if cls._is_recoverable_primary_direct(row):
+            return True
         if cls._is_ambient_observation(row):
             return False
         return row.get("decision_reason") not in {
@@ -353,13 +453,8 @@ class ContextManager:
         if reason not in {"other_person", "relevant_opening"}:
             return False
         text = str(row.get("corrected_content") or row.get("content") or "").strip()
-        iris_alias = re.match(r"(?iu)^\s*(?:iris|айрис|ирис|ириска|ириск|ирес|иреск)\b", text)
-        question_opening = re.match(
-            r"(?iu)^\s*(?:(?:а|ну|кстати|слушай|смотри|короче)\s+){0,3}"
-            r"(?:что|кто|где|куда|откуда|когда|почему|зачем|как|какой|какая|какие|сколько|чем)(?=\s|[?？])",
-            text,
-        )
-        return bool(iris_alias or question_opening)
+        addressing = ContextManager._addressing.analyze_addressing(text)
+        return addressing.direct_iris or addressing.implicit_iris
 
     @staticmethod
     def _ambient_entry(row: dict[str, object]) -> str:

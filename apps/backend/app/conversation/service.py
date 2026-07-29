@@ -301,7 +301,9 @@ class LiveConversationService:
             session.active_utterance_id = utterance_id
             session.phase = ConversationPhase.DECIDING
 
-        addressedness = self._decision.addressedness(corrected_content or transcript)
+        addressing_text = corrected_content or transcript
+        addressing = self._decision.analyze_addressing(addressing_text)
+        addressedness = self._decision.addressedness(addressing_text)
         strictness = getattr(self._runtime, "live_conversation_address_strictness", "balanced")
         if strictness == "strict" and addressedness < 0.9:
             addressedness *= 0.65
@@ -313,14 +315,17 @@ class LiveConversationService:
             "live_conversation_participant_mode",
             "one_to_one",
         )
+        continuation_window = {
+            "strict": 0.0,
+            "balanced": 25.0,
+            "relaxed": 45.0,
+        }.get(strictness, 25.0)
         recent_iris_turn = bool(
             session.last_iris_activity_at > 0
-            and time.monotonic() - session.last_iris_activity_at <= 45
+            and time.monotonic() - session.last_iris_activity_at <= continuation_window
         )
-        addressed_to_other_now = self._decision.is_addressed_to_other(
-            corrected_content or transcript
-        )
-        explicitly_addressed_to_iris = addressedness >= 0.86
+        addressed_to_other_now = addressing.other_person
+        explicitly_addressed_to_iris = addressing.direct_iris
         if addressed_to_other_now:
             session.other_conversation_until = time.monotonic() + 45
         elif explicitly_addressed_to_iris:
@@ -332,15 +337,20 @@ class LiveConversationService:
                 and not explicitly_addressed_to_iris
             )
         )
-        explicit_implicit_address = self._decision.is_implicit_address(
-            corrected_content or transcript
+        explicit_implicit_address = addressing.implicit_iris
+        recent_dialogue_continuation = bool(
+            recent_iris_turn
+            and self._has_recent_dialogue_evidence(
+                addressing_text,
+                session.last_generated_assistant_reply,
+            )
         )
         implicit_address = bool(
             participant_mode == "one_to_one"
             and strictness != "strict"
             and speaker_role is SpeakerRole.PRIMARY
             and not addressed_to_other
-            and (explicit_implicit_address or recent_iris_turn)
+            and (explicit_implicit_address or recent_dialogue_continuation)
         )
         if implicit_address:
             addressedness = max(addressedness, 0.82)
@@ -374,15 +384,15 @@ class LiveConversationService:
             "addressedness": addressedness,
             "addressed_confidence": 0.9 if addressedness >= 0.8 else 0.65,
             "addressing_reasons": (
-                ["other_vocative"]
-                if addressed_to_other_now
+                list(addressing.reasons)
+                if explicitly_addressed_to_iris or addressed_to_other_now
                 else ["other_conversation_continuity"]
                 if addressed_to_other
                 else
-                ["implicit_request"]
+                list(addressing.reasons)
                 if explicit_implicit_address
-                else ["recent_iris_turn"]
-                if recent_iris_turn and implicit_address
+                else ["recent_dialogue_continuity"]
+                if recent_dialogue_continuation and implicit_address
                 else []
             ),
             "end_of_turn_confidence": end_of_turn_confidence,
@@ -474,6 +484,31 @@ class LiveConversationService:
                 reason="ambiguous_observation",
             )
             decision, appraisal, decision_source = await adjudication_task
+        has_addressing_evidence = bool(
+            explicitly_addressed_to_iris
+            or implicit_address
+            or addressedness >= 0.55
+        )
+        if (
+            not has_addressing_evidence
+            and significance < 0.65
+            and decision.action in {
+                ConversationAction.BACKCHANNEL,
+                ConversationAction.RESPOND,
+            }
+        ):
+            # The LLM adjudicator may find an ambient sentence interesting, but
+            # interest alone is not permission to interrupt a nearby dialogue.
+            decision = self._decision._decision(
+                ConversationAction.OBSERVE,
+                DecisionReason.AMBIENT_SPEECH,
+                0.9,
+                addressedness,
+                decision.relevance,
+                significance,
+                decision.reaction_emotion,
+            )
+            decision_source = f"{decision_source}+addressing_sensitivity_clamp"
         if (
             decision.action is ConversationAction.BACKCHANNEL
             and session.backchannel_timestamps
@@ -1185,6 +1220,33 @@ class LiveConversationService:
         if any(item in lowered for item in strong):
             return 0.8
         return min(0.55, 0.15 + len(text) / 500)
+
+    @staticmethod
+    def _has_recent_dialogue_evidence(
+        text: str,
+        previous_assistant_reply: str,
+    ) -> bool:
+        """Keep real follow-ups while avoiding a timer-only implicit address."""
+        normalized = text.casefold().replace("ё", "е").strip()
+        if not normalized:
+            return False
+        if re.search(
+            r"\b(?:ты|тебе|тебя|тобой|твой|твоя|твое|твои|твою|"
+            r"вы|вам|вас|вами|ваш|ваша|ваше|ваши)\b",
+            normalized,
+        ):
+            return True
+        if re.search(
+            r"^(?:(?:а|ну|так)\s+)?(?:да|нет|неа|ага|в\s+смысле|"
+            r"я\s+же|если\s+что|точнее|вернее)\b",
+            normalized,
+        ):
+            return True
+        prior = previous_assistant_reply.rstrip()
+        return bool(
+            len(normalized) <= 240
+            and re.search(r"[?？]\s*$", prior)
+        )
 
     @staticmethod
     def _state_context(session: ConversationSession, decision: ConversationDecision) -> str:

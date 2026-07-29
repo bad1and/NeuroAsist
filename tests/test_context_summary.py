@@ -172,7 +172,7 @@ def test_name_only_followup_surfaces_unanswered_direct_messages(tmp_path: Path) 
     assert context.diagnostics["pending_direct_message_count"] == 1
 
 
-def test_name_only_followup_revives_primary_observation_but_not_ambient_speech(tmp_path: Path) -> None:
+def test_name_only_followup_does_not_cross_an_ambient_speech_boundary(tmp_path: Path) -> None:
     store = TimelineStore(tmp_path / "observed-followup.sqlite3")
     store.init_db()
     observed, _ = store.append_message(
@@ -202,10 +202,119 @@ def test_name_only_followup_revives_primary_observation_but_not_ambient_speech(t
     )
 
     pending_blocks = [item.content for item in context.messages if item.role == "system" and "неотвеченной мысли" in item.content]
-    assert len(pending_blocks) == 1
-    assert "интеллект прокачал" in pending_blocks[0]
-    assert "Олег, включи чайник" not in pending_blocks[0]
+    assert pending_blocks == []
+    assert context.response_target_text is None
+    assert context.diagnostics["pending_direct_message_count"] == 0
+
+
+def test_name_only_followup_recovers_inflected_question_from_false_other_label(
+    tmp_path: Path,
+) -> None:
+    class RecordingMemory:
+        incognito = False
+
+        def __init__(self) -> None:
+            self.queries: list[str] = []
+
+        def clarification_prompt(self, _message_id):
+            return None
+
+        def retrieve(self, query: str):
+            self.queries.append(query)
+            return [{
+                "id": "speech-model-topic",
+                "namespace": "topic_memory",
+                "predicate": "topic_summary",
+                "value_text": "Iris рекомендовала Whisper для распознавания речи",
+                "retrieval": {"reasons": ["lexical"]},
+            }]
+
+    store = TimelineStore(tmp_path / "name-resume-regression.sqlite3")
+    store.init_db()
+    memory = RecordingMemory()
+    store.append_message(
+        role="assistant",
+        content="Ты хотел улучшить распознавание речи.",
+        input_mode="voice",
+        created_at="2026-07-29T14:29:29+00:00",
+    )
+    question, _ = store.append_message(
+        role="user",
+        content="а какую ты мне модель посоветовала я не помню",
+        input_mode="voice",
+        created_at="2026-07-29T14:29:34+00:00",
+    )
+    store.save_conversation_observation(
+        message_id=question.id,
+        session_id="live",
+        turn_id=question.turn_id or "question",
+        utterance_id="question",
+        generation=1,
+        speaker_role="primary",
+        speaker_confidence=.9,
+        addressedness=.08,
+        addressed_confidence=.65,
+        end_of_turn_confidence=1.0,
+        significance=.2,
+        metadata={},
+    )
+    store.set_observation_decision(question.id, "observe", "other_person")
+    current, _ = store.append_message(
+        role="user",
+        content="ирис",
+        input_mode="voice",
+        created_at="2026-07-29T14:29:44+00:00",
+    )
+
+    context = ContextManager(
+        store,
+        max_tokens=900,
+        recent_turns=8,
+        memory_service=memory,
+    ).build(
+        current.content,
+        current_message_id=current.id,
+    )
+
+    assert context.effective_user_text == question.content
+    assert context.response_target_text == question.content
+    assert context.response_target_message_ids == (question.id,)
+    assert "модель" in context.response_target_anchors
+    assert context.diagnostics["addressing_reasons"] == ["name_only_resume"]
     assert context.diagnostics["pending_direct_message_count"] == 1
+    assert question.content in memory.queries[0]
+    assert any(
+        message.role == "system" and "Whisper" in message.content
+        for message in context.messages
+    )
+
+
+def test_name_only_followup_does_not_revive_message_after_thirty_seconds(
+    tmp_path: Path,
+) -> None:
+    store = TimelineStore(tmp_path / "name-resume-expired.sqlite3")
+    store.init_db()
+    question, _ = store.append_message(
+        role="user",
+        content="какую модель ты советовала",
+        input_mode="voice",
+        created_at="2026-07-29T14:29:00+00:00",
+    )
+    current, _ = store.append_message(
+        role="user",
+        content="ирис",
+        input_mode="voice",
+        created_at="2026-07-29T14:29:31+00:00",
+    )
+
+    context = ContextManager(store, max_tokens=900, recent_turns=8).build(
+        current.content,
+        current_message_id=current.id,
+    )
+
+    assert context.response_target_text is None
+    assert context.response_target_message_ids == ()
+    assert context.diagnostics["pending_direct_message_count"] == 0
 
 
 def test_context_recovers_question_word_and_stt_iris_alias_from_false_ambient_labels(tmp_path: Path) -> None:
@@ -236,9 +345,10 @@ def test_context_recovers_question_word_and_stt_iris_alias_from_false_ambient_la
         current.content, current_message_id=current.id,
     )
 
-    direct_text = "\n".join(item.content for item in context.messages if item.role == "user")
-    assert "откуда ты знаешь" in direct_text
-    assert "иреск ты помнишь" in direct_text
+    assert context.response_target_text is not None
+    assert "кстати ну как меня зовут" in context.response_target_text
+    assert "иреск ты помнишь" in context.response_target_text
+    assert "откуда ты знаешь" not in context.response_target_text
     ambient_blocks = [
         item.content for item in context.messages
         if item.role == "system" and "фоновые наблюдения" in item.content
