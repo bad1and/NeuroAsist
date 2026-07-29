@@ -76,7 +76,7 @@ def test_background_extractor_saves_durable_preference_without_explicit_command(
     assert memories[0]["value_text"] == "короткие ответы по делу"
 
 
-def test_background_extractor_keeps_sensitive_fact_in_review(tmp_path) -> None:
+def test_background_extractor_requests_sensitive_clarification_without_review_item(tmp_path) -> None:
     store, service = _memory_service(tmp_path)
     message, _ = store.append_message(role="user", content="У меня аллергия на орехи", input_mode="text")
     service.schedule_extraction(message)
@@ -87,7 +87,8 @@ def test_background_extractor_keeps_sensitive_fact_in_review(tmp_path) -> None:
     asyncio.run(MemoryExtractionWorker(store, service, provider).run_once())
 
     assert store.list_memories(status="active") == []
-    assert len(store.list_memories(status="candidate")) == 1
+    assert store.list_memories(status="candidate") == []
+    assert store.memory_diagnostics()["autonomy"]["open_clarifications"] == 1
 
 
 def test_background_extractor_redacts_secret_but_keeps_other_facts(tmp_path) -> None:

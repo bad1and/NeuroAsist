@@ -97,7 +97,6 @@ describe("русский интерфейс", () => {
     api.getMemories.mockResolvedValue({
       items: [
         { id: "m1", status: "active", predicate: "имя", value_text: "Роман", source_message_ids: [] },
-        { id: "m2", status: "candidate", predicate: "проект", value_text: "Iris", source_message_ids: [] },
       ],
     });
 
@@ -105,7 +104,7 @@ describe("русский интерфейс", () => {
 
     expect(await screen.findByRole("heading", { name: "О чём поговорим?" })).toBeInTheDocument();
     expect(await screen.findByText("Идеи интерфейса")).toBeInTheDocument();
-    expect(screen.getByText("1 ожидают проверки")).toBeInTheDocument();
+    expect(screen.getByText("Iris самостоятельно поддерживает актуальность фактов.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Начать диалог/ }));
     expect(screen.getByPlaceholderText("Напишите сообщение…")).toBeInTheDocument();
   });
@@ -140,27 +139,22 @@ describe("русский интерфейс", () => {
     expect(screen.getByLabelText("Стиль общения")).not.toBeVisible();
   });
 
-  it("создаёт запись памяти с тем же API-полезным содержимым", async () => {
+  it("не показывает ручное создание и очередь проверки", async () => {
     render(<MemoryPage />);
     await screen.findByText("Записей пока нет");
 
-    fireEvent.click(screen.getByRole("button", { name: "Добавить запись" }));
-    fireEvent.change(screen.getByLabelText("Тип записи"), { target: { value: "предпочтение" } });
-    fireEvent.change(screen.getByLabelText("Содержание"), { target: { value: "Любит чай" } });
-    fireEvent.click(screen.getByRole("button", { name: "Сохранить запись" }));
-
-    await waitFor(() => expect(api.createMemory).toHaveBeenCalledWith({
-      predicate: "предпочтение", value_text: "Любит чай", source_message_ids: [],
-    }));
+    expect(screen.queryByRole("button", { name: "Добавить запись" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "На проверке" })).not.toBeInTheDocument();
+    expect(api.createMemory).not.toHaveBeenCalled();
   });
 
   it("переключает раздел памяти в таком же меню", async () => {
     render(<MemoryPage />);
     await screen.findByRole("button", { name: "Текущие" });
 
-    fireEvent.click(screen.getByRole("button", { name: "На проверке" }));
+    fireEvent.click(screen.getByRole("button", { name: "Архив" }));
 
-    await waitFor(() => expect(api.getMemories).toHaveBeenLastCalledWith("candidate", undefined));
+    await waitFor(() => expect(api.getMemories).toHaveBeenLastCalledWith(undefined, undefined));
   });
 
   it("скрывает заменённые записи из текущей памяти и объясняет архив", async () => {
@@ -204,7 +198,7 @@ describe("русский интерфейс", () => {
     await waitFor(() => expect(api.resetConversationSession).toHaveBeenCalledTimes(2));
   });
 
-  it("редактирует память во встроенном диалоге", async () => {
+  it("оставляет только историю и забывание записи", async () => {
     api.getMemories.mockResolvedValue({
       items: [{
         id: "memory-1", scope: "user", kind: "fact", subject: "user", predicate: "напиток",
@@ -213,18 +207,14 @@ describe("русский интерфейс", () => {
         access_count: 1,
       }],
     });
-    api.updateMemory.mockResolvedValue({ memory: {} });
     render(<MemoryPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Дополнительные действия" }));
-    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
-    expect(screen.getByRole("heading", { name: "Изменить запись" })).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Содержание"), { target: { value: "Зелёный чай" } });
-    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
-
-    await waitFor(() => expect(api.updateMemory).toHaveBeenCalledWith("memory-1", {
-      value_text: "Зелёный чай", user_locked: true,
-    }));
+    expect(screen.getByRole("button", { name: "История записи" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Забыть" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Изменить" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Закрепить" })).not.toBeInTheDocument();
+    expect(api.updateMemory).not.toHaveBeenCalled();
   });
 
   it("подтверждает удаление истории во встроенном диалоге", async () => {

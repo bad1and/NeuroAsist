@@ -651,6 +651,13 @@ def create_app() -> FastAPI:
                     "Memory integrity v18 repair checked",
                     repair_v18,
                 )
+                repair_v19 = memory_service.repair_v19_autonomous_memory()
+                event_bus.publish(
+                    "memory.v19_repair",
+                    "info",
+                    "Autonomous memory v19 repair checked",
+                    repair_v19,
+                )
                 expired = memory_service.expire_due_memories()
                 if expired:
                     event_bus.publish(

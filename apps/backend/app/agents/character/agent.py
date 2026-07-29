@@ -78,6 +78,17 @@ class CharacterAgent:
             self._last_user_message = source_message
             self._active_turn_id = getattr(source_message, "turn_id", None)
             self.last_memory_updates = []
+        if self._memory_service is not None:
+            resolved = self._memory_service.resolve_clarification_response(
+                self._last_user_message,
+            )
+            self.last_memory_updates.extend(
+                self._memory_service.memory_update(memory)
+                for memory in resolved
+            )
+            self._memory_service.prepare_clarification_from_message(
+                self._last_user_message,
+            )
         built_context = (
             self._context_manager.build(effective_text, session_id=session_id, current_message_id=getattr(self._last_user_message, "id", None))
             if self._context_manager else None
@@ -290,6 +301,17 @@ class CharacterAgent:
             self._last_user_message = source_message
             self._active_turn_id = getattr(source_message, "turn_id", None)
             self.last_memory_updates = []
+        if self._memory_service is not None:
+            resolved = self._memory_service.resolve_clarification_response(
+                self._last_user_message,
+            )
+            self.last_memory_updates.extend(
+                self._memory_service.memory_update(memory)
+                for memory in resolved
+            )
+            self._memory_service.prepare_clarification_from_message(
+                self._last_user_message,
+            )
         built_context = (
             self._context_manager.build(effective_text, session_id=session_id, current_message_id=getattr(self._last_user_message, "id", None))
             if self._context_manager else None

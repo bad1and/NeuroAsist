@@ -56,6 +56,15 @@ class ConflictProposal(BaseModel):
     resolution: Literal["supersede", "review", "coexist"] = "review"
 
 
+class MemoryDecisionProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["accept", "reject", "clarify"]
+    reason: str = Field(min_length=1, max_length=200)
+    predicate: str | None = Field(default=None, max_length=200)
+    clarification_id: str | None = Field(default=None, max_length=64)
+
+
 class ConsolidationResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -63,3 +72,4 @@ class ConsolidationResult(BaseModel):
     topics: list[TopicProposal] = Field(default_factory=list, max_length=12)
     commitments: list[CommitmentProposal] = Field(default_factory=list, max_length=20)
     conflicts: list[ConflictProposal] = Field(default_factory=list, max_length=20)
+    decisions: list[MemoryDecisionProposal] = Field(default_factory=list, max_length=30)

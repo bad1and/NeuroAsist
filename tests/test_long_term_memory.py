@@ -34,7 +34,7 @@ def test_memory_has_user_source_and_deleted_memory_never_enters_context(tmp_path
     service.delete(str(memory["id"]))
     assert service.retrieve("как меня зовут") == []
     assert ContextManager(store, max_tokens=200, memory_service=service).build("как меня зовут").diagnostics["selected_memory_ids"] == []
-    assert {item["action"] for item in store.memory_audit(str(memory["id"]))} >= {"candidate_created", "deleted"}
+    assert {item["action"] for item in store.memory_audit(str(memory["id"]))} >= {"autonomous_accepted", "deleted"}
 
 
 def test_ambient_live_speech_is_not_extracted_or_retrieved_as_memory(tmp_path: Path) -> None:
@@ -93,6 +93,51 @@ def test_memory_deduplicates_and_supersedes_conflicting_user_fact(tmp_path: Path
     assert store.get_memory(str(first["id"]))["status"] == "superseded"
     assert store.get_memory(str(changed["id"]))["supersedes_id"] == first["id"]
     assert service.retrieve("как меня зовут")[0]["value_text"] == "Алекс"
+
+
+def test_explicit_name_correction_overrides_locked_fact_without_review(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    first_message, _ = store.append_message(
+        role="user", content="Меня зовут Роман", input_mode="text",
+    )
+    first = service.extract_from_message(first_message)[0]
+    service.edit(str(first["id"]), {"user_locked": True})
+    correction, _ = store.append_message(
+        role="user", content="Нет, теперь меня зовут Алекс", input_mode="text",
+    )
+
+    changed = service.extract_from_message(correction)[0]
+
+    assert changed["status"] == "active"
+    assert changed["value_text"] == "Алекс"
+    assert store.get_memory(str(first["id"]))["status"] == "superseded"
+    assert store.list_memories(status="candidate") == []
+
+
+def test_low_quality_important_fact_clarifies_but_transient_fact_is_rejected(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    name_message, _ = store.append_message(
+        role="user", content="Меня зовут Рома", input_mode="voice",
+        metadata={"stt_confidence": .55},
+    )
+    mood_message, _ = store.append_message(
+        role="user", content="Сейчас хочется поболтать", input_mode="voice",
+        metadata={"stt_confidence": .55},
+    )
+
+    assert service.extract_from_message(name_message) == []
+    assert service.apply_llm_candidates([{
+        "kind": "preference", "subject": "user", "predicate": "user.current_mood",
+        "value_text": "желание поболтать", "importance": .4, "confidence": .7,
+    }], mood_message) == []
+
+    diagnostics = store.memory_diagnostics()["autonomy"]
+    assert diagnostics["open_clarifications"] == 1
+    assert store.list_memories(status="candidate") == []
+    assert [
+        item["status"] for item in store.list_memories(limit=20)
+        if item.get("slot_key") == "user.current_mood"
+    ] == ["rejected"]
 
 
 def test_duplicate_fact_unions_sources_without_duplicate_evidence(tmp_path: Path) -> None:
@@ -243,13 +288,14 @@ def test_memory_policy_marks_allergy_sensitive_and_never_keeps_password(tmp_path
         {"kind": "decision", "subject": "user", "predicate": "note", "value_text": "123456", "importance": .9, "confidence": .99, "sensitivity": "normal"},
     ], secret)
 
-    assert stored_allergy[0]["status"] == "candidate"
-    assert stored_allergy[0]["sensitivity"] == "sensitive"
+    assert stored_allergy == []
+    assert store.memory_diagnostics()["autonomy"]["open_clarifications"] == 1
+    assert store.list_memories(status="candidate") == []
     assert stored_secret == []
     assert disguised_secret == []
 
 
-def test_ambiguous_social_relation_requires_review_but_direct_one_is_saved(tmp_path: Path) -> None:
+def test_ambiguous_social_relation_requests_clarification_but_direct_one_is_saved(tmp_path: Path) -> None:
     store, service = _service(tmp_path)
     ambiguous, _ = store.append_message(
         role="user", content="Моего друга Федю и мы разрабатываем тебя вдвоём", input_mode="text",
@@ -258,12 +304,13 @@ def test_ambiguous_social_relation_requires_review_but_direct_one_is_saved(tmp_p
 
     ambiguous_memory = service.apply_llm_candidates([
         {"kind": "relationship", "subject": "user", "predicate": "has_friend", "value_text": "Федя", "importance": .8, "confidence": .99},
-    ], ambiguous)[0]
+    ], ambiguous)
     direct_memory = service.apply_llm_candidates([
         {"kind": "relationship", "subject": "user", "predicate": "has_friend", "value_text": "Лука", "importance": .8, "confidence": .99},
     ], direct)[0]
 
-    assert ambiguous_memory["status"] == "candidate"
+    assert ambiguous_memory == []
+    assert store.memory_diagnostics()["autonomy"]["open_clarifications"] == 1
     assert direct_memory["status"] == "active"
 
 
@@ -285,13 +332,15 @@ def test_balanced_memory_saves_valid_identity_and_returns_it_for_identity_varian
     }
 
 
-def test_balanced_memory_keeps_preferences_and_sensitive_facts_for_review(tmp_path: Path) -> None:
+def test_balanced_memory_rejects_weak_preference_and_accepts_explicit_sensitive_fact(tmp_path: Path) -> None:
     store, service = _service(tmp_path, mode="balanced")
     preference, _ = store.append_message(role="user", content="Я предпочитаю короткие ответы", input_mode="text")
     sensitive, _ = store.append_message(role="user", content="Запомни: у меня диагноз аллергия", input_mode="text")
 
-    assert service.extract_from_message(preference)[0]["status"] == "candidate"
-    assert service.extract_from_message(sensitive)[0]["status"] == "candidate"
+    assert service.extract_from_message(preference) == []
+    saved = service.extract_from_message(sensitive)
+    assert saved[0]["status"] == "active"
+    assert store.list_memories(status="candidate") == []
 
 
 def test_explicit_memory_is_normalized_and_developer_relationship_is_structured(tmp_path: Path) -> None:
@@ -332,7 +381,7 @@ def test_direct_developer_wording_is_saved_immediately(tmp_path: Path) -> None:
     ]
 
 
-def test_ambiguous_legacy_relationship_is_moved_to_review(tmp_path: Path) -> None:
+def test_ambiguous_legacy_relationship_is_rejected_autonomously(tmp_path: Path) -> None:
     store, service = _service(tmp_path)
     source, _ = store.append_message(
         role="user", content="Я буду часто упоминать Федю", input_mode="text",
@@ -347,7 +396,7 @@ def test_ambiguous_legacy_relationship_is_moved_to_review(tmp_path: Path) -> Non
     repaired = service.repair_ambiguous_relationship_memories()
 
     assert [item["id"] for item in repaired] == [memory["id"]]
-    assert store.get_memory(str(memory["id"]))["status"] == "candidate"
+    assert store.get_memory(str(memory["id"]))["status"] == "rejected"
 
 
 def test_explicit_vague_fact_is_not_saved(tmp_path: Path) -> None:
@@ -379,21 +428,27 @@ def test_name_extraction_rejects_invalid_value_and_repairs_legacy_candidate_from
     assert service.repair_legacy_identity_candidates() == []
 
 
-def test_sensitive_and_ask_mode_candidates_require_confirmation(tmp_path: Path) -> None:
+def test_sensitive_fact_is_confirmed_in_chat_without_manual_candidate(tmp_path: Path) -> None:
     store, automatic = _service(tmp_path, mode="automatic")
-    sensitive, _ = store.append_message(role="user", content="Запомни: у меня диагноз аллергия", input_mode="text")
-    candidate = automatic.extract_from_message(sensitive)[0]
-    assert candidate["status"] == "candidate"
-    assert automatic.retrieve("диагноз") == []
-    automatic.confirm(str(candidate["id"]))
-    assert automatic.retrieve("диагноз")[0]["id"] == candidate["id"]
+    sensitive, _ = store.append_message(role="user", content="У меня диагноз аллергия", input_mode="text")
+    assert automatic.prepare_clarification_from_message(sensitive) is True
+    restarted = MemoryService(store, RuntimeSettings(memory_mode="automatic"))
+    context = ContextManager(store, max_tokens=400, memory_service=restarted).build(
+        sensitive.effective_content, current_message_id=sensitive.id,
+    )
+    assert context.diagnostics["memory_clarification_requested"] is True
+    assert any("долгосрочной памяти" in item.content for item in context.messages)
+    assert restarted.retrieve("диагноз") == []
+    confirmation, _ = store.append_message(
+        role="user", content="Да, запомни", input_mode="text",
+    )
+    confirmed = restarted.resolve_clarification_response(confirmation)
+    assert confirmed[0]["status"] == "active"
+    assert restarted.retrieve("аллергия")[0]["id"] == confirmed[0]["id"]
+    assert store.list_memories(status="candidate") == []
 
-    ask_message, _ = store.append_message(role="user", content="Я предпочитаю короткие ответы", input_mode="text")
-    ask = MemoryService(store, RuntimeSettings(memory_mode="ask"))
-    assert ask.extract_from_message(ask_message)[0]["status"] == "candidate"
 
-
-def test_memory_routes_enforce_sources_and_keep_memory_clear_separate(monkeypatch, tmp_path: Path) -> None:
+def test_memory_routes_disable_manual_mutation_and_keep_forgetting(monkeypatch, tmp_path: Path) -> None:
     settings = Settings(
         sqlite_path=str(tmp_path / "api.sqlite3"), log_to_file=False,
         voice_preload_stt_model=False, voice_preload_tts_model=False,
@@ -404,20 +459,31 @@ def test_memory_routes_enforce_sources_and_keep_memory_clear_separate(monkeypatc
         message = client.post("/timeline/messages", json={"role": "user", "content": "Источник", "input_mode": "text"}).json()["message"]
         without_source = client.post("/memory", json={"predicate": "note", "value_text": "Без источника"})
         created = client.post("/memory", json={"predicate": "note", "value_text": "С источником", "source_message_ids": [message["id"]]})
-        assert without_source.status_code == 200
-        assert without_source.json()["memory"]["source_count"] == 0
-        assert without_source.json()["memory"]["slot_key"] == "user.note"
-        memory_id = created.json()["memory"]["id"]
-        assert client.post(f"/memory/{memory_id}/reindex").status_code == 404
-        assert client.post("/memory/reindex").json()["indexed"] == 2
-        explanation = client.get("/memory/retrieval/explain", params={"q": "источником"})
-        assert explanation.status_code == 200
-        assert explanation.json()["items"][0]["id"] == memory_id
-        assert client.post("/memory/clear", json={}).json()["deleted"] == 2
+        assert without_source.status_code == 410
+        assert without_source.json()["detail"]["code"] == "memory_autonomous"
+        assert created.status_code == 410
+        assert client.patch("/memory/unknown", json={"value_text": "Новое"}).status_code == 410
+        assert client.post("/memory/unknown/restore").status_code == 410
+        assert client.post("/memory/unknown/confirm").status_code == 410
+        assert client.post("/memory/unknown/reject").status_code == 410
+        assert client.post("/memory/topics", json={"title": "Ручная тема"}).status_code == 410
+        assert client.post("/memory/commitments", json={
+            "kind": "open_loop", "title": "Ручной план",
+        }).status_code == 410
+        assert client.post("/memory/commitments/unknown/close").status_code == 410
+        assert client.get("/memory", params={"status": "candidate"}).json()["items"] == []
+        name_message = client.post("/timeline/messages", json={
+            "role": "user", "content": "Меня зовут Роман", "input_mode": "text",
+        }).json()["message"]
+        memory = client.app.state.memory_service.extract_from_message(
+            client.app.state.timeline_store.get_message(name_message["id"]),
+        )[0]
+        assert client.delete(f"/memory/{memory['id']}").status_code == 200
+        assert client.post("/memory/clear", json={}).json()["deleted"] == 0
         assert client.get("/timeline/messages?limit=10").json()["items"]
 
-    assert without_source.status_code == 200
-    assert created.status_code == 200
+    assert without_source.status_code == 410
+    assert created.status_code == 410
 
 
 def test_incognito_skips_timeline_and_memory_writes(tmp_path: Path) -> None:

@@ -150,6 +150,113 @@
       ],
       "title": "Intent",
       "type": "string"
+    },
+    "MemoryCandidate": {
+      "additionalProperties": false,
+      "description": "A proposed memory, never a direct command to mutate storage.",
+      "properties": {
+        "kind": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "subject": {
+          "default": "user",
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Subject",
+          "type": "string"
+        },
+        "predicate": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Predicate",
+          "type": "string"
+        },
+        "value_text": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Value Text",
+          "type": "string"
+        },
+        "importance": {
+          "default": 0.6,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Importance",
+          "type": "number"
+        },
+        "confidence": {
+          "default": 0.7,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "sensitivity": {
+          "default": "normal",
+          "pattern": "^(normal|sensitive)$",
+          "title": "Sensitivity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "predicate",
+        "value_text"
+      ],
+      "title": "MemoryCandidate",
+      "type": "object"
+    },
+    "MemoryDecisionCue": {
+      "additionalProperties": false,
+      "description": "Optional model assessment; MemoryService remains the authority.",
+      "properties": {
+        "action": {
+          "pattern": "^(accept|reject|clarify)$",
+          "title": "Action",
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "predicate": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Predicate"
+        },
+        "clarification_id": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Clarification Id"
+        }
+      },
+      "required": [
+        "action",
+        "reason"
+      ],
+      "title": "MemoryDecisionCue",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -189,6 +296,22 @@
         }
       ],
       "default": null
+    },
+    "memory_candidates": {
+      "items": {
+        "$ref": "#/$defs/MemoryCandidate"
+      },
+      "maxItems": 3,
+      "title": "Memory Candidates",
+      "type": "array"
+    },
+    "memory_decisions": {
+      "items": {
+        "$ref": "#/$defs/MemoryDecisionCue"
+      },
+      "maxItems": 3,
+      "title": "Memory Decisions",
+      "type": "array"
     }
   },
   "required": [

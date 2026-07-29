@@ -18,7 +18,7 @@ from apps.backend.app.llm.base import ChatMessage
 
 PRIMARY_RELATIONSHIP_ID = "primary"
 PRIMARY_TIMELINE_ID = "primary-timeline"
-LATEST_SCHEMA_VERSION = 18
+LATEST_SCHEMA_VERSION = 19
 
 
 @dataclass(frozen=True)
@@ -176,6 +176,9 @@ class TimelineStore:
             if 18 not in applied:
                 self._apply_v18_memory_integrity_schema(connection)
                 connection.execute("INSERT INTO schema_migrations (version, applied_at) VALUES (18, ?)", (self._now(),))
+            if 19 not in applied:
+                self._apply_v19_autonomous_memory_schema(connection)
+                connection.execute("INSERT INTO schema_migrations (version, applied_at) VALUES (19, ?)", (self._now(),))
             # v12 reached some development databases before all of its
             # additive objects existed.  Keep this repair idempotent and run
             # it even when the migration marker is already present.
@@ -186,6 +189,7 @@ class TimelineStore:
             self._apply_v16_memory_observability_schema(connection)
             self._apply_v17_canonical_memory_schema(connection)
             self._apply_v18_memory_integrity_schema(connection)
+            self._apply_v19_autonomous_memory_schema(connection)
             self._ensure_primary_timeline(connection)
             self._migrate_legacy_messages(connection)
             # Legacy V0.4 rows are imported after migrations, so backfill their
@@ -952,6 +956,17 @@ class TimelineStore:
                     "SELECT COUNT(*) FROM episode_summaries WHERE superseded_at IS NULL"
                 ).fetchone()[0]),
             }
+            clarification_rows = connection.execute(
+                """SELECT status, COUNT(*) AS count
+                   FROM memory_clarifications GROUP BY status"""
+            ).fetchall()
+            candidate_count = int(connection.execute(
+                "SELECT COUNT(*) FROM memory_items WHERE status = 'candidate'"
+            ).fetchone()[0])
+            decision_rows = connection.execute(
+                """SELECT action, COUNT(*) AS count FROM memory_audit
+                   WHERE action LIKE 'autonomous_%' GROUP BY action"""
+            ).fetchall()
         runs: list[dict[str, object]] = []
         for row in rows:
             item = dict(row)
@@ -971,6 +986,22 @@ class TimelineStore:
             "repair": repair_result,
             "active_by_namespace": namespace_counts,
             "integrity": self.memory_integrity(),
+            "autonomy": {
+                "candidate_count": candidate_count,
+                "clarifications": {
+                    str(row["status"]): int(row["count"])
+                    for row in clarification_rows
+                },
+                "decisions": {
+                    str(row["action"]).removeprefix("autonomous_"): int(row["count"])
+                    for row in decision_rows
+                },
+                "open_clarifications": sum(
+                    int(row["count"])
+                    for row in clarification_rows
+                    if row["status"] in {"pending", "asked"}
+                ),
+            },
         }
 
     def memory_integrity(self) -> dict[str, object]:
@@ -1029,6 +1060,7 @@ class TimelineStore:
             "provenance_missing": provenance_missing,
             "source_count_mismatches": source_mismatches,
             "guards_installed": len(guards) == 2,
+            "candidate_count": sum(1 for row in rows if row["status"] == "candidate"),
         }
         result["state"] = (
             "healthy"
@@ -1039,6 +1071,7 @@ class TimelineStore:
                     "noncanonical_active",
                     "provenance_missing",
                     "source_count_mismatches",
+                    "candidate_count",
                 )
             )
             and result["guards_installed"]
@@ -1069,6 +1102,131 @@ class TimelineStore:
                      completed_at = excluded.completed_at""",
                 (repair_key, json.dumps(result, ensure_ascii=False), now, now),
             )
+
+    def create_memory_clarification(
+        self,
+        values: dict[str, object],
+        *,
+        reason: str,
+        question: str,
+    ) -> dict[str, object]:
+        """Persist an internal clarification without exposing it as memory."""
+        now = self._now()
+        clarification_id = uuid4().hex
+        slot_key = str(values.get("slot_key") or "")
+        object_key = str(values.get("object_key") or "")
+        source_ids = list(dict.fromkeys(str(item) for item in values.get("source_message_ids", [])))
+        expires_at = (datetime.now(UTC) + timedelta(days=2)).isoformat(timespec="milliseconds")
+        with self._connect() as connection:
+            existing = connection.execute(
+                """SELECT * FROM memory_clarifications
+                   WHERE status IN ('pending', 'asked')
+                     AND slot_key = ? AND COALESCE(object_key, '') = ?
+                   ORDER BY created_at DESC LIMIT 1""",
+                (slot_key, object_key),
+            ).fetchone()
+            if existing is not None:
+                return self._clarification_row(existing)
+            connection.execute(
+                """INSERT INTO memory_clarifications (
+                     id, relationship_id, slot_key, object_key, reason, question,
+                     candidate_json, source_message_ids_json, status,
+                     asked_on_message_id, resolution_message_id,
+                     created_at, updated_at, expires_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, ?, ?)""",
+                (
+                    clarification_id,
+                    PRIMARY_RELATIONSHIP_ID,
+                    slot_key,
+                    object_key or None,
+                    reason,
+                    question,
+                    json.dumps(values, ensure_ascii=False),
+                    json.dumps(source_ids, ensure_ascii=False),
+                    now,
+                    now,
+                    expires_at,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM memory_clarifications WHERE id = ?",
+                (clarification_id,),
+            ).fetchone()
+        return self._clarification_row(row)
+
+    def next_memory_clarification(
+        self,
+        current_message_id: str | None,
+    ) -> dict[str, object] | None:
+        """Claim at most one question for the current direct response."""
+        now = self._now()
+        with self._connect() as connection:
+            connection.execute(
+                """UPDATE memory_clarifications
+                   SET status = 'expired', updated_at = ?
+                   WHERE status IN ('pending', 'asked') AND expires_at <= ?""",
+                (now, now),
+            )
+            row = connection.execute(
+                """SELECT * FROM memory_clarifications
+                   WHERE status = 'pending'
+                   ORDER BY created_at LIMIT 1"""
+            ).fetchone()
+            if row is None:
+                return None
+            source_ids = json.loads(str(row["source_message_ids_json"] or "[]"))
+            if current_message_id and current_message_id not in source_ids:
+                # A background clarification is first surfaced on this turn.
+                pass
+            connection.execute(
+                """UPDATE memory_clarifications
+                   SET status = 'asked', asked_on_message_id = ?, updated_at = ?
+                   WHERE id = ?""",
+                (current_message_id, now, row["id"]),
+            )
+            claimed = connection.execute(
+                "SELECT * FROM memory_clarifications WHERE id = ?",
+                (row["id"],),
+            ).fetchone()
+        return self._clarification_row(claimed)
+
+    def open_memory_clarification_for_response(
+        self,
+        message_id: str,
+    ) -> dict[str, object] | None:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT * FROM memory_clarifications
+                   WHERE status = 'asked' AND asked_on_message_id != ?
+                   ORDER BY updated_at LIMIT 1""",
+                (message_id,),
+            ).fetchall()
+        return self._clarification_row(rows[0]) if rows else None
+
+    def resolve_memory_clarification(
+        self,
+        clarification_id: str,
+        *,
+        status: str,
+        resolution_message_id: str,
+    ) -> dict[str, object]:
+        if status not in {"accepted", "rejected", "expired"}:
+            raise ValueError("Unsupported clarification resolution")
+        now = self._now()
+        with self._connect() as connection:
+            connection.execute(
+                """UPDATE memory_clarifications
+                   SET status = ?, resolution_message_id = ?, updated_at = ?
+                   WHERE id = ?""",
+                (status, resolution_message_id, now, clarification_id),
+            )
+            row = connection.execute(
+                "SELECT * FROM memory_clarifications WHERE id = ?",
+                (clarification_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyError(clarification_id)
+        return self._clarification_row(row)
 
     def _claim_job(
         self,
@@ -1268,7 +1426,7 @@ class TimelineStore:
                 ).fetchall()
             return [self._enrich_memory_row(connection, row) for row in rows]
 
-    def create_memory(self, values: dict[str, object], *, actor: str, action: str = "candidate_created") -> dict[str, object]:
+    def create_memory(self, values: dict[str, object], *, actor: str, action: str = "autonomous_accepted") -> dict[str, object]:
         now = self._now()
         memory_id = uuid4().hex
         source_ids = list(values.get("source_message_ids", []))
@@ -1287,7 +1445,7 @@ class TimelineStore:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, NULL, 0, '{}', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (memory_id, PRIMARY_RELATIONSHIP_ID, values["scope"], values["kind"], values["subject"], values["predicate"],
                  values["value_text"], canonical, values.get("importance", 0.5), values.get("confidence", 0.5),
-                 values.get("sensitivity", "normal"), values.get("status", "candidate"), int(bool(values.get("user_locked", False))),
+                 values.get("sensitivity", "normal"), values.get("status", "active"), int(bool(values.get("user_locked", False))),
                  values.get("valid_from"), values.get("valid_to"), values.get("expires_at"), source_episode_id,
                  json.dumps(source_ids, ensure_ascii=False), values.get("extractor_version", "memory-v1"), now, now,
                  values.get("extraction_model"), values.get("cardinality", "multi"), values.get("temporal_semantics", "atemporal"),
@@ -1295,7 +1453,7 @@ class TimelineStore:
                   values.get("slot_key"), values.get("object_key"), values.get("normalization_version", 1),
                   search_text),
             )
-            if values.get("status", "candidate") in {"active", "candidate"}:
+            if values.get("status", "active") == "active":
                 self._index_memory(connection, memory_id, search_text)
             for message_id in source_ids:
                 self._add_evidence(connection, "fact", memory_id, str(message_id), source_episode_id,
@@ -1336,7 +1494,7 @@ class TimelineStore:
             assignments = ", ".join(f"{key} = ?" for key in updates)
             connection.execute(f"UPDATE memory_items SET {assignments} WHERE id = ?", (*updates.values(), memory_id))
             row = connection.execute("SELECT * FROM memory_items WHERE id = ?", (memory_id,)).fetchone()
-            if row["status"] in {"active", "candidate"}:
+            if row["status"] == "active":
                 self._index_memory(connection, memory_id, row["search_text"] or row["canonical_text"])
             else:
                 connection.execute("DELETE FROM memory_fts WHERE memory_id = ?", (memory_id,))
@@ -1638,7 +1796,7 @@ class TimelineStore:
             before = self._memory_row(row)
             connection.execute("UPDATE memory_items SET status = ?, updated_at = ? WHERE id = ?", (status, self._now(), memory_id))
             row = connection.execute("SELECT * FROM memory_items WHERE id = ?", (memory_id,)).fetchone()
-            if status not in {"active", "candidate"}:
+            if status != "active":
                 connection.execute("DELETE FROM memory_fts WHERE memory_id = ?", (memory_id,))
             else:
                 self._index_memory(connection, memory_id, row["search_text"] or row["canonical_text"])
@@ -1800,7 +1958,7 @@ class TimelineStore:
             connection.execute("DELETE FROM memory_fts")
             rows = connection.execute(
                 """SELECT id, COALESCE(NULLIF(search_text, ''), canonical_text) AS index_text
-                   FROM memory_items WHERE status IN ('candidate', 'active')"""
+                   FROM memory_items WHERE status = 'active'"""
             ).fetchall()
             connection.executemany(
                 "INSERT INTO memory_fts (memory_id, text) VALUES (?, ?)",
@@ -2876,6 +3034,57 @@ class TimelineStore:
             """
         )
 
+    def _apply_v19_autonomous_memory_schema(self, connection: sqlite3.Connection) -> None:
+        """Store conversational clarifications outside durable memory."""
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS memory_clarifications (
+                id TEXT PRIMARY KEY,
+                relationship_id TEXT NOT NULL,
+                slot_key TEXT NOT NULL,
+                object_key TEXT,
+                reason TEXT NOT NULL,
+                question TEXT NOT NULL,
+                candidate_json TEXT NOT NULL,
+                source_message_ids_json TEXT NOT NULL DEFAULT '[]',
+                status TEXT NOT NULL
+                    CHECK(status IN ('pending', 'asked', 'accepted', 'rejected', 'expired')),
+                asked_on_message_id TEXT,
+                resolution_message_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_memory_clarifications_status
+                ON memory_clarifications(status, created_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_open_clarification
+                ON memory_clarifications(
+                    relationship_id, slot_key, COALESCE(object_key, '')
+                )
+                WHERE status IN ('pending', 'asked');
+            """
+        )
+
+    def ensure_autonomous_memory_guards(self) -> None:
+        """Forbid reintroducing the retired manual-review status."""
+        with self._connect() as connection:
+            connection.executescript(
+                """
+                CREATE TRIGGER IF NOT EXISTS trg_memory_no_candidate_insert
+                BEFORE INSERT ON memory_items
+                WHEN NEW.status = 'candidate'
+                BEGIN
+                    SELECT RAISE(ABORT, 'candidate status is retired');
+                END;
+                CREATE TRIGGER IF NOT EXISTS trg_memory_no_candidate_update
+                BEFORE UPDATE OF status ON memory_items
+                WHEN NEW.status = 'candidate'
+                BEGIN
+                    SELECT RAISE(ABORT, 'candidate status is retired');
+                END;
+                """
+            )
+
     def ensure_memory_integrity_indexes(self) -> None:
         """Install hard guards only after v18 has reconciled released data."""
         with self._connect() as connection:
@@ -2916,6 +3125,15 @@ class TimelineStore:
         value["user_locked"] = bool(value["user_locked"])
         value["source_message_ids"] = json.loads(value.pop("source_message_ids_json"))
         value["metadata"] = json.loads(value.pop("metadata_json"))
+        return value
+
+    @staticmethod
+    def _clarification_row(row: sqlite3.Row) -> dict[str, object]:
+        value = dict(row)
+        value["candidate"] = json.loads(str(value.pop("candidate_json") or "{}"))
+        value["source_message_ids"] = json.loads(
+            str(value.pop("source_message_ids_json") or "[]")
+        )
         return value
 
     def _enrich_memory_row(
