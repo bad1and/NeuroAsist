@@ -159,6 +159,67 @@ def test_v18_repairs_released_duplicate_and_provenance_pattern(tmp_path: Path) -
         }, actor="test")
 
 
+def test_v19_resolves_candidates_and_installs_autonomy_guard(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    name_source, _ = store.append_message(
+        role="user", content="Меня зовут Федя", input_mode="text",
+    )
+    active_name = service.extract_from_message(name_source)[0]
+    duplicate = store.create_memory({
+        "scope": "user_profile", "kind": "identity", "subject": "user",
+        "predicate": "name", "value_text": "Федя", "status": "candidate",
+        "source_message_ids": [name_source.id],
+        "source_episode_id": name_source.episode_id,
+        "extractor_version": "legacy-review",
+    }, actor="migration")
+    mood_source, _ = store.append_message(
+        role="user", content="Сейчас хочется поболтать", input_mode="text",
+    )
+    mood = store.create_memory({
+        "scope": "user_profile", "kind": "preference", "subject": "user",
+        "predicate": "mood", "value_text": "желание поболтать",
+        "importance": .4, "confidence": .6, "status": "candidate",
+        "temporal_semantics": "current",
+        "source_message_ids": [mood_source.id],
+        "source_episode_id": mood_source.episode_id,
+        "extractor_version": "legacy-review",
+    }, actor="migration")
+    sensitive = store.create_memory({
+        "scope": "user_profile", "kind": "constraint", "subject": "user",
+        "predicate": "diagnosis", "value_text": "аллергия",
+        "importance": .9, "confidence": .99, "sensitivity": "sensitive",
+        "status": "candidate", "source_message_ids": [name_source.id],
+        "source_episode_id": name_source.episode_id,
+        "extractor_version": "legacy-review",
+    }, actor="migration")
+
+    first = service.repair_v19_autonomous_memory()
+    with sqlite3.connect(tmp_path / "memory-v11.sqlite3") as connection:
+        connection.execute("DROP INDEX uq_memory_active_single_slot")
+        connection.execute("DROP INDEX uq_memory_active_multi_object")
+        connection.execute("DROP TRIGGER trg_memory_no_candidate_insert")
+        connection.execute("DROP TRIGGER trg_memory_no_candidate_update")
+    second = service.repair_v19_autonomous_memory()
+
+    assert first["merged"] == 1
+    assert first["expired"] == 1
+    assert first["rejected"] == 1
+    assert second["idempotent_noop"] is True
+    assert store.get_memory(str(duplicate["id"]))["status"] == "superseded"
+    assert store.get_memory(str(mood["id"]))["status"] == "expired"
+    assert store.get_memory(str(sensitive["id"]))["status"] == "rejected"
+    assert store.get_memory(str(active_name["id"]))["status"] == "active"
+    assert store.list_memories(status="candidate") == []
+    assert store.memory_integrity()["candidate_count"] == 0
+    assert store.memory_integrity()["state"] == "healthy"
+    with pytest.raises(sqlite3.IntegrityError):
+        store.create_memory({
+            "scope": "user_profile", "kind": "identity", "subject": "user",
+            "predicate": "name", "value_text": "Ручная проверка",
+            "status": "candidate", "source_message_ids": [],
+        }, actor="test")
+
+
 def test_v17_assigns_ttl_and_closes_name_loop_when_slot_is_filled(tmp_path: Path) -> None:
     store, service = _service(tmp_path)
     mood_source, _ = store.append_message(role="user", content="Сейчас я бодрый", input_mode="text")

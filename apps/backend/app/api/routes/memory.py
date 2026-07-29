@@ -16,6 +16,16 @@ def _service(request: Request):
     return service
 
 
+def _autonomous_memory_only() -> None:
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "memory_autonomous",
+            "message": "Memory is managed by Iris through conversation",
+        },
+    )
+
+
 @router.get("")
 def list_memory(
     request: Request,
@@ -23,25 +33,24 @@ def list_memory(
     q: str | None = Query(default=None, max_length=200),
     limit: int = Query(default=100, ge=1, le=500),
 ) -> dict[str, object]:
-    return {"items": _service(request).store.list_memories(status=status, query=q, limit=limit)}
+    if status == "candidate":
+        return {"items": []}
+    items = _service(request).store.list_memories(
+        status=status, query=q, limit=limit,
+    )
+    return {
+        "items": [item for item in items if item["status"] != "candidate"],
+    }
 
 
 @router.post("")
 def create_memory(payload: MemoryCreate, request: Request) -> dict[str, object]:
-    try:
-        memory = _service(request).create_manual(payload.model_dump())
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"memory": memory}
+    _autonomous_memory_only()
 
 
 @router.patch("/{memory_id}")
 def patch_memory(memory_id: str, payload: MemoryPatch, request: Request) -> dict[str, object]:
-    try:
-        memory = _service(request).edit(memory_id, payload.model_dump(exclude_none=True))
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Memory not found") from exc
-    return {"memory": memory}
+    _autonomous_memory_only()
 
 
 @router.delete("/{memory_id}")
@@ -54,26 +63,17 @@ def delete_memory(memory_id: str, request: Request) -> dict[str, object]:
 
 @router.post("/{memory_id}/restore")
 def restore_memory(memory_id: str, request: Request) -> dict[str, object]:
-    try:
-        return {"memory": _service(request).restore(memory_id)}
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Memory not found") from exc
+    _autonomous_memory_only()
 
 
 @router.post("/{memory_id}/confirm")
 def confirm_memory(memory_id: str, request: Request) -> dict[str, object]:
-    try:
-        return {"memory": _service(request).confirm(memory_id)}
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Memory not found") from exc
+    _autonomous_memory_only()
 
 
 @router.post("/{memory_id}/reject")
 def reject_memory(memory_id: str, request: Request) -> dict[str, object]:
-    try:
-        return {"memory": _service(request).reject(memory_id)}
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Memory not found") from exc
+    _autonomous_memory_only()
 
 
 @router.get("/profile")
@@ -83,14 +83,7 @@ def memory_profile(request: Request) -> dict[str, object]:
 
 @router.post("/merge")
 def merge_memory(payload: MemoryMerge, request: Request) -> dict[str, object]:
-    service = _service(request)
-    survivor, merged = service.store.get_memory(payload.survivor_id), service.store.get_memory(payload.merged_id)
-    if survivor is None or merged is None:
-        raise HTTPException(status_code=404, detail="Memory not found")
-    if survivor.get("user_locked") is False and merged.get("user_locked") is True:
-        raise HTTPException(status_code=422, detail="A locked memory must be the merge survivor")
-    service.store.supersede_memory(payload.merged_id, payload.survivor_id)
-    return {"memory": service.store.get_memory(payload.survivor_id)}
+    _autonomous_memory_only()
 
 
 @router.get("/topics")
@@ -100,23 +93,17 @@ def list_topics(request: Request, status: str | None = None, q: str | None = Que
 
 @router.post("/topics")
 def create_topic(payload: TopicCreate, request: Request) -> dict[str, object]:
-    return {"topic": _service(request).store.create_topic(payload.model_dump(), actor="user")}
+    _autonomous_memory_only()
 
 
 @router.patch("/topics/{topic_id}")
 def patch_topic(topic_id: str, payload: TopicPatch, request: Request) -> dict[str, object]:
-    try:
-        return {"topic": _service(request).store.update_topic(topic_id, payload.model_dump(exclude_none=True))}
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Topic not found") from exc
+    _autonomous_memory_only()
 
 
 @router.post("/topics/{topic_id}/merge/{merged_id}")
 def merge_topics(topic_id: str, merged_id: str, request: Request) -> dict[str, object]:
-    try:
-        return {"topic": _service(request).store.merge_topics(topic_id, merged_id)}
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Topic not found") from exc
+    _autonomous_memory_only()
 
 
 @router.get("/commitments")
@@ -126,23 +113,17 @@ def list_commitments(request: Request, status: str | None = None) -> dict[str, o
 
 @router.post("/commitments")
 def create_commitment(payload: CommitmentCreate, request: Request) -> dict[str, object]:
-    return {"commitment": _service(request).store.create_commitment(payload.model_dump())}
+    _autonomous_memory_only()
 
 
 @router.patch("/commitments/{commitment_id}")
 def patch_commitment(commitment_id: str, payload: CommitmentPatch, request: Request) -> dict[str, object]:
-    try:
-        return {"commitment": _service(request).store.update_commitment(commitment_id, payload.model_dump(exclude_none=True))}
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Commitment not found") from exc
+    _autonomous_memory_only()
 
 
 @router.post("/commitments/{commitment_id}/close")
 def close_commitment(commitment_id: str, request: Request) -> dict[str, object]:
-    try:
-        return {"commitment": _service(request).store.update_commitment(commitment_id, {"status": "completed"})}
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Commitment not found") from exc
+    _autonomous_memory_only()
 
 
 @router.get("/conflicts")

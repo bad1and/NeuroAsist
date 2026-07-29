@@ -15,6 +15,7 @@ from apps.backend.app.memory.consolidation import (
     ConflictProposal,
     ConsolidationResult,
     FactProposal,
+    MemoryDecisionProposal,
     TopicProposal,
 )
 from apps.backend.app.storage.timeline import TimelineStore
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 MEMORY_EXTRACTION_PROMPT = """Ты — Archivist, внутренний модуль консолидации памяти AI-компаньона.
-Верни только JSON вида {"facts":[],"topics":[],"commitments":[],"conflicts":[]}.
+Верни только JSON вида {"facts":[],"topics":[],"commitments":[],"conflicts":[],"decisions":[]}.
 Используй только явные сведения из завершённого прямого диалога. В окне есть user и Iris;
 обе роли допустимы как provenance для общих решений, обещаний и milestones. Не используй
 ambient/incomplete/echo, секреты, догадки или субъективные оценки. Каждый факт содержит kind,
@@ -37,7 +38,14 @@ source_message_ids. Conflicts имеют existing_id, proposed_kind, reason и r
 Факты и темы о пользователе обязаны иметь хотя бы один user source. Реплика Iris сама по себе
 не доказывает ни факт о пользователе, ни её выдуманное текущее занятие/состояние; обещания,
 решения и общие milestones из assistant source оформляй только как commitments.
+Decisions содержат внутренние accept|reject|clarify, reason, optional predicate и
+clarification_id; они не создают память и нужны только для диагностики решения.
 Если сохранять нечего, верни пустые массивы.
+Если Iris задала вопрос, чтобы уточнить факт или получить согласие на чувствительную
+память, не предлагай этот факт до следующего прямого ответа пользователя. Явное «да»,
+«верно» или исправленное значение подтверждает факт; явное отрицание его отклоняет.
+Не создавай факты для ручной проверки: сомнительные малозначимые и временные сведения
+просто пропускай.
 Предпочитай канонические predicates из каталога:
 user.name, assistant.developer, assistant.developer_count, user.likes_category,
 user.likes_game, user.game_detail, user.preference, user.note, user.relationship.friend,
@@ -50,7 +58,7 @@ user.prefers_response_length. Не создавай новый topic для од
 "importance":0.9,"confidence":0.99,"sensitivity":"normal","source_message_ids":["msg-1"],
 "cardinality":"single","temporal_semantics":"atemporal"}],
 "topics":[{"title":"Игровые предпочтения","summary_text":"Любит шутеры.","source_message_ids":["msg-2"]}],
-"commitments":[],"conflicts":[]}"""
+"commitments":[],"conflicts":[],"decisions":[]}"""
 
 
 class MemoryExtractionWorker:
@@ -281,20 +289,22 @@ class MemoryExtractionWorker:
                             "temporal_semantics": item.get("temporal_semantics", "atemporal")}
                           for item in raw if isinstance(item, dict)],
                 "topics": [], "commitments": [], "conflicts": [],
+                "decisions": [],
             }
-        unknown = sorted(set(payload) - {"facts", "topics", "commitments", "conflicts"})
+        unknown = sorted(set(payload) - {"facts", "topics", "commitments", "conflicts", "decisions"})
         models: dict[str, type[Any]] = {
             "facts": FactProposal,
             "topics": TopicProposal,
             "commitments": CommitmentProposal,
             "conflicts": ConflictProposal,
+            "decisions": MemoryDecisionProposal,
         }
         accepted: dict[str, list[object]] = {key: [] for key in models}
         errors: list[dict[str, object]] = [
             {"section": "root", "index": -1, "code": "extra_forbidden", "path": f"$.{key}"}
             for key in unknown
         ]
-        limits = {"facts": 30, "topics": 12, "commitments": 20, "conflicts": 20}
+        limits = {"facts": 30, "topics": 12, "commitments": 20, "conflicts": 20, "decisions": 30}
         for section, model in models.items():
             raw_items = payload.get(section, [])
             if not isinstance(raw_items, list):
@@ -318,7 +328,10 @@ class MemoryExtractionWorker:
 
     @staticmethod
     def _proposal_count(result: ConsolidationResult) -> int:
-        return len(result.facts) + len(result.topics) + len(result.commitments) + len(result.conflicts)
+        return (
+            len(result.facts) + len(result.topics) + len(result.commitments)
+            + len(result.conflicts) + len(result.decisions)
+        )
 
     def _filter_provenance(
         self,

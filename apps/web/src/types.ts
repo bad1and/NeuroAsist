@@ -39,7 +39,7 @@ export type ChatResponse = {
 export type MemoryUpdate = {
   id: string;
   status: MemoryStatus;
-  action: "saved" | "review" | "updated";
+  action: "saved" | "updated";
   predicate: string;
 };
 
@@ -311,7 +311,7 @@ export type TimelineJournalItem = {
   title?: string | null;
 };
 
-export type MemoryStatus = "candidate" | "active" | "superseded" | "rejected" | "deleted" | "expired";
+export type MemoryStatus = "active" | "superseded" | "rejected" | "deleted" | "expired";
 
 export type MemoryItem = {
   id: string;
@@ -422,7 +422,14 @@ export type MemoryDiagnostics = {
     noncanonical_active: number;
     provenance_missing: number;
     source_count_mismatches: number;
+    candidate_count?: number;
     guards_installed: boolean;
+  };
+  autonomy?: {
+    candidate_count: number;
+    open_clarifications: number;
+    clarifications: Record<string, number>;
+    decisions: Record<string, number>;
   };
   index_health?: {
     state: "healthy" | "degraded" | "rebuilding";

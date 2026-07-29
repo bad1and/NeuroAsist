@@ -7,9 +7,10 @@ import hashlib
 import re
 import logging
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from threading import RLock
-from typing import Any
+from typing import Any, Literal
 
 from apps.backend.app.runtime.settings import RuntimeSettings
 from apps.backend.app.memory.consolidation import CommitmentProposal, ConsolidationResult, FactProposal, TopicProposal
@@ -18,6 +19,12 @@ from apps.backend.app.storage.timeline import StoredTimelineMessage, TimelineSto
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class MemoryDecision:
+    action: Literal["accept", "reject", "clarify"]
+    reason: str
 
 
 class MemoryService:
@@ -29,7 +36,7 @@ class MemoryService:
     )
     _SECRET_WORDS = ("парол", "password", "код подтверждения", "код из смс", "cvv", "токен", "token", "api key")
     _SINGLE_VALUE_PREDICATES = {"name", "current_statement", "current_goal", "prefers_response_length"}
-    _CANONICAL_VERSION = 18
+    _CANONICAL_VERSION = 19
     _SINGLE_VALUE_SLOTS = {
         "user.name",
         "assistant.developer_count",
@@ -37,6 +44,8 @@ class MemoryService:
         "user.current_activity",
         "user.current_goal",
         "user.prefers_response_length",
+        "user.health_constraint",
+        "user.constraint",
     }
     _KNOWN_SLOTS = {
         "user.name",
@@ -52,6 +61,8 @@ class MemoryService:
         "user.current_activity",
         "user.current_goal",
         "user.prefers_response_length",
+        "user.health_constraint",
+        "user.constraint",
     }
     _NAME_PREFIX = re.compile(
         r"(?:\bменя\s+зовут\b|\bмо[её]\s+имя(?:\s+(?:это|[-—:]))?\b|\bmy\s+name\s+is\b|\bcall\s+me\b)",
@@ -96,6 +107,17 @@ class MemoryService:
         r"\bлюблю(?:\s+\w+){0,2}\s+играть\s+в\s+"
         r"(шутер(?:ы|ов|ах)?|стратеги(?:и|ях)|гонк(?:и|ах)|симулятор(?:ы|ах)?|рпг|rpg)\b",
         flags=re.IGNORECASE,
+    )
+    _CONFIRMATION = re.compile(
+        r"(?iu)^\s*(?:да|ага|верно|точно|правильно|подтверждаю|запомни|yes|correct)\b"
+    )
+    _REJECTION = re.compile(
+        r"(?iu)^\s*(?:нет|неверно|неправильно|не\s+надо|не\s+запоминай|no)\b"
+    )
+    _SENSITIVE_SELF_FACT = re.compile(
+        r"(?iu)\b(?:у\s+меня|мой|моя|мо[её]|я\s+(?:болею|принимаю))\b"
+        r"[^.!?\n]{0,160}\b(?:диагноз|аллерг|болез|лекар|симптом|адрес)\w*"
+        r"[^.!?\n]*"
     )
 
     def __init__(
@@ -452,6 +474,8 @@ class MemoryService:
             try:
                 for canonical in self._canonical_candidates(values, source):
                     memory = self._apply_candidate(canonical, actor="extractor", sync_vector=False)
+                    if memory is None:
+                        continue
                     if memory["status"] == "active":
                         self._schedule_vector_sync(memory)
                     saved_facts += 1
@@ -524,10 +548,20 @@ class MemoryService:
         self, values: dict[str, object], source: StoredTimelineMessage, *,
         sync_vector: bool = True,
     ) -> list[dict[str, object]]:
-        return [
-            self._apply_candidate(candidate, actor="extractor", sync_vector=sync_vector)
-            for candidate in self._canonical_candidates(values, source)
-        ]
+        applied: list[dict[str, object]] = []
+        prepared = {
+            **values,
+            "source_quality": values.get(
+                "source_quality", self._source_quality(source),
+            ),
+        }
+        for candidate in self._canonical_candidates(prepared, source):
+            memory = self._apply_candidate(
+                candidate, actor="extractor", sync_vector=sync_vector,
+            )
+            if memory is not None:
+                applied.append(memory)
+        return applied
 
     def sanitize_for_llm_extraction(self, text: str) -> tuple[str, bool]:
         """Remove secret-bearing spans before they can reach an LLM prompt."""
@@ -661,8 +695,8 @@ class MemoryService:
         """Move old, inferred social ties out of active prompt context.
 
         Earlier extractors could turn a loosely mentioned name into a permanent
-        relationship.  Preserve the record for review, but do not keep it in
-        automatic retrieval.  Explicit user-created memories are never touched.
+        relationship. Preserve it in the audit archive, never in a manual queue.
+        Explicit user-created memories are never touched.
         """
         repaired: list[dict[str, object]] = []
         for memory in self._store.list_memories(status="active", limit=250):
@@ -675,9 +709,9 @@ class MemoryService:
                 continue
             demoted = self._store.set_memory_status(
                 str(memory["id"]),
-                "candidate",
+                "rejected",
                 actor="migration",
-                action="ambiguous_relationship_review",
+                action="autonomous_rejected_ambiguous_relationship",
             )
             self._delete_vector(str(memory["id"]))
             repaired.append(demoted)
@@ -968,15 +1002,244 @@ class MemoryService:
             self._store.finish_memory_repair(repair_key, result)
         return result
 
+    def repair_v19_autonomous_memory(self) -> dict[str, object]:
+        """Resolve every legacy review item, then permanently retire review."""
+        repair_key = "autonomous-memory-v19"
+        previous = self._store.memory_repair_run(repair_key)
+        if previous is not None and previous.get("status") == "completed":
+            self._store.ensure_memory_integrity_indexes()
+            self._store.ensure_autonomous_memory_guards()
+            return dict(previous.get("result", {})) | {"idempotent_noop": True}
+        result: dict[str, object] = {
+            "activated": 0,
+            "merged": 0,
+            "rejected": 0,
+            "expired": 0,
+            "index_jobs": 0,
+        }
+        with self._write_lock, self._store.consolidation_transaction():
+            for item in self._store.list_memories(status="candidate", limit=1000):
+                source = next(
+                    (
+                        self._store.get_message(str(message_id))
+                        for message_id in reversed(item.get("source_message_ids", []))
+                        if self._store.get_message(str(message_id)) is not None
+                    ),
+                    None,
+                )
+                candidates = self._canonical_candidates(item, source)
+                if len(candidates) != 1:
+                    self._store.set_memory_status(
+                        str(item["id"]),
+                        "rejected",
+                        actor="migration",
+                        action="autonomous_rejected_noncanonical_v19",
+                    )
+                    result["rejected"] = int(result["rejected"]) + 1
+                    continue
+                canonical = candidates[0]
+                self._store.update_memory(
+                    str(item["id"]),
+                    self._canonical_fields(canonical),
+                    actor="migration",
+                    action="canonicalized_v19",
+                )
+                exact, conflict = self._match_existing(
+                    canonical, exclude_id=str(item["id"]),
+                )
+                if exact is not None:
+                    self._store.copy_memory_evidence(
+                        str(item["id"]), str(exact["id"]),
+                    )
+                    self._store.supersede_memory(
+                        str(item["id"]), str(exact["id"]),
+                    )
+                    result["merged"] = int(result["merged"]) + 1
+                    continue
+                temporal = str(canonical.get("temporal_semantics") or "")
+                expired_at = canonical.get("expires_at")
+                is_expired = False
+                if expired_at:
+                    try:
+                        is_expired = datetime.fromisoformat(
+                            str(expired_at).replace("Z", "+00:00")
+                        ) <= datetime.now(UTC)
+                    except ValueError:
+                        is_expired = True
+                if temporal in {"current", "period"} and (
+                    is_expired
+                    or float(canonical.get("confidence", 0.0)) < self._auto_min_confidence
+                ):
+                    self._store.set_memory_status(
+                        str(item["id"]),
+                        "expired",
+                        actor="migration",
+                        action="autonomous_expired_v19",
+                    )
+                    result["expired"] = int(result["expired"]) + 1
+                    continue
+                decision = self._autonomous_decision(canonical, conflict)
+                if decision.action == "accept":
+                    if conflict is not None:
+                        self._store.supersede_memory(
+                            str(conflict["id"]), str(item["id"]),
+                        )
+                    active = self._store.set_memory_status(
+                        str(item["id"]),
+                        "active",
+                        actor="migration",
+                        action="autonomous_accepted_v19",
+                    )
+                    self._schedule_vector_sync(active)
+                    result["activated"] = int(result["activated"]) + 1
+                    result["index_jobs"] = int(result["index_jobs"]) + 1
+                else:
+                    self._store.set_memory_status(
+                        str(item["id"]),
+                        "rejected",
+                        actor="migration",
+                        action=f"autonomous_rejected_{decision.reason}_v19",
+                    )
+                    result["rejected"] = int(result["rejected"]) + 1
+            self._store.reindex_memories()
+            self._store.finish_memory_repair(repair_key, result)
+        self._store.ensure_memory_integrity_indexes()
+        self._store.ensure_autonomous_memory_guards()
+        return result
+
     @staticmethod
     def memory_update(memory: dict[str, object]) -> dict[str, str]:
         status = str(memory["status"])
         return {
             "id": str(memory["id"]),
             "status": status,
-            "action": "saved" if status == "active" else "review" if status == "candidate" else "updated",
+            "action": "saved" if status == "active" else "updated",
             "predicate": str(memory["predicate"]),
         }
+
+    def clarification_prompt(self, current_message_id: str | None) -> str | None:
+        clarification = self._store.next_memory_clarification(current_message_id)
+        if clarification is None:
+            return None
+        return (
+            "Нужно уточнить важный факт для долгосрочной памяти. "
+            "В конце текущего ответа задай ровно один короткий вопрос, без кнопок "
+            "и служебных объяснений: "
+            + str(clarification["question"])
+        )
+
+    def resolve_clarification_response(
+        self,
+        message: StoredTimelineMessage | None,
+    ) -> list[dict[str, object]]:
+        """Resolve the previously asked question from a direct user reply."""
+        if message is None or message.role != "user" or message.status != "completed":
+            return []
+        clarification = self._store.open_memory_clarification_for_response(message.id)
+        if clarification is None:
+            return []
+        text = message.effective_content.strip()
+        clarification_id = str(clarification["id"])
+        values = dict(clarification["candidate"])
+        corrected = self._clarification_correction(values, text)
+        if corrected is not None:
+            corrected.update({
+                "status": "active",
+                "source_message_ids": list(dict.fromkeys([
+                    *clarification.get("source_message_ids", []),
+                    message.id,
+                ])),
+                "source_episode_id": message.episode_id,
+                "extractor_version": "clarification-v19",
+            })
+            memory = self._apply_candidate(
+                corrected,
+                actor="clarification",
+                action="autonomous_accepted_correction",
+            )
+            self._store.resolve_memory_clarification(
+                clarification_id,
+                status="accepted" if memory is not None else "rejected",
+                resolution_message_id=message.id,
+            )
+            return [memory] if memory is not None else []
+        if self._REJECTION.search(text):
+            self._store.resolve_memory_clarification(
+                clarification_id,
+                status="rejected",
+                resolution_message_id=message.id,
+            )
+            return []
+        if self._CONFIRMATION.search(text):
+            source_ids = [
+                *clarification.get("source_message_ids", []),
+                message.id,
+            ]
+            values.update({
+                "status": "active",
+                "source_message_ids": list(dict.fromkeys(source_ids)),
+                "source_episode_id": message.episode_id,
+                "extractor_version": "clarification-v19",
+            })
+            memory = self._apply_candidate(
+                values,
+                actor="clarification",
+                action="autonomous_accepted_clarification",
+            )
+            self._store.resolve_memory_clarification(
+                clarification_id,
+                status="accepted" if memory is not None else "rejected",
+                resolution_message_id=message.id,
+            )
+            return [memory] if memory is not None else []
+        self._store.resolve_memory_clarification(
+            clarification_id,
+            status="expired",
+            resolution_message_id=message.id,
+        )
+        return []
+
+    def prepare_clarification_from_message(
+        self,
+        message: StoredTimelineMessage | None,
+    ) -> bool:
+        """Create a same-turn consent question for obvious sensitive self-facts."""
+        if (
+            message is None
+            or message.role != "user"
+            or message.status != "completed"
+            or not self.is_eligible_automatic_source(message)
+        ):
+            return False
+        text = message.effective_content.strip()
+        normalized = self._normalize(text)
+        if (
+            self._contains_secret(normalized)
+            or re.search(r"\b(?:запомни|сохрани в памяти|remember)\b", normalized)
+            or not self._SENSITIVE_SELF_FACT.search(text)
+        ):
+            return False
+        values = self._canonicalize_single({
+            "scope": "user_profile",
+            "kind": "constraint",
+            "subject": "user",
+            "predicate": "health_condition",
+            "value_text": self._clean_memory_value(text)[:1000],
+            "importance": .9,
+            "confidence": .9,
+            "sensitivity": "sensitive",
+            "source_message_ids": [message.id],
+            "source_episode_id": message.episode_id,
+            "extractor_version": "preflight-v19",
+            "cardinality": "multi",
+            "temporal_semantics": "atemporal",
+        })
+        self._store.create_memory_clarification(
+            values,
+            reason="sensitive_consent",
+            question="Ты хочешь, чтобы я сохранила это в долгосрочной памяти?",
+        )
+        return True
 
     def create_manual(self, values: dict[str, object]) -> dict[str, object]:
         source_ids = list(values.get("source_message_ids", []))
@@ -1133,8 +1396,9 @@ class MemoryService:
         self._store.enqueue_memory_index_job(str(summary["id"]), "episode_summary")
 
     def _apply_candidate(
-        self, values: dict[str, object], *, actor: str, action: str = "candidate_created", sync_vector: bool = True,
-    ) -> dict[str, object]:
+        self, values: dict[str, object], *, actor: str,
+        action: str = "autonomous_accepted", sync_vector: bool = True,
+    ) -> dict[str, object] | None:
         with self._write_lock, self._store.consolidation_transaction():
             self._validate_sources(
                 list(values.get("source_message_ids", [])),
@@ -1163,31 +1427,30 @@ class MemoryService:
                         actor="user",
                         action="manual_duplicate_confirmed",
                     )
-                    if exact["status"] == "candidate":
-                        if conflict is not None:
-                            self._store.supersede_memory(
-                                str(conflict["id"]), str(exact["id"]),
-                            )
-                        exact = self._store.set_memory_status(
-                            str(exact["id"]), "active",
-                            actor="user", action="confirmed",
-                        )
                 return exact
-            status = str(values.get("status", "candidate"))
+            status = str(values.get("status", "active"))
             if actor == "extractor":
-                sensitive = values.get("sensitivity") == "sensitive"
-                status = "active" if self._should_auto_activate(values, sensitive) else "candidate"
-                if float(values.get("source_quality", 1.0)) < 0.80:
-                    # Speech recognition uncertainty is useful evidence, but
-                    # never strong enough to silently alter the profile.
-                    status = "candidate"
-                if conflict is not None and conflict["user_locked"]:
-                    status = "candidate"
-                if str(values.get("slot_key") or "") not in self._KNOWN_SLOTS:
-                    status = "candidate"
+                decision = self._autonomous_decision(values, conflict)
+                if decision.action == "clarify":
+                    self._store.create_memory_clarification(
+                        values,
+                        reason=decision.reason,
+                        question=self._clarification_question(
+                            values, decision.reason, conflict,
+                        ),
+                    )
+                    return None
+                if decision.action == "reject":
+                    self._store.create_memory(
+                        {**values, "status": "rejected"},
+                        actor=actor,
+                        action=f"autonomous_rejected_{decision.reason}",
+                    )
+                    return None
+                status = "active"
             values["status"] = status
             create_status = (
-                "candidate"
+                "rejected"
                 if status == "active" and conflict is not None
                 else status
             )
@@ -1195,7 +1458,11 @@ class MemoryService:
             memory = self._store.create_memory(
                 values,
                 actor=actor,
-                action=action if create_status == "active" else "candidate_created",
+                action=(
+                    action
+                    if create_status == "active"
+                    else "autonomous_staged_replacement"
+                ),
             )
             if status == "active" and conflict is not None:
                 self._store.supersede_memory(str(conflict["id"]), str(memory["id"]))
@@ -1209,6 +1476,130 @@ class MemoryService:
             if memory["status"] == "active":
                 self._close_satisfied_commitments(str(values.get("slot_key") or ""))
             return memory
+
+    def _autonomous_decision(
+        self,
+        values: dict[str, object],
+        conflict: dict[str, object] | None,
+    ) -> MemoryDecision:
+        slot = str(values.get("slot_key") or "")
+        importance = float(values.get("importance", 0.0))
+        confidence = float(values.get("confidence", 0.0))
+        source_quality = float(values.get("source_quality", 1.0))
+        sensitive = values.get("sensitivity") == "sensitive"
+        explicit = self._has_explicit_memory_consent(values)
+        explicit_correction = self._has_explicit_correction(values)
+        high_impact = (
+            slot in {
+                "user.name",
+                "assistant.developer",
+                "assistant.developer_count",
+                "user.current_goal",
+                "user.prefers_response_length",
+            }
+            or str(values.get("kind")) in {
+                "identity", "relationship", "constraint", "correction",
+            }
+            or importance >= 0.8
+        )
+        transient = (
+            slot in {"user.current_mood", "user.current_activity"}
+            or values.get("temporal_semantics") in {"current", "period"}
+        )
+        if slot not in self._KNOWN_SLOTS:
+            return MemoryDecision("reject", "unknown_slot")
+        if sensitive and not explicit:
+            return MemoryDecision("clarify", "sensitive_consent")
+        if source_quality < 0.80:
+            return MemoryDecision(
+                "clarify" if high_impact else "reject",
+                "low_source_quality",
+            )
+        if (
+            conflict is not None
+            and conflict.get("user_locked")
+            and not (explicit or explicit_correction)
+        ):
+            return MemoryDecision("clarify", "locked_conflict")
+        if (
+            str(values.get("kind")) == "relationship"
+            and not self._relationship_is_unambiguous(values)
+        ):
+            return MemoryDecision("clarify", "ambiguous_relationship")
+        if transient and (
+            confidence < self._auto_min_confidence
+            or importance < self._auto_min_importance
+        ):
+            return MemoryDecision("reject", "uncertain_transient")
+        if self._should_auto_activate(values, sensitive=False):
+            return MemoryDecision("accept", "policy_threshold")
+        return MemoryDecision(
+            "clarify" if high_impact else "reject",
+            "important_uncertainty" if high_impact else "below_threshold",
+        )
+
+    def _has_explicit_memory_consent(self, values: dict[str, object]) -> bool:
+        for message_id in values.get("source_message_ids", []):
+            source = self._store.get_message(str(message_id))
+            if source is None or source.role != "user":
+                continue
+            normalized = self._normalize(source.effective_content)
+            if re.search(r"\b(?:запомни|сохрани в памяти|remember)\b", normalized):
+                return True
+        return str(values.get("extractor_version", "")).startswith("clarification-")
+
+    def _has_explicit_correction(self, values: dict[str, object]) -> bool:
+        slot = str(values.get("slot_key") or "")
+        for message_id in values.get("source_message_ids", []):
+            source = self._store.get_message(str(message_id))
+            if source is None or source.role != "user":
+                continue
+            text = self._normalize(source.effective_content)
+            if re.search(
+                r"\b(?:нет|исправ|теперь|на самом деле|вообще-то|зови меня)\b",
+                text,
+            ):
+                return True
+            if slot == "user.name" and self._NAME_PREFIX.search(text):
+                return True
+        return False
+
+    @staticmethod
+    def _clarification_question(
+        values: dict[str, object],
+        reason: str,
+        conflict: dict[str, object] | None,
+    ) -> str:
+        value = str(values.get("value_text") or "").strip()
+        if reason == "sensitive_consent":
+            return "Ты хочешь, чтобы я сохранила это в долгосрочной памяти?"
+        if reason == "locked_conflict" and conflict is not None:
+            return (
+                f"Заменить сохранённое «{conflict['value_text']}» на «{value}»?"
+            )
+        if reason == "low_source_quality":
+            return f"Я правильно услышала: «{value}»?"
+        return f"Я правильно поняла, что нужно запомнить: «{value}»?"
+
+    def _clarification_correction(
+        self,
+        values: dict[str, object],
+        text: str,
+    ) -> dict[str, object] | None:
+        slot = str(values.get("slot_key") or "")
+        extracted = self._extract_candidates(text)
+        for candidate in extracted:
+            canonical = self._canonical_candidates(candidate, None)
+            if canonical and canonical[0].get("slot_key") == slot:
+                return {**values, **canonical[0]}
+        if slot == "user.name":
+            name = self._extract_name(text)
+            if name:
+                return {**values, "value_text": name}
+        if slot == "user.health_constraint" and self._SENSITIVE_SELF_FACT.search(text):
+            value = re.sub(r"(?iu)^\s*нет\s*[,—:-]?\s*", "", text).strip()
+            return {**values, "value_text": value}
+        return None
 
     def _schedule_vector_sync(self, memory: dict[str, object]) -> None:
         """Queue index work durably so a crash cannot lose a Chroma update."""
@@ -1401,7 +1792,6 @@ class MemoryService:
 
     def _match_existing(self, values: dict[str, object], exclude_id: str | None = None) -> tuple[dict[str, object] | None, dict[str, object] | None]:
         active = self._store.list_memories(status="active", limit=250)
-        review = self._store.list_memories(status="candidate", limit=250)
         subject, predicate = str(values["subject"]), str(values["predicate"])
         candidate_value = self._normalize(str(values["value_text"]))
         slot_key = str(values.get("slot_key") or "")
@@ -1413,7 +1803,7 @@ class MemoryService:
             or values.get("temporal_semantics") in {"current", "period"}
         )
         exact = conflict = None
-        for item in [*active, *review]:
+        for item in active:
             if item["id"] == exclude_id:
                 continue
             item_slot = str(item.get("slot_key") or "")
@@ -1740,6 +2130,16 @@ class MemoryService:
             object_key = object_key or f"preference:{self._normalize(value)}"
         elif predicate == "explicit_memory" and subject == "user":
             slot, object_key = "user.note", f"note:{self._normalize(value)}"
+        elif predicate in {
+            "allergy", "diagnosis", "health_condition", "medical_constraint",
+        } and subject == "user":
+            slot, predicate = "user.health_constraint", "health_constraint"
+            object_key = object_key or f"health:{self._normalize(value)}"
+            result["cardinality"] = "multi"
+        elif predicate in {"constraint", "restriction"} and subject == "user":
+            slot, predicate = "user.constraint", "constraint"
+            object_key = object_key or f"constraint:{self._normalize(value)}"
+            result["cardinality"] = "multi"
         elif predicate in {"has_friend", "friend"} and subject == "user":
             slot, object_key = "user.relationship.friend", f"person:{self._normalize(value)}"
         elif predicate in {"game_features", "plays_game_with_upgrades", "plays_for_fun"}:
@@ -1749,6 +2149,7 @@ class MemoryService:
             "user.likes_category", "user.likes_game", "user.preference", "user.note",
             "user.relationship.friend", "user.game_detail",
             "user.prefers_response_length",
+            "user.health_constraint", "user.constraint",
         }:
             result["temporal_semantics"] = "atemporal"
         if slot in self._SINGLE_VALUE_SLOTS:
@@ -1773,6 +2174,8 @@ class MemoryService:
             "user.current_activity": "занятие activity сейчас",
             "user.current_goal": "цель goal сейчас",
             "user.prefers_response_length": "длина ответов короткие длинные response length",
+            "user.health_constraint": "здоровье аллергия диагноз ограничение health allergy",
+            "user.constraint": "ограничение constraint restriction",
         }.get(slot, "")
         result.update({
             "subject": subject,

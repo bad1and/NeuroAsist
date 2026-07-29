@@ -77,8 +77,17 @@ class ContextManager:
         selected_topics: list[tuple[str, ChatMessage]] = []
         selected_loops: list[tuple[str, ChatMessage]] = []
         subjective_reflection: tuple[str, ChatMessage] | None = None
+        clarification_message: ChatMessage | None = None
         memory_retrieval: dict[str, object] = {}
         if self._memory_service is not None:
+            clarification_prompt = self._memory_service.clarification_prompt(
+                current_message_id,
+            )
+            if clarification_prompt:
+                clarification_message = ChatMessage(
+                    role="system",
+                    content=clarification_prompt,
+                )
             # Pronouns and short follow-ups inherit topic terms from the last
             # completed direct turn, which is already inside ``recent``.
             recent_text = " ".join(
@@ -203,6 +212,8 @@ class ContextManager:
             messages = [identity]
             if pending_followup_message is not None:
                 messages.append(pending_followup_message)
+            if clarification_message is not None:
+                messages.append(clarification_message)
             messages.extend(message for _, message in selected_loops)
             messages.extend(message for _, message in selected_memories)
             messages.extend(message for _, message in selected_topics)
@@ -268,6 +279,7 @@ class ContextManager:
             "selected_topic_ids": [topic_id for topic_id, _ in selected_topics],
             "selected_open_loop_ids": [loop_id for loop_id, _ in selected_loops],
             "subjective_reflection_id": subjective_reflection[0] if subjective_reflection else None,
+            "memory_clarification_requested": clarification_message is not None,
             "memory_retrieval": {memory_id: memory_retrieval[memory_id] for memory_id, _ in selected_memories},
             "rolling_summary_included": rolling_message is not None,
             "recent_message_count": sum(len(turn) for turn in recent_turns),

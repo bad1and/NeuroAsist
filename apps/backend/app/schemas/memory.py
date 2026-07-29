@@ -8,7 +8,7 @@ MemoryKind = Literal[
     "identity", "preference", "relationship", "goal", "constraint", "skill", "interest",
     "episode", "decision", "correction", "open_loop", "shared_milestone",
 ]
-MemoryStatus = Literal["candidate", "active", "superseded", "rejected", "deleted", "expired"]
+MemoryStatus = Literal["active", "superseded", "rejected", "deleted", "expired"]
 
 
 class MemoryCreate(BaseModel):

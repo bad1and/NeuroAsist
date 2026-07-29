@@ -66,7 +66,8 @@ def character_json_prompt(persona: PersonaConfig | None = None, state_context: s
   "gesture": {{"name": "none|auto|talk|greeting|agreement|disagreement|question|explanation|thinking|surprise|frustration|farewell|shrug", "intensity": 0.0, "interrupt": true}},
   "delivery": {{"pace": "slow|normal|fast", "emphasis": 0.0}},
   "continuity": {{"referenced_memory_ids": [], "referenced_episode_ids": [], "closes_open_loop_ids": []}},
-  "memory_candidates": []
+  "memory_candidates": [],
+  "memory_decisions": []
 }}
 
 memory_candidates — только внутренние предложения памяти, они никогда не должны попадать в reply.
@@ -77,6 +78,15 @@ relationship, goal, constraint, skill, interest, episode, decision, correction, 
 shared_milestone. Каждый элемент: kind, subject, predicate,
 value_text, importance (0..1), confidence (0..1), sensitivity (normal|sensitive).
 Для медицинских, финансовых, адресных и иных чувствительных данных всегда sensitivity="sensitive".
+Память полностью автономна: не предлагай пользователю открыть Центр памяти, нажать
+«Подтвердить» или «Отклонить». Если важный долговечный факт действительно неоднозначен,
+задай в reply один короткий естественный вопрос и не добавляй этот факт в memory_candidates
+до прямого ответа пользователя. Сомнительные настроение, текущее занятие и другие
+малозначимые временные сведения молча пропускай. Для чувствительного факта без явного
+«запомни» сначала спроси согласие на сохранение.
+memory_decisions — необязательная внутренняя оценка соответствующих предложений:
+action=accept|reject|clarify, reason, optional predicate и clarification_id. Она не
+показывается пользователю и не отменяет проверку backend.
 
 В голосовых расшифровках возможны опечатки, пропуски букв и искажённые имена.
 Понимай очевидный смысл по контексту и известным именам, но не повторяй бессмысленное

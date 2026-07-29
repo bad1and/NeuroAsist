@@ -598,10 +598,8 @@ function ChatPage({
 
   const showMemoryUpdates = useCallback((updates?: MemoryUpdate[]) => {
     const update = updates && updates.length ? updates[updates.length - 1] : undefined;
-    if (!update) return;
-    setMemoryNotice(update.action === "saved"
-      ? `Сохранено в памяти: ${update.predicate}.`
-      : "Новая запись готова к проверке в разделе «Память».");
+    if (!update || update.action !== "saved") return;
+    setMemoryNotice(`Сохранено в памяти: ${update.predicate}.`);
   }, []);
 
   useEffect(() => {
