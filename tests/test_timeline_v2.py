@@ -8,7 +8,7 @@ from apps.backend import main as backend_main
 from apps.backend.app.api.routes import chat as chat_route
 from apps.backend.app.core.config import Settings
 from apps.backend.app.llm.base import LLMResponse
-from apps.backend.app.storage.timeline import TimelineStore
+from apps.backend.app.storage.timeline import LATEST_SCHEMA_VERSION, TimelineStore
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,7 +48,8 @@ def test_v041_history_migrates_to_one_primary_timeline(monkeypatch, tmp_path: Pa
     assert {item["session_id"] for item in payload} == {"default", "voice-demo"}
     with sqlite3.connect(database) as connection:
         assert connection.execute("SELECT version FROM schema_migrations").fetchall() == [
-                (1,), (2,), (3,), (4,), (5,), (6,), (10,), (11,), (12,), (13,), (14,), (15,), (16,), (17,),
+            (version,)
+            for version in (*range(1, 7), *range(10, LATEST_SCHEMA_VERSION + 1))
         ]
         assert connection.execute("SELECT COUNT(*) FROM conversation_messages").fetchone() == (4,)
         assert connection.execute("SELECT status, message_count FROM conversation_episodes").fetchall() == [("closed", 4)]

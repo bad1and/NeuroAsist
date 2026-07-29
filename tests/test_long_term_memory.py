@@ -95,6 +95,103 @@ def test_memory_deduplicates_and_supersedes_conflicting_user_fact(tmp_path: Path
     assert service.retrieve("как меня зовут")[0]["value_text"] == "Алекс"
 
 
+def test_duplicate_fact_unions_sources_without_duplicate_evidence(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    first_message, _ = store.append_message(
+        role="user", content="Меня зовут Роман", input_mode="text",
+    )
+    first = service.extract_from_message(first_message)[0]
+    duplicate_message, _ = store.append_message(
+        role="user", content="Меня зовут Роман", input_mode="text",
+    )
+
+    duplicate = service.extract_from_message(duplicate_message)[0]
+
+    assert duplicate["id"] == first["id"]
+    assert set(duplicate["source_message_ids"]) == {
+        first_message.id, duplicate_message.id,
+    }
+    assert duplicate["source_count"] == 2
+    assert {
+        item["message_id"]
+        for item in store.memory_evidence("fact", str(first["id"]))
+    } == {first_message.id, duplicate_message.id}
+
+
+def test_developer_reference_tracks_current_user_name_as_one_active_object(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    first_name, _ = store.append_message(
+        role="user", content="Меня зовут Федор", input_mode="text",
+    )
+    service.extract_from_message(first_name)
+    first_relation, _ = store.append_message(
+        role="user", content="Я твой разработчик", input_mode="text",
+    )
+    service.apply_llm_candidates([{
+        "kind": "relationship", "subject": "user",
+        "predicate": "is_developer_of", "value_text": "Iris",
+        "importance": .9, "confidence": .99,
+    }], first_relation)
+    new_name, _ = store.append_message(
+        role="user", content="Зови меня Федя", input_mode="text",
+    )
+    service.apply_llm_candidates([{
+        "kind": "identity", "subject": "user", "predicate": "user.name",
+        "value_text": "Федя", "importance": .9, "confidence": .99,
+    }], new_name)
+    repeated_relation, _ = store.append_message(
+        role="user", content="Я всё ещё твой разработчик", input_mode="text",
+    )
+    service.apply_llm_candidates([{
+        "kind": "relationship", "subject": "user",
+        "predicate": "is_developer_of", "value_text": "Iris",
+        "importance": .9, "confidence": .99,
+    }], repeated_relation)
+
+    developers = [
+        item for item in store.list_memories(status="active", limit=100)
+        if item.get("slot_key") == "assistant.developer"
+        and item.get("object_key") == "user"
+    ]
+    assert [(item["value_text"], item["status"]) for item in developers] == [
+        ("Федя", "active"),
+    ]
+    assert {
+        item["value_text"] for item in service.retrieve("кто я?")
+    } == {"Федя"}
+
+
+def test_edit_and_restore_recanonicalize_and_preserve_single_slot(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    first_source, _ = store.append_message(
+        role="user", content="Меня зовут Роман", input_mode="text",
+    )
+    first = service.extract_from_message(first_source)[0]
+
+    edited = service.edit(str(first["id"]), {"value_text": "Алекс"})
+    assert edited["claim_fingerprint"] == "user.name|user|алекс"
+    assert "имя пользователя" in str(edited["search_text"])
+    assert edited["user_locked"] is True
+
+    service.delete(str(first["id"]))
+    new_source, _ = store.append_message(
+        role="user", content="Меня зовут Борис", input_mode="text",
+    )
+    newer = service.extract_from_message(new_source)[0]
+    restored = service.restore(str(first["id"]))
+
+    assert restored["status"] == "active"
+    assert store.get_memory(str(newer["id"]))["status"] == "superseded"
+    assert [
+        item["value_text"]
+        for item in store.list_memories(status="active", limit=100)
+        if item.get("slot_key") == "user.name"
+    ] == ["Алекс"]
+    service.edit(str(newer["id"]), {"value_text": "Алекс"})
+    assert store.get_memory(str(restored["id"]))["status"] == "active"
+    assert store.get_memory(str(newer["id"]))["status"] == "superseded"
+
+
 def test_response_length_preference_replaces_previous_choice(tmp_path: Path) -> None:
     store, service = _service(tmp_path)
     short_message, _ = store.append_message(role="user", content="Я предпочитаю короткие ответы", input_mode="text")
@@ -305,18 +402,21 @@ def test_memory_routes_enforce_sources_and_keep_memory_clear_separate(monkeypatc
     monkeypatch.setattr(backend_main, "get_settings", lambda: settings)
     with TestClient(backend_main.create_app()) as client:
         message = client.post("/timeline/messages", json={"role": "user", "content": "Источник", "input_mode": "text"}).json()["message"]
-        rejected = client.post("/memory", json={"predicate": "note", "value_text": "Без источника"})
+        without_source = client.post("/memory", json={"predicate": "note", "value_text": "Без источника"})
         created = client.post("/memory", json={"predicate": "note", "value_text": "С источником", "source_message_ids": [message["id"]]})
+        assert without_source.status_code == 200
+        assert without_source.json()["memory"]["source_count"] == 0
+        assert without_source.json()["memory"]["slot_key"] == "user.note"
         memory_id = created.json()["memory"]["id"]
         assert client.post(f"/memory/{memory_id}/reindex").status_code == 404
-        assert client.post("/memory/reindex").json()["indexed"] == 1
+        assert client.post("/memory/reindex").json()["indexed"] == 2
         explanation = client.get("/memory/retrieval/explain", params={"q": "источником"})
         assert explanation.status_code == 200
         assert explanation.json()["items"][0]["id"] == memory_id
-        assert client.post("/memory/clear", json={}).json()["deleted"] == 1
+        assert client.post("/memory/clear", json={}).json()["deleted"] == 2
         assert client.get("/timeline/messages?limit=10").json()["items"]
 
-    assert rejected.status_code == 422
+    assert without_source.status_code == 200
     assert created.status_code == 200
 
 

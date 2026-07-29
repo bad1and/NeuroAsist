@@ -18,7 +18,7 @@ from apps.backend.app.llm.base import ChatMessage
 
 PRIMARY_RELATIONSHIP_ID = "primary"
 PRIMARY_TIMELINE_ID = "primary-timeline"
-LATEST_SCHEMA_VERSION = 17
+LATEST_SCHEMA_VERSION = 18
 
 
 @dataclass(frozen=True)
@@ -173,6 +173,9 @@ class TimelineStore:
             if 17 not in applied:
                 self._apply_v17_canonical_memory_schema(connection)
                 connection.execute("INSERT INTO schema_migrations (version, applied_at) VALUES (17, ?)", (self._now(),))
+            if 18 not in applied:
+                self._apply_v18_memory_integrity_schema(connection)
+                connection.execute("INSERT INTO schema_migrations (version, applied_at) VALUES (18, ?)", (self._now(),))
             # v12 reached some development databases before all of its
             # additive objects existed.  Keep this repair idempotent and run
             # it even when the migration marker is already present.
@@ -182,6 +185,7 @@ class TimelineStore:
             self._apply_v15_reflection_schema(connection)
             self._apply_v16_memory_observability_schema(connection)
             self._apply_v17_canonical_memory_schema(connection)
+            self._apply_v18_memory_integrity_schema(connection)
             self._ensure_primary_timeline(connection)
             self._migrate_legacy_messages(connection)
             # Legacy V0.4 rows are imported after migrations, so backfill their
@@ -966,7 +970,81 @@ class TimelineStore:
             "runs": runs,
             "repair": repair_result,
             "active_by_namespace": namespace_counts,
+            "integrity": self.memory_integrity(),
         }
+
+    def memory_integrity(self) -> dict[str, object]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT m.*,
+                          COUNT(DISTINCT e.message_id) AS evidence_source_count
+                   FROM memory_items m
+                   LEFT JOIN memory_evidence e
+                     ON e.entity_type = 'fact' AND e.entity_id = m.id
+                   GROUP BY m.id"""
+            ).fetchall()
+            guards = {
+                str(row["name"])
+                for row in connection.execute(
+                    """SELECT name FROM sqlite_master
+                       WHERE type = 'index' AND name IN (
+                         'uq_memory_active_single_slot',
+                         'uq_memory_active_multi_object'
+                       )"""
+                )
+            }
+        active_keys: dict[tuple[str, ...], int] = {}
+        noncanonical = provenance_missing = source_mismatches = 0
+        for row in rows:
+            item = self._memory_row(row)
+            evidence_count = int(row["evidence_source_count"])
+            json_count = len(set(item["source_message_ids"]))
+            if json_count != evidence_count:
+                source_mismatches += 1
+            if item["status"] != "active":
+                continue
+            slot = str(item.get("slot_key") or "")
+            object_key = str(item.get("object_key") or "")
+            if not slot:
+                noncanonical += 1
+            if (
+                not str(item.get("extractor_version", "")).startswith("manual-")
+                and json_count == 0
+                and evidence_count == 0
+            ):
+                provenance_missing += 1
+            if not slot:
+                continue
+            if item.get("cardinality") == "single":
+                key = ("single", slot)
+            elif object_key:
+                key = ("multi", slot, object_key)
+            else:
+                continue
+            active_keys[key] = active_keys.get(key, 0) + 1
+        active_conflicts = sum(count - 1 for count in active_keys.values() if count > 1)
+        result = {
+            "active_conflicts": active_conflicts,
+            "noncanonical_active": noncanonical,
+            "provenance_missing": provenance_missing,
+            "source_count_mismatches": source_mismatches,
+            "guards_installed": len(guards) == 2,
+        }
+        result["state"] = (
+            "healthy"
+            if not any(
+                int(result[key])
+                for key in (
+                    "active_conflicts",
+                    "noncanonical_active",
+                    "provenance_missing",
+                    "source_count_mismatches",
+                )
+            )
+            and result["guards_installed"]
+            else "degraded"
+        )
+        return result
 
     def memory_repair_run(self, repair_key: str) -> dict[str, object] | None:
         with self._connect() as connection:
@@ -1188,7 +1266,7 @@ class TimelineStore:
                     "SELECT * FROM memory_items WHERE relationship_id = ? AND (? IS NULL OR status = ?) ORDER BY importance DESC, updated_at DESC LIMIT ?",
                     (PRIMARY_RELATIONSHIP_ID, status, status, limit),
                 ).fetchall()
-        return [self._memory_row(row) for row in rows]
+            return [self._enrich_memory_row(connection, row) for row in rows]
 
     def create_memory(self, values: dict[str, object], *, actor: str, action: str = "candidate_created") -> dict[str, object]:
         now = self._now()
@@ -1217,14 +1295,15 @@ class TimelineStore:
                   values.get("slot_key"), values.get("object_key"), values.get("normalization_version", 1),
                   search_text),
             )
-            self._index_memory(connection, memory_id, search_text)
+            if values.get("status", "candidate") in {"active", "candidate"}:
+                self._index_memory(connection, memory_id, search_text)
             for message_id in source_ids:
                 self._add_evidence(connection, "fact", memory_id, str(message_id), source_episode_id,
                                    str(values.get("source_role", "user")), float(values.get("source_quality", 1.0)),
                                    str(values.get("evidence_kind", "assertion")), values.get("stt_confidence"))
             row = connection.execute("SELECT * FROM memory_items WHERE id = ?", (memory_id,)).fetchone()
             self._audit_memory(connection, memory_id, action, actor, None, self._memory_row(row), None, source_ids)
-            return self._memory_row(row)
+            return self._enrich_memory_row(connection, row)
 
     def update_memory(self, memory_id: str, changes: dict[str, object], *, actor: str = "user", action: str = "edited") -> dict[str, object]:
         allowed = {
@@ -1245,22 +1324,30 @@ class TimelineStore:
                 raise KeyError(memory_id)
             before = self._memory_row(row)
             if "value_text" in updates:
-                updates["canonical_text"] = f"{row['subject']} {row['predicate']} {updates['value_text']}"
+                target_subject = str(updates.get("subject", row["subject"]))
+                target_predicate = str(updates.get("predicate", row["predicate"]))
+                updates.setdefault(
+                    "canonical_text",
+                    f"{target_subject} {target_predicate} {updates['value_text']}",
+                )
                 if "search_text" not in updates:
                     updates["search_text"] = updates["canonical_text"]
             updates["updated_at"] = self._now()
             assignments = ", ".join(f"{key} = ?" for key in updates)
             connection.execute(f"UPDATE memory_items SET {assignments} WHERE id = ?", (*updates.values(), memory_id))
             row = connection.execute("SELECT * FROM memory_items WHERE id = ?", (memory_id,)).fetchone()
-            self._index_memory(connection, memory_id, row["search_text"] or row["canonical_text"])
+            if row["status"] in {"active", "candidate"}:
+                self._index_memory(connection, memory_id, row["search_text"] or row["canonical_text"])
+            else:
+                connection.execute("DELETE FROM memory_fts WHERE memory_id = ?", (memory_id,))
             after = self._memory_row(row)
             self._audit_memory(connection, memory_id, action, actor, before, after, None, after["source_message_ids"])
-            return after
+            return self._enrich_memory_row(connection, row)
 
     def get_memory(self, memory_id: str) -> dict[str, object] | None:
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM memory_items WHERE id = ?", (memory_id,)).fetchone()
-        return self._memory_row(row) if row is not None else None
+            return self._enrich_memory_row(connection, row) if row is not None else None
 
     def memory_evidence(self, entity_type: str, entity_id: str) -> list[dict[str, object]]:
         with self._connect() as connection:
@@ -1273,13 +1360,147 @@ class TimelineStore:
     def reinforce_memory_evidence(
         self, memory_id: str, source_message_ids: list[str], source_episode_id: str | None,
         source_quality: float = 1.0,
-    ) -> None:
+    ) -> dict[str, object]:
         with self._connect() as connection:
+            row = connection.execute("SELECT * FROM memory_items WHERE id = ?", (memory_id,)).fetchone()
+            if row is None:
+                raise KeyError(memory_id)
+            before = self._memory_row(row)
+            known_ids = set(before["source_message_ids"])
             for message_id in source_message_ids:
-                self._add_evidence(
-                    connection, "fact", memory_id, message_id, source_episode_id,
-                    "user", source_quality, "overlap_reinforcement", None,
+                existing = connection.execute(
+                    """SELECT 1 FROM memory_evidence
+                       WHERE entity_type = 'fact' AND entity_id = ? AND message_id = ?
+                       LIMIT 1""",
+                    (memory_id, message_id),
+                ).fetchone()
+                if existing is None:
+                    self._add_evidence(
+                        connection, "fact", memory_id, message_id, source_episode_id,
+                        "user", source_quality, "overlap_reinforcement", None,
+                    )
+                known_ids.add(message_id)
+            merged_ids = sorted(known_ids)
+            connection.execute(
+                """UPDATE memory_items
+                   SET source_message_ids_json = ?, updated_at = ?
+                   WHERE id = ?""",
+                (json.dumps(merged_ids, ensure_ascii=False), self._now(), memory_id),
+            )
+            row = connection.execute("SELECT * FROM memory_items WHERE id = ?", (memory_id,)).fetchone()
+            after = self._memory_row(row)
+            if after["source_message_ids"] != before["source_message_ids"]:
+                self._audit_memory(
+                    connection, memory_id, "evidence_reinforced", "policy",
+                    before, after, None, after["source_message_ids"],
                 )
+            return self._enrich_memory_row(connection, row)
+
+    def copy_memory_evidence(self, source_id: str, target_id: str) -> int:
+        """Copy provenance between canonical descendants without requiring live history."""
+        with self._connect() as connection:
+            source = connection.execute(
+                "SELECT source_message_ids_json, source_episode_id FROM memory_items WHERE id = ?",
+                (source_id,),
+            ).fetchone()
+            target = connection.execute(
+                "SELECT * FROM memory_items WHERE id = ?", (target_id,),
+            ).fetchone()
+            if source is None or target is None:
+                return 0
+            before = self._memory_row(target)
+            copied = 0
+            evidence_rows = connection.execute(
+                """SELECT message_id, episode_id, source_role, source_quality,
+                          evidence_kind, stt_confidence
+                   FROM memory_evidence
+                   WHERE entity_type = 'fact' AND entity_id = ?""",
+                (source_id,),
+            ).fetchall()
+            for evidence in evidence_rows:
+                exists = connection.execute(
+                    """SELECT 1 FROM memory_evidence
+                       WHERE entity_type = 'fact' AND entity_id = ?
+                         AND message_id IS ? AND episode_id IS ? AND evidence_kind = ?""",
+                    (
+                        target_id, evidence["message_id"], evidence["episode_id"],
+                        evidence["evidence_kind"],
+                    ),
+                ).fetchone()
+                if exists is not None:
+                    continue
+                self._add_evidence(
+                    connection, "fact", target_id, evidence["message_id"],
+                    evidence["episode_id"], evidence["source_role"],
+                    float(evidence["source_quality"]), evidence["evidence_kind"],
+                    evidence["stt_confidence"],
+                )
+                copied += 1
+            source_ids = set(json.loads(str(source["source_message_ids_json"] or "[]")))
+            target_ids = set(before["source_message_ids"])
+            evidence_ids = {
+                str(row["message_id"])
+                for row in connection.execute(
+                    """SELECT DISTINCT message_id FROM memory_evidence
+                       WHERE entity_type = 'fact' AND entity_id = ? AND message_id IS NOT NULL""",
+                    (target_id,),
+                )
+            }
+            merged_ids = sorted(source_ids | target_ids | evidence_ids)
+            connection.execute(
+                """UPDATE memory_items
+                   SET source_message_ids_json = ?,
+                       source_episode_id = COALESCE(source_episode_id, ?),
+                       updated_at = ?
+                   WHERE id = ?""",
+                (
+                    json.dumps(merged_ids, ensure_ascii=False),
+                    source["source_episode_id"], self._now(), target_id,
+                ),
+            )
+            return copied
+
+    def synchronize_memory_sources(self, memory_id: str) -> dict[str, object]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM memory_items WHERE id = ?", (memory_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(memory_id)
+            item = self._memory_row(row)
+            for message_id in item["source_message_ids"]:
+                existing = connection.execute(
+                    """SELECT 1 FROM memory_evidence
+                       WHERE entity_type = 'fact' AND entity_id = ? AND message_id = ?
+                       LIMIT 1""",
+                    (memory_id, message_id),
+                ).fetchone()
+                if existing is None:
+                    self._add_evidence(
+                        connection, "fact", memory_id, str(message_id),
+                        item.get("source_episode_id"), "user",
+                        float(item.get("source_quality", 1.0)),
+                        "legacy_source", None,
+                    )
+            evidence_ids = {
+                str(evidence["message_id"])
+                for evidence in connection.execute(
+                    """SELECT DISTINCT message_id FROM memory_evidence
+                       WHERE entity_type = 'fact' AND entity_id = ?
+                         AND message_id IS NOT NULL""",
+                    (memory_id,),
+                )
+            }
+            merged_ids = sorted(set(item["source_message_ids"]) | evidence_ids)
+            if merged_ids != item["source_message_ids"]:
+                connection.execute(
+                    "UPDATE memory_items SET source_message_ids_json = ?, updated_at = ? WHERE id = ?",
+                    (json.dumps(merged_ids, ensure_ascii=False), self._now(), memory_id),
+                )
+                row = connection.execute(
+                    "SELECT * FROM memory_items WHERE id = ?", (memory_id,),
+                ).fetchone()
+            return self._enrich_memory_row(connection, row)
 
     def create_topic(self, values: dict[str, object], *, actor: str = "system") -> dict[str, object]:
         now = self._now()
@@ -1417,13 +1638,13 @@ class TimelineStore:
             before = self._memory_row(row)
             connection.execute("UPDATE memory_items SET status = ?, updated_at = ? WHERE id = ?", (status, self._now(), memory_id))
             row = connection.execute("SELECT * FROM memory_items WHERE id = ?", (memory_id,)).fetchone()
-            if status in {"deleted", "rejected"}:
+            if status not in {"active", "candidate"}:
                 connection.execute("DELETE FROM memory_fts WHERE memory_id = ?", (memory_id,))
             else:
-                self._index_memory(connection, memory_id, row["canonical_text"])
+                self._index_memory(connection, memory_id, row["search_text"] or row["canonical_text"])
             after = self._memory_row(row)
             self._audit_memory(connection, memory_id, action, actor, before, after, reason, after["source_message_ids"])
-            return after
+            return self._enrich_memory_row(connection, row)
 
     def supersede_memory(self, old_id: str, new_id: str) -> None:
         with self._connect() as connection:
@@ -2643,6 +2864,37 @@ class TimelineStore:
                WHERE search_text IS NULL OR trim(search_text) = ''"""
         )
 
+    def _apply_v18_memory_integrity_schema(self, connection: sqlite3.Connection) -> None:
+        """Supporting indexes; unique active-key guards are added after data repair."""
+        connection.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS idx_memory_evidence_entity_message
+                ON memory_evidence(entity_type, entity_id, message_id);
+            CREATE INDEX IF NOT EXISTS idx_memory_items_active_logical_key
+                ON memory_items(relationship_id, slot_key, object_key, cardinality)
+                WHERE status = 'active' AND slot_key IS NOT NULL;
+            """
+        )
+
+    def ensure_memory_integrity_indexes(self) -> None:
+        """Install hard guards only after v18 has reconciled released data."""
+        with self._connect() as connection:
+            connection.execute(
+                """CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_active_single_slot
+                   ON memory_items(relationship_id, slot_key)
+                   WHERE status = 'active'
+                     AND cardinality = 'single'
+                     AND slot_key IS NOT NULL"""
+            )
+            connection.execute(
+                """CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_active_multi_object
+                   ON memory_items(relationship_id, slot_key, object_key)
+                   WHERE status = 'active'
+                     AND cardinality != 'single'
+                     AND slot_key IS NOT NULL
+                     AND object_key IS NOT NULL"""
+            )
+
     @staticmethod
     def _rebuild_timeline_fts(connection: sqlite3.Connection) -> None:
         connection.execute("DELETE FROM episode_summary_fts")
@@ -2664,6 +2916,44 @@ class TimelineStore:
         value["user_locked"] = bool(value["user_locked"])
         value["source_message_ids"] = json.loads(value.pop("source_message_ids_json"))
         value["metadata"] = json.loads(value.pop("metadata_json"))
+        return value
+
+    def _enrich_memory_row(
+        self, connection: sqlite3.Connection, row: sqlite3.Row,
+    ) -> dict[str, object]:
+        value = self._memory_row(row)
+        evidence = connection.execute(
+            """SELECT COUNT(DISTINCT message_id)
+               FROM memory_evidence
+               WHERE entity_type = 'fact' AND entity_id = ? AND message_id IS NOT NULL""",
+            (value["id"],),
+        ).fetchone()
+        value["source_count"] = max(
+            len(set(value["source_message_ids"])),
+            int(evidence[0]) if evidence is not None else 0,
+        )
+        replacement = None
+        next_id = value.get("superseded_by_id")
+        visited = {str(value["id"])}
+        for _ in range(32):
+            if not next_id or str(next_id) in visited:
+                break
+            visited.add(str(next_id))
+            target = connection.execute(
+                """SELECT id, predicate, value_text, status, superseded_by_id
+                   FROM memory_items WHERE id = ?""",
+                (next_id,),
+            ).fetchone()
+            if target is None:
+                break
+            replacement = {
+                "id": str(target["id"]),
+                "predicate": str(target["predicate"]),
+                "value_text": str(target["value_text"]),
+                "status": str(target["status"]),
+            }
+            next_id = target["superseded_by_id"]
+        value["replacement"] = replacement
         return value
 
     def _audit_memory(
