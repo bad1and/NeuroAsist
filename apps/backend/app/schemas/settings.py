@@ -6,6 +6,9 @@ class PublicSettingsResponse(BaseModel):
     model: str
     personality: str
     voice_language: str
+    voice_microphone_profile: str
+    voice_vad: dict[str, object]
+    voice_input_diagnostic_audio_enabled: bool
     voice_stt_model: str
     voice_tts_enabled: bool
     voice_tts_provider: str
@@ -18,6 +21,7 @@ class PublicSettingsResponse(BaseModel):
     voice_playback_rate: float
     voice_live_playback_prebuffer_segments: int
     voice_live_playback_prebuffer_ms: int
+    voice_live_playback_start_lead_ms: int
     chat_history_limit: int
     episodes_enabled: bool
     episode_soft_inactivity_minutes: int
@@ -53,6 +57,7 @@ class RuntimeSettingsPatch(BaseModel):
 
     personality: str | None = None
     voice_language: str | None = None
+    voice_microphone_profile: str | None = None
     voice_tts_voice: str | None = None
     voice_playback_rate: float | None = None
     voice_live_playback_prebuffer_segments: int | None = None
@@ -90,3 +95,9 @@ class PronunciationsPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     pronunciations: dict[str, str]
+
+
+class SttTermsPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    terms: dict[str, list[str]]

@@ -249,6 +249,9 @@ VOICE_TTS_ADAPTIVE_PROSODY=true
 |---|---|
 | `VOICE_LIVE_QUEUE_SIZE` | Размер внутренней очереди live-ответа. |
 | `VOICE_LIVE_IDLE_FLUSH_MS` | Задержка перед отправкой последнего неполного live-сегмента. |
+| `VOICE_LIVE_FIRST_IDLE_FLUSH_MS` | Idle-flush первого произносимого фрагмента, по умолчанию `180` мс. |
+| `VOICE_LIVE_NEXT_IDLE_FLUSH_MS` | Idle-flush следующих фрагментов, по умолчанию `350` мс. |
+| `VOICE_LIVE_PLAYBACK_START_LEAD_MS` | Запас планирования browser playback, по умолчанию `30` мс. |
 | `VOICE_LIVE_FIRST_SEGMENT_CHARS` | Целевой размер первого live TTS-сегмента. |
 | `VOICE_LIVE_NEXT_SEGMENT_CHARS` | Целевой размер следующих live TTS-сегментов. |
 | `VOICE_LIVE_MAX_SEGMENT_CHARS` | Жёсткий лимит символов для одного live TTS-сегмента. |
@@ -260,6 +263,21 @@ VOICE_TTS_ADAPTIVE_PROSODY=true
 | `VOICE_LIVE_TTS_CONCURRENCY_MAX` | Верхняя граница параллельности live TTS. |
 | `VOICE_LIVE_PLAYBACK_PREBUFFER_SEGMENTS` | Сколько декодированных live-сегментов буферизовать перед стартом воспроизведения. Можно менять в runtime через Settings. |
 | `VOICE_LIVE_PLAYBACK_PREBUFFER_MS` | Дополнительная задержка live prebuffer в миллисекундах. Можно менять в runtime через Settings. |
+
+#### Распознавание речи и VAD
+
+| Параметр | За что отвечает |
+|---|---|
+| `VOICE_VAD_PROVIDER` | Streaming VAD: локальный `silero` по умолчанию или явный `energy`. |
+| `VOICE_SILERO_VAD_MODEL_PATH` | Необязательный TorchScript override. При ошибке используется модель из `silero-vad==6.2.1`, затем energy fallback. |
+| `VOICE_SILERO_VAD_START_THRESHOLD` / `VOICE_SILERO_VAD_END_THRESHOLD` | Вероятности старта/окончания Silero: `0.55` / `0.35`. |
+| `VOICE_ENERGY_VAD_START_RMS` / `VOICE_ENERGY_VAD_END_RMS` | Пороги RMS только для energy fallback: `0.018` / `0.012`. |
+| `VOICE_VAD_PRE_ROLL_MS` / `VOICE_VAD_POST_ROLL_MS` | Сохраняемый контекст до и после речи: `500` / `180` мс. |
+| `VOICE_VAD_END_SILENCE_MS` / `VOICE_VAD_LIVE_END_SILENCE_MS` | Endpoint в hands-free и live со SmartTurn: `480` / `320` мс. |
+| `VOICE_VAD_LIVE_FALLBACK_END_SILENCE_MS` | Осторожный live endpoint без SmartTurn: `650` мс. |
+| `VOICE_TORCH_CPU_THREADS` / `VOICE_TORCH_INTEROP_THREADS` | Общая настройка PyTorch до загрузки всех голосовых моделей: `4` / `1`. |
+| `VOICE_STT_TERMS_PATH` | Отдельный JSON точных aliases для STT; по умолчанию `stt-terms.json` в приватных app-data. |
+| `VOICE_INPUT_DIAGNOSTIC_AUDIO` | Сохранять canonical WAV и JSON в приватную diagnostic-папку. По умолчанию `false`. |
 
 #### Unity avatar bridge
 
@@ -464,6 +482,19 @@ python scripts/benchmark_tts.py --provider silero --device cuda --runs 5
 ```
 
 Benchmark записывает результат в `data/tts_benchmark.json` и выводит P50/P95 задержку синтеза и real-time factor.
+
+Для реального STT-корпуса открой «Настройки → Голос → Собрать приватный
+STT-корпус». Guided capture использует тот же `BrowserVadRecorder`, хранит
+записи только в IndexedDB браузера и позволяет выгрузить WAV вместе с manifest.
+
+```powershell
+.\.venv\Scripts\python.exe scripts/benchmark_stt.py baseline --manifest путь\stt-manifest.json --output data\stt-baseline.json --streaming-replay
+.\.venv\Scripts\python.exe scripts/benchmark_stt.py candidate --manifest путь\stt-manifest.json --output data\stt-candidate.json --streaming-replay
+.\.venv\Scripts\python.exe scripts/benchmark_stt.py compare --baseline data\stt-baseline.json --candidate data\stt-candidate.json --output data\stt-compare.json
+```
+
+Режим `threads` сравнивает 1/2/4/8 потоков PyTorch в отдельных subprocess.
+Приватные записи и диагностическое аудио добавлены в `.gitignore`.
 
 ## Устранение проблем
 

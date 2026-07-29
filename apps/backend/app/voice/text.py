@@ -19,7 +19,11 @@ class TextNormalizer:
 class TextChunker:
     _HARD_BOUNDARY = re.compile(r"[.!?…](?:[\"'»)]*)(?:\s+|$)")
     _SOFT_BOUNDARY = re.compile(r"[;:](?:[\"'»)]*)(?:\s+|$)")
-    _ABBREVIATIONS = ("т. д.", "т. п.", "т. е.")
+    _FIRST_CLAUSE_BOUNDARY = re.compile(r"[,;:](?:[\"'»)]*)(?:\s+|$)")
+    _ABBREVIATIONS = (
+        "т. д.", "т. п.", "т. е.", "т. к.", "г.", "ул.", "рис.", "стр.",
+        "им.", "руб.", "коп.",
+    )
 
     def __init__(
         self,
@@ -34,6 +38,14 @@ class TextChunker:
         self._max_chars = max_chars
         self._max_words = max_words
         self._emitted = False
+
+    @property
+    def emitted(self) -> bool:
+        return self._emitted
+
+    @property
+    def has_pending_text(self) -> bool:
+        return bool(re.search(r"\w", self._buffer))
 
     def feed(self, delta: str) -> list[str]:
         self._buffer += delta
@@ -81,11 +93,25 @@ class TextChunker:
         protected = self._buffer
         for abbreviation in self._ABBREVIATIONS:
             protected = protected.replace(abbreviation, abbreviation.replace(".", "∯"))
+        protected = re.sub(
+            r"https?://\S+",
+            lambda match: match.group(0).replace(".", "∯"),
+            protected,
+            flags=re.IGNORECASE,
+        )
         protected = re.sub(r"(?<=\d)\.(?=\d)", "∯", protected)
         target = self._first_target if not self._emitted else self._next_target
         hard = self._HARD_BOUNDARY.search(protected, pos=start)
         if hard:
             return hard.end()
+        if not self._emitted:
+            first_clause = self._FIRST_CLAUSE_BOUNDARY.search(protected, pos=start)
+            if (
+                first_clause
+                and first_clause.end() >= min(target, 28)
+                and len(protected[: first_clause.end()].split()) >= 6
+            ):
+                return first_clause.end()
         matches = []
         for priority, pattern in enumerate((self._SOFT_BOUNDARY,)):
             for match in pattern.finditer(protected, pos=start):

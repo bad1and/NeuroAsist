@@ -66,9 +66,18 @@ class GestureCue(ProtocolModel):
     interrupt: bool = True
 
 
+class DeliveryOverride(ProtocolModel):
+    """Restrained delivery change for one 1-based spoken sentence."""
+
+    segment: int = Field(ge=1, le=100)
+    pace: str = Field(default="normal", pattern="^(slow|normal|fast)$")
+    emphasis: str = Field(default="none", pattern="^(none|light)$")
+
+
 class DeliveryCue(ProtocolModel):
     pace: str = Field(default="normal", pattern="^(slow|normal|fast)$")
     emphasis: float = Field(default=0.0, ge=0.0, le=1.0)
+    overrides: list[DeliveryOverride] = Field(default_factory=list, max_length=3)
 
 
 class ContinuityCue(ProtocolModel):

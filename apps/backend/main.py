@@ -48,8 +48,10 @@ from apps.backend.app.semantic.chroma_index import ChromaVectorIndex
 from apps.backend.app.semantic.sync_worker import SemanticSyncWorker
 from apps.backend.app.semantic.vector_index import NullVectorIndex, SqliteVecIndex
 from apps.backend.app.voice.service import VoiceService
+from apps.backend.app.voice.audio import Pcm16Audio
 from apps.backend.app.voice.live import VoiceSessionManager
 from apps.backend.app.voice.input import SileroVadProvider, VadProvider, VoiceInputSessionManager
+from apps.backend.app.voice.runtime import configure_torch_threads
 from apps.backend.app.voice.orchestrator import SpeechOrchestrator
 from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.conversation.schemas import ConversationAction, ConversationPhase, SpeakerRole
@@ -68,6 +70,10 @@ TTS_AUDIO_RETENTION_SECONDS = 2 * 60
 def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings)
+    torch_threading = configure_torch_threads(
+        settings.voice_torch_cpu_threads,
+        settings.voice_torch_interop_threads,
+    )
 
     if not settings.llm_api_key:
         logger.warning("DeepSeek API key is not configured")
@@ -233,6 +239,8 @@ def create_app() -> FastAPI:
         tts_timeout=settings.voice_tts_timeout_seconds,
         retry_count=settings.voice_live_tts_retry_count,
         idle_flush_ms=settings.voice_live_idle_flush_ms,
+        first_idle_flush_ms=settings.voice_live_first_idle_flush_ms,
+        next_idle_flush_ms=settings.voice_live_next_idle_flush_ms,
         first_segment_chars=settings.voice_live_first_segment_chars,
         next_segment_chars=settings.voice_live_next_segment_chars,
         max_segment_chars=settings.voice_live_max_segment_chars,
@@ -361,13 +369,17 @@ def create_app() -> FastAPI:
     if conversation_service is not None:
         conversation_service.bind_turn_detector(turn_detector)
 
-    async def process_pcm_utterance(session_id, audio_path, language, connection) -> None:
+    async def process_pcm_utterance(
+        session_id,
+        audio: Pcm16Audio,
+        language,
+        connection,
+    ) -> None:
         if conversation_service is not None and connection.mode == "live_conversation":
             await conversation_service.phase(session_id, ConversationPhase.TRANSCRIBING, connection.send)
-        stt_result = await voice_service.stt_provider.transcribe(audio_path, language)
+        stt_result = await voice_service.transcribe_pcm16(audio, language)
         transcript = stt_result.text.strip()
-        transcript_signal = re.sub(r"(?u)[^\w]+", "", transcript)
-        if not transcript or len(transcript_signal) <= 1:
+        if not transcript:
             if (
                 conversation_service is not None
                 and connection.version == 2
@@ -375,7 +387,7 @@ def create_app() -> FastAPI:
             ):
                 await connection.send({
                     "type": "conversation.noise_ignored",
-                    "reason": "empty_transcript" if not transcript else "too_short_transcript",
+                    "reason": "empty_transcript",
                     "generation": connection.generation,
                 })
                 await conversation_service.phase(
@@ -404,7 +416,13 @@ def create_app() -> FastAPI:
         ):
             result = await conversation_service.ingest_observation(
                 session_id=session_id,
-                transcript=stt_result.text,
+                transcript=stt_result.raw_text or stt_result.text,
+                corrected_content=(
+                    stt_result.text
+                    if (stt_result.raw_text or stt_result.text) != stt_result.text
+                    else None
+                ),
+                transcript_corrections=stt_result.corrections,
                 language=stt_result.language,
                 send=connection.send,
                 expected_generation=connection.generation,
@@ -424,6 +442,8 @@ def create_app() -> FastAPI:
             await connection.send({
                 "type": "voice.input.transcript",
                 "transcript": stt_result.text,
+                "raw_transcript": stt_result.raw_text,
+                "corrections": list(stt_result.corrections),
                 "utterance_id": result.utterance_id,
                 "generation": result.generation,
                 "observation_only": result.decision.action not in {
@@ -447,16 +467,22 @@ def create_app() -> FastAPI:
                 generation=result.generation,
                 source_message=result.message,
                 state_context=result.state_context,
+                raw_transcript=stt_result.raw_text,
+                transcript_corrections=stt_result.corrections,
             )
             return
         await connection.send({
             "type": "voice.input.transcript",
             "transcript": stt_result.text,
+            "raw_transcript": stt_result.raw_text,
+            "corrections": list(stt_result.corrections),
             "utterance_id": utterance_id,
         })
         await voice_session_manager.start(
             session_id=session_id, utterance_id=utterance_id, transcript=stt_result.text,
             language=stt_result.language, voice=voice, agent=agent,
+            raw_transcript=stt_result.raw_text,
+            transcript_corrections=stt_result.corrections,
         )
 
     async def pcm_speech_started(session_id: str) -> int | None:
@@ -477,7 +503,18 @@ def create_app() -> FastAPI:
 
     voice_input_session_manager = VoiceInputSessionManager(
         voice_service, process_pcm_utterance, pcm_speech_started,
-        vad=vad_provider, vad_threshold=settings.voice_vad_threshold, pre_roll_ms=settings.voice_vad_pre_roll_ms,
+        vad=vad_provider,
+        silero_start_threshold=settings.voice_silero_vad_start_threshold,
+        silero_end_threshold=settings.voice_silero_vad_end_threshold,
+        energy_start_rms=settings.voice_energy_vad_start_rms,
+        energy_end_rms=settings.voice_energy_vad_end_rms,
+        silero_start_ms=settings.voice_silero_vad_min_speech_ms,
+        energy_start_ms=settings.voice_energy_vad_min_speech_ms,
+        pre_roll_ms=settings.voice_vad_pre_roll_ms,
+        post_roll_ms=settings.voice_vad_post_roll_ms,
+        end_silence_ms=settings.voice_vad_end_silence_ms,
+        live_end_silence_ms=settings.voice_vad_live_end_silence_ms,
+        live_fallback_end_silence_ms=settings.voice_vad_live_fallback_end_silence_ms,
         max_turn_silence_ms={
             "short": 1500,
             "natural": 2500,
@@ -490,6 +527,14 @@ def create_app() -> FastAPI:
             "high": 60,
         }.get(runtime_settings.live_conversation_interruption_sensitivity, 180),
         turn_detector=turn_detector,
+        event_publisher=event_bus.publish,
+    )
+    initial_vad_status = voice_input_session_manager.vad_status
+    event_bus.publish(
+        "voice.vad_ready" if initial_vad_status["ready"] else "voice.vad_fallback",
+        "info" if initial_vad_status["ready"] else "warning",
+        "Silero VAD is ready" if initial_vad_status["ready"] else "Energy VAD fallback is active",
+        initial_vad_status,
     )
     tts_audio_cleanup_task: asyncio.Task[None] | None = None
     reflection_worker_task: asyncio.Task[None] | None = None
@@ -554,8 +599,21 @@ def create_app() -> FastAPI:
     async def startup() -> None:
         nonlocal tts_audio_cleanup_task, summary_worker_task, semantic_sync_worker_task, memory_extraction_worker_task, reflection_worker_task
         removed = await asyncio.to_thread(voice_service.clear_tts_audio)
+        clear_stale_uploads = getattr(voice_service, "clear_stale_uploads", None)
+        stale_uploads = (
+            await asyncio.to_thread(clear_stale_uploads)
+            if clear_stale_uploads is not None
+            else 0
+        )
         if removed:
             logger.info("Generated WAV startup cleanup complete: removed=%s", removed)
+        if stale_uploads:
+            event_bus.publish(
+                "voice.stale_uploads_removed",
+                "info",
+                "Abandoned temporary voice uploads removed",
+                {"count": stale_uploads},
+            )
 
         try:
             if timeline_store is not None and settings.database_path.exists():
@@ -690,7 +748,13 @@ def create_app() -> FastAPI:
                     "voice.stt_preloaded",
                     "info",
                     "Voice STT model preloaded",
-                    {"provider": settings.voice_stt_provider, "model": settings.voice_stt_model},
+                    {
+                        "provider": settings.voice_stt_provider,
+                        "model": settings.voice_stt_model,
+                        "device": settings.voice_stt_device,
+                        "threading": torch_threading,
+                        **dict(getattr(voice_service.stt_provider, "metadata", {})),
+                    },
                 )
             except Exception:
                 logger.warning("Voice STT preload failed", exc_info=True)

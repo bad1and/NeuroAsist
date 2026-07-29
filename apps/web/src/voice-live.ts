@@ -4,6 +4,7 @@ export type TTSStreamPlayerOptions = {
   prebufferSegments?: number;
   prebufferMs?: number;
   playbackRate?: number;
+  startLeadMs?: number;
 };
 
 export type PlaybackOwner = "unity" | "desktop_ui" | "none";
@@ -58,15 +59,17 @@ export class TTSStreamPlayer {
   private readyBuffers: Array<{ buffer: AudioBuffer; text: string }> = [];
   private generation = 0;
   private started = false;
-  private decodeChain: Promise<void> = Promise.resolve();
+  private decodedBySegment = new Map<number, { buffer: AudioBuffer; text: string }>();
+  private nextDecodedSegment = 0;
   private pendingDecodes = 0;
   private activeUtteranceId: string | null = null;
   private lastQueuedSegment = -1;
   private serverFinished = false;
   private prebufferTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
   private prebufferSegments: number;
+  private underrunPrebufferSegments = 0;
   private prebufferMs: number;
-  private playbackRate: number;
+  private startLeadMs: number;
 
   constructor(
     private readonly onStarted: () => void,
@@ -75,16 +78,17 @@ export class TTSStreamPlayer {
     options: TTSStreamPlayerOptions = {},
     private readonly onUnderrun: (gapMs: number) => void = () => undefined,
     private readonly onSegmentFinished: (text: string) => void = () => undefined,
+    private readonly onDecoded: (segmentId: number, decodeMs: number) => void = () => undefined,
   ) {
     this.prebufferSegments = Math.max(1, options.prebufferSegments ?? 1);
     this.prebufferMs = Math.max(0, options.prebufferMs ?? 0);
-    this.playbackRate = this.normalizePlaybackRate(options.playbackRate ?? 1);
+    this.startLeadMs = Math.max(0, options.startLeadMs ?? 30);
   }
 
   updateOptions(options: TTSStreamPlayerOptions): void {
     this.prebufferSegments = Math.max(1, options.prebufferSegments ?? this.prebufferSegments);
     this.prebufferMs = Math.max(0, options.prebufferMs ?? this.prebufferMs);
-    this.playbackRate = this.normalizePlaybackRate(options.playbackRate ?? this.playbackRate);
+    this.startLeadMs = Math.max(0, options.startLeadMs ?? this.startLeadMs);
   }
 
   async unlock(): Promise<void> {
@@ -113,29 +117,18 @@ export class TTSStreamPlayer {
     this.lastQueuedSegment = segmentId;
     const generation = this.generation;
     this.pendingDecodes += 1;
-    const decode = async () => {
+    const decodeStarted = performance.now();
+    const result = (async () => {
       await this.unlock();
       const context = this.context!;
       const buffer = await context.decodeAudioData(data.slice(0));
+      this.onDecoded(segmentId, Math.round(performance.now() - decodeStarted));
       const decoded = { buffer, text: audio.text ?? "" };
       if (generation !== this.generation || utteranceId !== this.activeUtteranceId) return;
-      if (!this.started) {
-        this.readyBuffers.push(decoded);
-        this.armPrebufferTimer();
-        const bufferedSeconds = this.readyBuffers.reduce((sum, item) => sum + item.buffer.duration, 0);
-        if (
-          this.readyBuffers.length >= this.prebufferSegments
-          || bufferedSeconds >= this.prebufferMs / 1000
-          || this.serverFinished
-        ) {
-          this.flushPrebuffer();
-        }
-      } else {
-        this.scheduleBuffer(decoded);
-      }
-    };
-    const result = this.decodeChain.then(decode);
-    this.decodeChain = result
+      this.decodedBySegment.set(segmentId, decoded);
+      this.flushDecodedInOrder();
+    })();
+    void result
       .catch((error: unknown) => {
         if (generation === this.generation) {
           this.onError(error instanceof Error ? error : new Error("Could not decode TTS audio"));
@@ -166,13 +159,14 @@ export class TTSStreamPlayer {
     }
     this.sources.clear();
     this.readyBuffers = [];
+    this.decodedBySegment.clear();
+    this.nextDecodedSegment = 0;
     this.scheduledUntil = this.context?.currentTime ?? 0;
     this.started = false;
     this.pendingDecodes = 0;
     this.activeUtteranceId = null;
     this.lastQueuedSegment = -1;
     this.serverFinished = false;
-    this.decodeChain = Promise.resolve();
   }
 
   private maybeFinished(): void {
@@ -181,6 +175,7 @@ export class TTSStreamPlayer {
       && this.pendingDecodes === 0
       && this.sources.size === 0
       && this.readyBuffers.length === 0
+      && this.decodedBySegment.size === 0
     ) {
       this.serverFinished = false;
       this.onFinished();
@@ -193,6 +188,28 @@ export class TTSStreamPlayer {
       this.prebufferTimer = null;
       this.flushPrebuffer();
     }, this.prebufferMs);
+  }
+
+  private flushDecodedInOrder(): void {
+    while (this.decodedBySegment.has(this.nextDecodedSegment)) {
+      const decoded = this.decodedBySegment.get(this.nextDecodedSegment)!;
+      this.decodedBySegment.delete(this.nextDecodedSegment);
+      this.nextDecodedSegment += 1;
+      if (!this.started) {
+        this.readyBuffers.push(decoded);
+        this.armPrebufferTimer();
+        const bufferedSeconds = this.readyBuffers.reduce((sum, item) => sum + item.buffer.duration, 0);
+        if (
+          this.readyBuffers.length >= Math.max(this.prebufferSegments, this.underrunPrebufferSegments)
+          || bufferedSeconds >= this.prebufferMs / 1000
+          || this.serverFinished
+        ) {
+          this.flushPrebuffer();
+        }
+      } else {
+        this.scheduleBuffer(decoded);
+      }
+    }
   }
 
   private clearPrebufferTimer(): void {
@@ -214,15 +231,19 @@ export class TTSStreamPlayer {
     const { buffer, text } = item;
     const context = this.context!;
     const gapMs = this.started ? Math.max(0, (context.currentTime - this.scheduledUntil) * 1000) : 0;
-    if (gapMs > 50) this.onUnderrun(Math.round(gapMs));
+    if (gapMs > 50) {
+      this.underrunPrebufferSegments = Math.min(
+        3,
+        Math.max(this.prebufferSegments, this.underrunPrebufferSegments) + 1,
+      );
+      this.onUnderrun(Math.round(gapMs));
+    }
     const source = context.createBufferSource();
     source.buffer = buffer;
-    source.playbackRate.value = this.playbackRate;
+    source.playbackRate.value = 1;
     source.connect(context.destination);
-    const startAt = Math.max(context.currentTime + 0.075, this.scheduledUntil);
-    // AudioBuffer.duration is measured at normal speed.  Keeping the original
-    // value here creates a gap above 1x and overlap below 1x between segments.
-    this.scheduledUntil = startAt + buffer.duration / this.playbackRate;
+    const startAt = Math.max(context.currentTime + this.startLeadMs / 1000, this.scheduledUntil);
+    this.scheduledUntil = startAt + buffer.duration;
     this.sources.add(source);
     source.onended = () => {
       this.sources.delete(source);
@@ -235,10 +256,6 @@ export class TTSStreamPlayer {
       this.started = true;
       globalThis.setTimeout(this.onStarted, Math.max(0, (startAt - context.currentTime) * 1000));
     }
-  }
-
-  private normalizePlaybackRate(value: number): number {
-    return Math.max(0.75, Math.min(1.25, value));
   }
 
 }

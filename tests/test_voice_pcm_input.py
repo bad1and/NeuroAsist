@@ -109,6 +109,31 @@ async def test_pcm_input_uses_ram_ring_and_removes_temp_stt_file(tmp_path: Path)
 
 
 @pytest.mark.anyio
+async def test_stop_flushes_confirmed_active_utterance_before_returning(tmp_path: Path) -> None:
+    handled: list[bytes] = []
+
+    async def on_utterance(session_id, path, language, connection) -> None:
+        handled.append(path.read_bytes())
+
+    manager = VoiceInputSessionManager(
+        FakeVoiceService(tmp_path),
+        on_utterance,
+        vad=SequenceVad([.9]),
+    )
+    socket = FakeSocket()
+    await manager.register("stop", socket)
+    await manager.start("stop", sample_rate=16_000, channels=1, language="ru")
+    manager._sessions["stop"].gate.start_ms = 0
+    frame = b"\x07\x00" * 320
+
+    await manager.feed("stop", frame)
+    await manager.stop("stop")
+
+    assert handled == [frame]
+    assert not (tmp_path / "input.wav").exists()
+
+
+@pytest.mark.anyio
 async def test_continuation_during_endpoint_inference_keeps_entire_turn(tmp_path: Path) -> None:
     handled: list[bytes] = []
     generation = 0

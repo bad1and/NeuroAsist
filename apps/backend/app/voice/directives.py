@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 
 from apps.backend.app.schemas.character import Emotion
+from apps.backend.app.voice.delivery import clean_voice_directives
 
 
 _EMOTIONS = frozenset(item.value for item in Emotion)
@@ -150,4 +151,4 @@ def clean_live_reply(raw_reply: str) -> str:
     parser = LiveDirectiveParser()
     _, parts = parser.feed(raw_reply)
     _, tail = parser.finish()
-    return "".join([*parts, *tail]).strip()
+    return clean_voice_directives("".join([*parts, *tail]))

@@ -13,7 +13,10 @@ from apps.backend.app.agents.character.prompts import (
 )
 from apps.backend.app.agents.character.persona import get_persona
 from apps.backend.app.agents.character.protocol import classify_intent, legacy_result, parse_turn
-from apps.backend.app.agents.character.voice_input import VoiceInputInterpreter
+from apps.backend.app.agents.character.voice_input import (
+    VoiceInputInterpretation,
+    VoiceInputInterpreter,
+)
 from apps.backend.app.llm.base import ChatMessage, LLMProvider
 from apps.backend.app.schemas.character import CharacterTurn
 from apps.backend.app.storage.sqlite_history import SQLiteMessageHistory
@@ -67,15 +70,35 @@ class CharacterAgent:
         persist_reply_callback: Callable[[str], Any] | None = None,
         state_context: str | None = None,
         state_behavior: "BehaviorGuide | None" = None,
+        raw_user_text: str | None = None,
+        voice_corrections: tuple[dict[str, object], ...] = (),
     ) -> dict[str, Any]:
-        interpreted = self._voice_input.interpret(user_text, input_mode)
+        interpreted = (
+            VoiceInputInterpretation(user_text, len(voice_corrections), voice_corrections)
+            if input_mode == "voice" and raw_user_text is not None
+            else self._voice_input.interpret(user_text, input_mode)
+        )
         effective_text = interpreted.text
         if source_message is None:
-            self.last_memory_updates = self._persist_user_message(session_id, user_text, input_mode, interpreted)
+            self.last_memory_updates = self._persist_user_message(
+                session_id,
+                raw_user_text if raw_user_text is not None else user_text,
+                input_mode,
+                interpreted,
+            )
         else:
             # The route/coordinator owns durable acceptance.  The agent only
             # consumes that source message to construct causal context.
             self._last_user_message = source_message
+            if interpreted.changed:
+                apply_interpretation = getattr(self._history, "apply_voice_interpretation", None)
+                if callable(apply_interpretation):
+                    self._last_user_message = apply_interpretation(
+                        source_message.id,
+                        interpreted.text,
+                        interpreted.replacement_count,
+                        list(interpreted.replacements),
+                    )
             self._active_turn_id = getattr(source_message, "turn_id", None)
             self.last_memory_updates = []
         if self._memory_service is not None:
@@ -317,14 +340,34 @@ class CharacterAgent:
         state_context: str | None = None,
         schedule_memory: bool = True,
         persist_reply: bool | None = None,
+        raw_user_text: str | None = None,
+        voice_corrections: tuple[dict[str, object], ...] = (),
     ) -> AsyncIterator[str]:
         """Stream plain reply text and commit history only after clean completion."""
-        interpreted = self._voice_input.interpret(user_text, input_mode)
+        interpreted = (
+            VoiceInputInterpretation(user_text, len(voice_corrections), voice_corrections)
+            if input_mode == "voice" and raw_user_text is not None
+            else self._voice_input.interpret(user_text, input_mode)
+        )
         effective_text = interpreted.text
         if source_message is None:
-            self.last_memory_updates = self._persist_user_message(session_id, user_text, input_mode, interpreted)
+            self.last_memory_updates = self._persist_user_message(
+                session_id,
+                raw_user_text if raw_user_text is not None else user_text,
+                input_mode,
+                interpreted,
+            )
         else:
             self._last_user_message = source_message
+            if interpreted.changed:
+                apply_interpretation = getattr(self._history, "apply_voice_interpretation", None)
+                if callable(apply_interpretation):
+                    self._last_user_message = apply_interpretation(
+                        source_message.id,
+                        interpreted.text,
+                        interpreted.replacement_count,
+                        list(interpreted.replacements),
+                    )
             self._active_turn_id = getattr(source_message, "turn_id", None)
             self.last_memory_updates = []
         if self._memory_service is not None:
@@ -432,6 +475,7 @@ class CharacterAgent:
                     user_message.id,
                     interpreted.text,
                     interpreted.replacement_count,
+                    list(interpreted.replacements),
                 )
         self._last_user_message = user_message
         if self._memory_service is None:

@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     voice_stt_model: str = "v3_rnnt"
     voice_stt_device: str = "cpu"
     voice_stt_compute_type: str = "int8"
+    voice_torch_cpu_threads: int = 4
+    voice_torch_interop_threads: int = 1
     voice_default_language: str = "ru"
     voice_preload_stt_model: bool = True
     voice_preload_tts_model: bool = True
@@ -107,6 +109,8 @@ class Settings(BaseSettings):
     voice_tts_timeout_seconds: int = 45
     voice_live_queue_size: int = 3
     voice_live_idle_flush_ms: int = 500
+    voice_live_first_idle_flush_ms: int = 180
+    voice_live_next_idle_flush_ms: int = 350
     voice_live_first_segment_chars: int = 32
     voice_live_next_segment_chars: int = 75
     voice_live_max_segment_chars: int = 110
@@ -118,10 +122,24 @@ class Settings(BaseSettings):
     voice_live_tts_concurrency_max: int = 2
     voice_live_playback_prebuffer_segments: int = 1
     voice_live_playback_prebuffer_ms: int = 0
+    voice_live_playback_start_lead_ms: int = 30
     voice_vad_provider: str = "silero"
     voice_silero_vad_model_path: str | None = None
-    voice_vad_threshold: float = 0.55
+    voice_vad_threshold: float = 0.55  # legacy alias retained for existing .env files
+    voice_silero_vad_start_threshold: float = 0.55
+    voice_silero_vad_end_threshold: float = 0.35
+    voice_energy_vad_start_rms: float = 0.018
+    voice_energy_vad_end_rms: float = 0.012
+    voice_silero_vad_min_speech_ms: int = 64
+    voice_energy_vad_min_speech_ms: int = 120
     voice_vad_pre_roll_ms: int = 500
+    voice_vad_post_roll_ms: int = 180
+    voice_vad_end_silence_ms: int = 480
+    voice_vad_live_end_silence_ms: int = 320
+    voice_vad_live_fallback_end_silence_ms: int = 650
+    voice_stt_terms_path: str | None = None
+    voice_input_diagnostic_audio: bool = False
+    voice_input_diagnostic_dir: str | None = None
     avatar_enabled: bool = False
     avatar_emotion_mapping_path: str = "apps/protocol/avatar-emotion-mapping.json"
     avatar_heartbeat_interval_seconds: float = 15.0
@@ -185,6 +203,20 @@ class Settings(BaseSettings):
             return None
         path = Path(self.voice_silero_vad_model_path)
         return path if path.is_absolute() else ROOT_DIR / path
+
+    @property
+    def voice_stt_terms_file(self) -> Path:
+        if self.voice_stt_terms_path:
+            path = Path(self.voice_stt_terms_path).expanduser()
+            return path if path.is_absolute() else ROOT_DIR / path
+        return self.app_data_path / "stt-terms.json"
+
+    @property
+    def voice_input_diagnostic_path(self) -> Path:
+        if self.voice_input_diagnostic_dir:
+            path = Path(self.voice_input_diagnostic_dir).expanduser()
+            return path if path.is_absolute() else ROOT_DIR / path
+        return self.app_data_path / "diagnostics" / "stt-audio"
 
     @property
     def voice_openvoice_reference_audio_path(self) -> Path | None:

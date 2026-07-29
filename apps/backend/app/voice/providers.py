@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from apps.backend.app.voice.audio import Pcm16Audio, write_pcm16_wav
+from apps.backend.app.voice.delivery import SpeechEmphasis, SpeechPace
 from apps.backend.app.voice.style import VoiceExpressionLevel, VoiceStyle, coerce_voice_expression_level, coerce_voice_style, make_silero_ssml, profile_for
 from apps.backend.app.voice.lexicon import (
     normalize_tts_orthography,
@@ -31,6 +33,8 @@ class STTResult:
     duration_ms: int
     provider: str
     model: str | None = None
+    raw_text: str | None = None
+    corrections: tuple[dict[str, object], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -49,6 +53,11 @@ class TTSRequest:
     language: str
     voice: str
     style: VoiceStyle | str = VoiceStyle.AUTO
+    pace: SpeechPace | str = SpeechPace.NORMAL
+    tempo: float = 1.0
+    emphasis: SpeechEmphasis | str = SpeechEmphasis.NONE
+    pause_before_ms: int = 0
+    pause_after_ms: int = 100
     rate: str = "+0%"
     pitch: str = "+0Hz"
     volume: str = "+0%"
@@ -69,6 +78,12 @@ class STTProvider:
 
     async def preload(self) -> None:
         return None
+
+    async def transcribe_pcm16(self, audio: Pcm16Audio, language: str) -> STTResult:
+        with tempfile.TemporaryDirectory(prefix="neuroasist-stt-") as directory:
+            path = Path(directory) / "input.wav"
+            write_pcm16_wav(path, audio)
+            return await self.transcribe(path, language)
 
 
 class TTSProvider:
@@ -287,13 +302,56 @@ class GigaAMSTTProvider(STTProvider):
         self._selected_device: str | None = None
         self._load_lock = threading.Lock()
         self._inference_lock = threading.Lock()
+        self._warmup_lock = threading.Lock()
+        self._warmed_up = False
+        self._warmup_duration_ms: int | None = None
 
     async def transcribe(self, audio_path: Path, language: str) -> STTResult:
         started = time.perf_counter()
         return await asyncio.to_thread(self._transcribe_sync, audio_path, language, started)
 
+    async def transcribe_pcm16(self, audio: Pcm16Audio, language: str) -> STTResult:
+        started = time.perf_counter()
+        return await asyncio.to_thread(self._transcribe_pcm_sync, audio, language, started)
+
     async def preload(self) -> None:
-        await asyncio.to_thread(self._ensure_model)
+        await asyncio.to_thread(self._preload_sync)
+
+    @property
+    def metadata(self) -> dict[str, object]:
+        return {
+            "provider": "gigaam",
+            "model": self._model_name,
+            "device": self._selected_device or self._device,
+            "warmed_up": self._warmed_up,
+            "warmup_duration_ms": self._warmup_duration_ms,
+        }
+
+    def _preload_sync(self) -> None:
+        self._ensure_model()
+        if self._warmed_up:
+            return
+        with self._warmup_lock:
+            if self._warmed_up:
+                return
+            started = time.perf_counter()
+            # A short silence exercises preprocessing, encoder and RNNT decode
+            # without persisting microphone audio or creating a temporary WAV.
+            model = self._ensure_model()
+            if all(hasattr(model, name) for name in ("_device", "_dtype", "_decode", "forward")):
+                self._transcribe_pcm_sync(
+                    Pcm16Audio(b"\x00\x00" * 6_400),
+                    "ru",
+                    started,
+                )
+            self._warmup_duration_ms = int((time.perf_counter() - started) * 1000)
+            self._warmed_up = True
+            logger.info(
+                "GigaAM STT warmed up: model=%s device=%s duration_ms=%s",
+                self._model_name,
+                self._selected_device,
+                self._warmup_duration_ms,
+            )
 
     def _ensure_model(self):
         try:
@@ -361,6 +419,35 @@ class GigaAMSTTProvider(STTProvider):
             model=self._model_name,
         )
 
+    def _transcribe_pcm_sync(
+        self,
+        audio: Pcm16Audio,
+        language: str,
+        started: float,
+    ) -> STTResult:
+        with self._inference_lock:
+            try:
+                text = self._transcribe_pcm_with_current_model(audio)
+            except Exception as exc:
+                if not self._should_retry_on_cpu(exc):
+                    raise
+                logger.info(
+                    "GigaAM CUDA runtime failed, retrying PCM inference on CPU: model=%s error_type=%s",
+                    self._model_name,
+                    type(exc).__name__,
+                )
+                self._model = None
+                self._device = "cpu"
+                self._selected_device = None
+                text = self._transcribe_pcm_with_current_model(audio)
+        return STTResult(
+            text=text,
+            language="ru" if language == "auto" else language,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            provider="gigaam",
+            model=self._model_name,
+        )
+
     def _transcribe_with_current_model(self, audio_path: Path) -> str:
         model = self._ensure_model()
         try:
@@ -369,6 +456,31 @@ class GigaAMSTTProvider(STTProvider):
             if "too long wav" not in str(exc).lower():
                 raise
         return self._transcribe_long(model, audio_path)
+
+    def _transcribe_pcm_with_current_model(self, audio: Pcm16Audio) -> str:
+        model = self._ensure_model()
+        max_bytes = self._MAX_SHORT_SECONDS * self._SAMPLE_RATE * 2
+        if len(audio.data) <= max_bytes:
+            return self._transcribe_short_pcm(model, audio.data)
+        texts = [
+            self._transcribe_short_pcm(model, chunk)
+            for chunk in self._split_pcm16_on_quiet(audio.data)
+        ]
+        return " ".join(text for text in texts if text).strip()
+
+    @staticmethod
+    def _transcribe_short_pcm(model: Any, pcm16: bytes) -> str:
+        import torch
+
+        samples = array.array("h")
+        samples.frombytes(pcm16)
+        waveform = torch.tensor(samples, dtype=torch.float32).div_(32768.0)
+        waveform = waveform.to(model._device).to(model._dtype).unsqueeze(0)
+        length = torch.tensor([waveform.shape[-1]], device=model._device)
+        with torch.inference_mode():
+            encoded, encoded_len = model.forward(waveform, length)
+            text, _words = model._decode(encoded, encoded_len, length, False)[0]
+        return str(text).strip()
 
     @staticmethod
     def _transcribe_short(model: Any, audio_path: Path) -> str:
@@ -486,6 +598,106 @@ def wav_duration_seconds(wav_bytes: bytes) -> float:
         if frames <= 0 or rate <= 0:
             raise RuntimeError("TTS provider returned zero-duration audio")
         return frames / rate
+
+
+def apply_wav_delivery(
+    wav_bytes: bytes,
+    *,
+    tempo: float = 1.0,
+    pause_before_ms: int = 0,
+    pause_after_ms: int = 0,
+    postprocess: bool = False,
+    loudness_target_dbfs: float = -18.0,
+    peak_ceiling_dbfs: float = -1.0,
+    highpass_cutoff_hz: float = 60.0,
+) -> bytes:
+    """Apply pitch-preserving tempo and explicit silence to mono PCM16 WAV."""
+    import numpy as np
+
+    tempo = max(0.75, min(1.25, float(tempo)))
+    with wave.open(io.BytesIO(wav_bytes), "rb") as source:
+        channels = source.getnchannels()
+        sample_width = source.getsampwidth()
+        sample_rate = source.getframerate()
+        pcm = source.readframes(source.getnframes())
+    if channels != 1 or sample_width != 2 or not pcm:
+        return wav_bytes
+
+    samples = np.frombuffer(pcm, dtype="<i2").copy()
+    if abs(tempo - 1.0) >= 0.001:
+        try:
+            import av
+
+            frame = av.AudioFrame(format="s16", layout="mono", samples=len(samples))
+            frame.sample_rate = sample_rate
+            frame.planes[0].update(samples.tobytes())
+            graph = av.filter.Graph()
+            source_filter = graph.add(
+                "abuffer",
+                args=f"sample_rate={sample_rate}:sample_fmt=s16:channel_layout=mono",
+            )
+            tempo_filter = graph.add("atempo", f"{tempo:.6f}")
+            sink_filter = graph.add("abuffersink")
+            source_filter.link_to(tempo_filter)
+            tempo_filter.link_to(sink_filter)
+            graph.configure()
+            graph.push(frame)
+            graph.push(None)
+            rendered: list[Any] = []
+            while True:
+                try:
+                    rendered.append(graph.pull())
+                except (av.error.BlockingIOError, EOFError):
+                    break
+            if rendered:
+                samples = np.concatenate(
+                    [item.to_ndarray().reshape(-1).astype("<i2", copy=False) for item in rendered]
+                )
+        except Exception:
+            logger.warning(
+                "Could not apply pitch-preserving TTS tempo; using original audio: tempo=%s",
+                tempo,
+                exc_info=True,
+            )
+
+    if postprocess and len(samples):
+        rendered = samples.astype(np.float32) / 32768.0
+        rendered -= float(np.mean(rendered))
+        if highpass_cutoff_hz > 0 and len(rendered) > 1:
+            rc = 1.0 / (2.0 * np.pi * highpass_cutoff_hz)
+            alpha = rc / (rc + 1.0 / sample_rate)
+            filtered = np.empty_like(rendered)
+            filtered[0] = rendered[0]
+            for index in range(1, len(rendered)):
+                filtered[index] = alpha * (
+                    filtered[index - 1] + rendered[index] - rendered[index - 1]
+                )
+            rendered = filtered
+        active = np.abs(rendered) >= 10 ** (-45 / 20)
+        if active.any():
+            rms = float(np.sqrt(np.mean(np.square(rendered[active]))))
+            peak = float(np.max(np.abs(rendered)))
+            if rms > 0 and peak > 0:
+                target = 10 ** (loudness_target_dbfs / 20)
+                ceiling = 10 ** (peak_ceiling_dbfs / 20)
+                rendered *= min(target / rms, ceiling / peak)
+        fade_samples = min(max(1, round(sample_rate * 0.008)), len(rendered) // 2)
+        if fade_samples:
+            fade = np.linspace(0.0, 1.0, fade_samples, endpoint=False, dtype=np.float32)
+            rendered[:fade_samples] *= fade
+            rendered[-fade_samples:] *= fade[::-1]
+        samples = (np.clip(rendered, -1.0, 1.0) * 32767).astype("<i2")
+
+    before = np.zeros(max(0, round(sample_rate * pause_before_ms / 1000)), dtype="<i2")
+    after = np.zeros(max(0, round(sample_rate * pause_after_ms / 1000)), dtype="<i2")
+    delivered = np.concatenate((before, samples, after))
+    output = io.BytesIO()
+    with wave.open(output, "wb") as target:
+        target.setnchannels(1)
+        target.setsampwidth(2)
+        target.setframerate(sample_rate)
+        target.writeframes(delivered.tobytes())
+    return output.getvalue()
 
 
 _RU_UNITS = (
@@ -1009,8 +1221,6 @@ class OpenVoiceToneConverter:
                 "OpenVoice tone conversion is not installed. Run scripts/install-openvoice.ps1."
             ) from exc
 
-        if self.cpu_threads > 0:
-            torch.set_num_threads(self.cpu_threads)
         hps = openvoice_utils.get_hparams_from_file(str(config_path))
         model = SynthesizerTrn(
             len(getattr(hps, "symbols", [])),
@@ -1416,8 +1626,6 @@ class SileroTTSProvider(TTSProvider):
             raise RuntimeError(
                 "Silero TTS requires torch. Install CPU PyTorch and silero before using VOICE_TTS_PROVIDER=silero."
             ) from exc
-        if self.cpu_threads > 0:
-            torch.set_num_threads(self.cpu_threads)
         selected_device = self._select_device(torch)
         if self._model_loader is not None:
             model = self._model_loader()
@@ -1500,6 +1708,7 @@ class SileroTTSProvider(TTSProvider):
                     style,
                     self._expression_level,
                     adaptive_prosody=self.adaptive_prosody,
+                    terminal_pause=False,
                 ),
                 speaker=speaker,
                 sample_rate=self.sample_rate,
@@ -1600,7 +1809,7 @@ class SileroTTSProvider(TTSProvider):
     def _apply_edge_fades(samples: Any, sample_rate: int):
         import numpy as np
 
-        fade_samples = min(max(1, round(sample_rate * 0.005)), len(samples) // 2)
+        fade_samples = min(max(1, round(sample_rate * 0.008)), len(samples) // 2)
         if fade_samples <= 0:
             return samples
         envelope = np.linspace(0.0, 1.0, fade_samples, endpoint=False, dtype=np.float32)
@@ -1683,6 +1892,21 @@ class SileroTTSProvider(TTSProvider):
         speaker = self.resolve_voice(request.language, request.voice)
         style = coerce_voice_style(request.style)
         wav_bytes, _, _ = await self._synthesize_wav_bytes(text, speaker, style)
+        tempo_started = time.perf_counter()
+        wav_bytes = await asyncio.to_thread(
+            apply_wav_delivery,
+            wav_bytes,
+            tempo=request.tempo,
+            pause_before_ms=request.pause_before_ms,
+            pause_after_ms=request.pause_after_ms,
+            postprocess=True,
+            loudness_target_dbfs=self.loudness_target_dbfs,
+            peak_ceiling_dbfs=self.peak_ceiling_dbfs,
+            highpass_cutoff_hz=self.highpass_cutoff_hz
+            if self.audio_postprocessing_enabled
+            else 0.0,
+        )
+        tempo_processing_ms = int((time.perf_counter() - tempo_started) * 1000)
         yield AudioChunk(
             data=wav_bytes,
             format="wav",
@@ -1698,6 +1922,7 @@ class SileroTTSProvider(TTSProvider):
                 "voice_conversion": self._voice_converter is not None,
                 "native_english": self._english_tts_model is not None,
                 "style": style.value,
+                "tempo_processing_ms": tempo_processing_ms,
             },
         )
 

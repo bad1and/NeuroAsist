@@ -21,7 +21,7 @@ class SmartTurnDetector:
 
     name = "smart-turn-v3.2"
 
-    def __init__(self, model_path: Path | None, *, timeout_seconds: float = 0.25) -> None:
+    def __init__(self, model_path: Path | None, *, timeout_seconds: float = 0.5) -> None:
         self._model_path = model_path
         self._timeout = timeout_seconds
         self._session = None

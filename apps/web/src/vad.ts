@@ -1,5 +1,24 @@
 export type VadState = "idle" | "listening" | "speech_candidate" | "speech" | "end_pending";
 export type VadEvent = "speech_started" | "speech_ended" | null;
+export type MicrophoneProfile = "headset" | "balanced" | "speakers";
+
+export type CaptureMetadata = {
+  sampleRate: number;
+  channels: number;
+  profile: MicrophoneProfile;
+  settings: MediaTrackSettings;
+  constraints: MediaTrackConstraints;
+  supportedConstraints: MediaTrackSupportedConstraints;
+};
+
+export function microphoneConstraints(profile: MicrophoneProfile): MediaTrackConstraints {
+  const processing = {
+    headset: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    balanced: { echoCancellation: true, noiseSuppression: false, autoGainControl: false },
+    speakers: { echoCancellation: true, noiseSuppression: true, autoGainControl: false },
+  }[profile];
+  return { channelCount: { ideal: 1 }, ...processing };
+}
 
 /** Deterministic debounce layer used by the AudioWorklet RMS monitor. */
 export class VoiceActivityGate {
@@ -38,14 +57,35 @@ export class VoiceActivityGate {
 
 const WORKLET_SOURCE = `
 class NeuroVadProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.pending = [];
+    this.frameSamples = Math.max(1, Math.round(sampleRate * 0.020));
+  }
   process(inputs) {
-    const samples = inputs[0]?.[0];
-    if (!samples) return true;
-    let sum = 0;
-    for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
-    const pcm = new Int16Array(samples.length);
-    for (let i = 0; i < samples.length; i++) pcm[i] = Math.max(-1, Math.min(1, samples[i])) * 32767;
-    this.port.postMessage({ rms: Math.sqrt(sum / samples.length), pcm: pcm.buffer }, [pcm.buffer]);
+    const channels = inputs[0];
+    if (!channels?.length || !channels[0]?.length) return true;
+    for (let i = 0; i < channels[0].length; i++) {
+      let mono = 0;
+      for (let channel = 0; channel < channels.length; channel++) mono += channels[channel][i] || 0;
+      this.pending.push(mono / channels.length);
+    }
+    while (this.pending.length >= this.frameSamples) {
+      const samples = this.pending.splice(0, this.frameSamples);
+      const pcm = new Int16Array(samples.length);
+      let sum = 0;
+      for (let i = 0; i < samples.length; i++) {
+        const value = Math.max(-1, Math.min(1, samples[i]));
+        sum += value * value;
+        pcm[i] = value <= -1 ? -32768 : Math.round(value * 32767);
+      }
+      this.port.postMessage({
+        rms: Math.sqrt(sum / samples.length),
+        pcm: pcm.buffer,
+        sampleRate,
+        inputChannels: channels.length,
+      }, [pcm.buffer]);
+    }
     return true;
   }
 }
@@ -66,15 +106,27 @@ export class BrowserVadRecorder {
   async start(
     onPcm: (pcm16: ArrayBuffer, sampleRate: number) => void,
     onState: (state: VadState, event: VadEvent) => void,
-  ): Promise<void> {
-    if (this.stream) return;
+    profile: MicrophoneProfile = "balanced",
+  ): Promise<CaptureMetadata> {
+    if (this.stream && this.context) {
+      const track = this.stream.getAudioTracks()[0];
+      return {
+        sampleRate: this.context.sampleRate,
+        channels: 1,
+        profile,
+        settings: track?.getSettings() ?? {},
+        constraints: track?.getConstraints() ?? {},
+        supportedConstraints: navigator.mediaDevices.getSupportedConstraints(),
+      };
+    }
     if (!globalThis.AudioWorkletNode || !navigator.mediaDevices?.getUserMedia) {
       throw new Error("AudioWorklet VAD is unavailable in this browser");
     }
+    const requestedConstraints = microphoneConstraints(profile);
     this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      audio: requestedConstraints,
     });
-    this.context = new AudioContext({ sampleRate: 16000 });
+    this.context = new AudioContext();
     this.objectUrl = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: "text/javascript" }));
     await this.context.audioWorklet.addModule(this.objectUrl);
     const source = this.context.createMediaStreamSource(this.stream);
@@ -86,7 +138,7 @@ export class BrowserVadRecorder {
     this.gate.start(performance.now());
     onState("listening", null);
     this.node.port.onmessage = ({ data }) => {
-      onPcm(data.pcm as ArrayBuffer, this.context?.sampleRate ?? 16000);
+      onPcm(data.pcm as ArrayBuffer, Number(data.sampleRate) || this.context?.sampleRate || 48000);
       const previousState = this.gate.snapshot();
       const event = this.gate.feed(Number(data.rms) || 0, performance.now());
       const nextState = this.gate.snapshot();
@@ -96,6 +148,15 @@ export class BrowserVadRecorder {
       if (event || nextState !== previousState) {
         onState(nextState, event);
       }
+    };
+    const track = this.stream.getAudioTracks()[0];
+    return {
+      sampleRate: this.context.sampleRate,
+      channels: 1,
+      profile,
+      settings: track?.getSettings() ?? {},
+      constraints: track?.getConstraints() ?? requestedConstraints,
+      supportedConstraints: navigator.mediaDevices.getSupportedConstraints(),
     };
   }
 
@@ -112,6 +173,10 @@ export class BrowserVadRecorder {
 
 export class PcmInputClient {
   private socket: WebSocket | null = null;
+  private ready = false;
+  private pending: ArrayBuffer[] = [];
+  private pendingBytes = 0;
+  private maxPendingBytes = 192000;
   constructor(
     private readonly url: string,
     private readonly onEvent: (event: {
@@ -131,25 +196,63 @@ export class PcmInputClient {
     sampleRate: number,
     language: string,
     mode: "hands_free" | "live_conversation" = "hands_free",
+    capture?: CaptureMetadata,
   ): Promise<void> {
     if (this.socket?.readyState === WebSocket.OPEN) return;
     const socket = new WebSocket(this.url);
     this.socket = socket;
     await new Promise<void>((resolve, reject) => {
+      let settled = false;
       socket.onopen = () => {
+        this.maxPendingBytes = Math.max(32000, sampleRate * 2);
         socket.send(JSON.stringify({
           type: "voice.input.start",
           sample_rate: sampleRate,
           channels: 1,
+          format: "pcm_s16le",
           language,
           mode,
+          capture_profile: capture?.profile ?? "balanced",
+          capture_settings: capture?.settings ?? {},
+          capture_constraints: capture?.constraints ?? {},
+          supported_constraints: capture?.supportedConstraints ?? {},
         }));
-        resolve();
       };
       socket.onerror = () => reject(new Error("PCM input WebSocket failed"));
-      socket.onmessage = (message) => this.onEvent(JSON.parse(String(message.data)));
+      socket.onmessage = (message) => {
+        const event = JSON.parse(String(message.data));
+        if (event.type === "voice.input.ready") {
+          this.ready = true;
+          for (const frame of this.pending) socket.send(frame);
+          this.pending = [];
+          this.pendingBytes = 0;
+          settled = true;
+          resolve();
+        }
+        this.onEvent(event);
+      };
+      socket.onclose = () => {
+        if (!settled) reject(new Error("PCM input WebSocket closed before ready"));
+      };
     });
   }
-  sendPcm(pcm16: ArrayBuffer): void { if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(pcm16); }
-  close(): void { this.socket?.send(JSON.stringify({ type: "voice.input.stop" })); this.socket?.close(); this.socket = null; }
+  sendPcm(pcm16: ArrayBuffer): void {
+    if (this.ready && this.socket?.readyState === WebSocket.OPEN) {
+      this.socket.send(pcm16);
+      return;
+    }
+    this.pending.push(pcm16);
+    this.pendingBytes += pcm16.byteLength;
+    while (this.pending.length > 1 && this.pendingBytes > this.maxPendingBytes) {
+      this.pendingBytes -= this.pending.shift()!.byteLength;
+    }
+  }
+  close(): void {
+    this.socket?.send(JSON.stringify({ type: "voice.input.stop" }));
+    this.socket?.close();
+    this.socket = null;
+    this.ready = false;
+    this.pending = [];
+    this.pendingBytes = 0;
+  }
 }

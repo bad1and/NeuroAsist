@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
+import time
+import wave
 from pathlib import Path
 from uuid import uuid4
 
-from apps.backend.app.voice.providers import split_tts_chunks
+from apps.backend.app.voice.delivery import SpeechSegment, plan_speech
+from apps.backend.app.voice.providers import TTSRequest, TTSResult, split_tts_chunks
 from apps.backend.app.voice.style import VoiceStyle
 
 logger = logging.getLogger(__name__)
@@ -35,6 +39,8 @@ class SpeechOrchestrator:
         style: VoiceStyle | str = VoiceStyle.AUTO,
         interrupt: bool = True,
         voice_request_id: str | None = None,
+        delivery=None,
+        playback_rate: float = 1.0,
     ) -> str:
         request_id = voice_request_id or uuid4().hex
         self.voice_service.set_tts_job(
@@ -52,6 +58,8 @@ class SpeechOrchestrator:
                 voice=voice,
                 style=style,
                 interrupt=interrupt,
+                delivery=delivery,
+                playback_rate=playback_rate,
             )
         )
         self._tasks.add(task)
@@ -103,6 +111,8 @@ class SpeechOrchestrator:
         voice: str,
         style: VoiceStyle | str,
         interrupt: bool,
+        delivery,
+        playback_rate: float,
     ) -> None:
         output_path = self.voice_service.next_tts_path(self.settings.voice_tts_provider)
         text = reply.strip()[: self.settings.voice_tts_max_chars]
@@ -113,7 +123,14 @@ class SpeechOrchestrator:
         )
         try:
             result = await asyncio.wait_for(
-                self.voice_service.tts_provider.synthesize(text, voice, output_path, style),
+                self._synthesize_plan(
+                    text,
+                    voice,
+                    output_path,
+                    style,
+                    delivery,
+                    playback_rate,
+                ),
                 timeout=self.settings.voice_tts_background_timeout_seconds,
             )
             if not result.audio_path.exists() or not result.audio_path.is_file():
@@ -155,6 +172,77 @@ class SpeechOrchestrator:
                 emotion=emotion, intent=intent, gesture=gesture,
                 gesture_intensity=gesture_intensity, interrupt=interrupt,
             )
+
+    async def _synthesize_plan(
+        self,
+        text: str,
+        voice: str,
+        output_path: Path,
+        style: VoiceStyle | str,
+        delivery,
+        playback_rate: float,
+    ) -> TTSResult:
+        started = time.perf_counter()
+        provider = self.voice_service.tts_provider
+        if not callable(getattr(provider, "stream", None)):
+            return await provider.synthesize(text, voice, output_path, style)
+        segments = plan_speech(text, delivery)
+        if not segments:
+            raise ValueError("No speakable text")
+        rate = max(0.75, min(1.25, float(playback_rate)))
+        pcm_parts: list[bytes] = []
+        wave_params: tuple[int, int, int] | None = None
+        for segment in segments:
+            effective = SpeechSegment(
+                text=segment.text,
+                pace=segment.pace,
+                tempo=max(0.75, min(1.25, segment.tempo * rate)),
+                emphasis=segment.emphasis,
+                pause_before_ms=segment.pause_before_ms,
+                pause_after_ms=segment.pause_after_ms,
+                sequence=segment.sequence,
+            )
+            request = TTSRequest(
+                text=effective.text,
+                language="ru",
+                voice=voice,
+                style=style,
+                pace=effective.pace,
+                tempo=effective.tempo,
+                emphasis=effective.emphasis,
+                pause_before_ms=effective.pause_before_ms,
+                pause_after_ms=effective.pause_after_ms,
+            )
+            chunks = [chunk.data async for chunk in provider.stream(request) if chunk.data]
+            if not chunks:
+                raise RuntimeError("TTS provider returned empty audio")
+            with wave.open(io.BytesIO(b"".join(chunks)), "rb") as source:
+                current_params = (
+                    source.getnchannels(),
+                    source.getsampwidth(),
+                    source.getframerate(),
+                )
+                if wave_params is None:
+                    wave_params = current_params
+                elif current_params != wave_params:
+                    raise RuntimeError("TTS segments use incompatible WAV formats")
+                pcm_parts.append(source.readframes(source.getnframes()))
+        assert wave_params is not None
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with wave.open(str(output_path), "wb") as output:
+            output.setnchannels(wave_params[0])
+            output.setsampwidth(wave_params[1])
+            output.setframerate(wave_params[2])
+            output.writeframes(b"".join(pcm_parts))
+        frame_count = len(b"".join(pcm_parts)) // (wave_params[0] * wave_params[1])
+        return TTSResult(
+            audio_path=output_path,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            provider=provider.name,
+            voice=voice,
+            chunks_count=len(segments),
+            audio_duration_seconds=frame_count / wave_params[2],
+        )
 
     def _fail(self, session_id: str, voice_request_id: str, voice: str, error: str, error_type: str) -> None:
         self.voice_service.set_tts_job(

@@ -9,6 +9,7 @@ const api = vi.hoisted(() => ({
   getTimelineMessages: vi.fn(), getModels: vi.fn(), getBackups: vi.fn(), getAvatarOverlay: vi.fn(),
   getMemories: vi.fn(), createMemory: vi.fn(), getMemoryAudit: vi.fn(),
   getPronunciations: vi.fn(), updatePronunciations: vi.fn(), updateVoiceExpression: vi.fn(), updateVoiceStyle: vi.fn(),
+  getSttTerms: vi.fn(), updateSttTerms: vi.fn(),
   updateRuntimeSettings: vi.fn(), getTimelineJournal: vi.fn(), searchTimeline: vi.fn(),
   getVoiceTtsStatus: vi.fn(), sendChatMessage: vi.fn(), sendVoiceMessage: vi.fn(),
   installModel: vi.fn(), removeModel: vi.fn(), createBackup: vi.fn(),
@@ -34,9 +35,12 @@ import { MemoryPage } from "./memory";
 
 const settings = {
   provider: "deepseek", model: "deepseek-chat", personality: "default", voice_language: "ru",
+  voice_microphone_profile: "balanced", voice_vad: { configured_provider: "silero", active_provider: "silero", ready: true, fallback: false },
+  voice_input_diagnostic_audio_enabled: false,
   voice_stt_model: "small", voice_tts_enabled: true, avatar_enabled: false, voice_tts_voice: "F4",
   voice_tts_provider: "silero", voice_tts_model: "v5_5_ru", voice_tts_device: "cpu", voice_tts_style: "auto", voice_tts_expression_level: "natural",
   voice_playback_rate: 1, voice_live_playback_prebuffer_segments: 2, voice_live_playback_prebuffer_ms: 700,
+  voice_live_playback_start_lead_ms: 30,
   chat_history_limit: 40, episodes_enabled: true, episode_soft_inactivity_minutes: 30,
   episode_hard_inactivity_minutes: 120, episode_maximum_messages: 100, episode_maximum_estimated_tokens: 12000,
   memory_enabled: true, memory_mode: "balanced", memory_incognito: false, log_level: "info",
@@ -67,6 +71,7 @@ beforeEach(() => {
   api.getBackups.mockResolvedValue([]);
   api.getAvatarOverlay.mockResolvedValue({ visible: true, always_on_top: true, locked: true, scale: 1, monitor: "", x: 0, y: 0, width: 0, height: 0 });
   api.getPronunciations.mockResolvedValue({ pronunciations: {} });
+  api.getSttTerms.mockResolvedValue({ terms: {} });
   api.getMemories.mockResolvedValue({ items: [] });
   api.createMemory.mockResolvedValue({ memory: {} });
   api.getMemoryAudit.mockResolvedValue({ items: [] });

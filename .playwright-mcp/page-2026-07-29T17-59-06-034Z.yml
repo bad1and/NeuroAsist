@@ -1,0 +1,142 @@
+- generic [ref=f3e3]:
+  - complementary "Основная навигация" [ref=f3e4]:
+    - generic [ref=f3e5]:
+      - img "Iris" [ref=f3e6]
+      - generic [ref=f3e7]:
+        - text: ириска
+        - superscript [ref=f3e8]: "*"
+      - button "Закрыть меню" [ref=f3e9] [cursor=pointer]
+    - navigation "Разделы приложения" [ref=f3e13]:
+      - button "Обзор" [ref=f3e14] [cursor=pointer]
+      - button "Диалог" [ref=f3e21] [cursor=pointer]
+      - button "История" [ref=f3e25] [cursor=pointer]
+      - button "Память" [ref=f3e31] [cursor=pointer]
+      - button "Состояние" [ref=f3e43] [cursor=pointer]
+    - button "Настройки" [ref=f3e47] [cursor=pointer]
+  - banner [ref=f3e52]:
+    - button "Открыть меню" [ref=f3e54] [cursor=pointer]
+  - main [ref=f3e57]:
+    - generic [ref=f3e58]:
+      - navigation "Разделы настроек" [ref=f3e59]:
+        - button "Общее" [ref=f3e60] [cursor=pointer]
+        - button "Голос" [ref=f3e62] [cursor=pointer]
+        - button "Живой разговор" [ref=f3e67] [cursor=pointer]
+        - button "Память" [ref=f3e70] [cursor=pointer]
+        - button "Система" [ref=f3e81] [cursor=pointer]
+      - generic [ref=f3e93]:
+        - generic [ref=f3e94]:
+          - text: Настройки Iris
+          - heading "Голос" [level=2] [ref=f3e95]
+          - paragraph [ref=f3e96]: Звучание, темп и произношение речи.
+        - generic [ref=f3e97]:
+          - group "Голос" [ref=f3e98]:
+            - generic [ref=f3e100]:
+              - text: Язык голосового ввода
+              - combobox "Язык голосового ввода" [ref=f3e101]:
+                - option "Русский" [selected]
+            - generic [ref=f3e102]:
+              - text: Профиль микрофона
+              - combobox "Профиль микрофона Управляет эхоподавлением и шумоподавлением браузера для записи и живого режима." [ref=f3e103]:
+                - option "Сбалансированный — рекомендуется" [selected]
+                - option "Гарнитура"
+                - option "Колонки"
+              - generic [ref=f3e104]: Управляет эхоподавлением и шумоподавлением браузера для записи и живого режима.
+            - generic [ref=f3e105]:
+              - text: Голос Silero
+              - combobox "Голос Silero" [ref=f3e106]:
+                - option "F4" [selected]
+            - generic [ref=f3e107]:
+              - text: Скорость воспроизведения
+              - strong [ref=f3e108]: 1.00×
+              - slider "Скорость воспроизведения 1.00×" [ref=f3e109]: "1"
+            - generic [ref=f3e110]:
+              - text: Подача голоса
+              - combobox "Подача голоса Действует до перезапуска приложения." [ref=f3e111]:
+                - option "Авто — по эмоции нейросети" [selected]
+                - option "Спокойно"
+                - option "Обычно"
+                - option "Энергично"
+                - option "Задумчиво"
+                - option "Напористо"
+              - generic [ref=f3e112]: Действует до перезапуска приложения.
+            - generic [ref=f3e113]:
+              - text: Выразительность
+              - combobox "Выразительность Усиливает или смягчает выбранную подачу; обычный профиль не меняется." [ref=f3e114]:
+                - option "Минимальная — почти нейтрально"
+                - option "Естественная — рекомендовано" [selected]
+                - option "Заметная — сильнее эмоции"
+              - generic [ref=f3e115]: Усиливает или смягчает выбранную подачу; обычный профиль не меняется.
+            - generic [ref=f3e116]:
+              - generic [ref=f3e117]: Движок синтеза
+              - strong [ref=f3e118]: Silero · CPU · активен
+            - generic [ref=f3e119]:
+              - generic [ref=f3e120]: Детектор речи
+              - strong [ref=f3e121]: silero · silero_vad · готов
+          - group "Словарь распознавания" [ref=f3e122]:
+            - generic [ref=f3e124]:
+              - text: Канонический термин = точный вариант | точный вариант
+              - textbox "Канонический термин = точный вариант | точный вариант Исправляются только перечисленные варианты. Нечёткий поиск и LLM не используются." [ref=f3e125]:
+                - /placeholder: "NeuroAsist = Нейро Асист | нейроасист\nGigaAM = Гига АМ | гигаэм"
+              - generic [ref=f3e126]: Исправляются только перечисленные варианты. Нечёткий поиск и LLM не используются.
+            - button "Сохранить словарь распознавания" [ref=f3e127] [cursor=pointer]
+          - group "Словарь произношений" [ref=f3e128]:
+            - generic [ref=f3e130]:
+              - text: Термин = как произносить
+              - textbox "Термин = как произносить Одна пара на строку. Ударение можно задать как «к+ак-то» или «ка́к-то». Изменения применяются к следующей фразе без перезапуска." [ref=f3e131]:
+                - /placeholder: "OpenAI = Оупен Эй Ай\nКак-то = к+ак-то\nМука = му́ка"
+              - generic [ref=f3e132]: Одна пара на строку. Ударение можно задать как «к+ак-то» или «ка́к-то». Изменения применяются к следующей фразе без перезапуска.
+            - button "Сохранить словарь" [ref=f3e133] [cursor=pointer]
+          - group "Дополнительно" [ref=f3e134]:
+            - generic [ref=f3e136]:
+              - text: Сегментов в буфере
+              - spinbutton "Сегментов в буфере" [ref=f3e137]: "2"
+            - generic [ref=f3e138]:
+              - text: Задержка буфера, мс
+              - spinbutton "Задержка буфера, мс" [ref=f3e139]: "700"
+            - button "Скрыть сбор тестовых записей" [expanded] [active] [ref=f3e142] [cursor=pointer]
+          - region [ref=f3e143]:
+            - generic [ref=f3e144]:
+              - generic [ref=f3e145]:
+                - heading "Приватный корпус речи" [level=3] [ref=f3e146]
+                - paragraph [ref=f3e147]: Записи остаются только на этом устройстве.
+              - strong [ref=f3e151]:
+                - text: "0"
+                - generic [ref=f3e152]: /20
+            - progressbar "Прогресс сбора тестовых записей" [ref=f3e153]
+            - generic [ref=f3e154]:
+              - generic [ref=f3e155]:
+                - text: Сценарий 1 из 20
+                - combobox "Сценарий 1 из 20" [ref=f3e156]:
+                  - option "1. Обычная речь" [selected]
+                  - option "2. Быстрая речь"
+                  - option "3. Тихая речь"
+                  - option "4. Короткое «Да»"
+                  - option "5. Короткое «Нет»"
+                  - option "6. Короткое «Ну»"
+                  - option "7. Короткое «Что?»"
+                  - option "8. Пауза внутри фразы"
+                  - option "9. Незаконченная фраза"
+                  - 'option "10. Термины: Iris и NeuroAsist"'
+                  - 'option "11. Термины: GigaAM и DeepSeek"'
+                  - 'option "12. Термины: ComfyUI и GitHub"'
+                  - option "13. Шум клавиатуры"
+                  - option "14. Шум вентилятора"
+                  - option "15. Микрофон гарнитуры"
+                  - option "16. Колонки и эхоподавление"
+                  - option "17. Тихое окончание"
+                  - option "18. Живой диалог · начало"
+                  - option "19. Живой диалог · продолжение"
+                  - option "20. Живой диалог · завершение"
+              - generic [ref=f3e157]:
+                - text: Эталонный текст
+                - textbox "Эталонный текст Исправьте текст перед сохранением, если произнесли иначе." [ref=f3e158]: Привет Iris, как у тебя дела?
+                - generic [ref=f3e159]: Исправьте текст перед сохранением, если произнесли иначе.
+            - generic [ref=f3e160]:
+              - button "Начать запись" [ref=f3e161] [cursor=pointer]
+              - button "Скачать manifest" [disabled] [ref=f3e165]
+            - generic [ref=f3e171]:
+              - generic [ref=f3e172]:
+                - heading "Сохранённые записи" [level=4] [ref=f3e173]
+                - generic [ref=f3e174]: 0 WAV
+              - paragraph [ref=f3e175]: Здесь появятся записи, которые можно скачать по одной.
+          - button "Сохранить изменения" [ref=f3e141] [cursor=pointer]

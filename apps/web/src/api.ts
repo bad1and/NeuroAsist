@@ -142,6 +142,7 @@ export function resetConversationSession(): Promise<{ session_id: string; messag
 export function updateRuntimeSettings(payload: {
   personality?: string;
   voice_language?: string;
+  voice_microphone_profile?: PublicSettings["voice_microphone_profile"];
   voice_tts_voice?: string;
   voice_playback_rate?: number;
   voice_live_playback_prebuffer_segments?: number;
@@ -373,6 +374,17 @@ export function resetAllCompanionData(): Promise<{ messages: number; memories: n
 
 export function reindexMemories(): Promise<{ indexed: number }> {
   return requestJson("/memory/reindex", { method: "POST" });
+}
+
+export function getSttTerms(): Promise<{ terms: Record<string, string[]> }> {
+  return requestJson("/settings/stt-terms");
+}
+
+export function updateSttTerms(terms: Record<string, string[]>): Promise<{ terms: Record<string, string[]> }> {
+  return requestJson("/settings/stt-terms", {
+    method: "PUT",
+    body: JSON.stringify({ terms }),
+  });
 }
 
 export function getMemoryTopics(): Promise<{ items: MemoryTopic[] }> {

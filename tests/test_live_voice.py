@@ -13,6 +13,13 @@ from apps.backend.app.voice.directives import LiveDirectiveParser, AvatarDirecti
 from apps.backend.app.voice.live import VoiceSessionManager
 from apps.backend.app.voice.live import UtteranceContext
 from apps.backend.app.voice.providers import AudioChunk, MockTTSProvider
+from apps.backend.app.voice.delivery import (
+    LiveVoiceDirectiveParser,
+    SpeechEmphasis,
+    SpeechPace,
+    VoiceDirective,
+    clean_voice_directives,
+)
 from apps.backend.main import app
 from apps.backend.app.api.routes import voice as voice_route
 from apps.backend.app.voice.service import VoiceService
@@ -39,6 +46,34 @@ def test_normalizer_keeps_ui_independent_tts_copy() -> None:
     source = "**Ответ** `value` https://example.com\n```python\nsecret()\n```"
     assert TextNormalizer().normalize(source) == "Ответ value ссылка"
     assert "https://example.com" in source
+
+
+def test_voice_directive_parser_is_fragment_safe_fail_closed_and_limited() -> None:
+    parser = LiveVoiceDirectiveParser(max_directives=3)
+    output = []
+    for delta in (
+        "Первая. [[voi",
+        "ce pace=slow emphasis=light]]Вторая. ",
+        "[[voice pace=unknown emphasis=wrong]]Третья. ",
+        "[[voice broken]]Четвёртая. ",
+        "[[voice pace=fast emphasis=light]]Пятая.",
+    ):
+        output.extend(parser.feed(delta))
+    output.extend(parser.finish())
+
+    visible = "".join(item for item in output if isinstance(item, str))
+    directives = [item for item in output if isinstance(item, VoiceDirective)]
+    assert "[[voice" not in visible
+    assert visible == "Первая. Вторая. Третья. Четвёртая. Пятая."
+    assert directives[0].pace is SpeechPace.SLOW
+    assert directives[0].emphasis is SpeechEmphasis.LIGHT
+    assert directives[1] == VoiceDirective()
+    assert len(directives) == 3
+
+
+def test_overlong_voice_directive_never_leaks_visible_text() -> None:
+    value = "До. [[voice " + ("x" * 200) + "]] После."
+    assert clean_voice_directives(value) == "До.  После."
 
 
 def test_live_directive_is_fragment_safe_and_never_becomes_spoken_text() -> None:

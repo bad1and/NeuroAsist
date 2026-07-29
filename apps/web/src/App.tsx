@@ -34,6 +34,7 @@ import {
   getVoiceTtsStatus,
   getModels,
   getPronunciations,
+  getSttTerms,
   installModel,
   interruptVoiceSession,
   isDesktopManaged,
@@ -50,6 +51,7 @@ import {
   sendVoiceMessage,
   updateRuntimeSettings,
   updatePronunciations,
+  updateSttTerms,
   updateVoiceExpression,
   updateVoiceStyle,
   voiceWebSocketUrl,
@@ -79,7 +81,13 @@ import type {
 } from "./types";
 import type { VoiceServerEvent } from "./types";
 import { PlaybackCoordinator, TTSStreamPlayer, VoiceSocketClient } from "./voice-live";
-import { BrowserVadRecorder, PcmInputClient, type VadState } from "./vad";
+import {
+  BrowserVadRecorder,
+  PcmInputClient,
+  microphoneConstraints,
+  type MicrophoneProfile,
+  type VadState,
+} from "./vad";
 import { JournalPage } from "./journal";
 import { MemoryPage } from "./memory";
 import { StatePage } from "./state";
@@ -88,6 +96,7 @@ import { getDesktopRuntime, initialCoreStatus, listenForCoreStatus, restartDeskt
 import { StartupScreen } from "./components/StartupScreen";
 import { WindowChrome } from "./components/WindowChrome";
 import { AppDialog } from "./components/AppDialog";
+import { GuidedSttCapture } from "./stt-capture";
 
 type AppView = "overview" | "chat" | "journal" | "memory" | "state" | "settings";
 type SettingsSection = "general" | "voice" | "conversation" | "memory" | "system";
@@ -187,6 +196,29 @@ function isLiveVoiceTransportError(error: unknown): boolean {
     error.message.includes("incomplete chunked read") ||
     error.message.includes("peer closed connection") ||
     error.message.includes("Failed to fetch")
+  );
+}
+
+function formatSttTerms(entries: Record<string, string[]>): string {
+  return Object.entries(entries)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([canonical, aliases]) => `${canonical} = ${aliases.join(" | ")}`)
+    .join("\n");
+}
+
+function parseSttTerms(value: string): Record<string, string[]> {
+  return Object.fromEntries(
+    value.split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const separator = line.indexOf("=");
+        if (separator <= 0) throw new Error(`Некорректная строка словаря STT: ${line}`);
+        const canonical = line.slice(0, separator).trim();
+        const aliases = line.slice(separator + 1).split("|").map((item) => item.trim()).filter(Boolean);
+        if (!canonical || aliases.length === 0) throw new Error(`Некорректная строка словаря STT: ${line}`);
+        return [canonical, aliases];
+      }),
   );
 }
 
@@ -685,7 +717,7 @@ function ChatPage({
     async (audioUrl: string): Promise<boolean> => {
       stopVoicePlayback();
       const audio = new Audio(audioUrl);
-      audio.playbackRate = settings?.voice_playback_rate ?? 1;
+      audio.playbackRate = 1;
       activeAudioRef.current = audio;
       audio.onended = () => {
         if (activeAudioRef.current === audio) {
@@ -716,7 +748,7 @@ function ChatPage({
       const audio = new Audio(fallbackAudioUrl);
 
       stopVoicePlayback(audio);
-      audio.playbackRate = settings?.voice_playback_rate ?? 1;
+      audio.playbackRate = 1;
       activeAudioRef.current = audio;
       audio.onended = () => {
         if (activeAudioRef.current === audio) {
@@ -780,7 +812,8 @@ function ChatPage({
         {
           prebufferSegments: settings?.voice_live_playback_prebuffer_segments ?? 1,
           prebufferMs: settings?.voice_live_playback_prebuffer_ms ?? 0,
-          playbackRate: settings?.voice_playback_rate ?? 1,
+          playbackRate: 1,
+          startLeadMs: settings?.voice_live_playback_start_lead_ms ?? 30,
         },
         (gapMs) => {
           liveSocketRef.current?.send("playback.underrun", { underrun_ms: gapMs });
@@ -791,18 +824,25 @@ function ChatPage({
             generation: activeVoiceGenerationRef.current,
           });
         },
+        (segmentId, decodeMs) => {
+          liveSocketRef.current?.send("playback.segment.decoded", {
+            segment_id: segmentId,
+            decode_ms: decodeMs,
+          });
+        },
       );
     }
     livePlayerRef.current.updateOptions({
       prebufferSegments: settings?.voice_live_playback_prebuffer_segments ?? 1,
       prebufferMs: settings?.voice_live_playback_prebuffer_ms ?? 0,
-      playbackRate: settings?.voice_playback_rate ?? 1,
+      playbackRate: 1,
+      startLeadMs: settings?.voice_live_playback_start_lead_ms ?? 30,
     });
     return livePlayerRef.current;
   }, [
     settings?.voice_live_playback_prebuffer_ms,
     settings?.voice_live_playback_prebuffer_segments,
-    settings?.voice_playback_rate,
+    settings?.voice_live_playback_start_lead_ms,
   ]);
 
   const ensureLiveVoice = useCallback(async () => {
@@ -1176,7 +1216,10 @@ function ChatPage({
     setError(null);
     try {
       await ensureLivePlayer().unlock();
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const profile = (settings?.voice_microphone_profile ?? "balanced") as MicrophoneProfile;
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: microphoneConstraints(profile),
+      });
       const mimeType = getRecordingMimeType();
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       chunksRef.current = [];
@@ -1386,15 +1429,10 @@ function ChatPage({
           setError(event.message ?? "Не удалось обработать голосовой ввод");
         }
       });
-      await input.connect(
-        16000,
-        settings?.voice_language ?? "ru",
-        isLive ? "live_conversation" : "hands_free",
-      );
       pcmInputRef.current = input;
       const recorder = new BrowserVadRecorder();
       vadRecorderRef.current = recorder;
-      await recorder.start(
+      const capture = await recorder.start(
         (pcm16) => pcmInputRef.current?.sendPcm(pcm16),
         (nextState, event) => {
           setVadState(nextState);
@@ -1405,21 +1443,15 @@ function ChatPage({
             window.clearTimeout(bargeInTimerRef.current);
             bargeInTimerRef.current = null;
           }
-          if (event === "speech_started") {
-            if (isLive) updateConversationStatus("Слышу вас");
-            if (liveSocketRef.current?.activeUtteranceId) {
-              const confirmationMs = {
-                low: 300,
-                balanced: 180,
-                high: 60,
-              }[settings?.live_conversation_interruption_sensitivity ?? "balanced"];
-              bargeInTimerRef.current = window.setTimeout(() => {
-                bargeInTimerRef.current = null;
-                interruptAssistantSpeech();
-              }, confirmationMs);
-            }
-          }
+          if (event === "speech_started" && isLive) updateConversationStatus("Слышу вас");
         },
+        (settings?.voice_microphone_profile ?? "balanced") as MicrophoneProfile,
+      );
+      await input.connect(
+        capture.sampleRate,
+        settings?.voice_language ?? "ru",
+        isLive ? "live_conversation" : "hands_free",
+        capture,
       );
       setHandsFree(!isLive);
       setLiveConversation(isLive);
@@ -1704,10 +1736,12 @@ function SettingsPage({
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
   const [personality, setPersonality] = useState("");
   const [voiceLanguage, setVoiceLanguage] = useState("ru");
+  const [voiceMicrophoneProfile, setVoiceMicrophoneProfile] = useState<MicrophoneProfile>("balanced");
   const [voiceTtsVoice, setVoiceTtsVoice] = useState("");
   const [voiceTtsStyle, setVoiceTtsStyle] = useState("auto");
   const [voiceExpressionLevel, setVoiceExpressionLevel] = useState("natural");
   const [pronunciationsText, setPronunciationsText] = useState("");
+  const [sttTermsText, setSttTermsText] = useState("");
   const [voicePlaybackRate, setVoicePlaybackRate] = useState(1);
   const [prebufferSegments, setPrebufferSegments] = useState(1);
   const [prebufferMs, setPrebufferMs] = useState(0);
@@ -1729,11 +1763,13 @@ function SettingsPage({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [resetSessionDialog, setResetSessionDialog] = useState(false);
+  const [showSttCapture, setShowSttCapture] = useState(false);
 
   useEffect(() => {
     if (settings) {
       setPersonality(settings.personality);
       setVoiceLanguage(settings.voice_language);
+      setVoiceMicrophoneProfile(settings.voice_microphone_profile ?? "balanced");
       setVoiceTtsVoice(settings.voice_tts_voice);
       setVoiceTtsStyle(settings.voice_tts_style);
       setVoiceExpressionLevel(settings.voice_tts_expression_level);
@@ -1762,6 +1798,9 @@ function SettingsPage({
     void getPronunciations()
       .then((result) => setPronunciationsText(formatPronunciations(result.pronunciations)))
       .catch(() => setPronunciationsText(""));
+    void getSttTerms()
+      .then((result) => setSttTermsText(formatSttTerms(result.terms)))
+      .catch(() => setSttTermsText(""));
   }, []);
 
   const updateLiveSetting = <K extends keyof LiveConversationSettings>(
@@ -1778,6 +1817,7 @@ function SettingsPage({
       const nextSettings = await updateRuntimeSettings({
         personality,
         voice_language: voiceLanguage,
+        voice_microphone_profile: voiceMicrophoneProfile,
         voice_tts_voice: voiceTtsVoice,
         voice_playback_rate: voicePlaybackRate,
         voice_live_playback_prebuffer_segments: prebufferSegments,
@@ -1887,6 +1927,20 @@ function SettingsPage({
       setSaving(false);
     }
   };
+
+  const saveSttTerms = async () => {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const result = await updateSttTerms(parseSttTerms(sttTermsText));
+      setSttTermsText(formatSttTerms(result.terms));
+      setMessage("Словарь распознавания сохранён и применён.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Не удалось сохранить словарь распознавания.");
+    } finally {
+      setSaving(false);
+    }
+  };
   const activeSettingsMeta = settingsSectionMeta[activeSection];
 
   return (
@@ -1967,6 +2021,19 @@ function SettingsPage({
           </label>
 
           <label>
+            Профиль микрофона
+            <select
+              value={voiceMicrophoneProfile}
+              onChange={(event) => setVoiceMicrophoneProfile(event.target.value as MicrophoneProfile)}
+            >
+              <option value="balanced">Сбалансированный — рекомендуется</option>
+              <option value="headset">Гарнитура</option>
+              <option value="speakers">Колонки</option>
+            </select>
+            <small>Управляет эхоподавлением и шумоподавлением браузера для записи и живого режима.</small>
+          </label>
+
+          <label>
             Голос {ttsProviderLabel}
             <select
               value={voiceTtsVoice}
@@ -2022,6 +2089,33 @@ function SettingsPage({
               {" · активен"}
             </strong>
           </div>
+          <div className="readonly-setting">
+            <span>Детектор речи</span>
+            <strong>
+              {settings.voice_vad?.active_provider ?? "energy"}
+              {settings.voice_vad?.model ? ` · ${settings.voice_vad.model}` : ""}
+              {settings.voice_vad?.ready ? " · готов" : " · fallback"}
+            </strong>
+            {settings.voice_vad?.fallback_reason && <small>{settings.voice_vad.fallback_reason}</small>}
+          </div>
+        </fieldset>
+
+        <fieldset className="settings-group" hidden={activeSection !== "voice"}>
+          <legend>Словарь распознавания</legend>
+          <label>
+            Канонический термин = точный вариант | точный вариант
+            <textarea
+              rows={9}
+              value={sttTermsText}
+              onChange={(event) => setSttTermsText(event.target.value)}
+              placeholder={"NeuroAsist = Нейро Асист | нейроасист\nGigaAM = Гига АМ | гигаэм"}
+              disabled={saving}
+            />
+            <small>Исправляются только перечисленные варианты. Нечёткий поиск и LLM не используются.</small>
+          </label>
+          <button className="secondary" type="button" onClick={() => void saveSttTerms()} disabled={saving}>
+            Сохранить словарь распознавания
+          </button>
         </fieldset>
 
         <fieldset className="settings-group" hidden={activeSection !== "voice"}>
@@ -2070,7 +2164,18 @@ function SettingsPage({
               onChange={(event) => setPrebufferMs(Number(event.target.value))}
             />
           </label>
+          <button
+            className="secondary"
+            type="button"
+            aria-expanded={showSttCapture}
+            aria-controls="stt-guided-capture"
+            onClick={() => setShowSttCapture((value) => !value)}
+          >
+            {showSttCapture ? "Скрыть сбор тестовых записей" : "Собрать приватный STT-корпус"}
+          </button>
         </fieldset>
+
+        {showSttCapture && activeSection === "voice" && <GuidedSttCapture profile={voiceMicrophoneProfile} />}
 
         <fieldset className="settings-group live-conversation-settings" hidden={activeSection !== "conversation"}>
           <legend>Живой разговор</legend>

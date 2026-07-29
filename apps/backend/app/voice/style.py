@@ -29,15 +29,15 @@ class VoiceStyleProfile:
 
 
 _PROFILES: dict[VoiceStyle, VoiceStyleProfile] = {
-    # Silero v5.5 accepts SSML breaks reliably, but its `<prosody rate>`
-    # handling is not safe for percentage values: it can return a nearly empty
-    # WAV or exceed its internal duration limit.  Keep delivery variation in
-    # model-native intensity and short semantic pauses instead.
-    VoiceStyle.CALM: VoiceStyleProfile(intensity=2, pause_ms=155, clause_pause_ms=100),
+    # Keep Silero's model-native intensity fixed. Changing it between turns or
+    # segments changes more than prosody and makes one character sound like
+    # several different speakers. Restrained delivery is applied later as a
+    # provider-independent, pitch-preserving tempo adjustment.
+    VoiceStyle.CALM: VoiceStyleProfile(intensity=3, pause_ms=155, clause_pause_ms=100),
     VoiceStyle.NORMAL: VoiceStyleProfile(intensity=3, pause_ms=120, clause_pause_ms=70),
-    VoiceStyle.ENERGETIC: VoiceStyleProfile(intensity=4, pause_ms=95, clause_pause_ms=50),
-    VoiceStyle.THOUGHTFUL: VoiceStyleProfile(intensity=2, pause_ms=165, clause_pause_ms=115),
-    VoiceStyle.ASSERTIVE: VoiceStyleProfile(intensity=4, pause_ms=115, clause_pause_ms=65),
+    VoiceStyle.ENERGETIC: VoiceStyleProfile(intensity=3, pause_ms=95, clause_pause_ms=50),
+    VoiceStyle.THOUGHTFUL: VoiceStyleProfile(intensity=3, pause_ms=165, clause_pause_ms=115),
+    VoiceStyle.ASSERTIVE: VoiceStyleProfile(intensity=3, pause_ms=115, clause_pause_ms=65),
 }
 
 _CLAUSE_BOUNDARY_RE = re.compile(r"(?P<punct>[;:—–])\s+")
@@ -110,7 +110,7 @@ def profile_for(
     }[coerce_voice_expression_level(expression_level)]
     return replace(
         profile,
-        intensity=max(1, min(5, round(3 + (profile.intensity - 3) * weight))),
+        intensity=3,
         pause_ms=round(120 + (profile.pause_ms - 120) * weight),
     )
 
@@ -120,6 +120,7 @@ def make_silero_ssml(
     style: str | VoiceStyle,
     expression_level: str | VoiceExpressionLevel = VoiceExpressionLevel.NATURAL,
     adaptive_prosody: bool = True,
+    terminal_pause: bool = True,
 ) -> str:
     """Create only backend-owned SSML; source text is always escaped first."""
     profile = profile_for(style, expression_level)
@@ -133,8 +134,9 @@ def make_silero_ssml(
             lambda match: f',<break time="{max(35, profile.clause_pause_ms - 25)}ms"/> ',
             rendered,
         )
+    terminal_pattern = r"([.!?…])(?:\s+|$)" if terminal_pause else r"([.!?…])\s+"
     rendered = re.sub(
-        r"([.!?…])(?:\s+|$)",
+        terminal_pattern,
         lambda match: f'{match.group(1)}<break time="{profile.pause_ms}ms"/> ',
         rendered,
     ).strip()
