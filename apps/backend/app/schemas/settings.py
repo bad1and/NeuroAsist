@@ -27,6 +27,8 @@ class PublicSettingsResponse(BaseModel):
     memory_enabled: bool
     memory_mode: str
     memory_incognito: bool
+    reflections_enabled: bool
+    reflection_min_significance: float
     conversation_diagnostics_enabled: bool
     live_conversation_enabled: bool
     live_conversation_participant_mode: str
@@ -57,6 +59,8 @@ class RuntimeSettingsPatch(BaseModel):
     voice_live_playback_prebuffer_ms: int | None = None
     memory_mode: str | None = None
     memory_incognito: bool | None = None
+    reflections_enabled: bool | None = None
+    reflection_min_significance: float | None = None
     live_conversation_enabled: bool | None = None
     live_conversation_participant_mode: str | None = None
     live_conversation_engagement: str | None = None

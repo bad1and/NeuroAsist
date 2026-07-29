@@ -59,6 +59,8 @@ async def voice_chat(
     runtime_settings = request.app.state.runtime_settings
     voice_service = request.app.state.voice_service
     lease = None
+    state_context = None
+    state_behavior = None
 
     selected_language = language if language != "auto" else runtime_settings.voice_language
     if selected_language not in {"auto", "ru", "en"}:
@@ -153,6 +155,14 @@ async def voice_chat(
                     status=existing.status if existing is not None else "streaming",
                 )
             live_lease = await coordinator.begin_assistant(accepted, commit_policy="generated_text") if accepted is not None else None
+            state_service = getattr(request.app.state, "character_state_service", None)
+            if state_service is not None and accepted is not None:
+                state_turn = state_service.prepare(
+                    transcript=stt_result.text,
+                    message_id=accepted.message.id,
+                    stt_uncertain=False,
+                )
+                state_context, state_behavior = state_turn.prompt_block(), state_turn.behavior
 
             async def complete_live_assistant(reply: str) -> None:
                 if live_lease is None:
@@ -174,6 +184,8 @@ async def voice_chat(
                 agent=agent,
                 style_override=getattr(request.app.state, "voice_tts_style", "auto"),
                 source_message=accepted.message if accepted is not None else None,
+                state_context=state_context,
+                presentation_cue=state_behavior,
                 persist_reply=False if live_lease is not None else None,
                 on_assistant_completed=complete_live_assistant if live_lease is not None else None,
                 on_assistant_interrupted=interrupt_live_assistant if live_lease is not None else None,
@@ -215,10 +227,17 @@ async def voice_chat(
             else:
                 lease = await coordinator.begin_assistant(accepted)
                 coordinator.register_generation_task(lease)
+                state_service = getattr(request.app.state, "character_state_service", None)
+                if state_service is not None:
+                    state_turn = state_service.prepare(
+                        transcript=stt_result.text, message_id=accepted.message.id,
+                    )
+                    state_context, state_behavior = state_turn.prompt_block(), state_turn.behavior
                 result = await asyncio.wait_for(
                     agent.handle_user_message(
                         session_id, stt_result.text, input_mode="voice",
-                        source_message=accepted.message, persist_reply=False,
+                        source_message=accepted.message, persist_reply=False, state_context=state_context,
+                        state_behavior=state_behavior,
                     ),
                     timeout=settings.voice_llm_timeout_seconds,
                 )

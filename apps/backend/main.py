@@ -54,6 +54,7 @@ from apps.backend.app.voice.orchestrator import SpeechOrchestrator
 from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.conversation.schemas import ConversationAction, ConversationPhase, SpeakerRole
 from apps.backend.app.conversation.service import LiveConversationService
+from apps.backend.app.conversation.state_service import CharacterStateService
 from apps.backend.app.conversation.turn_coordinator import ConversationTurnCoordinator
 from apps.backend.app.conversation.turn import SmartTurnDetector
 from apps.backend.app.llm.providers.deepseek import DeepSeekProvider
@@ -170,18 +171,30 @@ def create_app() -> FastAPI:
         memory_service,
         DeepSeekProvider(settings),
         event_bus.publish,
+        reflection_policy=lambda: (
+            runtime_settings.reflections_enabled and not runtime_settings.memory_incognito,
+            runtime_settings.reflection_min_significance,
+        ),
+        respect_coalescing=True,
     ) if (
         timeline_store is not None
         and memory_service is not None
         and settings.memory_llm_extraction_enabled
         and settings.memory_async_extraction_enabled
     ) else None
+    character_state_service = CharacterStateService(
+        timeline_store, recovery=runtime_settings.live_conversation_mood_recovery,
+        reflection_policy=lambda: (runtime_settings.reflections_enabled and not runtime_settings.memory_incognito, runtime_settings.reflection_min_significance),
+        event_publisher=event_bus.publish,
+        reflection_llm_provider=DeepSeekProvider(settings) if settings.llm_api_key else None,
+    ) if timeline_store is not None else None
     conversation_service = LiveConversationService(
         timeline_store,
         runtime_settings,
         memory_service=memory_service,
         event_publisher=event_bus.publish,
         llm_provider=DeepSeekProvider(settings) if settings.llm_api_key else None,
+        state_service=character_state_service,
     ) if timeline_store is not None else None
     turn_coordinator = ConversationTurnCoordinator(timeline_store, event_bus.publish) if timeline_store is not None else None
     voice_service = VoiceService(settings)
@@ -458,6 +471,7 @@ def create_app() -> FastAPI:
         turn_detector=turn_detector,
     )
     tts_audio_cleanup_task: asyncio.Task[None] | None = None
+    reflection_worker_task: asyncio.Task[None] | None = None
     summary_worker_task: asyncio.Task[None] | None = None
     semantic_sync_worker_task: asyncio.Task[None] | None = None
     memory_extraction_worker_task: asyncio.Task[None] | None = None
@@ -505,9 +519,19 @@ def create_app() -> FastAPI:
         except asyncio.CancelledError:
             raise
 
+    async def reflect_forever() -> None:
+        if character_state_service is None:
+            return
+        try:
+            while True:
+                worked = await character_state_service.run_reflection_once()
+                await asyncio.sleep(0 if worked else 1)
+        except asyncio.CancelledError:
+            raise
+
     @app.on_event("startup")
     async def startup() -> None:
-        nonlocal tts_audio_cleanup_task, summary_worker_task, semantic_sync_worker_task, memory_extraction_worker_task
+        nonlocal tts_audio_cleanup_task, summary_worker_task, semantic_sync_worker_task, memory_extraction_worker_task, reflection_worker_task
         removed = await asyncio.to_thread(voice_service.clear_tts_audio)
         if removed:
             logger.info("Generated WAV startup cleanup complete: removed=%s", removed)
@@ -559,6 +583,22 @@ def create_app() -> FastAPI:
                         "info",
                         "Legacy identity memories repaired",
                         {"count": len(repaired)},
+                    )
+                rejected_identities = memory_service.reject_invalid_interrogative_identity_memories()
+                if rejected_identities:
+                    event_bus.publish(
+                        "memory.invalid_identity_rejected",
+                        "warning",
+                        "Question-derived identity memories rejected",
+                        {"count": len(rejected_identities)},
+                    )
+                rejected_assistant_facts = memory_service.reject_assistant_only_profile_memories()
+                if rejected_assistant_facts:
+                    event_bus.publish(
+                        "memory.assistant_only_facts_rejected",
+                        "warning",
+                        "Assistant-only profile memories rejected",
+                        {"count": len(rejected_assistant_facts)},
                     )
                 repaired_preferences = memory_service.repair_legacy_response_length_preferences()
                 if repaired_preferences:
@@ -652,9 +692,16 @@ def create_app() -> FastAPI:
         summary_worker_task = asyncio.create_task(summarize_forever())
         semantic_sync_worker_task = asyncio.create_task(sync_semantic_forever())
         memory_extraction_worker_task = asyncio.create_task(extract_memory_forever())
+        reflection_worker_task = asyncio.create_task(reflect_forever())
 
     @app.on_event("shutdown")
     async def shutdown() -> None:
+        if reflection_worker_task is not None:
+            reflection_worker_task.cancel()
+            try:
+                await reflection_worker_task
+            except asyncio.CancelledError:
+                pass
         if conversation_service is not None:
             await conversation_service.close()
         if timeline_store is not None:
@@ -702,6 +749,7 @@ def create_app() -> FastAPI:
     app.state.context_manager = context_manager
     app.state.memory_service = memory_service
     app.state.conversation_service = conversation_service
+    app.state.character_state_service = character_state_service
     app.state.event_bus = event_bus
     app.state.runtime_settings = runtime_settings
     app.state.runtime_settings_store = runtime_settings_store

@@ -35,6 +35,8 @@ class MemoryService:
     _NAME_TOKEN = re.compile(r"^[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё'’-]{1,39}$")
     _NAME_STOP_WORDS = {
         "и", "а", "но", "я", "мне", "это", "теперь", "запомни", "remember",
+        "как", "что", "где", "когда", "почему", "зачем", "ну", "хочу", "может",
+        "давай", "расскажи", "кто", "какой", "какая", "какие",
         "and", "but", "i", "this", "please",
     }
     _IDENTITY_QUERY_MARKERS = (
@@ -63,6 +65,11 @@ class MemoryService:
     _CURRENT_GOAL_FACT = re.compile(
         r"моя\s+(?:текущая\s+)?цель(?:\s+в\s+разработке)?\s*(?:(?:это|—|-)\s*)?"
         r"(.+?)(?=\s+(?:а|и)\s+ещ[её]\b|[.!?\n]|$)",
+        flags=re.IGNORECASE,
+    )
+    _DURABLE_GAME_GENRE = re.compile(
+        r"\bлюблю(?:\s+\w+){0,2}\s+играть\s+в\s+"
+        r"(шутер(?:ы|ов|ах)?|стратеги(?:и|ях)|гонк(?:и|ах)|симулятор(?:ы|ах)?|рпг|rpg)\b",
         flags=re.IGNORECASE,
     )
 
@@ -275,7 +282,7 @@ class MemoryService:
             return []
         saved: list[dict[str, object]] = []
         for candidate in self._extract_candidates(message.effective_content):
-            if str(candidate.get("predicate")) not in {"name", "developers"}:
+            if str(candidate.get("predicate")) not in {"name", "developers", "likes_category"}:
                 continue
             candidate.update({
                 "source_message_ids": [message.id],
@@ -350,7 +357,31 @@ class MemoryService:
                 self._schedule_vector_sync(memory)
         return saved
 
-    def apply_consolidation(self, result: ConsolidationResult, messages: list[StoredTimelineMessage], *, model: str | None = None) -> dict[str, int]:
+    def apply_consolidation(
+        self,
+        result: ConsolidationResult,
+        messages: list[StoredTimelineMessage],
+        *,
+        model: str | None = None,
+        run_record: dict[str, object] | None = None,
+    ) -> dict[str, int]:
+        """Apply accepted proposals and their run record in one writer transaction."""
+        with self._write_lock, self._store.consolidation_transaction():
+            counts = self._apply_consolidation_sections(result, messages, model=model)
+            if run_record is not None:
+                base_result = dict(run_record.get("result", {}))
+                self._store.record_consolidation_run(
+                    idempotency_key=str(run_record["idempotency_key"]),
+                    end_message_id=str(run_record["end_message_id"]),
+                    pipeline_version=str(run_record["pipeline_version"]),
+                    messages=messages,
+                    status=str(run_record["status"]),
+                    result={**base_result, "counts": counts, "saved": sum(counts.values())},
+                    section_errors=list(run_record.get("section_errors", [])),
+                )
+            return counts
+
+    def _apply_consolidation_sections(self, result: ConsolidationResult, messages: list[StoredTimelineMessage], *, model: str | None = None) -> dict[str, int]:
         """Apply independently valid structured sections without trusting model IDs.
 
         A bad proposal is recorded as a conflict/review item where possible;
@@ -474,6 +505,49 @@ class MemoryService:
             self._store.supersede_memory(str(candidate["id"]), str(repaired_memory["id"]))
             repaired.append(repaired_memory)
         return repaired
+
+    def reject_invalid_interrogative_identity_memories(self) -> list[dict[str, object]]:
+        """Remove names accidentally extracted from ``как меня зовут`` questions."""
+        rejected: list[dict[str, object]] = []
+        for memory in self._store.list_memories(status="active", limit=500):
+            if memory.get("predicate") != "name" or memory.get("user_locked"):
+                continue
+            source_ids = [str(item) for item in memory.get("source_message_ids", [])]
+            sources = [self._store.get_message(message_id) for message_id in source_ids]
+            if not any(
+                source is not None
+                and re.search(r"\bкак\s+меня\s+зовут\b", source.effective_content, flags=re.IGNORECASE)
+                for source in sources
+            ):
+                continue
+            rejected.append(self._store.set_memory_status(
+                str(memory["id"]),
+                "rejected",
+                actor="policy",
+                action="invalid_identity_rejected",
+                reason="interrogative_identity_source",
+            ))
+        return rejected
+
+    def reject_assistant_only_profile_memories(self) -> list[dict[str, object]]:
+        """Assistant improvisation cannot become a canonical profile fact."""
+        rejected: list[dict[str, object]] = []
+        for memory in self._store.list_memories(status="active", limit=500):
+            if memory.get("user_locked") or not str(memory.get("extractor_version", "")).startswith("consolidation-"):
+                continue
+            source_ids = [str(item) for item in memory.get("source_message_ids", [])]
+            sources = [self._store.get_message(message_id) for message_id in source_ids]
+            existing = [source for source in sources if source is not None]
+            if not existing or any(source.role == "user" for source in existing):
+                continue
+            rejected.append(self._store.set_memory_status(
+                str(memory["id"]),
+                "rejected",
+                actor="policy",
+                action="assistant_only_fact_rejected",
+                reason="assistant_output_is_not_profile_evidence",
+            ))
+        return rejected
 
     def repair_legacy_response_length_preferences(self) -> list[dict[str, object]]:
         """Merge the old ``preferred`` alias and stale answer-length choices.
@@ -892,6 +966,7 @@ class MemoryService:
         explicit = self._explicit_fact(cleaned)
         preference = re.search(r"(?:я предпочитаю|i prefer)\s+(.+)", cleaned, flags=re.IGNORECASE)
         interest = re.search(r"(?:я люблю|мне нравится|i like)\s+(.+)", cleaned, flags=re.IGNORECASE)
+        durable_genre = self._DURABLE_GAME_GENRE.search(cleaned)
         correction = re.search(r"(?:теперь я|я больше не)\s+(.+)", cleaned, flags=re.IGNORECASE)
         name = self._extract_name(cleaned)
         developer = self._developer_candidate(cleaned)
@@ -906,6 +981,13 @@ class MemoryService:
             value = preference.group(1).strip()
             predicate = "prefers_response_length" if self._is_response_length_preference(value) else "prefers"
             importance = 0.7
+        elif durable_genre:
+            value, kind, predicate, importance = (
+                f"играть в {durable_genre.group(1).lower()}",
+                "interest",
+                "likes_category",
+                0.7,
+            )
         elif interest:
             value, kind, predicate = interest.group(1).strip(), "interest", "likes"
         elif correction:
@@ -960,6 +1042,14 @@ class MemoryService:
                     "predicate": "current_goal", "value_text": value[:500],
                     "importance": 0.8, "confidence": 0.97, "sensitivity": "normal",
                 })
+        genre_match = self._DURABLE_GAME_GENRE.search(text)
+        if genre_match is not None:
+            genre = genre_match.group(1).lower()
+            candidates.append({
+                "scope": "user_profile", "kind": "interest", "subject": "user",
+                "predicate": "likes_category", "value_text": f"играть в {genre}",
+                "importance": 0.7, "confidence": 0.96, "sensitivity": "normal",
+            })
         return candidates
 
     def _developer_candidate(self, text: str) -> dict[str, object] | None:
@@ -1019,6 +1109,12 @@ class MemoryService:
         match = cls._NAME_PREFIX.search(text)
         if match is None:
             return None
+        # ``как меня зовут`` asks for an existing name; it is not an identity
+        # assertion. Treating the following words as a name produced records
+        # such as "Ты Же Помнишь".
+        prefix_context = text[max(0, match.start() - 40):match.start()]
+        if re.search(r"\bкак\s*$", prefix_context, flags=re.IGNORECASE):
+            return None
         suffix = text[match.end():].lstrip(" \t:,-—–")
         segment = re.split(r"[,.!?;:\n—–-]", suffix, maxsplit=1)[0]
         tokens: list[str] = []
@@ -1035,7 +1131,12 @@ class MemoryService:
                 break
         if not tokens:
             return None
-        return " ".join(tokens)
+        return " ".join(
+            token[:1].upper() + token[1:].lower()
+            if token.islower() or token.isupper()
+            else token
+            for token in tokens
+        )
 
     @classmethod
     def _is_identity_query(cls, normalized_query: str) -> bool:

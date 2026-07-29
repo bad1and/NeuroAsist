@@ -32,6 +32,7 @@ def _clamp(value: float, lower: float, upper: float) -> float:
 
 @dataclass
 class AffectState:
+    schema_version: int = 2
     valence: float = 0.0
     arousal: float = 0.25
     energy: float = 0.65
@@ -48,10 +49,21 @@ class AffectState:
     playfulness: float = 0.15
     fatigue: float = 0.0
     causes: list[dict[str, object]] = field(default_factory=list)
+    primary_emotion: str = "neutral"
+    primary_emotion_since: str | None = None
+    secondary_emotions: list[str] = field(default_factory=list)
+    psychological_tension: float = 0.0
+    interaction_load: float = 0.0
+    last_decay_at: str | None = None
+    mood_epoch: int = 0
     updated_at: str = field(default_factory=_now)
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
+
+    @property
+    def active_cause_labels(self) -> list[str]:
+        return [str(cause.get("display_label") or cause.get("event_kind")) for cause in self.causes if cause.get("status", "active") == "active"]
 
 
 @dataclass
@@ -64,6 +76,10 @@ class ParticipantState:
     tension: float = 0.0
     playfulness: float = 0.1
     evidence_count: int = 0
+    last_positive_event_at: str | None = None
+    last_negative_event_at: str | None = None
+    last_repair_event_at: str | None = None
+    relationship_epoch: int = 0
     updated_at: str = field(default_factory=_now)
 
     def as_dict(self) -> dict[str, object]:
@@ -88,6 +104,19 @@ class CharacterStateReducer:
             0.5, elapsed_minutes / (90.0 * multiplier)
         )
         state.desire_for_silence *= math.pow(0.5, elapsed_minutes / (45.0 * multiplier))
+        for cause in state.causes:
+            if cause.get("status", "active") != "active":
+                continue
+            half_life = max(1.0, float(cause.get("half_life_minutes", EMOTION_HALF_LIVES_MINUTES.get(str(cause.get("emotion")), 45.0))))
+            strength = float(cause.get("current_strength", cause.get("strength", 0.0)))
+            decayed = strength * math.pow(0.5, elapsed_minutes / (half_life * multiplier))
+            cause["current_strength"] = round(decayed, 6)
+            cause["last_decayed_at"] = current.isoformat(timespec="milliseconds")
+            if decayed < .02:
+                cause["status"] = "expired"
+        state.causes = [cause for cause in state.causes if cause.get("status", "active") == "active"][:8]
+        self._derive_emotions(state, current)
+        state.last_decay_at = current.isoformat(timespec="milliseconds")
         state.updated_at = current.isoformat(timespec="milliseconds")
         return state
 
@@ -108,16 +137,59 @@ class CharacterStateReducer:
             0.0,
             1.0,
         )
-        if appraisal.cause_message_ids and strength >= 0.05:
-            state.causes = (
-                [{
+        if appraisal.cause_message_ids and strength >= 0.05 and appraisal.event_kind not in {"neutral", "interruption"}:
+            fingerprint = f"{appraisal.target_participant}:{appraisal.event_kind}:{','.join(sorted(appraisal.cause_message_ids))}"
+            existing = next((item for item in state.causes if item.get("fingerprint") == fingerprint and item.get("status", "active") == "active"), None)
+            dominant = max(appraisal.emotion_impulses, key=appraisal.emotion_impulses.get, default="interest")
+            if existing is not None:
+                existing["current_strength"] = round(min(1.0, float(existing.get("current_strength", 0.0)) + strength * .35), 6)
+                existing["last_reinforced_at"] = _now()
+            else:
+                state.causes.insert(0, {
+                    "id": fingerprint,
+                    "fingerprint": fingerprint,
                     "event_kind": appraisal.event_kind,
+                    "emotion": dominant,
                     "message_ids": appraisal.cause_message_ids[:5],
-                    "strength": round(strength, 4),
-                }] + state.causes
-            )[:5]
+                    "display_label": appraisal.event_kind.replace("_", " "),
+                    "initial_strength": round(strength, 4),
+                    "current_strength": round(strength, 4),
+                    "half_life_minutes": EMOTION_HALF_LIVES_MINUTES.get(dominant, 45.0),
+                    "status": "active",
+                    "created_at": _now(),
+                })
+                state.causes = state.causes[:8]
+        if appraisal.event_kind == "apology":
+            for cause in state.causes:
+                if cause.get("event_kind") in {"insult", "broken_promise", "important_negative_event"}:
+                    cause["current_strength"] = round(float(cause.get("current_strength", 0.0)) * .7, 6)
+                    cause["resolution_kind"] = "apology_repair"
+                    cause["resolved_by_event_id"] = appraisal.cause_message_ids[0] if appraisal.cause_message_ids else None
+        self._derive_emotions(state, datetime.now(UTC))
         state.updated_at = _now()
         return state
+
+    @staticmethod
+    def _derive_emotions(state: AffectState, now: datetime) -> None:
+        scores = {name: getattr(state, name) for name in EMOTION_HALF_LIVES_MINUTES}
+        if scores["interest"] < .38:
+            scores["interest"] = 0.0
+        if scores["playfulness"] < .25:
+            scores["playfulness"] = 0.0
+        winner, score = max(scores.items(), key=lambda item: item[1])
+        current_score = scores.get(state.primary_emotion, 0.0)
+        # Hysteresis prevents avatar/prompt flicker on nearby values.
+        # Baseline curiosity is intentionally not a visible "thinking" mood.
+        if score < .04:
+            winner = "neutral"
+        elif state.primary_emotion != "neutral" and current_score >= score - .08:
+            winner = state.primary_emotion
+        if winner != state.primary_emotion:
+            state.primary_emotion = winner
+            state.primary_emotion_since = now.isoformat(timespec="milliseconds")
+        state.secondary_emotions = [name for name, value in sorted(scores.items(), key=lambda item: item[1], reverse=True) if name != winner and value >= .18][:2]
+        state.psychological_tension = _clamp(state.hurt * .55 + state.anxiety * .35 + state.anger * .4 + state.irritation * .2, 0.0, 1.0)
+        state.interaction_load = _clamp(state.fatigue * .7 + state.desire_for_silence * .3, 0.0, 1.0)
 
     def apply_relationship(
         self,
@@ -150,6 +222,8 @@ class CharacterStateReducer:
 
     @staticmethod
     def display_emotion(state: AffectState) -> str:
+        if state.primary_emotion and state.primary_emotion != "neutral":
+            return {"joy": "happy", "irritation": "annoyed", "anxiety": "concerned", "playfulness": "smirk", "interest": "thinking"}.get(state.primary_emotion, state.primary_emotion)
         candidates = {
             "angry": state.anger,
             "concerned": state.anxiety,

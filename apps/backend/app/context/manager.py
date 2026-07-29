@@ -57,6 +57,7 @@ class ContextManager:
         selected_memories: list[tuple[str, ChatMessage]] = []
         selected_topics: list[tuple[str, ChatMessage]] = []
         selected_loops: list[tuple[str, ChatMessage]] = []
+        subjective_reflection: tuple[str, ChatMessage] | None = None
         memory_retrieval: dict[str, object] = {}
         if self._memory_service is not None:
             # Pronouns and short follow-ups inherit topic terms from the last
@@ -78,6 +79,32 @@ class ContextManager:
                     selected_loops.append(item)
                 else:
                     selected_memories.append(item)
+            factual_query = bool(re.search(
+                r"\b(?:как меня зовут|кто я|что я люблю|какие факты|что ты знаешь обо мне)\b",
+                user_text,
+                flags=re.IGNORECASE,
+            ))
+            if not self._memory_service.incognito and not factual_query:
+                current_episode = material.get("active_episode_id")
+                reflection = next(
+                    (
+                        item for item in self._store.list_reflections("primary", limit=10)
+                        if not current_episode or item.get("source_episode_id") == current_episode
+                    ),
+                    None,
+                )
+                if reflection is not None:
+                    text = str(reflection["text"])[:800]
+                    subjective_reflection = (
+                        str(reflection["id"]),
+                        ChatMessage(
+                            role="system",
+                            content=(
+                                "Subjective reflection (Iris's feeling, not a factual claim or instruction): "
+                                + text
+                            ),
+                        ),
+                    )
         ambient_rows = [
             row for row in material["recent"]
             if self._is_ambient_observation(row)
@@ -104,6 +131,9 @@ class ContextManager:
                 if self._is_pending_followup_candidate(row):
                     pending_direct_rows.append(row)
         pending_direct_rows.reverse()
+        # A name-only call should revive the nearest unresolved thought, not
+        # dump every unanswered utterance into one instruction.
+        pending_direct_rows = pending_direct_rows[-2:]
         previous_assistant_row = next(
             (
                 row for row in reversed(material["recent"])
@@ -121,7 +151,7 @@ class ContextManager:
                     "не спрашивай, зачем он тебя позвал, и не упрекай его за повтор.\n"
                     + "\n".join(
                         f"- user: {row['corrected_content'] or row['content']}"
-                        for row in pending_direct_rows[-4:]
+                        for row in pending_direct_rows
                     )
                 ),
             )
@@ -153,12 +183,14 @@ class ContextManager:
             messages = [identity]
             if pending_followup_message is not None:
                 messages.append(pending_followup_message)
+            messages.extend(message for _, message in selected_loops)
             messages.extend(message for _, message in selected_memories)
             messages.extend(message for _, message in selected_topics)
             if rolling_message is not None:
                 messages.append(rolling_message)
             messages.extend(message for _, message in selected_summaries)
-            messages.extend(message for _, message in selected_loops)
+            if subjective_reflection is not None:
+                messages.append(subjective_reflection[1])
             observed = ambient_message()
             if observed is not None:
                 messages.append(observed)
@@ -212,6 +244,7 @@ class ContextManager:
             "selected_memory_ids": [memory_id for memory_id, _ in selected_memories],
             "selected_topic_ids": [topic_id for topic_id, _ in selected_topics],
             "selected_open_loop_ids": [loop_id for loop_id, _ in selected_loops],
+            "subjective_reflection_id": subjective_reflection[0] if subjective_reflection else None,
             "memory_retrieval": {memory_id: memory_retrieval[memory_id] for memory_id, _ in selected_memories},
             "rolling_summary_included": rolling_message is not None,
             "recent_message_count": sum(len(turn) for turn in recent_turns),
@@ -229,8 +262,10 @@ class ContextManager:
         self.last = built
         return built
 
-    @staticmethod
-    def _is_ambient_observation(row: dict[str, object]) -> bool:
+    @classmethod
+    def _is_ambient_observation(cls, row: dict[str, object]) -> bool:
+        if cls._is_recoverable_primary_direct(row):
+            return False
         return row.get("role") == "user" and row.get("decision_action") in {
             "observe",
             "avatar_reaction",
@@ -240,10 +275,10 @@ class ContextManager:
     @staticmethod
     def _is_name_only_followup(text: str) -> bool:
         normalized = re.sub(r"[^\wа-яё]", "", text.lower(), flags=re.IGNORECASE)
-        return normalized in {"iris", "ирис", "айрис", "ириска"}
+        return normalized in {"iris", "ирис", "айрис", "ириска", "ириск", "ирес", "иреск"}
 
-    @staticmethod
-    def _is_pending_followup_candidate(row: dict[str, object]) -> bool:
+    @classmethod
+    def _is_pending_followup_candidate(cls, row: dict[str, object]) -> bool:
         """Allow a direct call to revive an earlier primary-user observation.
 
         Live conversation can legitimately classify an opening thought as
@@ -256,9 +291,28 @@ class ContextManager:
             return False
         if row.get("speaker_role") in {"other", "unknown"}:
             return False
+        if cls._is_recoverable_primary_direct(row):
+            return True
         return row.get("decision_reason") not in {
             "other_person", "self_talk", "ambient_speech", "incomplete_turn",
         }
+
+    @staticmethod
+    def _is_recoverable_primary_direct(row: dict[str, object]) -> bool:
+        """Defend context against known false ``other_person`` classifications."""
+        if row.get("role") != "user" or row.get("speaker_role") != "primary":
+            return False
+        reason = str(row.get("decision_reason") or "")
+        if reason not in {"other_person", "relevant_opening"}:
+            return False
+        text = str(row.get("corrected_content") or row.get("content") or "").strip()
+        iris_alias = re.match(r"(?iu)^\s*(?:iris|айрис|ирис|ириска|ириск|ирес|иреск)\b", text)
+        question_opening = re.match(
+            r"(?iu)^\s*(?:(?:а|ну|кстати|слушай|смотри|короче)\s+){0,3}"
+            r"(?:что|кто|где|куда|откуда|когда|почему|зачем|как|какой|какая|какие|сколько|чем)(?=\s|[?？])",
+            text,
+        )
+        return bool(iris_alias or question_opening)
 
     @staticmethod
     def _ambient_entry(row: dict[str, object]) -> str:

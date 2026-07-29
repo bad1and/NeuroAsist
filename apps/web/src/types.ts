@@ -79,6 +79,16 @@ export type VoiceLiveResponse = {
   status: "streaming" | "completed" | "interrupted" | "failed";
 };
 
+export type CharacterStateView = {
+  mood: { primary_emotion: string; expression_strength: string; secondary_emotions: string[] };
+  relationship: Record<string, unknown>;
+  causes: Array<{ label: string; status: string }>;
+  incognito: boolean;
+  updated_at: string;
+};
+
+export type CharacterStateEvent = { id: string; event_kind: string; created_at: string; confidence: number; intensity: number; delta: Record<string, unknown> };
+
 export type VoiceServerEvent = {
   version: 1;
   type: string;
@@ -351,4 +361,41 @@ export type MemoryCommitment = {
   importance: number;
   confidence: number;
   user_locked: boolean;
+};
+
+export type CharacterReflection = {
+  id: string;
+  text: string;
+  trigger_kind: string;
+  trigger_label: string;
+  significance: number;
+  primary_emotion: string;
+  created_at: string;
+};
+
+export type MemoryDiagnosticRun = {
+  id: string;
+  type: string;
+  status: string;
+  attempts: number;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string | null;
+  result: {
+    outcome?: "applied" | "partial" | "no_candidates" | "invalid_output" | "failed";
+    proposed?: number;
+    saved?: number;
+    discarded?: number;
+    counts?: Record<string, number>;
+  };
+  diagnostics: {
+    model?: string;
+    pipeline_version?: string;
+    error_codes?: string[];
+  };
+};
+
+export type MemoryDiagnostics = {
+  queue: Record<string, number>;
+  runs: MemoryDiagnosticRun[];
 };

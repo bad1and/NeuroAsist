@@ -6,7 +6,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket
 
@@ -24,6 +24,8 @@ from apps.backend.app.voice.directives import (
 from apps.backend.app.voice.style import VoiceStyle, coerce_voice_style, resolve_voice_style
 
 logger = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    from apps.backend.app.conversation.behavior import BehaviorGuide
 TextCompletedHandler = Callable[[str, str, int, str], Awaitable[None]]
 AssistantTerminalHandler = Callable[[str], Awaitable[None]]
 
@@ -152,6 +154,7 @@ class VoiceSessionManager:
         generation: int = 0,
         source_message=None,
         state_context: str | None = None,
+        presentation_cue: "BehaviorGuide | None" = None,
         persist_reply: bool | None = None,
         on_assistant_completed: AssistantTerminalHandler | None = None,
         on_assistant_interrupted: AssistantTerminalHandler | None = None,
@@ -168,7 +171,7 @@ class VoiceSessionManager:
         self._active[session_id] = context
         context.task = asyncio.create_task(
             self._run(
-                context, transcript, language, voice, agent, input_mode, source_message, state_context,
+                context, transcript, language, voice, agent, input_mode, source_message, state_context, presentation_cue,
                 persist_reply, on_assistant_completed, on_assistant_interrupted,
             ),
             name=f"voice-{utterance_id}",
@@ -203,6 +206,7 @@ class VoiceSessionManager:
         input_mode: str,
         source_message,
         state_context: str | None,
+        presentation_cue: "BehaviorGuide | None",
         persist_reply: bool | None,
         on_assistant_completed: AssistantTerminalHandler | None,
         on_assistant_interrupted: AssistantTerminalHandler | None,
@@ -223,9 +227,19 @@ class VoiceSessionManager:
             if directive_sent:
                 return
             directive_sent = True
+            if presentation_cue is not None and presentation_cue.expression_strength != "muted":
+                from apps.backend.app.schemas.character import Emotion
+                directive = AvatarDirective(
+                    emotion=Emotion(presentation_cue.avatar_emotion),
+                    gesture=presentation_cue.allowed_gestures[0],
+                    intensity=presentation_cue.avatar_intensity,
+                )
             directive = make_live_directive_expressive(directive, transcript)
             context.voice_style = resolve_voice_style(
-                context.voice_style, emotion=directive.emotion.value
+                context.voice_style,
+                emotion=directive.emotion.value,
+                pace=presentation_cue.tts_pace if presentation_cue is not None else None,
+                emphasis=presentation_cue.tts_emphasis if presentation_cue is not None else 0.0,
             )
             frame = metadata_frame(
                 intent=intent,

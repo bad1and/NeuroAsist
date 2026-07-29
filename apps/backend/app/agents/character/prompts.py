@@ -36,14 +36,21 @@ EPISTEMIC_AND_CORRECTION_RULES = """
 Каждая новая содержательная реплика пользователя требует новой реакции. Не повторяй
 свою непосредственно предыдущую реплику или её длинный фрагмент вместо ответа, кроме
 случая, когда пользователь явно просит повторить, процитировать или пересказать её.
+
+На приветствие и вопрос «как дела?» отвечай только о своём состоянии и можешь задать
+нейтральный встречный вопрос. Не придумывай пользователю конкретные занятия, происшествия,
+игры, начальника, поломки, людей или проблемы ради шутки/подкола. Любая конкретная отсылка
+к жизни пользователя должна буквально следовать из переданного direct context или памяти.
 """
 
 
-def character_json_prompt(persona: PersonaConfig | None = None) -> str:
+def character_json_prompt(persona: PersonaConfig | None = None, state_context: str | None = None) -> str:
     persona = persona or get_persona("default")
+    state_block = f"\n\nТекущая внутренняя поведенческая рамка:\n{state_context}" if state_context else ""
     return f"""{persona.voice}
 
 {persona.relationship_guidance}
+{state_block}
 
 {EPISTEMIC_AND_CORRECTION_RULES}
 

@@ -82,13 +82,14 @@ import { PlaybackCoordinator, TTSStreamPlayer, VoiceSocketClient } from "./voice
 import { BrowserVadRecorder, PcmInputClient, type VadState } from "./vad";
 import { JournalPage } from "./journal";
 import { MemoryPage } from "./memory";
+import { StatePage } from "./state";
 import { OverviewPage } from "./overview";
 import { getDesktopRuntime, initialCoreStatus, listenForCoreStatus, restartDesktopCore, type CoreStatus } from "./desktop";
 import { StartupScreen } from "./components/StartupScreen";
 import { WindowChrome } from "./components/WindowChrome";
 import { AppDialog } from "./components/AppDialog";
 
-type AppView = "overview" | "chat" | "journal" | "memory" | "settings";
+type AppView = "overview" | "chat" | "journal" | "memory" | "state" | "settings";
 type SettingsSection = "general" | "voice" | "conversation" | "memory" | "system";
 type LiveConversationSettings = Pick<
   PublicSettings,
@@ -402,6 +403,7 @@ export default function App() {
           )}
           {activeView === "journal" && <JournalPage />}
           {activeView === "memory" && <MemoryPage />}
+          {activeView === "state" && <StatePage events={events} />}
           {activeView === "settings" && (
             <SettingsPage
               settings={settings}
@@ -468,6 +470,7 @@ const MAIN_NAVIGATION: Array<{ id: Exclude<AppView, "settings">; label: string; 
   { id: "chat", label: "Диалог", icon: MessageCircle },
   { id: "journal", label: "История", icon: History },
   { id: "memory", label: "Память", icon: Brain },
+  { id: "state", label: "Состояние", icon: SlidersHorizontal },
 ];
 
 function Sidebar({

@@ -4,7 +4,7 @@ import re
 from difflib import SequenceMatcher
 from dataclasses import dataclass
 from collections.abc import AsyncIterator
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from apps.backend.app.agents.character.prompts import (
     CHARACTER_REPAIR_PROMPT,
@@ -19,6 +19,9 @@ from apps.backend.app.schemas.character import CharacterTurn
 from apps.backend.app.storage.sqlite_history import SQLiteMessageHistory
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from apps.backend.app.conversation.behavior import BehaviorGuide
 
 
 @dataclass(frozen=True)
@@ -62,6 +65,8 @@ class CharacterAgent:
         source_message=None,
         persist_reply: bool = True,
         persist_reply_callback: Callable[[str], Any] | None = None,
+        state_context: str | None = None,
+        state_behavior: "BehaviorGuide | None" = None,
     ) -> dict[str, Any]:
         interpreted = self._voice_input.interpret(user_text, input_mode)
         effective_text = interpreted.text
@@ -86,7 +91,7 @@ class CharacterAgent:
             else None
         )
         messages = [
-            ChatMessage(role="system", content=character_json_prompt(self._persona)),
+            ChatMessage(role="system", content=character_json_prompt(self._persona, state_context)),
             *context,
             ChatMessage(role="user", content=effective_text),
         ]
@@ -140,21 +145,29 @@ class CharacterAgent:
             )
         )
         needs_pending_retry = parsed.valid and pending_followup and self._appears_to_ignore_pending_followup(parsed.payload["reply"])
+        needs_status_grounding_retry = parsed.valid and self._has_ungrounded_status_question(
+            parsed.payload["reply"], effective_text,
+        )
         duplicate = self._stale_duplicate_assessment(
             parsed.payload["reply"] if parsed.valid else "", previous_assistant_reply, effective_text,
         )
         needs_duplicate_retry = bool(parsed.valid and duplicate["stale"])
-        if needs_continuity_retry or needs_pending_retry or needs_duplicate_retry:
+        if needs_continuity_retry or needs_pending_retry or needs_duplicate_retry or needs_status_grounding_retry:
             # This is deliberately invisible: a snarky but ungrounded opening
             # is worse than one extra model pass, and must not reach TTS.
             self._publish_relevance_guard(
                 "detected", previous_assistant_id, duplicate, pending_followup,
-                "stale_duplicate" if needs_duplicate_retry else "continuity",
+                    "stale_duplicate" if needs_duplicate_retry else "ungrounded_status" if needs_status_grounding_retry else "continuity",
             )
             try:
                 guarded = await self._llm_provider.generate([
                     *messages,
-                    ChatMessage(role="system", content=self._guard_retry_instruction(needs_pending_retry, needs_duplicate_retry)),
+                    ChatMessage(
+                        role="system",
+                        content=self._guard_retry_instruction(
+                            needs_pending_retry, needs_duplicate_retry, needs_status_grounding_retry,
+                        ),
+                    ),
                 ])
                 repaired = self._parse_response_result(
                     guarded.content, session_id=session_id, user_text=effective_text,
@@ -171,12 +184,16 @@ class CharacterAgent:
                 )
                 and (not pending_followup or not self._appears_to_ignore_pending_followup(repaired.payload["reply"]))
                 and not self._stale_duplicate_assessment(repaired.payload["reply"], previous_assistant_reply, effective_text)["stale"]
+                and not self._has_ungrounded_status_question(repaired.payload["reply"], effective_text)
             ):
                 parsed = repaired
                 self._publish_relevance_guard("applied", previous_assistant_id, duplicate, pending_followup, "retry_accepted")
-            elif needs_duplicate_retry:
-                parsed = self._stale_reply_fallback()
+            elif needs_duplicate_retry or needs_status_grounding_retry:
+                parsed = self._status_reply_fallback() if needs_status_grounding_retry else self._stale_reply_fallback()
                 self._publish_relevance_guard("fallback", previous_assistant_id, duplicate, pending_followup, "retry_rejected")
+
+        if parsed.turn is not None and state_behavior is not None and state_behavior.expression_strength != "muted":
+            parsed = self._arbitrate_presentation(parsed, state_behavior)
 
         # The modern path deliberately has one writer: the background extractor.
         # Keeping Character Protocol candidates on that path as well prevents a
@@ -405,6 +422,19 @@ class CharacterAgent:
         return _ParseResult(result_payload, valid=True, reason=adapter_reason, turn=turn)
 
     @staticmethod
+    def _arbitrate_presentation(parsed: _ParseResult, guide: "BehaviorGuide") -> _ParseResult:
+        """Canonical state wins over optional model metadata; visible text is untouched."""
+        from apps.backend.app.schemas.character import AffectCue, DeliveryCue, Emotion, Gesture, GestureCue
+        assert parsed.turn is not None
+        gesture_name = next((name for name in guide.allowed_gestures if name in Gesture._value2member_map_), "auto")
+        turn = parsed.turn.model_copy(update={
+            "affect": AffectCue(emotion=Emotion(guide.avatar_emotion), intensity=guide.avatar_intensity),
+            "gesture": GestureCue(name=Gesture(gesture_name), intensity=guide.avatar_intensity),
+            "delivery": DeliveryCue(pace=guide.tts_pace, emphasis=guide.tts_emphasis),
+        })
+        return _ParseResult(legacy_result(turn), valid=parsed.valid, reason=parsed.reason, turn=turn)
+
+    @staticmethod
     def _extract_nested_reply(reply: str) -> str | None:
         """Unwrap a JSON response accidentally serialized into the reply field."""
         candidate = reply.strip()
@@ -497,6 +527,7 @@ class CharacterAgent:
         """Reject continuity or stale-repetition failures before UI/TTS sees text."""
         buffered: list[str] = []
         released = False
+        status_check = self._is_casual_status_check(user_text)
         async for delta in self._llm_provider.stream(messages):
             if released:
                 yield delta
@@ -510,7 +541,7 @@ class CharacterAgent:
             sentence_count = len(re.findall(r"[.!?…](?:\s|$)", opening))
             suspicious_opener = bool(re.search(r"(?:^|\n)\s*(?:ну|а)\?\s*(?:я\s+здесь)?", opening.lower()))
             duplicate_guard = bool(previous_assistant_reply and not self._user_allows_repetition(user_text, previous_assistant_reply))
-            required_sentences = 2 if suspicious_opener or require_pending_response or duplicate_guard else 1
+            required_sentences = 3 if status_check else 2 if suspicious_opener or require_pending_response or duplicate_guard else 1
             if sentence_count < required_sentences and len(opening) < 220:
                 continue
             duplicate = self._stale_duplicate_assessment(opening, previous_assistant_reply, user_text)
@@ -518,8 +549,12 @@ class CharacterAgent:
                 opening, previous_assistant_reply, user_text,
             ) or (
                 require_pending_response and self._appears_to_ignore_pending_followup(opening)
-            ) or duplicate["stale"]:
-                reason = "stale_duplicate" if duplicate["stale"] else "continuity"
+            ) or duplicate["stale"] or self._has_ungrounded_status_question(opening, user_text):
+                reason = (
+                    "stale_duplicate" if duplicate["stale"]
+                    else "ungrounded_status" if self._has_ungrounded_status_question(opening, user_text)
+                    else "continuity"
+                )
                 self._publish_relevance_guard("detected", previous_assistant_id, duplicate, require_pending_response, reason)
                 retry = await self._live_guard_retry(
                     messages, previous_assistant_reply, user_text, require_pending_response,
@@ -539,8 +574,13 @@ class CharacterAgent:
                 opening, previous_assistant_reply, user_text,
             ) or (
                 require_pending_response and self._appears_to_ignore_pending_followup(opening)
-            ) or duplicate["stale"]:
-                self._publish_relevance_guard("detected", previous_assistant_id, duplicate, require_pending_response, "stale_duplicate" if duplicate["stale"] else "continuity")
+            ) or duplicate["stale"] or self._has_ungrounded_status_question(opening, user_text):
+                reason = (
+                    "stale_duplicate" if duplicate["stale"]
+                    else "ungrounded_status" if self._has_ungrounded_status_question(opening, user_text)
+                    else "continuity"
+                )
+                self._publish_relevance_guard("detected", previous_assistant_id, duplicate, require_pending_response, reason)
                 retry = await self._live_guard_retry(
                     messages, previous_assistant_reply, user_text, require_pending_response,
                 )
@@ -557,7 +597,14 @@ class CharacterAgent:
             chunks = [
                 delta async for delta in self._llm_provider.stream([
                     *messages,
-                    ChatMessage(role="system", content=self._guard_retry_instruction(require_pending_response, True)),
+                    ChatMessage(
+                        role="system",
+                        content=self._guard_retry_instruction(
+                            require_pending_response,
+                            True,
+                            self._is_casual_status_check(user_text),
+                        ),
+                    ),
                 ])
             ]
         except Exception:
@@ -569,7 +616,10 @@ class CharacterAgent:
             or self._has_unconfirmed_assistant_content_attribution(reply, previous_assistant_reply, user_text)
             or (require_pending_response and self._appears_to_ignore_pending_followup(reply))
             or self._stale_duplicate_assessment(reply, previous_assistant_reply, user_text)["stale"]
+            or self._has_ungrounded_status_question(reply, user_text)
         ):
+            if self._is_casual_status_check(user_text):
+                return self._status_reply_fallback().payload["reply"]
             return self._stale_reply_fallback().payload["reply"]
         return reply
 
@@ -638,7 +688,36 @@ class CharacterAgent:
         )
 
     @staticmethod
-    def _guard_retry_instruction(require_pending_response: bool, stale_duplicate: bool = False) -> str:
+    def _is_casual_status_check(user_text: str) -> bool:
+        normalized = user_text.lower().replace("ё", "е")
+        return bool(re.search(
+            r"\b(?:как\s+(?:дела|делишки)|как\s+ты|че\s+как|что\s+как)\b",
+            normalized,
+        ))
+
+    @classmethod
+    def _has_ungrounded_status_question(cls, reply: str, user_text: str) -> bool:
+        """Reject invented personal specifics in a greeting/status exchange."""
+        if not cls._is_casual_status_check(user_text):
+            return False
+        questions = [
+            item.strip(" \n\t.!?…")
+            for item in re.findall(r"[^.!?…？]+[?？]", reply.lower().replace("ё", "е"))
+        ]
+        safe = re.compile(
+            r"(?iu)^(?:а\s+)?(?:"
+            r"у\s+тебя\s+как|как\s+у\s+тебя|как\s+(?:ты|сам|сама|дела|настроение)|"
+            r"что\s+(?:у\s+тебя\s+)?нового|чем\s+занимаешься|как\s+день"
+            r")\b"
+        )
+        return any(question and safe.search(question) is None for question in questions)
+
+    @staticmethod
+    def _guard_retry_instruction(
+        require_pending_response: bool,
+        stale_duplicate: bool = False,
+        status_grounding: bool = False,
+    ) -> str:
         instruction = CharacterAgent._continuity_retry_instruction()
         if stale_duplicate:
             instruction += (
@@ -649,6 +728,12 @@ class CharacterAgent:
             instruction += (
                 " Пользователь только позвал тебя после неотвеченной прямой реплики: "
                 "содержательно ответь на эту реплику, а не на само обращение по имени."
+            )
+        if status_grounding:
+            instruction += (
+                " Пользователь лишь спросил, как у Iris дела. Не придумывай ему конкретные "
+                "занятия, происшествия, игры, начальника, поломки или проблемы. Ответь о себе "
+                "и, если нужно, задай только нейтральный вопрос вроде «А у тебя как дела?»."
             )
         return instruction
 
@@ -720,6 +805,18 @@ class CharacterAgent:
             {"reply": "Похоже, я зациклилась на прошлом ответе. Не хочу повторять его вместо реакции на твоё сообщение.", "emotion": "neutral", "intent": "unknown"},
             valid=False,
             reason="stale_duplicate_retry_failed",
+        )
+
+    @staticmethod
+    def _status_reply_fallback() -> _ParseResult:
+        return _ParseResult(
+            {
+                "reply": "У меня всё нормально, я здесь и слушаю. А у тебя как дела?",
+                "emotion": "neutral",
+                "intent": "casual_chat",
+            },
+            valid=False,
+            reason="ungrounded_status_retry_failed",
         )
 
     @staticmethod

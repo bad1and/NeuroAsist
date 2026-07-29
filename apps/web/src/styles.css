@@ -2025,6 +2025,15 @@ body {
   align-items: center;
 }
 
+.state-page { width: min(100%, 1080px); margin: 0 auto; padding: 24px; }
+.state-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 20px 0; }
+.state-card { padding: 18px; border: 1px solid var(--color-border); border-radius: 16px; background: var(--color-surface); margin: 16px 0; }
+.state-card h2 { margin: 0 0 12px; font-size: 1rem; }
+.state-card dl { display: grid; gap: 9px; margin: 0; }
+.state-card dl div { display: flex; justify-content: space-between; gap: 12px; }
+.state-card dt { color: var(--color-text-muted); }.state-card dd { margin: 0; font-weight: 650; text-align: right; }
+.state-actions { display: flex; flex-wrap: wrap; gap: 10px; }.state-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }.state-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; }.state-list span { color: var(--color-text-muted); }.text-button { border: 0; background: transparent; color: var(--color-accent); cursor: pointer; }
+
 @media (max-width: 48rem) {
   .conversation-debug dl {
     grid-template-columns: 1fr;
@@ -2033,6 +2042,7 @@ body {
   .live-conversation-settings {
     grid-template-columns: 1fr;
   }
+  .state-grid { grid-template-columns: 1fr; }
 
   .live-conversation-settings legend,
   .live-conversation-settings > small,

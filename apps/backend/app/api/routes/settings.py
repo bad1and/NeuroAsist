@@ -70,6 +70,8 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         memory_enabled=settings.memory_enabled,
         memory_mode=runtime_settings.memory_mode,
         memory_incognito=runtime_settings.memory_incognito,
+        reflections_enabled=runtime_settings.reflections_enabled,
+        reflection_min_significance=runtime_settings.reflection_min_significance,
         conversation_diagnostics_enabled=settings.conversation_diagnostics_enabled,
         live_conversation_enabled=runtime_settings.live_conversation_enabled,
         live_conversation_participant_mode=runtime_settings.live_conversation_participant_mode,
@@ -157,6 +159,13 @@ def patch_runtime_settings(
     if payload.memory_incognito is not None:
         runtime_settings.memory_incognito = payload.memory_incognito
 
+    if payload.reflections_enabled is not None:
+        runtime_settings.reflections_enabled = payload.reflections_enabled
+    if payload.reflection_min_significance is not None:
+        if not 0.3 <= payload.reflection_min_significance <= 1.0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported reflection significance")
+        runtime_settings.reflection_min_significance = round(payload.reflection_min_significance, 2)
+
     if payload.live_conversation_enabled is not None:
         runtime_settings.live_conversation_enabled = payload.live_conversation_enabled
 
@@ -193,6 +202,8 @@ def patch_runtime_settings(
             "voice_live_playback_prebuffer_ms": runtime_settings.voice_live_playback_prebuffer_ms,
             "memory_mode": runtime_settings.memory_mode,
             "memory_incognito": runtime_settings.memory_incognito,
+            "reflections_enabled": runtime_settings.reflections_enabled,
+            "reflection_min_significance": runtime_settings.reflection_min_significance,
             "live_conversation_enabled": runtime_settings.live_conversation_enabled,
             **{
                 field_name: getattr(runtime_settings, field_name)

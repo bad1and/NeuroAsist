@@ -16,6 +16,8 @@ class RuntimeSettings:
     voice_live_playback_prebuffer_ms: int = 0
     memory_mode: str = "balanced"
     memory_incognito: bool = False
+    reflections_enabled: bool = True
+    reflection_min_significance: float = 0.55
     live_conversation_enabled: bool = False
     live_conversation_participant_mode: str = "one_to_one"
     live_conversation_engagement: str = "balanced"
