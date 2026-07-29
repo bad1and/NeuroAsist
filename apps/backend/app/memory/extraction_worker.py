@@ -38,6 +38,12 @@ source_message_ids. Conflicts имеют existing_id, proposed_kind, reason и r
 не доказывает ни факт о пользователе, ни её выдуманное текущее занятие/состояние; обещания,
 решения и общие milestones из assistant source оформляй только как commitments.
 Если сохранять нечего, верни пустые массивы.
+Предпочитай канонические predicates из каталога:
+user.name, assistant.developer, assistant.developer_count, user.likes_category,
+user.likes_game, user.game_detail, user.preference, user.note, user.relationship.friend,
+user.current_mood, user.current_activity, user.current_goal,
+user.prefers_response_length. Не создавай новый topic для одноразовой проверки памяти,
+имени или статуса разработчика; используй существующую игровую тему при наличии.
 
 Короткий корректный пример:
 {"facts":[{"kind":"identity","subject":"user","predicate":"name","value_text":"Федор",
@@ -360,15 +366,40 @@ class MemoryExtractionWorker:
     def _format_input(self, current_text: str, context) -> tuple[str, bool]:
         redacted = False
         rendered: list[str] = []
+        user_burst: list[tuple[str, str]] = []
+
+        def flush_user_burst() -> None:
+            if not user_burst:
+                return
+            ids = ",".join(message_id for message_id, _ in user_burst)
+            text = "\n".join(text for _, text in user_burst)
+            rendered.append(f"[{ids}] user-burst: {text}")
+            user_burst.clear()
+
         for item in context[-20:]:
             safe, was_redacted = self._memory_service.sanitize_for_llm_extraction(item.effective_content)
             redacted = redacted or was_redacted
-            rendered.append(f"[{item.id}] {item.role}: {safe}")
+            if item.role == "user":
+                user_burst.append((item.id, safe))
+            else:
+                flush_user_burst()
+                rendered.append(f"[{item.id}] {item.role}: {safe}")
+        flush_user_burst()
         if not rendered:
             safe, was_redacted = self._memory_service.sanitize_for_llm_extraction(current_text)
             redacted = redacted or was_redacted
             rendered.append(f"[unknown] user: {safe}")
-        return "Окно завершённого диалога:\n" + "\n".join(rendered), redacted
+        topics = self._store.list_topics(status="active", limit=50)
+        topic_catalog = [
+            {"id": item["id"], "title": item["title"]}
+            for item in topics
+        ]
+        return (
+            "Существующие темы (переиспользуй topic_id вместо дубля):\n"
+            + json.dumps(topic_catalog, ensure_ascii=False)
+            + "\nОкно завершённого диалога:\n"
+            + "\n".join(rendered)
+        ), redacted
 
     def _publish(self, event_type: str, level: str, message: str, details: dict[str, object]) -> None:
         if self._event_publisher is not None:

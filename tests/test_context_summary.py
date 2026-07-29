@@ -105,6 +105,54 @@ def test_context_excludes_current_saved_message_by_id(tmp_path: Path) -> None:
     assert context.diagnostics["current_message_id"] == current.id
 
 
+def test_context_compacts_unanswered_user_burst_without_duplicating_rows(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "burst.sqlite3")
+    store.init_db()
+    store.append_message(role="assistant", content="Рассказывай.", input_mode="text")
+    first, _ = store.append_message(role="user", content="ну вот будешь", input_mode="text")
+    second, _ = store.append_message(role="user", content="знать", input_mode="text")
+    current, _ = store.append_message(
+        role="user", content="второго разработчика зовут олег", input_mode="text",
+    )
+
+    context = ContextManager(store, max_tokens=800, recent_turns=8).build(
+        current.content, current_message_id=current.id,
+    )
+
+    assert context.effective_user_text == (
+        "ну вот будешь\nзнать\nвторого разработчика зовут олег"
+    )
+    assert context.pending_user_message_ids == (first.id, second.id, current.id)
+    assert context.diagnostics["pending_user_message_count"] == 3
+    assert context.diagnostics["burst_compacted"] is True
+    visible_users = [message.content for message in context.messages if message.role == "user"]
+    assert not any("ну вот будешь" in text or text == "знать" for text in visible_users)
+
+
+def test_context_burst_stops_at_ambient_or_incomplete_message(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "burst-boundary.sqlite3")
+    store.init_db()
+    store.append_message(role="assistant", content="Слушаю.", input_mode="voice")
+    store.append_message(role="user", content="первая прямая мысль", input_mode="voice")
+    ambient, _ = store.append_message(role="user", content="Олег, включи свет", input_mode="voice")
+    store.save_conversation_observation(
+        message_id=ambient.id, session_id="live", turn_id=ambient.turn_id or "ambient",
+        utterance_id="ambient", generation=1, speaker_role="other",
+        speaker_confidence=.9, addressedness=.01, addressed_confidence=.9,
+        end_of_turn_confidence=1.0, significance=.1, metadata={},
+    )
+    store.set_observation_decision(ambient.id, "observe", "other_person")
+    current, _ = store.append_message(role="user", content="текущая прямая мысль", input_mode="voice")
+
+    context = ContextManager(store, max_tokens=800, recent_turns=8).build(
+        current.content, current_message_id=current.id,
+    )
+
+    assert context.effective_user_text == current.content
+    assert context.pending_user_message_ids == (current.id,)
+    assert context.diagnostics["burst_compacted"] is False
+
+
 def test_name_only_followup_surfaces_unanswered_direct_messages(tmp_path: Path) -> None:
     store = TimelineStore(tmp_path / "name-followup.sqlite3")
     store.init_db()

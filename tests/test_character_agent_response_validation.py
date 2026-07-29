@@ -128,6 +128,43 @@ class InMemoryHistory:
         self.saved.append((session_id, role, content))
 
 
+def test_burst_prompt_retries_when_reply_ignores_second_developer_name() -> None:
+    burst = "ну вот будешь\nзнать\nвторого разработчика зовут олег"
+
+    class BurstContext:
+        def build(self, *_args, **_kwargs):
+            return BuiltContext(
+                [], 0,
+                {
+                    "pending_direct_message_count": 0,
+                    "pending_user_message_count": 3,
+                    "burst_compacted": True,
+                },
+                burst,
+                ("first", "second", "current"),
+            )
+
+    provider = SequencedLLMProvider([
+        '{"reply":"Теперь знаю, кто мой создатель.","emotion":"happy","intent":"casual_chat"}',
+        '{"reply":"Запомнила: второго разработчика зовут Олег.","emotion":"happy","intent":"casual_chat"}',
+    ])
+    agent = CharacterAgent(
+        provider, InMemoryHistory(), history_limit=0, context_manager=BurstContext(),
+    )
+
+    result = anyio.run(
+        agent.handle_user_message, "s1", "второго разработчика зовут олег",
+    )
+
+    assert provider.calls == 2
+    assert "Олег" in result["reply"]
+    assert any(message.role == "user" and message.content == burst for message in provider.messages)
+    assert any(
+        message.role == "system" and "смысловые якоря: олег" in message.content
+        for message in provider.messages
+    )
+
+
 def test_handle_user_message_retries_invalid_json_once() -> None:
     provider = SequencedLLMProvider(
         [

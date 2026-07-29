@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import logging
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from threading import RLock
 from typing import Any
 
@@ -28,6 +29,22 @@ class MemoryService:
     )
     _SECRET_WORDS = ("парол", "password", "код подтверждения", "код из смс", "cvv", "токен", "token", "api key")
     _SINGLE_VALUE_PREDICATES = {"name", "current_statement", "current_goal", "prefers_response_length"}
+    _CANONICAL_VERSION = 17
+    _KNOWN_SLOTS = {
+        "user.name",
+        "assistant.developer",
+        "assistant.developer_count",
+        "user.likes_category",
+        "user.likes_game",
+        "user.preference",
+        "user.note",
+        "user.relationship.friend",
+        "user.game_detail",
+        "user.current_mood",
+        "user.current_activity",
+        "user.current_goal",
+        "user.prefers_response_length",
+    }
     _NAME_PREFIX = re.compile(
         r"(?:\bменя\s+зовут\b|\bмо[её]\s+имя(?:\s+(?:это|[-—:]))?\b|\bmy\s+name\s+is\b|\bcall\s+me\b)",
         flags=re.IGNORECASE,
@@ -186,9 +203,31 @@ class MemoryService:
     def retrieve(self, query: str, limit: int = 6) -> list[dict[str, object]]:
         if not self._enabled or self.incognito:
             return []
+        self.expire_due_memories()
         normalized_query = self._normalize(query)
-        if self._is_identity_query(normalized_query):
-            memories = [item for item in self._store.list_memories(status="active", limit=limit) if item["predicate"] == "name"]
+        active_profile = self._store.list_memories(status="active", limit=250)
+        developer_query = bool(re.search(
+            r"\b(?:разработчик|разработчики|создатель|developer|developers)\b"
+            r"|\bкак\s+зовут\s+(?:твоего\s+)?второго\b",
+            normalized_query,
+        ))
+        if developer_query:
+            memories = [
+                item for item in active_profile
+                if item.get("slot_key") in {"assistant.developer", "assistant.developer_count"}
+            ][:limit]
+            memories = self._attach_retrieval(
+                memories, {str(item["id"]): 1.0 for item in memories}, {}, temporal=False,
+            )
+        elif self._is_identity_query(normalized_query):
+            memories = [
+                item for item in active_profile
+                if item.get("slot_key") == "user.name"
+                or (
+                    item.get("slot_key") == "assistant.developer"
+                    and item.get("object_key") == "user"
+                )
+            ][:limit]
             memories = self._attach_retrieval(memories, {str(item["id"]): 1.0 for item in memories}, {}, temporal=False)
         else:
             memories = self._hybrid_retrieve(query, limit)
@@ -261,7 +300,7 @@ class MemoryService:
                 "source_episode_id": message.episode_id,
                 "extractor_version": "deterministic-v2",
             })
-            saved.append(self._apply_candidate(candidate, actor="extractor"))
+            saved.extend(self._apply_source_candidate(candidate, message))
         return saved
 
     def extract_high_precision_from_message(self, message: StoredTimelineMessage | None) -> list[dict[str, object]]:
@@ -289,7 +328,7 @@ class MemoryService:
                 "source_episode_id": message.episode_id,
                 "extractor_version": "deterministic-v3-high-precision",
             })
-            saved.append(self._apply_candidate(candidate, actor="extractor"))
+            saved.extend(self._apply_source_candidate(candidate, message))
         return saved
 
     def apply_llm_candidates(
@@ -348,13 +387,14 @@ class MemoryService:
                 "extractor_version": "deepseek-character-v1",
             }
             try:
-                memory = self._apply_candidate(values, actor="extractor", sync_vector=False)
+                created = self._apply_source_candidate(values, source_message, sync_vector=False)
             except (KeyError, TypeError, ValueError):
                 logger.warning("Discarded invalid LLM memory candidate")
                 continue
-            saved.append(memory)
-            if memory["status"] == "active":
-                self._schedule_vector_sync(memory)
+            saved.extend(created)
+            for memory in created:
+                if memory["status"] == "active":
+                    self._schedule_vector_sync(memory)
         return saved
 
     def apply_consolidation(
@@ -402,8 +442,11 @@ class MemoryService:
                 "source_quality": self._source_quality(source),
             })
             try:
-                self._apply_candidate(values, actor="extractor", sync_vector=False)
-                saved_facts += 1
+                for canonical in self._canonical_candidates(values, source):
+                    memory = self._apply_candidate(canonical, actor="extractor", sync_vector=False)
+                    if memory["status"] == "active":
+                        self._schedule_vector_sync(memory)
+                    saved_facts += 1
             except (KeyError, TypeError, ValueError):
                 self._store.create_conflict({"reason": "invalid fact proposal", "proposed_entity_type": "fact", "status": "resolved", "resolution": "discarded"})
                 conflicts += 1
@@ -412,6 +455,7 @@ class MemoryService:
             try:
                 topic = self._apply_topic_proposal(proposal, source_ids)
                 if topic:
+                    self._store.enqueue_memory_index_job(str(topic["id"]), "topic_memory")
                     saved_topics += 1
             except (KeyError, TypeError, ValueError):
                 self._store.create_conflict({"reason": "invalid topic proposal", "proposed_entity_type": "topic", "status": "resolved", "resolution": "discarded"})
@@ -421,7 +465,8 @@ class MemoryService:
             if not source_ids:
                 continue
             try:
-                self._store.create_commitment({**proposal.model_dump(), "source_message_ids": source_ids, "source_episode_id": by_id[source_ids[-1]].episode_id, "extractor_version": "consolidation-v11"})
+                commitment = self._store.create_commitment({**proposal.model_dump(), "source_message_ids": source_ids, "source_episode_id": by_id[source_ids[-1]].episode_id, "extractor_version": "consolidation-v11"})
+                self._store.enqueue_memory_index_job(str(commitment["id"]), "commitment_memory")
                 saved_commitments += 1
             except (KeyError, TypeError, ValueError):
                 self._store.create_conflict({"reason": "invalid commitment proposal", "proposed_entity_type": "commitment", "status": "resolved", "resolution": "discarded"})
@@ -464,8 +509,17 @@ class MemoryService:
                 "source_episode_id": message.episode_id,
                 "extractor_version": "deterministic-v4-resilient",
             })
-            saved.append(self._apply_candidate(candidate, actor="extractor"))
+            saved.extend(self._apply_source_candidate(candidate, message))
         return saved
+
+    def _apply_source_candidate(
+        self, values: dict[str, object], source: StoredTimelineMessage, *,
+        sync_vector: bool = True,
+    ) -> list[dict[str, object]]:
+        return [
+            self._apply_candidate(candidate, actor="extractor", sync_vector=sync_vector)
+            for candidate in self._canonical_candidates(values, source)
+        ]
 
     def sanitize_for_llm_extraction(self, text: str) -> tuple[str, bool]:
         """Remove secret-bearing spans before they can reach an LLM prompt."""
@@ -621,6 +675,127 @@ class MemoryService:
             repaired.append(demoted)
         return repaired
 
+    def repair_v17_canonical_memory(self) -> dict[str, object]:
+        """Idempotently normalize released v11-v16 data without deleting evidence."""
+        repair_key = "canonical-memory-v17"
+        previous = self._store.memory_repair_run(repair_key)
+        if previous is not None and previous.get("status") == "completed":
+            return dict(previous.get("result", {})) | {"idempotent_noop": True}
+        result = {
+            "canonicalized": 0,
+            "superseded": 0,
+            "topics_merged": 0,
+            "topics_archived": 0,
+            "commitments_closed": 0,
+            "rejected": 0,
+            "index_jobs": 0,
+        }
+        with self._write_lock, self._store.consolidation_transaction():
+            active = list(self._store.list_memories(status="active", limit=500))
+            for item in active:
+                original_source_ids = [str(value) for value in item.get("source_message_ids", [])]
+                source_messages = [
+                    message for message in (
+                        self._store.get_message(message_id) for message_id in original_source_ids
+                    )
+                    if message is not None
+                    and message.role in {"user", "assistant"}
+                    and message.status == "completed"
+                ]
+                source_ids = [message.id for message in source_messages]
+                source = source_messages[-1] if source_messages else None
+                candidates = self._canonical_candidates(item, source)
+                for candidate in candidates:
+                    candidate = {**candidate, "source_message_ids": source_ids}
+                    if not candidate.get("slot_key"):
+                        self._store.set_memory_status(
+                            str(item["id"]),
+                            "rejected",
+                            actor="migration",
+                            action="rejected_v17_unknown_slot",
+                            reason="Predicate could not be normalized into the v17 slot catalog",
+                        )
+                        self._schedule_vector_sync(item)
+                        result["rejected"] += 1
+                        continue
+                    same_claim = (
+                        candidate["subject"] == item["subject"]
+                        and candidate["predicate"] == item["predicate"]
+                        and self._normalize(str(candidate["value_text"]))
+                        == self._normalize(str(item["value_text"]))
+                    )
+                    if same_claim:
+                        self._store.update_memory(
+                            str(item["id"]),
+                            {
+                                key: candidate.get(key)
+                                for key in (
+                                    "subject", "predicate", "value_text",
+                                    "slot_key", "object_key", "normalization_version",
+                                    "search_text", "claim_fingerprint", "canonical_text",
+                                    "expires_at", "cardinality", "temporal_semantics",
+                                )
+                                if candidate.get(key) is not None
+                            },
+                            actor="migration",
+                            action="canonicalized_v17",
+                        )
+                        result["canonicalized"] += 1
+                        continue
+                    canonical = self._apply_candidate(
+                        {**candidate, "status": "active"},
+                        actor="migration",
+                        action="canonicalized_v17",
+                        sync_vector=False,
+                    )
+                    if canonical["id"] != item["id"] and item["status"] == "active":
+                        self._store.supersede_memory(str(item["id"]), str(canonical["id"]))
+                        self._schedule_vector_sync(item)
+                        result["superseded"] += 1
+                    result["canonicalized"] += 1
+
+            topics = list(self._store.list_topics(status="active", limit=100))
+            game_topics = [
+                topic for topic in topics
+                if re.search(r"\b(?:игр|game|repo|r\.e\.p\.o)\w*", self._normalize(
+                    f"{topic['title']} {topic['summary_text']}"
+                ))
+            ]
+            if game_topics:
+                survivor = game_topics[0]
+                self._store.update_topic(str(survivor["id"]), {
+                    "title": "Игровые предпочтения",
+                    "topic_key": "user.games",
+                }, actor="migration-v17")
+                for topic in game_topics[1:]:
+                    self._store.merge_topics(str(survivor["id"]), str(topic["id"]))
+                    result["topics_merged"] += 1
+            for topic in topics:
+                text = self._normalize(f"{topic['title']} {topic['summary_text']}")
+                if topic in game_topics:
+                    continue
+                if any(marker in text for marker in (
+                    "identity check", "developer status", "role as developer",
+                    "user background", "проверка личности", "разработчик",
+                )):
+                    self._store.update_topic(
+                        str(topic["id"]), {"status": "archived"}, actor="migration-v17",
+                    )
+                    result["topics_archived"] += 1
+
+            before_open = len(self._store.list_commitments(status="open", limit=100))
+            if self._active_user_name():
+                self._close_satisfied_commitments("user.name")
+            after_open = len(self._store.list_commitments(status="open", limit=100))
+            result["commitments_closed"] = max(0, before_open - after_open)
+
+            for memory in self._store.list_memories(status="active", limit=500):
+                self._schedule_vector_sync(memory)
+                result["index_jobs"] += 1
+            self._store.reindex_memories()
+            self._store.finish_memory_repair(repair_key, result)
+        return result
+
     @staticmethod
     def memory_update(memory: dict[str, object]) -> dict[str, str]:
         status = str(memory["status"])
@@ -677,12 +852,15 @@ class MemoryService:
         if not self.semantic_enabled:
             return {"indexed": fts_indexed, "fts_indexed": fts_indexed, "semantic_indexed": 0, "semantic_enabled": False}
         try:
-            self._vector_index.rebuild_sync("memory")
-            self._vector_index.rebuild_sync("episode_summary")
+            namespaces = ("memory", "topic_memory", "commitment_memory", "episode_summary")
+            for namespace in namespaces:
+                self._vector_index.rebuild_sync(namespace)
+            semantic_indexed = sum(len(self._store.semantic_index_items(namespace)) for namespace in namespaces)
+            self._semantic_degraded_reason = None
             return {
                 "fts_indexed": fts_indexed,
                 "indexed": fts_indexed,
-                "semantic_indexed": len(self._store.semantic_index_items("memory")),
+                "semantic_indexed": semantic_indexed,
                 "semantic_enabled": True,
             }
         except Exception as exc:
@@ -706,32 +884,38 @@ class MemoryService:
             result["chroma_cleanup_pending"] = 1
         elif self.semantic_enabled:
             try:
-                self._vector_index.rebuild_sync("memory")
-                self._vector_index.rebuild_sync("episode_summary")
+                for namespace in ("memory", "topic_memory", "commitment_memory", "episode_summary"):
+                    self._vector_index.rebuild_sync(namespace)
             except Exception as exc:
                 self._degrade_semantic(exc)
         return result
 
     def index_episode_summary(self, summary: dict[str, object] | None) -> None:
-        if not summary or not self.semantic_enabled:
+        if not summary:
             return
-        try:
-            self._vector_index.upsert_sync(str(summary["id"]), str(summary["summary_text"]), "episode_summary")
-        except Exception as exc:
-            self._degrade_semantic(exc)
+        self._store.enqueue_memory_index_job(str(summary["id"]), "episode_summary")
 
     def _apply_candidate(
         self, values: dict[str, object], *, actor: str, action: str = "candidate_created", sync_vector: bool = True,
     ) -> dict[str, object]:
         with self._write_lock:
-            self._validate_sources(list(values.get("source_message_ids", [])), manual=actor == "user")
-            values = {
+            self._validate_sources(
+                list(values.get("source_message_ids", [])),
+                manual=actor in {"user", "migration"},
+            )
+            values = self._canonicalize_single({
                 **values,
                 "subject": self._normalize(str(values["subject"])),
                 "predicate": self._normalize(str(values["predicate"])),
-            }
+            })
             exact, conflict = self._match_existing(values)
             if exact is not None:
+                self._store.reinforce_memory_evidence(
+                    str(exact["id"]),
+                    [str(item) for item in values.get("source_message_ids", [])],
+                    values.get("source_episode_id"),
+                    float(values.get("source_quality", 1.0)),
+                )
                 self._store.update_memory(exact["id"], {}, actor="policy", action="retrieved")
                 return exact
             status = str(values.get("status", "candidate"))
@@ -744,6 +928,8 @@ class MemoryService:
                     status = "candidate"
                 if conflict is not None and conflict["user_locked"]:
                     status = "candidate"
+                if str(values.get("slot_key") or "") not in self._KNOWN_SLOTS:
+                    status = "candidate"
             values["status"] = status
             memory = self._store.create_memory(values, actor=actor, action=action if status == "active" else "candidate_created")
             if status == "active" and conflict is not None:
@@ -752,11 +938,13 @@ class MemoryService:
                 memory = self._store.get_memory(str(memory["id"])) or memory
             if sync_vector and memory["status"] == "active":
                 self._sync_vector(memory)
+            if memory["status"] == "active":
+                self._close_satisfied_commitments(str(values.get("slot_key") or ""))
             return memory
 
     def _schedule_vector_sync(self, memory: dict[str, object]) -> None:
         """Queue index work durably so a crash cannot lose a Chroma update."""
-        if not self.semantic_enabled:
+        if not getattr(self._vector_index, "available", False):
             return
         self._store.enqueue_memory_index_job(str(memory["id"]))
 
@@ -765,17 +953,65 @@ class MemoryService:
         if job is None:
             return False
         try:
-            memory_id = str(json.loads(str(job["payload_json"]))["memory_id"])
-            memory = self._store.get_memory(memory_id)
-            if memory is not None and memory["status"] == "active":
-                self._vector_index.upsert_sync(str(memory["id"]), str(memory["canonical_text"]), "memory")
+            payload = json.loads(str(job["payload_json"]))
+            memory_id = str(payload["memory_id"])
+            namespace = str(payload.get("namespace") or "memory")
+            source = dict(self._store.semantic_index_items(namespace))
+            if memory_id in source:
+                self._vector_index.upsert_sync(memory_id, source[memory_id], namespace)
             else:
-                self._vector_index.delete_sync(memory_id, "memory")
+                self._vector_index.delete_sync(memory_id, namespace)
             self._store.complete_summary_job(str(job["id"]))
         except Exception as exc:
             self._degrade_semantic(exc)
             self._store.fail_summary_job(str(job["id"]), str(exc))
         return True
+
+    def semantic_diagnostics(self) -> dict[str, object]:
+        namespaces: dict[str, object] = {}
+        overall_missing: list[str] = []
+        overall_stale: list[str] = []
+        snapshot_method = getattr(self._vector_index, "snapshot_sync", None)
+        for namespace in ("memory", "topic_memory", "commitment_memory", "episode_summary"):
+            source = dict(self._store.semantic_index_items(namespace))
+            source_fingerprint = hashlib.sha256(
+                "\n".join(f"{item_id}\0{text}" for item_id, text in sorted(source.items())).encode("utf-8")
+            ).hexdigest()
+            if callable(snapshot_method):
+                try:
+                    snapshot = snapshot_method(namespace)
+                    indexed_ids = set(snapshot.get("ids", []))
+                    missing = sorted(set(source) - indexed_ids)
+                    stale = sorted(indexed_ids - set(source))
+                    namespaces[namespace] = {
+                        **snapshot,
+                        "source_count": len(source),
+                        "source_fingerprint": source_fingerprint,
+                        "missing_ids": missing,
+                        "stale_ids": stale,
+                    }
+                    overall_missing.extend(f"{namespace}:{item_id}" for item_id in missing)
+                    overall_stale.extend(f"{namespace}:{item_id}" for item_id in stale)
+                except Exception as exc:
+                    self._degrade_semantic(exc)
+                    namespaces[namespace] = {
+                        "source_count": len(source),
+                        "source_fingerprint": source_fingerprint,
+                        "error": f"{type(exc).__name__}: {exc}"[:300],
+                    }
+            else:
+                namespaces[namespace] = {
+                    "source_count": len(source),
+                    "source_fingerprint": source_fingerprint,
+                }
+        return {
+            "state": "degraded" if not self.semantic_enabled else "healthy" if not overall_missing and not overall_stale else "rebuilding",
+            "semantic_enabled": self.semantic_enabled,
+            "degraded_reason": self._semantic_degraded_reason,
+            "missing_ids": overall_missing,
+            "stale_ids": overall_stale,
+            "namespaces": namespaces,
+        }
 
     def _hybrid_retrieve(self, query: str, limit: int) -> list[dict[str, object]]:
         fts = self._store.list_memories(status="active", query=query, limit=max(limit, self._semantic_limit))
@@ -784,7 +1020,16 @@ class MemoryService:
         candidates = {str(item["id"]): item for item in fts}
         if self.semantic_enabled:
             try:
-                for result in self._vector_index.search_sync(query, "memory", self._semantic_limit):
+                results = self._vector_index.search_sync(query, "memory", self._semantic_limit)
+                indexed_ids = {result.item_id for result in results}
+                source_ids = {item_id for item_id, _ in self._store.semantic_index_items("memory")}
+                source_search = getattr(self._vector_index, "search_source_sync", None)
+                if callable(source_search) and source_ids - indexed_ids:
+                    results = list(results) + [
+                        result for result in source_search(query, "memory", self._semantic_limit)
+                        if result.item_id not in indexed_ids
+                    ]
+                for result in results:
                     semantic_scores[result.item_id] = result.score
                     memory = self._store.get_memory(result.item_id)
                     if memory is not None and memory["status"] == "active":
@@ -857,20 +1102,12 @@ class MemoryService:
         return sorted(ranked, key=lambda item: item["retrieval"]["score"], reverse=True)
 
     def _sync_vector(self, memory: dict[str, object]) -> None:
-        if not self.semantic_enabled:
-            return
-        try:
-            self._vector_index.upsert_sync(str(memory["id"]), str(memory["canonical_text"]), "memory")
-        except Exception as exc:
-            self._degrade_semantic(exc)
+        self._schedule_vector_sync(memory)
 
     def _delete_vector(self, memory_id: str) -> None:
-        if not self.semantic_enabled:
+        if not getattr(self._vector_index, "available", False):
             return
-        try:
-            self._vector_index.delete_sync(memory_id, "memory")
-        except Exception as exc:
-            self._degrade_semantic(exc)
+        self._store.enqueue_memory_index_job(memory_id)
 
     def _degrade_semantic(self, error: Exception) -> None:
         self._semantic_degraded_reason = f"{type(error).__name__}: {error}"[:300]
@@ -924,16 +1161,43 @@ class MemoryService:
     def _apply_topic_proposal(self, proposal: TopicProposal, source_ids: list[str]) -> dict[str, object] | None:
         if not source_ids:
             return None
+        normalized_topic = self._normalize(f"{proposal.title} {proposal.summary_text}")
+        if any(marker in normalized_topic for marker in (
+            "identity check", "проверка памяти", "проверка личности",
+            "developer status", "статус разработчик", "имя пользователя",
+        )):
+            return None
+        is_game_topic = bool(re.search(r"\b(?:игр\w*|game\w*|repo|r\.e\.p\.o)\b", normalized_topic))
         candidates = self._store.list_topics(status="active", query=proposal.title, limit=5)
         target = next((item for item in candidates if self._normalize(str(item["title"])) == self._normalize(proposal.title)), None)
+        if target is None and is_game_topic:
+            target = next(
+                (
+                    item for item in self._store.list_topics(status="active", limit=100)
+                    if item.get("topic_key") == "user.games"
+                    or re.search(r"\b(?:игр\w*|game\w*|repo|r\.e\.p\.o)\b", self._normalize(
+                        f"{item['title']} {item['summary_text']}"
+                    ))
+                ),
+                None,
+            )
         if proposal.topic_id:
             target = self._store.get_topic(proposal.topic_id)
         if target is not None:
             if target.get("user_locked"):
                 return target
-            topic = self._store.update_topic(str(target["id"]), {"title": proposal.title, "summary_text": proposal.summary_text}, actor="consolidation")
+            topic = self._store.update_topic(str(target["id"]), {
+                "title": "Игровые предпочтения" if is_game_topic else proposal.title,
+                "summary_text": proposal.summary_text,
+                "topic_key": "user.games" if is_game_topic else target.get("topic_key"),
+            }, actor="consolidation")
         else:
-            topic = self._store.create_topic({"title": proposal.title, "summary_text": proposal.summary_text, "extractor_version": "consolidation-v11"}, actor="consolidation")
+            topic = self._store.create_topic({
+                "title": "Игровые предпочтения" if is_game_topic else proposal.title,
+                "summary_text": proposal.summary_text,
+                "topic_key": "user.games" if is_game_topic else None,
+                "extractor_version": "consolidation-v11",
+            }, actor="consolidation")
         for source_id in source_ids:
             self._store.link_topic(str(topic["id"]), "message", source_id)
         return topic
@@ -941,6 +1205,331 @@ class MemoryService:
     @classmethod
     def _fingerprint(cls, subject: str, predicate: str, value: str) -> str:
         return "|".join(cls._normalize(part) for part in (subject, predicate, value))
+
+    def _canonical_candidates(
+        self, values: dict[str, object], source: StoredTimelineMessage | None,
+    ) -> list[dict[str, object]]:
+        """Convert high-value model variants into stable v17 slots."""
+        text = self._normalize(source.effective_content) if source is not None else ""
+        user_developer = bool(
+            re.search(r"\bя\b.{0,50}\b(?:твой|твоих|разработчик|создател)", text)
+            and re.search(r"\b(?:разработчик|создател)", text)
+        )
+        second_developer = re.search(
+            r"\b(?:второго|другого)\s+(?:твоего\s+)?(?:разработчика|создателя)\s+зовут\s+([a-zа-яё][a-zа-яё'’-]{1,39})",
+            text,
+            flags=re.IGNORECASE,
+        )
+        developer_list = re.search(
+            r"\b(?:твоих|твои)\s+(?:разработчиков|создателей)\s+"
+            r"(?:зовут|это)\s+([^.!?\n]+)",
+            source.effective_content if source is not None else "",
+            flags=re.IGNORECASE,
+        )
+        predicate = self._normalize(str(values.get("predicate", "")))
+        subject = self._normalize(str(values.get("subject", "")))
+        developer_names_raw = (
+            developer_list.group(1)
+            if developer_list is not None
+            else str(values.get("value_text", ""))
+            if subject == "assistant" and predicate == "developers"
+            else None
+        )
+        if developer_names_raw is not None:
+            names = [
+                self._canonical_person_name(item)
+                for item in re.split(r"\s*(?:,|;|\bи\b|\band\b)\s*", developer_names_raw)
+                if item.strip()
+            ]
+            names = list(dict.fromkeys(name for name in names if name))
+            active_name = self._active_user_name()
+            developer_values = [
+                {
+                    **values,
+                    "scope": "relationship",
+                    "kind": "relationship",
+                    "subject": "assistant",
+                    "predicate": "developer",
+                    "value_text": name,
+                    "slot_key": "assistant.developer",
+                    "object_key": (
+                        "user"
+                        if active_name and self._normalize(active_name) == self._normalize(name)
+                        else f"person:{self._normalize(name)}"
+                    ),
+                    "cardinality": "multi",
+                    "temporal_semantics": "atemporal",
+                    "importance": max(.85, float(values.get("importance", .0))),
+                    "confidence": max(.95, float(values.get("confidence", .0))),
+                }
+                for name in names
+            ]
+            if names:
+                developer_values.append({
+                    **values,
+                    "scope": "relationship",
+                    "kind": "relationship",
+                    "subject": "assistant",
+                    "predicate": "developer_count",
+                    "value_text": str(len(names)),
+                    "slot_key": "assistant.developer_count",
+                    "object_key": f"count:{len(names)}",
+                    "cardinality": "single",
+                    "temporal_semantics": "atemporal",
+                    "importance": .8,
+                    "confidence": .95,
+                })
+                return developer_values
+        legacy_value = self._normalize(str(values.get("value_text", "")))
+        known_second_developer = any(
+            (
+                self._normalize(str(item.get("subject", ""))) in {"oleg", "олег"}
+                and self._normalize(str(item.get("predicate", ""))) == "name"
+            )
+            or (
+                item.get("slot_key") == "assistant.developer"
+                and item.get("object_key") == "person:олег"
+            )
+            for item in self._store.list_memories(status="active", limit=250)
+        )
+        if user_developer or (
+            subject == "user" and ("develop" in predicate or predicate == "role")
+            and ("develop" in legacy_value or predicate != "role")
+        ):
+            name = self._canonical_person_name(self._active_user_name() or "пользователь")
+            developer_count = 2 if (
+                known_second_developer
+                or re.search(r"\b(?:two|2|два|двух)\b", f"{text} {legacy_value}")
+            ) else 1
+            return [
+                {
+                    **values,
+                    "scope": "relationship",
+                    "kind": "relationship",
+                    "subject": "assistant",
+                    "predicate": "developer",
+                    "value_text": name,
+                    "slot_key": "assistant.developer",
+                    "object_key": "user",
+                    "cardinality": "multi",
+                    "temporal_semantics": "atemporal",
+                    "importance": max(.85, float(values.get("importance", .0))),
+                    "confidence": max(.95, float(values.get("confidence", .0))),
+                },
+                {
+                    **values,
+                    "scope": "relationship",
+                    "kind": "relationship",
+                    "subject": "assistant",
+                    "predicate": "developer_count",
+                    "value_text": str(developer_count),
+                    "slot_key": "assistant.developer_count",
+                    "object_key": f"count:{developer_count}",
+                    "cardinality": "single",
+                    "temporal_semantics": "atemporal",
+                    "importance": .8,
+                    "confidence": .95,
+                },
+            ]
+        if second_developer is not None or (
+            subject not in {"user", "assistant"} and predicate == "name"
+            and ("разработ" in text or subject in {"oleg", "олег"})
+        ):
+            display = (
+                second_developer.group(1)
+                if second_developer is not None
+                else str(values.get("value_text", "")).strip()
+            )
+            display = self._canonical_person_name(display)
+            return [
+                {
+                    **values,
+                    "scope": "relationship",
+                    "kind": "relationship",
+                    "subject": "assistant",
+                    "predicate": "developer",
+                    "value_text": display,
+                    "slot_key": "assistant.developer",
+                    "object_key": f"person:{self._normalize(display)}",
+                    "cardinality": "multi",
+                    "temporal_semantics": "atemporal",
+                    "importance": max(.85, float(values.get("importance", .0))),
+                    "confidence": max(.95, float(values.get("confidence", .0))),
+                },
+                {
+                    **values,
+                    "scope": "relationship",
+                    "kind": "relationship",
+                    "subject": "assistant",
+                    "predicate": "developer_count",
+                    "value_text": "2",
+                    "slot_key": "assistant.developer_count",
+                    "object_key": "count:2",
+                    "cardinality": "single",
+                    "temporal_semantics": "atemporal",
+                    "importance": .8,
+                    "confidence": .95,
+                },
+            ]
+        raw_value = str(values.get("value_text", "")).strip()
+        if (
+            predicate in {"likes_game", "plays_game", "plays"}
+            and "," in raw_value
+            and len(raw_value) < 80
+            and "(" not in raw_value
+        ):
+            return [
+                self._canonicalize_single({**values, "value_text": part.strip()})
+                for part in raw_value.split(",")
+                if part.strip()
+            ]
+        return [self._canonicalize_single(values)]
+
+    def _canonicalize_single(self, values: dict[str, object]) -> dict[str, object]:
+        result = dict(values)
+        subject = self._normalize(str(result.get("subject", "user")))
+        predicate = self._normalize(str(result.get("predicate", ""))).replace(" ", "_")
+        value = str(result.get("value_text", "")).strip()
+        slot = str(result.get("slot_key") or "")
+        object_key = str(result.get("object_key") or "")
+        if predicate == "name" and subject == "user":
+            slot, object_key = "user.name", "user"
+            value = self._canonical_person_name(value)
+        elif subject == "assistant" and predicate in {"developer", "developers"}:
+            slot = "assistant.developer"
+            object_key = object_key or f"person:{self._normalize(value)}"
+            predicate = "developer"
+        elif subject == "assistant" and predicate == "developer_count":
+            slot, object_key = "assistant.developer_count", f"count:{value}"
+        elif predicate in {"likes_game_genre", "plays_genre", "likes_category"}:
+            slot, object_key, predicate = "user.likes_category", "genre:shooter", "likes_category"
+            value = "шутеры" if self._normalize(value) in {"shooters", "shooter", "шутеры"} else value
+            result["cardinality"] = "multi"
+        elif predicate in {"likes_game", "plays_game", "plays"}:
+            slot, predicate = "user.likes_game", "likes_game"
+            result["cardinality"] = "multi"
+            normalized_game = self._normalize(value).replace(".", "")
+            if normalized_game in {"repo", "репо", "репо replay"} or normalized_game.startswith("repo "):
+                value, object_key = "R.E.P.O.", "game:repo"
+            elif normalized_game in {"deadlock", "дедлок", "дыдлок"}:
+                value, object_key = "Deadlock", "game:deadlock"
+            elif normalized_game in {"кс", "cs", "counter strike", "counter-strike"}:
+                value, object_key = "Counter-Strike", "game:counter-strike"
+            elif normalized_game in {"valorant", "валорант", "валарант"}:
+                value, object_key = "Valorant", "game:valorant"
+            else:
+                object_key = object_key or f"game:{normalized_game}"
+        elif predicate == "mood":
+            slot, object_key, predicate = "user.current_mood", "user", "mood"
+        elif predicate in {"current_activity", "activity"} and subject == "user":
+            slot, object_key, predicate = "user.current_activity", "user", "current_activity"
+        elif predicate in {"current_goal", "goal"} and subject == "user":
+            slot, object_key, predicate = "user.current_goal", "user", "current_goal"
+        elif predicate == "prefers_response_length" and subject == "user":
+            slot, object_key = "user.prefers_response_length", "user"
+        elif predicate in {"likes", "prefers", "preference", "style"} and subject == "user":
+            slot = "user.preference"
+            object_key = object_key or f"preference:{self._normalize(value)}"
+        elif predicate == "explicit_memory" and subject == "user":
+            slot, object_key = "user.note", f"note:{self._normalize(value)}"
+        elif predicate in {"has_friend", "friend"} and subject == "user":
+            slot, object_key = "user.relationship.friend", f"person:{self._normalize(value)}"
+        elif predicate in {"game_features", "plays_game_with_upgrades", "plays_for_fun"}:
+            slot, object_key = "user.game_detail", f"detail:{predicate}"
+        if slot in {
+            "user.name", "assistant.developer", "assistant.developer_count",
+            "user.likes_category", "user.likes_game", "user.preference", "user.note",
+            "user.relationship.friend", "user.game_detail",
+            "user.prefers_response_length",
+        }:
+            result["temporal_semantics"] = "atemporal"
+        temporal = str(result.get("temporal_semantics", "atemporal"))
+        if not result.get("expires_at") and temporal in {"current", "period"}:
+            days = 1 if slot in {"user.current_mood", "user.current_activity"} else 7 if temporal == "current" else 30
+            result["expires_at"] = (datetime.now(UTC) + timedelta(days=days)).isoformat(timespec="milliseconds")
+        aliases = {
+            "user.name": "имя пользователя user name кто я",
+            "assistant.developer": "разработчик разработчики создатель создатели developer developers Iris",
+            "assistant.developer_count": "число количество разработчиков developer count",
+            "user.likes_category": "любимый жанр шутеры shooters game genre",
+            "user.likes_game": "любимая игра играет game plays",
+            "user.preference": "предпочтение любит нравится preference likes",
+            "user.note": "явно запомнить заметка remember note",
+            "user.relationship.friend": "друг друзья friend relationship",
+            "user.game_detail": "детали игры особенности улучшения game features upgrades",
+            "user.current_mood": "настроение mood сейчас",
+            "user.current_activity": "занятие activity сейчас",
+            "user.current_goal": "цель goal сейчас",
+            "user.prefers_response_length": "длина ответов короткие длинные response length",
+        }.get(slot, "")
+        result.update({
+            "subject": subject,
+            "predicate": predicate,
+            "value_text": value,
+            "slot_key": slot or None,
+            "object_key": object_key or None,
+            "normalization_version": self._CANONICAL_VERSION,
+            "canonical_text": f"{subject} {predicate} {value}",
+            "search_text": f"{subject} {predicate} {value} {aliases}".strip(),
+        })
+        result["claim_fingerprint"] = self._fingerprint(
+            slot or subject, object_key or predicate, value,
+        )
+        return result
+
+    def _active_user_name(self) -> str | None:
+        return next(
+            (
+                str(item["value_text"])
+                for item in self._store.list_memories(status="active", limit=250)
+                if item.get("slot_key") == "user.name" or (
+                    item.get("subject") == "user" and item.get("predicate") == "name"
+                )
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _canonical_person_name(value: str) -> str:
+        cleaned = value.strip(" \t,;:.—-")
+        if not cleaned:
+            return cleaned
+        aliases = {"oleg": "Олег", "олег": "Олег", "федор": "Федор", "фёдор": "Федор"}
+        return aliases.get(cleaned.casefold(), cleaned[:1].upper() + cleaned[1:])
+
+    def _close_satisfied_commitments(self, slot_key: str) -> None:
+        if not slot_key:
+            return
+        for commitment in self._store.list_commitments(status="open", limit=100):
+            target = str(commitment.get("target_slot") or "")
+            text = self._normalize(f"{commitment.get('title', '')} {commitment.get('details', '')}")
+            inferred_name = slot_key == "user.name" and (
+                "name" in text or "имя" in text or "зовут" in text
+            )
+            if target == slot_key or inferred_name:
+                self._store.update_commitment(str(commitment["id"]), {
+                    "status": "completed", "target_slot": slot_key,
+                })
+
+    def expire_due_memories(self) -> int:
+        now = datetime.now(UTC)
+        expired = 0
+        for item in self._store.list_memories(status="active", limit=500):
+            raw = item.get("expires_at")
+            if not raw:
+                continue
+            try:
+                due = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if due <= now:
+                self._store.set_memory_status(
+                    str(item["id"]), "expired", actor="policy", action="expired",
+                    reason="v17 temporal TTL elapsed",
+                )
+                self._schedule_vector_sync(item)
+                expired += 1
+        return expired
 
     @staticmethod
     def _source_quality(message: StoredTimelineMessage) -> float:

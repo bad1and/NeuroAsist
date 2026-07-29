@@ -166,7 +166,7 @@ class Settings(BaseSettings):
     def semantic_chroma_directory(self) -> Path:
         if self.semantic_chroma_path:
             return Path(self.semantic_chroma_path).expanduser()
-        return ROOT_DIR / "data" / "chroma"
+        return self.database_path.parent / "chroma"
 
     @property
     def semantic_e5_model_directory(self) -> Path:

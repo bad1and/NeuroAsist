@@ -206,12 +206,17 @@ def test_explicit_memory_is_normalized_and_developer_relationship_is_structured(
         role="user", content="Запомни такой факт, что я люблю чай.", input_mode="text",
     )
 
-    developer = service.extract_from_message(developer_message)[0]
+    developers = service.extract_from_message(developer_message)
     generic = service.extract_from_message(generic_message)[0]
 
-    assert (developer["scope"], developer["kind"], developer["subject"], developer["predicate"], developer["value_text"]) == (
-        "relationship", "relationship", "assistant", "developers", "Олег и Федя",
-    )
+    assert {
+        (item["slot_key"], item["object_key"], item["value_text"])
+        for item in developers
+    } == {
+        ("assistant.developer", "person:олег", "Олег"),
+        ("assistant.developer", "person:федя", "Федя"),
+        ("assistant.developer_count", "count:2", "2"),
+    }
     assert generic["value_text"] == "я люблю чай"
 
 
@@ -223,8 +228,10 @@ def test_direct_developer_wording_is_saved_immediately(tmp_path: Path) -> None:
 
     saved = service.extract_high_precision_from_message(message)
 
-    assert [(item["subject"], item["predicate"], item["value_text"]) for item in saved] == [
-        ("assistant", "developers", "Олег и Федя"),
+    assert [(item["slot_key"], item["value_text"]) for item in saved] == [
+        ("assistant.developer", "Олег"),
+        ("assistant.developer", "Федя"),
+        ("assistant.developer_count", "2"),
     ]
 
 

@@ -82,6 +82,17 @@ class CharacterAgent:
             self._context_manager.build(effective_text, session_id=session_id, current_message_id=getattr(self._last_user_message, "id", None))
             if self._context_manager else None
         )
+        prompt_user_text = (
+            built_context.effective_user_text
+            if built_context is not None and built_context.effective_user_text
+            else effective_text
+        )
+        required_anchors = self._required_response_anchors(prompt_user_text)
+        if built_context is not None:
+            built_context.diagnostics["relevance_guard"] = {
+                "outcome": "not_required",
+                "required_anchors": required_anchors,
+            }
         context = built_context.messages if built_context is not None else self._history.get_recent_messages(session_id, limit=self._history_limit)
         pending_followup = bool(built_context and built_context.diagnostics.get("pending_direct_message_count"))
         previous_assistant_reply = self._previous_assistant_reply(context)
@@ -93,15 +104,15 @@ class CharacterAgent:
         messages = [
             ChatMessage(role="system", content=character_json_prompt(self._persona, state_context)),
             *context,
-            ChatMessage(role="user", content=effective_text),
+            ChatMessage(role="user", content=prompt_user_text),
         ]
-        empty_reply = self._empty_model_fallback(effective_text)
+        empty_reply = self._empty_model_fallback(prompt_user_text)
 
         llm_response = await self._llm_provider.generate(messages)
         parsed = self._parse_response_result(
             llm_response.content,
             session_id=session_id,
-            user_text=effective_text,
+            user_text=prompt_user_text,
             empty_fallback_reply=empty_reply,
             report_invalid=False,
         )
@@ -126,7 +137,7 @@ class CharacterAgent:
             parsed = self._parse_response_result(
                 repair_response.content,
                 session_id=session_id,
-                user_text=effective_text,
+                user_text=prompt_user_text,
                 empty_fallback_reply=empty_reply,
                 event_type="llm.invalid_json_retry_failed",
                 report_invalid=True,
@@ -141,23 +152,30 @@ class CharacterAgent:
         needs_continuity_retry = parsed.valid and (
             self._has_unconfirmed_continuity_accusation(parsed.payload["reply"])
             or self._has_unconfirmed_assistant_content_attribution(
-                parsed.payload["reply"], previous_assistant_reply, effective_text,
+                parsed.payload["reply"], previous_assistant_reply, prompt_user_text,
             )
         )
         needs_pending_retry = parsed.valid and pending_followup and self._appears_to_ignore_pending_followup(parsed.payload["reply"])
+        needs_anchor_retry = parsed.valid and self._misses_required_anchors(parsed.payload["reply"], required_anchors)
         needs_status_grounding_retry = parsed.valid and self._has_ungrounded_status_question(
-            parsed.payload["reply"], effective_text,
+            parsed.payload["reply"], prompt_user_text,
         )
         duplicate = self._stale_duplicate_assessment(
-            parsed.payload["reply"] if parsed.valid else "", previous_assistant_reply, effective_text,
+            parsed.payload["reply"] if parsed.valid else "", previous_assistant_reply, prompt_user_text,
         )
         needs_duplicate_retry = bool(parsed.valid and duplicate["stale"])
-        if needs_continuity_retry or needs_pending_retry or needs_duplicate_retry or needs_status_grounding_retry:
+        if needs_continuity_retry or needs_pending_retry or needs_anchor_retry or needs_duplicate_retry or needs_status_grounding_retry:
+            if built_context is not None:
+                built_context.diagnostics["relevance_guard"] = {
+                    "outcome": "detected",
+                    "reason": "missing_anchor" if needs_anchor_retry else "continuity",
+                    "required_anchors": required_anchors,
+                }
             # This is deliberately invisible: a snarky but ungrounded opening
             # is worse than one extra model pass, and must not reach TTS.
             self._publish_relevance_guard(
                 "detected", previous_assistant_id, duplicate, pending_followup,
-                    "stale_duplicate" if needs_duplicate_retry else "ungrounded_status" if needs_status_grounding_retry else "continuity",
+                    "missing_anchor" if needs_anchor_retry else "stale_duplicate" if needs_duplicate_retry else "ungrounded_status" if needs_status_grounding_retry else "continuity",
             )
             try:
                 guarded = await self._llm_provider.generate([
@@ -165,12 +183,12 @@ class CharacterAgent:
                     ChatMessage(
                         role="system",
                         content=self._guard_retry_instruction(
-                            needs_pending_retry, needs_duplicate_retry, needs_status_grounding_retry,
+                            needs_pending_retry, needs_duplicate_retry, needs_status_grounding_retry, required_anchors,
                         ),
                     ),
                 ])
                 repaired = self._parse_response_result(
-                    guarded.content, session_id=session_id, user_text=effective_text,
+                    guarded.content, session_id=session_id, user_text=prompt_user_text,
                     empty_fallback_reply=empty_reply, report_invalid=False,
                 )
             except Exception:
@@ -180,16 +198,27 @@ class CharacterAgent:
                 and repaired.valid
                 and not self._has_unconfirmed_continuity_accusation(repaired.payload["reply"])
                 and not self._has_unconfirmed_assistant_content_attribution(
-                    repaired.payload["reply"], previous_assistant_reply, effective_text,
+                    repaired.payload["reply"], previous_assistant_reply, prompt_user_text,
                 )
                 and (not pending_followup or not self._appears_to_ignore_pending_followup(repaired.payload["reply"]))
-                and not self._stale_duplicate_assessment(repaired.payload["reply"], previous_assistant_reply, effective_text)["stale"]
-                and not self._has_ungrounded_status_question(repaired.payload["reply"], effective_text)
+                and not self._misses_required_anchors(repaired.payload["reply"], required_anchors)
+                and not self._stale_duplicate_assessment(repaired.payload["reply"], previous_assistant_reply, prompt_user_text)["stale"]
+                and not self._has_ungrounded_status_question(repaired.payload["reply"], prompt_user_text)
             ):
                 parsed = repaired
+                if built_context is not None:
+                    built_context.diagnostics["relevance_guard"]["outcome"] = "applied"
                 self._publish_relevance_guard("applied", previous_assistant_id, duplicate, pending_followup, "retry_accepted")
-            elif needs_duplicate_retry or needs_status_grounding_retry:
-                parsed = self._status_reply_fallback() if needs_status_grounding_retry else self._stale_reply_fallback()
+            elif needs_anchor_retry or needs_duplicate_retry or needs_status_grounding_retry:
+                parsed = (
+                    self._anchor_reply_fallback(required_anchors)
+                    if needs_anchor_retry
+                    else self._status_reply_fallback()
+                    if needs_status_grounding_retry
+                    else self._stale_reply_fallback()
+                )
+                if built_context is not None:
+                    built_context.diagnostics["relevance_guard"]["outcome"] = "fallback"
                 self._publish_relevance_guard("fallback", previous_assistant_id, duplicate, pending_followup, "retry_rejected")
 
         if parsed.turn is not None and state_behavior is not None and state_behavior.expression_strength != "muted":
@@ -211,6 +240,14 @@ class CharacterAgent:
             # fallback without making a second model request.
             if not created and not parsed.turn.memory_candidates:
                 created = self._memory_service.extract_from_message(self._last_user_message)
+            self.last_memory_updates.extend(self._memory_service.memory_update(memory) for memory in created)
+        elif (
+            not parsed.valid
+            and self._memory_service is not None
+            and self._memory_service.llm_extraction_enabled
+            and not self._memory_service.uses_background_extraction
+        ):
+            created = self._memory_service.extract_from_message(self._last_user_message)
             self.last_memory_updates.extend(self._memory_service.memory_update(memory) for memory in created)
 
         # A user-visible fallback is still an assistant turn.  Persist it and
@@ -257,6 +294,17 @@ class CharacterAgent:
             self._context_manager.build(effective_text, session_id=session_id, current_message_id=getattr(self._last_user_message, "id", None))
             if self._context_manager else None
         )
+        prompt_user_text = (
+            built_context.effective_user_text
+            if built_context is not None and built_context.effective_user_text
+            else effective_text
+        )
+        required_anchors = self._required_response_anchors(prompt_user_text)
+        if built_context is not None:
+            built_context.diagnostics["relevance_guard"] = {
+                "outcome": "not_required",
+                "required_anchors": required_anchors,
+            }
         context = built_context.messages if built_context is not None else self._history.get_recent_messages(session_id, limit=self._history_limit)
         pending_followup = bool(built_context and built_context.diagnostics.get("pending_direct_message_count"))
         previous_assistant_reply = self._previous_assistant_reply(context)
@@ -269,7 +317,7 @@ class CharacterAgent:
         messages = [
             ChatMessage(role="system", content=system_prompt),
             *context,
-            ChatMessage(role="user", content=effective_text),
+            ChatMessage(role="user", content=prompt_user_text),
         ]
         chunks: list[str] = []
         async for delta in self._guarded_live_stream(
@@ -277,7 +325,9 @@ class CharacterAgent:
             require_pending_response=pending_followup,
             previous_assistant_reply=previous_assistant_reply,
             previous_assistant_id=previous_assistant_id,
-            user_text=effective_text,
+            user_text=prompt_user_text,
+            required_anchors=required_anchors,
+            guard_diagnostics=built_context.diagnostics if built_context is not None else None,
         ):
             if not delta:
                 continue
@@ -522,7 +572,8 @@ class CharacterAgent:
     async def _guarded_live_stream(
         self, messages: list[ChatMessage], *, require_pending_response: bool = False,
         previous_assistant_reply: str = "", previous_assistant_id: str | None = None,
-        user_text: str = "",
+        user_text: str = "", required_anchors: list[str] | None = None,
+        guard_diagnostics: dict[str, object] | None = None,
     ) -> AsyncIterator[str]:
         """Reject continuity or stale-repetition failures before UI/TTS sees text."""
         buffered: list[str] = []
@@ -541,7 +592,7 @@ class CharacterAgent:
             sentence_count = len(re.findall(r"[.!?…](?:\s|$)", opening))
             suspicious_opener = bool(re.search(r"(?:^|\n)\s*(?:ну|а)\?\s*(?:я\s+здесь)?", opening.lower()))
             duplicate_guard = bool(previous_assistant_reply and not self._user_allows_repetition(user_text, previous_assistant_reply))
-            required_sentences = 3 if status_check else 2 if suspicious_opener or require_pending_response or duplicate_guard else 1
+            required_sentences = 3 if status_check else 2 if suspicious_opener or require_pending_response or duplicate_guard or required_anchors else 1
             if sentence_count < required_sentences and len(opening) < 220:
                 continue
             duplicate = self._stale_duplicate_assessment(opening, previous_assistant_reply, user_text)
@@ -549,20 +600,28 @@ class CharacterAgent:
                 opening, previous_assistant_reply, user_text,
             ) or (
                 require_pending_response and self._appears_to_ignore_pending_followup(opening)
-            ) or duplicate["stale"] or self._has_ungrounded_status_question(opening, user_text):
+            ) or self._misses_required_anchors(opening, required_anchors or []) or duplicate["stale"] or self._has_ungrounded_status_question(opening, user_text):
                 reason = (
-                    "stale_duplicate" if duplicate["stale"]
+                    "missing_anchor" if self._misses_required_anchors(opening, required_anchors or [])
+                    else "stale_duplicate" if duplicate["stale"]
                     else "ungrounded_status" if self._has_ungrounded_status_question(opening, user_text)
                     else "continuity"
                 )
                 self._publish_relevance_guard("detected", previous_assistant_id, duplicate, require_pending_response, reason)
+                if guard_diagnostics is not None:
+                    guard_diagnostics["relevance_guard"] = {
+                        "outcome": "detected", "reason": reason,
+                        "required_anchors": required_anchors or [],
+                    }
                 retry = await self._live_guard_retry(
-                    messages, previous_assistant_reply, user_text, require_pending_response,
+                    messages, previous_assistant_reply, user_text, require_pending_response, required_anchors or [],
                 )
                 if retry == self._stale_reply_fallback().payload["reply"]:
                     self._publish_relevance_guard("fallback", previous_assistant_id, duplicate, require_pending_response, "retry_rejected")
                 else:
                     self._publish_relevance_guard("applied", previous_assistant_id, duplicate, require_pending_response, "retry_accepted")
+                if guard_diagnostics is not None:
+                    guard_diagnostics["relevance_guard"]["outcome"] = "applied"
                 yield retry
                 return
             released = True
@@ -574,23 +633,31 @@ class CharacterAgent:
                 opening, previous_assistant_reply, user_text,
             ) or (
                 require_pending_response and self._appears_to_ignore_pending_followup(opening)
-            ) or duplicate["stale"] or self._has_ungrounded_status_question(opening, user_text):
+            ) or self._misses_required_anchors(opening, required_anchors or []) or duplicate["stale"] or self._has_ungrounded_status_question(opening, user_text):
                 reason = (
-                    "stale_duplicate" if duplicate["stale"]
+                    "missing_anchor" if self._misses_required_anchors(opening, required_anchors or [])
+                    else "stale_duplicate" if duplicate["stale"]
                     else "ungrounded_status" if self._has_ungrounded_status_question(opening, user_text)
                     else "continuity"
                 )
                 self._publish_relevance_guard("detected", previous_assistant_id, duplicate, require_pending_response, reason)
+                if guard_diagnostics is not None:
+                    guard_diagnostics["relevance_guard"] = {
+                        "outcome": "detected", "reason": reason,
+                        "required_anchors": required_anchors or [],
+                    }
                 retry = await self._live_guard_retry(
-                    messages, previous_assistant_reply, user_text, require_pending_response,
+                    messages, previous_assistant_reply, user_text, require_pending_response, required_anchors or [],
                 )
+                if guard_diagnostics is not None:
+                    guard_diagnostics["relevance_guard"]["outcome"] = "applied"
                 yield retry
             else:
                 yield opening
 
     async def _live_guard_retry(
         self, messages: list[ChatMessage], previous_assistant_reply: str,
-        user_text: str, require_pending_response: bool,
+        user_text: str, require_pending_response: bool, required_anchors: list[str],
     ) -> str:
         """A retry is fully buffered so a second stale answer cannot reach TTS."""
         try:
@@ -603,6 +670,7 @@ class CharacterAgent:
                             require_pending_response,
                             True,
                             self._is_casual_status_check(user_text),
+                            required_anchors,
                         ),
                     ),
                 ])
@@ -615,9 +683,12 @@ class CharacterAgent:
             or self._has_unconfirmed_continuity_accusation(reply)
             or self._has_unconfirmed_assistant_content_attribution(reply, previous_assistant_reply, user_text)
             or (require_pending_response and self._appears_to_ignore_pending_followup(reply))
+            or self._misses_required_anchors(reply, required_anchors)
             or self._stale_duplicate_assessment(reply, previous_assistant_reply, user_text)["stale"]
             or self._has_ungrounded_status_question(reply, user_text)
         ):
+            if required_anchors:
+                return self._anchor_reply_fallback(required_anchors).payload["reply"]
             if self._is_casual_status_check(user_text):
                 return self._status_reply_fallback().payload["reply"]
             return self._stale_reply_fallback().payload["reply"]
@@ -688,6 +759,38 @@ class CharacterAgent:
         )
 
     @staticmethod
+    def _required_response_anchors(user_text: str) -> list[str]:
+        normalized = user_text.lower().replace("ё", "е")
+        anchors: list[str] = []
+        for match in re.finditer(
+            r"\bзовут\s+([a-zа-я][a-zа-я-]{1,30})\b",
+            normalized,
+            flags=re.IGNORECASE,
+        ):
+            anchors.append(match.group(1))
+        if len(normalized) <= 60:
+            for match in re.finditer(
+                r"\bне\s+[a-zа-я][a-zа-я-]{1,30}\s*,?\s*а\s+([a-zа-я][a-zа-я-]{1,30})\s*[.!?…]*$",
+                normalized,
+                flags=re.IGNORECASE,
+            ):
+                anchors.append(match.group(1))
+        if re.search(r"\b(?:запомни|запомнить|помни)\b", normalized):
+            content_words = [
+                word for word in re.findall(r"[a-zа-я][a-zа-я-]{3,}", normalized)
+                if word not in {"запомни", "запомнить", "пожалуйста", "теперь", "будешь"}
+            ]
+            anchors.extend(content_words[-2:])
+        return list(dict.fromkeys(anchors))
+
+    @staticmethod
+    def _misses_required_anchors(reply: str, anchors: list[str]) -> bool:
+        if not anchors:
+            return False
+        normalized = " ".join(re.findall(r"[a-zа-я0-9]+", reply.lower().replace("ё", "е")))
+        return any(anchor.lower().replace("ё", "е") not in normalized for anchor in anchors)
+
+    @staticmethod
     def _is_casual_status_check(user_text: str) -> bool:
         normalized = user_text.lower().replace("ё", "е")
         return bool(re.search(
@@ -717,6 +820,7 @@ class CharacterAgent:
         require_pending_response: bool,
         stale_duplicate: bool = False,
         status_grounding: bool = False,
+        required_anchors: list[str] | None = None,
     ) -> str:
         instruction = CharacterAgent._continuity_retry_instruction()
         if stale_duplicate:
@@ -734,6 +838,11 @@ class CharacterAgent:
                 " Пользователь лишь спросил, как у Iris дела. Не придумывай ему конкретные "
                 "занятия, происшествия, игры, начальника, поломки или проблемы. Ответь о себе "
                 "и, если нужно, задай только нейтральный вопрос вроде «А у тебя как дела?»."
+            )
+        if required_anchors:
+            instruction += (
+                " Обязательно явно отреагируй на последнюю содержательную часть всего блока "
+                f"и упомяни смысловые якоря: {', '.join(required_anchors)}."
             )
         return instruction
 
@@ -805,6 +914,19 @@ class CharacterAgent:
             {"reply": "Похоже, я зациклилась на прошлом ответе. Не хочу повторять его вместо реакции на твоё сообщение.", "emotion": "neutral", "intent": "unknown"},
             valid=False,
             reason="stale_duplicate_retry_failed",
+        )
+
+    @staticmethod
+    def _anchor_reply_fallback(anchors: list[str]) -> _ParseResult:
+        rendered = ", ".join(anchor.capitalize() for anchor in anchors)
+        return _ParseResult(
+            {
+                "reply": f"Поняла и не пропустила главное: {rendered}. Запомню.",
+                "emotion": "neutral",
+                "intent": "acknowledge",
+            },
+            valid=False,
+            reason="required_anchor_retry_failed",
         )
 
     @staticmethod
