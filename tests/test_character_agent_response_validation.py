@@ -316,6 +316,132 @@ def test_name_only_followup_retries_a_reply_that_ignores_pending_message() -> No
     assert "Двадцать" in result["reply"]
 
 
+def test_name_only_followup_uses_response_target_and_retries_generic_ack() -> None:
+    target = "а какую ты мне модель посоветовала я не помню"
+
+    class TargetContext:
+        def build(self, *_args, **_kwargs):
+            return BuiltContext(
+                [],
+                0,
+                {"pending_direct_message_count": 1},
+                target,
+                ("current",),
+                target,
+                ("question",),
+                ("модель", "посове"),
+            )
+
+    provider = SequencedLLMProvider([
+        '{"reply":"Я здесь. Ты снова ищешь свою задачу или уже что-то решил?","emotion":"neutral","intent":"casual_chat"}',
+        '{"reply":"Я советовала Whisper как более подходящую модель распознавания речи.","emotion":"neutral","intent":"casual_chat"}',
+    ])
+    agent = CharacterAgent(
+        provider,
+        InMemoryHistory(),
+        history_limit=0,
+        context_manager=TargetContext(),
+    )
+
+    result = anyio.run(agent.handle_user_message, "s1", "Ирис")
+
+    assert provider.calls == 2
+    assert "Whisper" in result["reply"]
+    assert any(
+        message.role == "user" and message.content == target
+        for message in provider.messages
+    )
+    assert any(
+        message.role == "system" and target in message.content
+        for message in provider.messages
+    )
+
+
+def test_name_only_followup_uses_grounded_target_fallback_after_two_misses() -> None:
+    target = "а какую ты мне модель посоветовала я не помню"
+
+    class TargetContext:
+        def build(self, *_args, **_kwargs):
+            return BuiltContext(
+                [],
+                0,
+                {"pending_direct_message_count": 1},
+                target,
+                ("current",),
+                target,
+                ("question",),
+                ("модель", "посове"),
+            )
+
+    ignored = (
+        '{"reply":"Я здесь. Ты снова ищешь свою задачу или уже что-то решил?",'
+        '"emotion":"neutral","intent":"casual_chat"}'
+    )
+    provider = SequencedLLMProvider([ignored, ignored])
+    agent = CharacterAgent(
+        provider,
+        InMemoryHistory(),
+        history_limit=0,
+        context_manager=TargetContext(),
+    )
+
+    result = anyio.run(agent.handle_user_message, "s1", "Ирис")
+
+    assert provider.calls == 2
+    assert "какую модель" in result["reply"]
+    assert "не хочу выдумывать" in result["reply"]
+
+
+def test_live_name_only_followup_is_guarded_before_stream_release() -> None:
+    target = "а какую ты мне модель посоветовала я не помню"
+
+    class TargetContext:
+        def build(self, *_args, **_kwargs):
+            return BuiltContext(
+                [],
+                0,
+                {"pending_direct_message_count": 1},
+                target,
+                ("current",),
+                target,
+                ("question",),
+                ("модель", "посове"),
+            )
+
+    class StreamingProvider:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def stream(self, _messages):
+            replies = [
+                "Я здесь. Ты снова ищешь свою задачу или уже что-то решил?",
+                "Я советовала Whisper как модель распознавания речи.",
+            ]
+            reply = replies[self.calls]
+            self.calls += 1
+            yield reply
+
+    async def collect(agent: CharacterAgent) -> str:
+        return "".join([
+            chunk
+            async for chunk in agent.stream_user_message("s1", "Ирис")
+        ])
+
+    provider = StreamingProvider()
+    agent = CharacterAgent(
+        provider,
+        InMemoryHistory(),
+        history_limit=0,
+        context_manager=TargetContext(),
+    )
+
+    reply = anyio.run(collect, agent)
+
+    assert provider.calls == 2
+    assert reply == "Я советовала Whisper как модель распознавания речи."
+    assert "снова ищешь" not in reply
+
+
 def test_handle_user_message_retries_stale_previous_assistant_reply() -> None:
     previous = "Горячим — это уже другой разговор. Ты каждый раз делаешь новую заварку или доливаешь кипяток?"
 

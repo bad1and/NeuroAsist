@@ -153,6 +153,56 @@ def test_question_word_is_not_mistaken_for_another_person_vocative() -> None:
     assert engine.is_implicit_address(transcript) is True
 
 
+@pytest.mark.parametrize(
+    "transcript",
+    [
+        "а какую ты мне модель посоветовала я не помню",
+        "какого ты провайдера советовала",
+        "каким ты способом это делала",
+        "которую ты версию имела в виду",
+    ],
+)
+def test_inflected_question_words_are_implicit_iris_addresses(
+    transcript: str,
+) -> None:
+    engine = ConversationDecisionEngine()
+    analysis = engine.analyze_addressing(transcript)
+
+    assert analysis.kind == "implicit_iris"
+    assert analysis.other_person is False
+    assert analysis.implicit_iris is True
+
+
+def test_unknown_other_name_requires_command_shaped_evidence() -> None:
+    engine = ConversationDecisionEngine()
+
+    assert engine.is_addressed_to_other("Арсен ты можешь включить демку") is True
+    assert engine.is_addressed_to_other("Арсен, привет") is True
+    assert engine.is_addressed_to_other("какую ты мне модель советовала") is False
+
+
+@pytest.mark.anyio
+async def test_screenshot_model_question_responds_without_second_wake_word(
+    tmp_path: Path,
+) -> None:
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    service = LiveConversationService(store, runtime())
+
+    result = await service.ingest_observation(
+        session_id="session",
+        transcript="а какую ты мне модель посоветовала я не помню",
+        language="ru",
+    )
+
+    assert result.decision.action is ConversationAction.RESPOND
+    assert result.decision.reason.value == "invited"
+    observations = store.recent_conversation_observations("session")
+    assert observations[0]["metadata"]["addressing_reasons"] == [
+        "interrogative_followup"
+    ]
+
+
 def test_discourse_filler_and_stt_iris_alias_remain_direct_addresses() -> None:
     engine = ConversationDecisionEngine()
     assert engine.is_implicit_address("кстати ну как меня зовут ты же помнишь") is True
@@ -253,7 +303,70 @@ async def test_follow_up_to_recent_iris_turn_keeps_conversation_addressed(tmp_pa
     assert result.decision.action is ConversationAction.RESPOND
     assert result.decision.reason.value == "invited"
     observations = store.recent_conversation_observations("session")
-    assert observations[0]["metadata"]["addressing_reasons"] == ["recent_iris_turn"]
+    assert observations[0]["metadata"]["addressing_reasons"] == ["recent_dialogue_continuity"]
+
+
+@pytest.mark.anyio
+async def test_recent_iris_timer_alone_does_not_make_ambient_speech_direct(
+    tmp_path: Path,
+) -> None:
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    service = LiveConversationService(store, runtime())
+    session = service.session("session")
+    session.last_iris_activity_at = __import__("time").monotonic()
+
+    result = await service.ingest_observation(
+        session_id="session",
+        transcript="мы завтра созвонимся в десять",
+        language="ru",
+    )
+
+    assert result.decision.action is ConversationAction.OBSERVE
+    assert result.decision.reason.value == "relevant_opening"
+
+
+@pytest.mark.anyio
+async def test_short_answer_to_recent_iris_question_remains_a_followup(
+    tmp_path: Path,
+) -> None:
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    service = LiveConversationService(store, runtime())
+    session = service.session("session")
+    session.last_iris_activity_at = __import__("time").monotonic()
+    session.last_generated_assistant_reply = "Какую модель ты хочешь поставить?"
+
+    result = await service.ingest_observation(
+        session_id="session",
+        transcript="Whisper третьей версии",
+        language="ru",
+    )
+
+    assert result.decision.action is ConversationAction.RESPOND
+    observations = store.recent_conversation_observations("session")
+    assert observations[0]["metadata"]["addressing_reasons"] == [
+        "recent_dialogue_continuity"
+    ]
+
+
+@pytest.mark.anyio
+async def test_balanced_followup_window_expires_after_twenty_five_seconds(
+    tmp_path: Path,
+) -> None:
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    service = LiveConversationService(store, runtime())
+    session = service.session("session")
+    session.last_iris_activity_at = __import__("time").monotonic() - 26
+
+    result = await service.ingest_observation(
+        session_id="session",
+        transcript="так в смысле я разраб если что",
+        language="ru",
+    )
+
+    assert result.decision.action is ConversationAction.OBSERVE
 
 
 @pytest.mark.anyio

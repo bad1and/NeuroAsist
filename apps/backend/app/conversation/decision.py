@@ -32,6 +32,17 @@ class DecisionContext:
     addressed_to_other: bool = False
 
 
+@dataclass(frozen=True)
+class AddressingAnalysis:
+    """Deterministic addressing evidence shared by decision and context repair."""
+
+    kind: str
+    direct_iris: bool
+    implicit_iris: bool
+    other_person: bool
+    reasons: tuple[str, ...] = ()
+
+
 class ConversationDecisionEngine:
     """Hard gates plus deterministic engagement scoring.
 
@@ -51,8 +62,17 @@ class ConversationDecisionEngine:
         r"дай|помоги|посоветуй|найди|открой|включи|выключи)\b|"
         r"^\s*(?:(?:а|ну|кстати|слушай|смотри|короче)\s+){0,3}"
         r"(?:что|кто|где|куда|откуда|когда|почему|зачем|как|"
-        r"какой|какая|какие|сколько|чем)(?=\s|[?？])"
+        r"какой|какая|какое|какие|какую|какою|какого|какому|каким|каком|"
+        r"каких|какими|который|которая|которое|которые|которую|которого|"
+        r"которому|которым|котором|которых|которыми|сколько|чем)(?=\s|[?？])"
         r")"
+    )
+    _interrogative_opening = re.compile(
+        r"(?iu)^\s*(?:(?:а|ну|кстати|слушай|смотри|короче)\s+){0,3}"
+        r"(?:что|кто|где|куда|откуда|когда|почему|зачем|как|"
+        r"какой|какая|какое|какие|какую|какою|какого|какому|каким|каком|"
+        r"каких|какими|который|которая|которое|которые|которую|которого|"
+        r"которому|которым|котором|которых|которыми|сколько|чем)(?=\s|[?？])"
     )
     _self_talk = re.compile(r"(?iu)\b(?:думаю вслух|сам с собой|не обращай внимания)\b")
     _question = re.compile(r"[?？]\s*$")
@@ -66,16 +86,27 @@ class ConversationDecisionEngine:
     )
     _generic_other_vocative = re.compile(
         r"(?iu)^\s*(?:(?:а|ну|так|эй|слушай)\s+){0,2}"
-        r"(?P<name>[а-яёa-z]{2,20})[\s,]+"
-        r"(?:ты|вы|можешь|можете|зайди|зайдите|подойди|подойдите|включи|"
+        r"(?P<name>[а-яёa-z]{2,20})(?P<separator>,\s*|\s+)"
+        r"(?P<tail>.+)$"
+    )
+    _generic_other_command = re.compile(
+        r"(?iu)^(?:"
+        r"(?:ты|вы)\s+(?:можешь|можете|зайди|зайдите|подойди|подойдите|"
+        r"включи|включите|выключи|выключите|скажи|скажите|посмотри|"
+        r"посмотрите|давай|давайте)\b|"
+        r"(?:можешь|можете|зайди|зайдите|подойди|подойдите|включи|"
         r"включите|выключи|выключите|скажи|скажите|посмотри|посмотрите|"
         r"давай|давайте|привет|пока)\b"
+        r")"
     )
     _non_names = {
         "iris", "айрис", "ирис", "ириска", "ириск", "ирес", "иреск",
         "а", "ну", "так", "да", "нет", "блин", "слушай", "смотри", "кстати",
         "короче", "что", "кто", "где", "куда", "откуда", "когда", "почему",
-        "зачем", "как", "какой", "какая", "какие", "сколько", "чем",
+        "зачем", "как", "какой", "какая", "какое", "какие", "какую", "какою",
+        "какого", "какому", "каким", "каком", "каких", "какими", "который",
+        "которая", "которое", "которые", "которую", "которого", "которому",
+        "которым", "котором", "которых", "которыми", "сколько", "чем",
     }
 
     def decide(
@@ -240,7 +271,46 @@ class ConversationDecisionEngine:
         if self._known_other_name.search(text):
             return True
         match = self._generic_other_vocative.search(text)
-        return bool(match and match.group("name").casefold() not in self._non_names)
+        if match is None:
+            return False
+        candidate = match.group("name").casefold()
+        if candidate in self._non_names:
+            return False
+        # Unknown names need stronger evidence than an arbitrary token followed
+        # by "ты/вы".  STT often omits commas, so a command-shaped continuation
+        # remains sufficient (for example, "Арсен ты можешь...").
+        tail = match.group("tail").strip()
+        comma_pronoun = bool(
+            match.group("separator").lstrip().startswith(",")
+            and re.match(r"(?iu)^(?:ты|вы)\b", tail)
+        )
+        return bool(comma_pronoun or self._generic_other_command.search(tail))
+
+    def analyze_addressing(self, transcript: str) -> AddressingAnalysis:
+        """Return one consistent addressing classification with audit reasons."""
+        direct = bool(self._name.search(transcript))
+        other = False if direct else self.is_addressed_to_other(transcript)
+        implicit = False if direct or other else self.is_implicit_address(transcript)
+        if direct:
+            return AddressingAnalysis(
+                "direct_iris", True, False, False, ("direct_iris",),
+            )
+        if other:
+            return AddressingAnalysis(
+                "other_person", False, False, True, ("other_vocative",),
+            )
+        if implicit:
+            reason = (
+                "interrogative_followup"
+                if self._interrogative_opening.search(transcript)
+                else "implicit_request"
+            )
+            return AddressingAnalysis(
+                "implicit_iris", False, True, False, (reason,),
+            )
+        return AddressingAnalysis(
+            "ambiguous", False, False, False, ("insufficient_addressing_evidence",),
+        )
 
     @staticmethod
     def appraise(

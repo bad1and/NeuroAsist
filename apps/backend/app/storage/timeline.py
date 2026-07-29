@@ -1993,16 +1993,18 @@ class TimelineStore:
             active = self._current_episode_row(connection)
             active_id = active["id"] if active else ""
             current_sequence = None
+            current_created_at = None
             if current_message_id is not None:
                 current = connection.execute(
-                    "SELECT sequence_no FROM conversation_messages WHERE id = ? AND timeline_id = ? AND (? IS NULL OR session_id = ?)",
+                    "SELECT sequence_no, created_at FROM conversation_messages WHERE id = ? AND timeline_id = ? AND (? IS NULL OR session_id = ?)",
                     (current_message_id, PRIMARY_TIMELINE_ID, session_id, session_id),
                 ).fetchone()
                 if current is not None:
                     current_sequence = int(current["sequence_no"])
+                    current_created_at = str(current["created_at"])
             recent = connection.execute(
                 """
-                SELECT m.id, m.role, m.content, m.corrected_content, m.input_mode, m.sequence_no,
+                SELECT m.id, m.role, m.content, m.corrected_content, m.input_mode, m.sequence_no, m.created_at,
                        o.decision_action, o.decision_reason, o.speaker_role,
                        o.addressedness
                 FROM conversation_messages m
@@ -2031,8 +2033,8 @@ class TimelineStore:
                 ).fetchone()
                 lower = int(previous_assistant["sequence_no"] or 0) if previous_assistant else 0
                 pending_user_rows = connection.execute(
-                    """SELECT m.id, m.role, m.content, m.corrected_content, m.input_mode, m.sequence_no,
-                              o.decision_action, o.decision_reason, o.speaker_role, o.addressedness
+                    """SELECT m.id, m.role, m.content, m.corrected_content, m.input_mode, m.sequence_no, m.created_at,
+                               o.decision_action, o.decision_reason, o.speaker_role, o.addressedness
                        FROM conversation_messages m
                        LEFT JOIN conversation_observations o ON o.message_id = m.id
                        WHERE m.timeline_id = ? AND (? IS NULL OR m.session_id = ?)
@@ -2085,6 +2087,7 @@ class TimelineStore:
         return {
             "active_episode_id": active_id or None,
             "causal_upper_bound": current_sequence,
+            "current_created_at": current_created_at,
             "recent": [dict(row) for row in reversed(recent)],
             "pending_user_rows": [dict(row) for row in pending_user_rows],
             "summaries": [dict(row) for row in summaries],
