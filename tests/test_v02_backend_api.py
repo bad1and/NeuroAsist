@@ -69,6 +69,7 @@ def test_public_settings_does_not_return_api_key(client: TestClient) -> None:
     assert body["voice_language"] == "ru"
     assert body["voice_stt_model"] == "v3_rnnt"
     assert body["voice_tts_enabled"] is True
+    assert body["avatar_placement"] == "desktop_overlay"
     assert body["voice_tts_provider"] == app.state.voice_service.tts_provider.name
     assert body["voice_tts_style"] == "auto"
     assert body["voice_tts_voice"]
@@ -90,6 +91,19 @@ def test_runtime_settings_rejects_model_patch(client: TestClient) -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_runtime_avatar_placement_can_be_updated_and_validated(client: TestClient) -> None:
+    original = client.get("/settings/public").json()["avatar_placement"]
+    try:
+        response = client.patch("/settings/runtime", json={"avatar_placement": "in_app"})
+        assert response.status_code == 200
+        assert response.json()["avatar_placement"] == "in_app"
+
+        unsupported = client.patch("/settings/runtime", json={"avatar_placement": "outside"})
+        assert unsupported.status_code == 400
+    finally:
+        client.patch("/settings/runtime", json={"avatar_placement": original})
 
 
 def test_runtime_voice_settings_can_be_updated(client: TestClient) -> None:

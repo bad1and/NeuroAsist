@@ -1,6 +1,7 @@
 import type {
   AvatarStatusResponse,
   AvatarOverlaySettings,
+  AvatarPlacement,
   BackendEvent,
   ChatResponse,
   PublicSettings,
@@ -164,6 +165,7 @@ export function updateRuntimeSettings(payload: {
   live_conversation_mood_recovery?: PublicSettings["live_conversation_mood_recovery"];
   live_conversation_recent_event_weight?: PublicSettings["live_conversation_recent_event_weight"];
   live_conversation_echo_mode?: PublicSettings["live_conversation_echo_mode"];
+  avatar_placement?: AvatarPlacement;
 }): Promise<PublicSettings> {
   return requestJson<PublicSettings>("/settings/runtime", {
     method: "PATCH",

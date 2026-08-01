@@ -30,7 +30,16 @@ The dev shell uses the repository `.venv\Scripts\python.exe` when present. `Comm
 
 Build the Unity renderer first with `npm run build:avatar --prefix apps/desktop`. In development the shell automatically discovers `apps/avatar-unity/Builds/NeuroAsistAvatar/NeuroAsistAvatar.exe`; production bundles include that directory as an `avatar` resource. `NEUROASIST_AVATAR_EXECUTABLE` remains an override for a custom renderer.
 
-The shell gives Unity `NEUROASIST_BACKEND_URL` and `NEUROASIST_BACKEND_TOKEN`, enabling it to connect to the randomly selected, authenticated backend port. The tray **Show / hide avatar** action controls the live overlay without restarting the renderer. Hold `Ctrl+Alt` to temporarily make the click-through overlay interactive for drag/repositioning; `Ctrl+Alt+A` shows or hides it.
+The shell gives Unity `NEUROASIST_BACKEND_URL` and `NEUROASIST_BACKEND_TOKEN`, enabling it to connect to the randomly selected, authenticated backend port. The tray **Show / hide avatar** action controls the active avatar presentation without restarting the renderer. In **Separate overlay** mode, hold `Ctrl+Alt` to temporarily make the click-through overlay interactive for drag/repositioning; `Ctrl+Alt+A` shows or hides it.
+
+## Avatar placement
+
+In **Settings → System → Avatar**, choose where the renderer appears:
+
+- **Inside Iris** presents the Unity player as an Iris-owned transparent native surface in the lower-left column of the **Dialog** screen. It is hidden outside the chat, follows the chat-slot bounds when the window moves or resizes, and has no second visible application window or Alt+Tab entry.
+- **Separate overlay** preserves the desktop companion behaviour: a borderless, click-through Unity window that can stay above other applications.
+
+The choice is stored with the other non-secret runtime settings. On Windows, the in-app mode starts Unity hidden through its supported `-parentHWND ... delayed` path, waits until its graphics surface is ready, then manages it as a transparent popup owned by the Iris window. React supplies the exact DPI-aware chat-slot bounds, while Tauri reapplies them when Iris moves or resizes. Unity still runs as a supervised child process in this mode, so speech, lip sync, gestures and the authenticated WebSocket protocol remain unchanged.
 
 ## Safe Mode and recovery
 

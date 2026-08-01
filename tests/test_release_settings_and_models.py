@@ -11,13 +11,14 @@ from apps.backend.app.storage.backups import BackupService
 
 def test_runtime_settings_survive_restart_without_secrets(tmp_path: Path) -> None:
     store = RuntimeSettingsStore(tmp_path / "settings.json")
-    values = RuntimeSettings(voice_language="en", memory_mode="automatic")
+    values = RuntimeSettings(voice_language="en", memory_mode="automatic", avatar_placement="in_app")
 
     store.save(values)
     loaded = store.load(RuntimeSettings())
 
     assert loaded.voice_language == "en"
     assert loaded.memory_mode == "automatic"
+    assert loaded.avatar_placement == "in_app"
     assert "api" not in (tmp_path / "settings.json").read_text(encoding="utf-8").lower()
 
 

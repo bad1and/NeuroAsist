@@ -219,6 +219,26 @@ select { appearance: auto; }
 
 .avatar-controls { padding: 0 16px 16px; }.disclosure-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; color: var(--subtle); font-size: 12px; }.avatar-summary-grid, .avatar-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); border-top: 1px solid var(--border); }.avatar-summary-grid .info-row, .avatar-grid .info-row { min-height: 62px; padding: 10px 12px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; }.avatar-technical { border-bottom: 1px solid var(--border); }.avatar-technical > summary { min-height: 42px; padding: 12px 0; color: var(--muted); cursor: pointer; list-style: none; font-size: 13px; }.avatar-technical > summary::-webkit-details-marker { display: none; }.avatar-options { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 13px 0; border-bottom: 1px solid var(--border); }.avatar-options label { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }.avatar-options input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }.avatar-test-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px 16px; padding: 14px 0; }.avatar-test-grid label { display: grid; gap: 7px; color: var(--muted); font-size: 12px; }.avatar-test-grid input, .avatar-test-grid select { min-width: 0; min-height: 36px; padding: 7px 9px; }.avatar-test-grid input[type="range"] { padding: 0; accent-color: var(--accent); }.avatar-test-actions { display: flex; flex-wrap: wrap; gap: 8px; }.avatar-test-actions button { min-height: 36px; padding: 8px 12px; }
 
+/* The Unity surface is a native owned window; this DOM element is its precise,
+   transparent anchor. Keeping it in a dedicated left column protects the
+   message stream and composer instead of placing a rectangle above them. */
+.chat-content { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; }
+.chat-panel.has-in-app-avatar { display: grid; grid-template-columns: clamp(220px, 28%, 330px) minmax(0, 1fr); column-gap: clamp(12px, 2vw, 28px); }
+.chat-panel.has-in-app-avatar .in-app-avatar-stage { align-self: end; width: 100%; min-width: 0; min-height: 300px; height: min(58vh, 500px); pointer-events: none; }
+.chat-panel.has-in-app-avatar .chat-content { min-height: 0; }
+.avatar-placement { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0 0 14px; border: 0; border-bottom: 1px solid var(--border); }
+.avatar-placement legend { width: 100%; margin-bottom: 8px; color: var(--text); font-size: 13px; font-weight: 650; }
+.avatar-placement label { display: flex; align-items: flex-start; gap: 9px; min-height: 72px; padding: 10px; border-radius: 10px; color: var(--muted); background: var(--color-surface-raised); cursor: pointer; }
+.avatar-placement input { flex: 0 0 auto; width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--accent); }
+.avatar-placement span { display: grid; gap: 3px; }.avatar-placement strong { color: var(--text); font-size: 13px; }.avatar-placement small { color: var(--subtle); font-size: 11px; line-height: 1.35; }
+.avatar-placement:disabled label { cursor: not-allowed; opacity: .56; }
+
+@media (max-width: 900px) {
+  .chat-panel.has-in-app-avatar { grid-template-columns: minmax(176px, 30%) minmax(0, 1fr); column-gap: 12px; }
+  .chat-panel.has-in-app-avatar .in-app-avatar-stage { min-height: 250px; height: min(48vh, 380px); }
+  .avatar-placement { grid-template-columns: 1fr; }
+}
+
 .setup-shell { display: grid; min-height: 100dvh; place-items: center; padding: 24px; }.setup-workspace { width: min(100%, 520px); }.setup-card { padding: 32px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); }.setup-card h1 { margin: 8px 0 10px; font-size: 27px; letter-spacing: -.03em; }.setup-card p { color: var(--muted); line-height: 1.55; }.setup-form { display: grid; gap: 16px; margin-top: 24px; }.setup-form label { display: grid; gap: 8px; color: var(--muted); font-size: 13px; }.setup-form .primary-button { min-height: 44px; }.setup-hint { margin-top: 20px; color: var(--subtle) !important; font-size: 12px; }
 
 @keyframes pulse { 50% { opacity: .25; transform: translateY(-2px); } }

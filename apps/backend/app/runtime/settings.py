@@ -30,6 +30,10 @@ class RuntimeSettings:
     live_conversation_mood_recovery: str = "natural"
     live_conversation_recent_event_weight: str = "balanced"
     live_conversation_echo_mode: str = "auto"
+    # The desktop shell consumes this preference before it starts the Unity
+    # renderer.  It intentionally lives next to the overlay preferences so a
+    # backup restores the avatar exactly as the person left it.
+    avatar_placement: str = "desktop_overlay"
     avatar_overlay_visible: bool = True
     avatar_overlay_always_on_top: bool = True
     avatar_overlay_locked: bool = True
@@ -71,6 +75,8 @@ class RuntimeSettingsStore:
         # behaviour after upgrading.
         if values.get("memory_mode") == "ask":
             values["memory_mode"] = "balanced"
+        if values.get("avatar_placement") not in {None, "desktop_overlay", "in_app"}:
+            values["avatar_placement"] = defaults.avatar_placement
         try:
             loaded = RuntimeSettings(**{**defaults_dict, **values})
         except TypeError:
