@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import warnings
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -1632,16 +1633,26 @@ class SileroTTSProvider(TTSProvider):
         else:
             self._configure_certifi_ca_bundle()
             try:
-                model, _ = torch.hub.load(
-                    repo_or_dir="snakers4/silero-models",
-                    model="silero_tts",
-                    language="ru",
-                    speaker=self.model_name,
-                    # The desktop backend has no interactive stdin. Without an
-                    # explicit trust decision Torch Hub blocks startup waiting
-                    # for a confirmation that cannot be entered by the user.
-                    trust_repo=True,
-                )
+                # The cached Silero checkpoint dynamically compiles a helper
+                # containing an invalid escape sequence. It is third-party
+                # model code and does not affect synthesis, but it otherwise
+                # prints a misleading warning on every application start.
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore",
+                        message=r"invalid escape sequence",
+                        category=SyntaxWarning,
+                    )
+                    model, _ = torch.hub.load(
+                        repo_or_dir="snakers4/silero-models",
+                        model="silero_tts",
+                        language="ru",
+                        speaker=self.model_name,
+                        # The desktop backend has no interactive stdin. Without an
+                        # explicit trust decision Torch Hub blocks startup waiting
+                        # for a confirmation that cannot be entered by the user.
+                        trust_repo=True,
+                    )
             except Exception as exc:
                 message = str(exc)
                 if "CERTIFICATE_VERIFY_FAILED" in message or "[SSL:" in message:

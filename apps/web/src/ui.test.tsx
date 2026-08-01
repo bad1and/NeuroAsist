@@ -14,7 +14,7 @@ const api = vi.hoisted(() => ({
   getVoiceTtsStatus: vi.fn(), sendChatMessage: vi.fn(), sendVoiceMessage: vi.fn(),
   installModel: vi.fn(), removeModel: vi.fn(), createBackup: vi.fn(),
   clearMemories: vi.fn(), reindexMemories: vi.fn(), resetAllCompanionData: vi.fn(),
-  resetConversationSession: vi.fn(),
+  resetConversationSession: vi.fn(), getConversationSession: vi.fn(),
   confirmMemory: vi.fn(), rejectMemory: vi.fn(), deleteMemory: vi.fn(), restoreMemory: vi.fn(), updateMemory: vi.fn(),
   deleteTimelineRange: vi.fn(), saveDesktopApiKey: vi.fn(), sendAvatarTestEmotion: vi.fn(),
   sendAvatarTestGesture: vi.fn(), sendAvatarTestPhrase: vi.fn(), stopAvatar: vi.fn(), updateAvatarOverlay: vi.fn(),
@@ -67,6 +67,7 @@ beforeEach(() => {
   api.getEvents.mockResolvedValue({ events: [] });
   api.getTimelineMessages.mockResolvedValue({ items: [], next_offset: null });
   api.resetConversationSession.mockResolvedValue({ session_id: "test-session", messages: 0, episodes: 0 });
+  api.getConversationSession.mockResolvedValue({ session_id: "test-session", created: false });
   api.getModels.mockResolvedValue({ models: [] });
   api.getBackups.mockResolvedValue([]);
   api.getAvatarOverlay.mockResolvedValue({ visible: true, always_on_top: true, locked: true, scale: 1, monitor: "", x: 0, y: 0, width: 0, height: 0 });
@@ -93,6 +94,49 @@ describe("русский интерфейс", () => {
     expect(container.querySelector(".chat-panel .chat-composer")).toBeInTheDocument();
     expect(container.querySelector(".chat-composer textarea")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Свободные руки" })).toBeInTheDocument();
+  });
+
+  it("восстанавливает активную сессию без сброса диалога при новом входе", async () => {
+    render(<App />);
+
+    await screen.findByRole("button", { name: "Диалог" });
+    await waitFor(() => expect(api.getConversationSession).toHaveBeenCalledTimes(1));
+    expect(api.resetConversationSession).not.toHaveBeenCalled();
+  });
+
+  it("сохраняет открытый чат при переходе между разделами", async () => {
+    api.getTimelineMessages.mockResolvedValue({
+      items: [{ id: "saved-message", role: "user", content: "Не теряй меня", metadata: {} }],
+      next_offset: null,
+    });
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
+    expect(await screen.findByText("Не теряй меня")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Обзор" }));
+    fireEvent.click(screen.getByRole("button", { name: "Диалог" }));
+
+    expect(screen.getByText("Не теряй меня")).toBeVisible();
+    expect(api.getTimelineMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it("открывает сохранённый диалог на последнем сообщении", async () => {
+    api.getTimelineMessages.mockResolvedValue({
+      items: [{ id: "last-message", role: "assistant", content: "Последнее сообщение", metadata: {} }],
+      next_offset: null,
+    });
+    const { container } = render(<App />);
+
+    await screen.findByText("Последнее сообщение");
+    const list = container.querySelector<HTMLElement>(".chat-panel .message-list");
+    expect(list).not.toBeNull();
+    Object.defineProperty(list!, "scrollHeight", { configurable: true, value: 640 });
+    fireEvent.click(screen.getByRole("button", { name: "Диалог" }));
+
+    await waitFor(() => expect(HTMLElement.prototype.scrollTo).toHaveBeenCalledWith({
+      top: 640,
+      behavior: "auto",
+    }));
   });
 
   it("открывает обзор с реальными данными и переводит к диалогу", async () => {
@@ -200,7 +244,7 @@ describe("русский интерфейс", () => {
     expect(screen.getByText(/Долгосрочная память Iris останется/)).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "Сбросить сессию" })[1]);
 
-    await waitFor(() => expect(api.resetConversationSession).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(api.resetConversationSession).toHaveBeenCalledTimes(1));
   });
 
   it("оставляет только историю и забывание записи", async () => {

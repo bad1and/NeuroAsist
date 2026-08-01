@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   Brain,
@@ -28,6 +28,7 @@ import {
   getEvents,
   getTimelineJournal,
   getTimelineMessages,
+  getConversationSession,
   getSettings,
   getConversationDebug,
   getStatus,
@@ -328,12 +329,22 @@ export default function App() {
     }
   }, []);
 
+  const resumeSession = useCallback(async () => {
+    setStartingSession(true);
+    try {
+      const session = await getConversationSession();
+      setSessionId(session.session_id);
+    } finally {
+      setStartingSession(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!servicesReady || !settings || setupRequired || sessionId || startingSession) return;
-    void startFreshSession().catch((error) => {
-      setStatusError(error instanceof Error ? error.message : "Не удалось начать новую сессию.");
+    void resumeSession().catch((error) => {
+      setStatusError(error instanceof Error ? error.message : "Не удалось восстановить сессию.");
     });
-  }, [servicesReady, settings, setupRequired, sessionId, startingSession, startFreshSession]);
+  }, [servicesReady, settings, setupRequired, sessionId, startingSession, resumeSession]);
 
   useEffect(() => {
     if (!servicesReady) return;
@@ -421,18 +432,19 @@ export default function App() {
               onOpenSettings={() => switchView("settings")}
             />
           )}
-          {activeView === "chat" && (
+          <div hidden={activeView !== "chat"}>
             <ChatPage
               key={sessionId ?? "starting"}
               sessionId={sessionId}
               sessionStarting={startingSession}
+              isActive={activeView === "chat"}
               events={events}
               settings={settings}
               avatarStatus={avatarStatus}
               onRefreshEvents={refreshEvents}
               onOpenMemory={() => switchView("memory")}
             />
-          )}
+          </div>
           {activeView === "journal" && <JournalPage />}
           {activeView === "memory" && <MemoryPage />}
           {activeView === "state" && <StatePage events={events} />}
@@ -557,6 +569,7 @@ function NavigationButton({
 function ChatPage({
   sessionId,
   sessionStarting,
+  isActive,
   events,
   settings,
   avatarStatus,
@@ -565,6 +578,7 @@ function ChatPage({
 }: {
   sessionId: string | null;
   sessionStarting: boolean;
+  isActive: boolean;
   events: BackendEvent[];
   settings: PublicSettings | null;
   avatarStatus: AvatarStatusResponse | null;
@@ -636,7 +650,7 @@ function ChatPage({
 
   useEffect(() => {
       if (!sessionId) return;
-      void getTimelineMessages().then((payload) => {
+      void getTimelineMessages(50, sessionId).then((payload) => {
       setMessages(payload.items
         .filter((message) => message.role === "user" || message.role === "assistant")
         .map((message) => ({ id: message.id, role: message.role as "user" | "assistant", content: message.content })));
@@ -1061,12 +1075,25 @@ function ChatPage({
     [pollVoiceTtsStatus, showMemoryUpdates],
   );
 
+  useLayoutEffect(() => {
+    // ChatPage remains mounted while another section is open so the live
+    // connection survives navigation.  Its list can therefore receive its
+    // history while hidden; scroll only after it becomes visible and has a
+    // measurable layout.
+    if (!isActive || messages.length === 0) return;
+    listRef.current?.scrollTo({
+      top: listRef.current.scrollHeight,
+      behavior: "auto",
+    });
+  }, [isActive, messages.length]);
+
   useEffect(() => {
+    if (!isActive) return;
     listRef.current?.scrollTo({
       top: listRef.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [messages]);
+  }, [isActive, messages]);
 
   useEffect(() => {
     for (const event of events) {

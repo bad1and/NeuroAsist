@@ -171,15 +171,32 @@ class SileroVadProvider(VadProvider):
 
     @property
     def ready(self) -> bool:
-        return self._first_model is not None
+        # `_first_model` is deliberately consumed by the first session so it
+        # gets an isolated streaming state.  Subsequent sessions load their
+        # own instance from the same local source; consuming that warm model
+        # must not make the provider look unavailable.
+        return self._torch is not None and (
+            self._first_model is not None
+            or self._model_path is not None
+            or self._package_loader is not None
+        )
 
     def create_stream(self) -> VadStream:
         if not self.ready:
             raise VadRuntimeError(self.error or "Silero VAD is unavailable")
         model = self._first_model
         self._first_model = None
-        if model is None:
-            model = self._load_path_model() if self._model_path is not None else self._load_package_model()
+        try:
+            if model is None:
+                model = (
+                    self._load_path_model()
+                    if self._model_path is not None
+                    else self._load_package_model()
+                )
+        except Exception as exc:
+            raise VadRuntimeError(
+                f"Could not create Silero VAD stream: {type(exc).__name__}"
+            ) from exc
         return SileroVadStream(model, self._torch)
 
     def _load_path_model(self):
@@ -237,7 +254,11 @@ class VadGate:
             self.state = "end_pending"
             self.silence_samples = samples
         elif self.state == "end_pending":
-            if value >= self.start_threshold:
+            # The lower threshold is the hangover threshold. A frame that is
+            # quieter than speech onset but still above it is ongoing speech,
+            # not silence. Keeping the previous silent frames in that case
+            # made a short dip in volume accumulate across a resumed phrase.
+            if not below_end:
                 self.state = "speech"
                 self.silence_samples = 0
             elif below_end:
@@ -268,7 +289,7 @@ class VadGate:
             self.state = "end_pending"
             self._legacy_silence_at = timestamp
         elif self.state == "end_pending":
-            if value >= self.start_threshold:
+            if value >= self.end_threshold:
                 self.state = "speech"
                 self._legacy_silence_at = None
             elif (
@@ -760,9 +781,23 @@ class VoiceInputSessionManager:
         return task
 
     def _append_ring(self, session: InputSession, pcm16: bytes) -> None:
+        max_bytes = int(session.sample_rate * 2 * self._pre_roll_ms / 1000)
+        if max_bytes <= 0:
+            session.ring.clear()
+            session.ring_bytes = 0
+            return
+        # The browser normally sends 20 ms frames, but an initial WebSocket
+        # backlog or a delayed AudioWorklet may yield one frame larger than the
+        # whole pre-roll window. Dropping that complete frame loses the start
+        # of the first spoken word exactly when VAD confirms speech.
+        if len(pcm16) >= max_bytes:
+            tail = pcm16[-max_bytes:]
+            session.ring.clear()
+            session.ring.append(tail)
+            session.ring_bytes = len(tail)
+            return
         session.ring.append(pcm16)
         session.ring_bytes += len(pcm16)
-        max_bytes = int(session.sample_rate * 2 * self._pre_roll_ms / 1000)
         while session.ring and session.ring_bytes > max_bytes:
             session.ring_bytes -= len(session.ring.popleft())
 

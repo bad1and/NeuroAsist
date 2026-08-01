@@ -139,6 +139,10 @@ export function resetConversationSession(): Promise<{ session_id: string; messag
   return requestJson("/conversation/session/reset", { method: "POST" });
 }
 
+export function getConversationSession(): Promise<{ session_id: string; created: boolean }> {
+  return requestJson("/conversation/session", { method: "POST" });
+}
+
 export function updateRuntimeSettings(payload: {
   personality?: string;
   voice_language?: string;
@@ -313,8 +317,12 @@ export function createBackup(): Promise<{ name: string; size_bytes: number; crea
   return requestJson("/backups", { method: "POST" });
 }
 
-export function getTimelineMessages(limit = 50): Promise<{ items: TimelineMessage[]; next_offset: number | null }> {
-  return requestJson(`/timeline/messages?limit=${limit}`);
+export function getTimelineMessages(
+  limit = 50,
+  sessionId?: string,
+): Promise<{ items: TimelineMessage[]; next_offset: number | null }> {
+  const session = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
+  return requestJson(`/timeline/messages?limit=${limit}${session}`);
 }
 
 export function getTimelineJournal(): Promise<{ items: TimelineJournalItem[] }> {

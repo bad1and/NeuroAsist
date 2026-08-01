@@ -146,6 +146,15 @@ def require_active_session(request: Request, session_id: str) -> None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Session is no longer active")
 
 
+@router.post("/session")
+async def open_session(request: Request) -> dict[str, object]:
+    """Resume the active browser session without treating a reload as reset."""
+    store = getattr(request.app.state, "timeline_store", None)
+    if store is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Timeline V2 is disabled")
+    return await asyncio.to_thread(store.ensure_active_session)
+
+
 @router.post("/session/reset")
 async def reset_session(request: Request) -> dict[str, object]:
     store = getattr(request.app.state, "timeline_store", None)

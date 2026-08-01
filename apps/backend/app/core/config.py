@@ -132,11 +132,14 @@ class Settings(BaseSettings):
     voice_energy_vad_end_rms: float = 0.012
     voice_silero_vad_min_speech_ms: int = 64
     voice_energy_vad_min_speech_ms: int = 120
-    voice_vad_pre_roll_ms: int = 500
+    voice_vad_pre_roll_ms: int = 900
     voice_vad_post_roll_ms: int = 180
-    voice_vad_end_silence_ms: int = 480
-    voice_vad_live_end_silence_ms: int = 320
-    voice_vad_live_fallback_end_silence_ms: int = 650
+    # These are deliberately more patient than a single word boundary. The
+    # live turn detector decides whether a confirmed VAD boundary is semantic;
+    # VAD itself must not split a natural thinking pause.
+    voice_vad_end_silence_ms: int = 720
+    voice_vad_live_end_silence_ms: int = 750
+    voice_vad_live_fallback_end_silence_ms: int = 1100
     voice_stt_terms_path: str | None = None
     voice_input_diagnostic_audio: bool = False
     voice_input_diagnostic_dir: str | None = None

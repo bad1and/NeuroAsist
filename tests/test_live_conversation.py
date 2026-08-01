@@ -307,14 +307,15 @@ async def test_follow_up_to_recent_iris_turn_keeps_conversation_addressed(tmp_pa
 
 
 @pytest.mark.anyio
-async def test_recent_iris_timer_alone_does_not_make_ambient_speech_direct(
+async def test_one_to_one_primary_speech_responds_without_a_name(
     tmp_path: Path,
 ) -> None:
     store = TimelineStore(tmp_path / "timeline.sqlite3")
     store.init_db()
-    service = LiveConversationService(store, runtime())
-    session = service.session("session")
-    session.last_iris_activity_at = __import__("time").monotonic()
+    service = LiveConversationService(
+        store,
+        runtime(live_conversation_address_strictness="strict"),
+    )
 
     result = await service.ingest_observation(
         session_id="session",
@@ -322,8 +323,12 @@ async def test_recent_iris_timer_alone_does_not_make_ambient_speech_direct(
         language="ru",
     )
 
-    assert result.decision.action is ConversationAction.OBSERVE
-    assert result.decision.reason.value == "relevant_opening"
+    assert result.decision.action is ConversationAction.RESPOND
+    assert result.decision.reason.value == "invited"
+    observations = store.recent_conversation_observations("session")
+    assert observations[0]["metadata"]["addressing_reasons"] == [
+        "one_to_one_primary_speech"
+    ]
 
 
 @pytest.mark.anyio
@@ -366,14 +371,17 @@ async def test_balanced_followup_window_expires_after_twenty_five_seconds(
         language="ru",
     )
 
-    assert result.decision.action is ConversationAction.OBSERVE
+    assert result.decision.action is ConversationAction.RESPOND
 
 
 @pytest.mark.anyio
 async def test_other_person_address_suppresses_followups_until_iris_is_called(tmp_path: Path) -> None:
     store = TimelineStore(tmp_path / "timeline.sqlite3")
     store.init_db()
-    service = LiveConversationService(store, runtime())
+    service = LiveConversationService(
+        store,
+        runtime(live_conversation_participant_mode="group"),
+    )
     session = service.session("session")
     session.last_iris_activity_at = __import__("time").monotonic()
 
@@ -414,7 +422,11 @@ async def test_other_person_speech_does_not_change_iris_state_or_enter_memory(tm
     store = TimelineStore(tmp_path / "timeline.sqlite3")
     store.init_db()
     memory = RecordingMemory()
-    service = LiveConversationService(store, runtime(), memory_service=memory)
+    service = LiveConversationService(
+        store,
+        runtime(live_conversation_participant_mode="group"),
+        memory_service=memory,
+    )
     session = service.session("session")
     initial_affect = session.affect.as_dict()
     initial_participant = session.participants["primary"].as_dict()
@@ -624,7 +636,7 @@ async def test_avatar_reaction_executes_without_assistant_turn(tmp_path: Path) -
     calls: list[tuple[str, str, int]] = []
     service = LiveConversationService(
         store,
-        runtime(live_conversation_address_strictness="strict"),
+        runtime(live_conversation_participant_mode="group"),
     )
 
     async def avatar(session_id: str, emotion: str, _intensity: float, generation: int) -> None:
@@ -634,7 +646,7 @@ async def test_avatar_reaction_executes_without_assistant_turn(tmp_path: Path) -
     generation = await service.speech_started("session")
     result = await service.ingest_observation(
         session_id="session",
-        transcript="Как сегодня погода?",
+        transcript="Сегодня будет дождь?",
         language="ru",
         expected_generation=generation,
     )
@@ -703,7 +715,11 @@ class _AdjudicationProvider:
 async def test_ambiguous_observation_uses_structured_adjudicator(tmp_path: Path) -> None:
     store = TimelineStore(tmp_path / "timeline.sqlite3")
     store.init_db()
-    service = LiveConversationService(store, runtime(), llm_provider=_AdjudicationProvider())
+    service = LiveConversationService(
+        store,
+        runtime(live_conversation_participant_mode="group"),
+        llm_provider=_AdjudicationProvider(),
+    )
     generation = await service.speech_started("session")
     result = await service.ingest_observation(
         session_id="session",
@@ -748,7 +764,11 @@ async def test_new_speech_cancels_registered_decision_task(tmp_path: Path) -> No
     store = TimelineStore(tmp_path / "timeline.sqlite3")
     store.init_db()
     provider = _SlowAdjudicationProvider()
-    service = LiveConversationService(store, runtime(), llm_provider=provider)
+    service = LiveConversationService(
+        store,
+        runtime(live_conversation_participant_mode="group"),
+        llm_provider=provider,
+    )
     generation = await service.speech_started("session")
     ingest = asyncio.create_task(
         service.ingest_observation(

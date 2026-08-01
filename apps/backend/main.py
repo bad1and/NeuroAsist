@@ -501,6 +501,17 @@ def create_app() -> FastAPI:
             in {ConversationPhase.GENERATING, ConversationPhase.SPEAKING}
         )
 
+    # A VAD boundary is only a candidate boundary. Keep the minimum silence
+    # long enough for ordinary Russian phrase pauses; Smart Turn still decides
+    # whether the resulting candidate is a complete turn. Older .env files
+    # used very short values, so the runtime safeguards existing installs too.
+    pause_profile = {
+        "short": (600, 650, 900, 1500),
+        "natural": (720, 750, 1100, 2500),
+        "patient": (900, 1100, 1500, 4000),
+    }.get(runtime_settings.live_conversation_pause_tolerance, (720, 750, 1100, 2500))
+    hands_free_end_silence_ms, live_end_silence_ms, live_fallback_end_silence_ms, max_turn_silence_ms = pause_profile
+
     voice_input_session_manager = VoiceInputSessionManager(
         voice_service, process_pcm_utterance, pcm_speech_started,
         vad=vad_provider,
@@ -510,16 +521,18 @@ def create_app() -> FastAPI:
         energy_end_rms=settings.voice_energy_vad_end_rms,
         silero_start_ms=settings.voice_silero_vad_min_speech_ms,
         energy_start_ms=settings.voice_energy_vad_min_speech_ms,
-        pre_roll_ms=settings.voice_vad_pre_roll_ms,
+        # Preserve the beginning of a phrase even if browser delivery or VAD
+        # confirmation arrives late. Keep existing installations safe when an
+        # older .env still specifies the former 500 ms default.
+        pre_roll_ms=max(settings.voice_vad_pre_roll_ms, 900),
         post_roll_ms=settings.voice_vad_post_roll_ms,
-        end_silence_ms=settings.voice_vad_end_silence_ms,
-        live_end_silence_ms=settings.voice_vad_live_end_silence_ms,
-        live_fallback_end_silence_ms=settings.voice_vad_live_fallback_end_silence_ms,
-        max_turn_silence_ms={
-            "short": 1500,
-            "natural": 2500,
-            "patient": 4000,
-        }.get(runtime_settings.live_conversation_pause_tolerance, 2500),
+        end_silence_ms=max(settings.voice_vad_end_silence_ms, hands_free_end_silence_ms),
+        live_end_silence_ms=max(settings.voice_vad_live_end_silence_ms, live_end_silence_ms),
+        live_fallback_end_silence_ms=max(
+            settings.voice_vad_live_fallback_end_silence_ms,
+            live_fallback_end_silence_ms,
+        ),
+        max_turn_silence_ms=max_turn_silence_ms,
         barge_in_guard=barge_in_guard_active,
         barge_in_confirmation_ms={
             "low": 300,

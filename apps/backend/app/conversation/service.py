@@ -316,6 +316,7 @@ class LiveConversationService:
             "live_conversation_participant_mode",
             "one_to_one",
         )
+        one_to_one = participant_mode == "one_to_one"
         continuation_window = {
             "strict": 0.0,
             "balanced": 25.0,
@@ -325,17 +326,23 @@ class LiveConversationService:
             session.last_iris_activity_at > 0
             and time.monotonic() - session.last_iris_activity_at <= continuation_window
         )
-        addressed_to_other_now = addressing.other_person
+        # In a one-to-one conversation every completed primary-speaker turn is
+        # for Iris unless the user explicitly marks it as self-talk.  Name and
+        # nearby-person detection is meaningful only in group mode.
+        addressed_to_other_now = not one_to_one and addressing.other_person
         explicitly_addressed_to_iris = addressing.direct_iris
         if addressed_to_other_now:
             session.other_conversation_until = time.monotonic() + 45
         elif explicitly_addressed_to_iris:
             session.other_conversation_until = 0.0
         addressed_to_other = bool(
-            addressed_to_other_now
-            or (
-                session.other_conversation_until > time.monotonic()
-                and not explicitly_addressed_to_iris
+            not one_to_one
+            and (
+                addressed_to_other_now
+                or (
+                    session.other_conversation_until > time.monotonic()
+                    and not explicitly_addressed_to_iris
+                )
             )
         )
         explicit_implicit_address = addressing.implicit_iris
@@ -347,11 +354,9 @@ class LiveConversationService:
             )
         )
         implicit_address = bool(
-            participant_mode == "one_to_one"
-            and strictness != "strict"
+            one_to_one
             and speaker_role is SpeakerRole.PRIMARY
-            and not addressed_to_other
-            and (explicit_implicit_address or recent_dialogue_continuation)
+            and not self._decision.is_self_talk(addressing_text)
         )
         if implicit_address:
             addressedness = max(addressedness, 0.82)
@@ -394,6 +399,8 @@ class LiveConversationService:
                 if explicit_implicit_address
                 else ["recent_dialogue_continuity"]
                 if recent_dialogue_continuation and implicit_address
+                else ["one_to_one_primary_speech"]
+                if implicit_address and one_to_one
                 else []
             ),
             "end_of_turn_confidence": end_of_turn_confidence,

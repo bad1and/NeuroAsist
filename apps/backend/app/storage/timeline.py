@@ -491,12 +491,25 @@ class TimelineStore:
             ).fetchall()
         return [ChatMessage(role=row["role"], content=row["corrected_content"] or row["content"]) for row in reversed(rows)]
 
-    def list_messages(self, limit: int, offset: int = 0) -> tuple[list[StoredTimelineMessage], int | None]:
+    def list_messages(
+        self,
+        limit: int,
+        offset: int = 0,
+        session_id: str | None = None,
+    ) -> tuple[list[StoredTimelineMessage], int | None]:
         with self._connect() as connection:
-            rows = connection.execute(
-                "SELECT * FROM conversation_messages WHERE timeline_id = ? ORDER BY sequence_no DESC LIMIT ? OFFSET ?",
-                (PRIMARY_TIMELINE_ID, limit + 1, offset),
-            ).fetchall()
+            if session_id is None:
+                rows = connection.execute(
+                    "SELECT * FROM conversation_messages WHERE timeline_id = ? ORDER BY sequence_no DESC LIMIT ? OFFSET ?",
+                    (PRIMARY_TIMELINE_ID, limit + 1, offset),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """SELECT * FROM conversation_messages
+                       WHERE timeline_id = ? AND session_id = ?
+                       ORDER BY sequence_no DESC LIMIT ? OFFSET ?""",
+                    (PRIMARY_TIMELINE_ID, session_id, limit + 1, offset),
+                ).fetchall()
         next_offset = offset + limit if len(rows) > limit else None
         return [self._row_to_message(row) for row in reversed(rows[:limit])], next_offset
 
@@ -1937,6 +1950,20 @@ class TimelineStore:
                 (session_id, self._now(), PRIMARY_TIMELINE_ID),
             )
         return {"session_id": session_id, "messages": messages, "episodes": episodes}
+
+    def ensure_active_session(self) -> dict[str, object]:
+        """Return the active session or create the first one without clearing history."""
+        with self._immediate_connect() as connection:
+            session_id = self._active_session_id(connection)
+            if session_id is not None:
+                return {"session_id": session_id, "created": False}
+            session_id = uuid4().hex
+            connection.execute(
+                """UPDATE conversation_timelines
+                   SET active_session_id = ?, updated_at = ? WHERE id = ?""",
+                (session_id, self._now(), PRIMARY_TIMELINE_ID),
+            )
+        return {"session_id": session_id, "created": True}
 
     def active_session_id(self) -> str | None:
         with self._connect() as connection:

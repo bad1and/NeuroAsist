@@ -272,9 +272,9 @@ VOICE_TTS_ADAPTIVE_PROSODY=true
 | `VOICE_SILERO_VAD_MODEL_PATH` | Необязательный TorchScript override. При ошибке используется модель из `silero-vad==6.2.1`, затем energy fallback. |
 | `VOICE_SILERO_VAD_START_THRESHOLD` / `VOICE_SILERO_VAD_END_THRESHOLD` | Вероятности старта/окончания Silero: `0.55` / `0.35`. |
 | `VOICE_ENERGY_VAD_START_RMS` / `VOICE_ENERGY_VAD_END_RMS` | Пороги RMS только для energy fallback: `0.018` / `0.012`. |
-| `VOICE_VAD_PRE_ROLL_MS` / `VOICE_VAD_POST_ROLL_MS` | Сохраняемый контекст до и после речи: `500` / `180` мс. |
-| `VOICE_VAD_END_SILENCE_MS` / `VOICE_VAD_LIVE_END_SILENCE_MS` | Endpoint в hands-free и live со SmartTurn: `480` / `320` мс. |
-| `VOICE_VAD_LIVE_FALLBACK_END_SILENCE_MS` | Осторожный live endpoint без SmartTurn: `650` мс. |
+| `VOICE_VAD_PRE_ROLL_MS` / `VOICE_VAD_POST_ROLL_MS` | Сохраняемый контекст до и после речи: `900` / `180` мс. Значение pre-roll ниже 900 мс безопасно повышается во время запуска. |
+| `VOICE_VAD_END_SILENCE_MS` / `VOICE_VAD_LIVE_END_SILENCE_MS` | Endpoint в hands-free и live со SmartTurn: `720` / `750` мс. Более короткие значения автоматически поднимаются до безопасного минимума выбранного профиля паузы. |
+| `VOICE_VAD_LIVE_FALLBACK_END_SILENCE_MS` | Осторожный live endpoint без SmartTurn: `1100` мс. |
 | `VOICE_TORCH_CPU_THREADS` / `VOICE_TORCH_INTEROP_THREADS` | Общая настройка PyTorch до загрузки всех голосовых моделей: `4` / `1`. |
 | `VOICE_STT_TERMS_PATH` | Отдельный JSON точных aliases для STT; по умолчанию `stt-terms.json` в приватных app-data. |
 | `VOICE_INPUT_DIAGNOSTIC_AUDIO` | Сохранять canonical WAV и JSON в приватную diagnostic-папку. По умолчанию `false`. |

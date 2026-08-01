@@ -19,8 +19,13 @@ def get_timeline(request: Request) -> dict[str, object]:
 
 
 @router.get("/messages")
-def get_messages(request: Request, limit: int = Query(default=50, ge=1, le=200), offset: int = Query(default=0, ge=0)) -> dict[str, object]:
-    messages, next_offset = _store(request).list_messages(limit, offset)
+def get_messages(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    session_id: str | None = Query(default=None, min_length=1, max_length=128),
+) -> dict[str, object]:
+    messages, next_offset = _store(request).list_messages(limit, offset, session_id)
     return {"items": [message.as_dict() for message in messages], "next_offset": next_offset}
 
 
