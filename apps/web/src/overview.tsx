@@ -63,7 +63,6 @@ export function OverviewPage({
     () => [...journal].sort((a, b) => b.last_activity_at.localeCompare(a.last_activity_at))[0],
     [journal],
   );
-  const reviewCount = memories.filter((item) => item.status === "candidate").length;
   const activeCount = memories.filter((item) => item.status === "active").length;
   const backendReady = status?.backend === "ok";
   const avatarConnected = Boolean(avatarStatus?.enabled && avatarStatus.client_count > 0);
@@ -100,7 +99,7 @@ export function OverviewPage({
           <div>
             <span>Память</span>
             <h3>{activeCount ? `${activeCount} сохранено` : "Нет сохранённых записей"}</h3>
-            <p>{reviewCount ? `${reviewCount} ожидают проверки` : "Новых записей на проверке нет."}</p>
+            <p>Iris самостоятельно поддерживает актуальность фактов.</p>
           </div>
           <button className="card-link" onClick={onOpenMemory}>Открыть память<ArrowRight size={15} /></button>
         </article>

@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import io
 import logging
 import os
 import re
@@ -27,6 +28,7 @@ from apps.backend.app.voice.providers import (
     split_multilingual_tts_segments,
     split_tts_chunks,
     waveform_to_wav_bytes,
+    apply_wav_delivery,
 )
 from apps.backend.app.voice.service import VoiceService
 from apps.backend.app.voice.lexicon import load_pronunciations, save_pronunciations
@@ -35,6 +37,31 @@ from apps.backend.app.voice.style import VoiceExpressionLevel, VoiceStyle, make_
 
 def _spoken_ssml(value: str) -> str:
     return re.sub(r"<[^>]+>", "", value).strip()
+
+
+def test_atempo_changes_duration_without_changing_pitch() -> None:
+    sample_rate = 48000
+    source = (
+        np.sin(2 * np.pi * 440 * np.arange(sample_rate) / sample_rate) * 12000
+    ).astype("<i2")
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(sample_rate)
+        output.writeframes(source.tobytes())
+
+    delivered = apply_wav_delivery(buffer.getvalue(), tempo=1.05)
+    with wave.open(io.BytesIO(delivered), "rb") as audio:
+        samples = np.frombuffer(
+            audio.readframes(audio.getnframes()), dtype="<i2"
+        ).astype(float)
+        duration = audio.getnframes() / audio.getframerate()
+    frequencies = np.fft.rfftfreq(len(samples), 1 / sample_rate)
+    peak_hz = frequencies[np.argmax(np.abs(np.fft.rfft(samples)))]
+
+    assert duration == pytest.approx(1 / 1.05, rel=0.02)
+    assert peak_hz == pytest.approx(440, rel=0.01)
 
 
 def test_tts_cleanup_keeps_only_recent_wavs(tmp_path) -> None:
@@ -271,11 +298,11 @@ def test_silero_ssml_uses_restrained_adaptive_prosody_and_escapes_text() -> None
     assert '<break time="50ms"/>' in ssml
     assert '<break time="35ms"/>' in ssml
     assert "<break time=\"95ms\"/>" in ssml
-    assert profile_for(VoiceStyle.CALM).intensity == 2
+    assert profile_for(VoiceStyle.CALM).intensity == 3
     assert profile_for(VoiceStyle.NORMAL).intensity == 3
-    assert profile_for(VoiceStyle.ENERGETIC).intensity == 4
+    assert profile_for(VoiceStyle.ENERGETIC).intensity == 3
     assert profile_for(VoiceStyle.ENERGETIC, VoiceExpressionLevel.MINIMAL).intensity == 3
-    assert profile_for(VoiceStyle.ENERGETIC, VoiceExpressionLevel.NOTICEABLE).intensity == 5
+    assert profile_for(VoiceStyle.ENERGETIC, VoiceExpressionLevel.NOTICEABLE).intensity == 3
     assert resolve_voice_style(VoiceStyle.AUTO, emotion="sad") is VoiceStyle.CALM
     assert resolve_voice_style(VoiceStyle.ASSERTIVE, emotion="happy") is VoiceStyle.ASSERTIVE
     assert resolve_voice_style(VoiceStyle.AUTO, emphasis=0.8) is VoiceStyle.ASSERTIVE

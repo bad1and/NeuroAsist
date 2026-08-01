@@ -63,8 +63,10 @@ python-multipart==0.0.20
 PyYAML==6.0.3
 requests==2.34.2
 sentencepiece==0.2.2
+sentence-transformers==3.4.1
 setuptools==78.1.0
 silero==0.5.5
+silero-vad==6.2.1
 silero-stress @ git+https://github.com/snakers4/silero-stress.git@76706c123dc9ac0ca0b2b428d132a71c6cc4ff36
 sniffio==1.3.1
 soundfile==0.14.0

@@ -66,9 +66,18 @@ class GestureCue(ProtocolModel):
     interrupt: bool = True
 
 
+class DeliveryOverride(ProtocolModel):
+    """Restrained delivery change for one 1-based spoken sentence."""
+
+    segment: int = Field(ge=1, le=100)
+    pace: str = Field(default="normal", pattern="^(slow|normal|fast)$")
+    emphasis: str = Field(default="none", pattern="^(none|light)$")
+
+
 class DeliveryCue(ProtocolModel):
     pace: str = Field(default="normal", pattern="^(slow|normal|fast)$")
     emphasis: float = Field(default=0.0, ge=0.0, le=1.0)
+    overrides: list[DeliveryOverride] = Field(default_factory=list, max_length=3)
 
 
 class ContinuityCue(ProtocolModel):
@@ -97,6 +106,15 @@ class MemoryCandidate(ProtocolModel):
     sensitivity: str = Field(default="normal", pattern="^(normal|sensitive)$")
 
 
+class MemoryDecisionCue(ProtocolModel):
+    """Optional model assessment; MemoryService remains the authority."""
+
+    action: str = Field(pattern="^(accept|reject|clarify)$")
+    reason: str = Field(min_length=1, max_length=120)
+    predicate: str | None = Field(default=None, max_length=200)
+    clarification_id: str | None = Field(default=None, max_length=64)
+
+
 class CharacterTurn(ProtocolModel):
     """Canonical visible reply plus non-visible character metadata."""
 
@@ -108,6 +126,7 @@ class CharacterTurn(ProtocolModel):
     delivery: DeliveryCue = Field(default_factory=DeliveryCue)
     continuity: ContinuityCue | None = None
     memory_candidates: list[MemoryCandidate] = Field(default_factory=list, max_length=3)
+    memory_decisions: list[MemoryDecisionCue] = Field(default_factory=list, max_length=3)
 
     @field_validator("reply")
     @classmethod
@@ -119,7 +138,10 @@ class CharacterTurn(ProtocolModel):
 
     def metadata_frame(self) -> dict[str, object]:
         """Return avatar metadata only; memory proposals are private to the backend."""
-        return self.model_dump(mode="json", exclude={"reply", "memory_candidates"})
+        return self.model_dump(
+            mode="json",
+            exclude={"reply", "memory_candidates", "memory_decisions"},
+        )
 
 
 class CharacterLLMResponse(ProtocolModel):

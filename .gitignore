@@ -205,6 +205,11 @@ apps/avatar-unity/Builds/NeuroAsistAvatar/*
 [Ll]ogs/
 UserSettings/
 MemoryCaptures/
+data/diagnostics/stt-audio/
+data/stt-private-corpus/
+data/stt-*.json
+output/stt-*.json
+output/stt-*.md
 
 # Unity IDE-generated project files
 apps/avatar-unity/*.csproj

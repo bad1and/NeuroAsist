@@ -19,7 +19,7 @@ from apps.backend.app.conversation.turn import SmartTurnDetector
 from apps.backend.app.core.config import Settings
 from apps.backend.app.llm.base import LLMResponse
 from apps.backend.app.model_manager.service import ModelManager
-from apps.backend.app.storage.timeline import TimelineStore
+from apps.backend.app.storage.timeline import LATEST_SCHEMA_VERSION, TimelineStore
 
 
 def runtime(**overrides):
@@ -46,7 +46,9 @@ def test_live_schema_is_additive_and_idempotent(tmp_path: Path) -> None:
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
 
-    assert versions == [(1,), (2,), (3,), (4,), (5,), (6,), (10,)]
+    assert versions == [
+        (version,) for version in (*range(1, 7), *range(10, LATEST_SCHEMA_VERSION + 1))
+    ]
     assert {
         "character_state_snapshots",
         "character_state_events",
@@ -90,7 +92,7 @@ def test_schema_v10_repairs_database_with_preexisting_versions(tmp_path: Path) -
             (stored.id,),
         ).fetchone()
 
-    assert versions == set(range(1, 11))
+    assert versions == set(range(1, LATEST_SCHEMA_VERSION + 1))
     assert {
         "character_state_snapshots",
         "character_state_events",
@@ -142,6 +144,70 @@ def test_stt_question_without_punctuation_is_an_implicit_address() -> None:
         ),
     )
     assert decision.action is ConversationAction.RESPOND
+
+
+def test_question_word_is_not_mistaken_for_another_person_vocative() -> None:
+    engine = ConversationDecisionEngine()
+    transcript = "откуда ты знаешь про шины и босса это вообще про что"
+    assert engine.is_addressed_to_other(transcript) is False
+    assert engine.is_implicit_address(transcript) is True
+
+
+@pytest.mark.parametrize(
+    "transcript",
+    [
+        "а какую ты мне модель посоветовала я не помню",
+        "какого ты провайдера советовала",
+        "каким ты способом это делала",
+        "которую ты версию имела в виду",
+    ],
+)
+def test_inflected_question_words_are_implicit_iris_addresses(
+    transcript: str,
+) -> None:
+    engine = ConversationDecisionEngine()
+    analysis = engine.analyze_addressing(transcript)
+
+    assert analysis.kind == "implicit_iris"
+    assert analysis.other_person is False
+    assert analysis.implicit_iris is True
+
+
+def test_unknown_other_name_requires_command_shaped_evidence() -> None:
+    engine = ConversationDecisionEngine()
+
+    assert engine.is_addressed_to_other("Арсен ты можешь включить демку") is True
+    assert engine.is_addressed_to_other("Арсен, привет") is True
+    assert engine.is_addressed_to_other("какую ты мне модель советовала") is False
+
+
+@pytest.mark.anyio
+async def test_screenshot_model_question_responds_without_second_wake_word(
+    tmp_path: Path,
+) -> None:
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    service = LiveConversationService(store, runtime())
+
+    result = await service.ingest_observation(
+        session_id="session",
+        transcript="а какую ты мне модель посоветовала я не помню",
+        language="ru",
+    )
+
+    assert result.decision.action is ConversationAction.RESPOND
+    assert result.decision.reason.value == "invited"
+    observations = store.recent_conversation_observations("session")
+    assert observations[0]["metadata"]["addressing_reasons"] == [
+        "interrogative_followup"
+    ]
+
+
+def test_discourse_filler_and_stt_iris_alias_remain_direct_addresses() -> None:
+    engine = ConversationDecisionEngine()
+    assert engine.is_implicit_address("кстати ну как меня зовут ты же помнишь") is True
+    assert engine.addressedness("иреск ты помнишь как меня зовут") == 1.0
+    assert engine.is_addressed_to_other("иреск ты помнишь как меня зовут") is False
 
 
 def test_vocative_to_another_person_overrides_implicit_request() -> None:
@@ -237,14 +303,85 @@ async def test_follow_up_to_recent_iris_turn_keeps_conversation_addressed(tmp_pa
     assert result.decision.action is ConversationAction.RESPOND
     assert result.decision.reason.value == "invited"
     observations = store.recent_conversation_observations("session")
-    assert observations[0]["metadata"]["addressing_reasons"] == ["recent_iris_turn"]
+    assert observations[0]["metadata"]["addressing_reasons"] == ["recent_dialogue_continuity"]
+
+
+@pytest.mark.anyio
+async def test_one_to_one_primary_speech_responds_without_a_name(
+    tmp_path: Path,
+) -> None:
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    service = LiveConversationService(
+        store,
+        runtime(live_conversation_address_strictness="strict"),
+    )
+
+    result = await service.ingest_observation(
+        session_id="session",
+        transcript="мы завтра созвонимся в десять",
+        language="ru",
+    )
+
+    assert result.decision.action is ConversationAction.RESPOND
+    assert result.decision.reason.value == "invited"
+    observations = store.recent_conversation_observations("session")
+    assert observations[0]["metadata"]["addressing_reasons"] == [
+        "one_to_one_primary_speech"
+    ]
+
+
+@pytest.mark.anyio
+async def test_short_answer_to_recent_iris_question_remains_a_followup(
+    tmp_path: Path,
+) -> None:
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    service = LiveConversationService(store, runtime())
+    session = service.session("session")
+    session.last_iris_activity_at = __import__("time").monotonic()
+    session.last_generated_assistant_reply = "Какую модель ты хочешь поставить?"
+
+    result = await service.ingest_observation(
+        session_id="session",
+        transcript="Whisper третьей версии",
+        language="ru",
+    )
+
+    assert result.decision.action is ConversationAction.RESPOND
+    observations = store.recent_conversation_observations("session")
+    assert observations[0]["metadata"]["addressing_reasons"] == [
+        "recent_dialogue_continuity"
+    ]
+
+
+@pytest.mark.anyio
+async def test_balanced_followup_window_expires_after_twenty_five_seconds(
+    tmp_path: Path,
+) -> None:
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    service = LiveConversationService(store, runtime())
+    session = service.session("session")
+    session.last_iris_activity_at = __import__("time").monotonic() - 26
+
+    result = await service.ingest_observation(
+        session_id="session",
+        transcript="так в смысле я разраб если что",
+        language="ru",
+    )
+
+    assert result.decision.action is ConversationAction.RESPOND
 
 
 @pytest.mark.anyio
 async def test_other_person_address_suppresses_followups_until_iris_is_called(tmp_path: Path) -> None:
     store = TimelineStore(tmp_path / "timeline.sqlite3")
     store.init_db()
-    service = LiveConversationService(store, runtime())
+    service = LiveConversationService(
+        store,
+        runtime(live_conversation_participant_mode="group"),
+    )
     session = service.session("session")
     session.last_iris_activity_at = __import__("time").monotonic()
 
@@ -285,7 +422,11 @@ async def test_other_person_speech_does_not_change_iris_state_or_enter_memory(tm
     store = TimelineStore(tmp_path / "timeline.sqlite3")
     store.init_db()
     memory = RecordingMemory()
-    service = LiveConversationService(store, runtime(), memory_service=memory)
+    service = LiveConversationService(
+        store,
+        runtime(live_conversation_participant_mode="group"),
+        memory_service=memory,
+    )
     session = service.session("session")
     initial_affect = session.affect.as_dict()
     initial_participant = session.participants["primary"].as_dict()
@@ -444,6 +585,31 @@ async def test_barge_in_commits_only_acknowledged_prefix_as_interrupted(tmp_path
     assert messages[-1].status == "interrupted"
 
 
+@pytest.mark.anyio
+async def test_visible_generated_reply_is_committed_before_next_user_turn(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "visible-generated.sqlite3")
+    store.init_db()
+    service = LiveConversationService(store, runtime())
+    generation = await service.speech_started("session")
+    observation = await service.ingest_observation(
+        session_id="session",
+        transcript="ирис ответь на это",
+        language="ru",
+        expected_generation=generation,
+    )
+    generated = "Это моя странная шутка про шины и босса, она была мимо."
+    await service.assistant_text_generated(
+        "session", observation.utterance_id, generation, generated,
+    )
+
+    await service.speech_started("session")
+
+    messages, _ = store.list_messages(20)
+    assert messages[-1].role == "assistant"
+    assert messages[-1].content == generated
+    assert messages[-1].status == "completed"
+
+
 def test_group_speaker_estimator_is_conservative() -> None:
     estimator = SpeakerRoleEstimator()
     unknown = estimator.estimate(
@@ -470,7 +636,7 @@ async def test_avatar_reaction_executes_without_assistant_turn(tmp_path: Path) -
     calls: list[tuple[str, str, int]] = []
     service = LiveConversationService(
         store,
-        runtime(live_conversation_address_strictness="strict"),
+        runtime(live_conversation_participant_mode="group"),
     )
 
     async def avatar(session_id: str, emotion: str, _intensity: float, generation: int) -> None:
@@ -480,7 +646,7 @@ async def test_avatar_reaction_executes_without_assistant_turn(tmp_path: Path) -
     generation = await service.speech_started("session")
     result = await service.ingest_observation(
         session_id="session",
-        transcript="Как сегодня погода?",
+        transcript="Сегодня будет дождь?",
         language="ru",
         expected_generation=generation,
     )
@@ -549,7 +715,11 @@ class _AdjudicationProvider:
 async def test_ambiguous_observation_uses_structured_adjudicator(tmp_path: Path) -> None:
     store = TimelineStore(tmp_path / "timeline.sqlite3")
     store.init_db()
-    service = LiveConversationService(store, runtime(), llm_provider=_AdjudicationProvider())
+    service = LiveConversationService(
+        store,
+        runtime(live_conversation_participant_mode="group"),
+        llm_provider=_AdjudicationProvider(),
+    )
     generation = await service.speech_started("session")
     result = await service.ingest_observation(
         session_id="session",
@@ -594,7 +764,11 @@ async def test_new_speech_cancels_registered_decision_task(tmp_path: Path) -> No
     store = TimelineStore(tmp_path / "timeline.sqlite3")
     store.init_db()
     provider = _SlowAdjudicationProvider()
-    service = LiveConversationService(store, runtime(), llm_provider=provider)
+    service = LiveConversationService(
+        store,
+        runtime(live_conversation_participant_mode="group"),
+        llm_provider=provider,
+    )
     generation = await service.speech_started("session")
     ingest = asyncio.create_task(
         service.ingest_observation(

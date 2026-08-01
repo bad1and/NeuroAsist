@@ -106,7 +106,8 @@ class SqliteVecIndex:
             connection.execute("DELETE FROM semantic_vectors WHERE namespace = ? AND item_id = ?", (namespace, item_id))
 
     def search_sync(self, query: str, namespace: str, limit: int) -> list[VectorSearchResult]:
-        query_vector = self._provider.embed(query)
+        embed_query = getattr(self._provider, "embed_query", self._provider.embed)
+        query_vector = embed_query(query)
         with self._connect() as connection:
             state = connection.execute("SELECT model_id, dimension FROM semantic_index_state WHERE namespace = ?", (namespace,)).fetchone()
             if state is None:
@@ -118,6 +119,16 @@ class SqliteVecIndex:
                 (namespace, self._provider.model_id, self._provider.dimension),
             ).fetchall()
         scored = [VectorSearchResult(row["item_id"], self._cosine(query_vector, json.loads(row["vector_json"]))) for row in rows]
+        return sorted((item for item in scored if item.score > 0), key=lambda item: item.score, reverse=True)[:limit]
+
+    def search_source_sync(self, query: str, namespace: str, limit: int) -> list[VectorSearchResult]:
+        """Score SQLite source rows without mutating a lagging rebuildable index."""
+        embed_query = getattr(self._provider, "embed_query", self._provider.embed)
+        query_vector = embed_query(query)
+        scored = [
+            VectorSearchResult(item_id, self._cosine(query_vector, self._provider.embed(text)))
+            for item_id, text in self._source(namespace)
+        ]
         return sorted((item for item in scored if item.score > 0), key=lambda item: item.score, reverse=True)[:limit]
 
     def rebuild_sync(self, namespace: str) -> None:

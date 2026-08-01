@@ -10,6 +10,7 @@ from dataclasses import dataclass
 class VoiceInputInterpretation:
     text: str
     replacement_count: int = 0
+    replacements: tuple[dict[str, object], ...] = ()
 
     @property
     def changed(self) -> bool:
@@ -37,22 +38,30 @@ class VoiceInputInterpreter:
         self._memory_service = memory_service
 
     def interpret(self, text: str, input_mode: str) -> VoiceInputInterpretation:
+        # This remains only as a compatibility path for callers that do not
+        # provide VoiceService's raw/corrected transcript pair. Production STT
+        # always supplies raw_user_text and bypasses this heuristic entirely.
         if input_mode != "voice" or not text.strip():
             return VoiceInputInterpretation(text)
         common = {self._normalize(word): word for word in self._COMMON_WORDS}
         names = self._known_names()
-        replacements = 0
+        replacements: list[dict[str, object]] = []
 
         def replace(match: re.Match[str]) -> str:
-            nonlocal replacements
             token = match.group(0)
             corrected = self._correct_token(token, names, common)
-            if corrected == token:
-                return token
-            replacements += 1
+            if corrected != token:
+                replacements.append({
+                    "original": token,
+                    "replacement": corrected,
+                    "start": match.start(),
+                    "end": match.end(),
+                    "source": "legacy_voice_interpreter",
+                })
             return corrected
 
-        return VoiceInputInterpretation(self._TOKEN_RE.sub(replace, text), replacements)
+        corrected_text = self._TOKEN_RE.sub(replace, text)
+        return VoiceInputInterpretation(corrected_text, len(replacements))
 
     def _known_names(self) -> dict[str, str]:
         if self._memory_service is None:

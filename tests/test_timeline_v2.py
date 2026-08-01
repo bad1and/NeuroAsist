@@ -1,12 +1,14 @@
 import sqlite3
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from apps.backend import main as backend_main
 from apps.backend.app.api.routes import chat as chat_route
 from apps.backend.app.core.config import Settings
 from apps.backend.app.llm.base import LLMResponse
+from apps.backend.app.storage.timeline import LATEST_SCHEMA_VERSION, TimelineStore
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,9 +45,11 @@ def test_v041_history_migrates_to_one_primary_timeline(monkeypatch, tmp_path: Pa
         "Привет, Нейро.", "Привет! Я на связи.", "Проверим голос.", "Голосовой цикл готов.",
     ]
     assert {item["metadata"].get("legacy_session_id") for item in payload} == {"default", "voice-demo"}
+    assert {item["session_id"] for item in payload} == {"default", "voice-demo"}
     with sqlite3.connect(database) as connection:
         assert connection.execute("SELECT version FROM schema_migrations").fetchall() == [
-            (1,), (2,), (3,), (4,), (5,), (6,), (10,),
+            (version,)
+            for version in (*range(1, 7), *range(10, LATEST_SCHEMA_VERSION + 1))
         ]
         assert connection.execute("SELECT COUNT(*) FROM conversation_messages").fetchone() == (4,)
         assert connection.execute("SELECT status, message_count FROM conversation_episodes").fetchall() == [("closed", 4)]
@@ -68,6 +72,71 @@ def test_timeline_append_is_idempotent_and_preserves_correction_audit(monkeypatc
     assert corrected.json()["message"]["original_content"] == "Исправь transcription"
     assert corrected.json()["message"]["metadata"]["correction_pending_review"] is True
     assert [item["id"] for item in searched.json()["items"]] == [message_id]
+
+
+def test_sequence_numbers_are_causal_when_timestamps_collide(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "causal.sqlite3")
+    store.init_db()
+    when = "2026-07-28T10:00:00.000+00:00"
+    user, _ = store.append_message(role="user", content="первая мысль", input_mode="text", created_at=when)
+    assistant, _ = store.append_message(
+        role="assistant", content="ответ на первую", input_mode="text", created_at=when,
+        turn_id=user.turn_id, reply_to_message_id=user.id,
+    )
+    assert [item.sequence_no for item in (user, assistant)] == [1, 2]
+    assert assistant.turn_id == user.turn_id
+    assert assistant.reply_to_message_id == user.id
+    assert [item.content for item in store.get_recent_messages("default", 2)] == ["первая мысль", "ответ на первую"]
+
+
+def test_session_reset_erases_dialog_but_preserves_memory_and_rejects_old_session(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "session.sqlite3")
+    store.init_db()
+    first = store.reset_session()["session_id"]
+    message = store.accept_user_turn(session_key=str(first), content="старый диалог", input_mode="text").message
+    memory = store.create_memory({
+        "scope": "user_profile", "kind": "identity", "subject": "user",
+        "predicate": "name", "value_text": "Роман", "source_message_ids": [message.id],
+    }, actor="test")
+
+    second = store.reset_session()["session_id"]
+
+    assert second != first
+    assert store.get_recent_messages(str(second), 10) == []
+    assert store.get_memory(str(memory["id"])) is not None
+    with pytest.raises(ValueError, match="no longer active"):
+        store.accept_user_turn(session_key=str(first), content="устаревшая сессия", input_mode="text")
+
+
+def test_session_reset_endpoint_issues_new_id_and_rejects_stale_requests(monkeypatch, tmp_path: Path) -> None:
+    client, _ = make_client(monkeypatch, tmp_path)
+    with client:
+        first = client.post("/conversation/session/reset")
+        second = client.post("/conversation/session/reset")
+        stale = client.post("/chat", json={"session_id": first.json()["session_id"], "message": "устарело"})
+
+    assert first.status_code == 200 and second.status_code == 200
+    assert first.json()["session_id"] != second.json()["session_id"]
+    assert stale.status_code == 409
+
+
+def test_open_session_resumes_without_erasing_messages(monkeypatch, tmp_path: Path) -> None:
+    client, _ = make_client(monkeypatch, tmp_path)
+    with client:
+        opened = client.post("/conversation/session")
+        session_id = opened.json()["session_id"]
+        accepted = client.app.state.timeline_store.accept_user_turn(
+            session_key=session_id,
+            content="Не удаляй этот диалог при перезагрузке",
+            input_mode="text",
+        )
+        resumed = client.post("/conversation/session")
+        messages = client.get("/timeline/messages", params={"session_id": session_id})
+
+    assert opened.status_code == 200 and opened.json()["created"] is True
+    assert resumed.status_code == 200
+    assert resumed.json() == {"session_id": session_id, "created": False}
+    assert [item["id"] for item in messages.json()["items"]] == [accepted.message.id]
 
 
 def test_timeline_pagination_journal_and_range_deletion(monkeypatch, tmp_path: Path) -> None:

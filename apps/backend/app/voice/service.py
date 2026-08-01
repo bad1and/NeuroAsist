@@ -1,9 +1,12 @@
 import logging
+import asyncio
+import json
 import shutil
 import time
 import wave
 import io
 from collections import OrderedDict
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -11,6 +14,7 @@ from uuid import uuid4
 from fastapi import HTTPException, UploadFile, status
 
 from apps.backend.app.core.config import Settings
+from apps.backend.app.voice.audio import Pcm16Audio, decode_audio_file, write_pcm16_wav
 from apps.backend.app.voice.providers import (
     FasterWhisperSTTProvider,
     GigaAMSTTProvider,
@@ -21,6 +25,12 @@ from apps.backend.app.voice.providers import (
     TTSProvider,
 )
 from apps.backend.app.voice.lexicon import load_pronunciations, save_pronunciations
+from apps.backend.app.voice.stt_terms import (
+    DEFAULT_STT_TERMS,
+    correct_stt_terms,
+    load_stt_terms,
+    save_stt_terms,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +73,16 @@ class VoiceService:
         self._settings = settings
         self._stt_provider = self._build_stt_provider(settings)
         self._tts_provider = self._build_tts_provider(settings)
+        terms_path = getattr(
+            settings,
+            "voice_stt_terms_file",
+            settings.voice_audio_path / "stt-terms.json",
+        )
+        try:
+            self._stt_terms = load_stt_terms(terms_path)
+        except ValueError as exc:
+            logger.warning("STT terms could not be loaded; built-in terms remain active: %s", exc)
+            self._stt_terms = {key: list(value) for key, value in DEFAULT_STT_TERMS.items()}
         self._tts_jobs: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._max_tts_jobs = 300
 
@@ -79,6 +99,40 @@ class VoiceService:
 
     async def preload_stt(self) -> None:
         await self._stt_provider.preload()
+
+    async def transcribe_path(self, path: Path, language: str):
+        if isinstance(self._stt_provider, MockSTTProvider):
+            result = await self._stt_provider.transcribe(path, language)
+            return self._correct_transcript(result)
+        audio = await asyncio.to_thread(decode_audio_file, path)
+        return await self.transcribe_pcm16(audio, language)
+
+    async def transcribe_pcm16(self, audio: Pcm16Audio, language: str):
+        if self._settings.voice_input_diagnostic_audio:
+            await asyncio.to_thread(self._save_diagnostic_audio, audio, {"language": language})
+        result = await self._stt_provider.transcribe_pcm16(audio, language)
+        return self._correct_transcript(result)
+
+    def _correct_transcript(self, result):
+        correction = correct_stt_terms(result.text, self._stt_terms)
+        return replace(
+            result,
+            raw_text=correction.raw_text,
+            text=correction.text,
+            corrections=tuple(item.as_dict() for item in correction.replacements),
+        )
+
+    def stt_terms(self) -> dict[str, list[str]]:
+        return {key: list(value) for key, value in self._stt_terms.items()}
+
+    def update_stt_terms(self, entries: dict[str, object]) -> dict[str, list[str]]:
+        path = getattr(
+            self._settings,
+            "voice_stt_terms_file",
+            self._settings.voice_audio_path / "stt-terms.json",
+        )
+        self._stt_terms = save_stt_terms(path, entries)
+        return self.stt_terms()
 
     async def preload_tts(self) -> None:
         await self._tts_provider.preload()
@@ -188,6 +242,43 @@ class VoiceService:
             path.unlink(missing_ok=True)
         except OSError:
             pass
+
+    def clear_stale_uploads(self) -> int:
+        """Remove abandoned request temporaries at process startup."""
+        upload_dir = self._settings.voice_audio_path / "uploads"
+        if not upload_dir.is_dir():
+            return 0
+        removed = 0
+        for path in upload_dir.iterdir():
+            if not path.is_file():
+                continue
+            try:
+                path.unlink()
+                removed += 1
+            except OSError:
+                logger.warning("Could not remove stale voice upload: path=%s", path)
+        return removed
+
+    def _save_diagnostic_audio(self, audio: Pcm16Audio, metadata: dict[str, Any]) -> None:
+        directory = self._settings.voice_input_diagnostic_path
+        directory.mkdir(parents=True, exist_ok=True)
+        stem = f"{int(time.time() * 1000)}-{uuid4().hex}"
+        wav_path = directory / f"{stem}.wav"
+        write_pcm16_wav(wav_path, audio)
+        (directory / f"{stem}.json").write_text(
+            json.dumps(
+                {
+                    "sample_rate": audio.sample_rate,
+                    "channels": audio.channels,
+                    "format": "pcm_s16le",
+                    "duration_seconds": audio.duration_seconds,
+                    **metadata,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
 
     def save_pcm16_temp(self, pcm16: bytes, sample_rate: int) -> Path:
         """Create a short-lived WAV for STT; callers must invoke cleanup_upload."""

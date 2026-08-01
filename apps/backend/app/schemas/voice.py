@@ -12,6 +12,8 @@ class VoiceProviderStats(BaseModel):
 class VoiceChatResponse(BaseModel):
     voice_request_id: str
     transcript: str
+    raw_transcript: str | None = None
+    corrections: list[dict[str, object]] = Field(default_factory=list)
     reply: str
     emotion: str = "neutral"
     intent: str = "casual_chat"
@@ -41,6 +43,10 @@ class VoiceLiveResponse(BaseModel):
     utterance_id: str
     voice_request_id: str
     transcript: str
+    raw_transcript: str | None = None
+    corrections: list[dict[str, object]] = Field(default_factory=list)
+    message_id: str | None = None
+    turn_id: str | None = None
     status: str = "streaming"
 
 

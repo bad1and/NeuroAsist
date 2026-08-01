@@ -90,16 +90,15 @@ describe("TTSStreamPlayer", () => {
     const second = player.enqueue("utterance", 1, audio());
     await tick();
     const context = FakeAudioContext.instance;
-    expect(context.decodeAudioData).toHaveBeenCalledTimes(1);
-    context.deferred[0].resolve(buffer(1));
-    await first;
-    expect(context.createBufferSource).toHaveBeenCalledTimes(1);
-    await tick();
     expect(context.decodeAudioData).toHaveBeenCalledTimes(2);
     context.deferred[1].resolve(buffer(0.5));
     await second;
-    expect(context.sources[0].start).toHaveBeenCalledWith(1.075);
-    expect(context.sources[1].start.mock.calls[0][0]).toBeCloseTo(2.075);
+    expect(context.createBufferSource).not.toHaveBeenCalled();
+    context.deferred[0].resolve(buffer(1));
+    await first;
+    expect(context.createBufferSource).toHaveBeenCalledTimes(2);
+    expect(context.sources[0].start).toHaveBeenCalledWith(1.03);
+    expect(context.sources[1].start.mock.calls[0][0]).toBeCloseTo(2.03);
   });
 
   it("starts prebuffer after timeout when only one buffer is ready", async () => {
@@ -144,7 +143,7 @@ describe("TTSStreamPlayer", () => {
     expect(context.createBufferSource).toHaveBeenCalledTimes(1);
   });
 
-  it("applies playback rate to scheduled live buffers", async () => {
+  it("keeps backend-rendered live buffers at normal browser playback rate", async () => {
     const player = new TTSStreamPlayer(vi.fn(), vi.fn(), vi.fn(), {
       playbackRate: 1.15,
     });
@@ -155,27 +154,23 @@ describe("TTSStreamPlayer", () => {
     context.deferred[0].resolve(buffer(0.25));
     player.finish("utterance");
     await pending;
-    expect(context.sources[0].playbackRate.value).toBe(1.15);
+    expect(context.sources[0].playbackRate.value).toBe(1);
   });
 
-  it.each([
-    [0.75, 1.0 / 0.75],
-    [1, 1],
-    [1.25, 1.0 / 1.25],
-  ])("schedules the next buffer after its playback-rate-adjusted duration", async (rate, duration) => {
+  it.each([0.75, 1, 1.25])("never applies backend tempo twice at playback rate %s", async (rate) => {
     const player = new TTSStreamPlayer(vi.fn(), vi.fn(), vi.fn(), { playbackRate: rate });
     player.begin("utterance");
     const first = player.enqueue("utterance", 0, audio());
     const second = player.enqueue("utterance", 1, audio());
     await tick();
     const context = FakeAudioContext.instance;
-    context.deferred[0].resolve(buffer(1));
-    await first;
-    await tick();
     context.deferred[1].resolve(buffer(0.5));
     await second;
+    context.deferred[0].resolve(buffer(1));
+    await first;
 
-    expect(context.sources[1].start.mock.calls[0][0]).toBeCloseTo(1.075 + duration);
+    expect(context.sources[1].start.mock.calls[0][0]).toBeCloseTo(2.03);
+    expect(context.sources[1].playbackRate.value).toBe(1);
   });
 
   it("invalidates an unfinished decode on stop", async () => {

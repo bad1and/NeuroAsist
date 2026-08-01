@@ -1,10 +1,12 @@
 from pathlib import Path
+import sqlite3
 
 from apps.backend.app.semantic.chroma_index import ChromaVectorIndex
 from apps.backend.app.semantic.embedding import HashEmbeddingProvider
 from apps.backend.app.memory.service import MemoryService
 from apps.backend.app.runtime.settings import RuntimeSettings
 from apps.backend.app.storage.timeline import TimelineStore
+from apps.backend.app.core.config import Settings
 
 
 def test_chroma_index_upserts_searches_deletes_and_rebuilds(tmp_path: Path) -> None:
@@ -56,3 +58,45 @@ def test_llm_candidate_is_indexed_in_chroma_outside_an_event_loop(tmp_path: Path
 
     assert service.sync_next_index_job() is True
     assert index.search_sync("кофе", "memory", 1)[0].item_id == created[0]["id"]
+
+
+def test_chroma_default_is_isolated_next_to_each_sqlite_database(tmp_path: Path) -> None:
+    first = Settings(sqlite_path=str(tmp_path / "one" / "memory.sqlite3"))
+    second = Settings(sqlite_path=str(tmp_path / "two" / "memory.sqlite3"))
+
+    assert first.semantic_chroma_directory == tmp_path / "one" / "chroma"
+    assert second.semantic_chroma_directory == tmp_path / "two" / "chroma"
+
+
+def test_chroma_rebuild_reconciles_missing_and_stale_ids_without_collection_reset(tmp_path: Path) -> None:
+    source = {"memory": [("current", "актуальный факт")]}
+    index = ChromaVectorIndex(
+        tmp_path / "chroma-reconcile",
+        HashEmbeddingProvider(dimension=64),
+        lambda namespace: source.get(namespace, []),
+    )
+    index.upsert_sync("stale", "устаревший факт", "memory")
+    collection_id = index._collection("memory").id
+
+    index.rebuild_sync("memory")
+    snapshot = index.snapshot_sync("memory")
+
+    assert snapshot["ids"] == ["current"]
+    assert index._collection("memory").id == collection_id
+
+
+def test_legacy_chroma_cleanup_requires_only_neuroasist_collections(tmp_path: Path) -> None:
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    connection = sqlite3.connect(legacy / "chroma.sqlite3")
+    try:
+        connection.execute("CREATE TABLE collections (name TEXT NOT NULL)")
+        connection.execute("INSERT INTO collections (name) VALUES ('neuroasist_memory')")
+        connection.commit()
+    finally:
+        connection.close()
+
+    assert ChromaVectorIndex.remove_legacy_storage_if_safe(
+        legacy, tmp_path / "replacement",
+    ) is True
+    assert not legacy.exists()

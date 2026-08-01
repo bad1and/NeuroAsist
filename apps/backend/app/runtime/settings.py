@@ -10,12 +10,15 @@ from pathlib import Path
 class RuntimeSettings:
     personality: str = "default"
     voice_language: str = "ru"
+    voice_microphone_profile: str = "balanced"
     voice_tts_voice: str | None = None
     voice_playback_rate: float = 1.0
     voice_live_playback_prebuffer_segments: int = 1
     voice_live_playback_prebuffer_ms: int = 0
     memory_mode: str = "balanced"
     memory_incognito: bool = False
+    reflections_enabled: bool = True
+    reflection_min_significance: float = 0.55
     live_conversation_enabled: bool = False
     live_conversation_participant_mode: str = "one_to_one"
     live_conversation_engagement: str = "balanced"

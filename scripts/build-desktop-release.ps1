@@ -47,6 +47,7 @@ New-Item -ItemType Directory -Force -Path $binaries, $output | Out-Null
     --paths $root `
     --add-data "$(Join-Path $root 'apps\protocol');apps\protocol" `
     --collect-all silero `
+    --collect-all silero_vad `
     --collect-all gigaam `
     --collect-all openvoice `
     --collect-all onnxruntime `
@@ -54,6 +55,7 @@ New-Item -ItemType Directory -Force -Path $binaries, $output | Out-Null
     --collect-all faster_whisper `
     --collect-all ctranslate2 `
     --collect-all av `
+    --exclude-module matplotlib `
     --distpath $output `
     --workpath (Join-Path $root "build\pyinstaller-work") `
     --specpath (Join-Path $root "build\pyinstaller-spec") `
