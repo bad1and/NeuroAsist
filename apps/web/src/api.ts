@@ -12,7 +12,11 @@ import type {
   TimelineMessage,
   MemoryAuditItem,
   MemoryItem,
+  MemoryTopic,
+  MemoryCommitment,
   ConversationDebug,
+  CharacterStateView,
+  CharacterStateEvent,
 } from "./types";
 
 const DESKTOP_RUNTIME =
@@ -122,9 +126,27 @@ export function getConversationDebug(sessionId: string): Promise<ConversationDeb
   );
 }
 
+export function getCharacterState(): Promise<CharacterStateView> { return requestJson("/conversation/state"); }
+export function getCharacterStateEvents(): Promise<{ events: CharacterStateEvent[] }> { return requestJson("/conversation/state/events"); }
+export function resetCharacterState(scope: "mood" | "relationship"): Promise<CharacterStateView> { return requestJson("/conversation/state/reset", { method: "POST", body: JSON.stringify({ scope }) }); }
+export function getCharacterReflections(): Promise<{ reflections: import("./types").CharacterReflection[] }> { return requestJson("/conversation/state/reflections"); }
+export function deleteCharacterReflection(id: string): Promise<{ deleted: boolean }> { return requestJson(`/conversation/state/reflections/${encodeURIComponent(id)}`, { method: "DELETE" }); }
+export type ReflectionSettings = { enabled: boolean; min_significance: number };
+export function getReflectionSettings(): Promise<ReflectionSettings> { return requestJson("/conversation/state/reflections/settings"); }
+export function updateReflectionSettings(payload: ReflectionSettings): Promise<ReflectionSettings> { return requestJson("/conversation/state/reflections/settings", { method: "PATCH", body: JSON.stringify(payload) }); }
+
+export function resetConversationSession(): Promise<{ session_id: string; messages: number; episodes: number }> {
+  return requestJson("/conversation/session/reset", { method: "POST" });
+}
+
+export function getConversationSession(): Promise<{ session_id: string; created: boolean }> {
+  return requestJson("/conversation/session", { method: "POST" });
+}
+
 export function updateRuntimeSettings(payload: {
   personality?: string;
   voice_language?: string;
+  voice_microphone_profile?: PublicSettings["voice_microphone_profile"];
   voice_tts_voice?: string;
   voice_playback_rate?: number;
   voice_live_playback_prebuffer_segments?: number;
@@ -187,12 +209,14 @@ export function getVoiceTtsStatus(
 export function sendChatMessage(
   sessionId: string,
   message: string,
+  clientMessageId?: string,
 ): Promise<ChatResponse> {
   return requestJson<ChatResponse>("/chat", {
     method: "POST",
     body: JSON.stringify({
       session_id: sessionId,
       message,
+      client_message_id: clientMessageId,
     }),
   });
 }
@@ -200,12 +224,14 @@ export function sendChatMessage(
 export function sendLiveTextMessage(
   sessionId: string,
   message: string,
+  clientMessageId?: string,
 ): Promise<VoiceLiveResponse> {
   return requestJson<VoiceLiveResponse>("/chat/live", {
     method: "POST",
     body: JSON.stringify({
       session_id: sessionId,
       message,
+      client_message_id: clientMessageId,
     }),
   });
 }
@@ -291,8 +317,12 @@ export function createBackup(): Promise<{ name: string; size_bytes: number; crea
   return requestJson("/backups", { method: "POST" });
 }
 
-export function getTimelineMessages(limit = 50): Promise<{ items: TimelineMessage[]; next_offset: number | null }> {
-  return requestJson(`/timeline/messages?limit=${limit}`);
+export function getTimelineMessages(
+  limit = 50,
+  sessionId?: string,
+): Promise<{ items: TimelineMessage[]; next_offset: number | null }> {
+  const session = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
+  return requestJson(`/timeline/messages?limit=${limit}${session}`);
 }
 
 export function getTimelineJournal(): Promise<{ items: TimelineJournalItem[] }> {
@@ -352,6 +382,41 @@ export function resetAllCompanionData(): Promise<{ messages: number; memories: n
 
 export function reindexMemories(): Promise<{ indexed: number }> {
   return requestJson("/memory/reindex", { method: "POST" });
+}
+
+export function getSttTerms(): Promise<{ terms: Record<string, string[]> }> {
+  return requestJson("/settings/stt-terms");
+}
+
+export function updateSttTerms(terms: Record<string, string[]>): Promise<{ terms: Record<string, string[]> }> {
+  return requestJson("/settings/stt-terms", {
+    method: "PUT",
+    body: JSON.stringify({ terms }),
+  });
+}
+
+export function getMemoryTopics(): Promise<{ items: MemoryTopic[] }> {
+  return requestJson("/memory/topics");
+}
+
+export function getMemoryCommitments(status?: string): Promise<{ items: MemoryCommitment[] }> {
+  return requestJson(`/memory/commitments${status ? `?status=${encodeURIComponent(status)}` : ""}`);
+}
+
+export function closeMemoryCommitment(id: string): Promise<{ commitment: MemoryCommitment }> {
+  return requestJson(`/memory/commitments/${encodeURIComponent(id)}/close`, { method: "POST" });
+}
+
+export function getMemoryConflicts(): Promise<{ items: Array<{ id: string; reason: string; status: string }> }> {
+  return requestJson("/memory/conflicts");
+}
+
+export function getMemoryDiagnostics(): Promise<import("./types").MemoryDiagnostics> {
+  return requestJson("/memory/diagnostics");
+}
+
+export function getMemoryProfile(): Promise<{ facts: MemoryItem[]; topics: MemoryTopic[]; commitments: MemoryCommitment[] }> {
+  return requestJson("/memory/profile");
 }
 
 export function getAvatarStatus(): Promise<AvatarStatusResponse> {

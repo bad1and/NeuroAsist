@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   Brain,
@@ -28,17 +28,20 @@ import {
   getEvents,
   getTimelineJournal,
   getTimelineMessages,
+  getConversationSession,
   getSettings,
   getConversationDebug,
   getStatus,
   getVoiceTtsStatus,
   getModels,
   getPronunciations,
+  getSttTerms,
   installModel,
   interruptVoiceSession,
   isDesktopManaged,
   removeModel,
   reindexMemories,
+  resetConversationSession,
   resetAllCompanionData,
   resolveApiUrl,
   saveDesktopApiKey,
@@ -49,6 +52,7 @@ import {
   sendVoiceMessage,
   updateRuntimeSettings,
   updatePronunciations,
+  updateSttTerms,
   updateVoiceExpression,
   updateVoiceStyle,
   voiceWebSocketUrl,
@@ -78,16 +82,24 @@ import type {
 } from "./types";
 import type { VoiceServerEvent } from "./types";
 import { PlaybackCoordinator, TTSStreamPlayer, VoiceSocketClient } from "./voice-live";
-import { BrowserVadRecorder, PcmInputClient, type VadState } from "./vad";
+import {
+  BrowserVadRecorder,
+  PcmInputClient,
+  microphoneConstraints,
+  type MicrophoneProfile,
+  type VadState,
+} from "./vad";
 import { JournalPage } from "./journal";
 import { MemoryPage } from "./memory";
+import { StatePage } from "./state";
 import { OverviewPage } from "./overview";
 import { getDesktopRuntime, initialCoreStatus, listenForCoreStatus, restartDesktopCore, type CoreStatus } from "./desktop";
 import { StartupScreen } from "./components/StartupScreen";
 import { WindowChrome } from "./components/WindowChrome";
 import { AppDialog } from "./components/AppDialog";
+import { GuidedSttCapture } from "./stt-capture";
 
-type AppView = "overview" | "chat" | "journal" | "memory" | "settings";
+type AppView = "overview" | "chat" | "journal" | "memory" | "state" | "settings";
 type SettingsSection = "general" | "voice" | "conversation" | "memory" | "system";
 type LiveConversationSettings = Pick<
   PublicSettings,
@@ -107,7 +119,6 @@ type WsState = "connected" | "disconnected" | "reconnecting";
 type LevelFilter = "all" | EventLevel;
 type VoiceState = "idle" | "recording" | "transcribing" | "thinking" | "speaking" | "stopping" | "error";
 
-const SESSION_ID = "default";
 const AVATAR_EMOTION_LABELS: Record<string, string> = {
   neutral: "Нейтральная", happy: "Радость", sad: "Грусть", angry: "Злость",
   annoyed: "Раздражение", smirk: "Улыбка", thinking: "Задумчивость", surprised: "Удивление",
@@ -179,7 +190,36 @@ function isLiveVoiceTransportError(error: unknown): boolean {
   return (
     error.message.includes("Live voice connection failed") ||
     error.message.includes("Voice WebSocket must be connected") ||
-    error.message.includes("Live text requires backend TTS")
+    error.message.includes("Live text requires backend TTS") ||
+    // A closed HTTP body during /chat/live is a transport failure, not a
+    // failed user message. Fall back to the ordinary /chat request so typing
+    // remains reliable while the live socket/core reconnects.
+    error.message.includes("incomplete chunked read") ||
+    error.message.includes("peer closed connection") ||
+    error.message.includes("Failed to fetch")
+  );
+}
+
+function formatSttTerms(entries: Record<string, string[]>): string {
+  return Object.entries(entries)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([canonical, aliases]) => `${canonical} = ${aliases.join(" | ")}`)
+    .join("\n");
+}
+
+function parseSttTerms(value: string): Record<string, string[]> {
+  return Object.fromEntries(
+    value.split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const separator = line.indexOf("=");
+        if (separator <= 0) throw new Error(`Некорректная строка словаря STT: ${line}`);
+        const canonical = line.slice(0, separator).trim();
+        const aliases = line.slice(separator + 1).split("|").map((item) => item.trim()).filter(Boolean);
+        if (!canonical || aliases.length === 0) throw new Error(`Некорректная строка словаря STT: ${line}`);
+        return [canonical, aliases];
+      }),
   );
 }
 
@@ -197,6 +237,8 @@ export default function App() {
   const [events, setEvents] = useState<BackendEvent[]>([]);
   const [wsState, setWsState] = useState<WsState>("disconnected");
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [startingSession, setStartingSession] = useState(false);
   const servicesReady = !desktopManaged || coreStatus === "ready";
   const setupRequired = Boolean(settings && !settings.api_key_configured && isDesktopManaged());
 
@@ -221,7 +263,7 @@ export default function App() {
   useEffect(() => {
     if (!desktopManaged || coreStatus !== "ready") return;
     const elapsed = Date.now() - startupStartedAt.current;
-    const timer = window.setTimeout(() => setShowStartup(false), Math.max(0, 800 - elapsed) + 380);
+    const timer = window.setTimeout(() => setShowStartup(false), Math.max(0, 2000 - elapsed));
     return () => window.clearTimeout(timer);
   }, [coreStatus, desktopManaged]);
 
@@ -276,6 +318,33 @@ export default function App() {
     }, 10000);
     return () => window.clearInterval(timer);
   }, [refreshEvents, refreshOverview, servicesReady]);
+
+  const startFreshSession = useCallback(async () => {
+    setStartingSession(true);
+    try {
+      const session = await resetConversationSession();
+      setSessionId(session.session_id);
+    } finally {
+      setStartingSession(false);
+    }
+  }, []);
+
+  const resumeSession = useCallback(async () => {
+    setStartingSession(true);
+    try {
+      const session = await getConversationSession();
+      setSessionId(session.session_id);
+    } finally {
+      setStartingSession(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!servicesReady || !settings || setupRequired || sessionId || startingSession) return;
+    void resumeSession().catch((error) => {
+      setStatusError(error instanceof Error ? error.message : "Не удалось восстановить сессию.");
+    });
+  }, [servicesReady, settings, setupRequired, sessionId, startingSession, resumeSession]);
 
   useEffect(() => {
     if (!servicesReady) return;
@@ -363,17 +432,22 @@ export default function App() {
               onOpenSettings={() => switchView("settings")}
             />
           )}
-          {activeView === "chat" && (
+          <div hidden={activeView !== "chat"}>
             <ChatPage
+              key={sessionId ?? "starting"}
+              sessionId={sessionId}
+              sessionStarting={startingSession}
+              isActive={activeView === "chat"}
               events={events}
               settings={settings}
               avatarStatus={avatarStatus}
               onRefreshEvents={refreshEvents}
               onOpenMemory={() => switchView("memory")}
             />
-          )}
+          </div>
           {activeView === "journal" && <JournalPage />}
           {activeView === "memory" && <MemoryPage />}
+          {activeView === "state" && <StatePage events={events} />}
           {activeView === "settings" && (
             <SettingsPage
               settings={settings}
@@ -386,6 +460,7 @@ export default function App() {
                 void refreshOverview();
                 void refreshEvents();
               }}
+              onResetSession={startFreshSession}
             />
           )}
         </main>
@@ -439,6 +514,7 @@ const MAIN_NAVIGATION: Array<{ id: Exclude<AppView, "settings">; label: string; 
   { id: "chat", label: "Диалог", icon: MessageCircle },
   { id: "journal", label: "История", icon: History },
   { id: "memory", label: "Память", icon: Brain },
+  { id: "state", label: "Состояние", icon: SlidersHorizontal },
 ];
 
 function Sidebar({
@@ -491,12 +567,18 @@ function NavigationButton({
 }
 
 function ChatPage({
+  sessionId,
+  sessionStarting,
+  isActive,
   events,
   settings,
   avatarStatus,
   onRefreshEvents,
   onOpenMemory,
 }: {
+  sessionId: string | null;
+  sessionStarting: boolean;
+  isActive: boolean;
   events: BackendEvent[];
   settings: PublicSettings | null;
   avatarStatus: AvatarStatusResponse | null;
@@ -562,30 +644,30 @@ function ChatPage({
 
   const showMemoryUpdates = useCallback((updates?: MemoryUpdate[]) => {
     const update = updates && updates.length ? updates[updates.length - 1] : undefined;
-    if (!update) return;
-    setMemoryNotice(update.action === "saved"
-      ? `Сохранено в памяти: ${update.predicate}.`
-      : "Новая запись готова к проверке в разделе «Память».");
+    if (!update || update.action !== "saved") return;
+    setMemoryNotice(`Сохранено в памяти: ${update.predicate}.`);
   }, []);
 
   useEffect(() => {
-    void getTimelineMessages().then((payload) => {
+      if (!sessionId) return;
+      void getTimelineMessages(50, sessionId).then((payload) => {
       setMessages(payload.items
         .filter((message) => message.role === "user" || message.role === "assistant")
         .map((message) => ({ id: message.id, role: message.role as "user" | "assistant", content: message.content })));
     }).catch(() => {
       // The V0.4 compatibility backend may intentionally keep Timeline V2 disabled.
     });
-  }, []);
+  }, [sessionId]);
 
   useEffect(() => {
-    if (!import.meta.env.DEV || !liveConversation) {
+    if (!import.meta.env.DEV || !liveConversation || !settings?.conversation_diagnostics_enabled) {
       setConversationDebug(null);
       return;
     }
     let active = true;
     const refresh = () => {
-      void getConversationDebug(SESSION_ID)
+      if (!sessionId) return;
+      void getConversationDebug(sessionId)
         .then((snapshot) => { if (active) setConversationDebug(snapshot); })
         .catch(() => { if (active) setConversationDebug(null); });
     };
@@ -595,7 +677,7 @@ function ChatPage({
       active = false;
       window.clearInterval(timer);
     };
-  }, [liveConversation]);
+  }, [liveConversation, sessionId, settings?.conversation_diagnostics_enabled]);
 
   const voiceSupported =
     typeof navigator !== "undefined" &&
@@ -640,16 +722,16 @@ function ChatPage({
     setLoading(false);
     // A live socket normally carries the cancellation.  REST covers a batch
     // fallback (or a temporarily disconnected socket), including Unity audio.
-    if (!sentOverLiveSocket) {
-      void interruptVoiceSession(SESSION_ID, utteranceId).catch(() => undefined);
+    if (!sentOverLiveSocket && sessionId) {
+      void interruptVoiceSession(sessionId, utteranceId).catch(() => undefined);
     }
-  }, [stopVoicePlayback]);
+  }, [sessionId, stopVoicePlayback]);
 
   const playAudioUrl = useCallback(
     async (audioUrl: string): Promise<boolean> => {
       stopVoicePlayback();
       const audio = new Audio(audioUrl);
-      audio.playbackRate = settings?.voice_playback_rate ?? 1;
+      audio.playbackRate = 1;
       activeAudioRef.current = audio;
       audio.onended = () => {
         if (activeAudioRef.current === audio) {
@@ -680,7 +762,7 @@ function ChatPage({
       const audio = new Audio(fallbackAudioUrl);
 
       stopVoicePlayback(audio);
-      audio.playbackRate = settings?.voice_playback_rate ?? 1;
+      audio.playbackRate = 1;
       activeAudioRef.current = audio;
       audio.onended = () => {
         if (activeAudioRef.current === audio) {
@@ -744,7 +826,8 @@ function ChatPage({
         {
           prebufferSegments: settings?.voice_live_playback_prebuffer_segments ?? 1,
           prebufferMs: settings?.voice_live_playback_prebuffer_ms ?? 0,
-          playbackRate: settings?.voice_playback_rate ?? 1,
+          playbackRate: 1,
+          startLeadMs: settings?.voice_live_playback_start_lead_ms ?? 30,
         },
         (gapMs) => {
           liveSocketRef.current?.send("playback.underrun", { underrun_ms: gapMs });
@@ -755,21 +838,29 @@ function ChatPage({
             generation: activeVoiceGenerationRef.current,
           });
         },
+        (segmentId, decodeMs) => {
+          liveSocketRef.current?.send("playback.segment.decoded", {
+            segment_id: segmentId,
+            decode_ms: decodeMs,
+          });
+        },
       );
     }
     livePlayerRef.current.updateOptions({
       prebufferSegments: settings?.voice_live_playback_prebuffer_segments ?? 1,
       prebufferMs: settings?.voice_live_playback_prebuffer_ms ?? 0,
-      playbackRate: settings?.voice_playback_rate ?? 1,
+      playbackRate: 1,
+      startLeadMs: settings?.voice_live_playback_start_lead_ms ?? 30,
     });
     return livePlayerRef.current;
   }, [
     settings?.voice_live_playback_prebuffer_ms,
     settings?.voice_live_playback_prebuffer_segments,
-    settings?.voice_playback_rate,
+    settings?.voice_live_playback_start_lead_ms,
   ]);
 
   const ensureLiveVoice = useCallback(async () => {
+    if (!sessionId) throw new Error("Сессия ещё создаётся");
     const player = ensureLivePlayer();
     if (!liveSocketRef.current) {
       const onEvent = (event: VoiceServerEvent) => {
@@ -851,7 +942,7 @@ function ChatPage({
         }
       };
       liveSocketRef.current = new VoiceSocketClient(
-        voiceWebSocketUrl(SESSION_ID),
+        voiceWebSocketUrl(sessionId),
         onEvent,
         (audio, segment) => {
           if (
@@ -867,7 +958,7 @@ function ChatPage({
     }
     await player.unlock();
     await liveSocketRef.current.connect();
-  }, [ensureLivePlayer, showMemoryUpdates, speakTextInBrowser, stopVoicePlayback]);
+  }, [ensureLivePlayer, sessionId, showMemoryUpdates, speakTextInBrowser, stopVoicePlayback]);
 
   useEffect(() => () => {
     livePlayerRef.current?.stop();
@@ -984,12 +1075,25 @@ function ChatPage({
     [pollVoiceTtsStatus, showMemoryUpdates],
   );
 
+  useLayoutEffect(() => {
+    // ChatPage remains mounted while another section is open so the live
+    // connection survives navigation.  Its list can therefore receive its
+    // history while hidden; scroll only after it becomes visible and has a
+    // measurable layout.
+    if (!isActive || messages.length === 0) return;
+    listRef.current?.scrollTo({
+      top: listRef.current.scrollHeight,
+      behavior: "auto",
+    });
+  }, [isActive, messages.length]);
+
   useEffect(() => {
+    if (!isActive) return;
     listRef.current?.scrollTo({
       top: listRef.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [messages]);
+  }, [isActive, messages]);
 
   useEffect(() => {
     for (const event of events) {
@@ -1057,7 +1161,7 @@ function ChatPage({
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
     const text = draft.trim();
-    if (!text || loading) {
+    if (!text || !sessionId) {
       return;
     }
 
@@ -1077,7 +1181,12 @@ function ChatPage({
         await ensureLiveVoice();
         liveSocketRef.current?.clearActive();
         liveAudioStartedRef.current = false;
-        const response = await sendLiveTextMessage(SESSION_ID, text);
+        const response = await sendLiveTextMessage(sessionId, text, userMessage.id);
+        if (response.message_id) {
+          setMessages((current) => current.map((message) =>
+            message.id === userMessage.id ? { ...message, id: response.message_id! } : message,
+          ));
+        }
         liveSocketRef.current?.activate(response.utterance_id);
         setVoiceState("thinking");
         return;
@@ -1089,12 +1198,14 @@ function ChatPage({
         liveSocketRef.current = null;
         setError("Потоковый режим недоступен: использован обычный ответ.");
       }
-      const response = await sendChatMessage(SESSION_ID, text);
+      const response = await sendChatMessage(sessionId, text, userMessage.id);
       showMemoryUpdates(response.memory_updates);
       setMessages((current) => [
-        ...current,
+        ...current.map((message) => message.id === userMessage.id && response.message_id
+          ? { ...message, id: response.message_id }
+          : message),
         {
-          id: crypto.randomUUID(),
+          id: response.assistant_message_id ?? crypto.randomUUID(),
           role: "assistant",
           content: response.reply,
           emotion: response.emotion,
@@ -1110,7 +1221,9 @@ function ChatPage({
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Не удалось отправить сообщение");
       setRetryText(text);
-      setMessages((current) => current.filter((message) => message.id !== userMessage.id));
+      // A transport failure is ambiguous: the server may already have
+      // accepted the client id.  Keep the optimistic user bubble so retry
+      // cannot silently erase a durable turn.
     } finally {
       if (!liveSocketRef.current?.activeUtteranceId) {
         setLoading(false);
@@ -1130,7 +1243,10 @@ function ChatPage({
     setError(null);
     try {
       await ensureLivePlayer().unlock();
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const profile = (settings?.voice_microphone_profile ?? "balanced") as MicrophoneProfile;
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: microphoneConstraints(profile),
+      });
       const mimeType = getRecordingMimeType();
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       chunksRef.current = [];
@@ -1185,6 +1301,7 @@ function ChatPage({
   };
 
   const submitVoice = async (audio: Blob, endOfSpeechUnixMs?: number) => {
+    if (!sessionId) return;
     if (audio.size === 0) {
       setError("Запись пуста");
       setVoiceState("idle");
@@ -1209,7 +1326,7 @@ function ChatPage({
         liveSocketRef.current?.clearActive();
         liveAudioStartedRef.current = false;
         response = await sendVoiceMessage(
-          SESSION_ID,
+          sessionId,
           audio,
           settings?.voice_language ?? "ru",
           true,
@@ -1222,7 +1339,7 @@ function ChatPage({
         liveSocketRef.current?.close();
         liveSocketRef.current = null;
         response = await sendVoiceMessage(
-          SESSION_ID,
+          sessionId,
           audio,
           settings?.voice_language ?? "ru",
           false,
@@ -1261,6 +1378,7 @@ function ChatPage({
   }, [submitVoice]);
 
   const toggleHandsFree = async (mode: "hands_free" | "live_conversation" = "hands_free") => {
+    if (!sessionId) return;
     const isLive = mode === "live_conversation";
     const requestedModeActive = isLive ? liveConversation : handsFree;
     if (requestedModeActive) {
@@ -1282,7 +1400,7 @@ function ChatPage({
     setLiveConversation(false);
     try {
       await ensureLiveVoice();
-      const input = new PcmInputClient(voiceInputWebSocketUrl(SESSION_ID, isLive ? 2 : 1), (event) => {
+      const input = new PcmInputClient(voiceInputWebSocketUrl(sessionId, isLive ? 2 : 1), (event) => {
         if (event.type === "voice.input.transcript" && event.transcript) {
           setMessages((current) => [...current, {
             id: crypto.randomUUID(),
@@ -1338,15 +1456,10 @@ function ChatPage({
           setError(event.message ?? "Не удалось обработать голосовой ввод");
         }
       });
-      await input.connect(
-        16000,
-        settings?.voice_language ?? "ru",
-        isLive ? "live_conversation" : "hands_free",
-      );
       pcmInputRef.current = input;
       const recorder = new BrowserVadRecorder();
       vadRecorderRef.current = recorder;
-      await recorder.start(
+      const capture = await recorder.start(
         (pcm16) => pcmInputRef.current?.sendPcm(pcm16),
         (nextState, event) => {
           setVadState(nextState);
@@ -1357,21 +1470,15 @@ function ChatPage({
             window.clearTimeout(bargeInTimerRef.current);
             bargeInTimerRef.current = null;
           }
-          if (event === "speech_started") {
-            if (isLive) updateConversationStatus("Слышу вас");
-            if (liveSocketRef.current?.activeUtteranceId) {
-              const confirmationMs = {
-                low: 300,
-                balanced: 180,
-                high: 60,
-              }[settings?.live_conversation_interruption_sensitivity ?? "balanced"];
-              bargeInTimerRef.current = window.setTimeout(() => {
-                bargeInTimerRef.current = null;
-                interruptAssistantSpeech();
-              }, confirmationMs);
-            }
-          }
+          if (event === "speech_started" && isLive) updateConversationStatus("Слышу вас");
         },
+        (settings?.voice_microphone_profile ?? "balanced") as MicrophoneProfile,
+      );
+      await input.connect(
+        capture.sampleRate,
+        settings?.voice_language ?? "ru",
+        isLive ? "live_conversation" : "hands_free",
+        capture,
       );
       setHandsFree(!isLive);
       setLiveConversation(isLive);
@@ -1472,9 +1579,9 @@ function ChatPage({
           <button
             className="primary-button send-button"
             type="submit"
-            disabled={loading || draft.trim().length === 0}
-            aria-label={loading ? "Отправка сообщения" : "Отправить сообщение"}
-            title={loading ? "Отправка сообщения" : "Отправить сообщение"}
+            disabled={!sessionId || sessionStarting || loading || draft.trim().length === 0}
+            aria-label={sessionStarting ? "Подготавливаем сессию" : loading ? "Отправка сообщения" : "Отправить сообщение"}
+            title={sessionStarting ? "Подготавливаем сессию" : loading ? "Отправка сообщения" : "Отправить сообщение"}
           >
             <SendHorizontal size={18} aria-hidden="true" />
           </button>
@@ -1643,6 +1750,7 @@ function SettingsPage({
   onRefreshEvents,
   onRefreshAvatar,
   onSettingsChanged,
+  onResetSession,
 }: {
   settings: PublicSettings | null;
   avatarStatus: AvatarStatusResponse | null;
@@ -1650,14 +1758,17 @@ function SettingsPage({
   onRefreshEvents: () => Promise<void>;
   onRefreshAvatar: () => Promise<void>;
   onSettingsChanged: (settings: PublicSettings) => void;
+  onResetSession: () => Promise<void>;
 }) {
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
   const [personality, setPersonality] = useState("");
   const [voiceLanguage, setVoiceLanguage] = useState("ru");
+  const [voiceMicrophoneProfile, setVoiceMicrophoneProfile] = useState<MicrophoneProfile>("balanced");
   const [voiceTtsVoice, setVoiceTtsVoice] = useState("");
   const [voiceTtsStyle, setVoiceTtsStyle] = useState("auto");
   const [voiceExpressionLevel, setVoiceExpressionLevel] = useState("natural");
   const [pronunciationsText, setPronunciationsText] = useState("");
+  const [sttTermsText, setSttTermsText] = useState("");
   const [voicePlaybackRate, setVoicePlaybackRate] = useState(1);
   const [prebufferSegments, setPrebufferSegments] = useState(1);
   const [prebufferMs, setPrebufferMs] = useState(0);
@@ -1678,11 +1789,14 @@ function SettingsPage({
   });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [resetSessionDialog, setResetSessionDialog] = useState(false);
+  const [showSttCapture, setShowSttCapture] = useState(false);
 
   useEffect(() => {
     if (settings) {
       setPersonality(settings.personality);
       setVoiceLanguage(settings.voice_language);
+      setVoiceMicrophoneProfile(settings.voice_microphone_profile ?? "balanced");
       setVoiceTtsVoice(settings.voice_tts_voice);
       setVoiceTtsStyle(settings.voice_tts_style);
       setVoiceExpressionLevel(settings.voice_tts_expression_level);
@@ -1711,6 +1825,9 @@ function SettingsPage({
     void getPronunciations()
       .then((result) => setPronunciationsText(formatPronunciations(result.pronunciations)))
       .catch(() => setPronunciationsText(""));
+    void getSttTerms()
+      .then((result) => setSttTermsText(formatSttTerms(result.terms)))
+      .catch(() => setSttTermsText(""));
   }, []);
 
   const updateLiveSetting = <K extends keyof LiveConversationSettings>(
@@ -1727,6 +1844,7 @@ function SettingsPage({
       const nextSettings = await updateRuntimeSettings({
         personality,
         voice_language: voiceLanguage,
+        voice_microphone_profile: voiceMicrophoneProfile,
         voice_tts_voice: voiceTtsVoice,
         voice_playback_rate: voicePlaybackRate,
         voice_live_playback_prebuffer_segments: prebufferSegments,
@@ -1822,6 +1940,34 @@ function SettingsPage({
       description: "Модели, резервные копии и состояние компонентов.",
     },
   };
+
+  const resetSession = async () => {
+    setSaving(true);
+    setMessage(null);
+    try {
+      await onResetSession();
+      setMessage("Новая сессия начата. Диалог удалён, память Iris сохранена.");
+      setResetSessionDialog(false);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Не удалось сбросить сессию.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveSttTerms = async () => {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const result = await updateSttTerms(parseSttTerms(sttTermsText));
+      setSttTermsText(formatSttTerms(result.terms));
+      setMessage("Словарь распознавания сохранён и применён.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Не удалось сохранить словарь распознавания.");
+    } finally {
+      setSaving(false);
+    }
+  };
   const activeSettingsMeta = settingsSectionMeta[activeSection];
 
   return (
@@ -1902,6 +2048,19 @@ function SettingsPage({
           </label>
 
           <label>
+            Профиль микрофона
+            <select
+              value={voiceMicrophoneProfile}
+              onChange={(event) => setVoiceMicrophoneProfile(event.target.value as MicrophoneProfile)}
+            >
+              <option value="balanced">Сбалансированный — рекомендуется</option>
+              <option value="headset">Гарнитура</option>
+              <option value="speakers">Колонки</option>
+            </select>
+            <small>Управляет эхоподавлением и шумоподавлением браузера для записи и живого режима.</small>
+          </label>
+
+          <label>
             Голос {ttsProviderLabel}
             <select
               value={voiceTtsVoice}
@@ -1957,6 +2116,33 @@ function SettingsPage({
               {" · активен"}
             </strong>
           </div>
+          <div className="readonly-setting">
+            <span>Детектор речи</span>
+            <strong>
+              {settings.voice_vad?.active_provider ?? "energy"}
+              {settings.voice_vad?.model ? ` · ${settings.voice_vad.model}` : ""}
+              {settings.voice_vad?.ready ? " · готов" : " · fallback"}
+            </strong>
+            {settings.voice_vad?.fallback_reason && <small>{settings.voice_vad.fallback_reason}</small>}
+          </div>
+        </fieldset>
+
+        <fieldset className="settings-group" hidden={activeSection !== "voice"}>
+          <legend>Словарь распознавания</legend>
+          <label>
+            Канонический термин = точный вариант | точный вариант
+            <textarea
+              rows={9}
+              value={sttTermsText}
+              onChange={(event) => setSttTermsText(event.target.value)}
+              placeholder={"NeuroAsist = Нейро Асист | нейроасист\nGigaAM = Гига АМ | гигаэм"}
+              disabled={saving}
+            />
+            <small>Исправляются только перечисленные варианты. Нечёткий поиск и LLM не используются.</small>
+          </label>
+          <button className="secondary" type="button" onClick={() => void saveSttTerms()} disabled={saving}>
+            Сохранить словарь распознавания
+          </button>
         </fieldset>
 
         <fieldset className="settings-group" hidden={activeSection !== "voice"}>
@@ -2005,7 +2191,18 @@ function SettingsPage({
               onChange={(event) => setPrebufferMs(Number(event.target.value))}
             />
           </label>
+          <button
+            className="secondary"
+            type="button"
+            aria-expanded={showSttCapture}
+            aria-controls="stt-guided-capture"
+            onClick={() => setShowSttCapture((value) => !value)}
+          >
+            {showSttCapture ? "Скрыть сбор тестовых записей" : "Собрать приватный STT-корпус"}
+          </button>
         </fieldset>
+
+        {showSttCapture && activeSection === "voice" && <GuidedSttCapture profile={voiceMicrophoneProfile} />}
 
         <fieldset className="settings-group live-conversation-settings" hidden={activeSection !== "conversation"}>
           <legend>Живой разговор</legend>
@@ -2168,6 +2365,13 @@ function SettingsPage({
               <option value="half_duplex">Не слушать во время ответа</option>
             </select>
           </label>
+          <div className="settings-danger-action">
+            <strong>Новая сессия</strong>
+            <small>Удалит текущий диалог и начнёт разговор с чистого листа. Долгосрочная память Iris сохранится.</small>
+            <button className="secondary danger-button" type="button" disabled={saving} onClick={() => setResetSessionDialog(true)}>
+              Сбросить сессию
+            </button>
+          </div>
         </fieldset>
 
         <fieldset className="settings-group" hidden={activeSection !== "memory"}>
@@ -2192,6 +2396,17 @@ function SettingsPage({
         </div>
 
         {message && <div className="notice" role="status">{message}</div>}
+        <AppDialog
+          open={resetSessionDialog}
+          title="Сбросить текущую сессию?"
+          description="Все сообщения и сводки текущего диалога будут удалены без возможности восстановления. Долгосрочная память Iris останется."
+          onClose={() => !saving && setResetSessionDialog(false)}
+        >
+          <div className="dialog-actions">
+            <button className="secondary" type="button" disabled={saving} onClick={() => setResetSessionDialog(false)}>Отмена</button>
+            <button className="danger-button" type="button" disabled={saving} onClick={() => void resetSession()}>{saving ? "Сбрасываю…" : "Сбросить сессию"}</button>
+          </div>
+        </AppDialog>
       </div>
     </section>
   );

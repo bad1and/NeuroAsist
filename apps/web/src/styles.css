@@ -137,6 +137,7 @@ select { appearance: auto; }
 .icon-button { min-width: 38px; padding: 8px; }
 .text-button { min-height: auto; padding: 2px 0; color: var(--color-focus); background: transparent; text-decoration: underline; text-underline-offset: 3px; }
 .danger-button { color: var(--color-danger-text); border-color: var(--color-danger-border); background: var(--danger-soft); }
+.settings-danger-action { display: grid; gap: 7px; margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--border); }.settings-danger-action small { color: var(--subtle); line-height: 1.4; }.settings-danger-action .danger-button { justify-self: start; }
 
 .chat-panel { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; height: 100%; max-height: 100%; }
 .message-list { display: flex; flex: 1 1 auto; flex-direction: column; gap: 10px; min-height: 0; overflow: auto; padding: 8px 0 14px; background: transparent; }
@@ -946,11 +947,43 @@ textarea::placeholder {
   margin-block-end: 24px;
 }
 
-.startup-mark img {
-  display: block;
+.iris-loader {
+  display: grid;
+  width: 160px;
+  aspect-ratio: 1;
+  place-items: center;
+}
+
+.iris-loader-compact {
+  width: 96px;
+}
+
+.iris-loader-hero {
   width: 100%;
-  height: auto;
-  animation: logo-arrive 600ms var(--ease-out) both;
+}
+
+.iris-loader-media {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.iris-loader-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transition: opacity 180ms cubic-bezier(.2, 0, 0, 1);
+}
+
+.iris-loader-canvas {
+  overflow: hidden;
+}
+
+.iris-loader-canvas svg {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
 }
 
 .startup-copy h1 {
@@ -963,23 +996,6 @@ textarea::placeholder {
   margin: 10px 0 0;
   color: var(--color-text-soft);
   font-size: 13px;
-}
-
-.startup-progress {
-  width: 180px;
-  height: 2px;
-  margin-block-start: 28px;
-  overflow: hidden;
-  border-radius: 2px;
-  background: var(--color-rule);
-}
-
-.startup-progress i {
-  display: block;
-  width: 42%;
-  height: 100%;
-  background: var(--color-accent);
-  animation: startup-progress 1.2s ease-in-out infinite;
 }
 
 .startup-content > .primary-button {
@@ -1060,15 +1076,6 @@ textarea::placeholder {
 
 @keyframes message-in {
   from { opacity: 0; transform: translateY(6px); }
-}
-
-@keyframes logo-arrive {
-  from { opacity: 0; transform: scale(0.88); }
-}
-
-@keyframes startup-progress {
-  from { transform: translateX(-120%); }
-  to { transform: translateX(340%); }
 }
 
 @keyframes spin {
@@ -1185,8 +1192,6 @@ textarea::placeholder {
 @media (prefers-reduced-motion: reduce) {
   .overview-page,
   .message,
-  .startup-mark img,
-  .startup-progress i,
   .is-spinning {
     animation: none;
   }
@@ -1926,12 +1931,8 @@ body {
   content: "";
 }
 
-.startup-mark img {
+.startup-mark .iris-loader-media {
   filter: drop-shadow(0 18px 28px var(--color-shadow));
-}
-
-.startup-progress {
-  box-shadow: var(--shadow-surface);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -2024,6 +2025,15 @@ body {
   align-items: center;
 }
 
+.state-page { width: min(100%, 1080px); margin: 0 auto; padding: 24px; }
+.state-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 20px 0; }
+.state-card { padding: 18px; border: 1px solid var(--color-border); border-radius: 16px; background: var(--color-surface); margin: 16px 0; }
+.state-card h2 { margin: 0 0 12px; font-size: 1rem; }
+.state-card dl { display: grid; gap: 9px; margin: 0; }
+.state-card dl div { display: flex; justify-content: space-between; gap: 12px; }
+.state-card dt { color: var(--color-text-muted); }.state-card dd { margin: 0; font-weight: 650; text-align: right; }
+.state-actions { display: flex; flex-wrap: wrap; gap: 10px; }.state-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }.state-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; }.state-list span { color: var(--color-text-muted); }.text-button { border: 0; background: transparent; color: var(--color-accent); cursor: pointer; }
+
 @media (max-width: 48rem) {
   .conversation-debug dl {
     grid-template-columns: 1fr;
@@ -2032,6 +2042,7 @@ body {
   .live-conversation-settings {
     grid-template-columns: 1fr;
   }
+  .state-grid { grid-template-columns: 1fr; }
 
   .live-conversation-settings legend,
   .live-conversation-settings > small,
@@ -2042,6 +2053,303 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .voice-button:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+/* Hallmark · component: guided STT capture · genre: atmospheric · theme: Iris graphite
+ * states: default · hover · focus · active · disabled · loading · error · success
+ * contrast: pass (40–41) · pre-emit critique: P5 H5 E5 S5 R5 V4
+ */
+
+.stt-capture {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 20px;
+  width: min(100%, 760px);
+  min-width: 0;
+  justify-self: start;
+  overflow: clip;
+  padding: 24px;
+  border-radius: 24px;
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-row);
+}
+
+.stt-capture-header,
+.stt-capture-saved-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  min-width: 0;
+}
+
+.stt-capture-header > div {
+  min-width: 0;
+}
+
+.stt-capture-header h3,
+.stt-capture-saved-heading h4 {
+  margin: 0;
+  color: var(--color-text);
+  font-style: normal;
+  text-wrap: balance;
+}
+
+.stt-capture-header h3 {
+  font-size: 20px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+}
+
+.stt-capture-header p {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  color: var(--color-text-soft);
+  font-size: 13px;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.stt-capture-header p svg {
+  flex: 0 0 auto;
+  color: var(--color-success);
+}
+
+.stt-capture-count {
+  flex: 0 0 auto;
+  color: var(--color-text);
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.stt-capture-count span {
+  color: var(--color-text-muted);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.stt-capture-progress {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-surface-soft);
+}
+
+.stt-capture-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-accent);
+  transform-origin: left center;
+  transition: transform var(--motion-standard) var(--ease-out);
+}
+
+.stt-capture-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 16px;
+  min-width: 0;
+}
+
+.stt-capture-editor label {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  color: var(--color-text-soft);
+  font-size: 13px;
+}
+
+.stt-capture-editor textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.stt-capture-editor small {
+  color: var(--color-text-muted);
+  line-height: 1.4;
+  text-wrap: pretty;
+}
+
+.stt-capture-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.stt-capture-actions button {
+  min-height: 44px;
+  white-space: nowrap;
+}
+
+.stt-capture-notice {
+  width: 100%;
+  margin: 0;
+}
+
+.stt-capture-saved {
+  min-width: 0;
+  padding-top: 20px;
+  border-top: 1px solid var(--color-rule);
+}
+
+.stt-capture-saved-heading {
+  align-items: baseline;
+  margin-bottom: 12px;
+}
+
+.stt-capture-saved-heading h4 {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.stt-capture-saved-heading span {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stt-capture-empty {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.stt-capture-files {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stt-capture-files li {
+  min-width: 0;
+}
+
+.stt-capture-files button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  color: var(--color-text-soft);
+  background: var(--color-surface);
+  box-shadow: 0 1px 0 var(--color-rule) inset;
+  transition:
+    color var(--motion-fast) var(--ease-out),
+    background-color var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
+}
+
+.stt-capture-files button span {
+  overflow: hidden;
+  font-size: 13px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stt-capture-files button svg:first-child {
+  color: var(--color-success);
+}
+
+.stt-capture-files button svg:last-child {
+  color: var(--color-text-muted);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .stt-capture-files button:hover {
+    color: var(--color-text);
+    background: var(--color-surface-soft);
+  }
+
+  .stt-capture-files button:hover svg:last-child {
+    color: var(--color-focus);
+  }
+}
+
+.stt-capture-files button:active:not(:disabled) {
+  transform: scale(.96);
+}
+
+.stt-capture-notice.is-success {
+  border-color: var(--color-success);
+  color: var(--color-success-text);
+  background: var(--color-success-soft);
+}
+
+.stt-capture-notice.is-error {
+  border-color: var(--color-danger-border);
+  color: var(--color-danger-text);
+  background: var(--color-danger-soft);
+}
+
+.stt-capture-spinner {
+  animation: stt-capture-spin 800ms linear infinite;
+}
+
+@keyframes stt-capture-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 48rem) {
+  .stt-capture {
+    gap: 20px;
+    padding: 20px;
+    border-radius: 20px;
+  }
+
+  .stt-capture-editor,
+  .stt-capture-files {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 24rem) {
+  .stt-capture {
+    padding: 16px;
+  }
+
+  .stt-capture-header {
+    gap: 12px;
+  }
+
+  .stt-capture-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .stt-capture-actions button {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stt-capture-progress span {
+    transition-duration: 120ms;
+  }
+
+  .stt-capture-spinner {
+    animation: none;
+  }
+
+  .stt-capture-files button:active:not(:disabled) {
     transform: none;
   }
 }

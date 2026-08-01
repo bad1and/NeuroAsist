@@ -1,7 +1,9 @@
+import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, Request, status
 
+from apps.backend.app.api.routes.conversation import require_active_session
 from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.llm.base import LLMProviderError
 from apps.backend.app.llm.providers.deepseek import DeepSeekProvider
@@ -23,6 +25,7 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
     A connected voice socket is still required because it carries text deltas,
     metadata and audio segments back to the desktop client.
     """
+    require_active_session(request, payload.session_id)
     settings = request.app.state.settings
     if not settings.voice_tts_enabled:
         raise HTTPException(
@@ -54,7 +57,54 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
         runtime_settings.voice_language,
         runtime_settings.voice_tts_voice,
     )
-    await manager.start(
+    source_message = None
+    state_context = None
+    state_behavior = None
+    lease = None
+    coordinator = getattr(request.app.state, "turn_coordinator", None)
+    if coordinator is not None:
+        try:
+            accepted = await coordinator.accept_user_turn(
+                session_id=payload.session_id, content=payload.message, input_mode="text",
+                client_message_id=payload.client_message_id, utterance_id=utterance_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        source_message = accepted.message
+        if not accepted.created:
+            existing = request.app.state.timeline_store.assistant_for_user(source_message.id)
+            return VoiceLiveResponse(
+                session_id=payload.session_id, utterance_id=utterance_id,
+                voice_request_id=voice_request_id, transcript=payload.message,
+                message_id=source_message.id, turn_id=source_message.turn_id,
+                status=existing.status if existing is not None else "streaming",
+            )
+        lease = await coordinator.begin_assistant(accepted, commit_policy="generated_text")
+        state_service = getattr(request.app.state, "character_state_service", None)
+        if state_service is not None:
+            state_turn = state_service.prepare(
+                transcript=payload.message, message_id=source_message.id,
+            )
+            state_context, state_behavior = state_turn.prompt_block(), state_turn.behavior
+    else:
+        timeline_store = getattr(request.app.state, "timeline_store", None)
+        if timeline_store is not None:
+            source_message, _ = timeline_store.append_message(
+                role="user", content=payload.message, input_mode="text",
+                utterance_id=utterance_id, metadata={"legacy_session_id": payload.session_id},
+            )
+    async def complete_live_assistant(reply: str) -> None:
+        if coordinator is None or lease is None:
+            return
+        assistant_message = await coordinator.complete_assistant(payload.session_id, lease, reply)
+        if request.app.state.memory_service is not None:
+            request.app.state.memory_service.schedule_extraction(assistant_message)
+
+    async def interrupt_live_assistant(prefix: str) -> None:
+        if coordinator is not None and lease is not None:
+            await coordinator.interrupt_assistant(payload.session_id, lease, prefix)
+
+    task = await manager.start(
         session_id=payload.session_id,
         utterance_id=utterance_id,
         transcript=payload.message,
@@ -62,7 +112,15 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
         voice=voice,
         agent=agent,
         input_mode="text",
+        source_message=source_message,
+        state_context=state_context,
+        presentation_cue=state_behavior,
+        persist_reply=False if lease is not None else True,
+        on_assistant_completed=complete_live_assistant if lease is not None else None,
+        on_assistant_interrupted=interrupt_live_assistant if lease is not None else None,
     )
+    if coordinator is not None and lease is not None:
+        coordinator.register_generation_task(lease, task)
     event_bus.publish(
         "chat.live_started",
         "info",
@@ -79,11 +137,14 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
         utterance_id=utterance_id,
         voice_request_id=voice_request_id,
         transcript=payload.message,
+        message_id=source_message.id if source_message is not None else None,
+        turn_id=source_message.turn_id if source_message is not None else None,
     )
 
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
+    require_active_session(request, payload.session_id)
     settings = request.app.state.settings
     history = request.app.state.history
     event_bus = request.app.state.event_bus
@@ -97,6 +158,10 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
         },
     )
 
+    lease = None
+    accepted = None
+    state_context = None
+    state_behavior = None
     try:
         provider = DeepSeekProvider(settings)
         agent = CharacterAgent(
@@ -108,8 +173,58 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             memory_service=request.app.state.memory_service,
             persona_name=request.app.state.runtime_settings.personality,
         )
-        result = await agent.handle_user_message(payload.session_id, payload.message)
+        coordinator = getattr(request.app.state, "turn_coordinator", None)
+        if coordinator is not None:
+            try:
+                accepted = await coordinator.accept_user_turn(
+                    session_id=payload.session_id,
+                    content=payload.message,
+                    input_mode="text",
+                    client_message_id=payload.client_message_id,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+            if not accepted.created:
+                previous = request.app.state.timeline_store.assistant_for_user(accepted.user_message_id)
+                if previous is not None and previous.status == "completed":
+                    return ChatResponse(
+                        reply=previous.effective_content,
+                        message_id=accepted.user_message_id,
+                        assistant_message_id=previous.id,
+                        turn_id=accepted.turn_id,
+                        generation=accepted.generation,
+                    )
+            lease = await coordinator.begin_assistant(accepted)
+            coordinator.register_generation_task(lease)
+            state_service = getattr(request.app.state, "character_state_service", None)
+            if state_service is not None:
+                state_turn = state_service.prepare(
+                    transcript=payload.message, message_id=accepted.message.id,
+                )
+                state_context, state_behavior = state_turn.prompt_block(), state_turn.behavior
+            result = await agent.handle_user_message(
+                payload.session_id, payload.message, source_message=accepted.message, persist_reply=False,
+                state_context=state_context,
+                state_behavior=state_behavior,
+            )
+            assistant_message = await coordinator.complete_assistant(payload.session_id, lease, result["reply"])
+            if request.app.state.memory_service is not None:
+                request.app.state.memory_service.schedule_extraction(assistant_message)
+            result.update({
+                "message_id": accepted.user_message_id,
+                "assistant_message_id": assistant_message.id,
+                "turn_id": accepted.turn_id,
+                "generation": accepted.generation,
+            })
+        else:
+            result = await agent.handle_user_message(payload.session_id, payload.message)
         result["memory_updates"] = agent.last_memory_updates
+    except asyncio.CancelledError:
+        if lease is not None:
+            await request.app.state.turn_coordinator.interrupt_assistant(payload.session_id, lease)
+        raise
+    except HTTPException:
+        raise
     except ValueError as exc:
         logger.error(
             "Chat request failed: session_id=%s message_length=%s",
@@ -132,6 +247,8 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             detail=str(exc),
         ) from exc
     except LLMProviderError as exc:
+        if lease is not None:
+            await request.app.state.turn_coordinator.fail_assistant(payload.session_id, lease)
         logger.error(
             "LLM provider failed during chat request: session_id=%s message_length=%s",
             payload.session_id,
@@ -163,6 +280,8 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             detail=str(exc),
         ) from exc
     except Exception as exc:
+        if lease is not None:
+            await request.app.state.turn_coordinator.fail_assistant(payload.session_id, lease)
         logger.exception(
             "Unexpected /chat failure: session_id=%s message_length=%s",
             payload.session_id,

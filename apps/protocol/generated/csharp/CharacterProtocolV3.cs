@@ -25,5 +25,6 @@ public sealed class CharacterTurn
 
 public sealed class AffectCue { public string emotion { get; set; } = "neutral"; public float intensity { get; set; } = 1; public float valence { get; set; }; public float arousal { get; set; }; }
 public sealed class GestureCue { public string name { get; set; } = "auto"; public float intensity { get; set; } = 1; public bool interrupt { get; set; } = true; }
-public sealed class DeliveryCue { public string pace { get; set; } = "normal"; public float emphasis { get; set; }; }
+public sealed class DeliveryOverride { public int segment { get; set; } = 1; public string pace { get; set; } = "normal"; public string emphasis { get; set; } = "none"; }
+public sealed class DeliveryCue { public string pace { get; set; } = "normal"; public float emphasis { get; set; }; public List<DeliveryOverride> overrides { get; set; } = new(); }
 public sealed class ContinuityCue { public List<string> referenced_memory_ids { get; set; } = new(); public List<string> referenced_episode_ids { get; set; } = new(); public List<string> closes_open_loop_ids { get; set; } = new(); }

@@ -1,6 +1,7 @@
 import { RefreshCw } from "lucide-react";
 
 import type { CoreStatus } from "../desktop";
+import { IrisLoader } from "./IrisLoader";
 import { WindowChrome } from "./WindowChrome";
 
 const STATUS_COPY: Record<CoreStatus, { title: string; detail: string }> = {
@@ -26,13 +27,12 @@ export function StartupScreen({
       <WindowChrome title="" compact />
       <main className={`startup-content is-${status}`} aria-live="polite">
         <div className="startup-mark" aria-hidden="true">
-          <img src="/brand/iris-wordmark-light.svg" alt="" />
+          <IrisLoader size="hero" active={status === "starting" || retrying} />
         </div>
         <div className="startup-copy">
           <h1>{copy.title}</h1>
           <p>{copy.detail}</p>
         </div>
-        {status === "starting" && <span className="startup-progress" aria-label="Запуск приложения"><i /></span>}
         {failed && (
           <button className="primary-button" type="button" onClick={onRetry} disabled={retrying}>
             <RefreshCw size={17} className={retrying ? "is-spinning" : ""} aria-hidden="true" />

@@ -32,6 +32,17 @@ class DecisionContext:
     addressed_to_other: bool = False
 
 
+@dataclass(frozen=True)
+class AddressingAnalysis:
+    """Deterministic addressing evidence shared by decision and context repair."""
+
+    kind: str
+    direct_iris: bool
+    implicit_iris: bool
+    other_person: bool
+    reasons: tuple[str, ...] = ()
+
+
 class ConversationDecisionEngine:
     """Hard gates plus deterministic engagement scoring.
 
@@ -39,7 +50,9 @@ class ConversationDecisionEngine:
     reducer remains the authority and always has a conservative local fallback.
     """
 
-    _name = re.compile(r"(?iu)(?:^|[\s,!.?—-])(?:iris|ирис|ириска)(?:$|[\s,!.?—-])")
+    _name = re.compile(
+        r"(?iu)(?:^|[\s,!.?—-])(?:iris|айрис|ирис|ириска|ириск|ирес|иреск)(?:$|[\s,!.?—-])"
+    )
     _invitation = re.compile(
         r"(?iu)\b(?:что думаешь|как считаешь|тво[её] мнение|скажи|ответь|прокомментируй|а ты)\b"
     )
@@ -47,9 +60,19 @@ class ConversationDecisionEngine:
         r"(?iu)(?:"
         r"\b(?:можешь|могла\s+бы|подскажи|расскажи|объясни|покажи|скинь|пришли|"
         r"дай|помоги|посоветуй|найди|открой|включи|выключи)\b|"
-        r"^\s*(?:а\s+)?(?:что|кто|где|куда|откуда|когда|почему|зачем|как|"
-        r"какой|какая|какие|сколько|чем)\b"
+        r"^\s*(?:(?:а|ну|кстати|слушай|смотри|короче)\s+){0,3}"
+        r"(?:что|кто|где|куда|откуда|когда|почему|зачем|как|"
+        r"какой|какая|какое|какие|какую|какою|какого|какому|каким|каком|"
+        r"каких|какими|который|которая|которое|которые|которую|которого|"
+        r"которому|которым|котором|которых|которыми|сколько|чем)(?=\s|[?？])"
         r")"
+    )
+    _interrogative_opening = re.compile(
+        r"(?iu)^\s*(?:(?:а|ну|кстати|слушай|смотри|короче)\s+){0,3}"
+        r"(?:что|кто|где|куда|откуда|когда|почему|зачем|как|"
+        r"какой|какая|какое|какие|какую|какою|какого|какому|каким|каком|"
+        r"каких|какими|который|которая|которое|которые|которую|которого|"
+        r"которому|которым|котором|которых|которыми|сколько|чем)(?=\s|[?？])"
     )
     _self_talk = re.compile(r"(?iu)\b(?:думаю вслух|сам с собой|не обращай внимания)\b")
     _question = re.compile(r"[?？]\s*$")
@@ -63,14 +86,27 @@ class ConversationDecisionEngine:
     )
     _generic_other_vocative = re.compile(
         r"(?iu)^\s*(?:(?:а|ну|так|эй|слушай)\s+){0,2}"
-        r"(?P<name>[а-яёa-z]{2,20})[\s,]+"
-        r"(?:ты|вы|можешь|можете|зайди|зайдите|подойди|подойдите|включи|"
+        r"(?P<name>[а-яёa-z]{2,20})(?P<separator>,\s*|\s+)"
+        r"(?P<tail>.+)$"
+    )
+    _generic_other_command = re.compile(
+        r"(?iu)^(?:"
+        r"(?:ты|вы)\s+(?:можешь|можете|зайди|зайдите|подойди|подойдите|"
+        r"включи|включите|выключи|выключите|скажи|скажите|посмотри|"
+        r"посмотрите|давай|давайте)\b|"
+        r"(?:можешь|можете|зайди|зайдите|подойди|подойдите|включи|"
         r"включите|выключи|выключите|скажи|скажите|посмотри|посмотрите|"
         r"давай|давайте|привет|пока)\b"
+        r")"
     )
     _non_names = {
-        "iris", "ирис", "ириска", "а", "ну", "так", "да", "нет", "блин",
-        "слушай", "смотри", "кстати", "короче",
+        "iris", "айрис", "ирис", "ириска", "ириск", "ирес", "иреск",
+        "а", "ну", "так", "да", "нет", "блин", "слушай", "смотри", "кстати",
+        "короче", "что", "кто", "где", "куда", "откуда", "когда", "почему",
+        "зачем", "как", "какой", "какая", "какое", "какие", "какую", "какою",
+        "какого", "какому", "каким", "каком", "каких", "какими", "который",
+        "которая", "которое", "которые", "которую", "которого", "которому",
+        "которым", "котором", "которых", "которыми", "сколько", "чем",
     }
 
     def decide(
@@ -229,22 +265,98 @@ class ConversationDecisionEngine:
         """Detect a normal one-to-one request even when STT omits punctuation."""
         return bool(self._implicit_request.search(transcript))
 
+    def is_self_talk(self, transcript: str) -> bool:
+        """Recognize an explicit request not to join the speaker's monologue."""
+        return bool(self._self_talk.search(transcript))
+
     def is_addressed_to_other(self, transcript: str) -> bool:
         """Detect a vocative aimed at a nearby person rather than Iris."""
         text = transcript.strip()
         if self._known_other_name.search(text):
             return True
         match = self._generic_other_vocative.search(text)
-        return bool(match and match.group("name").casefold() not in self._non_names)
+        if match is None:
+            return False
+        candidate = match.group("name").casefold()
+        if candidate in self._non_names:
+            return False
+        # Unknown names need stronger evidence than an arbitrary token followed
+        # by "ты/вы".  STT often omits commas, so a command-shaped continuation
+        # remains sufficient (for example, "Арсен ты можешь...").
+        tail = match.group("tail").strip()
+        comma_pronoun = bool(
+            match.group("separator").lstrip().startswith(",")
+            and re.match(r"(?iu)^(?:ты|вы)\b", tail)
+        )
+        return bool(comma_pronoun or self._generic_other_command.search(tail))
+
+    def analyze_addressing(self, transcript: str) -> AddressingAnalysis:
+        """Return one consistent addressing classification with audit reasons."""
+        direct = bool(self._name.search(transcript))
+        other = False if direct else self.is_addressed_to_other(transcript)
+        implicit = False if direct or other else self.is_implicit_address(transcript)
+        if direct:
+            return AddressingAnalysis(
+                "direct_iris", True, False, False, ("direct_iris",),
+            )
+        if other:
+            return AddressingAnalysis(
+                "other_person", False, False, True, ("other_vocative",),
+            )
+        if implicit:
+            reason = (
+                "interrogative_followup"
+                if self._interrogative_opening.search(transcript)
+                else "implicit_request"
+            )
+            return AddressingAnalysis(
+                "implicit_iris", False, True, False, (reason,),
+            )
+        return AddressingAnalysis(
+            "ambiguous", False, False, False, ("insufficient_addressing_evidence",),
+        )
 
     @staticmethod
-    def appraise(transcript: str, message_id: str, participant: str = "primary") -> EventAppraisal:
+    def appraise(
+        transcript: str,
+        message_id: str,
+        participant: str = "primary",
+        previous_assistant_text: str | None = None,
+    ) -> EventAppraisal:
         text = transcript.casefold()
+        affection = bool(re.search(r"\b(?:я\s+)?тебя\s+люблю\b|\bлюблю\s+тебя\b|\bобнимаю\s+тебя\b", text))
+        if affection:
+            return EventAppraisal(
+                event_kind="affection", confidence=.92,
+                intensity=min(1.0, 0.45 + len(text) / 500), valence=.55, arousal=.55,
+                direction="toward_iris", target_participant=participant,
+                emotion_impulses={"joy": .35, "playfulness": .12},
+                relationship_impulses={"warmth": .25}, cause_message_ids=[message_id],
+            )
+        correction = re.search(r"\bне\s+([\w.ё-]+)\s*,?\s+а\s+([\w.ё-]+)\b", text)
+        if correction and previous_assistant_text:
+            old_value = correction.group(1).strip(".").casefold()
+            if old_value and old_value in previous_assistant_text.casefold():
+                return EventAppraisal(
+                    event_kind="iris_mistake_corrected", confidence=.93, intensity=.58,
+                    valence=-.12, arousal=.35, direction="toward_iris",
+                    target_participant=participant,
+                    emotion_impulses={"embarrassment": .35, "interest": .18},
+                    relationship_impulses={"tension": -.03}, cause_message_ids=[message_id],
+                )
         mappings = (
-            (("извини", "прости"), "apology", 0.55, {"hurt": -0.45, "irritation": -0.35}, {"trust": 0.25, "tension": -0.35}),
-            (("спасибо", "молодец", "умница"), "praise", 0.45, {"joy": 0.5}, {"warmth": 0.3}),
-            (("ненавижу", "дура", "тупая", "заткнись"), "insult", -0.75, {"hurt": 0.7, "irritation": 0.45}, {"trust": -0.35, "tension": 0.5}),
-            (("обещаю",), "promise", 0.35, {"interest": 0.35}, {"trust": 0.15}),
+            (("помогу", "я рядом", "держись"), "support", .32, {"joy": .16, "interest": .18}, {"warmth": .14}),
+            (("извини", "прости", "виноват"), "apology", .55, {"hurt": -.45, "irritation": -.35}, {"tension": -.35}),
+            (("спасибо", "молодец", "умница", "классно"), "praise", .45, {"joy": .5}, {"warmth": .3}),
+            (("ненавижу", "дура", "тупая", "заткнись"), "insult", -.75, {"hurt": .7, "irritation": .45}, {"trust": -.35, "tension": .5}),
+            (("обещаю",), "promise_made", .35, {"interest": .35}, {"trust": .15}),
+            (("не выполнил", "не сдержал обещание"), "broken_promise", -.65, {"hurt": .55, "anxiety": .25}, {"trust": -.4, "tension": .35}),
+            (("сделал", "получилось", "закончили"), "shared_success", .55, {"joy": .55, "energy": .2}, {"warmth": .16}),
+            (("боюсь", "мне плохо", "тяжело"), "vulnerability", -.25, {"anxiety": .18, "interest": .2}, {"warmth": .12}),
+            (("ты ошиблась", "ты не про того", "не это"), "iris_mistake_corrected", -.12, {"embarrassment": .35, "interest": .18}, {"tension": -.03}),
+            (("не согласен", "неправильно"), "disagreement", -.15, {"irritation": .08, "interest": .16}, {}),
+            (("отстань", "не хочу с тобой"), "rejection", -.55, {"hurt": .4}, {"warmth": -.2, "tension": .2}),
+            (("бесит эта", "ненавижу эту", "достало это"), "user_frustration", -.18, {"anxiety": .08, "interest": .14}, {"warmth": .04}),
         )
         for needles, kind, valence, emotions, relations in mappings:
             if any(needle in text for needle in needles):
@@ -254,6 +366,7 @@ class ConversationDecisionEngine:
                     intensity=min(1.0, 0.45 + len(text) / 500),
                     valence=valence,
                     arousal=abs(valence),
+                    direction="toward_iris",
                     target_participant=participant,
                     emotion_impulses=emotions,
                     relationship_impulses=relations,
@@ -264,6 +377,7 @@ class ConversationDecisionEngine:
             confidence=0.7,
             intensity=0.1,
             target_participant=participant,
+            direction="unknown",
             cause_message_ids=[message_id],
         )
 

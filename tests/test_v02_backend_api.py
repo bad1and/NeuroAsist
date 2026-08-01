@@ -46,6 +46,17 @@ def test_status_returns_safe_public_status(client: TestClient) -> None:
     assert "api_key" not in body
 
 
+def test_character_state_api_has_scoped_reset_and_event_page(client: TestClient) -> None:
+    state = client.get("/conversation/state")
+    assert state.status_code == 200
+    assert {"mood", "relationship", "incognito", "updated_at"} <= state.json().keys()
+    assert client.get("/conversation/state/events?limit=2").status_code == 200
+    reset = client.post("/conversation/state/reset", json={"scope": "mood"})
+    assert reset.status_code == 200
+    assert reset.json()["affect"]["mood_epoch"] >= 1
+    assert client.post("/conversation/state/reset", json={"scope": "everything"}).status_code == 422
+
+
 def test_public_settings_does_not_return_api_key(client: TestClient) -> None:
     response = client.get("/settings/public")
 

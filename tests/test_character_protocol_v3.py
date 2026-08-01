@@ -3,10 +3,39 @@ from pathlib import Path
 
 from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.agents.character.protocol import metadata_frame, parse_turn
-from apps.backend.app.schemas.character import CharacterTurn, Emotion, Gesture, Intent
+from apps.backend.app.schemas.character import (
+    CharacterTurn,
+    DeliveryCue,
+    DeliveryOverride,
+    Emotion,
+    Gesture,
+    Intent,
+)
+from apps.backend.app.voice.delivery import SpeechEmphasis, SpeechPace, plan_speech
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_delivery_overrides_apply_to_one_1_based_sentence_only() -> None:
+    delivery = DeliveryCue(
+        pace="normal",
+        overrides=[
+            DeliveryOverride(segment=2, pace="slow", emphasis="light"),
+            DeliveryOverride(segment=3, pace="fast", emphasis="none"),
+        ],
+    )
+    segments = plan_speech("Первая. Вторая! Третья?", delivery)
+
+    assert [segment.pace for segment in segments] == [
+        SpeechPace.NORMAL,
+        SpeechPace.SLOW,
+        SpeechPace.FAST,
+    ]
+    assert [segment.tempo for segment in segments] == [1.0, 0.95, 1.05]
+    assert segments[1].emphasis is SpeechEmphasis.LIGHT
+    assert segments[1].pause_before_ms == 35
+    assert segments[2].emphasis is SpeechEmphasis.NONE
 
 
 def test_v3_turn_keeps_reply_when_only_metadata_is_invalid() -> None:

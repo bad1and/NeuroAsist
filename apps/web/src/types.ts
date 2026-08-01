@@ -30,12 +30,16 @@ export type ChatResponse = {
   reply_audio_url?: string | null;
   tts_status?: VoiceTtsStatus | null;
   memory_updates?: MemoryUpdate[];
+  message_id?: string | null;
+  assistant_message_id?: string | null;
+  turn_id?: string | null;
+  generation?: number | null;
 };
 
 export type MemoryUpdate = {
   id: string;
   status: MemoryStatus;
-  action: "saved" | "review" | "updated";
+  action: "saved" | "updated";
   predicate: string;
 };
 
@@ -50,6 +54,8 @@ export type VoiceTtsStatus =
 export type VoiceChatResponse = ChatResponse & {
   voice_request_id: string;
   transcript: string;
+  raw_transcript?: string | null;
+  corrections?: Array<{ source: string; target: string; start: number; end: number }>;
   reply_audio_url?: string | null;
   tts_status: VoiceTtsStatus;
   stt: {
@@ -70,8 +76,22 @@ export type VoiceLiveResponse = {
   utterance_id: string;
   voice_request_id: string;
   transcript: string;
-  status: "streaming";
+  raw_transcript?: string | null;
+  corrections?: Array<{ source: string; target: string; start: number; end: number }>;
+  message_id?: string | null;
+  turn_id?: string | null;
+  status: "streaming" | "completed" | "interrupted" | "failed";
 };
+
+export type CharacterStateView = {
+  mood: { primary_emotion: string; expression_strength: string; secondary_emotions: string[] };
+  relationship: Record<string, unknown>;
+  causes: Array<{ label: string; status: string }>;
+  incognito: boolean;
+  updated_at: string;
+};
+
+export type CharacterStateEvent = { id: string; event_kind: string; created_at: string; confidence: number; intensity: number; delta: Record<string, unknown> };
 
 export type VoiceServerEvent = {
   version: 1;
@@ -92,6 +112,11 @@ export type VoiceServerEvent = {
   code?: string;
   message?: string;
   text?: string;
+  pace?: "slow" | "normal" | "fast";
+  tempo?: number;
+  emphasis?: "none" | "light";
+  pause_after_ms?: number;
+  provider?: string;
   generation?: number;
   memory_updates?: MemoryUpdate[];
 };
@@ -173,6 +198,19 @@ export type PublicSettings = {
   model: string;
   personality: string;
   voice_language: string;
+  voice_microphone_profile: "headset" | "balanced" | "speakers";
+  voice_vad: {
+    configured_provider: string;
+    active_provider: string;
+    ready: boolean;
+    fallback: boolean;
+    fallback_reason?: string | null;
+    sample_rate?: number;
+    window_samples?: number | null;
+    model?: string | null;
+    version?: string | null;
+  };
+  voice_input_diagnostic_audio_enabled: boolean;
   voice_stt_model: string;
   voice_tts_enabled: boolean;
   voice_tts_provider: string;
@@ -185,6 +223,7 @@ export type PublicSettings = {
   voice_playback_rate: number;
   voice_live_playback_prebuffer_segments: number;
   voice_live_playback_prebuffer_ms: number;
+  voice_live_playback_start_lead_ms: number;
   chat_history_limit: number;
   episodes_enabled: boolean;
   episode_soft_inactivity_minutes: number;
@@ -194,6 +233,7 @@ export type PublicSettings = {
   memory_enabled: boolean;
   memory_mode: string;
   memory_incognito: boolean;
+  conversation_diagnostics_enabled: boolean;
   live_conversation_enabled: boolean;
   live_conversation_participant_mode: "one_to_one" | "group";
   live_conversation_engagement: "low" | "balanced" | "high";
@@ -294,7 +334,7 @@ export type TimelineJournalItem = {
   title?: string | null;
 };
 
-export type MemoryStatus = "candidate" | "active" | "superseded" | "rejected" | "deleted" | "expired";
+export type MemoryStatus = "active" | "superseded" | "rejected" | "deleted" | "expired";
 
 export type MemoryItem = {
   id: string;
@@ -310,10 +350,20 @@ export type MemoryItem = {
   user_locked: boolean;
   source_episode_id?: string | null;
   source_message_ids: string[];
+  source_count?: number;
+  replacement?: {
+    id: string;
+    predicate: string;
+    value_text: string;
+    status: MemoryStatus;
+  } | null;
   created_at: string;
   updated_at: string;
   last_accessed_at?: string | null;
   access_count: number;
+  slot_key?: string | null;
+  object_key?: string | null;
+  normalization_version?: number | null;
 };
 
 export type MemoryAuditItem = {
@@ -323,4 +373,100 @@ export type MemoryAuditItem = {
   reason?: string | null;
   source_message_ids: string[];
   created_at: string;
+};
+
+export type MemoryTopic = {
+  id: string;
+  title: string;
+  summary_text: string;
+  status: string;
+  user_locked: boolean;
+  links: Array<{ entity_type: string; entity_id: string }>;
+  evidence: Array<{ message_id?: string | null; source_role: string; source_quality: number }>;
+};
+
+export type MemoryCommitment = {
+  id: string;
+  kind: string;
+  title: string;
+  details: string;
+  status: "open" | "completed" | "cancelled";
+  importance: number;
+  confidence: number;
+  user_locked: boolean;
+};
+
+export type CharacterReflection = {
+  id: string;
+  text: string;
+  trigger_kind: string;
+  trigger_label: string;
+  significance: number;
+  primary_emotion: string;
+  created_at: string;
+};
+
+export type MemoryDiagnosticRun = {
+  id: string;
+  type: string;
+  status: string;
+  attempts: number;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string | null;
+  result: {
+    outcome?: "applied" | "partial" | "no_candidates" | "invalid_output" | "failed";
+    proposed?: number;
+    saved?: number;
+    discarded?: number;
+    counts?: Record<string, number>;
+  };
+  diagnostics: {
+    model?: string;
+    pipeline_version?: string;
+    error_codes?: string[];
+  };
+};
+
+export type MemoryDiagnostics = {
+  queue: Record<string, number>;
+  runs: MemoryDiagnosticRun[];
+  active_by_namespace?: Record<string, number>;
+  repair?: {
+    repair_key: string;
+    status: string;
+    created_at: string;
+    completed_at?: string | null;
+    result: Record<string, number | boolean | string>;
+  } | null;
+  integrity?: {
+    state: "healthy" | "degraded";
+    active_conflicts: number;
+    noncanonical_active: number;
+    provenance_missing: number;
+    source_count_mismatches: number;
+    candidate_count?: number;
+    guards_installed: boolean;
+  };
+  autonomy?: {
+    candidate_count: number;
+    open_clarifications: number;
+    clarifications: Record<string, number>;
+    decisions: Record<string, number>;
+  };
+  index_health?: {
+    state: "healthy" | "degraded" | "rebuilding";
+    semantic_enabled: boolean;
+    degraded_reason?: string | null;
+    missing_ids: string[];
+    stale_ids: string[];
+    namespaces: Record<string, {
+      count?: number;
+      source_count: number;
+      fingerprint?: string;
+      source_fingerprint: string;
+      last_successful_sync?: string | null;
+      error?: string;
+    }>;
+  };
 };

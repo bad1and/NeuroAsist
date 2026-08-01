@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from apps.backend.app.schemas.settings import (
     PublicSettingsResponse,
     PronunciationsPatch,
+    SttTermsPatch,
     RuntimeSettingsPatch,
     VoiceExpressionPatch,
     VoiceStylePatch,
@@ -49,6 +50,9 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         model=settings.deepseek_model,
         personality=runtime_settings.personality,
         voice_language=runtime_settings.voice_language,
+        voice_microphone_profile=runtime_settings.voice_microphone_profile,
+        voice_vad=dict(request.app.state.voice_input_session_manager.vad_status),
+        voice_input_diagnostic_audio_enabled=settings.voice_input_diagnostic_audio,
         voice_stt_model=settings.voice_stt_model,
         voice_tts_enabled=settings.voice_tts_enabled,
         voice_tts_provider=str(tts_metadata.get("provider", tts_provider.name)),
@@ -61,6 +65,7 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         voice_playback_rate=runtime_settings.voice_playback_rate,
         voice_live_playback_prebuffer_segments=runtime_settings.voice_live_playback_prebuffer_segments,
         voice_live_playback_prebuffer_ms=runtime_settings.voice_live_playback_prebuffer_ms,
+        voice_live_playback_start_lead_ms=settings.voice_live_playback_start_lead_ms,
         chat_history_limit=settings.chat_history_limit,
         episodes_enabled=settings.episodes_enabled,
         episode_soft_inactivity_minutes=settings.episode_soft_inactivity_minutes,
@@ -70,6 +75,9 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         memory_enabled=settings.memory_enabled,
         memory_mode=runtime_settings.memory_mode,
         memory_incognito=runtime_settings.memory_incognito,
+        reflections_enabled=runtime_settings.reflections_enabled,
+        reflection_min_significance=runtime_settings.reflection_min_significance,
+        conversation_diagnostics_enabled=settings.conversation_diagnostics_enabled,
         live_conversation_enabled=runtime_settings.live_conversation_enabled,
         live_conversation_participant_mode=runtime_settings.live_conversation_participant_mode,
         live_conversation_engagement=runtime_settings.live_conversation_engagement,
@@ -114,6 +122,14 @@ def patch_runtime_settings(
             )
         runtime_settings.voice_language = payload.voice_language
 
+    if payload.voice_microphone_profile is not None:
+        if payload.voice_microphone_profile not in {"headset", "balanced", "speakers"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unsupported microphone profile",
+            )
+        runtime_settings.voice_microphone_profile = payload.voice_microphone_profile
+
     if payload.voice_tts_voice is not None:
         if payload.voice_tts_voice not in _available_tts_voices(request):
             raise HTTPException(
@@ -156,6 +172,13 @@ def patch_runtime_settings(
     if payload.memory_incognito is not None:
         runtime_settings.memory_incognito = payload.memory_incognito
 
+    if payload.reflections_enabled is not None:
+        runtime_settings.reflections_enabled = payload.reflections_enabled
+    if payload.reflection_min_significance is not None:
+        if not 0.3 <= payload.reflection_min_significance <= 1.0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported reflection significance")
+        runtime_settings.reflection_min_significance = round(payload.reflection_min_significance, 2)
+
     if payload.live_conversation_enabled is not None:
         runtime_settings.live_conversation_enabled = payload.live_conversation_enabled
 
@@ -186,12 +209,15 @@ def patch_runtime_settings(
             "model": settings.deepseek_model,
             "personality": runtime_settings.personality,
             "voice_language": runtime_settings.voice_language,
+            "voice_microphone_profile": runtime_settings.voice_microphone_profile,
             "voice_tts_voice": runtime_settings.voice_tts_voice,
             "voice_playback_rate": runtime_settings.voice_playback_rate,
             "voice_live_playback_prebuffer_segments": runtime_settings.voice_live_playback_prebuffer_segments,
             "voice_live_playback_prebuffer_ms": runtime_settings.voice_live_playback_prebuffer_ms,
             "memory_mode": runtime_settings.memory_mode,
             "memory_incognito": runtime_settings.memory_incognito,
+            "reflections_enabled": runtime_settings.reflections_enabled,
+            "reflection_min_significance": runtime_settings.reflection_min_significance,
             "live_conversation_enabled": runtime_settings.live_conversation_enabled,
             **{
                 field_name: getattr(runtime_settings, field_name)
@@ -242,3 +268,23 @@ def get_pronunciations(request: Request) -> dict[str, dict[str, str]]:
 @router.put("/settings/pronunciations")
 def put_pronunciations(payload: PronunciationsPatch, request: Request) -> dict[str, dict[str, str]]:
     return {"pronunciations": request.app.state.voice_service.update_pronunciations(payload.pronunciations)}
+
+
+@router.get("/settings/stt-terms")
+def get_stt_terms(request: Request) -> dict[str, dict[str, list[str]]]:
+    return {"terms": request.app.state.voice_service.stt_terms()}
+
+
+@router.put("/settings/stt-terms")
+def put_stt_terms(
+    payload: SttTermsPatch,
+    request: Request,
+) -> dict[str, dict[str, list[str]]]:
+    try:
+        terms = request.app.state.voice_service.update_stt_terms(payload.terms)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    return {"terms": terms}
