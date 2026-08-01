@@ -265,6 +265,10 @@ class ConversationDecisionEngine:
         """Detect a normal one-to-one request even when STT omits punctuation."""
         return bool(self._implicit_request.search(transcript))
 
+    def is_self_talk(self, transcript: str) -> bool:
+        """Recognize an explicit request not to join the speaker's monologue."""
+        return bool(self._self_talk.search(transcript))
+
     def is_addressed_to_other(self, transcript: str) -> bool:
         """Detect a vocative aimed at a nearby person rather than Iris."""
         text = transcript.strip()

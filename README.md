@@ -289,10 +289,10 @@ ceiling. The editable pronunciation dictionary is created at
 | `VOICE_SILERO_VAD_MODEL_PATH` | Optional local 16 kHz Silero TorchScript override. If loading fails, packaged `silero-vad==6.2.1` is tried before energy fallback. |
 | `VOICE_SILERO_VAD_START_THRESHOLD` / `VOICE_SILERO_VAD_END_THRESHOLD` | Silero streaming start/end probabilities. Defaults: `0.55` / `0.35`. |
 | `VOICE_ENERGY_VAD_START_RMS` / `VOICE_ENERGY_VAD_END_RMS` | RMS thresholds used only by explicit/runtime energy fallback. Defaults: `0.018` / `0.012`. |
-| `VOICE_VAD_PRE_ROLL_MS` | RAM-only PCM ring-buffer duration preserved before detected speech. |
+| `VOICE_VAD_PRE_ROLL_MS` | RAM-only PCM ring-buffer duration preserved before detected speech. Default: `900` ms; lower values are raised to this safe minimum at runtime. |
 | `VOICE_VAD_POST_ROLL_MS` | Silence retained after speech. Only this tail, not all endpoint silence, is sent to STT. |
-| `VOICE_VAD_END_SILENCE_MS` / `VOICE_VAD_LIVE_END_SILENCE_MS` | Hands-free and SmartTurn-backed live endpoint delays. |
-| `VOICE_VAD_LIVE_FALLBACK_END_SILENCE_MS` | Conservative live delay when SmartTurn is unavailable. |
+| `VOICE_VAD_END_SILENCE_MS` / `VOICE_VAD_LIVE_END_SILENCE_MS` | Hands-free and SmartTurn-backed live endpoint delays. Defaults: `720` / `750` ms; shorter values are raised to the selected pause profile's safe minimum. |
+| `VOICE_VAD_LIVE_FALLBACK_END_SILENCE_MS` | Conservative live delay when SmartTurn is unavailable. Default: `1100` ms. |
 | `VOICE_TORCH_CPU_THREADS` / `VOICE_TORCH_INTEROP_THREADS` | Process-wide PyTorch threading, configured before STT/VAD/TTS model loading. Defaults: `4` / `1`. |
 | `VOICE_STT_TERMS_PATH` | Optional exact-alias STT dictionary path. Defaults to private app data `stt-terms.json`. |
 | `VOICE_INPUT_DIAGNOSTIC_AUDIO` | Persist canonical diagnostic WAV+JSON in the private diagnostics directory. Disabled by default. |

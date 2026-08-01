@@ -4,7 +4,12 @@ from pathlib import Path
 import anyio
 import pytest
 
-from apps.backend.app.voice.input import VadGate, VadProvider, VoiceInputSessionManager
+from apps.backend.app.voice.input import (
+    SileroVadProvider,
+    VadGate,
+    VadProvider,
+    VoiceInputSessionManager,
+)
 
 
 class FakeSocket:
@@ -34,6 +39,33 @@ class SequenceVad(VadProvider):
 
     def probability(self, pcm16: bytes, sample_rate: int) -> float:
         return next(self.values)
+
+
+class _FakeSileroModel:
+    def eval(self):
+        return self
+
+    def reset_states(self) -> None:
+        return None
+
+
+def test_silero_vad_provider_stays_ready_after_the_first_session() -> None:
+    # Bypass the loader so the regression test focuses on provider lifecycle:
+    # one warm model is consumed by session one, then session two must get a
+    # freshly loaded isolated model instead of energy fallback.
+    provider = object.__new__(SileroVadProvider)
+    provider._first_model = _FakeSileroModel()
+    provider._model_path = None
+    provider._package_loader = lambda *, onnx: _FakeSileroModel()
+    provider._torch = object()
+    provider.error = None
+
+    first = provider.create_stream()
+    second = provider.create_stream()
+
+    assert first.name == "silero"
+    assert second.name == "silero"
+    assert provider.ready is True
 
 
 class ControlledTurnDetector:
@@ -70,6 +102,33 @@ def test_vad_gate_debounces_transitions() -> None:
     assert gate.feed(.8, .1) == "speech_started"
     assert gate.feed(0, .2) is None
     assert gate.feed(0, .4) == "speech_ended"
+
+
+def test_vad_gate_clears_pending_silence_when_quiet_speech_resumes() -> None:
+    gate = VadGate(start_threshold=.55, end_threshold=.35, start_ms=64, end_ms=320)
+    assert gate.feed(.8, 512) is None
+    assert gate.feed(.8, 512) == "speech_started"
+    assert gate.feed(.2, 512) is None
+    # A quieter syllable can stay below the start threshold while still being
+    # above the end threshold. It must reset the pending endpoint timer.
+    assert gate.feed(.4, 512) is None
+    assert gate.state == "speech"
+    assert all(gate.feed(.2, 512) is None for _ in range(9))
+    assert gate.feed(.2, 512) == "speech_ended"
+
+
+def test_pre_roll_keeps_tail_of_an_oversized_pcm_frame(tmp_path: Path) -> None:
+    manager = VoiceInputSessionManager(FakeVoiceService(tmp_path), lambda *_args: None, pre_roll_ms=500)
+    socket = FakeSocket()
+    asyncio.run(manager.register("pre-roll", socket))
+    input_session = manager._sessions["pre-roll"]
+    input_session.sample_rate = 16_000
+    oversized = bytes(range(256)) * 100
+
+    manager._append_ring(input_session, oversized)
+
+    assert input_session.ring_bytes == 16_000
+    assert b"".join(input_session.ring) == oversized[-16_000:]
 
 
 @pytest.mark.anyio

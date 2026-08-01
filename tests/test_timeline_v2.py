@@ -120,6 +120,25 @@ def test_session_reset_endpoint_issues_new_id_and_rejects_stale_requests(monkeyp
     assert stale.status_code == 409
 
 
+def test_open_session_resumes_without_erasing_messages(monkeypatch, tmp_path: Path) -> None:
+    client, _ = make_client(monkeypatch, tmp_path)
+    with client:
+        opened = client.post("/conversation/session")
+        session_id = opened.json()["session_id"]
+        accepted = client.app.state.timeline_store.accept_user_turn(
+            session_key=session_id,
+            content="Не удаляй этот диалог при перезагрузке",
+            input_mode="text",
+        )
+        resumed = client.post("/conversation/session")
+        messages = client.get("/timeline/messages", params={"session_id": session_id})
+
+    assert opened.status_code == 200 and opened.json()["created"] is True
+    assert resumed.status_code == 200
+    assert resumed.json() == {"session_id": session_id, "created": False}
+    assert [item["id"] for item in messages.json()["items"]] == [accepted.message.id]
+
+
 def test_timeline_pagination_journal_and_range_deletion(monkeypatch, tmp_path: Path) -> None:
     client, _ = make_client(monkeypatch, tmp_path)
     with client:
