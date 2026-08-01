@@ -68,6 +68,7 @@ import type {
   BackendEvent,
   AvatarStatusResponse,
   AvatarOverlaySettings,
+  AvatarPlacement,
   ChatMessage,
   EventLevel,
   PublicSettings,
@@ -93,11 +94,12 @@ import { JournalPage } from "./journal";
 import { MemoryPage } from "./memory";
 import { StatePage } from "./state";
 import { OverviewPage } from "./overview";
-import { getDesktopRuntime, initialCoreStatus, listenForCoreStatus, restartDesktopCore, type CoreStatus } from "./desktop";
+import { configureAvatarPlacement, getDesktopRuntime, initialCoreStatus, listenForAvatarVisibility, listenForCoreStatus, restartDesktopCore, type CoreStatus } from "./desktop";
 import { StartupScreen } from "./components/StartupScreen";
 import { WindowChrome } from "./components/WindowChrome";
 import { AppDialog } from "./components/AppDialog";
 import { GuidedSttCapture } from "./stt-capture";
+import { InAppAvatarHost } from "./components/InAppAvatarHost";
 
 type AppView = "overview" | "chat" | "journal" | "memory" | "state" | "settings";
 type SettingsSection = "general" | "voice" | "conversation" | "memory" | "system";
@@ -233,6 +235,7 @@ export default function App() {
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [avatarStatus, setAvatarStatus] = useState<AvatarStatusResponse | null>(null);
+  const [avatarOverlay, setAvatarOverlay] = useState<AvatarOverlaySettings | null>(null);
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [events, setEvents] = useState<BackendEvent[]>([]);
   const [wsState, setWsState] = useState<WsState>("disconnected");
@@ -292,17 +295,16 @@ export default function App() {
 
   const refreshOverview = useCallback(async () => {
     try {
-      const [nextStatus, nextSettings] = await Promise.all([
+      const [nextStatus, nextSettings, nextAvatarStatus, nextAvatarOverlay] = await Promise.all([
         getStatus(),
         getSettings(),
+        getAvatarStatus().catch(() => null),
+        getAvatarOverlay().catch(() => null),
       ]);
       setStatus(nextStatus);
       setSettings(nextSettings);
-      try {
-        setAvatarStatus(await getAvatarStatus());
-      } catch {
-        setAvatarStatus(null);
-      }
+      setAvatarStatus(nextAvatarStatus);
+      setAvatarOverlay(nextAvatarOverlay);
       setStatusError(null);
     } catch (error) {
       setStatusError(error instanceof Error ? error.message : "Сервис недоступен");
@@ -318,6 +320,24 @@ export default function App() {
     }, 10000);
     return () => window.clearInterval(timer);
   }, [refreshEvents, refreshOverview, servicesReady]);
+
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    void listenForAvatarVisibility(() => {
+      void refreshOverview();
+    }).then((unlisten) => {
+      stop = unlisten;
+    });
+    return () => stop?.();
+  }, [refreshOverview]);
+
+  useEffect(() => {
+    if (!servicesReady || !settings) return;
+    void configureAvatarPlacement(settings.avatar_placement).catch(() => {
+      // Settings remain usable in a browser or when an optional avatar build
+      // is unavailable. Avatar diagnostics show the connection state.
+    });
+  }, [servicesReady, settings?.avatar_placement]);
 
   const startFreshSession = useCallback(async () => {
     setStartingSession(true);
@@ -441,6 +461,7 @@ export default function App() {
               events={events}
               settings={settings}
               avatarStatus={avatarStatus}
+              showInAppAvatar={settings?.avatar_placement === "in_app" && (avatarOverlay?.visible ?? true)}
               onRefreshEvents={refreshEvents}
               onOpenMemory={() => switchView("memory")}
             />
@@ -452,9 +473,11 @@ export default function App() {
             <SettingsPage
               settings={settings}
               avatarStatus={avatarStatus}
+              avatarOverlay={avatarOverlay}
               events={events}
               onRefreshEvents={refreshEvents}
               onRefreshAvatar={refreshOverview}
+              onAvatarOverlayChanged={setAvatarOverlay}
               onSettingsChanged={(nextSettings) => {
                 setSettings(nextSettings);
                 void refreshOverview();
@@ -573,6 +596,7 @@ function ChatPage({
   events,
   settings,
   avatarStatus,
+  showInAppAvatar,
   onRefreshEvents,
   onOpenMemory,
 }: {
@@ -582,6 +606,7 @@ function ChatPage({
   events: BackendEvent[];
   settings: PublicSettings | null;
   avatarStatus: AvatarStatusResponse | null;
+  showInAppAvatar: boolean;
   onRefreshEvents: () => Promise<void>;
   onOpenMemory: () => void;
 }) {
@@ -1494,7 +1519,9 @@ function ChatPage({
   };
 
   return (
-    <section className="panel chat-panel">
+    <section className={`panel chat-panel${showInAppAvatar && isActive ? " has-in-app-avatar" : ""}`}>
+      {showInAppAvatar && isActive && <InAppAvatarHost />}
+      <div className="chat-content">
       {memoryNotice && <div className="notice" role="status">{memoryNotice}<button className="text-button" onClick={onOpenMemory}>Открыть память</button></div>}
       <div className="message-list" ref={listRef}>
         {messages.length === 0 && (
@@ -1642,6 +1669,7 @@ function ChatPage({
           </details>
         )}
       </div>
+      </div>
     </section>
   );
 }
@@ -1746,17 +1774,21 @@ function EventsPage({
 function SettingsPage({
   settings,
   avatarStatus,
+  avatarOverlay,
   events,
   onRefreshEvents,
   onRefreshAvatar,
+  onAvatarOverlayChanged,
   onSettingsChanged,
   onResetSession,
 }: {
   settings: PublicSettings | null;
   avatarStatus: AvatarStatusResponse | null;
+  avatarOverlay: AvatarOverlaySettings | null;
   events: BackendEvent[];
   onRefreshEvents: () => Promise<void>;
   onRefreshAvatar: () => Promise<void>;
+  onAvatarOverlayChanged: (overlay: AvatarOverlaySettings | null) => void;
   onSettingsChanged: (settings: PublicSettings) => void;
   onResetSession: () => Promise<void>;
 }) {
@@ -2003,7 +2035,14 @@ function SettingsPage({
           <ModelManager />
           <BackupControls />
           <SystemMaintenance />
-          <AvatarControls avatarStatus={avatarStatus} onRefresh={onRefreshAvatar} />
+          <AvatarControls
+            avatarStatus={avatarStatus}
+            overlay={avatarOverlay}
+            placement={settings.avatar_placement}
+            onRefresh={onRefreshAvatar}
+            onOverlayChanged={onAvatarOverlayChanged}
+            onSettingsChanged={onSettingsChanged}
+          />
           <details className="system-disclosure events-disclosure">
             <summary>
               <span><strong>Журнал событий</strong><small>Технические события и диагностика</small></span>
@@ -2576,10 +2615,18 @@ function SystemMaintenance() {
 
 function AvatarControls({
   avatarStatus,
+  overlay: initialOverlay,
+  placement,
   onRefresh,
+  onOverlayChanged,
+  onSettingsChanged,
 }: {
   avatarStatus: AvatarStatusResponse | null;
+  overlay: AvatarOverlaySettings | null;
+  placement: AvatarPlacement;
   onRefresh: () => Promise<void>;
+  onOverlayChanged: (overlay: AvatarOverlaySettings | null) => void;
+  onSettingsChanged: (settings: PublicSettings) => void;
 }) {
   const [phrase, setPhrase] = useState("Проверка аватара.");
   const [emotion, setEmotion] = useState("happy");
@@ -2587,12 +2634,19 @@ function AvatarControls({
   const [motionIntensity, setMotionIntensity] = useState(0.8);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [overlay, setOverlay] = useState<AvatarOverlaySettings | null>(null);
+  const [overlay, setOverlay] = useState<AvatarOverlaySettings | null>(initialOverlay);
   const enabled = Boolean(avatarStatus?.enabled);
   const client = avatarStatus?.clients[0];
   const engine = avatarStatus?.emotion_engine;
 
-  useEffect(() => { void getAvatarOverlay().then(setOverlay).catch(() => setOverlay(null)); }, []);
+  useEffect(() => { setOverlay(initialOverlay); }, [initialOverlay]);
+  useEffect(() => {
+    if (initialOverlay) return;
+    void getAvatarOverlay().then((nextOverlay) => {
+      setOverlay(nextOverlay);
+      onOverlayChanged(nextOverlay);
+    }).catch(() => setOverlay(null));
+  }, [initialOverlay, onOverlayChanged]);
 
   const run = async (action: () => Promise<unknown>, success: string) => {
     setBusy(true);
@@ -2610,9 +2664,34 @@ function AvatarControls({
 
   const updateOverlay = async (patch: Partial<AvatarOverlaySettings>) => {
     setBusy(true); setMessage(null);
-    try { setOverlay(await updateAvatarOverlay(patch)); setMessage("Настройки оверлея обновлены."); }
+    try {
+      const nextOverlay = await updateAvatarOverlay(patch);
+      setOverlay(nextOverlay);
+      onOverlayChanged(nextOverlay);
+      setMessage(placement === "in_app" ? "Отображение аватара в диалоге обновлено." : "Настройки оверлея обновлены.");
+    }
     catch { setMessage("Не удалось сохранить настройки оверлея."); }
     finally { setBusy(false); }
+  };
+
+  const changePlacement = async (nextPlacement: AvatarPlacement) => {
+    if (nextPlacement === placement) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const nextSettings = await updateRuntimeSettings({ avatar_placement: nextPlacement });
+      onSettingsChanged(nextSettings);
+      // The app-level effect owns the native transition. Keeping a single
+      // caller avoids two concurrent Unity launches when this state update
+      // re-renders the app.
+      setMessage(nextPlacement === "in_app"
+        ? "Режим сохранён. Аватар появится внутри Iris на экране диалога."
+        : "Режим сохранён. Аватар снова будет отдельным оверлеем на рабочем столе.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Не удалось переключить размещение аватара.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -2623,9 +2702,20 @@ function AvatarControls({
       </summary>
       <section className="avatar-controls" aria-label="Управление аватаром">
       <div className="disclosure-toolbar">
-        <span>{enabled ? "Управление оверлеем и тестовыми командами" : "Подключите Unity-аватар, чтобы отправлять команды"}</span>
+        <span>{enabled ? "Размещение, отображение и тестовые команды" : "Подключите Unity-аватар, чтобы отправлять команды"}</span>
         <button className="icon-button" onClick={() => void onRefresh()} disabled={busy} aria-label="Обновить статус аватара" title="Обновить статус аватара"><RefreshCw size={16} /></button>
       </div>
+      <fieldset className="avatar-placement" disabled={busy}>
+        <legend>Где показывать аватар</legend>
+        <label>
+          <input type="radio" name="avatar-placement" aria-label="Внутри Iris" checked={placement === "in_app"} onChange={() => void changePlacement("in_app")} />
+          <span><strong>Внутри Iris</strong><small>Внизу слева на экране диалога, без второго окна.</small></span>
+        </label>
+        <label>
+          <input type="radio" name="avatar-placement" aria-label="Отдельным оверлеем" checked={placement === "desktop_overlay"} onChange={() => void changePlacement("desktop_overlay")} />
+          <span><strong>Отдельным оверлеем</strong><small>Поверх рабочего стола, как сейчас.</small></span>
+        </label>
+      </fieldset>
       <div className="avatar-summary-grid">
         <InfoRow label="Клиент" value={client?.client_name ?? "не подключён"} />
         <InfoRow label="Состояние" value={client?.state ?? "Отключён"} />
@@ -2644,22 +2734,24 @@ function AvatarControls({
       <div className="avatar-options">
         <label>
           <input type="checkbox" checked={overlay?.visible ?? true} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ visible: event.target.checked })} />
-          Показывать оверлей
+          {placement === "in_app" ? "Показывать в диалоге" : "Показывать оверлей"}
         </label>
-        <label>
-          <input type="checkbox" checked={overlay?.always_on_top ?? true} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ always_on_top: event.target.checked })} />
-          Поверх окон
-        </label>
-        <label>
-          <input type="checkbox" checked={overlay?.locked ?? true} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ locked: event.target.checked })} />
-          Заблокировать клики
-        </label>
+        {placement === "desktop_overlay" && <>
+          <label>
+            <input type="checkbox" checked={overlay?.always_on_top ?? true} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ always_on_top: event.target.checked })} />
+            Поверх окон
+          </label>
+          <label>
+            <input type="checkbox" checked={overlay?.locked ?? true} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ locked: event.target.checked })} />
+            Заблокировать клики
+          </label>
+        </>}
       </div>
       <div className="avatar-test-grid">
-        <label>
+        {placement === "desktop_overlay" && <label>
           Масштаб оверлея {overlay?.scale?.toFixed(1) ?? "1.0"}
           <input min="0.5" max="2" step="0.1" type="range" value={overlay?.scale ?? 1} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ scale: Number(event.target.value) })} />
-        </label>
+        </label>}
         <label>
           Тестовая фраза
           <input value={phrase} onChange={(event) => setPhrase(event.target.value)} disabled={!enabled || busy} />

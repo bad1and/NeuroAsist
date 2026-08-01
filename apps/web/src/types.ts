@@ -193,6 +193,8 @@ export type AvatarOverlaySettings = {
   height: number;
 };
 
+export type AvatarPlacement = "desktop_overlay" | "in_app";
+
 export type PublicSettings = {
   provider: string;
   model: string;
@@ -217,6 +219,7 @@ export type PublicSettings = {
   voice_tts_model: string | null;
   voice_tts_device: string | null;
   avatar_enabled: boolean;
+  avatar_placement: AvatarPlacement;
   voice_tts_voice: string;
   voice_tts_style: string;
   voice_tts_expression_level: string;

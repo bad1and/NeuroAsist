@@ -19,6 +19,7 @@ MAX_PREBUFFER_SEGMENTS = 4
 MIN_PREBUFFER_MS = 0
 MAX_PREBUFFER_MS = 1500
 MEMORY_MODES = {"off", "balanced", "automatic", "ask"}
+AVATAR_PLACEMENTS = {"desktop_overlay", "in_app"}
 LIVE_SETTING_VALUES = {
     "live_conversation_participant_mode": {"one_to_one", "group"},
     "live_conversation_engagement": {"low", "balanced", "high"},
@@ -59,6 +60,7 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         voice_tts_model=tts_metadata.get("model"),
         voice_tts_device=tts_metadata.get("device"),
         avatar_enabled=settings.avatar_enabled,
+        avatar_placement=runtime_settings.avatar_placement,
         voice_tts_voice=runtime_settings.voice_tts_voice or settings.voice_tts_default_voice,
         voice_tts_style=str(getattr(request.app.state, "voice_tts_style", "auto")),
         voice_tts_expression_level=str(getattr(request.app.state, "voice_tts_expression_level", "natural")),
@@ -182,6 +184,11 @@ def patch_runtime_settings(
     if payload.live_conversation_enabled is not None:
         runtime_settings.live_conversation_enabled = payload.live_conversation_enabled
 
+    if payload.avatar_placement is not None:
+        if payload.avatar_placement not in AVATAR_PLACEMENTS:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported avatar placement")
+        runtime_settings.avatar_placement = payload.avatar_placement
+
     for field_name, allowed_values in LIVE_SETTING_VALUES.items():
         value = getattr(payload, field_name)
         if value is None:
@@ -219,6 +226,7 @@ def patch_runtime_settings(
             "reflections_enabled": runtime_settings.reflections_enabled,
             "reflection_min_significance": runtime_settings.reflection_min_significance,
             "live_conversation_enabled": runtime_settings.live_conversation_enabled,
+            "avatar_placement": runtime_settings.avatar_placement,
             **{
                 field_name: getattr(runtime_settings, field_name)
                 for field_name in LIVE_SETTING_VALUES

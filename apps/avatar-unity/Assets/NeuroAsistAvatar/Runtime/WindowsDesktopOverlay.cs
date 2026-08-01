@@ -15,6 +15,7 @@ namespace NeuroAsist.Avatar
         private IntPtr handle;
         private Rect lastBounds;
         private float nextBoundsReportAt;
+        private bool embeddedInIris;
 
         private const int GWL_STYLE = -16;
         private const int GWL_EXSTYLE = -20;
@@ -31,6 +32,11 @@ namespace NeuroAsist.Avatar
         private void Awake()
         {
             if (Application.isEditor || Application.platform != RuntimePlatform.WindowsPlayer) return;
+            embeddedInIris = IsEmbeddedHost(Environment.GetEnvironmentVariable("NEUROASIST_AVATAR_HOST"));
+            // In the in-app mode Tauri owns the exact Unity HWND. GetActiveWindow
+            // is unreliable while a player starts hidden or loses activation to
+            // Iris, so this component must not alter native styles at all.
+            if (embeddedInIris) return;
             handle = GetActiveWindow();
             if (handle == IntPtr.Zero) return;
             if (client == null) client = GetComponent<AvatarWebSocketClient>();
@@ -41,6 +47,7 @@ namespace NeuroAsist.Avatar
 
         private void Update()
         {
+            if (embeddedInIris) return;
             if (Application.platform != RuntimePlatform.WindowsPlayer || handle == IntPtr.Zero) return;
             // Holding Ctrl+Alt temporarily makes the overlay interactive for drag/repositioning.
             var dragMode = (GetAsyncKeyState(0x11) & 0x8000) != 0 && (GetAsyncKeyState(0x12) & 0x8000) != 0;
@@ -56,7 +63,7 @@ namespace NeuroAsist.Avatar
             locked = nextLocked;
             scale = Mathf.Clamp(nextScale, .5f, 2f);
             transform.localScale = Vector3.one * scale;
-            if (handle == IntPtr.Zero) return;
+            if (embeddedInIris || handle == IntPtr.Zero) return;
             ApplyWindowFlags();
             if (width > 0 && height > 0) SetWindowPos(handle, alwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST, Mathf.RoundToInt(x), Mathf.RoundToInt(y), Mathf.RoundToInt(width), Mathf.RoundToInt(height), SWP_NOACTIVATE);
             SetVisible(visible);
@@ -71,6 +78,11 @@ namespace NeuroAsist.Avatar
             SetLayeredWindowAttributes(handle, (uint)(49 | (77 << 8) | (121 << 16)), 0, LWA_COLORKEY);
             SetClickThrough(locked);
             SetWindowPos(handle, alwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+
+        public static bool IsEmbeddedHost(string host)
+        {
+            return string.Equals(host, "embedded", StringComparison.OrdinalIgnoreCase);
         }
 
         private void SetClickThrough(bool enabled)
