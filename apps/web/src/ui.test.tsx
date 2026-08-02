@@ -44,6 +44,12 @@ const settings = {
   chat_history_limit: 40, episodes_enabled: true, episode_soft_inactivity_minutes: 30,
   episode_hard_inactivity_minutes: 120, episode_maximum_messages: 100, episode_maximum_estimated_tokens: 12000,
   memory_enabled: true, memory_mode: "balanced", memory_incognito: false, log_level: "info",
+  live_conversation_enabled: false, live_conversation_participant_mode: "one_to_one",
+  live_conversation_engagement: "balanced", live_conversation_initiative: "rare",
+  live_conversation_address_strictness: "balanced", live_conversation_interruption_sensitivity: "balanced",
+  live_conversation_pause_tolerance: "natural", live_conversation_emotion_expression: "natural",
+  live_conversation_mood_recovery: "natural", live_conversation_recent_event_weight: "balanced",
+  live_conversation_echo_mode: "auto",
   api_key_configured: true, available_personalities: ["default"], available_voice_languages: ["ru"], available_tts_voices: ["F4"],
 };
 
@@ -90,6 +96,7 @@ describe("русский интерфейс", () => {
     expect(container.querySelector("img.brand-logo")).toHaveAttribute("src", "/brand/iris-wordmark-light.svg");
     fireEvent.click(screen.getByRole("button", { name: "Диалог" }));
     expect(container.querySelector("main.workspace-chat")).toBeInTheDocument();
+    expect(container.querySelector(".workspace-chat > .chat-view")).toBeInTheDocument();
     expect(container.querySelector(".chat-panel .message-list")).toBeInTheDocument();
     expect(container.querySelector(".chat-panel .chat-composer")).toBeInTheDocument();
     expect(container.querySelector(".chat-composer textarea")).toBeInTheDocument();
@@ -210,6 +217,24 @@ describe("русский интерфейс", () => {
     expect(screen.getByLabelText("Голос Silero")).toBeVisible();
     expect(screen.getByText("Silero · CPU · активен")).toBeVisible();
     expect(screen.getByLabelText("Стиль общения")).not.toBeVisible();
+  });
+
+  it("не теряет выбранных участников при фоновом обновлении настроек", async () => {
+    const savedSettings = { ...settings, live_conversation_participant_mode: "group" as const };
+    api.updateRuntimeSettings.mockResolvedValue(savedSettings);
+    const { container } = render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
+    fireEvent.click(screen.getByRole("button", { name: "Живой разговор" }));
+    const participantMode = await screen.findByLabelText("Участники");
+    fireEvent.change(participantMode, { target: { value: "group" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+
+    await waitFor(() => expect(api.updateRuntimeSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ live_conversation_participant_mode: "group" }),
+    ));
+    await waitFor(() => expect(participantMode).toHaveValue("group"));
+    expect(container.querySelector(".settings-panel")).toBeInTheDocument();
   });
 
   it("не показывает ручное создание и очередь проверки", async () => {

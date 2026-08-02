@@ -1242,6 +1242,21 @@ textarea::placeholder {
   max-width: none;
 }
 
+/* ChatPage is kept mounted while switching views so the current dialog is not
+   lost. Its wrapper is also a flex item; without an explicit width it shrinks
+   to the empty-state's intrinsic content width, leaving a narrow composer in
+   a new dialog. */
+.workspace-chat > .chat-view {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+}
+
+.workspace-chat > .chat-view > .chat-panel {
+  min-width: 0;
+}
+
 .chat-panel.has-in-app-avatar {
   grid-template-columns: clamp(300px, 31%, 460px) minmax(0, 1fr);
   column-gap: clamp(20px, 2.2vw, 36px);
