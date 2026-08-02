@@ -353,10 +353,27 @@ class LiveConversationService:
                 session.last_generated_assistant_reply,
             )
         )
-        implicit_address = bool(
-            one_to_one
-            and speaker_role is SpeakerRole.PRIMARY
+        # Group mode is deliberately conservative, but an explicit request can
+        # still be a continuation of Iris's immediately preceding turn.  The
+        # lexical signal alone is not enough in a room with other people: it
+        # must also be tied to the recent Iris turn and have no conflicting
+        # addressee, self-talk, or playback-echo evidence.
+        group_contextual_implicit_address = bool(
+            not one_to_one
+            and explicit_implicit_address
+            and recent_dialogue_continuation
+            and self._has_explicit_dialogue_reply_evidence(addressing_text)
+            and not addressing.other_person
             and not self._decision.is_self_talk(addressing_text)
+            and not echo
+        )
+        implicit_address = bool(
+            group_contextual_implicit_address
+            or (
+                one_to_one
+                and speaker_role is SpeakerRole.PRIMARY
+                and not self._decision.is_self_talk(addressing_text)
+            )
         )
         if implicit_address:
             addressedness = max(addressedness, 0.82)
@@ -394,8 +411,9 @@ class LiveConversationService:
                 if explicitly_addressed_to_iris or addressed_to_other_now
                 else ["other_conversation_continuity"]
                 if addressed_to_other
-                else
-                list(addressing.reasons)
+                else [*addressing.reasons, "recent_dialogue_continuity"]
+                if group_contextual_implicit_address
+                else list(addressing.reasons)
                 if explicit_implicit_address
                 else ["recent_dialogue_continuity"]
                 if recent_dialogue_continuation and implicit_address
@@ -1244,6 +1262,18 @@ class LiveConversationService:
         normalized = text.casefold().replace("ё", "е").strip()
         if not normalized:
             return False
+        if LiveConversationService._has_explicit_dialogue_reply_evidence(normalized):
+            return True
+        prior = previous_assistant_reply.rstrip()
+        return bool(
+            len(normalized) <= 240
+            and re.search(r"[?？]\s*$", prior)
+        )
+
+    @staticmethod
+    def _has_explicit_dialogue_reply_evidence(text: str) -> bool:
+        """Recognize a reply that is explicitly tied to Iris's prior turn."""
+        normalized = text.casefold().replace("ё", "е").strip()
         if re.search(
             r"\b(?:ты|тебе|тебя|тобой|твой|твоя|твое|твои|твою|"
             r"вы|вам|вас|вами|ваш|ваша|ваше|ваши)\b",
@@ -1256,11 +1286,7 @@ class LiveConversationService:
             normalized,
         ):
             return True
-        prior = previous_assistant_reply.rstrip()
-        return bool(
-            len(normalized) <= 240
-            and re.search(r"[?？]\s*$", prior)
-        )
+        return False
 
     @staticmethod
     def _state_context(session: ConversationSession, decision: ConversationDecision) -> str:
