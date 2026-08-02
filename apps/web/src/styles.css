@@ -1231,6 +1231,39 @@ textarea::placeholder {
   }
 }
 
+/* Embedded Unity avatar: let the chat use the available desktop width so the
+   native surface scales with Iris instead of remaining a narrow fixed column. */
+.workspace-chat {
+  width: min(100%, 1560px);
+}
+
+.workspace-chat .chat-panel {
+  width: 100%;
+  max-width: none;
+}
+
+.chat-panel.has-in-app-avatar {
+  grid-template-columns: clamp(300px, 31%, 460px) minmax(0, 1fr);
+  column-gap: clamp(20px, 2.2vw, 36px);
+}
+
+.chat-panel.has-in-app-avatar .in-app-avatar-stage {
+  min-height: 420px;
+  height: min(58vh, 680px);
+}
+
+@media (max-width: 900px) {
+  .chat-panel.has-in-app-avatar {
+    grid-template-columns: minmax(230px, 32%) minmax(0, 1fr);
+    column-gap: 16px;
+  }
+
+  .chat-panel.has-in-app-avatar .in-app-avatar-stage {
+    min-height: 360px;
+    height: min(52vh, 520px);
+  }
+}
+
 /* Hallmark · redesign pass 2 · flat workbench · pre-emit critique: P5 H5 E4 S5 R5 V4 */
 
 :root {
