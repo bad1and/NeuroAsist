@@ -24,7 +24,7 @@ use windows::Win32::{
     Foundation::{COLORREF, HWND, LPARAM, POINT},
     Graphics::Gdi::ClientToScreen,
     UI::WindowsAndMessaging::{
-        EnumChildWindows, EnumWindows, GetClassNameW, GetParent, GetWindowLongPtrW, GetWindowThreadProcessId,
+        EnumWindows, GetClassNameW, GetParent, GetWindowLongPtrW, GetWindowThreadProcessId,
         SetLayeredWindowAttributes, SetParent, SetWindowLongPtrW, SetWindowPos, ShowWindow,
         GWL_EXSTYLE, GWL_STYLE, GWLP_HWNDPARENT, GWLP_USERDATA,
         HWND_TOP, LWA_COLORKEY, SW_HIDE, SW_SHOWNA, SWP_FRAMECHANGED, SWP_NOACTIVATE,
@@ -36,6 +36,16 @@ use windows::core::BOOL;
 
 const CORE_STARTUP_ATTEMPTS: u8 = 60;
 const CORE_STARTUP_DELAY: Duration = Duration::from_millis(250);
+// A cold Unity start loads Mono, D3D and the VRM scene before it creates the
+// player HWND. On the target machine this takes about fourteen seconds; five
+// seconds caused the desktop shell to kill a healthy player before it could
+// attach to the chat host.
+#[cfg(windows)]
+const UNITY_WINDOW_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(windows)]
+const UNITY_GRAPHICS_READY_TIMEOUT: Duration = Duration::from_secs(15);
+#[cfg(windows)]
+const UNITY_WINDOW_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const KEYRING_SERVICE: &str = "NeuroAsist";
 const KEYRING_ACCOUNT: &str = "deepseek_api_key";
 
@@ -347,23 +357,25 @@ impl DesktopState {
             );
         if placement == AvatarPlacement::InApp {
             // Colour-key transparency is unsupported by Unity's DXGI flip
-            // swapchain.  The BitBlt D3D11 path is deliberate here: it keeps
+            // swapchain. The BitBlt D3D11 path is deliberate here: it keeps
             // the native avatar surface transparent over the Iris UI.
+            //
+            // Do not use Unity's `-parentHWND ... delayed` option here. With
+            // this player and the Tauri WebView parent it never creates the
+            // Unity render HWND, so the shell correctly times out and kills
+            // the player. Start tiny, find its normal top-level render window,
+            // then convert it to an Iris-owned transparent popup ourselves.
             #[cfg(windows)]
             {
-                let parent = app
-                    .get_webview_window("main")
-                    .ok_or("Could not find Iris main window")?
-                    .hwnd()
-                    .map_err(|error| format!("Could not get Iris native window handle: {error}"))?;
                 command.args([
-                    "-parentHWND",
-                    &(parent.0 as usize).to_string(),
-                    "delayed",
                     "-force-d3d11",
                     "-force-d3d11-bitblt-model",
                     "-screen-fullscreen",
                     "0",
+                    "-screen-width",
+                    "1",
+                    "-screen-height",
+                    "1",
                 ]);
             }
             #[cfg(not(windows))]
@@ -371,32 +383,14 @@ impl DesktopState {
                 return Err("The in-app avatar is currently supported on Windows only".into());
             }
         }
-        let mut child = command
+        let child = command
             .spawn()
             .map_err(|error| format!("Could not start avatar process: {error}"))?;
-        let embedded_window = if placement == AvatarPlacement::InApp {
-            #[cfg(windows)]
-            {
-                match attach_embedded_avatar_window(app, child.id()) {
-                    Ok(window) => Some(window),
-                    Err(error) => {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        return Err(error);
-                    }
-                }
-            }
-            #[cfg(not(windows))]
-            {
-                None
-            }
-        } else {
-            None
-        };
+        let process_id = child.id();
         *self.avatar.lock().map_err(|_| "avatar mutex poisoned")? = Some(AvatarProcess {
             child,
             placement,
-            embedded_window,
+            embedded_window: None,
         });
         // The popup stays hidden until both the React chat anchor and the
         // requested visibility are known. This also preserves requests that
@@ -417,10 +411,52 @@ impl DesktopState {
         };
         *self.avatar_visible.lock().map_err(|_| "avatar visibility mutex poisoned")? = initial_visible;
         if placement == AvatarPlacement::InApp {
-            self.apply_in_app_avatar_host(app)?;
+            // Unity takes several seconds to construct its native render
+            // window. Attaching it synchronously here blocks Tauri's command
+            // path and makes Iris appear frozen. The worker below waits in the
+            // background; bounds and visibility IPC are already queued in the
+            // shared DesktopState and are applied as soon as it attaches.
+            #[cfg(windows)]
+            self.attach_in_app_avatar_in_background(app.clone(), process_id);
         }
         let _ = app.emit("desktop-avatar-status", "connecting");
         Ok(true)
+    }
+
+    #[cfg(windows)]
+    fn attach_in_app_avatar_in_background(&self, app: AppHandle, process_id: u32) {
+        thread::spawn(move || {
+            let attached = attach_embedded_avatar_window(&app, process_id);
+            let state = app.state::<DesktopState>();
+            let Ok(_lifecycle) = state.avatar_lifecycle.lock() else { return };
+            let Ok(mut avatar) = state.avatar.lock() else { return };
+            let is_current_in_app_player = avatar.as_ref().is_some_and(|process| {
+                process.placement == AvatarPlacement::InApp && process.child.id() == process_id
+            });
+            if !is_current_in_app_player {
+                return;
+            }
+
+            match attached {
+                Ok(window) => {
+                    if let Some(process) = avatar.as_mut() {
+                        process.embedded_window = Some(window);
+                    }
+                    drop(avatar);
+                    let _ = state.apply_in_app_avatar_host(&app);
+                    let _ = app.emit("desktop-avatar-status", "connected");
+                }
+                Err(error) => {
+                    let failed = avatar.take();
+                    drop(avatar);
+                    if let Some(mut process) = failed {
+                        let _ = process.child.kill();
+                        let _ = process.child.wait();
+                    }
+                    let _ = app.emit("desktop-avatar-status", format!("failed: {error}"));
+                }
+            }
+        });
     }
 
     fn stop_avatar(&self) {
@@ -834,20 +870,20 @@ fn attach_embedded_avatar_window(app: &AppHandle, process_id: u32) -> Result<usi
         .hwnd()
         .map_err(|error| format!("Could not get Iris native window handle: {error}"))?;
 
-    let window = (0..100)
-        .find_map(|_| {
-            let found = unity_window_for_process(parent, process_id);
-            if found.is_none() {
-                thread::sleep(Duration::from_millis(50));
-            }
-            found
-        })
-        .ok_or("Unity avatar did not create an embeddable window within 5 seconds")?;
+    let started_at = std::time::Instant::now();
+    let window = loop {
+        if let Some(window) = unity_window_for_process(process_id) {
+            break window;
+        }
+        if started_at.elapsed() >= UNITY_WINDOW_DISCOVERY_TIMEOUT {
+            return Err("Unity avatar did not create an embeddable window within 30 seconds".into());
+        }
+        thread::sleep(UNITY_WINDOW_POLL_INTERVAL);
+    };
 
     unsafe {
-        // `-parentHWND ... delayed` guarantees that Unity begins hidden. Wait
-        // until its graphics system has initialized before changing its size;
-        // otherwise the player later restores its default full-window bounds.
+        // Unity starts at 1×1. Hide it before the final graphics startup and
+        // never expose its standalone player bounds to the desktop.
         let _ = ShowWindow(window, SW_HIDE);
     }
     wait_for_unity_graphics(window)?;
@@ -882,14 +918,17 @@ fn attach_embedded_avatar_window(app: &AppHandle, process_id: u32) -> Result<usi
 
 #[cfg(windows)]
 fn wait_for_unity_graphics(window: HWND) -> Result<(), String> {
-    for _ in 0..200 {
+    let started_at = std::time::Instant::now();
+    loop {
         let flags = unsafe { GetWindowLongPtrW(window, GWLP_USERDATA) as usize };
         if flags & 1 == 1 {
             return Ok(());
         }
+        if started_at.elapsed() >= UNITY_GRAPHICS_READY_TIMEOUT {
+            return Err("Unity avatar graphics did not initialize within 15 seconds".into());
+        }
         thread::sleep(Duration::from_millis(25));
     }
-    Err("Unity avatar graphics did not initialize within 5 seconds".into())
 }
 
 #[cfg(windows)]
@@ -932,7 +971,7 @@ fn set_embedded_avatar_visibility(window: usize, visible: bool) -> Result<(), St
 }
 
 #[cfg(windows)]
-fn unity_window_for_process(parent: HWND, process_id: u32) -> Option<HWND> {
+fn unity_window_for_process(process_id: u32) -> Option<HWND> {
     struct Search {
         process_id: u32,
         window: Option<HWND>,
@@ -950,17 +989,10 @@ fn unity_window_for_process(parent: HWND, process_id: u32) -> Option<HWND> {
 
     let mut search = Search { process_id, window: None };
     unsafe {
-        // `-parentHWND` makes Unity's D3D render surface a child of Iris.
-        // Search there first; EnumWindows can otherwise return a splash or a
-        // helper window from the same process before the actual renderer.
-        let _ = EnumChildWindows(
-            Some(parent),
-            Some(visit),
-            LPARAM((&mut search as *mut Search) as isize),
-        );
-        if search.window.is_none() {
-            let _ = EnumWindows(Some(visit), LPARAM((&mut search as *mut Search) as isize));
-        }
+        // The player starts as a normal tiny top-level window. Its rendering
+        // surface is always a UnityWndClass; helper and splash windows are
+        // skipped by the class-name check.
+        let _ = EnumWindows(Some(visit), LPARAM((&mut search as *mut Search) as isize));
     }
     search.window
 }
