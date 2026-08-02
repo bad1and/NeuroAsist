@@ -37,7 +37,7 @@ const settings = {
   provider: "deepseek", model: "deepseek-chat", personality: "default", voice_language: "ru",
   voice_microphone_profile: "balanced", voice_vad: { configured_provider: "silero", active_provider: "silero", ready: true, fallback: false },
   voice_input_diagnostic_audio_enabled: false,
-  voice_stt_model: "small", voice_tts_enabled: true, avatar_enabled: false, avatar_placement: "desktop_overlay", voice_tts_voice: "F4",
+  voice_stt_model: "small", voice_tts_enabled: true, avatar_enabled: false, avatar_placement: "desktop_overlay", avatar_in_app_visible: true, voice_tts_voice: "F4",
   voice_tts_provider: "silero", voice_tts_model: "v5_5_ru", voice_tts_device: "cpu", voice_tts_style: "auto", voice_tts_expression_level: "natural",
   voice_playback_rate: 1, voice_live_playback_prebuffer_segments: 2, voice_live_playback_prebuffer_ms: 700,
   voice_live_playback_start_lead_ms: 30,
@@ -109,6 +109,15 @@ describe("русский интерфейс", () => {
     expect(screen.getByText("Где показывать аватар")).toBeInTheDocument();
     expect(screen.getByLabelText("Внутри Iris")).toBeChecked();
     expect(screen.getByLabelText("Отдельным оверлеем")).not.toBeChecked();
+  });
+
+  it("не связывает встроенный аватар со скрытым внешним оверлеем", async () => {
+    api.getSettings.mockResolvedValue({ ...settings, avatar_placement: "in_app", avatar_in_app_visible: true });
+    api.getAvatarOverlay.mockResolvedValue({ visible: false, always_on_top: true, locked: true, scale: 1, monitor: "", x: 0, y: 0, width: 0, height: 0 });
+    const { container } = render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
+    expect(container.querySelector(".chat-panel.has-in-app-avatar .in-app-avatar-stage")).toBeInTheDocument();
   });
 
   it("восстанавливает активную сессию без сброса диалога при новом входе", async () => {

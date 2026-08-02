@@ -16,6 +16,7 @@ class PublicSettingsResponse(BaseModel):
     voice_tts_device: str | None = None
     avatar_enabled: bool
     avatar_placement: str
+    avatar_in_app_visible: bool
     voice_tts_voice: str
     voice_tts_style: str
     voice_tts_expression_level: str
@@ -79,6 +80,7 @@ class RuntimeSettingsPatch(BaseModel):
     live_conversation_recent_event_weight: str | None = None
     live_conversation_echo_mode: str | None = None
     avatar_placement: str | None = None
+    avatar_in_app_visible: bool | None = None
 
 
 class VoiceStylePatch(BaseModel):

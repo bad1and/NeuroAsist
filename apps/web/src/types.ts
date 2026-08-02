@@ -220,6 +220,7 @@ export type PublicSettings = {
   voice_tts_device: string | null;
   avatar_enabled: boolean;
   avatar_placement: AvatarPlacement;
+  avatar_in_app_visible: boolean;
   voice_tts_voice: string;
   voice_tts_style: string;
   voice_tts_expression_level: string;
