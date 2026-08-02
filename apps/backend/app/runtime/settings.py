@@ -34,6 +34,10 @@ class RuntimeSettings:
     # renderer.  It intentionally lives next to the overlay preferences so a
     # backup restores the avatar exactly as the person left it.
     avatar_placement: str = "desktop_overlay"
+    # This controls the chat-hosted avatar only.  It must not reuse the
+    # desktop-overlay flag: a hidden desktop popup must not make the avatar
+    # disappear after switching it into Iris.
+    avatar_in_app_visible: bool = True
     avatar_overlay_visible: bool = True
     avatar_overlay_always_on_top: bool = True
     avatar_overlay_locked: bool = True

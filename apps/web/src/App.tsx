@@ -238,6 +238,9 @@ export default function App() {
   const [avatarOverlay, setAvatarOverlay] = useState<AvatarOverlaySettings | null>(null);
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [events, setEvents] = useState<BackendEvent[]>([]);
+  // A settings mutation is authoritative.  Do not allow an older polling
+  // request to overwrite it after the user has switched avatar placement.
+  const overviewRevision = useRef(0);
   const [wsState, setWsState] = useState<WsState>("disconnected");
   const [statusError, setStatusError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -294,6 +297,7 @@ export default function App() {
   }, []);
 
   const refreshOverview = useCallback(async () => {
+    const revision = ++overviewRevision.current;
     try {
       const [nextStatus, nextSettings, nextAvatarStatus, nextAvatarOverlay] = await Promise.all([
         getStatus(),
@@ -301,12 +305,14 @@ export default function App() {
         getAvatarStatus().catch(() => null),
         getAvatarOverlay().catch(() => null),
       ]);
+      if (revision !== overviewRevision.current) return;
       setStatus(nextStatus);
       setSettings(nextSettings);
       setAvatarStatus(nextAvatarStatus);
       setAvatarOverlay(nextAvatarOverlay);
       setStatusError(null);
     } catch (error) {
+      if (revision !== overviewRevision.current) return;
       setStatusError(error instanceof Error ? error.message : "Сервис недоступен");
     }
   }, []);
@@ -461,7 +467,7 @@ export default function App() {
               events={events}
               settings={settings}
               avatarStatus={avatarStatus}
-              showInAppAvatar={settings?.avatar_placement === "in_app" && (avatarOverlay?.visible ?? true)}
+              showInAppAvatar={settings?.avatar_placement === "in_app" && (settings.avatar_in_app_visible ?? true)}
               onRefreshEvents={refreshEvents}
               onOpenMemory={() => switchView("memory")}
             />
@@ -477,8 +483,12 @@ export default function App() {
               events={events}
               onRefreshEvents={refreshEvents}
               onRefreshAvatar={refreshOverview}
-              onAvatarOverlayChanged={setAvatarOverlay}
+              onAvatarOverlayChanged={(nextOverlay) => {
+                overviewRevision.current += 1;
+                setAvatarOverlay(nextOverlay);
+              }}
               onSettingsChanged={(nextSettings) => {
+                overviewRevision.current += 1;
                 setSettings(nextSettings);
                 void refreshOverview();
                 void refreshEvents();
@@ -2039,6 +2049,7 @@ function SettingsPage({
             avatarStatus={avatarStatus}
             overlay={avatarOverlay}
             placement={settings.avatar_placement}
+            inAppVisible={settings.avatar_in_app_visible}
             onRefresh={onRefreshAvatar}
             onOverlayChanged={onAvatarOverlayChanged}
             onSettingsChanged={onSettingsChanged}
@@ -2617,6 +2628,7 @@ function AvatarControls({
   avatarStatus,
   overlay: initialOverlay,
   placement,
+  inAppVisible,
   onRefresh,
   onOverlayChanged,
   onSettingsChanged,
@@ -2624,6 +2636,7 @@ function AvatarControls({
   avatarStatus: AvatarStatusResponse | null;
   overlay: AvatarOverlaySettings | null;
   placement: AvatarPlacement;
+  inAppVisible: boolean;
   onRefresh: () => Promise<void>;
   onOverlayChanged: (overlay: AvatarOverlaySettings | null) => void;
   onSettingsChanged: (settings: PublicSettings) => void;
@@ -2672,6 +2685,17 @@ function AvatarControls({
     }
     catch { setMessage("Не удалось сохранить настройки оверлея."); }
     finally { setBusy(false); }
+  };
+
+  const updateInAppVisibility = async (visible: boolean) => {
+    setBusy(true); setMessage(null);
+    try {
+      const nextSettings = await updateRuntimeSettings({ avatar_in_app_visible: visible });
+      onSettingsChanged(nextSettings);
+      setMessage(visible ? "Аватар будет показан в диалоге." : "Аватар скрыт в диалоге.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Не удалось сохранить отображение аватара.");
+    } finally { setBusy(false); }
   };
 
   const changePlacement = async (nextPlacement: AvatarPlacement) => {
@@ -2733,7 +2757,14 @@ function AvatarControls({
       </details>
       <div className="avatar-options">
         <label>
-          <input type="checkbox" checked={overlay?.visible ?? true} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ visible: event.target.checked })} />
+          <input
+            type="checkbox"
+            checked={placement === "in_app" ? inAppVisible : (overlay?.visible ?? true)}
+            disabled={!enabled || busy}
+            onChange={(event) => void (placement === "in_app"
+              ? updateInAppVisibility(event.target.checked)
+              : updateOverlay({ visible: event.target.checked }))}
+          />
           {placement === "in_app" ? "Показывать в диалоге" : "Показывать оверлей"}
         </label>
         {placement === "desktop_overlay" && <>

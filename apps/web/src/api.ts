@@ -166,6 +166,7 @@ export function updateRuntimeSettings(payload: {
   live_conversation_recent_event_weight?: PublicSettings["live_conversation_recent_event_weight"];
   live_conversation_echo_mode?: PublicSettings["live_conversation_echo_mode"];
   avatar_placement?: AvatarPlacement;
+  avatar_in_app_visible?: boolean;
 }): Promise<PublicSettings> {
   return requestJson<PublicSettings>("/settings/runtime", {
     method: "PATCH",

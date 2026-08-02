@@ -402,7 +402,11 @@ impl DesktopState {
         // requested visibility are known. This also preserves requests that
         // arrived while Unity was still starting, rather than overwriting
         // them with the persisted desktop-overlay preference.
-        let persisted_visible = avatar_overlay_visible_from_settings(&desktop_data_root(&self.root));
+        let persisted_visible = if placement == AvatarPlacement::InApp {
+            avatar_in_app_visible_from_settings(&desktop_data_root(&self.root))
+        } else {
+            avatar_overlay_visible_from_settings(&desktop_data_root(&self.root))
+        };
         let initial_visible = if placement == AvatarPlacement::InApp {
             self.in_app_avatar_visible.lock().map_err(|_| "in-app avatar visibility mutex poisoned")?
                 .as_ref()
@@ -544,8 +548,8 @@ impl DesktopState {
                 // persisted preference and lets React mount or unmount that
                 // host; showing the native child directly here could place it
                 // over Settings or another non-chat screen.
-                let next = !avatar_overlay_visible_from_settings(&desktop_data_root(&self.root));
-                avatar_overlay_visibility_request(&self.runtime(), next)?;
+                let next = !avatar_in_app_visible_from_settings(&desktop_data_root(&self.root));
+                avatar_in_app_visibility_request(&self.runtime(), next)?;
                 let _ = app.emit("desktop-avatar-visibility", next);
                 return Ok(next);
             }
@@ -809,6 +813,19 @@ fn avatar_overlay_visible_from_json(json: &str) -> bool {
         .unwrap_or(true)
 }
 
+fn avatar_in_app_visible_from_settings(data_root: &PathBuf) -> bool {
+    std::fs::read_to_string(data_root.join("settings.json"))
+        .map(|json| avatar_in_app_visible_from_json(&json))
+        .unwrap_or(true)
+}
+
+fn avatar_in_app_visible_from_json(json: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|payload| payload.get("settings")?.get("avatar_in_app_visible")?.as_bool())
+        .unwrap_or(true)
+}
+
 #[cfg(windows)]
 fn attach_embedded_avatar_window(app: &AppHandle, process_id: u32) -> Result<usize, String> {
     let parent = app
@@ -980,6 +997,8 @@ mod tests {
     fn avatar_visibility_defaults_to_enabled_for_existing_settings() {
         assert!(!avatar_overlay_visible_from_json(r#"{"settings":{"avatar_overlay_visible":false}}"#));
         assert!(avatar_overlay_visible_from_json(r#"{"settings":{}}"#));
+        assert!(!avatar_in_app_visible_from_json(r#"{"settings":{"avatar_in_app_visible":false}}"#));
+        assert!(avatar_in_app_visible_from_json(r#"{"settings":{}}"#));
     }
 
     #[test]
@@ -1062,6 +1081,18 @@ fn avatar_overlay_visibility_request(runtime: &DesktopRuntime, visible: bool) ->
     stream.set_read_timeout(Some(Duration::from_secs(1))).map_err(|error| error.to_string())?;
     let body = format!(r#"{{"visible":{visible}}}"#);
     let request = format!("PUT /avatar/overlay HTTP/1.1\r\nHost: {address}\r\nX-NeuroAsist-Token: {}\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}", runtime.api_token, body.len());
+    stream.write_all(request.as_bytes()).map_err(|error| error.to_string())?;
+    let mut response = String::new();
+    stream.read_to_string(&mut response).map_err(|error| error.to_string())?;
+    if response.starts_with("HTTP/1.1 2") { Ok(()) } else { Err(response.lines().next().unwrap_or("No HTTP response").into()) }
+}
+
+fn avatar_in_app_visibility_request(runtime: &DesktopRuntime, visible: bool) -> Result<(), String> {
+    let address = runtime.api_base_url.trim_start_matches("http://");
+    let mut stream = TcpStream::connect(address).map_err(|error| error.to_string())?;
+    stream.set_read_timeout(Some(Duration::from_secs(1))).map_err(|error| error.to_string())?;
+    let body = format!(r#"{{"avatar_in_app_visible":{visible}}}"#);
+    let request = format!("PATCH /settings/runtime HTTP/1.1\r\nHost: {address}\r\nX-NeuroAsist-Token: {}\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}", runtime.api_token, body.len());
     stream.write_all(request.as_bytes()).map_err(|error| error.to_string())?;
     let mut response = String::new();
     stream.read_to_string(&mut response).map_err(|error| error.to_string())?;

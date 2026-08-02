@@ -61,6 +61,7 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         voice_tts_device=tts_metadata.get("device"),
         avatar_enabled=settings.avatar_enabled,
         avatar_placement=runtime_settings.avatar_placement,
+        avatar_in_app_visible=runtime_settings.avatar_in_app_visible,
         voice_tts_voice=runtime_settings.voice_tts_voice or settings.voice_tts_default_voice,
         voice_tts_style=str(getattr(request.app.state, "voice_tts_style", "auto")),
         voice_tts_expression_level=str(getattr(request.app.state, "voice_tts_expression_level", "natural")),
@@ -189,6 +190,9 @@ def patch_runtime_settings(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported avatar placement")
         runtime_settings.avatar_placement = payload.avatar_placement
 
+    if payload.avatar_in_app_visible is not None:
+        runtime_settings.avatar_in_app_visible = payload.avatar_in_app_visible
+
     for field_name, allowed_values in LIVE_SETTING_VALUES.items():
         value = getattr(payload, field_name)
         if value is None:
@@ -227,6 +231,7 @@ def patch_runtime_settings(
             "reflection_min_significance": runtime_settings.reflection_min_significance,
             "live_conversation_enabled": runtime_settings.live_conversation_enabled,
             "avatar_placement": runtime_settings.avatar_placement,
+            "avatar_in_app_visible": runtime_settings.avatar_in_app_visible,
             **{
                 field_name: getattr(runtime_settings, field_name)
                 for field_name in LIVE_SETTING_VALUES

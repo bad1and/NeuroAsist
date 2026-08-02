@@ -451,7 +451,7 @@ Chat or non-live voice response
 
 The avatar bridge remains optional: unavailable Unity clients do not delay or fail text chat or TTS. The renderer source lives in [`apps/avatar-unity`](apps/avatar-unity/README.md); Tauri launches it with an authenticated dynamic-port WebSocket and exposes controls through the Settings page and tray.
 
-In **Settings → System → Avatar**, choose whether the renderer appears as a separate desktop overlay or **inside Iris**. On Windows, in-app mode presents Unity as a transparent native surface owned by the Iris window in the lower-left column of the **Dialog** page. It follows the chat layout and DPI, stays out of Alt+Tab, and does not create a second standalone application window. Speech, lip sync, expressions, and gestures work identically in both modes.
+In **Settings → System → Avatar**, choose whether the renderer appears as a separate desktop overlay or **inside Iris**. On Windows, in-app mode presents Unity as a transparent native surface owned by the Iris window in the lower-left column of the **Dialog** page. It follows the chat layout and DPI, stays out of Alt+Tab, and does not create a second standalone application window. The **Show in dialog** switch is stored separately from the visibility of the external overlay, so hiding the latter never suppresses the in-app avatar. Speech, lip sync, expressions, and gestures work identically in both modes.
 
 ## Project structure
 
