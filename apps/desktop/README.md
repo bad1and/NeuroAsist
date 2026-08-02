@@ -36,10 +36,10 @@ The shell gives Unity `NEUROASIST_BACKEND_URL` and `NEUROASIST_BACKEND_TOKEN`, e
 
 In **Settings → System → Avatar**, choose where the renderer appears:
 
-- **Inside Iris** presents the Unity player as an Iris-owned transparent native surface in the lower-left column of the **Dialog** screen. It is hidden outside the chat, follows the chat-slot bounds when the window moves or resizes, and has no second visible application window or Alt+Tab entry. Its **Show in dialog** switch is independent from the external-overlay visibility setting.
+- **Inside Iris** presents the Unity player as an Iris-owned, transparent, borderless native surface in the lower-left column of the **Dialog** screen. It is hidden outside the chat, scales with the available chat area, follows DPI changes, and has no second visible application window or Alt+Tab entry. Its **Show in dialog** switch is independent from the external-overlay visibility setting.
 - **Separate overlay** preserves the desktop companion behaviour: a borderless, click-through Unity window that can stay above other applications.
 
-The choice is stored with the other non-secret runtime settings. On Windows, the in-app mode starts Unity hidden through its supported `-parentHWND ... delayed` path, waits until its graphics surface is ready, then manages it as a transparent popup owned by the Iris window. React supplies the exact DPI-aware chat-slot bounds, while Tauri reapplies them when Iris moves or resizes. Unity still runs as a supervised child process in this mode, so speech, lip sync, gestures and the authenticated WebSocket protocol remain unchanged.
+The choice is stored with the other non-secret runtime settings. On Windows, in-app mode starts Unity as a tiny hidden player, then converts its ready render window into a transparent popup owned by Iris. React supplies the exact DPI-aware chat-slot bounds with frame-coalesced updates; the owned popup follows normal window movement without fighting the Windows drag loop. Unity still runs as a supervised child process in this mode, so speech, lip sync, gestures and the authenticated WebSocket protocol remain unchanged.
 
 ## Safe Mode and recovery
 

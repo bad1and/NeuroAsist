@@ -28,7 +28,7 @@ use windows::Win32::{
         SetLayeredWindowAttributes, SetParent, SetWindowLongPtrW, SetWindowPos, ShowWindow,
         GWL_EXSTYLE, GWL_STYLE, GWLP_HWNDPARENT, GWLP_USERDATA,
         HWND_TOP, LWA_COLORKEY, SW_HIDE, SW_SHOWNA, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-        WS_CHILD, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
+        WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
     },
 };
 #[cfg(windows)]
@@ -508,10 +508,6 @@ impl DesktopState {
         self.apply_in_app_avatar_host(app)
     }
 
-    fn refresh_in_app_avatar_bounds(&self, app: &AppHandle) -> Result<(), String> {
-        self.apply_in_app_avatar_host(app)
-    }
-
     fn apply_in_app_avatar_host(&self, app: &AppHandle) -> Result<(), String> {
         let bounds = self.in_app_avatar_bounds.lock().map_err(|_| "avatar bounds mutex poisoned")?.clone();
         let fallback_visible = *self.avatar_visible.lock().map_err(|_| "avatar visibility mutex poisoned")?;
@@ -678,13 +674,12 @@ fn main() {
                 return;
             }
             match event {
-                WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
-                    let _ = window.app_handle().state::<DesktopState>().refresh_in_app_avatar_bounds(window.app_handle());
-                }
-                WindowEvent::ScaleFactorChanged { .. } => {
-                    // Stored coordinates are physical pixels. Ask the DOM
-                    // anchor for a fresh rectangle rather than reusing one
-                    // captured on a monitor with a different DPI scale.
+                WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                    // The owned Unity popup moves together with Iris. Calling
+                    // SetWindowPos for every native `Moved` event fights the
+                    // Windows drag loop and makes the whole window stutter.
+                    // On resize/DPI changes React supplies one coalesced,
+                    // fresh physical chat-slot rectangle instead.
                     let _ = window.emit("desktop-avatar-layout-invalidated", ());
                 }
                 _ => {}
@@ -894,9 +889,10 @@ fn attach_embedded_avatar_window(app: &AppHandle, process_id: u32) -> Result<usi
         // window relationship in this order follows Win32's child/popup style
         // transition rules and prevents an invalid intermediate fullscreen
         // client surface.
-        let style = GetWindowLongPtrW(window, GWL_STYLE) as u32;
-        let popup_style = (style | WS_POPUP.0) & !WS_CHILD.0;
-        SetWindowLongPtrW(window, GWL_STYLE, popup_style as isize);
+        // Replace the complete overlapped-window style, not only WS_CHILD.
+        // Keeping Unity's caption bits was the source of the white native
+        // title bar above an otherwise embedded avatar.
+        SetWindowLongPtrW(window, GWL_STYLE, WS_POPUP.0 as isize);
         if GetParent(window).map(|current| !current.0.is_null()).unwrap_or(false) {
             SetParent(window, None)
                 .map_err(|error| format!("Could not detach Unity avatar window from Iris: {error}"))?;

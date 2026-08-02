@@ -26,6 +26,7 @@ export function InAppAvatarHost() {
     if (!element) return undefined;
 
     let cancelled = false;
+    let scheduledFrame: number | null = null;
     const syncBounds = () => {
       if (cancelled) return;
       const rect = element.getBoundingClientRect();
@@ -48,29 +49,47 @@ export function InAppAvatarHost() {
       });
     };
 
+    // ResizeObserver can fire several times per native resize or window drag.
+    // One update per animation frame keeps the D3D popup and the Tauri window
+    // in lockstep without flooding the IPC bridge with SetWindowPos calls.
+    const scheduleSync = () => {
+      if (cancelled || scheduledFrame !== null) return;
+      if (typeof window.requestAnimationFrame !== "function") {
+        syncBounds();
+        return;
+      }
+      scheduledFrame = window.requestAnimationFrame(() => {
+        scheduledFrame = null;
+        syncBounds();
+      });
+    };
+
     syncBounds();
     // Unity finishes configuring its native popup shortly after the DOM host
     // mounts. Reapply the authoritative chat rectangle after that startup
     // window so a late Unity resize can never expand over the application.
     const retryTimers = [
-      window.setTimeout(syncBounds, 180),
-      window.setTimeout(syncBounds, 700),
+      window.setTimeout(scheduleSync, 180),
+      window.setTimeout(scheduleSync, 700),
     ];
     let stopLayoutInvalidation: (() => void) | undefined;
-    void listenForAvatarLayoutInvalidation(syncBounds).then((unlisten) => {
+    void listenForAvatarLayoutInvalidation(scheduleSync).then((unlisten) => {
       if (cancelled) unlisten();
       else stopLayoutInvalidation = unlisten;
     });
     const observer = typeof ResizeObserver === "undefined"
       ? undefined
-      : new ResizeObserver(syncBounds);
+      : new ResizeObserver(scheduleSync);
     observer?.observe(element);
-    window.addEventListener("resize", syncBounds);
+    window.addEventListener("resize", scheduleSync);
     return () => {
       cancelled = true;
       observer?.disconnect();
       stopLayoutInvalidation?.();
-      window.removeEventListener("resize", syncBounds);
+      window.removeEventListener("resize", scheduleSync);
+      if (scheduledFrame !== null && typeof window.cancelAnimationFrame === "function") {
+        window.cancelAnimationFrame(scheduledFrame);
+      }
       retryTimers.forEach((timer) => window.clearTimeout(timer));
       void setAvatarInAppVisible(false, nextAvatarHostRevision());
     };
