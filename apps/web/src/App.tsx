@@ -458,7 +458,7 @@ export default function App() {
               onOpenSettings={() => switchView("settings")}
             />
           )}
-          <div hidden={activeView !== "chat"}>
+          <div className="chat-view" hidden={activeView !== "chat"}>
             <ChatPage
               key={sessionId ?? "starting"}
               sessionId={sessionId}
@@ -1833,35 +1833,43 @@ function SettingsPage({
   const [message, setMessage] = useState<string | null>(null);
   const [resetSessionDialog, setResetSessionDialog] = useState(false);
   const [showSttCapture, setShowSttCapture] = useState(false);
+  // Settings are polled by the app shell.  Once this form is open, a polling
+  // response must not replace a value the person has just selected before
+  // they get a chance to press Save (most visibly the participant mode).
+  const hasInitialSettings = useRef(false);
+
+  const applySettingsToForm = useCallback((nextSettings: PublicSettings) => {
+    setPersonality(nextSettings.personality);
+    setVoiceLanguage(nextSettings.voice_language);
+    setVoiceMicrophoneProfile(nextSettings.voice_microphone_profile ?? "balanced");
+    setVoiceTtsVoice(nextSettings.voice_tts_voice);
+    setVoiceTtsStyle(nextSettings.voice_tts_style);
+    setVoiceExpressionLevel(nextSettings.voice_tts_expression_level);
+    setVoicePlaybackRate(nextSettings.voice_playback_rate);
+    setPrebufferSegments(nextSettings.voice_live_playback_prebuffer_segments);
+    setPrebufferMs(nextSettings.voice_live_playback_prebuffer_ms);
+    setMemoryMode(nextSettings.memory_mode);
+    setMemoryIncognito(nextSettings.memory_incognito);
+    setLiveSettings({
+      live_conversation_enabled: nextSettings.live_conversation_enabled,
+      live_conversation_participant_mode: nextSettings.live_conversation_participant_mode,
+      live_conversation_engagement: nextSettings.live_conversation_engagement,
+      live_conversation_initiative: nextSettings.live_conversation_initiative,
+      live_conversation_address_strictness: nextSettings.live_conversation_address_strictness,
+      live_conversation_interruption_sensitivity: nextSettings.live_conversation_interruption_sensitivity,
+      live_conversation_pause_tolerance: nextSettings.live_conversation_pause_tolerance,
+      live_conversation_emotion_expression: nextSettings.live_conversation_emotion_expression,
+      live_conversation_mood_recovery: nextSettings.live_conversation_mood_recovery,
+      live_conversation_recent_event_weight: nextSettings.live_conversation_recent_event_weight,
+      live_conversation_echo_mode: nextSettings.live_conversation_echo_mode,
+    });
+  }, []);
 
   useEffect(() => {
-    if (settings) {
-      setPersonality(settings.personality);
-      setVoiceLanguage(settings.voice_language);
-      setVoiceMicrophoneProfile(settings.voice_microphone_profile ?? "balanced");
-      setVoiceTtsVoice(settings.voice_tts_voice);
-      setVoiceTtsStyle(settings.voice_tts_style);
-      setVoiceExpressionLevel(settings.voice_tts_expression_level);
-      setVoicePlaybackRate(settings.voice_playback_rate);
-      setPrebufferSegments(settings.voice_live_playback_prebuffer_segments);
-      setPrebufferMs(settings.voice_live_playback_prebuffer_ms);
-      setMemoryMode(settings.memory_mode);
-      setMemoryIncognito(settings.memory_incognito);
-      setLiveSettings({
-        live_conversation_enabled: settings.live_conversation_enabled,
-        live_conversation_participant_mode: settings.live_conversation_participant_mode,
-        live_conversation_engagement: settings.live_conversation_engagement,
-        live_conversation_initiative: settings.live_conversation_initiative,
-        live_conversation_address_strictness: settings.live_conversation_address_strictness,
-        live_conversation_interruption_sensitivity: settings.live_conversation_interruption_sensitivity,
-        live_conversation_pause_tolerance: settings.live_conversation_pause_tolerance,
-        live_conversation_emotion_expression: settings.live_conversation_emotion_expression,
-        live_conversation_mood_recovery: settings.live_conversation_mood_recovery,
-        live_conversation_recent_event_weight: settings.live_conversation_recent_event_weight,
-        live_conversation_echo_mode: settings.live_conversation_echo_mode,
-      });
-    }
-  }, [settings]);
+    if (!settings || hasInitialSettings.current) return;
+    applySettingsToForm(settings);
+    hasInitialSettings.current = true;
+  }, [applySettingsToForm, settings]);
 
   useEffect(() => {
     void getPronunciations()
@@ -1895,6 +1903,10 @@ function SettingsPage({
         memory_incognito: memoryIncognito,
         ...liveSettings,
       });
+      // The API response is the persisted source of truth.  Apply it directly
+      // before the parent schedules its background refresh, so controls cannot
+      // temporarily fall back to an older polling result.
+      applySettingsToForm(nextSettings);
       onSettingsChanged(nextSettings);
       setMessage("Настройки сохранены.");
     } catch (error) {

@@ -27,7 +27,8 @@ use windows::Win32::{
         EnumWindows, GetClassNameW, GetParent, GetWindowLongPtrW, GetWindowThreadProcessId,
         SetLayeredWindowAttributes, SetParent, SetWindowLongPtrW, SetWindowPos, ShowWindow,
         GWL_EXSTYLE, GWL_STYLE, GWLP_HWNDPARENT, GWLP_USERDATA,
-        HWND_TOP, LWA_COLORKEY, SW_HIDE, SW_SHOWNA, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+        HWND_TOP, LWA_COLORKEY, SW_HIDE, SW_SHOWNA, SWP_ASYNCWINDOWPOS, SWP_FRAMECHANGED,
+        SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
         WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
     },
 };
@@ -508,6 +509,23 @@ impl DesktopState {
         self.apply_in_app_avatar_host(app)
     }
 
+    /// An owned popup does not reliably follow a Tauri/WebView owner while
+    /// Windows is dragging it. Move it natively from the latest DOM rectangle
+    /// instead of waiting for React to re-render after a navigation change.
+    fn move_in_app_avatar_with_parent(&self, app: &AppHandle) -> Result<(), String> {
+        let _update = self.in_app_avatar_update.lock().map_err(|_| "in-app avatar update mutex poisoned")?;
+        let bounds = self.in_app_avatar_bounds.lock().map_err(|_| "avatar bounds mutex poisoned")?.clone();
+        let embedded_window = self.avatar.lock().map_err(|_| "avatar mutex poisoned")?
+            .as_ref()
+            .filter(|process| process.placement == AvatarPlacement::InApp)
+            .and_then(|process| process.embedded_window);
+        #[cfg(windows)]
+        if let (Some(bounds), Some(window)) = (bounds.as_ref(), embedded_window) {
+            move_embedded_avatar_window(app, window, bounds)?;
+        }
+        Ok(())
+    }
+
     fn apply_in_app_avatar_host(&self, app: &AppHandle) -> Result<(), String> {
         let bounds = self.in_app_avatar_bounds.lock().map_err(|_| "avatar bounds mutex poisoned")?.clone();
         let fallback_visible = *self.avatar_visible.lock().map_err(|_| "avatar visibility mutex poisoned")?;
@@ -674,6 +692,14 @@ fn main() {
                 return;
             }
             match event {
+                WindowEvent::Moved(_) => {
+                    // Keep the transparent Unity popup in its chat slot while
+                    // Iris is being dragged. This uses only a native position
+                    // update (no resize or Z-order change), so it does not
+                    // compete with Windows' drag loop.
+                    let app = window.app_handle();
+                    let _ = app.state::<DesktopState>().move_in_app_avatar_with_parent(app);
+                }
                 WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
                     // The owned Unity popup moves together with Iris. Calling
                     // SetWindowPos for every native `Moved` event fights the
@@ -944,13 +970,38 @@ fn resize_embedded_avatar_window(app: &AppHandle, window: usize, bounds: &Avatar
             .map_err(|error| format!("Could not map avatar host bounds to screen: {error}"))?;
         SetWindowPos(
             HWND(window as *mut core::ffi::c_void),
-            Some(HWND_TOP),
+            None,
             position.x,
             position.y,
             bounds.width,
             bounds.height,
-            SWP_NOACTIVATE,
+            SWP_NOACTIVATE | SWP_NOZORDER,
         ).map_err(|error| format!("Could not resize Unity avatar host: {error}"))?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn move_embedded_avatar_window(app: &AppHandle, window: usize, bounds: &AvatarInAppBounds) -> Result<(), String> {
+    let parent = app
+        .get_webview_window("main")
+        .ok_or("Could not find Iris main window")?
+        .hwnd()
+        .map_err(|error| format!("Could not get Iris native window handle: {error}"))?;
+    unsafe {
+        let mut position = POINT { x: bounds.x, y: bounds.y };
+        ClientToScreen(parent, &mut position)
+            .ok()
+            .map_err(|error| format!("Could not map avatar move to screen: {error}"))?;
+        SetWindowPos(
+            HWND(window as *mut core::ffi::c_void),
+            None,
+            position.x,
+            position.y,
+            0,
+            0,
+            SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER,
+        ).map_err(|error| format!("Could not move Unity avatar host: {error}"))?;
     }
     Ok(())
 }
