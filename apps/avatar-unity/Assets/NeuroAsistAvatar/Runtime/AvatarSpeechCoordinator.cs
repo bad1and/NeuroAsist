@@ -16,6 +16,7 @@ namespace NeuroAsist.Avatar
         private GestureTag pendingStreamGesture = GestureTag.Auto;
         private float pendingStreamGestureIntensity = 1f;
         private string currentStreamEmotion = "neutral";
+        public void SetAudioMuted(bool muted) { player?.SetMuted(muted); }
         public void Speak(AvatarCommand command, AvatarCommandPayload payload)
         {
             generation++; currentUtterance = payload.utterance_id;

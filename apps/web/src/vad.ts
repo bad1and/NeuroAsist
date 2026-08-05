@@ -11,13 +11,17 @@ export type CaptureMetadata = {
   supportedConstraints: MediaTrackSupportedConstraints;
 };
 
-export function microphoneConstraints(profile: MicrophoneProfile): MediaTrackConstraints {
+export function microphoneConstraints(profile: MicrophoneProfile, inputDeviceId = ""): MediaTrackConstraints {
   const processing = {
     headset: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
     balanced: { echoCancellation: true, noiseSuppression: false, autoGainControl: false },
     speakers: { echoCancellation: true, noiseSuppression: true, autoGainControl: false },
   }[profile];
-  return { channelCount: { ideal: 1 }, ...processing };
+  return {
+    channelCount: { ideal: 1 },
+    ...processing,
+    ...(inputDeviceId ? { deviceId: { exact: inputDeviceId } } : {}),
+  };
 }
 
 /** Deterministic debounce layer used by the AudioWorklet RMS monitor. */
@@ -107,6 +111,7 @@ export class BrowserVadRecorder {
     onPcm: (pcm16: ArrayBuffer, sampleRate: number) => void,
     onState: (state: VadState, event: VadEvent) => void,
     profile: MicrophoneProfile = "balanced",
+    inputDeviceId = "",
   ): Promise<CaptureMetadata> {
     if (this.stream && this.context) {
       const track = this.stream.getAudioTracks()[0];
@@ -122,7 +127,7 @@ export class BrowserVadRecorder {
     if (!globalThis.AudioWorkletNode || !navigator.mediaDevices?.getUserMedia) {
       throw new Error("AudioWorklet VAD is unavailable in this browser");
     }
-    const requestedConstraints = microphoneConstraints(profile);
+    const requestedConstraints = microphoneConstraints(profile, inputDeviceId);
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: requestedConstraints,
     });
