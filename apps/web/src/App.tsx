@@ -477,6 +477,7 @@ export default function App() {
               showInAppAvatar={settings?.avatar_placement === "in_app" && (settings.avatar_in_app_visible ?? true)}
               onRefreshEvents={refreshEvents}
               onOpenMemory={() => switchView("memory")}
+              onStartNewDialog={startFreshSession}
             />
           </div>
           {activeView === "journal" && <JournalPage />}
@@ -500,7 +501,6 @@ export default function App() {
                 void refreshOverview();
                 void refreshEvents();
               }}
-              onResetSession={startFreshSession}
             />
           )}
         </main>
@@ -616,6 +616,7 @@ function ChatPage({
   showInAppAvatar,
   onRefreshEvents,
   onOpenMemory,
+  onStartNewDialog,
 }: {
   sessionId: string | null;
   sessionStarting: boolean;
@@ -626,6 +627,7 @@ function ChatPage({
   showInAppAvatar: boolean;
   onRefreshEvents: () => Promise<void>;
   onOpenMemory: () => void;
+  onStartNewDialog: () => Promise<void>;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -639,6 +641,8 @@ function ChatPage({
   const [conversationStatus, setConversationStatus] = useState("Микрофон включён");
   const [conversationDebug, setConversationDebug] = useState<ConversationDebug | null>(null);
   const [vadState, setVadState] = useState<VadState>("idle");
+  const [newDialogConfirmationOpen, setNewDialogConfirmationOpen] = useState(false);
+  const [newDialogPending, setNewDialogPending] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -1571,6 +1575,30 @@ function ChatPage({
     }
   };
 
+  const startNewDialog = async () => {
+    if (!sessionId || newDialogPending) return;
+    setNewDialogPending(true);
+    setError(null);
+    try {
+      // A new session must not inherit a live microphone stream or an answer
+      // that was still playing in the previous dialog.
+      vadRecorderRef.current?.stop();
+      pcmInputRef.current?.close();
+      pcmInputRef.current = null;
+      vadRecorderRef.current = null;
+      setHandsFree(false);
+      setLiveConversation(false);
+      setVadState("idle");
+      interruptAssistantSpeech();
+      await onStartNewDialog();
+      setNewDialogConfirmationOpen(false);
+    } catch (newDialogError) {
+      setError(newDialogError instanceof Error ? newDialogError.message : "Не удалось начать новый диалог.");
+    } finally {
+      setNewDialogPending(false);
+    }
+  };
+
   return (
     <section className={`panel chat-panel${showInAppAvatar && isActive ? " has-in-app-avatar" : ""}`}>
       {showInAppAvatar && isActive && <InAppAvatarHost />}
@@ -1700,6 +1728,15 @@ function ChatPage({
           >
             {liveConversation ? "Живой разговор: вкл." : "Живой разговор"}
           </button>
+          <button
+            className="secondary voice-button new-dialog-button"
+            disabled={!sessionId || sessionStarting || newDialogPending || voiceState === "recording" || voiceState === "transcribing"}
+            onClick={() => setNewDialogConfirmationOpen(true)}
+            title="Очистить текущий чат и начать новый разговор"
+            type="button"
+          >
+            Новый диалог
+          </button>
           {(handsFree || liveConversation || voiceState !== "idle" || !voiceSupported) && <span>
             {voiceSupported
               ? liveConversation
@@ -1722,6 +1759,21 @@ function ChatPage({
           </details>
         )}
       </div>
+      <AppDialog
+        open={newDialogConfirmationOpen}
+        title="Начать новый диалог?"
+        description="Все сообщения и сводки текущего диалога будут удалены без возможности восстановления. Долгосрочная память Iris останется."
+        onClose={() => !newDialogPending && setNewDialogConfirmationOpen(false)}
+      >
+        <div className="dialog-actions">
+          <button className="secondary" type="button" disabled={newDialogPending} onClick={() => setNewDialogConfirmationOpen(false)}>
+            Отмена
+          </button>
+          <button className="danger-button" type="button" disabled={newDialogPending} onClick={() => void startNewDialog()}>
+            {newDialogPending ? "Создаю…" : "Начать новый диалог"}
+          </button>
+        </div>
+      </AppDialog>
       </div>
     </section>
   );
@@ -1833,7 +1885,6 @@ function SettingsPage({
   onRefreshAvatar,
   onAvatarOverlayChanged,
   onSettingsChanged,
-  onResetSession,
 }: {
   settings: PublicSettings | null;
   avatarStatus: AvatarStatusResponse | null;
@@ -1843,7 +1894,6 @@ function SettingsPage({
   onRefreshAvatar: () => Promise<void>;
   onAvatarOverlayChanged: (overlay: AvatarOverlaySettings | null) => void;
   onSettingsChanged: (settings: PublicSettings) => void;
-  onResetSession: () => Promise<void>;
 }) {
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
   const [personality, setPersonality] = useState("");
@@ -1884,7 +1934,6 @@ function SettingsPage({
   });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [resetSessionDialog, setResetSessionDialog] = useState(false);
   const [showSttCapture, setShowSttCapture] = useState(false);
   // Settings are polled by the app shell.  Once this form is open, a polling
   // response must not replace a value the person has just selected before
@@ -2079,20 +2128,6 @@ function SettingsPage({
       title: "Система",
       description: "Модели, резервные копии и состояние компонентов.",
     },
-  };
-
-  const resetSession = async () => {
-    setSaving(true);
-    setMessage(null);
-    try {
-      await onResetSession();
-      setMessage("Новая сессия начата. Диалог удалён, память Iris сохранена.");
-      setResetSessionDialog(false);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Не удалось сбросить сессию.");
-    } finally {
-      setSaving(false);
-    }
   };
 
   const saveSttTerms = async () => {
@@ -2587,13 +2622,6 @@ function SettingsPage({
               <option value="half_duplex">Не слушать во время ответа</option>
             </select>
           </label>
-          <div className="settings-danger-action">
-            <strong>Новая сессия</strong>
-            <small>Удалит текущий диалог и начнёт разговор с чистого листа. Долгосрочная память Iris сохранится.</small>
-            <button className="secondary danger-button" type="button" disabled={saving} onClick={() => setResetSessionDialog(true)}>
-              Сбросить сессию
-            </button>
-          </div>
         </fieldset>
 
         <fieldset className="settings-group" hidden={activeSection !== "memory"}>
@@ -2618,17 +2646,6 @@ function SettingsPage({
         </div>
 
         {message && <div className="notice" role="status">{message}</div>}
-        <AppDialog
-          open={resetSessionDialog}
-          title="Сбросить текущую сессию?"
-          description="Все сообщения и сводки текущего диалога будут удалены без возможности восстановления. Долгосрочная память Iris останется."
-          onClose={() => !saving && setResetSessionDialog(false)}
-        >
-          <div className="dialog-actions">
-            <button className="secondary" type="button" disabled={saving} onClick={() => setResetSessionDialog(false)}>Отмена</button>
-            <button className="danger-button" type="button" disabled={saving} onClick={() => void resetSession()}>{saving ? "Сбрасываю…" : "Сбросить сессию"}</button>
-          </div>
-        </AppDialog>
       </div>
     </section>
   );
