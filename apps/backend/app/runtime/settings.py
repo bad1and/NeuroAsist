@@ -11,6 +11,10 @@ class RuntimeSettings:
     personality: str = "default"
     voice_language: str = "ru"
     voice_microphone_profile: str = "balanced"
+    # Browser/Windows device IDs are opaque, machine-local identifiers. An
+    # empty value deliberately means "follow the operating-system default".
+    voice_input_device_id: str = ""
+    voice_output_device_id: str = ""
     voice_tts_voice: str | None = None
     voice_playback_rate: float = 1.0
     voice_live_playback_prebuffer_segments: int = 1

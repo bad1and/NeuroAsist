@@ -275,6 +275,7 @@ def create_app() -> FastAPI:
             width=runtime_settings.avatar_overlay_width,
             height=runtime_settings.avatar_overlay_height,
         ),
+        audio_muted=bool(runtime_settings.voice_output_device_id),
         on_overlay_bounds_changed=persist_avatar_overlay_bounds,
     )
     voice_session_manager.bind_avatar_service(avatar_service)

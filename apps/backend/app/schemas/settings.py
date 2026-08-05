@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PublicSettingsResponse(BaseModel):
@@ -7,6 +7,8 @@ class PublicSettingsResponse(BaseModel):
     personality: str
     voice_language: str
     voice_microphone_profile: str
+    voice_input_device_id: str
+    voice_output_device_id: str
     voice_vad: dict[str, object]
     voice_input_diagnostic_audio_enabled: bool
     voice_stt_model: str
@@ -60,6 +62,8 @@ class RuntimeSettingsPatch(BaseModel):
     personality: str | None = None
     voice_language: str | None = None
     voice_microphone_profile: str | None = None
+    voice_input_device_id: str | None = Field(default=None, max_length=2048)
+    voice_output_device_id: str | None = Field(default=None, max_length=2048)
     voice_tts_voice: str | None = None
     voice_playback_rate: float | None = None
     voice_live_playback_prebuffer_segments: int | None = None

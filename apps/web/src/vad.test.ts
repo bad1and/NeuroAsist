@@ -38,6 +38,9 @@ describe("VoiceActivityGate", () => {
     expect(microphoneConstraints("speakers")).toMatchObject({
       echoCancellation: true, noiseSuppression: true, autoGainControl: false,
     });
+    expect(microphoneConstraints("balanced", "usb-microphone")).toMatchObject({
+      deviceId: { exact: "usb-microphone" },
+    });
   });
 
   it("buffers initial PCM until the backend ready handshake", async () => {

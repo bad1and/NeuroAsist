@@ -201,6 +201,8 @@ export type PublicSettings = {
   personality: string;
   voice_language: string;
   voice_microphone_profile: "headset" | "balanced" | "speakers";
+  voice_input_device_id: string;
+  voice_output_device_id: string;
   voice_vad: {
     configured_provider: string;
     active_provider: string;

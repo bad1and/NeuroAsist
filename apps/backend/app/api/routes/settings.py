@@ -52,6 +52,8 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         personality=runtime_settings.personality,
         voice_language=runtime_settings.voice_language,
         voice_microphone_profile=runtime_settings.voice_microphone_profile,
+        voice_input_device_id=runtime_settings.voice_input_device_id,
+        voice_output_device_id=runtime_settings.voice_output_device_id,
         voice_vad=dict(request.app.state.voice_input_session_manager.vad_status),
         voice_input_diagnostic_audio_enabled=settings.voice_input_diagnostic_audio,
         voice_stt_model=settings.voice_stt_model,
@@ -101,7 +103,7 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
 
 
 @router.patch("/settings/runtime", response_model=PublicSettingsResponse)
-def patch_runtime_settings(
+async def patch_runtime_settings(
     payload: RuntimeSettingsPatch,
     request: Request,
 ) -> PublicSettingsResponse:
@@ -132,6 +134,12 @@ def patch_runtime_settings(
                 detail="Unsupported microphone profile",
             )
         runtime_settings.voice_microphone_profile = payload.voice_microphone_profile
+
+    if payload.voice_input_device_id is not None:
+        runtime_settings.voice_input_device_id = payload.voice_input_device_id
+
+    if payload.voice_output_device_id is not None:
+        runtime_settings.voice_output_device_id = payload.voice_output_device_id
 
     if payload.voice_tts_voice is not None:
         if payload.voice_tts_voice not in _available_tts_voices(request):
@@ -212,6 +220,14 @@ def patch_runtime_settings(
             detail="Could not persist settings",
         ) from error
 
+    # A selected output is rendered by the WebView because it can target a
+    # concrete Windows device. Unity keeps decoding the same stream for lip
+    # sync, but must stay muted so the answer is never played twice.
+    if payload.voice_output_device_id is not None:
+        await request.app.state.avatar_service.set_audio_muted(
+            bool(runtime_settings.voice_output_device_id),
+        )
+
     event_bus.publish(
         "backend.status",
         "info",
@@ -221,6 +237,8 @@ def patch_runtime_settings(
             "personality": runtime_settings.personality,
             "voice_language": runtime_settings.voice_language,
             "voice_microphone_profile": runtime_settings.voice_microphone_profile,
+            "voice_input_device_id": runtime_settings.voice_input_device_id,
+            "voice_output_device_id": runtime_settings.voice_output_device_id,
             "voice_tts_voice": runtime_settings.voice_tts_voice,
             "voice_playback_rate": runtime_settings.voice_playback_rate,
             "voice_live_playback_prebuffer_segments": runtime_settings.voice_live_playback_prebuffer_segments,
