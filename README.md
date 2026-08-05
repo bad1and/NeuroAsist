@@ -47,6 +47,7 @@ The V0.5 direction is a single continuous desktop companion: one character, one 
 | Text conversation | ✅ | FastAPI chat endpoint |
 | Push-to-talk voice chat | ✅ | Browser `MediaRecorder` |
 | Live voice response | ✅ | WebSocket audio segments |
+| Audio device selection | ✅ | Choose a microphone and playback device in Voice Settings; selections persist locally |
 | Local speech-to-text | ✅ | GigaAM v3, `faster-whisper` fallback |
 | Local text-to-speech | ✅ | Silero v5_5_ru, Baya by default |
 | Conversation history and journal | ✅ | SQLite timeline, episodes, and summaries |
@@ -55,7 +56,7 @@ The V0.5 direction is a single continuous desktop companion: one character, one 
 | Runtime events | ✅ | REST and WebSocket |
 | Voice and runtime settings | ✅ | Local React control panel |
 | Browser speech fallback | ✅ | Used when backend TTS fails |
-| Unity VRM avatar and lip sync | ✅ | Optional WebSocket client with UniVRM/uLipSync |
+| Unity VRM avatar and lip sync | ✅ | Optional WebSocket client with UniVRM/uLipSync, shown either in the chat or as a desktop overlay |
 | Continuous companion runtime | 🧭 | Timeline, episodes, summaries, controlled long-term memory, and the validated Tauri shell are implemented |
 | Development agent, sandbox, and desktop control | 🚫 | Explicitly out of V0.5 scope |
 
@@ -72,11 +73,11 @@ The V0.5 direction is a single continuous desktop companion: one character, one 
 
 The React control panel contains five main sections:
 
-- **Chat** — text messages, microphone recording, transcription, AI replies, and audio playback.
+- **Chat** — text messages, microphone recording, transcription, AI replies, audio playback, and a confirmed **New dialog** action that clears the current conversation while preserving long-term memory.
 - **Journal** — the continuous timeline and internal conversation episodes.
 - **Memory** — saved facts, provenance, review, and a full reset of memory and history.
 - **Events** — live backend, LLM, STT, TTS, and connection events.
-- **Settings** — voice language, TTS voice, playback speed, live prebuffer, runtime options, and avatar test controls.
+- **Settings** — voice language, input microphone, output device, TTS voice, playback speed, live prebuffer, runtime options, and avatar test controls.
 
 The header displays backend status, WebSocket connection state, API-key availability, and the fixed LLM model.
 

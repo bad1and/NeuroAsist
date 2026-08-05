@@ -148,6 +148,8 @@ export function updateRuntimeSettings(payload: {
   personality?: string;
   voice_language?: string;
   voice_microphone_profile?: PublicSettings["voice_microphone_profile"];
+  voice_input_device_id?: string;
+  voice_output_device_id?: string;
   voice_tts_voice?: string;
   voice_playback_rate?: number;
   voice_live_playback_prebuffer_segments?: number;

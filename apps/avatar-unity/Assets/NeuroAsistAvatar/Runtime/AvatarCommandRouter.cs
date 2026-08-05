@@ -47,6 +47,7 @@ namespace NeuroAsist.Avatar
                     motion?.TriggerGesture(AvatarMotionNames.ParseGesture(payload.gesture), payload.intensity, payload.interrupt);
                     break;
                 case "avatar.stop": client.SendAck(command.message_id, true); speech.Stop(payload.utterance_id); motion?.ResetToNeutral(); break;
+                case "avatar.audio.mute": client.SendAck(command.message_id, true); speech.SetAudioMuted(payload.muted); break;
                 case "avatar.state":
                     client.SendAck(command.message_id, true);
                     if (System.Enum.TryParse(payload.state, true, out AvatarState next)) state.SetState(next, false);

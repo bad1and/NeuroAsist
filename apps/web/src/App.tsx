@@ -84,6 +84,13 @@ import type {
 import type { VoiceServerEvent } from "./types";
 import { PlaybackCoordinator, TTSStreamPlayer, VoiceSocketClient } from "./voice-live";
 import {
+  canSelectAudioOutput,
+  getAudioDeviceCatalog,
+  setAudioElementOutput,
+  type AudioDeviceCatalog,
+  type AudioDeviceOption,
+} from "./audio-devices";
+import {
   BrowserVadRecorder,
   PcmInputClient,
   microphoneConstraints,
@@ -470,6 +477,7 @@ export default function App() {
               showInAppAvatar={settings?.avatar_placement === "in_app" && (settings.avatar_in_app_visible ?? true)}
               onRefreshEvents={refreshEvents}
               onOpenMemory={() => switchView("memory")}
+              onStartNewDialog={startFreshSession}
             />
           </div>
           {activeView === "journal" && <JournalPage />}
@@ -493,7 +501,6 @@ export default function App() {
                 void refreshOverview();
                 void refreshEvents();
               }}
-              onResetSession={startFreshSession}
             />
           )}
         </main>
@@ -609,6 +616,7 @@ function ChatPage({
   showInAppAvatar,
   onRefreshEvents,
   onOpenMemory,
+  onStartNewDialog,
 }: {
   sessionId: string | null;
   sessionStarting: boolean;
@@ -619,6 +627,7 @@ function ChatPage({
   showInAppAvatar: boolean;
   onRefreshEvents: () => Promise<void>;
   onOpenMemory: () => void;
+  onStartNewDialog: () => Promise<void>;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -632,6 +641,8 @@ function ChatPage({
   const [conversationStatus, setConversationStatus] = useState("Микрофон включён");
   const [conversationDebug, setConversationDebug] = useState<ConversationDebug | null>(null);
   const [vadState, setVadState] = useState<VadState>("idle");
+  const [newDialogConfirmationOpen, setNewDialogConfirmationOpen] = useState(false);
+  const [newDialogPending, setNewDialogPending] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -726,11 +737,41 @@ function ChatPage({
     typeof window !== "undefined" &&
     "speechSynthesis" in window &&
     "SpeechSynthesisUtterance" in window;
-  const avatarOwnsAudio = Boolean(avatarStatus?.enabled && avatarStatus.client_count > 0);
+  const selectedInputDeviceId = settings?.voice_input_device_id ?? "";
+  const selectedOutputDeviceId = settings?.voice_output_device_id ?? "";
+  // A concrete output requires Web Audio/HTML audio routing. In that mode the
+  // avatar remains visually in sync but its Unity AudioSource is muted by the
+  // backend, so the browser is the only audible playback owner.
+  const routeAvatarAudioThroughDesktop = Boolean(selectedOutputDeviceId && canSelectAudioOutput());
+  const avatarOwnsAudio = Boolean(
+    avatarStatus?.enabled
+    && avatarStatus.client_count > 0
+    && !routeAvatarAudioThroughDesktop,
+  );
 
   useEffect(() => {
     avatarOwnsAudioRef.current = avatarOwnsAudio;
   }, [avatarOwnsAudio]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const applyOutput = async () => {
+      try {
+        if (activeAudioRef.current) {
+          await setAudioElementOutput(activeAudioRef.current, selectedOutputDeviceId);
+        }
+        await livePlayerRef.current?.setOutputDevice(selectedOutputDeviceId);
+      } catch (outputError) {
+        if (!cancelled) {
+          setError(outputError instanceof Error
+            ? `Не удалось переключить вывод звука: ${outputError.message}`
+            : "Не удалось переключить вывод звука");
+        }
+      }
+    };
+    void applyOutput();
+    return () => { cancelled = true; };
+  }, [selectedOutputDeviceId]);
 
   const stopVoicePlayback = useCallback((except?: HTMLAudioElement) => {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
@@ -780,6 +821,7 @@ function ChatPage({
       };
 
       try {
+        await setAudioElementOutput(audio, selectedOutputDeviceId);
         await audio.play();
         return true;
       } catch {
@@ -789,7 +831,7 @@ function ChatPage({
         return false;
       }
     },
-    [settings?.voice_playback_rate, stopVoicePlayback],
+    [selectedOutputDeviceId, settings?.voice_playback_rate, stopVoicePlayback],
   );
 
   const playMessageAudioTrack = useCallback(
@@ -807,6 +849,7 @@ function ChatPage({
 
       try {
         audio.currentTime = 0;
+        await setAudioElementOutput(audio, selectedOutputDeviceId);
         await audio.play();
         return true;
       } catch {
@@ -816,7 +859,7 @@ function ChatPage({
         return false;
       }
     },
-    [settings?.voice_playback_rate, stopVoicePlayback],
+    [selectedOutputDeviceId, settings?.voice_playback_rate, stopVoicePlayback],
   );
 
   const speakTextInBrowser = useCallback(
@@ -863,6 +906,7 @@ function ChatPage({
           prebufferMs: settings?.voice_live_playback_prebuffer_ms ?? 0,
           playbackRate: 1,
           startLeadMs: settings?.voice_live_playback_start_lead_ms ?? 30,
+          outputDeviceId: selectedOutputDeviceId,
         },
         (gapMs) => {
           liveSocketRef.current?.send("playback.underrun", { underrun_ms: gapMs });
@@ -886,12 +930,14 @@ function ChatPage({
       prebufferMs: settings?.voice_live_playback_prebuffer_ms ?? 0,
       playbackRate: 1,
       startLeadMs: settings?.voice_live_playback_start_lead_ms ?? 30,
+      outputDeviceId: selectedOutputDeviceId,
     });
     return livePlayerRef.current;
   }, [
     settings?.voice_live_playback_prebuffer_ms,
     settings?.voice_live_playback_prebuffer_segments,
     settings?.voice_live_playback_start_lead_ms,
+    selectedOutputDeviceId,
   ]);
 
   const ensureLiveVoice = useCallback(async () => {
@@ -1280,7 +1326,7 @@ function ChatPage({
       await ensureLivePlayer().unlock();
       const profile = (settings?.voice_microphone_profile ?? "balanced") as MicrophoneProfile;
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: microphoneConstraints(profile),
+        audio: microphoneConstraints(profile, selectedInputDeviceId),
       });
       const mimeType = getRecordingMimeType();
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
@@ -1508,6 +1554,7 @@ function ChatPage({
           if (event === "speech_started" && isLive) updateConversationStatus("Слышу вас");
         },
         (settings?.voice_microphone_profile ?? "balanced") as MicrophoneProfile,
+        selectedInputDeviceId,
       );
       await input.connect(
         capture.sampleRate,
@@ -1525,6 +1572,30 @@ function ChatPage({
       setHandsFree(false);
       setLiveConversation(false);
       setVadState("idle");
+    }
+  };
+
+  const startNewDialog = async () => {
+    if (!sessionId || newDialogPending) return;
+    setNewDialogPending(true);
+    setError(null);
+    try {
+      // A new session must not inherit a live microphone stream or an answer
+      // that was still playing in the previous dialog.
+      vadRecorderRef.current?.stop();
+      pcmInputRef.current?.close();
+      pcmInputRef.current = null;
+      vadRecorderRef.current = null;
+      setHandsFree(false);
+      setLiveConversation(false);
+      setVadState("idle");
+      interruptAssistantSpeech();
+      await onStartNewDialog();
+      setNewDialogConfirmationOpen(false);
+    } catch (newDialogError) {
+      setError(newDialogError instanceof Error ? newDialogError.message : "Не удалось начать новый диалог.");
+    } finally {
+      setNewDialogPending(false);
     }
   };
 
@@ -1657,6 +1728,15 @@ function ChatPage({
           >
             {liveConversation ? "Живой разговор: вкл." : "Живой разговор"}
           </button>
+          <button
+            className="secondary voice-button new-dialog-button"
+            disabled={!sessionId || sessionStarting || newDialogPending || voiceState === "recording" || voiceState === "transcribing"}
+            onClick={() => setNewDialogConfirmationOpen(true)}
+            title="Очистить текущий чат и начать новый разговор"
+            type="button"
+          >
+            Новый диалог
+          </button>
           {(handsFree || liveConversation || voiceState !== "idle" || !voiceSupported) && <span>
             {voiceSupported
               ? liveConversation
@@ -1679,6 +1759,21 @@ function ChatPage({
           </details>
         )}
       </div>
+      <AppDialog
+        open={newDialogConfirmationOpen}
+        title="Начать новый диалог?"
+        description="Все сообщения и сводки текущего диалога будут удалены без возможности восстановления. Долгосрочная память Iris останется."
+        onClose={() => !newDialogPending && setNewDialogConfirmationOpen(false)}
+      >
+        <div className="dialog-actions">
+          <button className="secondary" type="button" disabled={newDialogPending} onClick={() => setNewDialogConfirmationOpen(false)}>
+            Отмена
+          </button>
+          <button className="danger-button" type="button" disabled={newDialogPending} onClick={() => void startNewDialog()}>
+            {newDialogPending ? "Создаю…" : "Начать новый диалог"}
+          </button>
+        </div>
+      </AppDialog>
       </div>
     </section>
   );
@@ -1790,7 +1885,6 @@ function SettingsPage({
   onRefreshAvatar,
   onAvatarOverlayChanged,
   onSettingsChanged,
-  onResetSession,
 }: {
   settings: PublicSettings | null;
   avatarStatus: AvatarStatusResponse | null;
@@ -1800,12 +1894,21 @@ function SettingsPage({
   onRefreshAvatar: () => Promise<void>;
   onAvatarOverlayChanged: (overlay: AvatarOverlaySettings | null) => void;
   onSettingsChanged: (settings: PublicSettings) => void;
-  onResetSession: () => Promise<void>;
 }) {
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
   const [personality, setPersonality] = useState("");
   const [voiceLanguage, setVoiceLanguage] = useState("ru");
   const [voiceMicrophoneProfile, setVoiceMicrophoneProfile] = useState<MicrophoneProfile>("balanced");
+  const [voiceInputDeviceId, setVoiceInputDeviceId] = useState("");
+  const [voiceOutputDeviceId, setVoiceOutputDeviceId] = useState("");
+  const [audioDevices, setAudioDevices] = useState<AudioDeviceCatalog>({
+    inputs: [],
+    outputs: [],
+    canEnumerate: false,
+    canSelectOutput: false,
+  });
+  const [audioDevicesLoading, setAudioDevicesLoading] = useState(false);
+  const [audioDevicesMessage, setAudioDevicesMessage] = useState<string | null>(null);
   const [voiceTtsVoice, setVoiceTtsVoice] = useState("");
   const [voiceTtsStyle, setVoiceTtsStyle] = useState("auto");
   const [voiceExpressionLevel, setVoiceExpressionLevel] = useState("natural");
@@ -1831,7 +1934,6 @@ function SettingsPage({
   });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [resetSessionDialog, setResetSessionDialog] = useState(false);
   const [showSttCapture, setShowSttCapture] = useState(false);
   // Settings are polled by the app shell.  Once this form is open, a polling
   // response must not replace a value the person has just selected before
@@ -1842,6 +1944,8 @@ function SettingsPage({
     setPersonality(nextSettings.personality);
     setVoiceLanguage(nextSettings.voice_language);
     setVoiceMicrophoneProfile(nextSettings.voice_microphone_profile ?? "balanced");
+    setVoiceInputDeviceId(nextSettings.voice_input_device_id ?? "");
+    setVoiceOutputDeviceId(nextSettings.voice_output_device_id ?? "");
     setVoiceTtsVoice(nextSettings.voice_tts_voice);
     setVoiceTtsStyle(nextSettings.voice_tts_style);
     setVoiceExpressionLevel(nextSettings.voice_tts_expression_level);
@@ -1887,6 +1991,35 @@ function SettingsPage({
     setLiveSettings((current) => ({ ...current, [key]: value }));
   };
 
+  const refreshAudioDevices = useCallback(async (requestMicrophoneAccess = false) => {
+    setAudioDevicesLoading(true);
+    setAudioDevicesMessage(null);
+    try {
+      const nextDevices = await getAudioDeviceCatalog(requestMicrophoneAccess);
+      setAudioDevices(nextDevices);
+      if (!nextDevices.canEnumerate) {
+        setAudioDevicesMessage("Этот WebView не даёт получить список аудиоустройств.");
+      } else if (requestMicrophoneAccess && nextDevices.inputs.length === 0) {
+        setAudioDevicesMessage("Микрофоны не найдены. Проверьте доступ к микрофону в Windows.");
+      }
+    } catch (error) {
+      setAudioDevicesMessage(
+        error instanceof Error ? `Не удалось получить список устройств: ${error.message}` : "Не удалось получить список устройств.",
+      );
+    } finally {
+      setAudioDevicesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshAudioDevices();
+    const mediaDevices = typeof navigator === "undefined" ? undefined : navigator.mediaDevices;
+    if (!mediaDevices?.addEventListener) return undefined;
+    const handleDeviceChange = () => void refreshAudioDevices();
+    mediaDevices.addEventListener("devicechange", handleDeviceChange);
+    return () => mediaDevices.removeEventListener("devicechange", handleDeviceChange);
+  }, [refreshAudioDevices]);
+
   const saveSettings = async () => {
     setSaving(true);
     setMessage(null);
@@ -1895,6 +2028,8 @@ function SettingsPage({
         personality,
         voice_language: voiceLanguage,
         voice_microphone_profile: voiceMicrophoneProfile,
+        voice_input_device_id: voiceInputDeviceId,
+        voice_output_device_id: voiceOutputDeviceId,
         voice_tts_voice: voiceTtsVoice,
         voice_playback_rate: voicePlaybackRate,
         voice_live_playback_prebuffer_segments: prebufferSegments,
@@ -1995,20 +2130,6 @@ function SettingsPage({
     },
   };
 
-  const resetSession = async () => {
-    setSaving(true);
-    setMessage(null);
-    try {
-      await onResetSession();
-      setMessage("Новая сессия начата. Диалог удалён, память Iris сохранена.");
-      setResetSessionDialog(false);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Не удалось сбросить сессию.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const saveSttTerms = async () => {
     setSaving(true);
     setMessage(null);
@@ -2022,6 +2143,27 @@ function SettingsPage({
       setSaving(false);
     }
   };
+
+  const includeSelectedAudioDevice = (
+    options: AudioDeviceOption[],
+    deviceId: string,
+    unavailableLabel: string,
+  ): AudioDeviceOption[] => (
+    deviceId && !options.some((option) => option.deviceId === deviceId)
+      ? [{ deviceId, label: unavailableLabel }, ...options]
+      : options
+  );
+  const inputDeviceOptions = includeSelectedAudioDevice(
+    audioDevices.inputs,
+    voiceInputDeviceId,
+    "Выбранный микрофон сейчас недоступен",
+  );
+  const outputDeviceOptions = includeSelectedAudioDevice(
+    audioDevices.outputs,
+    voiceOutputDeviceId,
+    "Выбранное устройство вывода сейчас недоступно",
+  );
+
   const activeSettingsMeta = settingsSectionMeta[activeSection];
 
   return (
@@ -2121,6 +2263,57 @@ function SettingsPage({
             </select>
             <small>Управляет эхоподавлением и шумоподавлением браузера для записи и живого режима.</small>
           </label>
+
+          <label>
+            Источник входа (микрофон)
+            <select
+              value={voiceInputDeviceId}
+              onChange={(event) => setVoiceInputDeviceId(event.target.value)}
+              disabled={saving}
+            >
+              <option value="">Системный по умолчанию</option>
+              {inputDeviceOptions.map((device) => (
+                <option key={device.deviceId} value={device.deviceId} disabled={!audioDevices.canEnumerate}>
+                  {device.label}
+                </option>
+              ))}
+            </select>
+            <small>Используется для голосовых сообщений, «Свободных рук» и живого разговора.</small>
+          </label>
+
+          <label>
+            Источник вывода (наушники или колонки)
+            <select
+              value={voiceOutputDeviceId}
+              onChange={(event) => setVoiceOutputDeviceId(event.target.value)}
+              disabled={saving}
+            >
+              <option value="">Системный по умолчанию</option>
+              {outputDeviceOptions.map((device) => (
+                <option key={device.deviceId} value={device.deviceId} disabled={!audioDevices.canSelectOutput}>
+                  {device.label}
+                </option>
+              ))}
+            </select>
+            <small>
+              {audioDevices.canSelectOutput
+                ? "Выбранное устройство используется для синтезированных аудиофайлов и воспроизведения сообщений; запасной системный голос браузера следует настройке Windows."
+                : "Этот WebView не поддерживает выбор устройства вывода."}
+            </small>
+          </label>
+
+          <div className="readonly-setting audio-device-refresh">
+            <span>Аудиоустройства</span>
+            <button
+              className="secondary"
+              type="button"
+              onClick={() => void refreshAudioDevices(true)}
+              disabled={saving || audioDevicesLoading}
+            >
+              {audioDevicesLoading ? "Обновляем…" : "Разрешить доступ и обновить"}
+            </button>
+            {audioDevicesMessage && <small role="status">{audioDevicesMessage}</small>}
+          </div>
 
           <label>
             Голос {ttsProviderLabel}
@@ -2264,7 +2457,9 @@ function SettingsPage({
           </button>
         </fieldset>
 
-        {showSttCapture && activeSection === "voice" && <GuidedSttCapture profile={voiceMicrophoneProfile} />}
+        {showSttCapture && activeSection === "voice" && (
+          <GuidedSttCapture profile={voiceMicrophoneProfile} inputDeviceId={voiceInputDeviceId} />
+        )}
 
         <fieldset className="settings-group live-conversation-settings" hidden={activeSection !== "conversation"}>
           <legend>Живой разговор</legend>
@@ -2427,13 +2622,6 @@ function SettingsPage({
               <option value="half_duplex">Не слушать во время ответа</option>
             </select>
           </label>
-          <div className="settings-danger-action">
-            <strong>Новая сессия</strong>
-            <small>Удалит текущий диалог и начнёт разговор с чистого листа. Долгосрочная память Iris сохранится.</small>
-            <button className="secondary danger-button" type="button" disabled={saving} onClick={() => setResetSessionDialog(true)}>
-              Сбросить сессию
-            </button>
-          </div>
         </fieldset>
 
         <fieldset className="settings-group" hidden={activeSection !== "memory"}>
@@ -2458,17 +2646,6 @@ function SettingsPage({
         </div>
 
         {message && <div className="notice" role="status">{message}</div>}
-        <AppDialog
-          open={resetSessionDialog}
-          title="Сбросить текущую сессию?"
-          description="Все сообщения и сводки текущего диалога будут удалены без возможности восстановления. Долгосрочная память Iris останется."
-          onClose={() => !saving && setResetSessionDialog(false)}
-        >
-          <div className="dialog-actions">
-            <button className="secondary" type="button" disabled={saving} onClick={() => setResetSessionDialog(false)}>Отмена</button>
-            <button className="danger-button" type="button" disabled={saving} onClick={() => void resetSession()}>{saving ? "Сбрасываю…" : "Сбросить сессию"}</button>
-          </div>
-        </AppDialog>
       </div>
     </section>
   );
