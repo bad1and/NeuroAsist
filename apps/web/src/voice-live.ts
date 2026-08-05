@@ -1,10 +1,12 @@
 import type { VoiceServerEvent } from "./types";
+import { setAudioContextOutput } from "./audio-devices";
 
 export type TTSStreamPlayerOptions = {
   prebufferSegments?: number;
   prebufferMs?: number;
   playbackRate?: number;
   startLeadMs?: number;
+  outputDeviceId?: string;
 };
 
 export type PlaybackOwner = "unity" | "desktop_ui" | "none";
@@ -70,6 +72,7 @@ export class TTSStreamPlayer {
   private underrunPrebufferSegments = 0;
   private prebufferMs: number;
   private startLeadMs: number;
+  private outputDeviceId: string;
 
   constructor(
     private readonly onStarted: () => void,
@@ -83,17 +86,25 @@ export class TTSStreamPlayer {
     this.prebufferSegments = Math.max(1, options.prebufferSegments ?? 1);
     this.prebufferMs = Math.max(0, options.prebufferMs ?? 0);
     this.startLeadMs = Math.max(0, options.startLeadMs ?? 30);
+    this.outputDeviceId = options.outputDeviceId ?? "";
   }
 
   updateOptions(options: TTSStreamPlayerOptions): void {
     this.prebufferSegments = Math.max(1, options.prebufferSegments ?? this.prebufferSegments);
     this.prebufferMs = Math.max(0, options.prebufferMs ?? this.prebufferMs);
     this.startLeadMs = Math.max(0, options.startLeadMs ?? this.startLeadMs);
+    this.outputDeviceId = options.outputDeviceId ?? this.outputDeviceId;
   }
 
   async unlock(): Promise<void> {
     this.context ??= new AudioContext();
+    if (this.outputDeviceId) await setAudioContextOutput(this.context, this.outputDeviceId);
     if (this.context.state === "suspended") await this.context.resume();
+  }
+
+  async setOutputDevice(deviceId: string): Promise<void> {
+    this.outputDeviceId = deviceId;
+    if (this.context) await setAudioContextOutput(this.context, deviceId);
   }
 
   begin(utteranceId: string): void {

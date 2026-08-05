@@ -10,6 +10,7 @@ from .connection_manager import AvatarConnectionManager, BroadcastResult
 from .emotion_engine import EmotionEngine
 from .schemas import (
     AvatarStatusResponse,
+    AudioMutePayload,
     EmotionPayload,
     ErrorPayload,
     GesturePayload,
@@ -42,6 +43,7 @@ class AvatarService:
         client_timeout_seconds: float,
         emotion_engine: EmotionEngine | None = None,
         overlay: OverlayPayload | None = None,
+        audio_muted: bool = False,
         on_overlay_bounds_changed: Callable[[OverlayPayload], None] | None = None,
     ) -> None:
         self.manager = manager
@@ -51,6 +53,7 @@ class AvatarService:
         self.client_timeout_seconds = client_timeout_seconds
         self.emotion_engine = emotion_engine or EmotionEngine()
         self.overlay = overlay or OverlayPayload()
+        self.audio_muted = audio_muted
         self.on_overlay_bounds_changed = on_overlay_bounds_changed
         self._heartbeat_task: asyncio.Task[None] | None = None
         self._playback_finished_handler: PlaybackFinishedHandler | None = None
@@ -209,6 +212,16 @@ class AvatarService:
             "avatar.overlay.configure", session_id, overlay.model_dump(mode="json"), protocol_version=2, min_protocol_version=2,
         )
 
+    async def set_audio_muted(self, muted: bool, *, session_id: str = "default") -> BroadcastResult:
+        self.audio_muted = muted
+        return await self._broadcast(
+            "avatar.audio.mute",
+            session_id,
+            AudioMutePayload(muted=muted).model_dump(mode="json"),
+            protocol_version=2,
+            min_protocol_version=2,
+        )
+
     async def protocol_error(self, client_id: str, code: str, message: str) -> None:
         frame = OutgoingMessage(type="avatar.error", payload=ErrorPayload(code=code, message=message).model_dump(mode="json"))
         await self.manager.send_to(client_id, frame.model_dump(mode="json"))
@@ -227,6 +240,12 @@ class AvatarService:
                 payload=self.overlay.model_dump(mode="json"),
             )
             await self.manager.send_to(client_id, frame.model_dump(mode="json"))
+            audio_frame = OutgoingMessage(
+                protocol_version=2,
+                type="avatar.audio.mute",
+                payload=AudioMutePayload(muted=self.audio_muted).model_dump(mode="json"),
+            )
+            await self.manager.send_to(client_id, audio_frame.model_dump(mode="json"))
         elif envelope.type == "avatar.pong":
             return
         elif envelope.type == "avatar.ack":

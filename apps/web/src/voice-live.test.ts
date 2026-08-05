@@ -55,6 +55,7 @@ class FakeAudioContext {
     FakeAudioContext.instance = this;
   }
   resume = vi.fn(async () => undefined);
+  setSinkId = vi.fn(async () => undefined);
   decodeAudioData = vi.fn(() => new Promise<AudioBuffer>((resolve, reject) => {
     this.deferred.push({ resolve, reject });
   }));
@@ -81,6 +82,12 @@ describe("TTSStreamPlayer", () => {
     const player = new TTSStreamPlayer(vi.fn(), vi.fn(), vi.fn());
     await player.unlock();
     expect(FakeAudioContext.instance.resume).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes live synthesis to the selected output device", async () => {
+    const player = new TTSStreamPlayer(vi.fn(), vi.fn(), vi.fn(), { outputDeviceId: "headphones" });
+    await player.unlock();
+    expect(FakeAudioContext.instance.setSinkId).toHaveBeenCalledWith("headphones");
   });
 
   it("decodes and schedules segments strictly in sequence", async () => {

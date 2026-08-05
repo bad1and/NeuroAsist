@@ -123,7 +123,13 @@ function download(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-export function GuidedSttCapture({ profile }: { profile: MicrophoneProfile }) {
+export function GuidedSttCapture({
+  profile,
+  inputDeviceId = "",
+}: {
+  profile: MicrophoneProfile;
+  inputDeviceId?: string;
+}) {
   const recorder = useRef<BrowserVadRecorder | null>(null);
   const chunks = useRef<ArrayBuffer[]>([]);
   const metadata = useRef<CaptureMetadata | null>(null);
@@ -161,6 +167,7 @@ export function GuidedSttCapture({ profile }: { profile: MicrophoneProfile }) {
         (pcm) => chunks.current.push(pcm.slice(0)),
         () => undefined,
         profile,
+        inputDeviceId,
       );
       setRecording(true);
     } catch (error) {

@@ -207,6 +207,9 @@ select { appearance: auto; }
 .workspace-settings .system-card .panel-header { min-height: 58px; padding: 13px 0; }
 .workspace-settings .system-card .notice { margin-inline: 0; }
 .workspace-settings .system-card .settings-group { max-width: none; padding: 14px 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; }
+.audio-device-refresh { align-items: start; }
+.audio-device-refresh button { width: fit-content; }
+.audio-device-refresh small { color: var(--subtle); }
 .workspace-settings .system-card > small { display: block; padding: 0 0 14px; color: var(--subtle); font-size: 12px; }
 .workspace-settings .system-card .card-empty { padding: 0 0 14px; }
 .workspace-settings .maintenance-actions { padding: 0 0 14px; }

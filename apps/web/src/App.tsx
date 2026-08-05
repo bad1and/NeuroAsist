@@ -84,6 +84,13 @@ import type {
 import type { VoiceServerEvent } from "./types";
 import { PlaybackCoordinator, TTSStreamPlayer, VoiceSocketClient } from "./voice-live";
 import {
+  canSelectAudioOutput,
+  getAudioDeviceCatalog,
+  setAudioElementOutput,
+  type AudioDeviceCatalog,
+  type AudioDeviceOption,
+} from "./audio-devices";
+import {
   BrowserVadRecorder,
   PcmInputClient,
   microphoneConstraints,
@@ -726,11 +733,41 @@ function ChatPage({
     typeof window !== "undefined" &&
     "speechSynthesis" in window &&
     "SpeechSynthesisUtterance" in window;
-  const avatarOwnsAudio = Boolean(avatarStatus?.enabled && avatarStatus.client_count > 0);
+  const selectedInputDeviceId = settings?.voice_input_device_id ?? "";
+  const selectedOutputDeviceId = settings?.voice_output_device_id ?? "";
+  // A concrete output requires Web Audio/HTML audio routing. In that mode the
+  // avatar remains visually in sync but its Unity AudioSource is muted by the
+  // backend, so the browser is the only audible playback owner.
+  const routeAvatarAudioThroughDesktop = Boolean(selectedOutputDeviceId && canSelectAudioOutput());
+  const avatarOwnsAudio = Boolean(
+    avatarStatus?.enabled
+    && avatarStatus.client_count > 0
+    && !routeAvatarAudioThroughDesktop,
+  );
 
   useEffect(() => {
     avatarOwnsAudioRef.current = avatarOwnsAudio;
   }, [avatarOwnsAudio]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const applyOutput = async () => {
+      try {
+        if (activeAudioRef.current) {
+          await setAudioElementOutput(activeAudioRef.current, selectedOutputDeviceId);
+        }
+        await livePlayerRef.current?.setOutputDevice(selectedOutputDeviceId);
+      } catch (outputError) {
+        if (!cancelled) {
+          setError(outputError instanceof Error
+            ? `Не удалось переключить вывод звука: ${outputError.message}`
+            : "Не удалось переключить вывод звука");
+        }
+      }
+    };
+    void applyOutput();
+    return () => { cancelled = true; };
+  }, [selectedOutputDeviceId]);
 
   const stopVoicePlayback = useCallback((except?: HTMLAudioElement) => {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
@@ -780,6 +817,7 @@ function ChatPage({
       };
 
       try {
+        await setAudioElementOutput(audio, selectedOutputDeviceId);
         await audio.play();
         return true;
       } catch {
@@ -789,7 +827,7 @@ function ChatPage({
         return false;
       }
     },
-    [settings?.voice_playback_rate, stopVoicePlayback],
+    [selectedOutputDeviceId, settings?.voice_playback_rate, stopVoicePlayback],
   );
 
   const playMessageAudioTrack = useCallback(
@@ -807,6 +845,7 @@ function ChatPage({
 
       try {
         audio.currentTime = 0;
+        await setAudioElementOutput(audio, selectedOutputDeviceId);
         await audio.play();
         return true;
       } catch {
@@ -816,7 +855,7 @@ function ChatPage({
         return false;
       }
     },
-    [settings?.voice_playback_rate, stopVoicePlayback],
+    [selectedOutputDeviceId, settings?.voice_playback_rate, stopVoicePlayback],
   );
 
   const speakTextInBrowser = useCallback(
@@ -863,6 +902,7 @@ function ChatPage({
           prebufferMs: settings?.voice_live_playback_prebuffer_ms ?? 0,
           playbackRate: 1,
           startLeadMs: settings?.voice_live_playback_start_lead_ms ?? 30,
+          outputDeviceId: selectedOutputDeviceId,
         },
         (gapMs) => {
           liveSocketRef.current?.send("playback.underrun", { underrun_ms: gapMs });
@@ -886,12 +926,14 @@ function ChatPage({
       prebufferMs: settings?.voice_live_playback_prebuffer_ms ?? 0,
       playbackRate: 1,
       startLeadMs: settings?.voice_live_playback_start_lead_ms ?? 30,
+      outputDeviceId: selectedOutputDeviceId,
     });
     return livePlayerRef.current;
   }, [
     settings?.voice_live_playback_prebuffer_ms,
     settings?.voice_live_playback_prebuffer_segments,
     settings?.voice_live_playback_start_lead_ms,
+    selectedOutputDeviceId,
   ]);
 
   const ensureLiveVoice = useCallback(async () => {
@@ -1280,7 +1322,7 @@ function ChatPage({
       await ensureLivePlayer().unlock();
       const profile = (settings?.voice_microphone_profile ?? "balanced") as MicrophoneProfile;
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: microphoneConstraints(profile),
+        audio: microphoneConstraints(profile, selectedInputDeviceId),
       });
       const mimeType = getRecordingMimeType();
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
@@ -1508,6 +1550,7 @@ function ChatPage({
           if (event === "speech_started" && isLive) updateConversationStatus("Слышу вас");
         },
         (settings?.voice_microphone_profile ?? "balanced") as MicrophoneProfile,
+        selectedInputDeviceId,
       );
       await input.connect(
         capture.sampleRate,
@@ -1806,6 +1849,16 @@ function SettingsPage({
   const [personality, setPersonality] = useState("");
   const [voiceLanguage, setVoiceLanguage] = useState("ru");
   const [voiceMicrophoneProfile, setVoiceMicrophoneProfile] = useState<MicrophoneProfile>("balanced");
+  const [voiceInputDeviceId, setVoiceInputDeviceId] = useState("");
+  const [voiceOutputDeviceId, setVoiceOutputDeviceId] = useState("");
+  const [audioDevices, setAudioDevices] = useState<AudioDeviceCatalog>({
+    inputs: [],
+    outputs: [],
+    canEnumerate: false,
+    canSelectOutput: false,
+  });
+  const [audioDevicesLoading, setAudioDevicesLoading] = useState(false);
+  const [audioDevicesMessage, setAudioDevicesMessage] = useState<string | null>(null);
   const [voiceTtsVoice, setVoiceTtsVoice] = useState("");
   const [voiceTtsStyle, setVoiceTtsStyle] = useState("auto");
   const [voiceExpressionLevel, setVoiceExpressionLevel] = useState("natural");
@@ -1842,6 +1895,8 @@ function SettingsPage({
     setPersonality(nextSettings.personality);
     setVoiceLanguage(nextSettings.voice_language);
     setVoiceMicrophoneProfile(nextSettings.voice_microphone_profile ?? "balanced");
+    setVoiceInputDeviceId(nextSettings.voice_input_device_id ?? "");
+    setVoiceOutputDeviceId(nextSettings.voice_output_device_id ?? "");
     setVoiceTtsVoice(nextSettings.voice_tts_voice);
     setVoiceTtsStyle(nextSettings.voice_tts_style);
     setVoiceExpressionLevel(nextSettings.voice_tts_expression_level);
@@ -1887,6 +1942,35 @@ function SettingsPage({
     setLiveSettings((current) => ({ ...current, [key]: value }));
   };
 
+  const refreshAudioDevices = useCallback(async (requestMicrophoneAccess = false) => {
+    setAudioDevicesLoading(true);
+    setAudioDevicesMessage(null);
+    try {
+      const nextDevices = await getAudioDeviceCatalog(requestMicrophoneAccess);
+      setAudioDevices(nextDevices);
+      if (!nextDevices.canEnumerate) {
+        setAudioDevicesMessage("Этот WebView не даёт получить список аудиоустройств.");
+      } else if (requestMicrophoneAccess && nextDevices.inputs.length === 0) {
+        setAudioDevicesMessage("Микрофоны не найдены. Проверьте доступ к микрофону в Windows.");
+      }
+    } catch (error) {
+      setAudioDevicesMessage(
+        error instanceof Error ? `Не удалось получить список устройств: ${error.message}` : "Не удалось получить список устройств.",
+      );
+    } finally {
+      setAudioDevicesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshAudioDevices();
+    const mediaDevices = typeof navigator === "undefined" ? undefined : navigator.mediaDevices;
+    if (!mediaDevices?.addEventListener) return undefined;
+    const handleDeviceChange = () => void refreshAudioDevices();
+    mediaDevices.addEventListener("devicechange", handleDeviceChange);
+    return () => mediaDevices.removeEventListener("devicechange", handleDeviceChange);
+  }, [refreshAudioDevices]);
+
   const saveSettings = async () => {
     setSaving(true);
     setMessage(null);
@@ -1895,6 +1979,8 @@ function SettingsPage({
         personality,
         voice_language: voiceLanguage,
         voice_microphone_profile: voiceMicrophoneProfile,
+        voice_input_device_id: voiceInputDeviceId,
+        voice_output_device_id: voiceOutputDeviceId,
         voice_tts_voice: voiceTtsVoice,
         voice_playback_rate: voicePlaybackRate,
         voice_live_playback_prebuffer_segments: prebufferSegments,
@@ -2022,6 +2108,27 @@ function SettingsPage({
       setSaving(false);
     }
   };
+
+  const includeSelectedAudioDevice = (
+    options: AudioDeviceOption[],
+    deviceId: string,
+    unavailableLabel: string,
+  ): AudioDeviceOption[] => (
+    deviceId && !options.some((option) => option.deviceId === deviceId)
+      ? [{ deviceId, label: unavailableLabel }, ...options]
+      : options
+  );
+  const inputDeviceOptions = includeSelectedAudioDevice(
+    audioDevices.inputs,
+    voiceInputDeviceId,
+    "Выбранный микрофон сейчас недоступен",
+  );
+  const outputDeviceOptions = includeSelectedAudioDevice(
+    audioDevices.outputs,
+    voiceOutputDeviceId,
+    "Выбранное устройство вывода сейчас недоступно",
+  );
+
   const activeSettingsMeta = settingsSectionMeta[activeSection];
 
   return (
@@ -2121,6 +2228,57 @@ function SettingsPage({
             </select>
             <small>Управляет эхоподавлением и шумоподавлением браузера для записи и живого режима.</small>
           </label>
+
+          <label>
+            Источник входа (микрофон)
+            <select
+              value={voiceInputDeviceId}
+              onChange={(event) => setVoiceInputDeviceId(event.target.value)}
+              disabled={saving}
+            >
+              <option value="">Системный по умолчанию</option>
+              {inputDeviceOptions.map((device) => (
+                <option key={device.deviceId} value={device.deviceId} disabled={!audioDevices.canEnumerate}>
+                  {device.label}
+                </option>
+              ))}
+            </select>
+            <small>Используется для голосовых сообщений, «Свободных рук» и живого разговора.</small>
+          </label>
+
+          <label>
+            Источник вывода (наушники или колонки)
+            <select
+              value={voiceOutputDeviceId}
+              onChange={(event) => setVoiceOutputDeviceId(event.target.value)}
+              disabled={saving}
+            >
+              <option value="">Системный по умолчанию</option>
+              {outputDeviceOptions.map((device) => (
+                <option key={device.deviceId} value={device.deviceId} disabled={!audioDevices.canSelectOutput}>
+                  {device.label}
+                </option>
+              ))}
+            </select>
+            <small>
+              {audioDevices.canSelectOutput
+                ? "Выбранное устройство используется для синтезированных аудиофайлов и воспроизведения сообщений; запасной системный голос браузера следует настройке Windows."
+                : "Этот WebView не поддерживает выбор устройства вывода."}
+            </small>
+          </label>
+
+          <div className="readonly-setting audio-device-refresh">
+            <span>Аудиоустройства</span>
+            <button
+              className="secondary"
+              type="button"
+              onClick={() => void refreshAudioDevices(true)}
+              disabled={saving || audioDevicesLoading}
+            >
+              {audioDevicesLoading ? "Обновляем…" : "Разрешить доступ и обновить"}
+            </button>
+            {audioDevicesMessage && <small role="status">{audioDevicesMessage}</small>}
+          </div>
 
           <label>
             Голос {ttsProviderLabel}
@@ -2264,7 +2422,9 @@ function SettingsPage({
           </button>
         </fieldset>
 
-        {showSttCapture && activeSection === "voice" && <GuidedSttCapture profile={voiceMicrophoneProfile} />}
+        {showSttCapture && activeSection === "voice" && (
+          <GuidedSttCapture profile={voiceMicrophoneProfile} inputDeviceId={voiceInputDeviceId} />
+        )}
 
         <fieldset className="settings-group live-conversation-settings" hidden={activeSection !== "conversation"}>
           <legend>Живой разговор</legend>
