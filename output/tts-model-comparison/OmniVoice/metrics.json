@@ -1,0 +1,53 @@
+{
+  "model": "k2-fsa/OmniVoice",
+  "runtime": "torch-2.8.0+cu128",
+  "gpu": "NVIDIA GeForce GTX 1660 SUPER 6GB",
+  "sample_rate": 24000,
+  "dtype": "float16",
+  "num_step": 32,
+  "observed_total_vram_mib": 5568,
+  "reference": "data/voice-references/qwen-baya-neutral.wav",
+  "notes": "Voice-design variants were rejected because the initial free-form instructions contained unsupported attributes; core clone samples completed successfully.",
+  "samples": [
+    {
+      "sample": "omnivoice__01_dialogue__clone_baya.wav",
+      "synthesis_seconds": 83.4467,
+      "audio_seconds": 15.08,
+      "rtf": 5.5336,
+      "rss_mb_after": 1957.5,
+      "peak_generation_vram_mb": 2170.9
+    },
+    {
+      "sample": "omnivoice__02_emotion__clone_baya.wav",
+      "synthesis_seconds": 69.2351,
+      "audio_seconds": 10.8,
+      "rtf": 6.4107,
+      "rss_mb_after": 1958.3,
+      "peak_generation_vram_mb": 2130.5
+    },
+    {
+      "sample": "omnivoice__03_numbers_terms__clone_baya.wav",
+      "synthesis_seconds": 82.5544,
+      "audio_seconds": 15.76,
+      "rtf": 5.2382,
+      "rss_mb_after": 1962.1,
+      "peak_generation_vram_mb": 2180.3
+    },
+    {
+      "sample": "omnivoice__04_long_form__clone_baya.wav",
+      "synthesis_seconds": 129.3807,
+      "audio_seconds": 26.47,
+      "rtf": 4.8878,
+      "rss_mb_after": 2034.5,
+      "peak_generation_vram_mb": 2311.2
+    },
+    {
+      "sample": "omnivoice__05_code_switch__clone_baya.wav",
+      "synthesis_seconds": 82.3872,
+      "audio_seconds": 15.0,
+      "rtf": 5.4925,
+      "rss_mb_after": 2031.6,
+      "peak_generation_vram_mb": 2164.9
+    }
+  ]
+}

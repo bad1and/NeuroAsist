@@ -1,0 +1,77 @@
+{
+  "provider": "silero",
+  "model": "v5_5_ru",
+  "speaker": "baya",
+  "device": "cpu",
+  "stress": "ready",
+  "text": "Сейчас я скажу это медленно. А эту часть произнесу в обычном темпе. И последнюю фразу скажу быстрее.",
+  "load_seconds": 3.963,
+  "samples": [
+    {
+      "case_id": "all_normal",
+      "label": "Вся реплика в обычном темпе",
+      "audio": "baya_all_normal.wav",
+      "segments": [
+        {
+          "text": "Сейчас я скажу это медленно.",
+          "tempo": 1.0
+        },
+        {
+          "text": "А эту часть произнесу в обычном темпе.",
+          "tempo": 1.0
+        },
+        {
+          "text": "И последнюю фразу скажу быстрее.",
+          "tempo": 1.0
+        }
+      ],
+      "generation_seconds": 0.4173,
+      "audio_duration_seconds": 7.3,
+      "rtf": 0.0572
+    },
+    {
+      "case_id": "mixed_precise",
+      "label": "Медленно → обычно → быстро",
+      "audio": "baya_mixed_precise.wav",
+      "segments": [
+        {
+          "text": "Сейчас я скажу это медленно.",
+          "tempo": 0.72
+        },
+        {
+          "text": "А эту часть произнесу в обычном темпе.",
+          "tempo": 1.0
+        },
+        {
+          "text": "И последнюю фразу скажу быстрее.",
+          "tempo": 1.28
+        }
+      ],
+      "generation_seconds": 0.4137,
+      "audio_duration_seconds": 7.5353,
+      "rtf": 0.0549
+    },
+    {
+      "case_id": "mixed_named",
+      "label": "Медленно → обычно → быстро по режимам",
+      "audio": "baya_mixed_named.wav",
+      "segments": [
+        {
+          "text": "Сейчас я скажу это медленно.",
+          "tempo": 0.95
+        },
+        {
+          "text": "А эту часть произнесу в обычном темпе.",
+          "tempo": 1.0
+        },
+        {
+          "text": "И последнюю фразу скажу быстрее.",
+          "tempo": 1.05
+        }
+      ],
+      "generation_seconds": 0.4093,
+      "audio_duration_seconds": 7.2832,
+      "rtf": 0.0562
+    }
+  ]
+}

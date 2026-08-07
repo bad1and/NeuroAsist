@@ -2332,8 +2332,8 @@ function SettingsPage({
           <label>
             Скорость воспроизведения <strong>{voicePlaybackRate.toFixed(2)}×</strong>
             <input
-              min="0.75"
-              max="1.25"
+              min="0.70"
+              max="1.30"
               step="0.05"
               type="range"
               value={voicePlaybackRate}

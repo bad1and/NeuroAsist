@@ -1,0 +1,59 @@
+{
+  "provider": "silero",
+  "model": "v5_5_ru",
+  "speaker": "baya",
+  "device": "cpu",
+  "stress": "ready",
+  "text": "Привет. Я рядом. Можешь спокойно рассказать, что случилось? Я всё выслушаю и постараюсь помочь.",
+  "load_seconds": 6.5631,
+  "samples": [
+    {
+      "variant_id": "current",
+      "label": "Текущий вариант",
+      "description": "Обычный стиль, адаптивная просодия включена.",
+      "audio": "baya_current.wav",
+      "style": "normal",
+      "adaptive_prosody": true,
+      "expression_level": "natural",
+      "generation_seconds": 0.3905,
+      "audio_duration_seconds": 7.2,
+      "rtf": 0.0542
+    },
+    {
+      "variant_id": "plain",
+      "label": "Ровнее и естественнее",
+      "description": "Без дополнительных SSML-пауз между смысловыми частями.",
+      "audio": "baya_plain.wav",
+      "style": "normal",
+      "adaptive_prosody": false,
+      "expression_level": "natural",
+      "generation_seconds": 0.3646,
+      "audio_duration_seconds": 7.2,
+      "rtf": 0.0506
+    },
+    {
+      "variant_id": "soft",
+      "label": "Мягкая подача",
+      "description": "Без адаптивных пауз, с более спокойной подачей.",
+      "audio": "baya_soft.wav",
+      "style": "calm",
+      "adaptive_prosody": false,
+      "expression_level": "minimal",
+      "generation_seconds": 0.3584,
+      "audio_duration_seconds": 7.2375,
+      "rtf": 0.0495
+    },
+    {
+      "variant_id": "calm",
+      "label": "Спокойный разговор",
+      "description": "Сохранены естественные паузы, но темп подачи спокойнее.",
+      "audio": "baya_calm.wav",
+      "style": "calm",
+      "adaptive_prosody": true,
+      "expression_level": "minimal",
+      "generation_seconds": 0.3724,
+      "audio_duration_seconds": 7.2375,
+      "rtf": 0.0514
+    }
+  ]
+}

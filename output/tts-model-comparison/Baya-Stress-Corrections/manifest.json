@@ -1,0 +1,54 @@
+{
+  "provider": "silero",
+  "model": "v5_5_ru",
+  "speaker": "baya",
+  "device": "cpu",
+  "stress": "ready",
+  "load_seconds": 4.0611,
+  "samples": [
+    {
+      "case_id": "lock",
+      "label": "Замок на двери — нужен замок",
+      "text": "На двери новый замок.",
+      "automatic_audio": "baya_lock_automatic.wav",
+      "corrected_audio": "baya_lock_corrected.wav",
+      "automatic_marked": "Н+а двер+и н+овый зам+ок.",
+      "corrected_marked": "На двери новый з+амок.",
+      "automatic_rtf": 0.0625,
+      "corrected_rtf": 0.0598
+    },
+    {
+      "case_id": "castle",
+      "label": "Старинный замок — нужен замок",
+      "text": "На горе стоял старый замок.",
+      "automatic_audio": "baya_castle_automatic.wav",
+      "corrected_audio": "baya_castle_corrected.wav",
+      "automatic_marked": "Н+а гор+е сто+ял ст+арый з+амок.",
+      "corrected_marked": "На горе стоял старый зам+ок.",
+      "automatic_rtf": 0.0439,
+      "corrected_rtf": 0.0433
+    },
+    {
+      "case_id": "flour",
+      "label": "Продукт — нужна мука́",
+      "text": "Мука закончилась.",
+      "automatic_audio": "baya_flour_automatic.wav",
+      "corrected_audio": "baya_flour_corrected.wav",
+      "automatic_marked": "М+ука зак+ончилась.",
+      "corrected_marked": "Мук+а закончилась.",
+      "automatic_rtf": 0.0469,
+      "corrected_rtf": 0.0454
+    },
+    {
+      "case_id": "torment",
+      "label": "Страдание — нужна му́ка",
+      "text": "Он терпел страшную муку.",
+      "automatic_audio": "baya_torment_automatic.wav",
+      "corrected_audio": "baya_torment_corrected.wav",
+      "automatic_marked": "+Он терп+ел стр+ашную м+уку.",
+      "corrected_marked": "Он терпел страшную м+уку.",
+      "automatic_rtf": 0.045,
+      "corrected_rtf": 0.0425
+    }
+  ]
+}

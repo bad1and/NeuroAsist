@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>TTS comparison — OmniVoice / Chatterbox V3 / Supertonic 3</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; background:#0d1117; color:#e6edf3 }
+    body { max-width:1180px; margin:0 auto; padding:32px 20px 80px }
+    h1 { font-size:clamp(28px,5vw,48px); letter-spacing:-.04em; margin:0 0 10px }
+    h2 { margin-top:42px } .muted { color:#8b949e } .lead { max-width:820px; line-height:1.55 }
+    .case { border:1px solid #30363d; border-radius:16px; margin:18px 0; overflow:hidden; background:#161b22 }
+    .case-head { padding:18px 20px; border-bottom:1px solid #30363d }
+    .case-head p { margin:8px 0 0; line-height:1.45; color:#b1bac4 }
+    .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)) }
+    .sample { padding:18px; border-right:1px solid #30363d } .sample:last-child { border:0 }
+    .model { font-weight:700; margin-bottom:12px } audio { width:100%; height:38px }
+    .scores { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:14px }
+    label { color:#8b949e; font-size:12px } select,input { width:100%; margin-top:4px; background:#0d1117; color:#e6edf3; border:1px solid #30363d; border-radius:7px; padding:7px }
+    .note { grid-column:1/-1 } button { border:0; border-radius:9px; padding:10px 14px; font-weight:700; cursor:pointer; background:#238636; color:white }
+    .toolbar { position:sticky; bottom:12px; display:flex; justify-content:flex-end; margin-top:24px; pointer-events:none } .toolbar button { pointer-events:auto; box-shadow:0 8px 32px #000a }
+    .extras { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px }
+    .extra { border:1px solid #30363d; background:#161b22; padding:16px; border-radius:12px }
+    @media(max-width:850px){.grid{grid-template-columns:1fr}.sample{border-right:0;border-bottom:1px solid #30363d}.extras{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <h1>Три TTS — один и тот же материал</h1>
+  <p class="lead muted">Слушай сначала вслепую по одному кейсу и не прыгай между разными текстами. Оценивай естественность, дикцию, эмоцию и пригодность голоса для Iris. Шкала: 1 — плохо, 3 — терпимо, 5 — отлично. Кнопка внизу выгрузит оценки в JSON.</p>
+  <div id="cases"></div>
+  <h2>Дополнительные варианты</h2>
+  <p class="muted">Они не входят в основной расчёт скорости: четыре других фиксированных женских голоса Supertonic и более выразительная настройка Chatterbox.</p>
+  <div class="extras" id="extras"></div>
+  <div class="toolbar"><button id="export">Скачать мои оценки</button></div>
+<script>
+const cases = [
+  {id:'01_dialogue', title:'1. Обычный диалог', text:'Слушай, я всё проверила. В целом идея рабочая, но есть один неприятный момент: если запустить это прямо сейчас, мы потеряем часть контекста. Давай сначала сохраним состояние, а потом спокойно продолжим.'},
+  {id:'02_emotion', title:'2. Эмоциональная реплика', text:'Да ладно... Серьёзно? Вот этого я вообще не ожидала! Подожди секунду — нет, всё правильно. Получилось. Чёрт возьми, у нас действительно получилось!'},
+  {id:'03_numbers_terms', title:'3. Числа и технические термины', text:'Проверка завершена 5 августа 2026 года в 21:45. Видеокарта GTX 1660 SUPER имеет 6 гигабайт VRAM; API ответил за 187 миллисекунд, а версия приложения — 0.5.3.'},
+  {id:'04_long_form', title:'4. Длинная фраза', text:'Иногда хорошая система отличается от посредственной не количеством функций, а тем, насколько естественно она ведёт себя в мелочах. Она не перебивает, не торопится отвечать и не превращает каждую реплику в длинную лекцию. Когда нужно — говорит коротко. Когда ситуация сложная — объясняет подробнее, сохраняя мысль, интонацию и нормальный человеческий ритм.'},
+  {id:'05_code_switch', title:'5. Переключение русский / English', text:'Я обновила voice pipeline и запустила real-time benchmark. First audio latency стала ниже, но voice cloning всё ещё требует дополнительной проверки. В остальном — looks good, можно тестировать дальше.'}
+];
+const models = [
+  {name:'OmniVoice', dir:'OmniVoice', file:id=>`omnivoice__${id}__clone_baya.wav`},
+  {name:'Chatterbox Multilingual V3', dir:'Chatterbox-Multilingual-V3', file:id=>`chatterbox_v3__${id}__clone_baya.wav`},
+  {name:'Supertonic 3 · F1', dir:'Supertonic-3', file:id=>`supertonic3__${id}__F1.wav`}
+];
+function scoring(key){return `<div class="scores" data-key="${key}">${['Естественность','Дикция','Эмоция','Голос Iris'].map((x,i)=>`<label>${x}<select data-score="${i}"><option value="">—</option>${[1,2,3,4,5].map(n=>`<option>${n}</option>`).join('')}</select></label>`).join('')}<label class="note">Комментарий<input data-note placeholder="Что режет слух?"></label></div>`}
+document.querySelector('#cases').innerHTML=cases.map(c=>`<section class="case"><div class="case-head"><strong>${c.title}</strong><p>${c.text}</p></div><div class="grid">${models.map(m=>{const key=`${m.name}/${c.id}`;return `<article class="sample"><div class="model">${m.name}</div><audio controls preload="metadata" src="${m.dir}/${m.file(c.id)}"></audio>${scoring(key)}</article>`}).join('')}</div></section>`).join('');
+const extras=[
+ ['Supertonic F2','Supertonic-3/supertonic3__06_voice_f2__F2.wav'],['Supertonic F3','Supertonic-3/supertonic3__06_voice_f3__F3.wav'],
+ ['Supertonic F4','Supertonic-3/supertonic3__06_voice_f4__F4.wav'],['Supertonic F5','Supertonic-3/supertonic3__06_voice_f5__F5.wav'],
+ ['Chatterbox expressive · exaggeration 0.7 / CFG 0.3','Chatterbox-Multilingual-V3/chatterbox_v3__06_expressive__clone_baya.wav']
+];
+document.querySelector('#extras').innerHTML=extras.map(([name,src])=>`<article class="extra"><div class="model">${name}</div><audio controls preload="metadata" src="${src}"></audio>${scoring(`extra/${name}`)}</article>`).join('');
+document.querySelector('#export').onclick=()=>{const ratings=[...document.querySelectorAll('.scores')].map(el=>({sample:el.dataset.key,scores:[...el.querySelectorAll('select')].map(x=>x.value?Number(x.value):null),note:el.querySelector('[data-note]').value}));const blob=new Blob([JSON.stringify({created_at:new Date().toISOString(),scale:['naturalness','pronunciation','emotion','iris_voice_fit'],ratings},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='tts-listening-ratings.json';a.click();URL.revokeObjectURL(a.href)};
+</script>
+</body>
+</html>

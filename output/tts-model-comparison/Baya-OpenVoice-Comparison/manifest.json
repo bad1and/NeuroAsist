@@ -1,0 +1,36 @@
+{
+  "provider": "silero+openvoice",
+  "model": "v5_5_ru",
+  "speaker": "baya",
+  "device": "cpu",
+  "reference": "D:\\NeroPizda\\NeuroAsist\\data\\voice-references\\0718-2-clean.wav",
+  "text": "Привет. Я рядом. Можешь спокойно рассказать, что случилось? Я всё выслушаю и постараюсь помочь.",
+  "baseline_load_seconds": 5.7393,
+  "converted_load_seconds": 9.9975,
+  "samples": [
+    {
+      "variant_id": "baya_clean",
+      "label": "Baya без конвертации",
+      "description": "Чистый Baya с фильтром сипящих верхов; контрольный вариант.",
+      "audio": "baya_clean.wav",
+      "sample_rate": 48000,
+      "voice_conversion": false,
+      "stress": "ready",
+      "generation_seconds": 0.3678,
+      "audio_duration_seconds": 7.2,
+      "rtf": 0.0511
+    },
+    {
+      "variant_id": "baya_openvoice",
+      "label": "Baya + живой референс",
+      "description": "Сохраняем русское произношение Baya, меняем тембр по естественному референсу.",
+      "audio": "baya_openvoice.wav",
+      "sample_rate": 22050,
+      "voice_conversion": true,
+      "stress": "ready",
+      "generation_seconds": 5.9395,
+      "audio_duration_seconds": 7.1982,
+      "rtf": 0.8251
+    }
+  ]
+}
