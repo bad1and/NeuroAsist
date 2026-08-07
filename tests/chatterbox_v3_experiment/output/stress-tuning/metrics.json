@@ -1,0 +1,143 @@
+{
+  "model": "ResembleAI/chatterbox t3_mtl23ls_v3",
+  "device": "cuda",
+  "gpu": "NVIDIA GeForce GTX 1660 SUPER",
+  "sample_rate": 24000,
+  "reference": "D:\\NeroPizda\\NeuroAsist\\data\\voice-references\\qwen-baya-neutral.wav",
+  "model_load_ms": 9731.5,
+  "reference_prepare_ms": 1258.2,
+  "p50_synthesis_ms": 15059.8,
+  "rows": [
+    {
+      "sample": "greeting__control_no_stress.wav",
+      "case_id": "greeting",
+      "label": "Контроль: без stress-модуля",
+      "text": "Привет! Я рядом и внимательно тебя слушаю.",
+      "profile": "baseline",
+      "profile_label": "База: 0.5 / 0.5",
+      "seed": 20260807,
+      "chunk_index": null,
+      "synthesis_ms": 5732.0,
+      "audio_duration_ms": 5120.0,
+      "rtf": 1.1195,
+      "rss_mb_after": 2972.5,
+      "peak_vram_mb": 3437.3,
+      "parameters": {
+        "exaggeration": 0.5,
+        "cfg_weight": 0.5,
+        "temperature": 0.8,
+        "repetition_penalty": 2.0,
+        "min_p": 0.05,
+        "top_p": 1.0
+      },
+      "mode": "control_no_stress",
+      "stress_enabled": false
+    },
+    {
+      "sample": "greeting__auto_stress.wav",
+      "case_id": "greeting",
+      "label": "Автоматические русские ударения",
+      "text": "Привет! Я рядом и внимательно тебя слушаю.",
+      "profile": "baseline",
+      "profile_label": "База: 0.5 / 0.5",
+      "seed": 20260808,
+      "chunk_index": null,
+      "synthesis_ms": 10945.4,
+      "audio_duration_ms": 7680.0,
+      "rtf": 1.4252,
+      "rss_mb_after": 3785.6,
+      "peak_vram_mb": 3478.7,
+      "parameters": {
+        "exaggeration": 0.5,
+        "cfg_weight": 0.5,
+        "temperature": 0.8,
+        "repetition_penalty": 2.0,
+        "min_p": 0.05,
+        "top_p": 1.0
+      },
+      "mode": "auto_stress",
+      "stress_enabled": true
+    },
+    {
+      "sample": "greeting__manual_stress.wav",
+      "case_id": "greeting",
+      "label": "Явно заданные ударения",
+      "text": "Приве́т! Я ря́дом и внима́тельно тебя́ слу́шаю.",
+      "profile": "baseline",
+      "profile_label": "База: 0.5 / 0.5",
+      "seed": 20260809,
+      "chunk_index": null,
+      "synthesis_ms": 43302.4,
+      "audio_duration_ms": 39840.0,
+      "rtf": 1.0869,
+      "rss_mb_after": 4125.7,
+      "peak_vram_mb": 4597.5,
+      "parameters": {
+        "exaggeration": 0.5,
+        "cfg_weight": 0.5,
+        "temperature": 0.8,
+        "repetition_penalty": 2.0,
+        "min_p": 0.05,
+        "top_p": 1.0
+      },
+      "mode": "manual_stress",
+      "stress_enabled": true
+    },
+    {
+      "sample": "dialogue__auto_stress.wav",
+      "case_id": "dialogue",
+      "label": "Диалог: автоматические ударения",
+      "text": "Слушай, я всё проверила. В целом идея рабочая, но есть один неприятный момент: если запустить это прямо сейчас, мы потеряем часть контекста.",
+      "profile": "baseline",
+      "profile_label": "База: 0.5 / 0.5",
+      "seed": 20260810,
+      "chunk_index": null,
+      "synthesis_ms": 15059.8,
+      "audio_duration_ms": 13680.0,
+      "rtf": 1.1009,
+      "rss_mb_after": 3962.9,
+      "peak_vram_mb": 3603.5,
+      "parameters": {
+        "exaggeration": 0.5,
+        "cfg_weight": 0.5,
+        "temperature": 0.8,
+        "repetition_penalty": 2.0,
+        "min_p": 0.05,
+        "top_p": 1.0
+      },
+      "mode": "auto_stress",
+      "stress_enabled": true
+    },
+    {
+      "sample": "dialogue__manual_stress.wav",
+      "case_id": "dialogue",
+      "label": "Диалог: явно заданные ударения",
+      "text": "Слу́шай, я всё прове́рила. В це́лом иде́я рабо́чая, но е́сть оди́н неприя́тный моме́нт: е́сли запусти́ть э́то пря́мо сейча́с, мы поте́ряем ча́сть ко́нтекста.",
+      "profile": "baseline",
+      "profile_label": "База: 0.5 / 0.5",
+      "seed": 20260811,
+      "chunk_index": null,
+      "synthesis_ms": 16204.8,
+      "audio_duration_ms": 13440.0,
+      "rtf": 1.2057,
+      "rss_mb_after": 4158.5,
+      "peak_vram_mb": 3597.9,
+      "parameters": {
+        "exaggeration": 0.5,
+        "cfg_weight": 0.5,
+        "temperature": 0.8,
+        "repetition_penalty": 2.0,
+        "min_p": 0.05,
+        "top_p": 1.0
+      },
+      "mode": "manual_stress",
+      "stress_enabled": true
+    }
+  ],
+  "stressed_text": {
+    "greeting_plain": "Приве́т! Я ря́дом и внима́тельно тебя́ слу́шаю.",
+    "greeting_marked": "Приве́́! Я ря́́до и внима́́тельн тебя́ слу́́ша.",
+    "dialogue_plain": "Слу́шай, я всё прове́рила. В це́лом иде́я рабо́чая, но есть оди́н неприя́тный моме́нт: е́сли запусти́ть э́то пря́мо сейча́с, мы потеря́ем часть конте́кста.",
+    "dialogue_marked": "Слу́шай, я всё прове́́рил. В це́́ло иде́́ рабо́́ча, но е́сть оди́н неприя́́тны моме́́н: е́́сл запусти́́т э́́т пря́́м сейча́́, мы поте́р́яе ча́сть ко́нт́екст."
+  }
+}

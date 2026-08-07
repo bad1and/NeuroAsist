@@ -15,7 +15,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from apps.backend.app.voice.audio import Pcm16Audio, write_pcm16_wav
-from apps.backend.app.voice.delivery import SpeechEmphasis, SpeechPace
+from apps.backend.app.voice.delivery import (
+    MAX_SPEECH_TEMPO,
+    MIN_SPEECH_TEMPO,
+    SpeechEmphasis,
+    SpeechPace,
+)
 from apps.backend.app.voice.style import VoiceExpressionLevel, VoiceStyle, coerce_voice_expression_level, coerce_voice_style, make_silero_ssml, profile_for
 from apps.backend.app.voice.lexicon import (
     normalize_tts_orthography,
@@ -615,7 +620,7 @@ def apply_wav_delivery(
     """Apply pitch-preserving tempo and explicit silence to mono PCM16 WAV."""
     import numpy as np
 
-    tempo = max(0.75, min(1.25, float(tempo)))
+    tempo = max(MIN_SPEECH_TEMPO, min(MAX_SPEECH_TEMPO, float(tempo)))
     with wave.open(io.BytesIO(wav_bytes), "rb") as source:
         channels = source.getnchannels()
         sample_width = source.getsampwidth()
@@ -1359,6 +1364,7 @@ class SileroTTSProvider(TTSProvider):
         stress_cpu_threads: int = 1,
         audio_postprocessing_enabled: bool = True,
         highpass_cutoff_hz: float = 60.0,
+        lowpass_cutoff_hz: float = 12000.0,
         adaptive_prosody: bool = True,
         openvoice_enabled: bool = False,
         openvoice_reference_audio_path: Path | None = None,
@@ -1391,6 +1397,7 @@ class SileroTTSProvider(TTSProvider):
         self.cmudict_cache_dir = cmudict_cache_dir or Path(".cache/cmudict")
         self.audio_postprocessing_enabled = audio_postprocessing_enabled
         self.highpass_cutoff_hz = max(0.0, highpass_cutoff_hz)
+        self.lowpass_cutoff_hz = max(0.0, lowpass_cutoff_hz)
         self.adaptive_prosody = adaptive_prosody
         self._stress_accentor = LocalStressAccentor(
             enabled=stress_enabled,
@@ -1446,6 +1453,7 @@ class SileroTTSProvider(TTSProvider):
             "stress": self._stress_accentor.status,
             "audio_postprocessing": self.audio_postprocessing_enabled,
             "highpass_cutoff_hz": self.highpass_cutoff_hz if self.audio_postprocessing_enabled else 0.0,
+            "lowpass_cutoff_hz": self.lowpass_cutoff_hz if self.audio_postprocessing_enabled else 0.0,
             "adaptive_prosody": self.adaptive_prosody,
         }
 
@@ -1817,6 +1825,29 @@ class SileroTTSProvider(TTSProvider):
         return output
 
     @staticmethod
+    def _lowpass_filter(samples: Any, sample_rate: int, cutoff_hz: float):
+        """Apply a gentle zero-phase low-pass without adding a SciPy dependency."""
+        import numpy as np
+
+        if cutoff_hz <= 0 or sample_rate <= 0 or len(samples) < 3:
+            return samples
+        cutoff_hz = min(cutoff_hz, sample_rate * 0.45)
+        if cutoff_hz <= 0:
+            return samples
+        # A cosine transition avoids the ringing of a hard FFT cutoff while
+        # keeping the operation vectorized for low-latency TTS segments.
+        frequencies = np.fft.rfftfreq(len(samples), 1.0 / sample_rate)
+        transition_start = cutoff_hz * 0.82
+        gain = np.ones_like(frequencies, dtype=np.float32)
+        gain[frequencies >= cutoff_hz] = 0.0
+        transition = (frequencies > transition_start) & (frequencies < cutoff_hz)
+        ratio = (frequencies[transition] - transition_start) / (cutoff_hz - transition_start)
+        gain[transition] = 0.5 * (1.0 + np.cos(np.pi * ratio))
+        spectrum = np.fft.rfft(np.asarray(samples, dtype=np.float32))
+        filtered = np.fft.irfft(spectrum * gain, n=len(samples))
+        return filtered.astype(np.asarray(samples).dtype, copy=False)
+
+    @staticmethod
     def _apply_edge_fades(samples: Any, sample_rate: int):
         import numpy as np
 
@@ -1838,6 +1869,7 @@ class SileroTTSProvider(TTSProvider):
         if self.audio_postprocessing_enabled and len(samples):
             samples = samples - np.mean(samples)
             samples = self._highpass_filter(samples, sample_rate, self.highpass_cutoff_hz)
+            samples = self._lowpass_filter(samples, sample_rate, self.lowpass_cutoff_hz)
             samples = self._apply_edge_fades(samples, sample_rate)
         active = np.abs(samples) >= 10 ** (-45 / 20)
         if active.any():
@@ -1874,7 +1906,8 @@ class SileroTTSProvider(TTSProvider):
             "Silero TTS segment synthesized: provider=silero model=%s speaker=%s device=%s "
             "text_length=%s word_count=%s style=%s voice_conversion=%s synthesis_ms=%s "
             "audio_duration_ms=%s RTF=%.3f audio_bytes=%s rms_dbfs=%.1f peak_dbfs=%.1f "
-            "dc_offset=%.6f input_dc_offset=%.6f clipped_samples=%s postprocessing=%s highpass_hz=%.1f",
+            "dc_offset=%.6f input_dc_offset=%.6f clipped_samples=%s postprocessing=%s "
+            "highpass_hz=%.1f lowpass_hz=%.1f",
             self.model_name,
             speaker,
             self._selected_device,
@@ -1893,6 +1926,7 @@ class SileroTTSProvider(TTSProvider):
             audio_metrics["output"]["clipped_samples"],
             self.audio_postprocessing_enabled,
             self.highpass_cutoff_hz if self.audio_postprocessing_enabled else 0.0,
+            self.lowpass_cutoff_hz if self.audio_postprocessing_enabled else 0.0,
         )
         return wav_bytes, duration, synthesis_ms
 

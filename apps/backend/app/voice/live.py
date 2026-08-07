@@ -23,6 +23,8 @@ from apps.backend.app.voice.directives import (
 )
 from apps.backend.app.voice.delivery import (
     LiveVoiceDirectiveParser,
+    MAX_SPEECH_TEMPO,
+    MIN_SPEECH_TEMPO,
     SpeechPace,
     SpeechSegment,
     VoiceDirective,
@@ -188,7 +190,7 @@ class VoiceSessionManager:
             generation=generation,
             voice_style=coerce_voice_style(style_override),
             base_pace=self._pace_for_style(style_override),
-            playback_rate=max(0.75, min(1.25, float(playback_rate))),
+            playback_rate=max(MIN_SPEECH_TEMPO, min(MAX_SPEECH_TEMPO, float(playback_rate))),
         )
         self._active[session_id] = context
         context.task = asyncio.create_task(
@@ -319,7 +321,7 @@ class VoiceSessionManager:
             segment = SpeechSegment(
                 text=segment.text,
                 pace=segment.pace,
-                tempo=max(0.75, min(1.25, segment.tempo * context.playback_rate)),
+                tempo=max(MIN_SPEECH_TEMPO, min(MAX_SPEECH_TEMPO, segment.tempo * context.playback_rate)),
                 emphasis=segment.emphasis,
                 pause_before_ms=segment.pause_before_ms,
                 pause_after_ms=paragraph_pause,

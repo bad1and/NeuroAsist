@@ -1,0 +1,47 @@
+{
+  "package": "baya-approved-handoff",
+  "purpose": "Перенести одобренную Baya-реализацию позже отдельным commit",
+  "status": "not-integrated",
+  "snapshot_base": "ae8b3f51",
+  "source_snapshot_root": "source/",
+  "source_changes": [
+    ".env.example",
+    "apps/backend/app/agents/character/prompts.py",
+    "apps/backend/app/api/routes/settings.py",
+    "apps/backend/app/core/config.py",
+    "apps/backend/app/schemas/character.py",
+    "apps/backend/app/voice/delivery.py",
+    "apps/backend/app/voice/live.py",
+    "apps/backend/app/voice/orchestrator.py",
+    "apps/backend/app/voice/providers.py",
+    "apps/backend/app/voice/service.py"
+  ],
+  "existing_supporting_source": [
+    "apps/backend/app/voice/stress.py",
+    "apps/backend/app/voice/lexicon.py"
+  ],
+  "tests_to_carry": [
+    "tests/test_character_protocol_v3.py",
+    "tests/test_voice_providers.py"
+  ],
+  "verification_commands": [
+    "pytest -q tests/test_character_protocol_v3.py tests/test_voice_providers.py",
+    "python scripts/compare_baya_polished_profiles.py --device cpu",
+    "python scripts/test_baya_stress_corrections.py --device cpu",
+    "python scripts/test_baya_sentence_pacing.py --device cpu"
+  ],
+  "runtime_contract": {
+    "provider": "silero",
+    "model": "v5_5_ru",
+    "speaker": "baya",
+    "sample_rate": 48000,
+    "stress": "enabled-with-fallback",
+    "postprocessing": "highpass-60hz-and-lowpass-12khz",
+    "tempo_range": [0.7, 1.3],
+    "default_tempo": 1.0
+  },
+  "audio_reference": {
+    "path": "data/voice-references/qwen-baya-neutral.wav",
+    "sha256": "DEB0AC894CC9F986BF02D0658FF458A572BC078AB15FBDDF6080631841FA2248"
+  }
+}

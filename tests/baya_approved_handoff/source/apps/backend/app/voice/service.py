@@ -1,0 +1,381 @@
+import logging
+import asyncio
+import json
+import shutil
+import time
+import wave
+import io
+from collections import OrderedDict
+from dataclasses import replace
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
+
+from fastapi import HTTPException, UploadFile, status
+
+from apps.backend.app.core.config import Settings
+from apps.backend.app.voice.audio import Pcm16Audio, decode_audio_file, write_pcm16_wav
+from apps.backend.app.voice.providers import (
+    FasterWhisperSTTProvider,
+    GigaAMSTTProvider,
+    MockSTTProvider,
+    MockTTSProvider,
+    SileroTTSProvider,
+    STTProvider,
+    TTSProvider,
+)
+from apps.backend.app.voice.lexicon import load_pronunciations, save_pronunciations
+from apps.backend.app.voice.stt_terms import (
+    DEFAULT_STT_TERMS,
+    correct_stt_terms,
+    load_stt_terms,
+    save_stt_terms,
+)
+
+logger = logging.getLogger(__name__)
+
+ALLOWED_AUDIO_TYPES = {
+    "audio/webm": ".webm",
+    "audio/ogg": ".ogg",
+    "audio/opus": ".opus",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/mpeg": ".mp3",
+    "audio/mp4": ".m4a",
+    "audio/x-m4a": ".m4a",
+    "application/ogg": ".ogg",
+    "application/octet-stream": ".webm",
+}
+
+ALLOWED_AUDIO_EXTENSIONS = {".webm", ".ogg", ".opus", ".wav", ".mp3", ".m4a", ".mp4"}
+FALLBACK_FILENAME_TYPES = {"application/octet-stream", "binary/octet-stream"}
+
+
+def _normalize_content_type(content_type: str | None) -> str:
+    return (content_type or "application/octet-stream").split(";", 1)[0].strip().lower()
+
+
+def _resolve_audio_suffix(upload: UploadFile) -> str | None:
+    content_type = _normalize_content_type(upload.content_type)
+    filename_suffix = Path(upload.filename or "").suffix.lower()
+    if content_type in FALLBACK_FILENAME_TYPES and filename_suffix in ALLOWED_AUDIO_EXTENSIONS:
+        return filename_suffix
+
+    suffix = ALLOWED_AUDIO_TYPES.get(content_type)
+    if suffix is not None:
+        return suffix
+
+    return None
+
+
+class VoiceService:
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+        self._stt_provider = self._build_stt_provider(settings)
+        self._tts_provider = self._build_tts_provider(settings)
+        terms_path = getattr(
+            settings,
+            "voice_stt_terms_file",
+            settings.voice_audio_path / "stt-terms.json",
+        )
+        try:
+            self._stt_terms = load_stt_terms(terms_path)
+        except ValueError as exc:
+            logger.warning("STT terms could not be loaded; built-in terms remain active: %s", exc)
+            self._stt_terms = {key: list(value) for key, value in DEFAULT_STT_TERMS.items()}
+        self._tts_jobs: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._max_tts_jobs = 300
+
+    @property
+    def stt_provider(self) -> STTProvider:
+        return self._stt_provider
+
+    @property
+    def tts_provider(self) -> TTSProvider:
+        return self._tts_provider
+
+    async def preload(self) -> None:
+        await self.preload_stt()
+
+    async def preload_stt(self) -> None:
+        await self._stt_provider.preload()
+
+    async def transcribe_path(self, path: Path, language: str):
+        if isinstance(self._stt_provider, MockSTTProvider):
+            result = await self._stt_provider.transcribe(path, language)
+            return self._correct_transcript(result)
+        audio = await asyncio.to_thread(decode_audio_file, path)
+        return await self.transcribe_pcm16(audio, language)
+
+    async def transcribe_pcm16(self, audio: Pcm16Audio, language: str):
+        if self._settings.voice_input_diagnostic_audio:
+            await asyncio.to_thread(self._save_diagnostic_audio, audio, {"language": language})
+        result = await self._stt_provider.transcribe_pcm16(audio, language)
+        return self._correct_transcript(result)
+
+    def _correct_transcript(self, result):
+        correction = correct_stt_terms(result.text, self._stt_terms)
+        return replace(
+            result,
+            raw_text=correction.raw_text,
+            text=correction.text,
+            corrections=tuple(item.as_dict() for item in correction.replacements),
+        )
+
+    def stt_terms(self) -> dict[str, list[str]]:
+        return {key: list(value) for key, value in self._stt_terms.items()}
+
+    def update_stt_terms(self, entries: dict[str, object]) -> dict[str, list[str]]:
+        path = getattr(
+            self._settings,
+            "voice_stt_terms_file",
+            self._settings.voice_audio_path / "stt-terms.json",
+        )
+        self._stt_terms = save_stt_terms(path, entries)
+        return self.stt_terms()
+
+    async def preload_tts(self) -> None:
+        await self._tts_provider.preload()
+
+    def set_tts_job(self, voice_request_id: str, payload: dict[str, Any]) -> None:
+        self._tts_jobs[voice_request_id] = {
+            "voice_request_id": voice_request_id,
+            **payload,
+        }
+        self._tts_jobs.move_to_end(voice_request_id)
+        while len(self._tts_jobs) > self._max_tts_jobs:
+            self._tts_jobs.popitem(last=False)
+
+    def get_tts_job(self, voice_request_id: str) -> dict[str, Any] | None:
+        job = self._tts_jobs.get(voice_request_id)
+        if job is None:
+            return None
+        self._tts_jobs.move_to_end(voice_request_id)
+        return dict(job)
+
+    def pronunciations(self) -> dict[str, str]:
+        return load_pronunciations(self._settings.voice_silero_pronunciation_dictionary)
+
+    def update_pronunciations(self, entries: dict[str, str]) -> dict[str, str]:
+        pronunciations = save_pronunciations(self._settings.voice_silero_pronunciation_dictionary, entries)
+        updater = getattr(self._tts_provider, "set_pronunciations", None)
+        if updater is not None:
+            updater(pronunciations)
+        return pronunciations
+
+    def set_tts_expression_level(self, level: str) -> None:
+        updater = getattr(self._tts_provider, "set_expression_level", None)
+        if updater is not None:
+            updater(level)
+
+    async def save_upload(self, upload: UploadFile) -> Path:
+        content_type = _normalize_content_type(upload.content_type)
+        suffix = _resolve_audio_suffix(upload)
+        if suffix is None:
+            logger.warning(
+                "Unsupported audio upload type: content_type=%s filename_suffix=%s",
+                content_type,
+                Path(upload.filename or "").suffix.lower(),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Unsupported audio type",
+            )
+
+        upload_dir = self._settings.voice_audio_path / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        output_path = upload_dir / f"{uuid4().hex}{suffix}"
+        max_bytes = self._settings.voice_max_upload_mb * 1024 * 1024
+        written = 0
+
+        with output_path.open("wb") as output:
+            while chunk := await upload.read(1024 * 1024):
+                written += len(chunk)
+                if written > max_bytes:
+                    output.close()
+                    output_path.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="Audio upload is too large",
+                    )
+                output.write(chunk)
+
+        await upload.close()
+        return output_path
+
+    def next_tts_path(self, provider_name: str) -> Path:
+        suffix = getattr(self._tts_provider, "file_extension", ".wav")
+        output_dir = self._settings.voice_audio_path / "tts"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return output_dir / f"{uuid4().hex}{suffix}"
+
+    def resolve_tts_voice(self, language: str, requested_voice: str | None = None) -> str:
+        resolver = getattr(self._tts_provider, "resolve_voice", None)
+        if resolver is None:
+            return requested_voice or language
+        return resolver(language, requested_voice)
+
+    def available_tts_voices(self) -> list[str]:
+        voices = getattr(self._tts_provider, "available_speakers", None)
+        if voices is not None:
+            return list(voices)
+        if self._settings.voice_tts_provider == "silero" and self._settings.voice_silero_model == "v5_5_ru":
+            return ["xenia", "baya", "kseniya"]
+        return [self._settings.voice_silero_speaker_ru]
+
+    def resolve_audio_path(self, audio_id: str) -> Path:
+        if "/" in audio_id or "\\" in audio_id or ".." in audio_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audio not found")
+
+        path = self._settings.voice_audio_path / "tts" / audio_id
+        try:
+            path.resolve().relative_to((self._settings.voice_audio_path / "tts").resolve())
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audio not found") from exc
+
+        if not path.is_file():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audio not found")
+        return path
+
+    def cleanup_upload(self, path: Path) -> None:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def clear_stale_uploads(self) -> int:
+        """Remove abandoned request temporaries at process startup."""
+        upload_dir = self._settings.voice_audio_path / "uploads"
+        if not upload_dir.is_dir():
+            return 0
+        removed = 0
+        for path in upload_dir.iterdir():
+            if not path.is_file():
+                continue
+            try:
+                path.unlink()
+                removed += 1
+            except OSError:
+                logger.warning("Could not remove stale voice upload: path=%s", path)
+        return removed
+
+    def _save_diagnostic_audio(self, audio: Pcm16Audio, metadata: dict[str, Any]) -> None:
+        directory = self._settings.voice_input_diagnostic_path
+        directory.mkdir(parents=True, exist_ok=True)
+        stem = f"{int(time.time() * 1000)}-{uuid4().hex}"
+        wav_path = directory / f"{stem}.wav"
+        write_pcm16_wav(wav_path, audio)
+        (directory / f"{stem}.json").write_text(
+            json.dumps(
+                {
+                    "sample_rate": audio.sample_rate,
+                    "channels": audio.channels,
+                    "format": "pcm_s16le",
+                    "duration_seconds": audio.duration_seconds,
+                    **metadata,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+    def save_pcm16_temp(self, pcm16: bytes, sample_rate: int) -> Path:
+        """Create a short-lived WAV for STT; callers must invoke cleanup_upload."""
+        upload_dir = self._settings.voice_audio_path / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        path = upload_dir / f"{uuid4().hex}.wav"
+        with wave.open(str(path), "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(sample_rate)
+            audio.writeframes(pcm16)
+        return path
+
+    def clear_audio_dir(self) -> None:
+        root = self._settings.voice_audio_path
+        if root.exists():
+            shutil.rmtree(root)
+
+    def clear_tts_audio(self) -> int:
+        """Remove all generated WAV files when the backend starts."""
+        return self._remove_tts_wavs(older_than_seconds=None)
+
+    def cleanup_tts_audio(self, *, max_age_seconds: float) -> int:
+        """Remove generated WAV files whose last write is older than the retention window."""
+        return self._remove_tts_wavs(older_than_seconds=max_age_seconds)
+
+    def _remove_tts_wavs(self, *, older_than_seconds: float | None) -> int:
+        output_dir = self._settings.voice_audio_path / "tts"
+        if not output_dir.is_dir():
+            return 0
+
+        cutoff = None if older_than_seconds is None else time.time() - older_than_seconds
+        removed = 0
+        for path in output_dir.glob("*.wav"):
+            try:
+                if cutoff is not None and path.stat().st_mtime >= cutoff:
+                    continue
+                path.unlink()
+                removed += 1
+            except FileNotFoundError:
+                continue
+            except OSError:
+                logger.warning("Could not remove generated WAV: path=%s", path)
+        return removed
+
+    def _build_stt_provider(self, settings: Settings) -> STTProvider:
+        if settings.voice_stt_provider == "mock":
+            return MockSTTProvider()
+        if settings.voice_stt_provider == "faster_whisper":
+            return FasterWhisperSTTProvider(
+                settings.voice_stt_model,
+                settings.voice_stt_device,
+                settings.voice_stt_compute_type,
+            )
+        if settings.voice_stt_provider == "gigaam":
+            return GigaAMSTTProvider(
+                settings.voice_stt_model,
+                settings.voice_stt_device,
+            )
+        raise ValueError(f"Unsupported STT provider: {settings.voice_stt_provider}")
+
+    def _build_tts_provider(self, settings: Settings) -> TTSProvider:
+        return self._build_tts_provider_by_name(settings.voice_tts_provider, settings)
+
+    @staticmethod
+    def _build_tts_provider_by_name(provider_name: str, settings: Settings) -> TTSProvider:
+        if provider_name == "mock":
+            return MockTTSProvider()
+        if provider_name == "silero":
+            return SileroTTSProvider(
+                model=settings.voice_silero_model,
+                speaker=settings.voice_silero_speaker_ru,
+                sample_rate=settings.voice_silero_sample_rate,
+                device=settings.voice_silero_device,
+                cpu_threads=settings.voice_silero_cpu_threads,
+                warmup=settings.voice_silero_warmup,
+                timeout_seconds=settings.voice_silero_timeout_seconds,
+                loudness_target_dbfs=settings.voice_silero_loudness_target_dbfs,
+                peak_ceiling_dbfs=settings.voice_silero_peak_ceiling_dbfs,
+                pronunciation_dictionary_path=settings.voice_silero_pronunciation_dictionary,
+                native_english=settings.voice_silero_native_english,
+                english_model=settings.voice_silero_english_model,
+                english_speaker=settings.voice_silero_english_speaker,
+                stress_enabled=settings.voice_stress_enabled,
+                stress_cpu_threads=settings.voice_stress_cpu_threads,
+                audio_postprocessing_enabled=settings.voice_tts_postprocessing_enabled,
+                highpass_cutoff_hz=settings.voice_tts_highpass_cutoff_hz,
+                lowpass_cutoff_hz=settings.voice_tts_lowpass_cutoff_hz,
+                adaptive_prosody=settings.voice_tts_adaptive_prosody,
+                cmudict_enabled=settings.voice_cmudict_enabled,
+                cmudict_cache_dir=settings.voice_cmudict_cache_path,
+                openvoice_enabled=settings.voice_openvoice_enabled,
+                openvoice_reference_audio_path=settings.voice_openvoice_reference_audio_path,
+                openvoice_cache_dir=settings.voice_openvoice_cache_path,
+                openvoice_repo_id=settings.voice_openvoice_repo_id,
+                openvoice_revision=settings.voice_openvoice_revision,
+                openvoice_tau=settings.voice_openvoice_tau,
+                openvoice_cpu_threads=settings.voice_openvoice_cpu_threads,
+            )
+        raise ValueError(f"Unsupported TTS provider: {provider_name}")

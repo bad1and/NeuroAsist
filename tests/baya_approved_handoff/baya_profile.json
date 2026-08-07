@@ -1,0 +1,55 @@
+{
+  "package": "baya-approved-handoff",
+  "status": "prepared-not-integrated",
+  "base_commit": "ae8b3f51",
+  "voice": {
+    "provider": "silero",
+    "model": "v5_5_ru",
+    "speaker": "baya",
+    "device": "cpu",
+    "sample_rate": 48000,
+    "warmup": true,
+    "stress_enabled": true,
+    "stress_cpu_threads": 1,
+    "adaptive_prosody": true,
+    "postprocessing_enabled": true,
+    "highpass_cutoff_hz": 60,
+    "lowpass_cutoff_hz": 12000,
+    "loudness_target_dbfs": -18,
+    "peak_ceiling_dbfs": -1
+  },
+  "approved_default": {
+    "style": "normal",
+    "expression_level": "natural",
+    "tempo": 1.0,
+    "adaptive_prosody": true
+  },
+  "optional_profiles": {
+    "calm": {
+      "style": "calm",
+      "expression_level": "minimal",
+      "tempo": 0.98,
+      "adaptive_prosody": false
+    },
+    "lively": {
+      "style": "normal",
+      "expression_level": "natural",
+      "tempo": 1.02,
+      "adaptive_prosody": true
+    }
+  },
+  "sentence_speed": {
+    "min": 0.7,
+    "max": 1.3,
+    "default": 1.0,
+    "pitch_preserving": true
+  },
+  "reference_audio": {
+    "path": "data/voice-references/qwen-baya-neutral.wav",
+    "sha256": "DEB0AC894CC9F986BF02D0658FF458A572BC078AB15FBDDF6080631841FA2248"
+  },
+  "do_not_enable_for_this_profile": {
+    "openvoice": false,
+    "manual_unicode_acute_stress": true
+  }
+}

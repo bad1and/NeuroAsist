@@ -89,6 +89,7 @@ class Settings(BaseSettings):
     voice_stress_cpu_threads: int = 1
     voice_tts_postprocessing_enabled: bool = True
     voice_tts_highpass_cutoff_hz: float = 60.0
+    voice_tts_lowpass_cutoff_hz: float = 12000.0
     voice_tts_adaptive_prosody: bool = True
     voice_cmudict_enabled: bool = True
     voice_cmudict_cache_dir: str = ".cache/cmudict"

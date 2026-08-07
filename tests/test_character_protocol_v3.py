@@ -38,6 +38,19 @@ def test_delivery_overrides_apply_to_one_1_based_sentence_only() -> None:
     assert segments[2].emphasis is SpeechEmphasis.NONE
 
 
+def test_delivery_override_can_set_precise_sentence_speed() -> None:
+    delivery = DeliveryCue(
+        overrides=[
+            DeliveryOverride(segment=1, pace="normal", speed=0.82),
+            DeliveryOverride(segment=2, pace="normal", speed=1.17),
+        ],
+    )
+
+    segments = plan_speech("Медленнее. Быстрее.", delivery)
+
+    assert [segment.tempo for segment in segments] == [0.82, 1.17]
+
+
 def test_v3_turn_keeps_reply_when_only_metadata_is_invalid() -> None:
     turn, valid_metadata, reason = parse_turn(
         {

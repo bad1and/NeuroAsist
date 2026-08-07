@@ -471,6 +471,27 @@ def test_silero_uses_local_stress_accentor_before_synthesis(
     assert provider.metadata["stress"] == "ready"
 
 
+def test_silero_context_pronunciation_override_bypasses_automatic_stress(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    install_fake_torch(monkeypatch)
+    model = FakeSileroModel()
+
+    provider = SileroTTSProvider(
+        model_loader=lambda: model,
+        stress_accentor_loader=lambda: (lambda text: text.replace("замок", "зам+ок")),
+        warmup=False,
+    )
+    provider.set_pronunciations({
+        "На двери новый замок": "На двери новый з+амок",
+    })
+
+    asyncio.run(provider.synthesize("На двери новый замок.", "baya", tmp_path / "reply.wav"))
+
+    assert [_spoken_ssml(call) for call in model.calls] == ["На двери новый з+амок."]
+
+
 def test_silero_stress_failure_keeps_builtin_stress_fallback(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -366,6 +366,7 @@ class VoiceService:
                 stress_cpu_threads=settings.voice_stress_cpu_threads,
                 audio_postprocessing_enabled=settings.voice_tts_postprocessing_enabled,
                 highpass_cutoff_hz=settings.voice_tts_highpass_cutoff_hz,
+                lowpass_cutoff_hz=settings.voice_tts_lowpass_cutoff_hz,
                 adaptive_prosody=settings.voice_tts_adaptive_prosody,
                 cmudict_enabled=settings.voice_cmudict_enabled,
                 cmudict_cache_dir=settings.voice_cmudict_cache_path,
