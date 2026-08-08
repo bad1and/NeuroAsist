@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
@@ -11,7 +11,7 @@ const api = vi.hoisted(() => ({
   getPronunciations: vi.fn(), updatePronunciations: vi.fn(), updateVoiceExpression: vi.fn(), updateVoiceStyle: vi.fn(),
   getSttTerms: vi.fn(), updateSttTerms: vi.fn(),
   updateRuntimeSettings: vi.fn(), getTimelineJournal: vi.fn(), searchTimeline: vi.fn(),
-  getVoiceTtsStatus: vi.fn(), sendChatMessage: vi.fn(), sendVoiceMessage: vi.fn(), interruptVoiceSession: vi.fn(),
+  getVoiceTtsStatus: vi.fn(), sendChatMessage: vi.fn(), sendLiveTextMessage: vi.fn(), sendVoiceMessage: vi.fn(), interruptVoiceSession: vi.fn(),
   installModel: vi.fn(), removeModel: vi.fn(), createBackup: vi.fn(),
   clearMemories: vi.fn(), reindexMemories: vi.fn(), resetAllCompanionData: vi.fn(),
   resetConversationSession: vi.fn(), getConversationSession: vi.fn(),
@@ -67,7 +67,7 @@ beforeEach(() => {
   Object.defineProperty(HTMLElement.prototype, "scrollTo", { configurable: true, value: vi.fn() });
   Object.defineProperty(HTMLDialogElement.prototype, "showModal", { configurable: true, value() { this.setAttribute("open", ""); } });
   Object.defineProperty(HTMLDialogElement.prototype, "close", { configurable: true, value() { this.removeAttribute("open"); this.dispatchEvent(new Event("close")); } });
-  api.getStatus.mockResolvedValue({ app_name: "Iris", backend: "ok", database: "ok", version: "0.6.0", api_key_configured: true, llm_provider: "deepseek", llm_model: "deepseek-chat" });
+  api.getStatus.mockResolvedValue({ app_name: "Iris", backend: "ok", database: "ok", version: "0.8.0", api_key_configured: true, llm_provider: "deepseek", llm_model: "deepseek-chat" });
   api.getSettings.mockResolvedValue(settings);
   api.getAvatarStatus.mockResolvedValue({ enabled: false, protocol_version: 1, broadcast_policy: "", client_count: 0, clients: [], emotion_engine: { mapping_valid: true, current_emotion: "neutral", target_emotion: "neutral", intensity: 0, gesture: "", motion_profile: "", attack_ms: 0, minimum_hold_ms: 0, release_ms: 0, generation: 0, speaking: false } });
   api.getEvents.mockResolvedValue({ events: [] });
@@ -106,6 +106,39 @@ describe("русский интерфейс", () => {
     expect(container.querySelector(".chat-panel .chat-composer")).toBeInTheDocument();
     expect(container.querySelector(".chat-composer textarea")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Свободные руки" })).toBeInTheDocument();
+  });
+
+  it("автоматически скрывает временную ошибку отправки в чате", async () => {
+    vi.stubGlobal("AudioContext", class {
+      state = "running";
+      destination = {};
+      async resume() {}
+    });
+    api.sendLiveTextMessage.mockRejectedValueOnce(new Error("peer closed connection without sending complete message body"));
+    api.sendChatMessage.mockRejectedValueOnce(new Error("peer closed connection without sending complete message body"));
+    try {
+      render(<App />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Новый диалог" })).not.toBeDisabled());
+      fireEvent.change(screen.getByPlaceholderText("Напишите сообщение…"), { target: { value: "Проверка" } });
+      const sendButton = await screen.findByRole("button", { name: "Отправить сообщение" });
+      await waitFor(() => expect(sendButton).not.toBeDisabled());
+      vi.useFakeTimers();
+      fireEvent.click(sendButton);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.getByRole("alert")).toHaveTextContent("peer closed connection without sending complete message body");
+      act(() => {
+        vi.advanceTimersByTime(8_000);
+      });
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("переключает sidebar в компактный режим без смены активного раздела", async () => {
@@ -279,7 +312,7 @@ describe("русский интерфейс", () => {
     expect(within(navigation).queryByText("Настройки")).not.toBeInTheDocument();
     expect(screen.queryByText("Настройки Iris")).not.toBeInTheDocument();
     expect(screen.queryByText("Готово к изменениям")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Стиль общения")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Живой разговор" })).toBeVisible();
     expect(container.querySelector(".system-stack")).toHaveAttribute("hidden");
 
     const voiceGroup = within(navigation).getByRole("button", { name: "Голос" });
@@ -287,7 +320,7 @@ describe("русский интерфейс", () => {
     expect(voiceGroup).toHaveAttribute("aria-controls", "settings-nav-children-voice");
     fireEvent.click(voiceGroup);
     expect(voiceGroup).toHaveAttribute("aria-expanded", "false");
-    expect(screen.getByLabelText("Стиль общения")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Живой разговор" })).toBeVisible();
     expect(screen.queryByLabelText("Язык голосового ввода")).not.toBeVisible();
 
     fireEvent.click(voiceGroup);
@@ -296,7 +329,7 @@ describe("русский интерфейс", () => {
     expect(screen.getByLabelText("Язык голосового ввода")).toBeVisible();
     expect(screen.getByLabelText("Голос Silero")).toBeVisible();
     expect(screen.getByText("Silero · CPU · активен")).toBeVisible();
-    expect(screen.getByLabelText("Стиль общения")).not.toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Живой разговор" })).not.toBeInTheDocument();
 
     fireEvent.click(voiceGroup);
     expect(voiceGroup).toHaveAttribute("aria-expanded", "false");
@@ -312,7 +345,7 @@ describe("русский интерфейс", () => {
     const behavior = within(navigation).getByRole("button", { name: "Поведение" });
     expect(behavior).toHaveAttribute("aria-expanded", "true");
     expect(behavior).toHaveAttribute("aria-controls", "settings-nav-children-behavior");
-    expect(within(navigation).getByRole("button", { name: "Стиль общения" })).toHaveAttribute("aria-current", "page");
+    expect(within(navigation).getByRole("button", { name: "Живой разговор" })).toHaveAttribute("aria-current", "page");
 
     const avatar = within(navigation).getByRole("button", { name: "Аватар" });
     expect(avatar).not.toHaveAttribute("aria-expanded");
