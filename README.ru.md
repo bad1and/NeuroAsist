@@ -6,7 +6,7 @@
 
 ### Локальный голосовой AI‑персонаж и будущая neuro‑VTuber платформа
 
-[![Версия](https://img.shields.io/badge/version-0.6.0--dev-7c3aed?style=flat-square)](https://github.com/bad1and/NeuroAsist/tree/v0.6)
+[![Версия](https://img.shields.io/badge/version-0.8.0--dev-7c3aed?style=flat-square)](https://github.com/bad1and/NeuroAsist)
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776ab?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-24%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.116-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -18,8 +18,15 @@
 </div>
 
 > [!IMPORTANT]
-> **Iris v0.6 — экспериментальная development-ветка локального desktop-приложения.**
+> **Iris v0.8 — экспериментальная development-ветка локального desktop-приложения.**
 > Tauri запускает React-интерфейс и FastAPI core вместе. Доступны текстовый/голосовой чат, долгосрочная память и опциональный Unity VRM-аватар.
+
+## Что нового в v0.8
+
+- В настройках голоса можно выбрать микрофон и устройство вывода звука; выбор сохраняется локально.
+- Unity-аватар показывается либо прозрачным оверлеем рабочего стола, либо прямо в чате без второго видимого окна.
+- Кнопка **«Новый диалог»** в чате очищает текущий разговор, сохраняя долгосрочную память.
+- Временные ошибки соединения в чате скрываются автоматически и не остаются на экране.
 
 Iris — официальное имя. К ней также можно обращаться: **Ирис**, **Айрис** или **Ириска**.
 
@@ -40,13 +47,14 @@ flowchart LR
 
 Направление V0.5 — desktop-компаньон с одной активной сессией: при новом запуске или ручном сбросе диалог начинается с чистого листа, а управляемая долгосрочная память сохраняется. Внутри сессии используются episodes и summaries. Это не продукт с вручную созданными чатами. Dev-agent, sandbox и управление рабочим столом исключены из V0.5.
 
-## Возможности v0.6
+## Возможности v0.8
 
 | Возможность | Статус | Реализация |
 |---|:---:|---|
 | Текстовый диалог | ✅ | FastAPI chat endpoint |
 | Push-to-talk | ✅ | Browser `MediaRecorder` |
 | Live-ответ голосом | ✅ | Аудиосегменты через WebSocket |
+| Выбор устройств звука | ✅ | Микрофон и устройство вывода выбираются в настройках голоса |
 | Локальное распознавание речи | ✅ | GigaAM v3, `faster-whisper` fallback |
 | Локальная русская озвучка | ✅ | Silero `v5_5_ru` |
 | История диалога и Journal | ✅ | SQLite timeline, episodes и summaries |
@@ -55,7 +63,7 @@ flowchart LR
 | Runtime-события | ✅ | REST и WebSocket |
 | Настройка голоса и runtime | ✅ | Локальная React-панель |
 | Browser speech fallback | ✅ | При ошибке backend TTS |
-| Unity VRM-аватар и lipsync | ✅ | Опциональный WebSocket-клиент с UniVRM/uLipSync |
+| Unity VRM-аватар и lipsync | ✅ | Опциональный WebSocket-клиент с UniVRM/uLipSync: в чате или отдельным прозрачным оверлеем |
 | Runtime continuous companion | 🧭 | Реализованы timeline, episodes, summaries, управляемая долгосрочная память и проверенный Tauri shell |
 | Dev-agent, sandbox и управление ПК | 🚫 | Явно вне scope V0.5 |
 
@@ -72,11 +80,11 @@ flowchart LR
 
 В React-панели есть пять основных разделов:
 
-- **Chat** — текстовые сообщения, запись микрофона, распознанная фраза, ответ и воспроизведение.
+- **Chat** — текстовые сообщения, запись микрофона, распознанная фраза, автоматически озвучиваемый ответ и кнопка **«Новый диалог»**, которая очищает разговор, сохраняя долгосрочную память. Временные ошибки соединения скрываются автоматически.
 - **Journal** — непрерывная timeline и внутренние эпизоды разговора.
 - **Memory** — сохранённые факты, их происхождение, проверка и полный сброс памяти с историей.
 - **Events** — события backend, LLM, STT, TTS и соединений в реальном времени.
-- **Settings** — язык голоса, speaker Silero, скорость воспроизведения, live prebuffer, runtime-настройки и тестовое управление аватаром.
+- **Settings** — язык голоса, микрофон, устройство вывода, speaker Silero, скорость воспроизведения, live prebuffer, размещение и тестовое управление аватаром.
 
 В шапке отображаются состояние backend, подключение WebSocket, наличие API-ключа и фиксированная LLM-модель.
 
@@ -118,7 +126,7 @@ flowchart LR
 ### 1. Клонирование ветки
 
 ```powershell
-git clone --branch v0.6 --single-branch https://github.com/bad1and/NeuroAsist.git Iris
+git clone --branch "v0.8(avatar-remove/UI)" --single-branch https://github.com/bad1and/NeuroAsist.git Iris
 cd Iris
 ```
 
