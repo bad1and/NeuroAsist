@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
@@ -86,7 +86,11 @@ beforeEach(() => {
   api.updateRuntimeSettings.mockResolvedValue(settings);
 });
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => {
+  cleanup();
+  window.localStorage.clear();
+  vi.clearAllMocks();
+});
 
 describe("русский интерфейс", () => {
   it("собирает диалог в отдельную рабочую область с закреплённым композером", async () => {
@@ -94,7 +98,7 @@ describe("русский интерфейс", () => {
 
     await screen.findByRole("button", { name: "Диалог" });
     expect(screen.getByRole("img", { name: "Iris" })).toBeInTheDocument();
-    expect(container.querySelector("img.brand-logo")).toHaveAttribute("src", "/brand/iris-wordmark-light.svg");
+    expect(container.querySelector("img.brand-logo-wordmark")).toHaveAttribute("src", "/brand/iris-wordmark-light.svg");
     fireEvent.click(screen.getByRole("button", { name: "Диалог" }));
     expect(container.querySelector("main.workspace-chat")).toBeInTheDocument();
     expect(container.querySelector(".workspace-chat > .chat-view")).toBeInTheDocument();
@@ -102,6 +106,65 @@ describe("русский интерфейс", () => {
     expect(container.querySelector(".chat-panel .chat-composer")).toBeInTheDocument();
     expect(container.querySelector(".chat-composer textarea")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Свободные руки" })).toBeInTheDocument();
+  });
+
+  it("переключает sidebar в компактный режим без смены активного раздела", async () => {
+    const { container } = render(<App />);
+
+    await screen.findByRole("button", { name: "Обзор" });
+    const collapseButton = screen.getByRole("button", { name: "Свернуть меню" });
+    expect(collapseButton).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Обзор" })).toHaveAttribute("aria-current", "page");
+
+    fireEvent.click(collapseButton);
+
+    expect(container.querySelector(".app-shell")).toHaveClass("is-sidebar-collapsed");
+    expect(screen.getByRole("button", { name: "Развернуть меню" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Обзор" })).toHaveAttribute("aria-current", "page");
+    expect(container.querySelector("img.brand-logo-mark")).toHaveAttribute("src", "/brand/iris-mark-light.svg");
+    expect(window.localStorage.getItem("iris.sidebar.collapsed")).toBe("true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Диалог" }));
+    expect(container.querySelector("main.workspace-chat")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Развернуть меню" }));
+    expect(container.querySelector(".app-shell")).not.toHaveClass("is-sidebar-collapsed");
+    expect(container.querySelector("img.brand-logo-wordmark")).toHaveAttribute("src", "/brand/iris-wordmark-light.svg");
+  });
+
+  it("восстанавливает компактный sidebar из локального предпочтения", async () => {
+    window.localStorage.setItem("iris.sidebar.collapsed", "true");
+    const { container } = render(<App />);
+
+    await screen.findByRole("button", { name: "Обзор" });
+    expect(container.querySelector(".app-shell")).toHaveClass("is-sidebar-collapsed");
+    expect(screen.getByRole("button", { name: "Развернуть меню" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("управляет drawer с aria-состоянием, фокусом, scrim и Escape", async () => {
+    const { container } = render(<App />);
+
+    const menuButton = await screen.findByRole("button", { name: "Открыть меню" });
+    expect(menuButton).toHaveAttribute("aria-expanded", "false");
+    expect(menuButton).toHaveAttribute("aria-controls", "main-sidebar");
+
+    fireEvent.click(menuButton);
+    const sidebar = screen.getByRole("complementary", { name: "Основная навигация" });
+    await waitFor(() => expect(menuButton).toHaveFocus());
+    expect(menuButton).toHaveAttribute("aria-expanded", "true");
+    expect(container.querySelector(".sidebar.is-open")).toBeInTheDocument();
+    expect(within(sidebar).queryByRole("button", { name: "Закрыть меню" })).not.toBeInTheDocument();
+    expect(container.querySelector("img.brand-logo-wordmark")).toHaveAttribute("src", "/brand/iris-wordmark-light.svg");
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(menuButton).toHaveFocus());
+    expect(menuButton).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(menuButton);
+    const scrim = document.querySelector<HTMLButtonElement>(".navigation-scrim");
+    expect(scrim).not.toBeNull();
+    fireEvent.click(scrim!);
+    await waitFor(() => expect(menuButton).toHaveAttribute("aria-expanded", "false"));
   });
 
   it("закрепляет встроенный аватар слева от чата и даёт переключить размещение", async () => {
@@ -112,8 +175,7 @@ describe("русский интерфейс", () => {
     expect(container.querySelector(".chat-panel.has-in-app-avatar .in-app-avatar-stage")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Система" }));
-    fireEvent.click(screen.getByText("Аватар"));
+    fireEvent.click(await screen.findByRole("button", { name: "Аватар" }));
     expect(screen.getByText("Где показывать аватар")).toBeInTheDocument();
     expect(screen.getByLabelText("Внутри Iris")).toBeChecked();
     expect(screen.getByLabelText("Отдельным оверлеем")).not.toBeChecked();
@@ -197,12 +259,15 @@ describe("русский интерфейс", () => {
     expect(screen.queryByRole("button", { name: "Events" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
-    await screen.findByRole("button", { name: "Система" });
-    fireEvent.click(screen.getByRole("button", { name: "Система" }));
+    const settingsNavigation = screen.getByRole("navigation", { name: "Разделы настроек" });
+    await within(settingsNavigation).findByRole("button", { name: "Система" });
+    fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Система" }));
+    fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Обзор" }));
 
-    expect(await screen.findByRole("heading", { name: "Модели" })).toBeInTheDocument();
-    expect(screen.getByText("Журнал событий")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Журнал событий"));
+    expect(await screen.findByRole("heading", { name: "Система" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Модели" }));
+    expect((await screen.findAllByRole("heading", { name: "Модели" })).length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(screen.getByRole("button", { name: "Журнал событий" }));
     expect(await screen.findByRole("button", { name: "Обновить журнал событий" })).toBeInTheDocument();
   });
 
@@ -210,14 +275,93 @@ describe("русский интерфейс", () => {
     const { container } = render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
+    const navigation = screen.getByRole("navigation", { name: "Разделы настроек" });
+    expect(within(navigation).queryByText("Настройки")).not.toBeInTheDocument();
+    expect(screen.queryByText("Настройки Iris")).not.toBeInTheDocument();
+    expect(screen.queryByText("Готово к изменениям")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Стиль общения")).toBeVisible();
     expect(container.querySelector(".system-stack")).toHaveAttribute("hidden");
 
-    fireEvent.click(screen.getByRole("button", { name: "Голос" }));
+    const voiceGroup = within(navigation).getByRole("button", { name: "Голос" });
+    expect(voiceGroup).toHaveAttribute("aria-expanded", "true");
+    expect(voiceGroup).toHaveAttribute("aria-controls", "settings-nav-children-voice");
+    fireEvent.click(voiceGroup);
+    expect(voiceGroup).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByLabelText("Стиль общения")).toBeVisible();
+    expect(screen.queryByLabelText("Язык голосового ввода")).not.toBeVisible();
+
+    fireEvent.click(voiceGroup);
+    expect(voiceGroup).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(within(navigation).getByRole("button", { name: "Основное" }));
     expect(screen.getByLabelText("Язык голосового ввода")).toBeVisible();
     expect(screen.getByLabelText("Голос Silero")).toBeVisible();
     expect(screen.getByText("Silero · CPU · активен")).toBeVisible();
     expect(screen.getByLabelText("Стиль общения")).not.toBeVisible();
+
+    fireEvent.click(voiceGroup);
+    expect(voiceGroup).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByLabelText("Язык голосового ввода")).toBeVisible();
+    expect(within(navigation).getByRole("button", { name: "Основное", hidden: true })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("открывает одиночные разделы напрямую и сохраняет доступную навигацию групп", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
+    const navigation = screen.getByRole("navigation", { name: "Разделы настроек" });
+    const behavior = within(navigation).getByRole("button", { name: "Поведение" });
+    expect(behavior).toHaveAttribute("aria-expanded", "true");
+    expect(behavior).toHaveAttribute("aria-controls", "settings-nav-children-behavior");
+    expect(within(navigation).getByRole("button", { name: "Стиль общения" })).toHaveAttribute("aria-current", "page");
+
+    const avatar = within(navigation).getByRole("button", { name: "Аватар" });
+    expect(avatar).not.toHaveAttribute("aria-expanded");
+    fireEvent.click(avatar);
+    expect(await screen.findByRole("heading", { name: "Аватар" })).toBeVisible();
+    expect(avatar).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByRole("heading", { name: "Аватар Iris" })).not.toBeInTheDocument();
+
+    const memory = within(navigation).getByRole("button", { name: "Память" });
+    expect(memory).not.toHaveAttribute("aria-expanded");
+    fireEvent.click(memory);
+    expect(await screen.findByRole("heading", { name: "Память" })).toBeVisible();
+    expect(memory).toHaveAttribute("aria-current", "page");
+  });
+
+  it("автосохраняет отдельное поле и откатывает его при ошибке", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
+    const memoryButtons = screen.getAllByRole("button", { name: "Память" });
+    fireEvent.click(memoryButtons[memoryButtons.length - 1]);
+    const mode = screen.getByLabelText("Режим сохранения");
+    fireEvent.change(mode, { target: { value: "off" } });
+
+    await waitFor(() => expect(api.updateRuntimeSettings).toHaveBeenCalledWith({ memory_mode: "off" }));
+    expect(screen.queryByRole("button", { name: "Сохранить изменения" })).not.toBeInTheDocument();
+
+    api.updateRuntimeSettings.mockRejectedValueOnce(new Error("Не удалось сохранить"));
+    fireEvent.change(mode, { target: { value: "automatic" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Повторить" })).toBeInTheDocument());
+    expect(mode).toHaveValue("off");
+
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    await waitFor(() => expect(api.updateRuntimeSettings).toHaveBeenCalledWith({ memory_mode: "automatic" }));
+  });
+
+  it("откладывает сохранение скорости до окончания debounce", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
+    const settingsNavigation = screen.getByRole("navigation", { name: "Разделы настроек" });
+    const voiceGroup = within(settingsNavigation).getByRole("button", { name: "Голос" });
+    fireEvent.click(voiceGroup);
+    fireEvent.click(voiceGroup);
+    fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Основное" }));
+    fireEvent.change(screen.getByRole("slider", { name: /Скорость воспроизведения/ }), { target: { value: "1.2" } });
+
+    expect(api.updateRuntimeSettings).not.toHaveBeenCalled();
+    await waitFor(() => expect(api.updateRuntimeSettings).toHaveBeenCalledWith({ voice_playback_rate: 1.2 }));
   });
 
   it("не теряет выбранных участников при фоновом обновлении настроек", async () => {
@@ -229,7 +373,6 @@ describe("русский интерфейс", () => {
     fireEvent.click(screen.getByRole("button", { name: "Живой разговор" }));
     const participantMode = await screen.findByLabelText("Участники");
     fireEvent.change(participantMode, { target: { value: "group" } });
-    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
 
     await waitFor(() => expect(api.updateRuntimeSettings).toHaveBeenCalledWith(
       expect.objectContaining({ live_conversation_participant_mode: "group" }),
@@ -264,7 +407,11 @@ describe("русский интерфейс", () => {
     try {
       render(<App />);
       fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
-      fireEvent.click(screen.getByRole("button", { name: "Голос" }));
+      const settingsNavigation = screen.getByRole("navigation", { name: "Разделы настроек" });
+      const voiceGroup = within(settingsNavigation).getByRole("button", { name: "Голос" });
+      fireEvent.click(voiceGroup);
+      fireEvent.click(voiceGroup);
+      fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Устройства" }));
 
       const input = await screen.findByLabelText(/Источник входа/);
       const output = screen.getByLabelText(/Источник вывода/);
@@ -272,12 +419,9 @@ describe("русский интерфейс", () => {
       await waitFor(() => expect(output).not.toBeDisabled());
       fireEvent.change(input, { target: { value: "usb-microphone" } });
       fireEvent.change(output, { target: { value: "headphones" } });
-      fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
 
-      await waitFor(() => expect(api.updateRuntimeSettings).toHaveBeenCalledWith(expect.objectContaining({
-        voice_input_device_id: "usb-microphone",
-        voice_output_device_id: "headphones",
-      })));
+      await waitFor(() => expect(api.updateRuntimeSettings).toHaveBeenCalledWith({ voice_input_device_id: "usb-microphone" }));
+      await waitFor(() => expect(api.updateRuntimeSettings).toHaveBeenCalledWith({ voice_output_device_id: "headphones" }));
     } finally {
       if (mediaDevicesDescriptor) Object.defineProperty(navigator, "mediaDevices", mediaDevicesDescriptor);
       else delete (navigator as { mediaDevices?: MediaDevices }).mediaDevices;

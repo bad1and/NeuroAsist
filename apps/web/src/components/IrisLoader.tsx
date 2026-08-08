@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { AnimationItem } from "lottie-web";
 
-import animationData from "../../public/brand/iris-loader.json";
+import animationData from "../brand/iris-loader.json";
 
 const lottiePlayer =
   import.meta.env.MODE === "test"

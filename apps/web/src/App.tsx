@@ -10,12 +10,13 @@ import {
   MessageCircle,
   Mic,
   MonitorCog,
+  PanelLeftClose,
+  PanelLeftOpen,
   RefreshCw,
   SendHorizontal,
   Settings,
   SlidersHorizontal,
   Volume2,
-  X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -109,7 +110,23 @@ import { GuidedSttCapture } from "./stt-capture";
 import { InAppAvatarHost } from "./components/InAppAvatarHost";
 
 type AppView = "overview" | "chat" | "journal" | "memory" | "state" | "settings";
-type SettingsSection = "general" | "voice" | "conversation" | "memory" | "system";
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "iris.sidebar.collapsed";
+type SettingsSection =
+  | "behavior"
+  | "conversation"
+  | "avatar"
+  | "voice"
+  | "voice-devices"
+  | "voice-recognition"
+  | "voice-advanced"
+  | "memory"
+  | "system-overview"
+  | "models"
+  | "backups"
+  | "maintenance"
+  | "events";
+type RuntimeSettingsPatch = Parameters<typeof updateRuntimeSettings>[0];
+type AutoSaveStatus = "idle" | "saving" | "saved" | "error";
 type LiveConversationSettings = Pick<
   PublicSettings,
   | "live_conversation_enabled"
@@ -155,6 +172,102 @@ function parsePronunciations(value: string): Record<string, string> {
       .filter(([term, pronunciation]) => term && pronunciation),
   );
 }
+
+function useRuntimeSettingsAutosave(onSettingsChanged: (settings: PublicSettings) => void) {
+  const pendingPatchRef = useRef<RuntimeSettingsPatch>({});
+  const failedPatchRef = useRef<RuntimeSettingsPatch | null>(null);
+  const rollbackRef = useRef<Array<() => void>>([]);
+  const runningRef = useRef(false);
+  const [status, setStatus] = useState<AutoSaveStatus>("idle");
+
+  const drain = useCallback(async () => {
+    if (runningRef.current || Object.keys(pendingPatchRef.current).length === 0) {
+      return;
+    }
+
+    runningRef.current = true;
+    const patch = pendingPatchRef.current;
+    const rollback = rollbackRef.current;
+    pendingPatchRef.current = {};
+    rollbackRef.current = [];
+    setStatus("saving");
+
+    try {
+      const nextSettings = await updateRuntimeSettings(patch);
+      failedPatchRef.current = null;
+      onSettingsChanged(nextSettings);
+      setStatus("saved");
+    } catch {
+      failedPatchRef.current = patch;
+      rollback.forEach((restore) => restore());
+      setStatus("error");
+    } finally {
+      runningRef.current = false;
+      if (Object.keys(pendingPatchRef.current).length > 0) {
+        void drain();
+      }
+    }
+  }, [onSettingsChanged]);
+
+  const save = useCallback((patch: RuntimeSettingsPatch, rollback?: () => void) => {
+    pendingPatchRef.current = { ...pendingPatchRef.current, ...patch };
+    if (rollback) {
+      rollbackRef.current.push(rollback);
+    }
+    void drain();
+  }, [drain]);
+
+  const retry = useCallback(() => {
+    if (!failedPatchRef.current) return;
+    pendingPatchRef.current = { ...failedPatchRef.current, ...pendingPatchRef.current };
+    failedPatchRef.current = null;
+    void drain();
+  }, [drain]);
+
+  return { save, retry, status };
+}
+
+function AutoSaveStatus({ status, onRetry }: { status: AutoSaveStatus; onRetry: () => void }) {
+  if (status === "saving") return <span className="settings-save-status is-saving" role="status">Сохраняем…</span>;
+  if (status === "error") {
+    return <span className="settings-save-status is-error" role="alert">Не удалось сохранить <button type="button" onClick={onRetry}>Повторить</button></span>;
+  }
+  if (status === "saved") return <span className="settings-save-status is-saved" role="status">Сохранено</span>;
+  return null;
+}
+
+function SettingsSwitch({
+  checked,
+  label,
+  description,
+  disabled,
+  onChange,
+}: {
+  checked: boolean;
+  label: string;
+  description?: string;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="settings-switch-row">
+      <span className="settings-switch-copy">
+        <strong>{label}</strong>
+        {description && <small>{description}</small>}
+      </span>
+      <input
+        className="settings-switch-input"
+        type="checkbox"
+        role="switch"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span className="settings-switch" aria-hidden="true"><span /></span>
+    </label>
+  );
+}
+
 const RECORDING_MIME_TYPES = [
   "audio/webm;codecs=opus",
   "audio/webm",
@@ -240,6 +353,14 @@ export default function App() {
   const startupStartedAt = useRef(Date.now());
   const [activeView, setActiveView] = useState<AppView>("overview");
   const [navigationOpen, setNavigationOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  const menuToggleRef = useRef<HTMLButtonElement>(null);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [avatarStatus, setAvatarStatus] = useState<AvatarStatusResponse | null>(null);
   const [avatarOverlay, setAvatarOverlay] = useState<AvatarOverlaySettings | null>(null);
@@ -333,6 +454,29 @@ export default function App() {
     }, 10000);
     return () => window.clearInterval(timer);
   }, [refreshEvents, refreshOverview, servicesReady]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(sidebarCollapsed));
+    } catch {
+      // The sidebar remains usable when storage is unavailable.
+    }
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    if (!navigationOpen) return;
+    const focusMenuButton = window.setTimeout(() => menuToggleRef.current?.focus(), 0);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setNavigationOpen(false);
+      window.setTimeout(() => menuToggleRef.current?.focus(), 0);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.clearTimeout(focusMenuButton);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [navigationOpen]);
 
   useEffect(() => {
     let stop: (() => void) | undefined;
@@ -436,22 +580,40 @@ export default function App() {
     return <div className="app-shell setup-shell"><SetupWizard onComplete={refreshOverview} /></div>;
   }
 
+  const closeNavigation = () => {
+    setNavigationOpen((current) => {
+      if (current) window.setTimeout(() => menuToggleRef.current?.focus(), 0);
+      return false;
+    });
+  };
+
+  const toggleNavigation = () => {
+    setNavigationOpen((current) => {
+      const next = !current;
+      if (!next) window.setTimeout(() => menuToggleRef.current?.focus(), 0);
+      return next;
+    });
+  };
+
   const switchView = (view: AppView) => {
     setActiveView(view);
-    setNavigationOpen(false);
+    closeNavigation();
   };
   return (
-    <div className="app-shell">
+    <div className={`app-shell${sidebarCollapsed ? " is-sidebar-collapsed" : ""}`}>
       <Sidebar
         activeView={activeView}
         isOpen={navigationOpen}
+        isCollapsed={sidebarCollapsed}
         onNavigate={switchView}
-        onClose={() => setNavigationOpen(false)}
+        onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
       />
-      {navigationOpen && <button className="navigation-scrim" aria-label="Закрыть меню" onClick={() => setNavigationOpen(false)} />}
+      {navigationOpen && <button className="navigation-scrim" type="button" aria-label="Закрыть меню" onClick={closeNavigation} />}
       <WindowChrome
         title=""
-        onOpenNavigation={() => setNavigationOpen(true)}
+        navigationOpen={navigationOpen}
+        navigationButtonRef={menuToggleRef}
+        onOpenNavigation={toggleNavigation}
       />
       <section className="app-content">
         <main className={`workspace workspace-${activeView}`}>
@@ -560,28 +722,42 @@ const MAIN_NAVIGATION: Array<{ id: Exclude<AppView, "settings">; label: string; 
 function Sidebar({
   activeView,
   isOpen,
+  isCollapsed,
   onNavigate,
-  onClose,
+  onToggleCollapsed,
 }: {
   activeView: AppView;
   isOpen: boolean;
+  isCollapsed: boolean;
   onNavigate: (view: AppView) => void;
-  onClose: () => void;
+  onToggleCollapsed: () => void;
 }) {
   return (
-    <aside className={`sidebar${isOpen ? " is-open" : ""}`} aria-label="Основная навигация">
+    <aside id="main-sidebar" className={`sidebar${isOpen ? " is-open" : ""}`} aria-label="Основная навигация">
       <div className="sidebar-brand" data-tauri-drag-region>
-        <img className="brand-logo" src="/brand/iris-wordmark-light.svg" alt="Iris" />
+        <img className="brand-logo brand-logo-wordmark" src="/brand/iris-wordmark-light.svg" alt="Iris" />
+        <img className="brand-logo brand-logo-mark" src="/brand/iris-mark-light.svg" alt="" aria-hidden="true" />
         <span className="brand-alias" data-tauri-drag-region aria-hidden="true">ириска<sup>*</sup></span>
-        <button className="icon-button sidebar-close" aria-label="Закрыть меню" title="Закрыть меню" onClick={onClose}><X size={18} /></button>
       </div>
       <nav className="sidebar-nav" aria-label="Разделы приложения">
         {MAIN_NAVIGATION.map(({ id, label, icon: Icon }) => (
-          <NavigationButton key={id} icon={Icon} label={label} active={activeView === id} onClick={() => onNavigate(id)} />
+          <NavigationButton key={id} icon={Icon} label={label} active={activeView === id} compact={isCollapsed} onClick={() => onNavigate(id)} />
         ))}
       </nav>
       <div className="sidebar-footer">
-        <NavigationButton icon={Settings} label="Настройки" active={activeView === "settings"} onClick={() => onNavigate("settings")} />
+        <div className="sidebar-footer-row">
+          <NavigationButton icon={Settings} label="Настройки" active={activeView === "settings"} compact={isCollapsed} onClick={() => onNavigate("settings")} />
+          <button
+            className="icon-button sidebar-collapse-toggle"
+            type="button"
+            aria-label={isCollapsed ? "Развернуть меню" : "Свернуть меню"}
+            aria-pressed={isCollapsed}
+            title={isCollapsed ? "Развернуть меню" : "Свернуть меню"}
+            onClick={onToggleCollapsed}
+          >
+            {isCollapsed ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />}
+          </button>
+        </div>
       </div>
     </aside>
   );
@@ -591,15 +767,24 @@ function NavigationButton({
   icon: Icon,
   label,
   active,
+  compact = false,
   onClick,
 }: {
   icon: LucideIcon;
   label: string;
   active: boolean;
+  compact?: boolean;
   onClick: () => void;
 }) {
   return (
-    <button className={`navigation-button${active ? " is-active" : ""}`} aria-current={active ? "page" : undefined} onClick={onClick}>
+    <button
+      className={`navigation-button${active ? " is-active" : ""}`}
+      aria-label={label}
+      aria-current={active ? "page" : undefined}
+      data-tooltip={compact ? label : undefined}
+      title={compact ? label : undefined}
+      onClick={onClick}
+    >
       <Icon size={19} aria-hidden="true" />
       <span>{label}</span>
     </button>
@@ -1895,7 +2080,7 @@ function SettingsPage({
   onAvatarOverlayChanged: (overlay: AvatarOverlaySettings | null) => void;
   onSettingsChanged: (settings: PublicSettings) => void;
 }) {
-  const [activeSection, setActiveSection] = useState<SettingsSection>("general");
+  const [activeSection, setActiveSection] = useState<SettingsSection>("behavior");
   const [personality, setPersonality] = useState("");
   const [voiceLanguage, setVoiceLanguage] = useState("ru");
   const [voiceMicrophoneProfile, setVoiceMicrophoneProfile] = useState<MicrophoneProfile>("balanced");
@@ -1935,10 +2120,12 @@ function SettingsPage({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [showSttCapture, setShowSttCapture] = useState(false);
+  const autosaveTimersRef = useRef<Partial<Record<SettingsSection, number>>>({});
   // Settings are polled by the app shell.  Once this form is open, a polling
   // response must not replace a value the person has just selected before
   // they get a chance to press Save (most visibly the participant mode).
   const hasInitialSettings = useRef(false);
+  const autosave = useRuntimeSettingsAutosave(onSettingsChanged);
 
   const applySettingsToForm = useCallback((nextSettings: PublicSettings) => {
     setPersonality(nextSettings.personality);
@@ -1984,12 +2171,36 @@ function SettingsPage({
       .catch(() => setSttTermsText(""));
   }, []);
 
+  const saveRuntimeSetting = useCallback((patch: RuntimeSettingsPatch, rollback?: () => void) => {
+    autosave.save(patch, rollback);
+  }, [autosave]);
+
   const updateLiveSetting = <K extends keyof LiveConversationSettings>(
     key: K,
     value: LiveConversationSettings[K],
   ) => {
+    const previousValue = liveSettings[key];
     setLiveSettings((current) => ({ ...current, [key]: value }));
+    saveRuntimeSetting(
+      { [key]: value } as RuntimeSettingsPatch,
+      () => setLiveSettings((current) => ({ ...current, [key]: previousValue })),
+    );
   };
+
+  const scheduleRuntimeSetting = useCallback((section: SettingsSection, patch: RuntimeSettingsPatch, rollback?: () => void) => {
+    const currentTimer = autosaveTimersRef.current[section];
+    if (currentTimer !== undefined) window.clearTimeout(currentTimer);
+    autosaveTimersRef.current[section] = window.setTimeout(() => {
+      delete autosaveTimersRef.current[section];
+      saveRuntimeSetting(patch, rollback);
+    }, 300);
+  }, [saveRuntimeSetting]);
+
+  useEffect(() => () => {
+    Object.values(autosaveTimersRef.current).forEach((timer) => {
+      if (timer !== undefined) window.clearTimeout(timer);
+    });
+  }, []);
 
   const refreshAudioDevices = useCallback(async (requestMicrophoneAccess = false) => {
     setAudioDevicesLoading(true);
@@ -2020,38 +2231,9 @@ function SettingsPage({
     return () => mediaDevices.removeEventListener("devicechange", handleDeviceChange);
   }, [refreshAudioDevices]);
 
-  const saveSettings = async () => {
-    setSaving(true);
-    setMessage(null);
-    try {
-      const nextSettings = await updateRuntimeSettings({
-        personality,
-        voice_language: voiceLanguage,
-        voice_microphone_profile: voiceMicrophoneProfile,
-        voice_input_device_id: voiceInputDeviceId,
-        voice_output_device_id: voiceOutputDeviceId,
-        voice_tts_voice: voiceTtsVoice,
-        voice_playback_rate: voicePlaybackRate,
-        voice_live_playback_prebuffer_segments: prebufferSegments,
-        voice_live_playback_prebuffer_ms: prebufferMs,
-        memory_mode: memoryMode,
-        memory_incognito: memoryIncognito,
-        ...liveSettings,
-      });
-      // The API response is the persisted source of truth.  Apply it directly
-      // before the parent schedules its background refresh, so controls cannot
-      // temporarily fall back to an older polling result.
-      applySettingsToForm(nextSettings);
-      onSettingsChanged(nextSettings);
-      setMessage("Настройки сохранены.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Не удалось сохранить настройки.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const changeVoiceStyle = async (value: string) => {
+    const previousValue = voiceTtsStyle;
+    setVoiceTtsStyle(value);
     setSaving(true);
     setMessage(null);
     try {
@@ -2060,6 +2242,7 @@ function SettingsPage({
       setVoiceTtsStyle(nextSettings.voice_tts_style);
       setMessage("Подача голоса изменена до перезапуска.");
     } catch (error) {
+      setVoiceTtsStyle(previousValue);
       setMessage(error instanceof Error ? error.message : "Не удалось изменить подачу голоса.");
     } finally {
       setSaving(false);
@@ -2067,6 +2250,8 @@ function SettingsPage({
   };
 
   const changeVoiceExpression = async (value: string) => {
+    const previousValue = voiceExpressionLevel;
+    setVoiceExpressionLevel(value);
     setSaving(true);
     setMessage(null);
     try {
@@ -2075,6 +2260,7 @@ function SettingsPage({
       setVoiceExpressionLevel(nextSettings.voice_tts_expression_level);
       setMessage("Выразительность изменена до перезапуска.");
     } catch (error) {
+      setVoiceExpressionLevel(previousValue);
       setMessage(error instanceof Error ? error.message : "Не удалось изменить выразительность.");
     } finally {
       setSaving(false);
@@ -2108,26 +2294,19 @@ function SettingsPage({
     .filter(Boolean)
     .join(" · ");
   const settingsSectionMeta: Record<SettingsSection, { title: string; description: string }> = {
-    general: {
-      title: "Общее",
-      description: "Характер Iris и базовое поведение приложения.",
-    },
-    voice: {
-      title: "Голос",
-      description: "Звучание, темп и произношение речи.",
-    },
-    conversation: {
-      title: "Живой разговор",
-      description: "Когда Iris слушает, вступает в разговор и выражает эмоции.",
-    },
-    memory: {
-      title: "Память",
-      description: "Какие сведения Iris может сохранять между разговорами.",
-    },
-    system: {
-      title: "Система",
-      description: "Модели, резервные копии и состояние компонентов.",
-    },
+    behavior: { title: "Поведение", description: "Как Iris общается и ведёт себя в разговоре." },
+    conversation: { title: "Живой разговор", description: "Когда Iris слушает, вступает в разговор и выражает эмоции." },
+    avatar: { title: "Аватар", description: "Размещение, внешний вид и тестовые команды Iris." },
+    voice: { title: "Голос", description: "Звучание, темп и подача речи." },
+    "voice-devices": { title: "Устройства", description: "Микрофон, наушники и профиль записи." },
+    "voice-recognition": { title: "Распознавание", description: "Словари и параметры распознавания речи." },
+    "voice-advanced": { title: "Дополнительно", description: "Буфер воспроизведения и приватный сбор тестовых записей." },
+    memory: { title: "Память", description: "Какие сведения Iris может сохранять между разговорами." },
+    "system-overview": { title: "Система", description: "Состояние подключения и компонентов Iris." },
+    models: { title: "Модели", description: "Загрузка и обслуживание локальных моделей." },
+    backups: { title: "Резервные копии", description: "Копии памяти и настроек профиля." },
+    maintenance: { title: "Обслуживание данных", description: "Индексы, очистка и необратимые действия." },
+    events: { title: "Журнал событий", description: "Технические события и диагностика." },
   };
 
   const saveSttTerms = async () => {
@@ -2168,22 +2347,20 @@ function SettingsPage({
 
   return (
     <section className="panel settings-panel">
-      <nav className="settings-navigation" aria-label="Разделы настроек">
-        <SettingsSectionButton section="general" current={activeSection} label="Общее" icon={SlidersHorizontal} onClick={setActiveSection} />
-        <SettingsSectionButton section="voice" current={activeSection} label="Голос" icon={Volume2} onClick={setActiveSection} />
-        <SettingsSectionButton section="conversation" current={activeSection} label="Живой разговор" icon={MessageCircle} onClick={setActiveSection} />
-        <SettingsSectionButton section="memory" current={activeSection} label="Память" icon={Brain} onClick={setActiveSection} />
-        <SettingsSectionButton section="system" current={activeSection} label="Система" icon={MonitorCog} onClick={setActiveSection} />
-      </nav>
+      <SettingsNavigation current={activeSection} onChange={setActiveSection} />
 
       <div className="settings-content">
         <header className="settings-heading">
-          <span>Настройки Iris</span>
-          <h2>{activeSettingsMeta.title}</h2>
-          <p>{activeSettingsMeta.description}</p>
+          <div className="settings-heading-row">
+            <div>
+              <h2>{activeSettingsMeta.title}</h2>
+              <p>{activeSettingsMeta.description}</p>
+            </div>
+            <AutoSaveStatus status={autosave.status} onRetry={autosave.retry} />
+          </div>
         </header>
 
-        <div className="settings-grid system-status-grid" hidden={activeSection !== "system"}>
+        <div className="settings-grid system-status-grid" hidden={activeSection !== "system-overview"}>
           <InfoRow label="Ключ API" value={settings.api_key_configured ? "Настроен" : "Не настроен"} />
           <InfoRow label="Провайдер" value={settings.provider} />
           <InfoRow label="Модель" value={settings.model} />
@@ -2195,10 +2372,16 @@ function SettingsPage({
           />
         </div>
 
-        <div className="system-stack" hidden={activeSection !== "system"}>
-          <ModelManager />
-          <BackupControls />
-          <SystemMaintenance />
+        <div className="system-stack" hidden={!(["models", "backups", "maintenance", "events"] as SettingsSection[]).includes(activeSection)}>
+          <div hidden={activeSection !== "models"}><ModelManager /></div>
+          <div hidden={activeSection !== "backups"}><BackupControls /></div>
+          <div hidden={activeSection !== "maintenance"}><SystemMaintenance /></div>
+          <div hidden={activeSection !== "events"}>
+            <EventsPage events={events} onRefreshEvents={onRefreshEvents} compact />
+          </div>
+        </div>
+
+        <div hidden={activeSection !== "avatar"}>
           <AvatarControls
             avatarStatus={avatarStatus}
             overlay={avatarOverlay}
@@ -2208,23 +2391,21 @@ function SettingsPage({
             onOverlayChanged={onAvatarOverlayChanged}
             onSettingsChanged={onSettingsChanged}
           />
-          <details className="system-disclosure events-disclosure">
-            <summary>
-              <span><strong>Журнал событий</strong><small>Технические события и диагностика</small></span>
-              <ChevronDown size={18} aria-hidden="true" />
-            </summary>
-            <EventsPage events={events} onRefreshEvents={onRefreshEvents} compact />
-          </details>
         </div>
 
-        <div className="form-grid settings-form" hidden={activeSection === "system"}>
-          <fieldset className="settings-group" hidden={activeSection !== "general"}>
-          <legend>Общее</legend>
+        <div className="form-grid settings-form" hidden={activeSection === "avatar" || activeSection === "system-overview" || ["models", "backups", "maintenance", "events"].includes(activeSection)}>
+          <fieldset className="settings-group" hidden={activeSection !== "behavior"}>
+          <legend>Как Iris общается</legend>
           <label>
             Стиль общения
             <select
               value={personality}
-              onChange={(event) => setPersonality(event.target.value)}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                const previousValue = personality;
+                setPersonality(nextValue);
+                saveRuntimeSetting({ personality: nextValue }, () => setPersonality(previousValue));
+              }}
             >
               {settings.available_personalities.map((availablePersonality) => (
                 <option key={availablePersonality} value={availablePersonality}>
@@ -2236,12 +2417,17 @@ function SettingsPage({
         </fieldset>
 
         <fieldset className="settings-group" hidden={activeSection !== "voice"}>
-          <legend>Голос</legend>
+          <legend>Основное</legend>
           <label>
             Язык голосового ввода
             <select
               value={voiceLanguage}
-              onChange={(event) => setVoiceLanguage(event.target.value)}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                const previousValue = voiceLanguage;
+                setVoiceLanguage(nextValue);
+                saveRuntimeSetting({ voice_language: nextValue }, () => setVoiceLanguage(previousValue));
+              }}
             >
               {settings.available_voice_languages.map((availableLanguage) => (
                 <option key={availableLanguage} value={availableLanguage}>
@@ -2250,12 +2436,20 @@ function SettingsPage({
               ))}
             </select>
           </label>
+        </fieldset>
 
+        <fieldset className="settings-group" hidden={activeSection !== "voice-devices"}>
+          <legend>Устройства</legend>
           <label>
             Профиль микрофона
             <select
               value={voiceMicrophoneProfile}
-              onChange={(event) => setVoiceMicrophoneProfile(event.target.value as MicrophoneProfile)}
+              onChange={(event) => {
+                const nextValue = event.target.value as MicrophoneProfile;
+                const previousValue = voiceMicrophoneProfile;
+                setVoiceMicrophoneProfile(nextValue);
+                saveRuntimeSetting({ voice_microphone_profile: nextValue }, () => setVoiceMicrophoneProfile(previousValue));
+              }}
             >
               <option value="balanced">Сбалансированный — рекомендуется</option>
               <option value="headset">Гарнитура</option>
@@ -2268,7 +2462,12 @@ function SettingsPage({
             Источник входа (микрофон)
             <select
               value={voiceInputDeviceId}
-              onChange={(event) => setVoiceInputDeviceId(event.target.value)}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                const previousValue = voiceInputDeviceId;
+                setVoiceInputDeviceId(nextValue);
+                saveRuntimeSetting({ voice_input_device_id: nextValue }, () => setVoiceInputDeviceId(previousValue));
+              }}
               disabled={saving}
             >
               <option value="">Системный по умолчанию</option>
@@ -2285,7 +2484,12 @@ function SettingsPage({
             Источник вывода (наушники или колонки)
             <select
               value={voiceOutputDeviceId}
-              onChange={(event) => setVoiceOutputDeviceId(event.target.value)}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                const previousValue = voiceOutputDeviceId;
+                setVoiceOutputDeviceId(nextValue);
+                saveRuntimeSetting({ voice_output_device_id: nextValue }, () => setVoiceOutputDeviceId(previousValue));
+              }}
               disabled={saving}
             >
               <option value="">Системный по умолчанию</option>
@@ -2314,12 +2518,20 @@ function SettingsPage({
             </button>
             {audioDevicesMessage && <small role="status">{audioDevicesMessage}</small>}
           </div>
+        </fieldset>
 
+        <fieldset className="settings-group" hidden={activeSection !== "voice"}>
+          <legend>Синтез речи</legend>
           <label>
             Голос {ttsProviderLabel}
             <select
               value={voiceTtsVoice}
-              onChange={(event) => setVoiceTtsVoice(event.target.value)}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                const previousValue = voiceTtsVoice;
+                setVoiceTtsVoice(nextValue);
+                saveRuntimeSetting({ voice_tts_voice: nextValue }, () => setVoiceTtsVoice(previousValue));
+              }}
             >
               {settings.available_tts_voices.map((availableVoice) => (
                 <option key={availableVoice} value={availableVoice}>
@@ -2337,7 +2549,12 @@ function SettingsPage({
               step="0.05"
               type="range"
               value={voicePlaybackRate}
-              onChange={(event) => setVoicePlaybackRate(Number(event.target.value))}
+              onChange={(event) => {
+                const nextValue = Number(event.target.value);
+                const previousValue = voicePlaybackRate;
+                setVoicePlaybackRate(nextValue);
+                scheduleRuntimeSetting("voice", { voice_playback_rate: nextValue }, () => setVoicePlaybackRate(previousValue));
+              }}
             />
           </label>
 
@@ -2371,6 +2588,10 @@ function SettingsPage({
               {" · активен"}
             </strong>
           </div>
+        </fieldset>
+
+        <fieldset className="settings-group" hidden={activeSection !== "voice-recognition"}>
+          <legend>Детектор речи</legend>
           <div className="readonly-setting">
             <span>Детектор речи</span>
             <strong>
@@ -2382,7 +2603,7 @@ function SettingsPage({
           </div>
         </fieldset>
 
-        <fieldset className="settings-group" hidden={activeSection !== "voice"}>
+        <fieldset className="settings-group" hidden={activeSection !== "voice-recognition"}>
           <legend>Словарь распознавания</legend>
           <label>
             Канонический термин = точный вариант | точный вариант
@@ -2400,7 +2621,7 @@ function SettingsPage({
           </button>
         </fieldset>
 
-        <fieldset className="settings-group" hidden={activeSection !== "voice"}>
+        <fieldset className="settings-group" hidden={activeSection !== "voice-recognition"}>
           <legend>Словарь произношений</legend>
           <label>
             Термин = как произносить
@@ -2421,7 +2642,7 @@ function SettingsPage({
           </button>
         </fieldset>
 
-        <fieldset className="settings-group" hidden={activeSection !== "voice"}>
+        <fieldset className="settings-group" hidden={activeSection !== "voice-advanced"}>
           <legend>Дополнительно</legend>
           <label>
             Сегментов в буфере
@@ -2431,7 +2652,12 @@ function SettingsPage({
               step="1"
               type="number"
               value={prebufferSegments}
-              onChange={(event) => setPrebufferSegments(Number(event.target.value))}
+              onChange={(event) => {
+                const nextValue = Number(event.target.value);
+                const previousValue = prebufferSegments;
+                setPrebufferSegments(nextValue);
+                scheduleRuntimeSetting("voice-advanced", { voice_live_playback_prebuffer_segments: nextValue }, () => setPrebufferSegments(previousValue));
+              }}
             />
           </label>
 
@@ -2443,7 +2669,12 @@ function SettingsPage({
               step="50"
               type="number"
               value={prebufferMs}
-              onChange={(event) => setPrebufferMs(Number(event.target.value))}
+              onChange={(event) => {
+                const nextValue = Number(event.target.value);
+                const previousValue = prebufferMs;
+                setPrebufferMs(nextValue);
+                scheduleRuntimeSetting("voice-advanced", { voice_live_playback_prebuffer_ms: nextValue }, () => setPrebufferMs(previousValue));
+              }}
             />
           </label>
           <button
@@ -2457,20 +2688,17 @@ function SettingsPage({
           </button>
         </fieldset>
 
-        {showSttCapture && activeSection === "voice" && (
+        {showSttCapture && activeSection === "voice-advanced" && (
           <GuidedSttCapture profile={voiceMicrophoneProfile} inputDeviceId={voiceInputDeviceId} />
         )}
 
         <fieldset className="settings-group live-conversation-settings" hidden={activeSection !== "conversation"}>
           <legend>Живой разговор</legend>
-          <label className="settings-checkbox">
-            <input
-              type="checkbox"
-              checked={liveSettings.live_conversation_enabled}
-              onChange={(event) => updateLiveSetting("live_conversation_enabled", event.target.checked)}
-            />
-            Включить отдельный режим «Живой разговор»
-          </label>
+          <SettingsSwitch
+            checked={liveSettings.live_conversation_enabled}
+            label="Включить отдельный режим «Живой разговор»"
+            onChange={(checked) => updateLiveSetting("live_conversation_enabled", checked)}
+          />
           <small>
             Текстовый чат, голосовые сообщения и «Свободные руки» сохраняют прежнее поведение.
           </small>
@@ -2628,21 +2856,31 @@ function SettingsPage({
           <legend>Память</legend>
           <label>
             Режим сохранения
-            <select value={memoryMode} onChange={(event) => setMemoryMode(event.target.value)}>
+            <select
+              value={memoryMode}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                const previousValue = memoryMode;
+                setMemoryMode(nextValue);
+                saveRuntimeSetting({ memory_mode: nextValue }, () => setMemoryMode(previousValue));
+              }}
+            >
               <option value="off">Не сохранять</option>
               <option value="balanced">Умный — только важные устойчивые факты</option>
               <option value="automatic">Автоматический — все обычные факты</option>
             </select>
           </label>
-          <label>
-            <input type="checkbox" checked={memoryIncognito} onChange={(event) => setMemoryIncognito(event.target.checked)} />
-            Не сохранять текущий разговор (инкогнито)
-          </label>
+          <SettingsSwitch
+            checked={memoryIncognito}
+            label="Не сохранять текущий разговор"
+            description="Режим инкогнито не добавляет новые данные в долгосрочную память."
+            onChange={(checked) => {
+              const previousValue = memoryIncognito;
+              setMemoryIncognito(checked);
+              saveRuntimeSetting({ memory_incognito: checked }, () => setMemoryIncognito(previousValue));
+            }}
+          />
         </fieldset>
-
-          <button className="primary-button settings-save" onClick={saveSettings} disabled={saving}>
-            {saving ? "Сохраняем…" : "Сохранить изменения"}
-          </button>
         </div>
 
         {message && <div className="notice" role="status">{message}</div>}
@@ -2651,27 +2889,139 @@ function SettingsPage({
   );
 }
 
+const SETTINGS_NAVIGATION: Array<{
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  directSection?: SettingsSection;
+  items: Array<{ section: SettingsSection; label: string }>;
+}> = [
+  {
+    id: "behavior",
+    label: "Поведение",
+    icon: SlidersHorizontal,
+    items: [
+      { section: "behavior", label: "Стиль общения" },
+      { section: "conversation", label: "Живой разговор" },
+    ],
+  },
+  {
+    id: "avatar",
+    label: "Аватар",
+    icon: Settings,
+    directSection: "avatar",
+    items: [],
+  },
+  {
+    id: "voice",
+    label: "Голос",
+    icon: Volume2,
+    items: [
+      { section: "voice", label: "Основное" },
+      { section: "voice-devices", label: "Устройства" },
+      { section: "voice-recognition", label: "Распознавание" },
+      { section: "voice-advanced", label: "Дополнительно" },
+    ],
+  },
+  {
+    id: "memory",
+    label: "Память",
+    icon: Brain,
+    directSection: "memory",
+    items: [],
+  },
+  {
+    id: "system",
+    label: "Система",
+    icon: MonitorCog,
+    items: [
+      { section: "system-overview", label: "Обзор" },
+      { section: "models", label: "Модели" },
+      { section: "backups", label: "Резервные копии" },
+      { section: "maintenance", label: "Обслуживание данных" },
+      { section: "events", label: "Журнал событий" },
+    ],
+  },
+];
+
+function SettingsNavigation({ current, onChange }: { current: SettingsSection; onChange: (section: SettingsSection) => void }) {
+  const activeGroup = SETTINGS_NAVIGATION.find((group) => group.directSection === current || group.items.some((item) => item.section === current))?.id ?? "behavior";
+  const [expanded, setExpanded] = useState<Record<string, boolean>>(() => ({
+    behavior: true,
+    voice: true,
+    system: false,
+  }));
+
+  useEffect(() => {
+    setExpanded((value) => ({ ...value, [activeGroup]: true }));
+  }, [activeGroup]);
+
+  return (
+    <nav className="settings-navigation" aria-label="Разделы настроек">
+      {SETTINGS_NAVIGATION.map((group) => {
+        if (group.directSection) {
+          return (
+            <button
+              key={group.id}
+              type="button"
+              className={`settings-nav-direct${current === group.directSection ? " is-active" : ""}`}
+              aria-current={current === group.directSection ? "page" : undefined}
+              onClick={() => onChange(group.directSection!)}
+            >
+              <group.icon size={17} aria-hidden="true" />
+              <span>{group.label}</span>
+            </button>
+          );
+        }
+        const isExpanded = expanded[group.id] ?? false;
+        const isActive = group.id === activeGroup;
+        const childrenId = `settings-nav-children-${group.id}`;
+        return (
+          <div className={`settings-nav-group${isActive ? " is-active" : ""}`} key={group.id}>
+            <button
+              type="button"
+              className="settings-nav-group-button"
+              aria-expanded={isExpanded}
+              aria-controls={childrenId}
+              onClick={() => {
+                setExpanded((value) => ({ ...value, [group.id]: !isExpanded }));
+              }}
+            >
+              <group.icon size={17} aria-hidden="true" />
+              <span>{group.label}</span>
+              <ChevronDown className="settings-nav-chevron" size={15} aria-hidden="true" />
+            </button>
+            <div id={childrenId} className="settings-nav-children" hidden={!isExpanded}>
+              {group.items.map((item) => (
+                <SettingsSectionButton key={item.section} section={item.section} current={current} label={item.label} onClick={onChange} />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </nav>
+  );
+}
+
 function SettingsSectionButton({
   section,
   current,
   label,
-  icon: Icon,
   onClick,
 }: {
   section: SettingsSection;
   current: SettingsSection;
   label: string;
-  icon: LucideIcon;
   onClick: (section: SettingsSection) => void;
 }) {
   return (
     <button
+      type="button"
       className={`settings-nav-button${section === current ? " is-active" : ""}`}
       aria-current={section === current ? "page" : undefined}
       onClick={() => onClick(section)}
     >
-      <Icon size={17} aria-hidden="true" />
-      {label}
+      <span>{label}</span>
     </button>
   );
 }
@@ -2908,14 +3258,9 @@ function AvatarControls({
   };
 
   return (
-    <details className="system-disclosure">
-      <summary>
-        <span><strong>Аватар</strong><small>{enabled ? `${avatarStatus?.client_count ?? 0} подключено` : "Интеграция отключена"}</small></span>
-        <ChevronDown size={18} aria-hidden="true" />
-      </summary>
-      <section className="avatar-controls" aria-label="Управление аватаром">
-      <div className="disclosure-toolbar">
-        <span>{enabled ? "Размещение, отображение и тестовые команды" : "Подключите Unity-аватар, чтобы отправлять команды"}</span>
+    <section className="avatar-controls" aria-label="Управление аватаром">
+      <div className="avatar-toolbar">
+        <span>{enabled ? `${avatarStatus?.client_count ?? 0} подключено` : "Интеграция отключена"}</span>
         <button className="icon-button" onClick={() => void onRefresh()} disabled={busy} aria-label="Обновить статус аватара" title="Обновить статус аватара"><RefreshCw size={16} /></button>
       </div>
       <fieldset className="avatar-placement" disabled={busy}>
@@ -2945,29 +3290,20 @@ function AvatarControls({
         </div>
       </details>
       <div className="avatar-options">
-        <label>
-          <input
-            type="checkbox"
-            checked={placement === "in_app" ? inAppVisible : (overlay?.visible ?? true)}
-            disabled={!enabled || busy}
-            onChange={(event) => void (placement === "in_app"
-              ? updateInAppVisibility(event.target.checked)
-              : updateOverlay({ visible: event.target.checked }))}
-          />
-          {placement === "in_app" ? "Показывать в диалоге" : "Показывать оверлей"}
-        </label>
+        <SettingsSwitch
+          checked={placement === "in_app" ? inAppVisible : (overlay?.visible ?? true)}
+          label={placement === "in_app" ? "Показывать в диалоге" : "Показывать оверлей"}
+          disabled={!enabled || busy}
+          onChange={(checked) => void (placement === "in_app" ? updateInAppVisibility(checked) : updateOverlay({ visible: checked }))}
+        />
         {placement === "desktop_overlay" && <>
-          <label>
-            <input type="checkbox" checked={overlay?.always_on_top ?? true} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ always_on_top: event.target.checked })} />
-            Поверх окон
-          </label>
-          <label>
-            <input type="checkbox" checked={overlay?.locked ?? true} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ locked: event.target.checked })} />
-            Заблокировать клики
-          </label>
+          <SettingsSwitch checked={overlay?.always_on_top ?? true} label="Поверх окон" disabled={!enabled || busy} onChange={(checked) => void updateOverlay({ always_on_top: checked })} />
+          <SettingsSwitch checked={overlay?.locked ?? true} label="Заблокировать клики" disabled={!enabled || busy} onChange={(checked) => void updateOverlay({ locked: checked })} />
         </>}
       </div>
-      <div className="avatar-test-grid">
+      <details className="avatar-test-disclosure">
+        <summary>Тест эмоций и жестов <ChevronDown size={16} aria-hidden="true" /></summary>
+        <div className="avatar-test-grid">
         {placement === "desktop_overlay" && <label>
           Масштаб оверлея {overlay?.scale?.toFixed(1) ?? "1.0"}
           <input min="0.5" max="2" step="0.1" type="range" value={overlay?.scale ?? 1} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ scale: Number(event.target.value) })} />
@@ -2992,16 +3328,16 @@ function AvatarControls({
           Интенсивность движения {motionIntensity.toFixed(1)}
           <input min="0" max="1" step="0.1" type="range" value={motionIntensity} onChange={(event) => setMotionIntensity(Number(event.target.value))} disabled={!enabled || busy} />
         </label>
-      </div>
+        </div>
       <div className="avatar-test-actions">
         <button className="primary-button" onClick={() => void run(() => sendAvatarTestPhrase({ text: phrase, emotion }), "Тестовая фраза отправлена.")} disabled={!enabled || busy || !phrase.trim()}>Отправить фразу</button>
         <button className="secondary" onClick={() => void run(() => sendAvatarTestEmotion({ emotion, intensity: 1 }), "Эмоция отправлена.")} disabled={!enabled || busy}>Отправить эмоцию</button>
         <button className="secondary" onClick={() => void run(() => sendAvatarTestGesture({ gesture, intensity: motionIntensity, interrupt: true }), "Тестовый жест отправлен.")} disabled={!enabled || busy}>Отправить жест</button>
         <button className="secondary" onClick={() => void run(stopAvatar, "Движение сброшено.")} disabled={!enabled || busy}>Сбросить движение</button>
-      </div>
+        </div>
+      </details>
       {message && <div className="notice" role="status">{message}</div>}
-      </section>
-    </details>
+    </section>
   );
 }
 
