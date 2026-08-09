@@ -3,7 +3,6 @@ import time
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.llm.base import ChatMessage, LLMProvider, LLMResponse
@@ -20,9 +19,6 @@ from apps.backend.app.voice.delivery import (
     VoiceDirective,
     clean_voice_directives,
 )
-from apps.backend.main import app
-from apps.backend.app.api.routes import voice as voice_route
-from apps.backend.app.voice.service import VoiceService
 
 
 class StreamingProvider(LLMProvider):
@@ -395,48 +391,24 @@ def test_local_intent(text: str, expected: str) -> None:
     assert CharacterAgent.classify_intent(text) == expected
 
 
-def test_live_rest_and_websocket_stream_protocol(monkeypatch, tmp_path: Path) -> None:
-    class RouteStreamingProvider(StreamingProvider):
-        def __init__(self, settings, model=None):
-            pass
+def test_live_input_uses_only_protocol_v3() -> None:
+    from fastapi.testclient import TestClient
 
-    settings = app.state.settings
-    previous_service = app.state.voice_service
-    previous_manager = app.state.voice_session_manager
-    previous_stt = settings.voice_stt_provider
-    previous_tts = settings.voice_tts_provider
-    previous_audio_dir = settings.voice_audio_dir
-    settings.voice_stt_provider = "mock"
-    settings.voice_tts_provider = "mock"
-    settings.voice_audio_dir = str(tmp_path / "audio")
-    app.state.voice_service = VoiceService(settings)
-    app.state.voice_session_manager = VoiceSessionManager(app.state.voice_service.tts_provider, tts_timeout=2)
-    monkeypatch.setattr(voice_route, "DeepSeekProvider", RouteStreamingProvider)
-    try:
-        with TestClient(app) as client:
-            with client.websocket_connect("/ws/voice/live-test?version=1") as socket:
-                response = client.post(
-                    "/voice/chat",
-                    data={"session_id": "live-test", "language": "ru", "live": "true"},
-                    files={"audio": ("voice.webm", b"test-audio", "audio/webm")},
-                )
-                assert response.status_code == 200
-                body = response.json()
-                assert body["status"] == "streaming"
-                assert body["transcript"] == "Тестовое голосовое сообщение"
-                events = [socket.receive_json() for _ in range(4)]
-                event_types = [event["type"] for event in events]
-                assert event_types[:3] == [
-                    "voice.utterance.started", "voice.metadata", "voice.text.delta",
-                ]
-                # The relevance guard may release a short safe reply in one
-                # buffered delta, followed immediately by completion.
-                assert event_types[3] in {"voice.text.delta", "tts.segment.started", "voice.text.completed"}
-                assert all(event["utterance_id"] == body["utterance_id"] for event in events)
-    finally:
-        app.state.voice_service.clear_audio_dir()
-        app.state.voice_service = previous_service
-        app.state.voice_session_manager = previous_manager
-        settings.voice_stt_provider = previous_stt
-        settings.voice_tts_provider = previous_tts
-        settings.voice_audio_dir = previous_audio_dir
+    from apps.backend.main import app
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/voice-input/live-test?version=3") as socket:
+            socket.send_json({
+                "type": "voice.input.start",
+                "protocol_version": 3,
+                "sample_rate": 16000,
+                "channels": 1,
+                "format": "pcm_s16le",
+                "language": "ru",
+                "capture_profile": "live",
+            })
+            ready = socket.receive_json()
+            assert ready["type"] == "voice.input.ready"
+            assert ready["protocol_version"] == 3
+            socket.send_bytes(b"\0\0" * 512)
+            socket.send_json({"type": "voice.input.stop"})

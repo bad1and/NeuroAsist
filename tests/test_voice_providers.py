@@ -14,14 +14,19 @@ import numpy as np
 import pytest
 
 from apps.backend.app.core.config import Settings
+from apps.backend.app.voice.audio import Pcm16Audio
 from apps.backend.app.voice.providers import (
     AudioChunk,
+    FallbackSTTProvider,
     FasterWhisperSTTProvider,
     GigaAMSTTProvider,
+    Qwen3ASRProvider,
     MockTTSProvider,
     SileroTTSProvider,
     TTSProvider,
     TTSRequest,
+    STTProvider,
+    STTResult,
     configure_cmudict,
     normalize_russian_tts_text,
     prepare_english_tts_text,
@@ -200,6 +205,65 @@ def test_gigaam_auto_falls_back_to_cpu_during_load(monkeypatch: pytest.MonkeyPat
 
     assert devices == ["cuda", "cpu"]
     assert provider._selected_device == "cpu"
+
+
+def test_qwen3_asr_provider_is_lazy_and_uses_russian_language_hint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FakeModel:
+        def transcribe(self, **kwargs):
+            calls.append(kwargs)
+            return [SimpleNamespace(language="Russian", text="проверка qwen")]
+
+    class FakeQwen:
+        @staticmethod
+        def from_pretrained(model_name: str, **kwargs):
+            calls.append({"model": model_name, **kwargs})
+            return FakeModel()
+
+    monkeypatch.setitem(sys.modules, "qwen_asr", SimpleNamespace(Qwen3ASRModel=FakeQwen))
+    audio_path = tmp_path / "input.wav"
+    audio_path.write_bytes(b"fake")
+    provider = Qwen3ASRProvider("Qwen/Qwen3-ASR-0.6B", "cpu")
+
+    result = asyncio.run(provider.transcribe(audio_path, "ru"))
+
+    assert result.text == "проверка qwen"
+    assert result.provider == "qwen3_asr"
+    assert result.model == "Qwen/Qwen3-ASR-0.6B"
+    assert calls[0]["model"] == "Qwen/Qwen3-ASR-0.6B"
+    assert calls[1] == {"audio": str(audio_path), "language": "Russian"}
+
+
+def test_stt_fallback_runs_only_for_low_snr() -> None:
+    class Primary(STTProvider):
+        async def transcribe(self, audio_path: Path, language: str) -> STTResult:
+            return STTResult("первичный", language, 1, "primary")
+
+        async def transcribe_pcm16(self, audio: Pcm16Audio, language: str) -> STTResult:
+            return STTResult("первичный", language, 1, "primary")
+
+    class Secondary(STTProvider):
+        async def transcribe(self, audio_path: Path, language: str) -> STTResult:
+            return STTResult("вторичный", language, 1, "secondary")
+
+        async def transcribe_pcm16(self, audio: Pcm16Audio, language: str) -> STTResult:
+            return STTResult("вторичный", language, 1, "secondary")
+
+    provider = FallbackSTTProvider(Primary(), Secondary(), min_rms=.01)
+    loud = Pcm16Audio((np.full(1600, 3000, dtype="<i2")).tobytes())
+    quiet = Pcm16Audio((np.full(1600, 100, dtype="<i2")).tobytes())
+
+    loud_result = asyncio.run(provider.transcribe_pcm16(loud, "ru"))
+    quiet_result = asyncio.run(provider.transcribe_pcm16(quiet, "ru"))
+
+    assert loud_result.provider == "primary"
+    assert quiet_result.provider == "secondary"
+    assert quiet_result.fallback is True
+    assert quiet_result.fallback_reason == "low_snr"
 
 
 def test_gigaam_long_audio_split_preserves_pcm_and_stays_under_limit() -> None:

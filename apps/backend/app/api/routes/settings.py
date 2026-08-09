@@ -191,7 +191,9 @@ async def patch_runtime_settings(
         runtime_settings.reflection_min_significance = round(payload.reflection_min_significance, 2)
 
     if payload.live_conversation_enabled is not None:
-        runtime_settings.live_conversation_enabled = payload.live_conversation_enabled
+        # Kept as a compatibility field for old clients; live is the only
+        # supported voice mode and therefore cannot be disabled here.
+        runtime_settings.live_conversation_enabled = True
 
     if payload.avatar_placement is not None:
         if payload.avatar_placement not in AVATAR_PLACEMENTS:

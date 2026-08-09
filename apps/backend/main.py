@@ -376,16 +376,12 @@ def create_app() -> FastAPI:
         language,
         connection,
     ) -> None:
-        if conversation_service is not None and connection.mode == "live_conversation":
+        if conversation_service is not None:
             await conversation_service.phase(session_id, ConversationPhase.TRANSCRIBING, connection.send)
         stt_result = await voice_service.transcribe_pcm16(audio, language)
         transcript = stt_result.text.strip()
         if not transcript:
-            if (
-                conversation_service is not None
-                and connection.version == 2
-                and connection.mode == "live_conversation"
-            ):
+            if conversation_service is not None:
                 await connection.send({
                     "type": "conversation.noise_ignored",
                     "reason": "empty_transcript",
@@ -409,12 +405,10 @@ def create_app() -> FastAPI:
         )
         utterance_id = __import__("uuid").uuid4().hex
         voice = voice_service.resolve_tts_voice(language, runtime_settings.voice_tts_voice)
-        if (
-            conversation_service is not None
-            and connection.version == 2
-            and connection.mode == "live_conversation"
-            and runtime_settings.live_conversation_enabled
-        ):
+        stt_uncertain = stt_result.fallback or (
+            stt_result.confidence is not None and stt_result.confidence < 0.6
+        )
+        if conversation_service is not None:
             result = await conversation_service.ingest_observation(
                 session_id=session_id,
                 transcript=stt_result.raw_text or stt_result.text,
@@ -437,6 +431,7 @@ def create_app() -> FastAPI:
                     if runtime_settings.live_conversation_participant_mode == "group"
                     else 0.9
                 ),
+                stt_uncertain=stt_uncertain,
             )
             if result.generation != conversation_service.session(session_id).generation:
                 return
@@ -445,6 +440,12 @@ def create_app() -> FastAPI:
                 "transcript": stt_result.text,
                 "raw_transcript": stt_result.raw_text,
                 "corrections": list(stt_result.corrections),
+                "provider": stt_result.provider,
+                "model": stt_result.model,
+                "confidence": stt_result.confidence,
+                "fallback": stt_result.fallback,
+                "fallback_reason": stt_result.fallback_reason,
+                "stt_uncertain": stt_uncertain,
                 "utterance_id": result.utterance_id,
                 "generation": result.generation,
                 "observation_only": result.decision.action not in {
@@ -477,6 +478,11 @@ def create_app() -> FastAPI:
             "transcript": stt_result.text,
             "raw_transcript": stt_result.raw_text,
             "corrections": list(stt_result.corrections),
+            "provider": stt_result.provider,
+            "model": stt_result.model,
+            "confidence": stt_result.confidence,
+            "fallback": stt_result.fallback,
+            "fallback_reason": stt_result.fallback_reason,
             "utterance_id": utterance_id,
         })
         await voice_session_manager.start(
@@ -507,11 +513,11 @@ def create_app() -> FastAPI:
     # whether the resulting candidate is a complete turn. Older .env files
     # used very short values, so the runtime safeguards existing installs too.
     pause_profile = {
-        "short": (600, 650, 900, 1500),
-        "natural": (720, 750, 1100, 2500),
-        "patient": (900, 1100, 1500, 4000),
-    }.get(runtime_settings.live_conversation_pause_tolerance, (720, 750, 1100, 2500))
-    hands_free_end_silence_ms, live_end_silence_ms, live_fallback_end_silence_ms, max_turn_silence_ms = pause_profile
+        "short": (650, 900, 1500),
+        "natural": (750, 1100, 2500),
+        "patient": (900, 1500, 4000),
+    }.get(runtime_settings.live_conversation_pause_tolerance, (750, 1100, 2500))
+    live_end_silence_ms, live_fallback_end_silence_ms, max_turn_silence_ms = pause_profile
 
     voice_input_session_manager = VoiceInputSessionManager(
         voice_service, process_pcm_utterance, pcm_speech_started,
@@ -527,7 +533,6 @@ def create_app() -> FastAPI:
         # older .env still specifies the former 500 ms default.
         pre_roll_ms=max(settings.voice_vad_pre_roll_ms, 900),
         post_roll_ms=settings.voice_vad_post_roll_ms,
-        end_silence_ms=max(settings.voice_vad_end_silence_ms, hands_free_end_silence_ms),
         live_end_silence_ms=max(settings.voice_vad_live_end_silence_ms, live_end_silence_ms),
         live_fallback_end_silence_ms=max(
             settings.voice_vad_live_fallback_end_silence_ms,

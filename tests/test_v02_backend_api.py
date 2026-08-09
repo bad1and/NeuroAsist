@@ -79,7 +79,7 @@ def test_public_settings_does_not_return_api_key(client: TestClient) -> None:
     assert 0 <= body["voice_live_playback_prebuffer_ms"] <= 1500
     assert body["available_voice_languages"] == ["auto", "ru", "en"]
     assert body["available_tts_voices"]
-    assert body["live_conversation_enabled"] is False
+    assert body["live_conversation_enabled"] is True
     assert body["live_conversation_participant_mode"] == "one_to_one"
     assert "api_key" not in body
     assert "DEEPSEEK_API_KEY" not in response.text

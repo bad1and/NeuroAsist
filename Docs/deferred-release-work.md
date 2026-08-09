@@ -39,7 +39,7 @@
 1. Python virtual environment `.venv` с зависимостями проекта.
 2. Node dependencies для web/desktop части.
 3. DeepSeek API key — при запуске Tauri он вводится в первом окне и хранится в Windows Credential Manager; для development-режима допускается `.env`.
-4. Для hands-free voice: в **Settings → Models** скачать Silero VAD. Для STT/TTS могут потребоваться их локальные runtime/model зависимости, заданные текущей конфигурацией.
+4. Для Live voice: в **Settings → Models** скачать Silero VAD. Для STT/TTS могут потребоваться их локальные runtime/model зависимости, заданные текущей конфигурацией.
 
 NSIS, clean VM и оптимизированный installer для локального запуска сейчас **не требуются**.
 
@@ -53,4 +53,4 @@ npm --prefix apps/desktop run dev
 
 На первом запуске появится окно Iris. Вставь в него DeepSeek API key и нажми **Save and continue**. Приложение перезапустит свой локальный backend автоматически. Остановить приложение можно, закрыв окно/выйдя через tray или нажав `Ctrl+C` в PowerShell.
 
-Для режима hands-free разреши доступ к микрофону в окне приложения и в **Settings → Models** нажми **Download** у Silero VAD. Первое использование STT/TTS может занять больше времени, потому что локальные модели подготавливаются на компьютере.
+Для режима Live разреши доступ к микрофону в окне приложения и в **Settings → Models** нажми **Download** у Silero VAD. Первое использование STT/TTS может занять больше времени, потому что локальные модели подготавливаются на компьютере.

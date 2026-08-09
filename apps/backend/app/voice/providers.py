@@ -2,6 +2,7 @@ import asyncio
 import array
 import io
 import logging
+import math
 import os
 import re
 import subprocess
@@ -10,7 +11,7 @@ import threading
 import time
 import warnings
 import wave
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -41,6 +42,9 @@ class STTResult:
     model: str | None = None
     raw_text: str | None = None
     corrections: tuple[dict[str, object], ...] = ()
+    confidence: float | None = None
+    fallback: bool = False
+    fallback_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -128,6 +132,7 @@ class MockSTTProvider(STTProvider):
             duration_ms=0,
             provider="mock",
             model="mock",
+            confidence=1.0,
         )
 
 
@@ -260,7 +265,18 @@ class FasterWhisperSTTProvider(STTProvider):
             compression_ratio_threshold=2.4,
             log_prob_threshold=-1.0,
         )
-        text = " ".join(segment.text.strip() for segment in segments).strip()
+        segment_list = list(segments)
+        text = " ".join(segment.text.strip() for segment in segment_list).strip()
+        confidence_values: list[float] = []
+        for segment in segment_list:
+            avg_logprob = getattr(segment, "avg_logprob", None)
+            no_speech_prob = getattr(segment, "no_speech_prob", 0.0)
+            if avg_logprob is None:
+                continue
+            confidence_values.append(
+                max(0.0, min(1.0, math.exp(max(-10.0, min(0.0, float(avg_logprob))))))
+                * max(0.0, min(1.0, 1.0 - float(no_speech_prob)))
+            )
         detected_language = getattr(info, "language", None) or selected_language or "auto"
         return STTResult(
             text=text,
@@ -268,6 +284,7 @@ class FasterWhisperSTTProvider(STTProvider):
             duration_ms=int((time.perf_counter() - started) * 1000),
             provider="faster_whisper",
             model=self._model_name,
+            confidence=(sum(confidence_values) / len(confidence_values)) if confidence_values else None,
         )
 
     def _initial_prompt(self, language: str | None) -> str | None:
@@ -291,6 +308,170 @@ class FasterWhisperSTTProvider(STTProvider):
             "library",
         )
         return any(marker in message for marker in cuda_markers)
+
+
+class Qwen3ASRProvider(STTProvider):
+    """Optional local Qwen3-ASR adapter used for Russian benchmark/fallback runs.
+
+    ``qwen-asr`` is intentionally imported lazily. The default installation
+    stays lightweight, while a machine with the optional package can select
+    ``qwen3_asr`` through ``VOICE_STT_PROVIDER`` or the fallback setting.
+    """
+
+    _LANGUAGES = {"ru": "Russian", "en": "English"}
+
+    def __init__(self, model_name: str, device: str) -> None:
+        if device not in {"cpu", "cuda", "auto"}:
+            raise ValueError("VOICE_STT_DEVICE must be one of: cpu, cuda, auto")
+        self._model_name = (
+            model_name
+            if model_name and model_name not in {"v3_rnnt", "v3_e2e_rnnt"}
+            else "Qwen/Qwen3-ASR-1.7B"
+        )
+        self._device = device
+        self._model = None
+        self._selected_device: str | None = None
+        self._load_lock = threading.Lock()
+
+    async def transcribe(self, audio_path: Path, language: str) -> STTResult:
+        started = time.perf_counter()
+        return await asyncio.to_thread(self._transcribe_sync, audio_path, language, started)
+
+    async def preload(self) -> None:
+        await asyncio.to_thread(self._ensure_model)
+
+    @property
+    def metadata(self) -> dict[str, object]:
+        return {
+            "provider": "qwen3_asr",
+            "model": self._model_name,
+            "device": self._selected_device or self._device,
+        }
+
+    def _ensure_model(self):
+        try:
+            import torch
+            from qwen_asr import Qwen3ASRModel
+        except ImportError as exc:
+            raise RuntimeError(
+                "Qwen3-ASR is not installed; install the optional qwen-asr package"
+            ) from exc
+
+        if self._model is not None:
+            return self._model
+        with self._load_lock:
+            if self._model is not None:
+                return self._model
+            selected_device = self._device
+            if selected_device == "auto":
+                selected_device = "cuda:0" if torch.cuda.is_available() else "cpu"
+            elif selected_device == "cuda":
+                selected_device = "cuda:0"
+            dtype = torch.bfloat16 if selected_device.startswith("cuda") else torch.float32
+            self._model = Qwen3ASRModel.from_pretrained(
+                self._model_name,
+                dtype=dtype,
+                device_map=selected_device,
+                max_inference_batch_size=1,
+                max_new_tokens=256,
+            )
+            self._selected_device = selected_device
+        return self._model
+
+    def _transcribe_sync(self, audio_path: Path, language: str, started: float) -> STTResult:
+        model = self._ensure_model()
+        selected_language = self._LANGUAGES.get(language)
+        results = model.transcribe(audio=str(audio_path), language=selected_language)
+        first = results[0] if isinstance(results, (list, tuple)) else results
+        text = str(getattr(first, "text", first)).strip()
+        detected_language = str(getattr(first, "language", None) or language or "auto")
+        return STTResult(
+            text=text,
+            language=detected_language,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            provider="qwen3_asr",
+            model=self._model_name,
+        )
+
+
+class FallbackSTTProvider(STTProvider):
+    """Run a configured secondary model only when the primary looks uncertain."""
+
+    def __init__(
+        self,
+        primary: STTProvider,
+        fallback: STTProvider,
+        *,
+        confidence_threshold: float = 0.60,
+        min_rms: float = 0.008,
+    ) -> None:
+        self.primary = primary
+        self.fallback = fallback
+        self.confidence_threshold = confidence_threshold
+        self.min_rms = min_rms
+
+    async def preload(self) -> None:
+        # Keep the secondary model cold until it is actually needed. This is
+        # important for a live session's startup time and resident memory.
+        await self.primary.preload()
+
+    async def transcribe(self, audio_path: Path, language: str) -> STTResult:
+        primary_result = await self.primary.transcribe(audio_path, language)
+        reason = self._fallback_reason(primary_result, None)
+        if reason is None:
+            return primary_result
+        return await self._run_fallback(primary_result, audio_path, language, reason)
+
+    async def transcribe_pcm16(self, audio: Pcm16Audio, language: str) -> STTResult:
+        primary_result = await self.primary.transcribe_pcm16(audio, language)
+        reason = self._fallback_reason(primary_result, self._rms(audio))
+        if reason is None:
+            return primary_result
+        try:
+            fallback_result = await self.fallback.transcribe_pcm16(audio, language)
+        except Exception as exc:
+            logger.warning(
+                "STT fallback failed; keeping primary result: provider=%s error_type=%s",
+                getattr(self.fallback, "name", self.fallback.__class__.__name__),
+                type(exc).__name__,
+            )
+            return replace(primary_result, fallback_reason=f"{reason}:unavailable")
+        return replace(fallback_result, fallback=True, fallback_reason=reason)
+
+    async def _run_fallback(
+        self,
+        primary_result: STTResult,
+        audio_path: Path,
+        language: str,
+        reason: str,
+    ) -> STTResult:
+        try:
+            fallback_result = await self.fallback.transcribe(audio_path, language)
+        except Exception as exc:
+            logger.warning(
+                "STT fallback failed; keeping primary result: provider=%s error_type=%s",
+                self.fallback.__class__.__name__,
+                type(exc).__name__,
+            )
+            return replace(primary_result, fallback_reason=f"{reason}:unavailable")
+        return replace(fallback_result, fallback=True, fallback_reason=reason)
+
+    def _fallback_reason(self, result: STTResult, rms: float | None) -> str | None:
+        if not result.text.strip():
+            return "empty_result"
+        if result.confidence is not None and result.confidence < self.confidence_threshold:
+            return "low_confidence"
+        if rms is not None and rms < self.min_rms:
+            return "low_snr"
+        return None
+
+    @staticmethod
+    def _rms(audio: Pcm16Audio) -> float:
+        samples = array.array("h")
+        samples.frombytes(audio.data)
+        if not samples:
+            return 0.0
+        return math.sqrt(sum(sample * sample for sample in samples) / len(samples)) / 32768.0
 
 
 class GigaAMSTTProvider(STTProvider):
@@ -470,9 +651,9 @@ class GigaAMSTTProvider(STTProvider):
             return self._transcribe_short_pcm(model, audio.data)
         texts = [
             self._transcribe_short_pcm(model, chunk)
-            for chunk in self._split_pcm16_on_quiet(audio.data)
+            for chunk in self._split_pcm16_on_quiet(audio.data, overlap_seconds=0.75)
         ]
-        return " ".join(text for text in texts if text).strip()
+        return self._merge_overlapped_texts(texts)
 
     @staticmethod
     def _transcribe_short_pcm(model: Any, pcm16: bytes) -> str:
@@ -495,7 +676,7 @@ class GigaAMSTTProvider(STTProvider):
 
     def _transcribe_long(self, model: Any, audio_path: Path) -> str:
         pcm16 = self._decode_pcm16(audio_path)
-        chunks = self._split_pcm16_on_quiet(pcm16)
+        chunks = self._split_pcm16_on_quiet(pcm16, overlap_seconds=0.75)
         texts: list[str] = []
         with tempfile.TemporaryDirectory(prefix="neuroasist-gigaam-") as temp_dir:
             for index, chunk in enumerate(chunks):
@@ -508,7 +689,7 @@ class GigaAMSTTProvider(STTProvider):
                 text = self._transcribe_short(model, chunk_path)
                 if text:
                     texts.append(text)
-        return " ".join(texts).strip()
+        return self._merge_overlapped_texts(texts)
 
     def _decode_pcm16(self, audio_path: Path) -> bytes:
         command = [
@@ -533,7 +714,7 @@ class GigaAMSTTProvider(STTProvider):
             raise RuntimeError("Could not decode long audio for GigaAM")
         return completed.stdout
 
-    def _split_pcm16_on_quiet(self, pcm16: bytes) -> list[bytes]:
+    def _split_pcm16_on_quiet(self, pcm16: bytes, *, overlap_seconds: float = 0.0) -> list[bytes]:
         samples = array.array("h")
         samples.frombytes(pcm16)
         max_samples = self._MAX_SHORT_SECONDS * self._SAMPLE_RATE
@@ -544,6 +725,7 @@ class GigaAMSTTProvider(STTProvider):
         max_chunk = 23 * self._SAMPLE_RATE
         min_tail = 5 * self._SAMPLE_RATE
         frame = self._SAMPLE_RATE // 10
+        overlap_samples = max(0, round(overlap_seconds * self._SAMPLE_RATE))
         chunks: list[bytes] = []
         start = 0
         while len(samples) - start > max_samples:
@@ -558,11 +740,27 @@ class GigaAMSTTProvider(STTProvider):
                     key=lambda offset: sum(value * value for value in samples[offset : offset + frame]),
                 )
                 cut = quiet_start + frame // 2
-            chunks.append(samples[start:cut].tobytes())
+            chunks.append(samples[max(0, start - overlap_samples):cut].tobytes())
             start = cut
         if start < len(samples):
-            chunks.append(samples[start:].tobytes())
+            chunks.append(samples[max(0, start - overlap_samples):].tobytes())
         return chunks
+
+    @staticmethod
+    def _merge_overlapped_texts(texts: list[str]) -> str:
+        merged: list[str] = []
+        for text in texts:
+            tokens = text.split()
+            if not tokens:
+                continue
+            overlap = 0
+            max_overlap = min(8, len(merged), len(tokens))
+            for size in range(max_overlap, 0, -1):
+                if [item.casefold() for item in merged[-size:]] == [item.casefold() for item in tokens[:size]]:
+                    overlap = size
+                    break
+            merged.extend(tokens[overlap:])
+        return " ".join(merged).strip()
 
     def _should_retry_on_cpu(self, exc: Exception) -> bool:
         if self._device != "auto" or self._selected_device != "cuda":

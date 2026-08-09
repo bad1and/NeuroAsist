@@ -45,9 +45,9 @@ flowchart LR
 | Возможность | Статус | Реализация |
 |---|:---:|---|
 | Текстовый диалог | ✅ | FastAPI chat endpoint |
-| Push-to-talk | ✅ | Browser `MediaRecorder` |
+| Live-диалог | ✅ | Непрерывный PCM16 через AudioWorklet и input WebSocket v3 |
 | Live-ответ голосом | ✅ | Аудиосегменты через WebSocket |
-| Локальное распознавание речи | ✅ | GigaAM v3, `faster-whisper` fallback |
+| Локальное распознавание речи | ✅ | GigaAM v3, `faster-whisper`/Qwen3-ASR optional fallback |
 | Локальная русская озвучка | ✅ | Silero `v5_5_ru` |
 | История диалога и Journal | ✅ | SQLite timeline, episodes и summaries |
 | Долгосрочная память | 🧪 | Канонические записи SQLite, audit trail и Memory Center |
@@ -72,7 +72,7 @@ flowchart LR
 
 В React-панели есть пять основных разделов:
 
-- **Chat** — текстовые сообщения, запись микрофона, распознанная фраза, ответ и воспроизведение.
+- **Chat** — текстовые сообщения, кнопка `Live`, распознанная фраза, ответ и воспроизведение.
 - **Journal** — непрерывная timeline и внутренние эпизоды разговора.
 - **Memory** — сохранённые факты, их происхождение, проверка и полный сброс памяти с историей.
 - **Events** — события backend, LLM, STT, TTS и соединений в реальном времени.
@@ -100,7 +100,7 @@ flowchart LR
 - TypeScript
 - Vite
 - Vitest
-- Browser MediaRecorder
+- Browser AudioWorklet + Web Audio API
 - Web Audio API
 
 ## Быстрый запуск
@@ -207,8 +207,12 @@ VOICE_TTS_ADAPTIVE_PROSODY=true
 
 | Параметр | За что отвечает |
 |---|---|
-| `VOICE_STT_PROVIDER` | STT-провайдер: `gigaam` для точного русского, `faster_whisper` для мультиязычного режима, `mock` для тестов. |
-| `VOICE_STT_MODEL` | Модель провайдера: рекомендуется `v3_rnnt` для GigaAM или `large-v3-turbo` для faster-whisper. |
+| `VOICE_STT_PROVIDER` | STT-провайдер: `gigaam` для русского, `faster_whisper` для мультиязычного режима, `qwen3_asr` для optional Qwen3-ASR, `mock` для тестов. |
+| `VOICE_STT_MODEL` | Модель провайдера: `v3_rnnt`/`v3_e2e_rnnt` для GigaAM, `large-v3-turbo` для faster-whisper или `Qwen/Qwen3-ASR-1.7B` для Qwen3-ASR. |
+| `VOICE_STT_FALLBACK_PROVIDER` | Необязательная вторичная локальная модель (`faster_whisper`, `qwen3_asr` или `gigaam`). Загружается только при необходимости. |
+| `VOICE_STT_FALLBACK_MODEL` | Модель вторичного провайдера. Для Qwen по умолчанию используется `Qwen/Qwen3-ASR-1.7B`. |
+| `VOICE_STT_FALLBACK_CONFIDENCE_THRESHOLD` | Порог confidence для запуска secondary STT, по умолчанию `0.60`. |
+| `VOICE_STT_FALLBACK_MIN_RMS` | Нижний порог уровня PCM для low-SNR fallback, по умолчанию `0.008`. |
 | `VOICE_STT_DEVICE` | Где запускать STT: `cpu`, `cuda` или `auto`. |
 | `VOICE_STT_COMPUTE_TYPE` | Тип вычислений только для faster-whisper, например `int8` для CPU или `int8_float16` для CUDA. GigaAM игнорирует параметр. |
 | `VOICE_DEFAULT_LANGUAGE` | Язык по умолчанию для STT и голосового UI, например `ru`. |
@@ -217,7 +221,29 @@ VOICE_TTS_ADAPTIVE_PROSODY=true
 | `VOICE_MAX_UPLOAD_MB` | Максимальный размер загружаемого аудио. |
 | `VOICE_MAX_RECORD_SECONDS` | Максимальная длительность принимаемой записи. |
 
-Для русского голосового ассистента рекомендуется `gigaam` + `v3_rnnt`: это самый точный режим по словам, но он возвращает нижний регистр без пунктуации. `v3_e2e_rnnt` формирует более читаемый текст с пунктуацией и нормализацией чисел ценой небольшой потери точности. На контрольном прогоне GTX 1660 SUPER / Ryzen 7 5700X (`20` коротких записей Golos) `v3_rnnt` получил `1.0% WER` и медиану `0.56 с` на GPU или `0.40 с` на CPU с четырьмя потоками. `large-v3-turbo` получил `16.2% WER` и `1.26 с`, текущий Whisper `small` — `32.3% WER` и `1.05 с`. Этот небольшой прогон нужен для выбора runtime; окончательное качество следует проверять на записях конкретного пользователя.
+Для русского голосового ассистента базовым кандидатом остаётся `gigaam` +
+`v3_rnnt`: он ориентирован на точное распознавание слов. `v3_e2e_rnnt`
+формирует более читаемый текст с пунктуацией и нормализацией чисел. Текущий
+локальный baseline на 20 коротких записях — около `18.3% WER`; это не release-
+метрика, а точка сравнения для расширенного приватного корпуса. Окончательный
+выбор делается только после одинакового benchmark для GigaAM RNNT/E2E,
+`large-v3-turbo` и optional Qwen3-ASR.
+
+Qwen3-ASR подключается отдельно в чистом окружении:
+
+```powershell
+pip install -U qwen-asr
+```
+
+После установки кандидат можно прогнать так:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\benchmark_stt.py candidate `
+  --manifest Audio\stt-manifest.json `
+  --output output\stt-qwen.json `
+  --provider qwen3_asr `
+  --model Qwen/Qwen3-ASR-1.7B
+```
 
 #### Text-to-speech / Silero
 
@@ -238,7 +264,7 @@ VOICE_TTS_ADAPTIVE_PROSODY=true
 | `VOICE_TTS_POSTPROCESSING_ENABLED` | Включает удаление DC-смещения, high-pass, антищелчковые fades и безопасную нормализацию WAV. |
 | `VOICE_TTS_HIGHPASS_CUTOFF_HZ` | Частота среза низкочастотного гула при включённой постобработке; по умолчанию `60`. |
 | `VOICE_TTS_ADAPTIVE_PROSODY` | Добавляет безопасные смысловые паузы между частями фразы, сохраняя нативную выразительность Silero. Выключите для сравнения с базовым звучанием. |
-| `VOICE_TTS_BACKGROUND_TIMEOUT_SECONDS` | Timeout фоновых batch TTS jobs, которые создаёт `/voice/chat`. |
+| `VOICE_TTS_BACKGROUND_TIMEOUT_SECONDS` | Timeout фоновых TTS jobs, если они используются внутренним voice pipeline. |
 | `VOICE_TTS_TIMEOUT_SECONDS` | Общий timeout TTS для voice API flow. |
 | `VOICE_TTS_MAX_CHARS` | Максимальная длина текста для одного backend TTS-запроса. |
 | `VOICE_AUDIO_DIR` | Папка, куда сохраняются сгенерированные аудиофайлы. WAV удаляются при старте backend, затем раз в 20 минут удаляются файлы старше 2 минут. |
@@ -273,7 +299,7 @@ VOICE_TTS_ADAPTIVE_PROSODY=true
 | `VOICE_SILERO_VAD_START_THRESHOLD` / `VOICE_SILERO_VAD_END_THRESHOLD` | Вероятности старта/окончания Silero: `0.55` / `0.35`. |
 | `VOICE_ENERGY_VAD_START_RMS` / `VOICE_ENERGY_VAD_END_RMS` | Пороги RMS только для energy fallback: `0.018` / `0.012`. |
 | `VOICE_VAD_PRE_ROLL_MS` / `VOICE_VAD_POST_ROLL_MS` | Сохраняемый контекст до и после речи: `900` / `180` мс. Значение pre-roll ниже 900 мс безопасно повышается во время запуска. |
-| `VOICE_VAD_END_SILENCE_MS` / `VOICE_VAD_LIVE_END_SILENCE_MS` | Endpoint в hands-free и live со SmartTurn: `720` / `750` мс. Более короткие значения автоматически поднимаются до безопасного минимума выбранного профиля паузы. |
+| `VOICE_VAD_END_SILENCE_MS` / `VOICE_VAD_LIVE_END_SILENCE_MS` | Базовый и live endpoint со SmartTurn: `720` / `750` мс. Более короткие значения автоматически поднимаются до безопасного минимума выбранного профиля паузы. |
 | `VOICE_VAD_LIVE_FALLBACK_END_SILENCE_MS` | Осторожный live endpoint без SmartTurn: `1100` мс. |
 | `VOICE_TORCH_CPU_THREADS` / `VOICE_TORCH_INTEROP_THREADS` | Общая настройка PyTorch до загрузки всех голосовых моделей: `4` / `1`. |
 | `VOICE_STT_TERMS_PATH` | Отдельный JSON точных aliases для STT; по умолчанию `stt-terms.json` в приватных app-data. |
@@ -383,20 +409,23 @@ Backend построен как модульный монолит: API routes, a
 
 ## Голосовой pipeline
 
-### Обычный push-to-talk
+### Live-диалог
 
 ```text
-Browser MediaRecorder
-  → POST /voice/chat
+Кнопка Live
+  → AudioWorklet PCM16 stream
+  → input WebSocket v3
+  → backend VAD + Smart Turn
   → GigaAM v3
   → Character Agent
   → DeepSeek-совместимая LLM
-  → быстрый текстовый ответ
-  → фоновая генерация Silero
-  → готовый WAV-файл
+  → потоковый live TTS
+  → очередь воспроизведения
 ```
 
-Текст возвращается раньше завершения TTS. Интерфейс получает готовое аудио, когда генерация закончилась.
+После запуска `Live` пользователь не управляет отдельными репликами: начало и
+конец мысли определяются backend VAD и Smart Turn. При подтверждённом barge-in
+воспроизведение останавливается сразу, а старое поколение ответа блокируется.
 
 ### Live-ответ
 
@@ -408,12 +437,13 @@ Browser MediaRecorder
   → очередь воспроизведения в браузере
 ```
 
-Для live-режима настраиваются размер сегментов, лимит очереди, параллельность TTS и prebuffer воспроизведения.
+Для live-режима настраиваются размер сегментов, лимит очереди, параллельность
+TTS и prebuffer воспроизведения.
 
 ### Воспроизведение Unity-аватаром
 
 ```text
-Текстовый или обычный голосовой ответ
+Текстовый или live-голосовой ответ
   → фоновая генерация Silero
   → voice.tts_ready
   → URL полного WAV

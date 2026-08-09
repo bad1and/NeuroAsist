@@ -23,7 +23,7 @@ class RuntimeSettings:
     memory_incognito: bool = False
     reflections_enabled: bool = True
     reflection_min_significance: float = 0.55
-    live_conversation_enabled: bool = False
+    live_conversation_enabled: bool = True
     live_conversation_participant_mode: str = "one_to_one"
     live_conversation_engagement: str = "balanced"
     live_conversation_initiative: str = "rare"
@@ -83,6 +83,9 @@ class RuntimeSettingsStore:
         # behaviour after upgrading.
         if values.get("memory_mode") == "ask":
             values["memory_mode"] = "balanced"
+        # Voice is live-only since protocol v3. Keep the field readable for
+        # old settings files, but never allow a persisted flag to disable it.
+        values["live_conversation_enabled"] = True
         if values.get("avatar_placement") not in {None, "desktop_overlay", "in_app"}:
             values["avatar_placement"] = defaults.avatar_placement
         try:

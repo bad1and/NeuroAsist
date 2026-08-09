@@ -6,7 +6,6 @@ import type {
   ChatResponse,
   PublicSettings,
   StatusResponse,
-  VoiceChatResponse,
   VoiceLiveResponse,
   VoiceTtsStatusResponse,
   TimelineJournalItem,
@@ -54,27 +53,10 @@ export function voiceWebSocketUrl(sessionId: string): string {
   return `${base}/ws/voice/${encodeURIComponent(sessionId)}?version=1${token ? `&token=${encodeURIComponent(token)}` : ""}`;
 }
 
-export function voiceInputWebSocketUrl(sessionId: string, version: 1 | 2 = 1): string {
+export function voiceInputWebSocketUrl(sessionId: string, version: 3 = 3): string {
   const base = API_BASE_URL.replace(/^http/, "ws");
   const token = DESKTOP_RUNTIME?.apiToken;
   return `${base}/ws/voice-input/${encodeURIComponent(sessionId)}?version=${version}${token ? `&token=${encodeURIComponent(token)}` : ""}`;
-}
-
-function audioExtensionForMime(mimeType: string): string {
-  const normalized = mimeType.split(";")[0].trim().toLowerCase();
-  if (normalized === "audio/ogg" || normalized === "application/ogg") {
-    return ".ogg";
-  }
-  if (normalized === "audio/mp4" || normalized === "audio/x-m4a") {
-    return ".m4a";
-  }
-  if (normalized === "audio/wav" || normalized === "audio/x-wav") {
-    return ".wav";
-  }
-  if (normalized === "audio/mpeg") {
-    return ".mp3";
-  }
-  return ".webm";
 }
 
 async function requestJson<T>(
@@ -249,57 +231,6 @@ export function interruptVoiceSession(
     method: "POST",
     body: JSON.stringify({ session_id: sessionId, utterance_id: utteranceId }),
   });
-}
-
-export async function sendVoiceMessage(
-  sessionId: string,
-  audio: Blob,
-  language: string,
-  live = false,
-  endOfSpeechUnixMs?: number,
-): Promise<VoiceChatResponse | VoiceLiveResponse> {
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 90000);
-  const form = new FormData();
-  form.append("session_id", sessionId);
-  form.append("language", language);
-  form.append("live", String(live));
-  if (endOfSpeechUnixMs !== undefined) form.append("client_end_of_speech_unix_ms", String(endOfSpeechUnixMs));
-  form.append("audio", audio, `voice-message${audioExtensionForMime(audio.type)}`);
-
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE_URL}/voice/chat`, {
-      method: "POST",
-      body: form,
-      headers: DESKTOP_RUNTIME?.apiToken
-        ? { "X-NeuroAsist-Token": DESKTOP_RUNTIME.apiToken }
-        : undefined,
-      signal: controller.signal,
-    });
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error("Voice request timed out");
-    }
-    throw error;
-  } finally {
-    window.clearTimeout(timeout);
-  }
-
-  if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
-    try {
-      const payload = await response.json();
-      if (typeof payload.detail === "string") {
-        detail = payload.detail;
-      }
-    } catch {
-      // Keep the status-only error.
-    }
-    throw new Error(detail);
-  }
-
-  return response.json() as Promise<VoiceChatResponse | VoiceLiveResponse>;
 }
 
 export function getModels(): Promise<{ models: import("./types").ManagedModel[] }> {

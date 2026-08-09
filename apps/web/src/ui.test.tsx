@@ -11,7 +11,7 @@ const api = vi.hoisted(() => ({
   getPronunciations: vi.fn(), updatePronunciations: vi.fn(), updateVoiceExpression: vi.fn(), updateVoiceStyle: vi.fn(),
   getSttTerms: vi.fn(), updateSttTerms: vi.fn(),
   updateRuntimeSettings: vi.fn(), getTimelineJournal: vi.fn(), searchTimeline: vi.fn(),
-  getVoiceTtsStatus: vi.fn(), sendChatMessage: vi.fn(), sendVoiceMessage: vi.fn(), interruptVoiceSession: vi.fn(),
+  getVoiceTtsStatus: vi.fn(), sendChatMessage: vi.fn(), interruptVoiceSession: vi.fn(),
   installModel: vi.fn(), removeModel: vi.fn(), createBackup: vi.fn(),
   clearMemories: vi.fn(), reindexMemories: vi.fn(), resetAllCompanionData: vi.fn(),
   resetConversationSession: vi.fn(), getConversationSession: vi.fn(),
@@ -44,7 +44,7 @@ const settings = {
   chat_history_limit: 40, episodes_enabled: true, episode_soft_inactivity_minutes: 30,
   episode_hard_inactivity_minutes: 120, episode_maximum_messages: 100, episode_maximum_estimated_tokens: 12000,
   memory_enabled: true, memory_mode: "balanced", memory_incognito: false, log_level: "info",
-  live_conversation_enabled: false, live_conversation_participant_mode: "one_to_one",
+  live_conversation_enabled: true, live_conversation_participant_mode: "one_to_one",
   live_conversation_engagement: "balanced", live_conversation_initiative: "rare",
   live_conversation_address_strictness: "balanced", live_conversation_interruption_sensitivity: "balanced",
   live_conversation_pause_tolerance: "natural", live_conversation_emotion_expression: "natural",
@@ -105,7 +105,8 @@ describe("русский интерфейс", () => {
     expect(container.querySelector(".chat-panel .message-list")).toBeInTheDocument();
     expect(container.querySelector(".chat-panel .chat-composer")).toBeInTheDocument();
     expect(container.querySelector(".chat-composer textarea")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Свободные руки" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Live" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Свободные руки" })).not.toBeInTheDocument();
   });
 
   it("переключает sidebar в компактный режим без смены активного раздела", async () => {
