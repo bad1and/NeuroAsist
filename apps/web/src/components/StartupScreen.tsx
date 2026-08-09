@@ -1,6 +1,8 @@
 import { RefreshCw } from "lucide-react";
 
 import type { CoreStatus } from "../desktop";
+import leftFloraUrl from "../../../../assets/Для загрузки лево.png";
+import rightFloraUrl from "../../../../assets/Для загрузки права.png";
 import { IrisLoader } from "./IrisLoader";
 import { WindowChrome } from "./WindowChrome";
 
@@ -24,6 +26,12 @@ export function StartupScreen({
   const failed = status === "failed" || status === "crashed";
   return (
     <div className="startup-screen">
+      <div className="startup-flora startup-flora-left" aria-hidden="true">
+        <img src={leftFloraUrl} alt="" />
+      </div>
+      <div className="startup-flora startup-flora-right" aria-hidden="true">
+        <img src={rightFloraUrl} alt="" />
+      </div>
       <WindowChrome title="" compact />
       <main className={`startup-content is-${status}`} aria-live="polite">
         <div className="startup-mark" aria-hidden="true">
