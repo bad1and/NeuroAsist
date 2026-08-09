@@ -6,7 +6,7 @@
 
 ### Local-first voice AI character and future neuro‑VTuber platform
 
-[![Version](https://img.shields.io/badge/version-0.6.0--dev-7c3aed?style=flat-square)](https://github.com/bad1and/NeuroAsist/tree/v0.6)
+[![Version](https://img.shields.io/badge/version-0.8.0--dev-7c3aed?style=flat-square)](https://github.com/bad1and/NeuroAsist)
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776ab?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-24%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.116-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -18,8 +18,15 @@
 </div>
 
 > [!IMPORTANT]
-> **Iris v0.6 is an experimental local desktop development branch.**
+> **Iris v0.8 is an experimental local desktop development branch.**
 > The Tauri shell starts the React UI and FastAPI core together. Text and voice chat, long-term memory, and an optional Unity VRM avatar runtime are available.
+
+## What's new in v0.8
+
+- Choose the microphone input and audio output device in Voice Settings; selections persist locally.
+- Show the Unity avatar either as a transparent desktop overlay or natively inside the chat without a second visible window.
+- Start a **New dialog** from the chat; it clears the current conversation while preserving long-term memory.
+- Temporary chat transport errors now disappear automatically instead of remaining on screen.
 
 Iris is the official name. You can also call her **Ирис**, **Айрис**, or **Ириска**.
 
@@ -73,7 +80,7 @@ The V0.5 direction is a single continuous desktop companion: one character, one 
 
 The React control panel contains five main sections:
 
-- **Chat** — text messages, microphone recording, transcription, AI replies, audio playback, and a confirmed **New dialog** action that clears the current conversation while preserving long-term memory.
+- **Chat** — text messages, microphone recording, transcription, automatically played AI replies, and a confirmed **New dialog** action that clears the current conversation while preserving long-term memory. Temporary connection errors dismiss themselves automatically.
 - **Journal** — the continuous timeline and internal conversation episodes.
 - **Memory** — saved facts, provenance, review, and a full reset of memory and history.
 - **Events** — live backend, LLM, STT, TTS, and connection events.
@@ -119,7 +126,7 @@ The header displays backend status, WebSocket connection state, API-key availabi
 ### 1. Clone the development branch
 
 ```powershell
-git clone --branch v0.6 --single-branch https://github.com/bad1and/NeuroAsist.git Iris
+git clone --branch "v0.8(avatar-remove/UI)" --single-branch https://github.com/bad1and/NeuroAsist.git Iris
 cd Iris
 ```
 
