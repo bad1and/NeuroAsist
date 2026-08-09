@@ -26,6 +26,13 @@ describe("interface translations", () => {
     expect(translateInterfaceText("Естественное", "en")).toBe("Natural");
     expect(translateInterfaceText("начальное", "en")).toBe("Initial");
     expect(translateInterfaceText("спокойная", "en")).toBe("Calm");
+    expect(translateInterfaceText("Начните разговор", "en")).toBe("Start a conversation");
+    expect(translateInterfaceText("Сохранено", "en")).toBe("Saved");
+    expect(translateInterfaceText("Перезапустите Iris, чтобы использовать модель.", "en"))
+      .toBe("Restart Iris to use this model.");
+    expect(translateInterfaceText("Начать новый диалог", "en")).toBe("Start new chat");
+    expect(translateInterfaceText("Все сообщения и сводки текущего диалога будут удалены без возможности восстановления. Долгосрочная память Iris останется.", "en"))
+      .toBe("All messages and summaries in the current chat will be deleted permanently. Iris's long-term memory will remain.");
   });
 
   it("restores the original Russian grammatical form after switching back", () => {
