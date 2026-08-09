@@ -109,8 +109,8 @@ import { InAppAvatarHost } from "./components/InAppAvatarHost";
 
 type AppView = "overview" | "chat" | "journal" | "memory" | "state" | "settings";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "iris.sidebar.collapsed";
+const CHAT_ERROR_AUTO_DISMISS_MS = 8_000;
 type SettingsSection =
-  | "behavior"
   | "conversation"
   | "avatar"
   | "voice"
@@ -284,10 +284,6 @@ function formatTime(value: string): string {
 
 function boolLabel(value: boolean): string {
   return value ? "Да" : "Нет";
-}
-
-function personalityLabel(value: string): string {
-  return value === "default" ? "Стандартный" : value;
 }
 
 function isLiveVoiceTransportError(error: unknown): boolean {
@@ -847,6 +843,21 @@ function ChatPage({
     }
   }, []);
 
+  useEffect(() => {
+    if (!error) return;
+
+    const visibleError = error;
+    const visibleRetryText = retryText;
+    const dismissTimer = window.setTimeout(() => {
+      setError((currentError) => currentError === visibleError ? null : currentError);
+      setRetryText((currentRetryText) => (
+        currentRetryText === visibleRetryText ? null : currentRetryText
+      ));
+    }, CHAT_ERROR_AUTO_DISMISS_MS);
+
+    return () => window.clearTimeout(dismissTimer);
+  }, [error, retryText]);
+
   const showMemoryUpdates = useCallback((updates?: MemoryUpdate[]) => {
     const update = updates && updates.length ? updates[updates.length - 1] : undefined;
     if (!update || update.action !== "saved") return;
@@ -999,34 +1010,6 @@ function ChatPage({
       };
 
       try {
-        await setAudioElementOutput(audio, selectedOutputDeviceId);
-        await audio.play();
-        return true;
-      } catch {
-        if (activeAudioRef.current === audio) {
-          activeAudioRef.current = null;
-        }
-        return false;
-      }
-    },
-    [selectedOutputDeviceId, settings?.voice_playback_rate, stopVoicePlayback],
-  );
-
-  const playMessageAudioTrack = useCallback(
-    async (_messageId: string, fallbackAudioUrl: string): Promise<boolean> => {
-      const audio = new Audio(fallbackAudioUrl);
-
-      stopVoicePlayback(audio);
-      audio.playbackRate = 1;
-      activeAudioRef.current = audio;
-      audio.onended = () => {
-        if (activeAudioRef.current === audio) {
-          activeAudioRef.current = null;
-        }
-      };
-
-      try {
-        audio.currentTime = 0;
         await setAudioElementOutput(audio, selectedOutputDeviceId);
         await audio.play();
         return true;
@@ -1636,58 +1619,6 @@ function ChatPage({
             <div className="message-role">{message.role === "user" ? message.speakerLabel ?? "Вы" : "Iris"}</div>
             <p>{message.content}</p>
             {message.ttsError && <div className="message-error">{message.ttsError}</div>}
-            {message.role === "assistant" && (
-              <button
-                className="speak-button"
-                disabled={!message.audioUrl && !message.voiceRequestId && !browserSpeechSupported}
-                onClick={async () => {
-                  if (message.audioUrl) {
-                    const played = await playMessageAudioTrack(message.id, message.audioUrl);
-                    if (!played) {
-                      setMessages((current) =>
-                        current.map((currentMessage) =>
-                          currentMessage.id === message.id
-                            ? {
-                                ...currentMessage,
-                                ttsError: "Не удалось начать воспроизведение аудио",
-                              }
-                            : currentMessage,
-                        ),
-                      );
-                    }
-                    return;
-                  }
-                  if (message.voiceRequestId) {
-                    const status = await syncVoiceTtsStatus(message.voiceRequestId);
-                    if (status?.status === "ready" && status.audio_url) {
-                      const resolvedAudioUrl = resolveApiUrl(status.audio_url);
-                      window.setTimeout(() => {
-                        void playMessageAudioTrack(message.id, resolvedAudioUrl);
-                      }, 50);
-                    }
-                    return;
-                  }
-                  if (!speakTextInBrowser(message.content)) {
-                    setMessages((current) =>
-                      current.map((currentMessage) =>
-                        currentMessage.id === message.id
-                          ? {
-                              ...currentMessage,
-                              ttsError: "Аудио ещё не готово",
-                            }
-                          : currentMessage,
-                      ),
-                    );
-                  }
-                }}
-                type="button"
-              >
-                <Volume2 size={15} aria-hidden="true" />
-                {message.audioUrl || message.voiceRequestId || browserSpeechSupported
-                  ? "Воспроизвести"
-                  : "Аудио готовится"}
-              </button>
-            )}
           </article>
         ))}
         {loading && <div className="assistant-thinking" role="status"><span aria-hidden="true" /><span aria-hidden="true" /><span aria-hidden="true" />Iris печатает</div>}
@@ -1878,8 +1809,7 @@ function SettingsPage({
   onAvatarOverlayChanged: (overlay: AvatarOverlaySettings | null) => void;
   onSettingsChanged: (settings: PublicSettings) => void;
 }) {
-  const [activeSection, setActiveSection] = useState<SettingsSection>("behavior");
-  const [personality, setPersonality] = useState("");
+  const [activeSection, setActiveSection] = useState<SettingsSection>("conversation");
   const [voiceLanguage, setVoiceLanguage] = useState("ru");
   const [voiceMicrophoneProfile, setVoiceMicrophoneProfile] = useState<MicrophoneProfile>("balanced");
   const [voiceInputDeviceId, setVoiceInputDeviceId] = useState("");
@@ -1926,7 +1856,6 @@ function SettingsPage({
   const autosave = useRuntimeSettingsAutosave(onSettingsChanged);
 
   const applySettingsToForm = useCallback((nextSettings: PublicSettings) => {
-    setPersonality(nextSettings.personality);
     setVoiceLanguage(nextSettings.voice_language);
     setVoiceMicrophoneProfile(nextSettings.voice_microphone_profile ?? "balanced");
     setVoiceInputDeviceId(nextSettings.voice_input_device_id ?? "");
@@ -2092,7 +2021,6 @@ function SettingsPage({
     .filter(Boolean)
     .join(" · ");
   const settingsSectionMeta: Record<SettingsSection, { title: string; description: string }> = {
-    behavior: { title: "Поведение", description: "Как Iris общается и ведёт себя в разговоре." },
     conversation: { title: "Живой разговор", description: "Когда Iris слушает, вступает в разговор и выражает эмоции." },
     avatar: { title: "Аватар", description: "Размещение, внешний вид и тестовые команды Iris." },
     voice: { title: "Голос", description: "Звучание, темп и подача речи." },
@@ -2192,28 +2120,6 @@ function SettingsPage({
         </div>
 
         <div className="form-grid settings-form" hidden={activeSection === "avatar" || activeSection === "system-overview" || ["models", "backups", "maintenance", "events"].includes(activeSection)}>
-          <fieldset className="settings-group" hidden={activeSection !== "behavior"}>
-          <legend>Как Iris общается</legend>
-          <label>
-            Стиль общения
-            <select
-              value={personality}
-              onChange={(event) => {
-                const nextValue = event.target.value;
-                const previousValue = personality;
-                setPersonality(nextValue);
-                saveRuntimeSetting({ personality: nextValue }, () => setPersonality(previousValue));
-              }}
-            >
-              {settings.available_personalities.map((availablePersonality) => (
-                <option key={availablePersonality} value={availablePersonality}>
-                  {personalityLabel(availablePersonality)}
-                </option>
-              ))}
-            </select>
-          </label>
-        </fieldset>
-
         <fieldset className="settings-group" hidden={activeSection !== "voice"}>
           <legend>Основное</legend>
           <label>
@@ -2693,10 +2599,7 @@ const SETTINGS_NAVIGATION: Array<{
     id: "behavior",
     label: "Поведение",
     icon: SlidersHorizontal,
-    items: [
-      { section: "behavior", label: "Стиль общения" },
-      { section: "conversation", label: "Живой разговор" },
-    ],
+    items: [{ section: "conversation", label: "Живой разговор" }],
   },
   {
     id: "avatar",
