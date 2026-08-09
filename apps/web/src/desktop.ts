@@ -1,6 +1,6 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import type { AvatarPlacement } from "./types";
+import type { AvatarPlacement, InterfaceLocale } from "./types";
 
 export type CoreStatus = "starting" | "ready" | "failed" | "crashed";
 
@@ -70,6 +70,11 @@ export async function getDesktopRuntime(): Promise<DesktopRuntime> {
 
 export async function quitDesktopApp(): Promise<void> {
   return invoke<void>("quit_app");
+}
+
+export async function setDesktopInterfaceLocale(locale: InterfaceLocale): Promise<void> {
+  if (!isDesktopApp()) return;
+  await invoke<void>("set_interface_locale", { locale });
 }
 
 export async function configureAvatarPlacement(placement: AvatarPlacement): Promise<AvatarHostStatus | null> {

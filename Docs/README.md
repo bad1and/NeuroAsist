@@ -6,6 +6,7 @@
 - [V0.5 Companion Blueprint](NeuroAsist_V0.5_Companion_Blueprint.md) — полная целевая архитектура; в самом документе сохранено историческое имя NeuroAsist.
 - [Локальный запуск и отложенные release-задачи](deferred-release-work.md).
 - [ChromaDB memory](chroma-memory.md) — текущий retrieval/index и настройки V0.6.
+- Интерфейс переключается между русским и английским в **Settings → System → Interface**. Эта настройка сохраняется локально и не меняет язык Iris, голосовой ввод или синтез речи.
 - [Milestones 0–11](MILESTONES.md) — в том числе текущий статус Stabilization Gate.
 
 ## Отчёты о реализации

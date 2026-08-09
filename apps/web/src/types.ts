@@ -174,11 +174,13 @@ export type AvatarOverlaySettings = {
 };
 
 export type AvatarPlacement = "desktop_overlay" | "in_app";
+export type InterfaceLocale = "ru" | "en";
 
 export type PublicSettings = {
   provider: string;
   model: string;
   personality: string;
+  interface_locale: InterfaceLocale;
   voice_language: string;
   voice_microphone_profile: "headset" | "balanced" | "speakers";
   voice_input_device_id: string;

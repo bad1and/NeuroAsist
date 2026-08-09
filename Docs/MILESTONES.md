@@ -2,7 +2,7 @@
 
 Это единая карта работ по V0.5. Здесь находятся цель, результат и текущий статус каждого milestone. Детали реализации, API и тесты остаются в отдельных отчётах, на которые ведут ссылки ниже.
 
-**Актуальный статус: 16 июля 2026.** V0.5 остаётся архитектурной картой, а ветка V0.6 развивает локальный desktop companion. Публичный release пока не готовится.
+**Актуальный статус: 9 августа 2026.** V0.5 остаётся архитектурной картой, а ветка V0.8 развивает локальный desktop companion. Публичный release пока не готовится.
 
 ## Карта статусов
 
@@ -130,7 +130,7 @@ generation. Подтверждённое начало речи сразу ост
 
 **Цель.** Сделать локальное приложение удобным для запуска без ручной настройки путей к моделям и ключам.
 
-**Сделано.** Persistent runtime settings, first-run key setup через Windows Credential Manager, Model Manager с прогрессом и checksum, diagnostics, backup и retention. Данные desktop-режима живут в `%LOCALAPPDATA%\NeuroAsist`.
+**Сделано.** Persistent runtime settings, first-run key setup через Windows Credential Manager, Model Manager с прогрессом и checksum, diagnostics, backup и retention. Добавлен выбор языка интерфейса `ru`/`en`: он сохраняется локально, меняет UI, даты и системный tray, но не влияет на Iris, память и голосовые настройки. Данные desktop-режима живут в `%LOCALAPPDATA%\NeuroAsist`.
 
 **Результат.** Локальный Tauri development-режим запускается одной командой; API key не попадает в JSON settings, backup или Git.
 

@@ -5,6 +5,7 @@ class PublicSettingsResponse(BaseModel):
     provider: str
     model: str
     personality: str
+    interface_locale: str
     voice_language: str
     voice_microphone_profile: str
     voice_input_device_id: str
@@ -60,6 +61,7 @@ class RuntimeSettingsPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     personality: str | None = None
+    interface_locale: str | None = None
     voice_language: str | None = None
     voice_microphone_profile: str | None = None
     voice_input_device_id: str | None = Field(default=None, max_length=2048)
