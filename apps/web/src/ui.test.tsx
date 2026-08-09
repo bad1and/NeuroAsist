@@ -34,7 +34,7 @@ import { JournalPage } from "./journal";
 import { MemoryPage } from "./memory";
 
 const settings = {
-  provider: "deepseek", model: "deepseek-chat", personality: "default", voice_language: "ru",
+  provider: "deepseek", model: "deepseek-chat", personality: "default", interface_locale: "ru" as const, voice_language: "ru",
   voice_microphone_profile: "balanced", voice_input_device_id: "", voice_output_device_id: "", voice_vad: { configured_provider: "silero", active_provider: "silero", ready: true, fallback: false },
   voice_input_diagnostic_audio_enabled: false,
   voice_stt_model: "small", voice_tts_enabled: true, avatar_enabled: false, avatar_placement: "desktop_overlay", avatar_in_app_visible: true, voice_tts_voice: "F4",
@@ -272,6 +272,55 @@ describe("русский интерфейс", () => {
     expect(await screen.findByRole("button", { name: "Обновить журнал событий" })).toBeInTheDocument();
   });
 
+  it("меняет только язык интерфейса и сохраняет выбор", async () => {
+    api.updateRuntimeSettings.mockResolvedValue({ ...settings, interface_locale: "en" });
+    api.getSettings.mockResolvedValueOnce(settings).mockResolvedValue({ ...settings, interface_locale: "en" });
+    api.getTimelineJournal.mockResolvedValue({
+      items: [{ day: "2026-08-08", message_count: 28, started_at: "2026-08-08T22:00:00Z", last_activity_at: "2026-08-08T22:28:00Z" }],
+    });
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
+    const settingsNavigation = screen.getByRole("navigation", { name: "Разделы настроек" });
+    fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Система" }));
+    fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Интерфейс" }));
+    await screen.findByRole("heading", { name: "Интерфейс" });
+
+    const interfaceLanguage = document.querySelector<HTMLSelectElement>(
+      ".settings-content > .form-grid.settings-form:not([hidden]) select",
+    );
+    expect(interfaceLanguage).not.toBeNull();
+    expect(interfaceLanguage).toBeVisible();
+    fireEvent.change(interfaceLanguage!, { target: { value: "en" } });
+
+    await waitFor(() => expect(api.updateRuntimeSettings).toHaveBeenCalledWith({ interface_locale: "en" }));
+    await waitFor(() => expect(document.documentElement.lang).toBe("en"));
+    await screen.findByRole("button", { name: "Settings" });
+    expect(screen.getByRole("option", { name: "Russian" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "English" })).toBeInTheDocument();
+    expect(interfaceLanguage).toHaveValue("en");
+
+    const applicationNavigation = screen.getByRole("navigation", { name: "Application sections" });
+    fireEvent.click(within(applicationNavigation).getByRole("button", { name: "Overview" }));
+    expect(await screen.findByRole("heading", { name: "Conversation with Iris" })).toBeInTheDocument();
+    expect(screen.getByText(/28 messages/)).toBeInTheDocument();
+
+    fireEvent.click(within(applicationNavigation).getByRole("button", { name: "Chat" }));
+    expect(await screen.findByRole("button", { name: "New chat" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const englishSettingsNavigation = await screen.findByRole("navigation", { name: "Settings sections" });
+    fireEvent.click(within(englishSettingsNavigation).getByRole("button", { name: "Avatar" }));
+    fireEvent.click(await screen.findByText("Test emotions and gestures"));
+    await waitFor(() => expect(screen.getByLabelText("Test phrase")).toHaveValue("Avatar test."));
+
+    fireEvent.click(within(englishSettingsNavigation).getByRole("button", { name: "System" }));
+    fireEvent.click(within(englishSettingsNavigation).getByRole("button", { name: "Data maintenance" }));
+    expect(await screen.findByRole("button", { name: "Rebuild memory index" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear memory" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reset all data" })).toBeInTheDocument();
+  });
+
   it("показывает только выбранный раздел настроек", async () => {
     const { container } = render(<App />);
 
@@ -280,7 +329,7 @@ describe("русский интерфейс", () => {
     expect(within(navigation).queryByText("Настройки")).not.toBeInTheDocument();
     expect(screen.queryByText("Настройки Iris")).not.toBeInTheDocument();
     expect(screen.queryByText("Готово к изменениям")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Стиль общения")).toBeVisible();
+    expect(screen.getByLabelText("Участники")).toBeVisible();
     expect(container.querySelector(".system-stack")).toHaveAttribute("hidden");
 
     const voiceGroup = within(navigation).getByRole("button", { name: "Голос" });
@@ -288,7 +337,7 @@ describe("русский интерфейс", () => {
     expect(voiceGroup).toHaveAttribute("aria-controls", "settings-nav-children-voice");
     fireEvent.click(voiceGroup);
     expect(voiceGroup).toHaveAttribute("aria-expanded", "false");
-    expect(screen.getByLabelText("Стиль общения")).toBeVisible();
+    expect(screen.getByLabelText("Участники")).toBeVisible();
     expect(screen.queryByLabelText("Язык голосового ввода")).not.toBeVisible();
 
     fireEvent.click(voiceGroup);
@@ -297,7 +346,7 @@ describe("русский интерфейс", () => {
     expect(screen.getByLabelText("Язык голосового ввода")).toBeVisible();
     expect(screen.getByLabelText("Голос Silero")).toBeVisible();
     expect(screen.getByText("Silero · CPU · активен")).toBeVisible();
-    expect(screen.getByLabelText("Стиль общения")).not.toBeVisible();
+    expect(screen.getByLabelText("Участники")).not.toBeVisible();
 
     fireEvent.click(voiceGroup);
     expect(voiceGroup).toHaveAttribute("aria-expanded", "false");
@@ -313,7 +362,7 @@ describe("русский интерфейс", () => {
     const behavior = within(navigation).getByRole("button", { name: "Поведение" });
     expect(behavior).toHaveAttribute("aria-expanded", "true");
     expect(behavior).toHaveAttribute("aria-controls", "settings-nav-children-behavior");
-    expect(within(navigation).getByRole("button", { name: "Стиль общения" })).toHaveAttribute("aria-current", "page");
+    expect(within(navigation).getByRole("button", { name: "Живой разговор" })).toHaveAttribute("aria-current", "page");
 
     const avatar = within(navigation).getByRole("button", { name: "Аватар" });
     expect(avatar).not.toHaveAttribute("aria-expanded");
@@ -473,7 +522,8 @@ describe("русский интерфейс", () => {
     fireEvent.click(screen.getByRole("button", { name: "Архив" }));
 
     expect(await screen.findByText("Федор")).toBeInTheDocument();
-    expect(screen.getByText("Заменено на: Федя")).toBeInTheDocument();
+    expect(screen.getByText("Заменено на:")).toBeInTheDocument();
+    expect(screen.getByText("Федя")).toBeInTheDocument();
     expect(screen.getByText("Имя пользователя")).toBeInTheDocument();
     expect(screen.getByText(/использовалось до замены: 3/)).toBeInTheDocument();
   });

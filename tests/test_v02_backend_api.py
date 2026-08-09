@@ -66,6 +66,7 @@ def test_public_settings_does_not_return_api_key(client: TestClient) -> None:
     assert body["model"] == app.state.settings.deepseek_model
     assert "available_models" not in body
     assert body["available_personalities"] == ["default"]
+    assert body["interface_locale"] == "ru"
     assert body["voice_language"] == "ru"
     assert body["voice_stt_model"] == "v3_rnnt"
     assert body["voice_tts_enabled"] is True
@@ -92,6 +93,21 @@ def test_runtime_settings_rejects_model_patch(client: TestClient) -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_runtime_interface_locale_can_be_updated_without_affecting_voice(client: TestClient) -> None:
+    original = client.get("/settings/public").json()
+    try:
+        response = client.patch("/settings/runtime", json={"interface_locale": "en"})
+
+        assert response.status_code == 200
+        assert response.json()["interface_locale"] == "en"
+        assert response.json()["voice_language"] == original["voice_language"]
+
+        unsupported = client.patch("/settings/runtime", json={"interface_locale": "de"})
+        assert unsupported.status_code == 400
+    finally:
+        client.patch("/settings/runtime", json={"interface_locale": original["interface_locale"]})
 
 
 def test_runtime_avatar_placement_can_be_updated_and_validated(client: TestClient) -> None:

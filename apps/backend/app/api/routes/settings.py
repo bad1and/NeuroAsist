@@ -11,6 +11,7 @@ from apps.backend.app.schemas.settings import (
 
 router = APIRouter()
 AVAILABLE_PERSONALITIES = ["default"]
+AVAILABLE_INTERFACE_LOCALES = {"ru", "en"}
 AVAILABLE_VOICE_LANGUAGES = ["auto", "ru", "en"]
 MIN_PLAYBACK_RATE = 0.70
 MAX_PLAYBACK_RATE = 1.30
@@ -50,6 +51,7 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         provider="deepseek",
         model=settings.deepseek_model,
         personality=runtime_settings.personality,
+        interface_locale=runtime_settings.interface_locale,
         voice_language=runtime_settings.voice_language,
         voice_microphone_profile=runtime_settings.voice_microphone_profile,
         voice_input_device_id=runtime_settings.voice_input_device_id,
@@ -118,6 +120,14 @@ async def patch_runtime_settings(
                 detail="Unsupported personality",
             )
         runtime_settings.personality = payload.personality
+
+    if payload.interface_locale is not None:
+        if payload.interface_locale not in AVAILABLE_INTERFACE_LOCALES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unsupported interface locale",
+            )
+        runtime_settings.interface_locale = payload.interface_locale
 
     if payload.voice_language is not None:
         if payload.voice_language not in AVAILABLE_VOICE_LANGUAGES:
@@ -237,6 +247,7 @@ async def patch_runtime_settings(
         {
             "model": settings.deepseek_model,
             "personality": runtime_settings.personality,
+            "interface_locale": runtime_settings.interface_locale,
             "voice_language": runtime_settings.voice_language,
             "voice_microphone_profile": runtime_settings.voice_microphone_profile,
             "voice_input_device_id": runtime_settings.voice_input_device_id,

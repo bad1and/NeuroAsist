@@ -8,6 +8,10 @@ from pathlib import Path
 
 @dataclass
 class RuntimeSettings:
+    # This controls only the application chrome and visible UI copy.  It must
+    # stay independent from ``voice_language`` so changing the interface does
+    # not alter Iris, STT, TTS, or the user's conversation data.
+    interface_locale: str = "ru"
     personality: str = "default"
     voice_language: str = "ru"
     voice_microphone_profile: str = "balanced"
@@ -86,6 +90,8 @@ class RuntimeSettingsStore:
         # Voice is live-only since protocol v3. Keep the field readable for
         # old settings files, but never allow a persisted flag to disable it.
         values["live_conversation_enabled"] = True
+        if values.get("interface_locale") not in {None, "ru", "en"}:
+            values["interface_locale"] = defaults.interface_locale
         if values.get("avatar_placement") not in {None, "desktop_overlay", "in_app"}:
             values["avatar_placement"] = defaults.avatar_placement
         try:
