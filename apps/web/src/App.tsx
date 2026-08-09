@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   MessageCircle,
   Mic,
+  MicOff,
   MonitorCog,
   PanelLeftClose,
   PanelLeftOpen,
@@ -50,7 +51,6 @@ import {
   sendLiveTextMessage,
   searchTimeline,
   deleteTimelineRange,
-  sendVoiceMessage,
   updateRuntimeSettings,
   updatePronunciations,
   updateSttTerms,
@@ -77,7 +77,6 @@ import type {
   StatusResponse,
   TimelineJournalItem,
   TimelineMessage,
-  VoiceChatResponse,
   VoiceTtsStatusResponse,
   MemoryUpdate,
   ConversationDebug,
@@ -93,10 +92,9 @@ import {
 } from "./audio-devices";
 import {
   BrowserVadRecorder,
+  LIVE_MUTE_HOTKEY,
   PcmInputClient,
-  microphoneConstraints,
   type MicrophoneProfile,
-  type VadState,
 } from "./vad";
 import { JournalPage } from "./journal";
 import { MemoryPage } from "./memory";
@@ -266,21 +264,6 @@ function SettingsSwitch({
       <span className="settings-switch" aria-hidden="true"><span /></span>
     </label>
   );
-}
-
-const RECORDING_MIME_TYPES = [
-  "audio/webm;codecs=opus",
-  "audio/webm",
-  "audio/ogg;codecs=opus",
-  "audio/ogg",
-  "audio/mp4",
-];
-
-function getRecordingMimeType(): string | undefined {
-  if (typeof MediaRecorder === "undefined") {
-    return undefined;
-  }
-  return RECORDING_MIME_TYPES.find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
 }
 
 function dedupeEvents(events: BackendEvent[]): BackendEvent[] {
@@ -821,24 +804,19 @@ function ChatPage({
   const [error, setError] = useState<string | null>(null);
   const [retryText, setRetryText] = useState<string | null>(null);
   const [memoryNotice, setMemoryNotice] = useState<string | null>(null);
-  const [handsFree, setHandsFree] = useState(false);
   const [liveConversation, setLiveConversation] = useState(false);
+  const [microphoneMuted, setMicrophoneMuted] = useState(false);
   const [conversationStatus, setConversationStatus] = useState("Микрофон включён");
   const [conversationDebug, setConversationDebug] = useState<ConversationDebug | null>(null);
-  const [vadState, setVadState] = useState<VadState>("idle");
   const [newDialogConfirmationOpen, setNewDialogConfirmationOpen] = useState(false);
   const [newDialogPending, setNewDialogPending] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const recordTimeoutRef = useRef<number | null>(null);
   const handledVoiceEventIdsRef = useRef<Set<string>>(new Set());
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
   const liveSocketRef = useRef<VoiceSocketClient | null>(null);
   const livePlayerRef = useRef<TTSStreamPlayer | null>(null);
   const vadRecorderRef = useRef<BrowserVadRecorder | null>(null);
   const pcmInputRef = useRef<PcmInputClient | null>(null);
-  const submitVoiceRef = useRef<(audio: Blob, endedAt?: number) => void>(() => undefined);
   const playbackCoordinatorRef = useRef(new PlaybackCoordinator());
   const avatarOwnsAudioRef = useRef(false);
   const liveAudioStartedRef = useRef(false);
@@ -848,7 +826,6 @@ function ChatPage({
   const playbackSegmentTextsRef = useRef<string[]>([]);
   const activeVoiceGenerationRef = useRef<number | undefined>(undefined);
   const conversationStatusTimerRef = useRef<number | null>(null);
-  const bargeInTimerRef = useRef<number | null>(null);
 
   const updateConversationStatus = useCallback((status: string, resetAfterMs?: number) => {
     if (conversationStatusTimerRef.current !== null) {
@@ -867,9 +844,6 @@ function ChatPage({
   useEffect(() => () => {
     if (conversationStatusTimerRef.current !== null) {
       window.clearTimeout(conversationStatusTimerRef.current);
-    }
-    if (bargeInTimerRef.current !== null) {
-      window.clearTimeout(bargeInTimerRef.current);
     }
   }, []);
 
@@ -910,11 +884,7 @@ function ChatPage({
     };
   }, [liveConversation, sessionId, settings?.conversation_diagnostics_enabled]);
 
-  const voiceSupported =
-    typeof navigator !== "undefined" &&
-    Boolean(navigator.mediaDevices?.getUserMedia) &&
-    typeof MediaRecorder !== "undefined";
-  const handsFreeSupported =
+  const liveVoiceSupported =
     typeof navigator !== "undefined"
     && Boolean(navigator.mediaDevices?.getUserMedia)
     && typeof AudioWorkletNode !== "undefined";
@@ -987,6 +957,29 @@ function ChatPage({
       void interruptVoiceSession(sessionId, utteranceId).catch(() => undefined);
     }
   }, [sessionId, stopVoicePlayback]);
+
+  const playMuteTone = useCallback((muted: boolean) => {
+    try {
+      const AudioContextConstructor = globalThis.AudioContext
+        ?? (globalThis as typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextConstructor) return;
+      const context = new AudioContextConstructor();
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      const now = context.currentTime;
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(muted ? 220 : 520, now);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.025, now + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.055);
+      oscillator.connect(gain).connect(context.destination);
+      oscillator.start(now);
+      oscillator.stop(now + 0.06);
+      oscillator.addEventListener("ended", () => { void context.close(); }, { once: true });
+    } catch {
+      // Audio feedback is optional and must never block microphone control.
+    }
+  }, []);
 
   const playAudioUrl = useCallback(
     async (audioUrl: string): Promise<boolean> => {
@@ -1311,36 +1304,6 @@ function ChatPage({
     [syncVoiceTtsStatus],
   );
 
-  const appendBatchVoiceResponse = useCallback(
-    (response: VoiceChatResponse) => {
-      showMemoryUpdates(response.memory_updates);
-      setMessages((current) => [
-        ...current,
-        {
-          id: crypto.randomUUID(),
-          role: "user",
-          content: response.transcript,
-        },
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: response.reply,
-          emotion: response.emotion,
-          intent: response.intent,
-          voiceRequestId: response.voice_request_id,
-          ttsStatus: response.tts_status,
-          audioUrl: response.reply_audio_url
-            ? resolveApiUrl(response.reply_audio_url)
-            : undefined,
-        },
-      ]);
-      if (response.tts_status === "queued") {
-        void pollVoiceTtsStatus(response.voice_request_id);
-      }
-    },
-    [pollVoiceTtsStatus, showMemoryUpdates],
-  );
-
   useLayoutEffect(() => {
     // ChatPage remains mounted while another section is open so the live
     // connection survives navigation.  Its list can therefore receive its
@@ -1498,175 +1461,28 @@ function ChatPage({
     }
   };
 
-  const startRecording = async (bargeIn = false) => {
-    if (!voiceSupported || (!bargeIn && (loading || voiceState !== "idle"))) {
-      return;
-    }
-
-    if (bargeIn) {
-      interruptAssistantSpeech();
-    }
-    setError(null);
-    try {
-      await ensureLivePlayer().unlock();
-      const profile = (settings?.voice_microphone_profile ?? "balanced") as MicrophoneProfile;
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: microphoneConstraints(profile, selectedInputDeviceId),
-      });
-      const mimeType = getRecordingMimeType();
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      chunksRef.current = [];
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunksRef.current.push(event.data);
-        }
-      };
-
-      recorder.onstop = () => {
-        if (recordTimeoutRef.current !== null) {
-          window.clearTimeout(recordTimeoutRef.current);
-          recordTimeoutRef.current = null;
-        }
-        stream.getTracks().forEach((track) => track.stop());
-        const audio = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
-        chunksRef.current = [];
-        void submitVoice(audio, Date.now());
-      };
-
-      recorderRef.current = recorder;
-      recorder.start();
-      recordTimeoutRef.current = window.setTimeout(() => {
-        stopRecording();
-      }, 60000);
-      setVoiceState("recording");
-    } catch (recordError) {
-      setError(
-        recordError instanceof Error ? recordError.message : "Микрофон недоступен",
-      );
-      setVoiceState("idle");
-    }
-  };
-
-  const stopRecording = () => {
-    if (recorderRef.current?.state === "recording") {
-      recorderRef.current.stop();
-      setVoiceState("transcribing");
-    }
-  };
-
-  const toggleRecording = async () => {
-    if (voiceState === "recording") {
-      stopRecording();
-      return;
-    }
-    // The avatar can still be speaking after the browser has released its
-    // local playback lease.  Treat every new push-to-talk recording as a
-    // barge-in instead of relying on UI state to detect that case.
-    await startRecording(true);
-  };
-
-  const submitVoice = async (audio: Blob, endOfSpeechUnixMs?: number) => {
+  const toggleLive = async () => {
     if (!sessionId) return;
-    if (audio.size === 0) {
-      setError("Запись пуста");
-      setVoiceState("idle");
-      return;
-    }
-    if (audio.size < 800) {
-      setError("Запись слишком короткая");
-      setVoiceState("idle");
-      return;
-    }
-
-    setLoading(true);
-    setVoiceState("transcribing");
-    setError(null);
-    const thinkingTimer = window.setTimeout(() => {
-      setVoiceState("thinking");
-    }, 500);
-    try {
-      let response;
-      try {
-        await ensureLiveVoice();
-        liveSocketRef.current?.clearActive();
-        liveAudioStartedRef.current = false;
-        response = await sendVoiceMessage(
-          sessionId,
-          audio,
-          settings?.voice_language ?? "ru",
-          true,
-          endOfSpeechUnixMs,
-        );
-      } catch (liveError) {
-        if (!isLiveVoiceTransportError(liveError)) {
-          throw liveError;
-        }
-        liveSocketRef.current?.close();
-        liveSocketRef.current = null;
-        response = await sendVoiceMessage(
-          sessionId,
-          audio,
-          settings?.voice_language ?? "ru",
-          false,
-          endOfSpeechUnixMs,
-        );
-      setError("Потоковый голосовой режим недоступен: использован обычный ответ.");
-      }
-      if ("status" in response) {
-        liveSocketRef.current?.activate(response.utterance_id);
-        setMessages((current) => [
-          ...current,
-          {
-            id: crypto.randomUUID(),
-            role: "user",
-            content: response.transcript,
-          },
-        ]);
-        setVoiceState("thinking");
-        return;
-      }
-      appendBatchVoiceResponse(response);
-      await onRefreshEvents();
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Не удалось отправить голосовое сообщение");
-    } finally {
-      window.clearTimeout(thinkingTimer);
-      if (!liveSocketRef.current?.activeUtteranceId) {
-        setLoading(false);
-        setVoiceState("idle");
-      }
-    }
-  };
-
-  useEffect(() => {
-    submitVoiceRef.current = (audio: Blob, endedAt?: number) => { void submitVoice(audio, endedAt); };
-  }, [submitVoice]);
-
-  const toggleHandsFree = async (mode: "hands_free" | "live_conversation" = "hands_free") => {
-    if (!sessionId) return;
-    const isLive = mode === "live_conversation";
-    const requestedModeActive = isLive ? liveConversation : handsFree;
-    if (requestedModeActive) {
+    if (liveConversation) {
       vadRecorderRef.current?.stop();
       pcmInputRef.current?.close();
       pcmInputRef.current = null;
       vadRecorderRef.current = null;
-      setHandsFree(false);
+      setMicrophoneMuted(false);
       setLiveConversation(false);
-      setVadState("idle");
-      updateConversationStatus("Микрофон включён");
+      setVoiceState("idle");
+      updateConversationStatus("Live выключен");
       return;
     }
     vadRecorderRef.current?.stop();
     pcmInputRef.current?.close();
     pcmInputRef.current = null;
     vadRecorderRef.current = null;
-    setHandsFree(false);
+    setMicrophoneMuted(false);
     setLiveConversation(false);
     try {
       await ensureLiveVoice();
-      const input = new PcmInputClient(voiceInputWebSocketUrl(sessionId, isLive ? 2 : 1), (event) => {
+      const input = new PcmInputClient(voiceInputWebSocketUrl(sessionId, 3), (event) => {
         if (event.type === "voice.input.transcript" && event.transcript) {
           setMessages((current) => [...current, {
             id: crypto.randomUUID(),
@@ -1674,7 +1490,7 @@ function ChatPage({
             content: event.transcript!,
             speakerLabel: pendingSpeakerLabelRef.current,
           }]);
-          if (!isLive || !event.observation_only) {
+          if (!event.observation_only) {
             setVoiceState("thinking");
             updateConversationStatus("Iris отвечает");
           }
@@ -1727,38 +1543,57 @@ function ChatPage({
       vadRecorderRef.current = recorder;
       const capture = await recorder.start(
         (pcm16) => pcmInputRef.current?.sendPcm(pcm16),
-        (nextState, event) => {
-          setVadState(nextState);
-          if (
-            nextState !== "speech"
-            && bargeInTimerRef.current !== null
-          ) {
-            window.clearTimeout(bargeInTimerRef.current);
-            bargeInTimerRef.current = null;
+        (_nextState, event) => {
+          if (event === "speech_started") {
+            interruptAssistantSpeech();
+            setVoiceState("recording");
+            updateConversationStatus("Слышу вас");
+          } else if (event === "speech_ended") {
+            setVoiceState("transcribing");
           }
-          if (event === "speech_started" && isLive) updateConversationStatus("Слышу вас");
         },
-        (settings?.voice_microphone_profile ?? "balanced") as MicrophoneProfile,
+        "live",
         selectedInputDeviceId,
       );
       await input.connect(
         capture.sampleRate,
         settings?.voice_language ?? "ru",
-        isLive ? "live_conversation" : "hands_free",
         capture,
       );
-      setHandsFree(!isLive);
-      setLiveConversation(isLive);
+      setLiveConversation(true);
+      setMicrophoneMuted(false);
       updateConversationStatus("Микрофон включён");
     } catch (vadError) {
       vadRecorderRef.current?.stop();
+      pcmInputRef.current?.close();
       vadRecorderRef.current = null;
-      setError(vadError instanceof Error ? vadError.message : "Режим свободных рук недоступен");
-      setHandsFree(false);
+      pcmInputRef.current = null;
+      setMicrophoneMuted(false);
+      setError(vadError instanceof Error ? vadError.message : "Live-режим недоступен");
       setLiveConversation(false);
-      setVadState("idle");
     }
   };
+
+  const toggleMicrophoneMute = useCallback(() => {
+    if (!liveConversation || !vadRecorderRef.current) return;
+    const nextMuted = !microphoneMuted;
+    vadRecorderRef.current.setMuted(nextMuted);
+    setMicrophoneMuted(nextMuted);
+    playMuteTone(nextMuted);
+    updateConversationStatus(nextMuted ? "Микрофон выключен" : "Микрофон включён");
+  }, [liveConversation, microphoneMuted, playMuteTone, updateConversationStatus]);
+
+  useEffect(() => {
+    const handleMuteHotkey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== LIVE_MUTE_HOTKEY || event.repeat || !liveConversation) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.isContentEditable || (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
+      event.preventDefault();
+      toggleMicrophoneMute();
+    };
+    window.addEventListener("keydown", handleMuteHotkey);
+    return () => window.removeEventListener("keydown", handleMuteHotkey);
+  }, [liveConversation, toggleMicrophoneMute]);
 
   const startNewDialog = async () => {
     if (!sessionId || newDialogPending) return;
@@ -1771,9 +1606,8 @@ function ChatPage({
       pcmInputRef.current?.close();
       pcmInputRef.current = null;
       vadRecorderRef.current = null;
-      setHandsFree(false);
       setLiveConversation(false);
-      setVadState("idle");
+      setMicrophoneMuted(false);
       interruptAssistantSpeech();
       await onStartNewDialog();
       setNewDialogConfirmationOpen(false);
@@ -1882,37 +1716,27 @@ function ChatPage({
 
         <div className="voice-controls">
           <button
-            className={`voice-button${voiceState === "recording" ? " recording" : ""}`}
-            disabled={!voiceSupported || voiceState === "transcribing" || voiceState === "stopping"}
-            onClick={() => void toggleRecording()}
+            className={liveConversation ? "voice-button recording" : "secondary voice-button"}
+            disabled={!liveVoiceSupported || voiceState === "stopping"}
+            onClick={() => void toggleLive()}
+            title="Непрерывный live-диалог с автоматическими паузами и перебиваниями"
             type="button"
           >
             <Mic size={18} aria-hidden="true" />
-            {voiceButtonLabel(voiceState)}
+            {liveConversation ? "Live: вкл." : "Live"}
           </button>
-          <button
-            className={handsFree ? "voice-button recording" : "secondary voice-button"}
-            disabled={!handsFreeSupported || voiceState === "transcribing"}
-            onClick={() => void toggleHandsFree("hands_free")}
-            type="button"
-          >
-            {handsFree ? "Свободные руки: вкл." : "Свободные руки"}
-          </button>
-          <button
-            className={liveConversation ? "voice-button recording" : "secondary voice-button"}
-            disabled={
-              !handsFreeSupported
-              || voiceState === "transcribing"
-              || !settings?.live_conversation_enabled
-            }
-            onClick={() => void toggleHandsFree("live_conversation")}
-            title={settings?.live_conversation_enabled
-              ? "Естественный разговор с решениями говорить или слушать"
-              : "Включите живой разговор в настройках"}
-            type="button"
-          >
-            {liveConversation ? "Живой разговор: вкл." : "Живой разговор"}
-          </button>
+          {liveConversation && (
+            <button
+              className={microphoneMuted ? "secondary voice-button muted" : "secondary voice-button"}
+              aria-label={microphoneMuted ? "Включить микрофон" : "Выключить микрофон"}
+              aria-pressed={microphoneMuted}
+              onClick={toggleMicrophoneMute}
+              title={`Микрофон: ${microphoneMuted ? "включить" : "выключить"} · клавиша ${LIVE_MUTE_HOTKEY.toUpperCase()}`}
+              type="button"
+            >
+              {microphoneMuted ? <MicOff size={18} aria-hidden="true" /> : <Mic size={18} aria-hidden="true" />}
+            </button>
+          )}
           <button
             className="secondary voice-button new-dialog-button"
             disabled={!sessionId || sessionStarting || newDialogPending || voiceState === "recording" || voiceState === "transcribing"}
@@ -1922,12 +1746,8 @@ function ChatPage({
           >
             Новый диалог
           </button>
-          {(handsFree || liveConversation || voiceState !== "idle" || !voiceSupported) && <span>
-            {voiceSupported
-              ? liveConversation
-                ? conversationStatus
-                : `Голос: ${settings?.voice_language === "en" ? "английский" : "русский"}${handsFree ? ` · ${vadState}` : ""}`
-              : "Голосовой ввод недоступен"}
+          {(liveConversation || voiceState !== "idle" || !liveVoiceSupported) && <span>
+            {liveVoiceSupported ? conversationStatus : "Live-аудио недоступно"}
           </span>}
         </div>
         {import.meta.env.DEV && liveConversation && conversationDebug && (
@@ -1962,28 +1782,6 @@ function ChatPage({
       </div>
     </section>
   );
-}
-
-function voiceButtonLabel(voiceState: VoiceState): string {
-  if (voiceState === "recording") {
-    return "Остановить и отправить";
-  }
-  if (voiceState === "transcribing") {
-    return "Распознаём речь";
-  }
-  if (voiceState === "thinking") {
-    return "Перебить и говорить";
-  }
-  if (voiceState === "speaking") {
-    return "Перебить и говорить";
-  }
-  if (voiceState === "stopping") {
-    return "Останавливаем";
-  }
-  if (voiceState === "error") {
-    return "Попробовать снова";
-  }
-  return "Голосовое сообщение";
 }
 
 function getStringMetadata(event: BackendEvent, key: string): string | null {
@@ -2105,7 +1903,7 @@ function SettingsPage({
   const [memoryMode, setMemoryMode] = useState("balanced");
   const [memoryIncognito, setMemoryIncognito] = useState(false);
   const [liveSettings, setLiveSettings] = useState<LiveConversationSettings>({
-    live_conversation_enabled: false,
+    live_conversation_enabled: true,
     live_conversation_participant_mode: "one_to_one",
     live_conversation_engagement: "balanced",
     live_conversation_initiative: "rare",
@@ -2477,7 +2275,7 @@ function SettingsPage({
                 </option>
               ))}
             </select>
-            <small>Используется для голосовых сообщений, «Свободных рук» и живого разговора.</small>
+            <small>Используется для единственного голосового режима Live.</small>
           </label>
 
           <label>
@@ -2694,13 +2492,8 @@ function SettingsPage({
 
         <fieldset className="settings-group live-conversation-settings" hidden={activeSection !== "conversation"}>
           <legend>Живой разговор</legend>
-          <SettingsSwitch
-            checked={liveSettings.live_conversation_enabled}
-            label="Включить отдельный режим «Живой разговор»"
-            onChange={(checked) => updateLiveSetting("live_conversation_enabled", checked)}
-          />
           <small>
-            Текстовый чат, голосовые сообщения и «Свободные руки» сохраняют прежнее поведение.
+            Live — единственный голосовой режим. Реплики распознаются автоматически, без кнопки записи.
           </small>
 
           <label>

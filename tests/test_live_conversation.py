@@ -567,7 +567,7 @@ async def test_incognito_observation_stays_ephemeral(tmp_path: Path) -> None:
 async def test_smart_turn_missing_model_degrades_safely(tmp_path: Path) -> None:
     detector = SmartTurnDetector(tmp_path / "missing.onnx")
     result = await detector.analyze(b"\0\0" * 16000, 16000)
-    assert result.complete is True
+    assert result.complete is False
     assert result.fallback is True
     assert result.provider == "heuristic"
 

@@ -17,9 +17,11 @@ from apps.backend.app.core.config import Settings
 from apps.backend.app.voice.audio import Pcm16Audio, decode_audio_file, write_pcm16_wav
 from apps.backend.app.voice.providers import (
     FasterWhisperSTTProvider,
+    FallbackSTTProvider,
     GigaAMSTTProvider,
     MockSTTProvider,
     MockTTSProvider,
+    Qwen3ASRProvider,
     SileroTTSProvider,
     STTProvider,
     TTSProvider,
@@ -71,7 +73,22 @@ def _resolve_audio_suffix(upload: UploadFile) -> str | None:
 class VoiceService:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._stt_provider = self._build_stt_provider(settings)
+        primary_provider = self._build_stt_provider(settings)
+        fallback_name = str(getattr(settings, "voice_stt_fallback_provider", "") or "").strip().lower()
+        if fallback_name and fallback_name != settings.voice_stt_provider:
+            fallback_provider = self._build_stt_provider(
+                settings,
+                provider_name=fallback_name,
+                model_name=getattr(settings, "voice_stt_fallback_model", "") or None,
+            )
+            self._stt_provider = FallbackSTTProvider(
+                primary_provider,
+                fallback_provider,
+                confidence_threshold=settings.voice_stt_fallback_confidence_threshold,
+                min_rms=settings.voice_stt_fallback_min_rms,
+            )
+        else:
+            self._stt_provider = primary_provider
         self._tts_provider = self._build_tts_provider(settings)
         terms_path = getattr(
             settings,
@@ -324,21 +341,31 @@ class VoiceService:
                 logger.warning("Could not remove generated WAV: path=%s", path)
         return removed
 
-    def _build_stt_provider(self, settings: Settings) -> STTProvider:
-        if settings.voice_stt_provider == "mock":
+    def _build_stt_provider(
+        self,
+        settings: Settings,
+        *,
+        provider_name: str | None = None,
+        model_name: str | None = None,
+    ) -> STTProvider:
+        provider = provider_name or settings.voice_stt_provider
+        model = model_name or getattr(settings, "voice_stt_model", "v3_rnnt")
+        if provider == "mock":
             return MockSTTProvider()
-        if settings.voice_stt_provider == "faster_whisper":
+        if provider == "faster_whisper":
             return FasterWhisperSTTProvider(
-                settings.voice_stt_model,
+                model,
                 settings.voice_stt_device,
                 settings.voice_stt_compute_type,
             )
-        if settings.voice_stt_provider == "gigaam":
+        if provider == "gigaam":
             return GigaAMSTTProvider(
-                settings.voice_stt_model,
+                model,
                 settings.voice_stt_device,
             )
-        raise ValueError(f"Unsupported STT provider: {settings.voice_stt_provider}")
+        if provider == "qwen3_asr":
+            return Qwen3ASRProvider(model, settings.voice_stt_device)
+        raise ValueError(f"Unsupported STT provider: {provider}")
 
     def _build_tts_provider(self, settings: Settings) -> TTSProvider:
         return self._build_tts_provider_by_name(settings.voice_tts_provider, settings)

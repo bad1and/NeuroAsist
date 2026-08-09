@@ -2,21 +2,14 @@
 
 ## Назначение
 
-Live Conversation — отдельный opt-in режим голосового общения. Текстовый чат,
-голосовые сообщения и «Свободные руки» сохраняют прежний контракт
-«сообщение → ответ». В live-режиме распознанная человеческая реплика сначала
-становится observation, и только затем conversation policy решает, отвечать ли
-Iris.
+Live Conversation — единственный голосовой режим Iris. Текстовый чат сохраняется,
+а голос запускается одной кнопкой `Live`: после старта браузер непрерывно
+передаёт PCM16, backend сам определяет реплики и автоматически запускает ответ.
+Отдельных режимов записи и ручного управления репликой в контракте больше нет.
 
-Feature flag по умолчанию выключен:
-
-```text
-live_conversation_enabled=false
-```
-
-Включить режим можно в «Настройки → Живой разговор». Новый web-клиент
-подключается к `/ws/voice-input/{session_id}?version=2`; версия 1 остаётся
-совместимой.
+Параметр `live_conversation_enabled` сохранён только для миграции старых
+настроек и всегда считается включённым. Web-клиент использует только
+`/ws/voice-input/{session_id}?version=3`.
 
 ## Поток данных
 
@@ -143,11 +136,10 @@ tasks и незавершённые generations не восстанавлива�
 - `conversation_observations`.
 
 Перед миграцией существующей БД startup создаёт backup. Миграция идемпотентна и
-не меняет существующие memory/timeline rows. Rollback — выключить
-`live_conversation_enabled`; новые таблицы можно оставить на месте. «Очистить
-память» их не удаляет, а «Сбросить данные Iris» удаляет.
+не меняет существующие memory/timeline rows. Новые таблицы можно оставить на
+месте: «Очистить память» их не удаляет, а «Сбросить данные Iris» удаляет.
 
-## WebSocket v2
+## WebSocket v3
 
 Conversation events содержат `session_id`, `generation`, `turn_id`,
 `utterance_id` и `created_at`:
@@ -166,8 +158,22 @@ conversation.cancelled
 conversation.echo_rejected
 ```
 
-`voice.input.transcript` остаётся для совместимости. Silence отображается
-коротким статусом и не создаёт assistant bubble.
+`voice.input.transcript` содержит `raw_transcript`, исправленный `transcript`,
+`confidence`, а при срабатывании вторичной модели — `fallback` и
+`fallback_reason`. Silence отображается коротким статусом и не создаёт
+assistant bubble.
+
+Клиентский input-контракт:
+
+```text
+voice.input.start { protocol_version: 3, sample_rate, language, capture: "live" }
+<непрерывные бинарные PCM16-фреймы>
+voice.input.stop
+```
+
+Поле `mode` и версии протокола 1/2 отклоняются. `stop` завершает всю live-сессию,
+а не отдельную реплику. При reconnect старое соединение теряет право принимать
+PCM и закрывать сессию; ожидающие фреймы отправляются только новым соединением.
 
 Клиент отправляет:
 
@@ -215,8 +221,11 @@ Deferred queue ограничена тремя элементами, TTL 45 се
 ## Failure modes
 
 - Smart Turn не установлен: VAD использует более терпеливую fallback-паузу.
-- Smart Turn timeout/error: candidate завершается консервативно, голосовой
-  pipeline остаётся доступен.
+- Smart Turn timeout/error: endpoint остаётся pending и закрывается только
+  осторожным timeout-fallback, поэтому внутренняя пауза не запускает ранний
+  ответ.
+- Secondary STT не установлен или упал: первичный результат сохраняется, а
+  причина fallback попадает в diagnostics без потери пользовательской реплики.
 - STT старого generation: результат отбрасывается до timeline write.
 - Decision path не зависит от внешнего adjudicator: hard gates и deterministic
   score работают локально, поэтому прямое обращение не теряется при сбое LLM

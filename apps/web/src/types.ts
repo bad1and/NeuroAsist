@@ -51,26 +51,6 @@ export type VoiceTtsStatus =
   | "disabled"
   | "skipped";
 
-export type VoiceChatResponse = ChatResponse & {
-  voice_request_id: string;
-  transcript: string;
-  raw_transcript?: string | null;
-  corrections?: Array<{ source: string; target: string; start: number; end: number }>;
-  reply_audio_url?: string | null;
-  tts_status: VoiceTtsStatus;
-  stt: {
-    provider: string;
-    model?: string | null;
-    language?: string | null;
-    duration_ms: number;
-  };
-  tts: {
-    provider: string;
-    voice?: string | null;
-    duration_ms: number;
-  };
-};
-
 export type VoiceLiveResponse = {
   session_id: string;
   utterance_id: string;

@@ -156,8 +156,8 @@ async def websocket_voice(websocket: WebSocket, session_id: str, version: int = 
 
 
 @router.websocket("/ws/voice-input/{session_id}")
-async def websocket_voice_input(websocket: WebSocket, session_id: str, version: int = 1, token: str | None = None) -> None:
-    if not _desktop_token_is_valid(websocket, token) or not _session_is_active(websocket, session_id) or version not in {1, 2}:
+async def websocket_voice_input(websocket: WebSocket, session_id: str, version: int = 3, token: str | None = None) -> None:
+    if not _desktop_token_is_valid(websocket, token) or not _session_is_active(websocket, session_id) or version != 3:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     await websocket.accept()
@@ -167,18 +167,21 @@ async def websocket_voice_input(websocket: WebSocket, session_id: str, version: 
         while True:
             message = await websocket.receive()
             if message.get("bytes") is not None:
-                await manager.feed(session_id, message["bytes"])
+                await manager.feed(session_id, message["bytes"], connection)
                 continue
             payload = json.loads(message.get("text") or "{}")
             if payload.get("type") == "voice.input.start":
+                if payload.get("protocol_version", 3) != 3:
+                    raise ValueError("voice input protocol v3 is required")
+                if "mode" in payload:
+                    raise ValueError("voice.input.start no longer accepts mode")
                 await manager.start(
                     session_id,
                     sample_rate=int(payload.get("sample_rate", 16000)),
                     channels=int(payload.get("channels", 1)),
                     language=str(payload.get("language", "ru")),
-                    mode=str(payload.get("mode", "hands_free")),
                     audio_format=str(payload.get("format", "pcm_s16le")),
-                    capture_profile=str(payload.get("capture_profile", "balanced")),
+                    capture_profile=str(payload.get("capture_profile", "live")),
                     capture_settings=payload.get("capture_settings")
                     if isinstance(payload.get("capture_settings"), dict)
                     else {},
@@ -190,16 +193,16 @@ async def websocket_voice_input(websocket: WebSocket, session_id: str, version: 
                     else {},
                 )
             elif payload.get("type") == "voice.input.stop":
-                await manager.stop(session_id)
+                await manager.stop(session_id, connection=connection)
                 break
     except (WebSocketDisconnect, RuntimeError, json.JSONDecodeError, ValueError) as exc:
         if not isinstance(exc, WebSocketDisconnect):
             with contextlib.suppress(Exception):
                 await connection.send({"type": "voice.input.error", "message": str(exc)})
     finally:
-        await manager.unregister(session_id, connection)
+        connection_is_current = await manager.unregister(session_id, connection)
         service = getattr(websocket.app.state, "conversation_service", None)
-        if service is not None and connection.mode == "live_conversation":
+        if service is not None and connection_is_current:
             await service.close_session(session_id)
 
 

@@ -17,7 +17,7 @@ class TurnDetectionResult:
 
 
 class SmartTurnDetector:
-    """Optional local Smart Turn v3.2 adapter with a safe audio-level fallback."""
+    """Optional local Smart Turn v3.2 adapter with a patient live fallback."""
 
     name = "smart-turn-v3.2"
 
@@ -54,8 +54,8 @@ class SmartTurnDetector:
         started = time.perf_counter()
         if not self.ready or sample_rate != 16000:
             return TurnDetectionResult(
-                complete=True,
-                confidence=0.55,
+                complete=False,
+                confidence=0.5,
                 provider="heuristic",
                 latency_ms=(time.perf_counter() - started) * 1000,
                 fallback=True,
@@ -74,7 +74,7 @@ class SmartTurnDetector:
             )
         except TimeoutError:
             return TurnDetectionResult(
-                complete=True,
+                complete=False,
                 confidence=0.5,
                 provider="heuristic",
                 latency_ms=(time.perf_counter() - started) * 1000,
@@ -83,7 +83,7 @@ class SmartTurnDetector:
             )
         except Exception as exc:
             return TurnDetectionResult(
-                complete=True,
+                complete=False,
                 confidence=0.5,
                 provider="heuristic",
                 latency_ms=(time.perf_counter() - started) * 1000,

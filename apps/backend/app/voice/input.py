@@ -323,8 +323,7 @@ class VadGate:
 @dataclass
 class InputConnection:
     websocket: WebSocket
-    version: int = 1
-    mode: str = "hands_free"
+    version: int = 3
     generation: int = 0
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
@@ -345,7 +344,7 @@ class InputSession:
     normalizer: StreamingPcm16Normalizer | None = None
     vad_stream: VadStream | None = None
     vad_fallback_reason: str | None = None
-    capture_profile: str = "balanced"
+    capture_profile: str = "live"
     capture_settings: dict = field(default_factory=dict)
     capture_constraints: dict = field(default_factory=dict)
     capture_supported_constraints: dict = field(default_factory=dict)
@@ -384,11 +383,10 @@ class VoiceInputSessionManager:
         energy_end_rms: float = .012,
         silero_start_ms: int = 64,
         energy_start_ms: int = 120,
-        pre_roll_ms: int = 500,
+        pre_roll_ms: int = 900,
         post_roll_ms: int = 180,
-        end_silence_ms: int = 480,
-        live_end_silence_ms: int = 320,
-        live_fallback_end_silence_ms: int = 650,
+        live_end_silence_ms: int = 750,
+        live_fallback_end_silence_ms: int = 1100,
         max_utterance_seconds: int = 45,
         max_turn_silence_ms: int = 2500,
         barge_in_guard: BargeInGuard | None = None,
@@ -408,7 +406,6 @@ class VoiceInputSessionManager:
         self._energy_start_ms = max(32, energy_start_ms)
         self._pre_roll_ms = pre_roll_ms
         self._post_roll_ms = max(0, post_roll_ms)
-        self._end_silence_ms = max(100, end_silence_ms)
         self._live_end_silence_ms = max(100, live_end_silence_ms)
         self._live_fallback_end_silence_ms = max(100, live_fallback_end_silence_ms)
         self._max_utterance_seconds = max_utterance_seconds
@@ -436,32 +433,53 @@ class VoiceInputSessionManager:
             "version": getattr(self._vad, "version", None),
         }
 
-    async def register(self, session_id: str, websocket: WebSocket, *, version: int = 1) -> InputConnection:
+    async def register(self, session_id: str, websocket: WebSocket, *, version: int = 3) -> InputConnection:
+        previous = self._sessions.get(session_id)
+        if previous is not None:
+            # A reconnect replaces the old owner atomically. Do not let a
+            # stale socket finalize audio after the new socket has started.
+            await self.unregister(session_id, previous.connection, finalize_active=False)
+            with contextlib.suppress(Exception):
+                await previous.connection.websocket.close(code=1012)
         connection = InputConnection(websocket, version=version)
         self._sessions[session_id] = InputSession(session_id, connection)
         return connection
 
-    async def unregister(self, session_id: str, connection: InputConnection) -> None:
+    async def unregister(
+        self,
+        session_id: str,
+        connection: InputConnection,
+        *,
+        finalize_active: bool = True,
+    ) -> bool:
         session = self._sessions.get(session_id)
-        if session is not None and session.connection is connection:
-            await self.stop(session_id, finalize_active=True)
-            self._sessions.pop(session_id, None)
-            if session.endpoint_task is not None:
-                session.endpoint_task.cancel()
-            session.endpoint_task = None
-            if session.vad_stream is not None:
-                session.vad_stream.reset()
-            session.vad_stream = None
-            session.normalizer = None
+        if session is None or session.connection is not connection:
+            return False
+        await self.stop(session_id, finalize_active=finalize_active)
+        self._sessions.pop(session_id, None)
+        if session.endpoint_task is not None:
+            session.endpoint_task.cancel()
+        session.endpoint_task = None
+        if session.vad_stream is not None:
+            session.vad_stream.reset()
+        session.vad_stream = None
+        session.normalizer = None
+        return True
 
-    async def close_session(self, session_id: str) -> None:
+    async def close_session(self, session_id: str, connection: InputConnection | None = None) -> None:
         session = self._sessions.get(session_id)
-        if session is not None:
+        if session is not None and (connection is None or session.connection is connection):
             await self.unregister(session_id, session.connection)
 
-    async def stop(self, session_id: str, *, finalize_active: bool = True) -> None:
+    async def stop(
+        self,
+        session_id: str,
+        *,
+        connection: InputConnection | None = None,
+        finalize_active: bool = True,
+    ) -> None:
         session = self._sessions.get(session_id)
-        if session is None:
+        if session is None or (connection is not None and session.connection is not connection):
             return
         if session.normalizer is not None:
             with contextlib.suppress(Exception):
@@ -474,9 +492,8 @@ class VoiceInputSessionManager:
             session.utterance = None
             session.candidate_sequence += 1
             candidate_id = session.candidate_sequence
-            if session.connection.mode == "live_conversation":
-                session.pending_turn = bytearray(audio)
-                session.pending_candidate_id = candidate_id
+            session.pending_turn = bytearray(audio)
+            session.pending_candidate_id = candidate_id
             finalize_task = self._start_finalize_task(session, audio, candidate_id)
             # An explicit stop must not close the WebSocket before the final
             # confirmed utterance has been flushed through STT.
@@ -491,9 +508,8 @@ class VoiceInputSessionManager:
         sample_rate: int,
         channels: int,
         language: str,
-        mode: str = "hands_free",
         audio_format: str = CANONICAL_FORMAT,
-        capture_profile: str = "balanced",
+        capture_profile: str = "live",
         capture_settings: dict | None = None,
         capture_constraints: dict | None = None,
         capture_supported_constraints: dict | None = None,
@@ -507,12 +523,10 @@ class VoiceInputSessionManager:
         session.sample_rate = CANONICAL_SAMPLE_RATE
         session.channels, session.language = channels, language
         session.normalizer = StreamingPcm16Normalizer(sample_rate)
-        session.capture_profile = capture_profile if capture_profile in {"headset", "balanced", "speakers"} else "balanced"
+        session.capture_profile = capture_profile if capture_profile in {"live", "headset", "balanced", "speakers"} else "live"
         session.capture_settings = dict(capture_settings or {})
         session.capture_constraints = dict(capture_constraints or {})
         session.capture_supported_constraints = dict(capture_supported_constraints or {})
-        session.connection.mode = mode if mode in {"hands_free", "live_conversation"} else "hands_free"
-        live = session.connection.mode == "live_conversation"
         semantic_ready = bool(self._turn_detector is not None and getattr(self._turn_detector, "ready", False))
         session.vad_fallback_reason = None
         try:
@@ -527,10 +541,8 @@ class VoiceInputSessionManager:
             start_ms=self._silero_start_ms if silero_active else self._energy_start_ms,
             end_ms=(
                 self._live_end_silence_ms
-                if live and semantic_ready
+                if semantic_ready
                 else self._live_fallback_end_silence_ms
-                if live
-                else self._end_silence_ms
             ),
         )
         session.ring.clear()
@@ -548,6 +560,7 @@ class VoiceInputSessionManager:
         vad_status = self._session_vad_status(session)
         await session.connection.send({
             "type": "voice.input.ready",
+            "protocol_version": 3,
             "source_sample_rate": sample_rate,
             "canonical_sample_rate": CANONICAL_SAMPLE_RATE,
             "sample_rate": CANONICAL_SAMPLE_RATE,
@@ -586,9 +599,18 @@ class VoiceInputSessionManager:
         if session.vad_fallback_reason:
             self._publish_vad_fallback(session, session.vad_fallback_reason)
 
-    async def feed(self, session_id: str, pcm16: bytes) -> None:
+    async def feed(
+        self,
+        session_id: str,
+        pcm16: bytes,
+        connection: InputConnection | None = None,
+    ) -> None:
         session = self._sessions.get(session_id)
-        if session is None or not pcm16:
+        if (
+            session is None
+            or (connection is not None and session.connection is not connection)
+            or not pcm16
+        ):
             return
         if len(pcm16) % 2:
             await session.connection.send({"type": "voice.input.error", "message": "PCM16 frame has an odd byte length"})
@@ -621,8 +643,7 @@ class VoiceInputSessionManager:
             session.utterance = bytearray(session.pending_turn)
             session.utterance.extend(bytearray().join(session.ring))
             guarded = bool(
-                session.connection.mode == "live_conversation"
-                and self._barge_in_guard is not None
+                self._barge_in_guard is not None
                 and self._barge_in_guard(session.session_id)
             )
             session.speech_confirmed = False
@@ -657,12 +678,11 @@ class VoiceInputSessionManager:
                 session.utterance = None
                 session.speech_confirmation_due_at = 0.0
                 session.speech_confirmation_samples = 0
-                if session.connection.mode == "live_conversation":
-                    await session.connection.send({
-                        "type": "conversation.noise_ignored",
-                        "reason": "barge_in_too_short",
-                        "generation": session.connection.generation,
-                    })
+                await session.connection.send({
+                    "type": "conversation.noise_ignored",
+                    "reason": "barge_in_too_short",
+                    "generation": session.connection.generation,
+                })
                 return
             trim_samples = max(
                 0,
@@ -678,11 +698,10 @@ class VoiceInputSessionManager:
             # inference/STT begins. If speech resumes while either is running,
             # the next utterance is assembled from this audio instead of
             # silently losing the earlier speech island.
-            if session.connection.mode == "live_conversation":
-                session.pending_turn = bytearray(audio)
-                session.pending_candidate_id = candidate_id
-                session.ring.clear()
-                session.ring_bytes = 0
+            session.pending_turn = bytearray(audio)
+            session.pending_candidate_id = candidate_id
+            session.ring.clear()
+            session.ring_bytes = 0
             # Finalization is intentionally concurrent with continued PCM
             # ingestion. A new speech island can start while STT is running.
             self._start_finalize_task(session, audio, candidate_id)
@@ -813,12 +832,11 @@ class VoiceInputSessionManager:
         connection = InputConnection(
             session.connection.websocket,
             version=session.connection.version,
-            mode=session.connection.mode,
             generation=generation,
             lock=session.connection.lock,
         )
         try:
-            if connection.mode == "live_conversation" and self._turn_detector is not None:
+            if self._turn_detector is not None:
                 await connection.send({
                     "type": "conversation.turn_candidate",
                     "generation": generation,

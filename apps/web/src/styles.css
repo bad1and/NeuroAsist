@@ -164,6 +164,7 @@ select { appearance: auto; }
 .voice-button { display: inline-flex; align-items: center; gap: 7px; min-height: 32px; padding: 6px 8px; border: 0; border-radius: 7px; color: var(--muted); background: transparent; }
 .voice-button:hover:not(:disabled) { color: var(--text); background: var(--color-surface-soft); }
 .voice-button.recording { color: var(--color-accent-ink); border-color: var(--accent); background: var(--accent); }
+.voice-button.muted { color: var(--color-danger-text); background: var(--color-danger-soft); }
 .new-dialog-button { color: var(--subtle); }
 .voice-controls span { margin-left: auto; color: var(--subtle); font-size: 12px; }
 .notice, .error-banner, .error-text { display: flex; align-items: center; gap: 10px; margin: 12px 20px; padding: 10px 12px; border: 1px solid var(--color-warning-border); border-radius: 9px; color: var(--color-warning-text); background: var(--color-warning-soft); font-size: 13px; }

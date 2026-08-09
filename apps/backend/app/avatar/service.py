@@ -246,6 +246,10 @@ class AvatarService:
                 payload=AudioMutePayload(muted=self.audio_muted).model_dump(mode="json"),
             )
             await self.manager.send_to(client_id, audio_frame.model_dump(mode="json"))
+            # Keep the persisted overlay as the final hello frame. Some Unity
+            # clients apply the last configuration frame they receive after a
+            # reconnect; the mute notification must not mask overlay state.
+            await self.manager.send_to(client_id, frame.model_dump(mode="json"))
         elif envelope.type == "avatar.pong":
             return
         elif envelope.type == "avatar.ack":

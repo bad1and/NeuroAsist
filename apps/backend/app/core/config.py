@@ -63,6 +63,12 @@ class Settings(BaseSettings):
     cors_origin_regex: str = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
     voice_stt_provider: str = "gigaam"
     voice_stt_model: str = "v3_rnnt"
+    # Optional second local model. It is lazy-loaded and called only for an
+    # empty/low-confidence/low-SNR primary result.
+    voice_stt_fallback_provider: str = ""
+    voice_stt_fallback_model: str = ""
+    voice_stt_fallback_confidence_threshold: float = 0.60
+    voice_stt_fallback_min_rms: float = 0.008
     voice_stt_device: str = "cpu"
     voice_stt_compute_type: str = "int8"
     voice_torch_cpu_threads: int = 4
