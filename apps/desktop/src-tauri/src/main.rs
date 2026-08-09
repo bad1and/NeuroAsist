@@ -633,6 +633,23 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
+/// The web UI owns the saved preference; the native shell mirrors it so the
+/// system tray remains in the same language as the application interface.
+#[tauri::command]
+fn set_interface_locale(app: AppHandle, locale: String) -> Result<(), String> {
+    if !matches!(locale.as_str(), "ru" | "en") {
+        return Err("Unsupported interface locale".into());
+    }
+    let menu = build_tray_menu(&app, &locale).map_err(|error| error.to_string())?;
+    let tray = app
+        .tray_by_id("companion")
+        .ok_or("Could not find Iris tray icon")?;
+    tray.set_menu(Some(menu)).map_err(|error| error.to_string())?;
+    tray.set_tooltip(Some(tray_tooltip(&locale)))
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 fn toggle_avatar(app: AppHandle) -> Result<bool, String> {
     app.state::<DesktopState>().toggle_avatar(&app)
@@ -750,7 +767,7 @@ fn main() {
             )?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![desktop_runtime, restart_core, quit_app, toggle_avatar, configure_avatar_placement, set_avatar_in_app_bounds, set_avatar_in_app_visible, api_key_configured, save_api_key, remove_api_key])
+        .invoke_handler(tauri::generate_handler![desktop_runtime, restart_core, quit_app, set_interface_locale, toggle_avatar, configure_avatar_placement, set_avatar_in_app_bounds, set_avatar_in_app_visible, api_key_configured, save_api_key, remove_api_key])
         .build(tauri::generate_context!())
         .expect("error while building Iris desktop shell");
 
@@ -774,14 +791,12 @@ fn create_main_window(app: &AppHandle, runtime: DesktopRuntime) -> tauri::Result
 }
 
 fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
-    let show = MenuItemBuilder::with_id("show", "Show Iris").build(app)?;
-    let avatar = MenuItemBuilder::with_id("avatar", "Show / hide avatar").build(app)?;
-    let safe_mode = MenuItemBuilder::with_id("safe-mode", "Restart in Safe Mode").build(app)?;
-    let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
-    let menu = MenuBuilder::new(app).items(&[&show, &avatar, &safe_mode, &quit]).build()?;
+    let state = app.state::<DesktopState>();
+    let locale = interface_locale_from_settings(&desktop_data_root(&state.root));
+    let menu = build_tray_menu(app, &locale)?;
     TrayIconBuilder::with_id("companion")
         .icon(tauri::include_image!("./icons/32x32.png"))
-        .tooltip("Iris companion")
+        .tooltip(tray_tooltip(&locale))
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => show_main_window(app),
@@ -979,6 +994,41 @@ fn resize_embedded_avatar_window(app: &AppHandle, window: usize, bounds: &Avatar
         ).map_err(|error| format!("Could not resize Unity avatar host: {error}"))?;
     }
     Ok(())
+}
+
+fn interface_locale_from_settings(data_root: &PathBuf) -> String {
+    std::fs::read_to_string(data_root.join("settings.json"))
+        .ok()
+        .and_then(|json| {
+            serde_json::from_str::<serde_json::Value>(&json)
+                .ok()
+                .and_then(|payload| payload.get("settings")?.get("interface_locale")?.as_str().map(str::to_owned))
+        })
+        .filter(|locale| matches!(locale.as_str(), "ru" | "en"))
+        .unwrap_or_else(|| "ru".to_owned())
+}
+
+fn tray_copy(locale: &str) -> (&'static str, &'static str, &'static str, &'static str) {
+    match locale {
+        "en" => ("Show Iris", "Show / hide avatar", "Restart in Safe Mode", "Quit"),
+        _ => ("Показать Iris", "Показать / скрыть аватар", "Перезапустить в безопасном режиме", "Выйти"),
+    }
+}
+
+fn tray_tooltip(locale: &str) -> &'static str {
+    if locale == "en" { "Iris companion" } else { "Компаньон Iris" }
+}
+
+fn build_tray_menu<R: tauri::Runtime, M: Manager<R>>(
+    manager: &M,
+    locale: &str,
+) -> tauri::Result<tauri::menu::Menu<R>> {
+    let (show_label, avatar_label, safe_mode_label, quit_label) = tray_copy(locale);
+    let show = MenuItemBuilder::with_id("show", show_label).build(manager)?;
+    let avatar = MenuItemBuilder::with_id("avatar", avatar_label).build(manager)?;
+    let safe_mode = MenuItemBuilder::with_id("safe-mode", safe_mode_label).build(manager)?;
+    let quit = MenuItemBuilder::with_id("quit", quit_label).build(manager)?;
+    MenuBuilder::new(manager).items(&[&show, &avatar, &safe_mode, &quit]).build()
 }
 
 #[cfg(windows)]

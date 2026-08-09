@@ -80,6 +80,7 @@ import type {
   VoiceTtsStatusResponse,
   MemoryUpdate,
   ConversationDebug,
+  InterfaceLocale,
 } from "./types";
 import type { VoiceServerEvent } from "./types";
 import { PlaybackCoordinator, TTSStreamPlayer, VoiceSocketClient } from "./voice-live";
@@ -100,12 +101,19 @@ import { JournalPage } from "./journal";
 import { MemoryPage } from "./memory";
 import { StatePage } from "./state";
 import { OverviewPage } from "./overview";
-import { configureAvatarPlacement, getDesktopRuntime, initialCoreStatus, listenForAvatarVisibility, listenForCoreStatus, restartDesktopCore, type CoreStatus } from "./desktop";
+import { configureAvatarPlacement, getDesktopRuntime, initialCoreStatus, listenForAvatarVisibility, listenForCoreStatus, restartDesktopCore, setDesktopInterfaceLocale, type CoreStatus } from "./desktop";
 import { StartupScreen } from "./components/StartupScreen";
 import { WindowChrome } from "./components/WindowChrome";
 import { AppDialog } from "./components/AppDialog";
 import { GuidedSttCapture } from "./stt-capture";
 import { InAppAvatarHost } from "./components/InAppAvatarHost";
+import {
+  initialInterfaceLocale,
+  interfaceIntlLocale,
+  INTERFACE_LOCALE_CHANGED_EVENT,
+  setInterfaceLocalePreference,
+  useInterfaceLocale,
+} from "./i18n";
 
 type AppView = "overview" | "chat" | "journal" | "memory" | "state" | "settings";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "iris.sidebar.collapsed";
@@ -118,6 +126,7 @@ type SettingsSection =
   | "voice-recognition"
   | "voice-advanced"
   | "memory"
+  | "system-interface"
   | "system-overview"
   | "models"
   | "backups"
@@ -279,7 +288,7 @@ function formatTime(value: string): string {
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleTimeString(interfaceIntlLocale(), { hour: "2-digit", minute: "2-digit" });
 }
 
 function boolLabel(value: boolean): string {
@@ -344,6 +353,7 @@ export default function App() {
   const [avatarStatus, setAvatarStatus] = useState<AvatarStatusResponse | null>(null);
   const [avatarOverlay, setAvatarOverlay] = useState<AvatarOverlaySettings | null>(null);
   const [settings, setSettings] = useState<PublicSettings | null>(null);
+  const [interfaceLocale, setInterfaceLocale] = useState<InterfaceLocale>(initialInterfaceLocale);
   const [events, setEvents] = useState<BackendEvent[]>([]);
   // A settings mutation is authoritative.  Do not allow an older polling
   // request to overwrite it after the user has switched avatar placement.
@@ -354,6 +364,30 @@ export default function App() {
   const [startingSession, setStartingSession] = useState(false);
   const servicesReady = !desktopManaged || coreStatus === "ready";
   const setupRequired = Boolean(settings && !settings.api_key_configured && isDesktopManaged());
+
+  useInterfaceLocale(interfaceLocale);
+
+  useEffect(() => {
+    const handleLocaleChange = (event: Event) => {
+      const locale = (event as CustomEvent<InterfaceLocale>).detail;
+      if (locale === "ru" || locale === "en") setInterfaceLocale(locale);
+    };
+    window.addEventListener(INTERFACE_LOCALE_CHANGED_EVENT, handleLocaleChange);
+    return () => window.removeEventListener(INTERFACE_LOCALE_CHANGED_EVENT, handleLocaleChange);
+  }, []);
+
+  useEffect(() => {
+    if (!settings || !["ru", "en"].includes(settings.interface_locale)) return;
+    setInterfaceLocale(settings.interface_locale);
+    setInterfaceLocalePreference(settings.interface_locale);
+  }, [settings?.interface_locale]);
+
+  useEffect(() => {
+    void setDesktopInterfaceLocale(interfaceLocale).catch(() => {
+      // The browser build has no tray, and an older desktop shell can still
+      // show the app safely even if it does not expose this optional command.
+    });
+  }, [interfaceLocale]);
 
   useEffect(() => {
     let stop: (() => void) | undefined;
@@ -635,6 +669,10 @@ export default function App() {
               onAvatarOverlayChanged={(nextOverlay) => {
                 overviewRevision.current += 1;
                 setAvatarOverlay(nextOverlay);
+              }}
+              onInterfaceLocaleChange={(locale) => {
+                setInterfaceLocale(locale);
+                setInterfaceLocalePreference(locale);
               }}
               onSettingsChanged={(nextSettings) => {
                 overviewRevision.current += 1;
@@ -1617,8 +1655,8 @@ function ChatPage({
         {messages.map((message) => (
           <article className={`message ${message.role}`} key={message.id}>
             <div className="message-role">{message.role === "user" ? message.speakerLabel ?? "Вы" : "Iris"}</div>
-            <p>{message.content}</p>
-            {message.ttsError && <div className="message-error">{message.ttsError}</div>}
+            <p data-i18n-skip>{message.content}</p>
+            {message.ttsError && <div className="message-error" data-i18n-skip>{message.ttsError}</div>}
           </article>
         ))}
         {loading && <div className="assistant-thinking" role="status"><span aria-hidden="true" /><span aria-hidden="true" /><span aria-hidden="true" />Iris печатает</div>}
@@ -1780,7 +1818,7 @@ function EventsPage({
                 <span className="event-time">{formatTime(event.created_at)}</span>
                 <span className="event-level">{event.level}</span>
                 <span className="event-type">{event.type}</span>
-                <strong>{event.message}</strong>
+                <strong data-i18n-skip>{event.message}</strong>
               </div>
               <details className="event-details"><summary>Технические данные</summary><pre>{JSON.stringify(event.metadata, null, 2)}</pre></details>
             </article>
@@ -1798,6 +1836,7 @@ function SettingsPage({
   onRefreshEvents,
   onRefreshAvatar,
   onAvatarOverlayChanged,
+  onInterfaceLocaleChange,
   onSettingsChanged,
 }: {
   settings: PublicSettings | null;
@@ -1807,9 +1846,11 @@ function SettingsPage({
   onRefreshEvents: () => Promise<void>;
   onRefreshAvatar: () => Promise<void>;
   onAvatarOverlayChanged: (overlay: AvatarOverlaySettings | null) => void;
+  onInterfaceLocaleChange: (locale: InterfaceLocale) => void;
   onSettingsChanged: (settings: PublicSettings) => void;
 }) {
   const [activeSection, setActiveSection] = useState<SettingsSection>("conversation");
+  const [interfaceLocale, setInterfaceLocale] = useState<InterfaceLocale>("ru");
   const [voiceLanguage, setVoiceLanguage] = useState("ru");
   const [voiceMicrophoneProfile, setVoiceMicrophoneProfile] = useState<MicrophoneProfile>("balanced");
   const [voiceInputDeviceId, setVoiceInputDeviceId] = useState("");
@@ -1856,6 +1897,7 @@ function SettingsPage({
   const autosave = useRuntimeSettingsAutosave(onSettingsChanged);
 
   const applySettingsToForm = useCallback((nextSettings: PublicSettings) => {
+    setInterfaceLocale(nextSettings.interface_locale === "en" ? "en" : "ru");
     setVoiceLanguage(nextSettings.voice_language);
     setVoiceMicrophoneProfile(nextSettings.voice_microphone_profile ?? "balanced");
     setVoiceInputDeviceId(nextSettings.voice_input_device_id ?? "");
@@ -2028,6 +2070,7 @@ function SettingsPage({
     "voice-recognition": { title: "Распознавание", description: "Словари и параметры распознавания речи." },
     "voice-advanced": { title: "Дополнительно", description: "Буфер воспроизведения и приватный сбор тестовых записей." },
     memory: { title: "Память", description: "Какие сведения Iris может сохранять между разговорами." },
+    "system-interface": { title: "Интерфейс", description: "Общие настройки интерфейса." },
     "system-overview": { title: "Система", description: "Состояние подключения и компонентов Iris." },
     models: { title: "Модели", description: "Загрузка и обслуживание локальных моделей." },
     backups: { title: "Резервные копии", description: "Копии памяти и настроек профиля." },
@@ -2098,6 +2141,35 @@ function SettingsPage({
           />
         </div>
 
+        <div className="form-grid settings-form" hidden={activeSection !== "system-interface"}>
+          <fieldset className="settings-group">
+            <legend>Интерфейс</legend>
+            <label>
+              Язык приложения
+              <select
+                value={interfaceLocale}
+                onChange={(event) => {
+                  const nextValue = event.target.value as InterfaceLocale;
+                  const previousValue = interfaceLocale;
+                  setInterfaceLocale(nextValue);
+                  onInterfaceLocaleChange(nextValue);
+                  saveRuntimeSetting(
+                    { interface_locale: nextValue },
+                    () => {
+                      setInterfaceLocale(previousValue);
+                      onInterfaceLocaleChange(previousValue);
+                    },
+                  );
+                }}
+              >
+                <option value="ru">Русский</option>
+                <option value="en">Английский</option>
+              </select>
+              <small>Выберите язык кнопок, меню и системных подсказок.</small>
+            </label>
+          </fieldset>
+        </div>
+
         <div className="system-stack" hidden={!(["models", "backups", "maintenance", "events"] as SettingsSection[]).includes(activeSection)}>
           <div hidden={activeSection !== "models"}><ModelManager /></div>
           <div hidden={activeSection !== "backups"}><BackupControls /></div>
@@ -2113,13 +2185,14 @@ function SettingsPage({
             overlay={avatarOverlay}
             placement={settings.avatar_placement}
             inAppVisible={settings.avatar_in_app_visible}
+            interfaceLocale={interfaceLocale}
             onRefresh={onRefreshAvatar}
             onOverlayChanged={onAvatarOverlayChanged}
             onSettingsChanged={onSettingsChanged}
           />
         </div>
 
-        <div className="form-grid settings-form" hidden={activeSection === "avatar" || activeSection === "system-overview" || ["models", "backups", "maintenance", "events"].includes(activeSection)}>
+        <div className="form-grid settings-form" hidden={activeSection === "avatar" || activeSection === "system-interface" || activeSection === "system-overview" || ["models", "backups", "maintenance", "events"].includes(activeSection)}>
         <fieldset className="settings-group" hidden={activeSection !== "voice"}>
           <legend>Основное</legend>
           <label>
@@ -2631,6 +2704,7 @@ const SETTINGS_NAVIGATION: Array<{
     label: "Система",
     icon: MonitorCog,
     items: [
+      { section: "system-interface", label: "Интерфейс" },
       { section: "system-overview", label: "Обзор" },
       { section: "models", label: "Модели" },
       { section: "backups", label: "Резервные копии" },
@@ -2864,6 +2938,7 @@ function AvatarControls({
   overlay: initialOverlay,
   placement,
   inAppVisible,
+  interfaceLocale,
   onRefresh,
   onOverlayChanged,
   onSettingsChanged,
@@ -2872,11 +2947,13 @@ function AvatarControls({
   overlay: AvatarOverlaySettings | null;
   placement: AvatarPlacement;
   inAppVisible: boolean;
+  interfaceLocale: InterfaceLocale;
   onRefresh: () => Promise<void>;
   onOverlayChanged: (overlay: AvatarOverlaySettings | null) => void;
   onSettingsChanged: (settings: PublicSettings) => void;
 }) {
-  const [phrase, setPhrase] = useState("Проверка аватара.");
+  const defaultTestPhrase = interfaceLocale === "en" ? "Avatar test." : "Проверка аватара.";
+  const [phrase, setPhrase] = useState(defaultTestPhrase);
   const [emotion, setEmotion] = useState("happy");
   const [gesture, setGesture] = useState("greeting");
   const [motionIntensity, setMotionIntensity] = useState(0.8);
@@ -2888,6 +2965,11 @@ function AvatarControls({
   const engine = avatarStatus?.emotion_engine;
 
   useEffect(() => { setOverlay(initialOverlay); }, [initialOverlay]);
+  useEffect(() => {
+    setPhrase((current) => current === "Проверка аватара." || current === "Avatar test."
+      ? defaultTestPhrase
+      : current);
+  }, [defaultTestPhrase]);
   useEffect(() => {
     if (initialOverlay) return;
     void getAvatarOverlay().then((nextOverlay) => {
