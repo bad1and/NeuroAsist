@@ -4,19 +4,20 @@ import { History, RefreshCw, Search, Trash2 } from "lucide-react";
 import { deleteTimelineRange, getTimelineJournal, searchTimeline } from "./api";
 import type { TimelineJournalItem, TimelineMessage } from "./types";
 import { AppDialog } from "./components/AppDialog";
+import { interfaceIntlLocale } from "./i18n";
 
 function formatDate(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? value
-    : new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", year: "numeric" }).format(date);
+    : new Intl.DateTimeFormat(interfaceIntlLocale(), { day: "numeric", month: "long", year: "numeric" }).format(date);
 }
 
 function formatTime(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? value
-    : date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+    : date.toLocaleTimeString(interfaceIntlLocale(), { hour: "2-digit", minute: "2-digit" });
 }
 
 export function JournalPage() {
@@ -58,7 +59,7 @@ export function JournalPage() {
     </form>
     {error && <p className="error-text" role="alert">{error}</p>}
     {results && <div className="history-list search-results">
-      {results.length ? results.map((message) => <article className={`message ${message.role === "user" ? "user" : "assistant"}`} key={message.id}><div className="message-role">{message.role === "user" ? "Вы" : "Iris"}</div><p>{message.content}</p></article>) : <EmptyHistory text="Ничего не найдено" />}
+      {results.length ? results.map((message) => <article className={`message ${message.role === "user" ? "user" : "assistant"}`} key={message.id}><div className="message-role">{message.role === "user" ? "Вы" : "Iris"}</div><p data-i18n-skip>{message.content}</p></article>) : <EmptyHistory text="Ничего не найдено" />}
     </div>}
     {!results && <div className="history-list">
       {items.length ? items.map((item) => <article className="history-card" key={item.id ?? item.day}>

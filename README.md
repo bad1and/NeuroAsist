@@ -27,6 +27,7 @@
 - Show the Unity avatar either as a transparent desktop overlay or natively inside the chat without a second visible window.
 - Start a **New dialog** from the chat; it clears the current conversation while preserving long-term memory.
 - Temporary chat transport errors now disappear automatically instead of remaining on screen.
+- Switch the complete application interface between Russian and English in **Settings → System → Interface**. The choice persists locally, including the desktop tray, and does not affect Iris replies, memories, or voice/STT/TTS settings.
 
 Iris is the official name. You can also call her **Ирис**, **Айрис**, or **Ириска**.
 
@@ -55,6 +56,7 @@ The V0.5 direction is a single continuous desktop companion: one character, one 
 | Push-to-talk voice chat | ✅ | Browser `MediaRecorder` |
 | Live voice response | ✅ | WebSocket audio segments |
 | Audio device selection | ✅ | Choose a microphone and playback device in Voice Settings; selections persist locally |
+| Russian and English interface | ✅ | Switch UI copy, system labels, dates, and the desktop tray in Settings; conversation content and voice behaviour remain unchanged |
 | Local speech-to-text | ✅ | GigaAM v3, `faster-whisper` fallback |
 | Local text-to-speech | ✅ | Silero v5_5_ru, Baya by default |
 | Conversation history and journal | ✅ | SQLite timeline, episodes, and summaries |
@@ -84,7 +86,7 @@ The React control panel contains five main sections:
 - **Journal** — the continuous timeline and internal conversation episodes.
 - **Memory** — saved facts, provenance, review, and a full reset of memory and history.
 - **Events** — live backend, LLM, STT, TTS, and connection events.
-- **Settings** — voice language, input microphone, output device, TTS voice, playback speed, live prebuffer, runtime options, and avatar test controls.
+- **Settings** — application interface language (Russian or English), voice language, input microphone, output device, TTS voice, playback speed, live prebuffer, runtime options, and avatar test controls. Changing the interface language does not change Iris replies or speech settings.
 
 The header displays backend status, WebSocket connection state, API-key availability, and the fixed LLM model.
 

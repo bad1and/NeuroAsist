@@ -1,0 +1,718 @@
+import { useLayoutEffect } from "react";
+
+import type { InterfaceLocale } from "./types";
+
+export const INTERFACE_LOCALE_STORAGE_KEY = "iris.interface.locale";
+export const INTERFACE_LOCALE_CHANGED_EVENT = "iris-interface-locale-changed";
+
+type TranslationPair = readonly [ru: string, en: string];
+
+// The application has been Russian-only until v0.8.  Keeping the catalogue in
+// one place makes the change safe for the existing JSX while we gradually move
+// screens to semantic translation keys.  It deliberately translates only UI
+// chrome; user messages, memories, event payloads, and Iris replies are
+// excluded by `data-i18n-skip` at their render sites.
+const RU_TO_EN: readonly TranslationPair[] = [
+  ["Настройки голоса и моделей можно изменить позже в разделе «Настройки».", "You can change voice and model settings later in Settings."],
+  ["Введите ключ DeepSeek один раз. Он хранится в диспетчере учётных данных Windows, а не в файлах проекта.", "Enter your DeepSeek key once. It is stored in Windows Credential Manager, not in project files."],
+  ["Непрерывный live-диалог с автоматическими паузами и перебиваниями", "Continuous live conversation with automatic pauses and interruptions"],
+  ["Выбранное устройство используется для синтезированных аудиофайлов и воспроизведения сообщений; запасной системный голос браузера следует настройке Windows.", "The selected device is used for synthesized audio and message playback; the browser's fallback system voice follows Windows settings."],
+  ["Субъективные внутренние заметки Iris, а не факты о вас.", "Iris's subjective internal notes, not facts about you."],
+  ["Режим инкогнито не добавляет новые данные в долгосрочную память.", "Incognito mode does not add new information to long-term memory."],
+  ["Приватный корпус речи", "Private speech corpus"],
+  ["Записи остаются только на этом устройстве.", "Recordings remain only on this device."],
+  ["Подключитесь к сервису и попробуйте ещё раз.", "Connect to the service and try again."],
+  ["Память и настройки, срок хранения — 30 дней", "Memory and settings, retained for 30 days"],
+  ["Память и настройки профиля.", "Memory and profile settings."],
+  ["Словарь распознавания сохранён и применён.", "The recognition dictionary has been saved and applied."],
+  ["Выбранный микрофон сейчас недоступен", "The selected microphone is currently unavailable"],
+  ["Выбранное устройство вывода сейчас недоступно", "The selected output device is currently unavailable"],
+  ["Управляет эхоподавлением и шумоподавлением браузера для записи и живого режима.", "Controls browser echo cancellation and noise suppression for recording and live mode."],
+  ["Используется для единственного голосового режима Live.", "Used for the Live voice mode."],
+  ["Этот WebView не поддерживает выбор устройства вывода.", "This WebView does not support output-device selection."],
+  ["Разрешить доступ и обновить", "Allow access and refresh"],
+  ["Действует до перезапуска приложения.", "Applies until the application is restarted."],
+  ["Усиливает или смягчает выбранную подачу; обычный профиль не меняется.", "Strengthens or softens the selected delivery; the normal profile is unchanged."],
+  ["Исправляются только перечисленные варианты. Нечёткий поиск и LLM не используются.", "Only the listed variants are corrected. Fuzzy search and LLM are not used."],
+  ["Одна пара на строку. Ударение можно задать как «к+ак-то» или «ка́к-то». Изменения применяются к следующей фразе без перезапуска.", "One pair per line. Changes apply to the next phrase without a restart."],
+  ["Live — единственный голосовой режим. Реплики распознаются автоматически, без кнопки записи.", "Live is the only voice mode. Speech is recognized automatically, without a record button."],
+  ["Умный — только важные устойчивые факты", "Smart — only important, lasting facts"],
+  ["Автоматический — все обычные факты", "Automatic — all normal facts"],
+  ["Не сохранять текущий разговор", "Do not save the current conversation"],
+  ["Размещение, внешний вид и тестовые команды Iris.", "Placement, appearance, and Iris test commands."],
+  ["Когда Iris слушает, вступает в разговор и выражает эмоции.", "When Iris listens, joins the conversation, and expresses emotions."],
+  ["Загрузка и обслуживание локальных моделей.", "Download and maintain local models."],
+  ["Индексы, очистка и необратимые действия.", "Indexes, cleanup, and irreversible actions."],
+  ["Технические события и диагностика.", "Technical events and diagnostics."],
+  ["Состояние подключения и компонентов Iris.", "Connection and Iris component status."],
+  ["Какие сведения Iris может сохранять между разговорами.", "What information Iris can retain between conversations."],
+  ["Звучание, темп и подача речи.", "Speech sound, pace, and delivery."],
+  ["Микрофон, наушники и профиль записи.", "Microphone, headphones, and recording profile."],
+  ["Словари и параметры распознавания речи.", "Speech-recognition dictionaries and settings."],
+  ["Буфер воспроизведения и приватный сбор тестовых записей.", "Playback buffer and private test-recording collection."],
+  ["Настройки недоступны", "Settings are unavailable"],
+  ["Не удалось сохранить ключ API.", "Could not save the API key."],
+  ["Первичная настройка", "Initial setup"],
+  ["Подключите Iris", "Connect Iris"],
+  ["Ключ API DeepSeek", "DeepSeek API key"],
+  ["Подключаем…", "Connecting…"],
+  ["Продолжить", "Continue"],
+  ["Обновить журнал событий", "Refresh event log"],
+  ["Технические данные", "Technical details"],
+  ["Язык приложения", "Application language"],
+  ["Русский", "Russian"],
+  ["Английский", "English"],
+  ["Выберите язык кнопок, меню и системных подсказок.", "Choose the language for buttons, menus, and system hints."],
+  ["Общие настройки интерфейса.", "General interface settings."],
+  ["Интерфейс", "Interface"],
+  ["Основная навигация", "Main navigation"],
+  ["Разделы приложения", "Application sections"],
+  ["Разделы настроек", "Settings sections"],
+  ["Развернуть меню", "Expand menu"],
+  ["Свернуть меню", "Collapse menu"],
+  ["Открыть меню", "Open menu"],
+  ["Закрыть меню", "Close menu"],
+  ["Управление окном", "Window controls"],
+  ["Свернуть окно", "Minimize window"],
+  ["Развернуть окно", "Maximize window"],
+  ["Восстановить окно", "Restore window"],
+  ["Закрыть Iris", "Close Iris"],
+  ["Закрыть диалог", "Close dialog"],
+  ["Обзор", "Overview"],
+  ["Диалог", "Chat"],
+  ["История", "History"],
+  ["Память", "Memory"],
+  ["Состояние", "State"],
+  ["Настройки", "Settings"],
+  ["Живой разговор", "Live conversation"],
+  ["Аватар", "Avatar"],
+  ["Голос", "Voice"],
+  ["Устройства", "Devices"],
+  ["Распознавание", "Recognition"],
+  ["Дополнительно", "Advanced"],
+  ["Поведение", "Behavior"],
+  ["Система", "System"],
+  ["Модели", "Models"],
+  ["Обслуживание данных", "Data maintenance"],
+  ["Журнал событий", "Event log"],
+  ["Основное", "General"],
+  ["Ключ API", "API key"],
+  ["Настроен", "Configured"],
+  ["Не настроен", "Not configured"],
+  ["Провайдер", "Provider"],
+  ["Модель", "Model"],
+  ["История в контексте", "History in context"],
+  ["Уровень журнала", "Log level"],
+  ["Язык голосового ввода", "Voice input language"],
+  ["Профиль микрофона", "Microphone profile"],
+  ["Сбалансированный — рекомендуется", "Balanced — recommended"],
+  ["Гарнитура", "Headset"],
+  ["Колонки", "Speakers"],
+  ["Источник входа (микрофон)", "Input source (microphone)"],
+  ["Источник вывода (наушники или колонки)", "Output source (headphones or speakers)"],
+  ["Системный по умолчанию", "System default"],
+  ["Аудиоустройства", "Audio devices"],
+  ["Обновляем…", "Refreshing…"],
+  ["Синтез речи", "Speech synthesis"],
+  ["Скорость воспроизведения", "Playback speed"],
+  ["Подача голоса", "Voice delivery"],
+  ["Авто — по эмоции нейросети", "Auto — based on AI emotion"],
+  ["Спокойно", "Calm"],
+  ["Обычно", "Normal"],
+  ["Энергично", "Energetic"],
+  ["Задумчиво", "Thoughtful"],
+  ["Напористо", "Assertive"],
+  ["Выразительность", "Expressiveness"],
+  ["Минимальная — почти нейтрально", "Minimal — almost neutral"],
+  ["Естественная — рекомендовано", "Natural — recommended"],
+  ["Заметная — сильнее эмоции", "Noticeable — stronger emotion"],
+  ["Движок синтеза", "Synthesis engine"],
+  ["активен", "active"],
+  ["Детектор речи", "Speech detector"],
+  ["готов", "ready"],
+  ["Словарь распознавания", "Recognition dictionary"],
+  ["Канонический термин = точный вариант | точный вариант", "Canonical term = exact variant | exact variant"],
+  ["Сохранить словарь распознавания", "Save recognition dictionary"],
+  ["Словарь произношений", "Pronunciation dictionary"],
+  ["Термин = как произносить", "Term = pronunciation"],
+  ["Сохранить словарь", "Save dictionary"],
+  ["Сегментов в буфере", "Buffered segments"],
+  ["Задержка буфера, мс", "Buffer delay, ms"],
+  ["Скрыть сбор тестовых записей", "Hide test-recording collection"],
+  ["Собрать приватный STT-корпус", "Collect a private STT corpus"],
+  ["Участники", "Participants"],
+  ["Один на один", "One to one"],
+  ["Несколько собеседников", "Multiple participants"],
+  ["Охотность вступать", "Willingness to join"],
+  ["Сдержанная", "Reserved"],
+  ["Сбалансированная", "Balanced"],
+  ["Сбалансированное", "Balanced"],
+  ["Разговорчивая", "Talkative"],
+  ["Инициативность", "Initiative"],
+  ["Выключена", "Off"],
+  ["Редкая", "Rare"],
+  ["Прямое обращение", "Direct address"],
+  ["Свободное", "Relaxed"],
+  ["Строгое", "Strict"],
+  ["Чувствительность к перебиванию", "Interruption sensitivity"],
+  ["Низкая", "Low"],
+  ["Высокая", "High"],
+  ["Терпимость к паузам", "Pause tolerance"],
+  ["Короткая", "Short"],
+  ["Естественная", "Natural"],
+  ["Терпеливая", "Patient"],
+  ["Выраженность эмоций", "Emotional expression"],
+  ["Тонкая", "Subtle"],
+  ["Яркая", "Strong"],
+  ["Восстановление настроения", "Mood recovery"],
+  ["Медленное", "Slow"],
+  ["Естественное", "Natural"],
+  ["Быстрое", "Fast"],
+  ["Влияние недавних событий", "Recent-event influence"],
+  ["Слабое", "Light"],
+  ["Сильное", "Strong"],
+  ["Защита от собственного голоса", "Own-voice protection"],
+  ["Автоматически", "Automatically"],
+  ["Не слушать во время ответа", "Do not listen while replying"],
+  ["сообщ.", "messages"],
+  ["начальное", "Initial"],
+  ["умеренный", "Moderate"],
+  ["умеренное", "Moderate"],
+  ["умеренная", "Moderate"],
+  ["хорошее", "Good"],
+  ["осторожное", "Cautious"],
+  ["высокое", "High"],
+  ["сдержанная", "Reserved"],
+  ["тёплая", "Warm"],
+  ["низкая", "Low"],
+  ["высокая", "High"],
+  ["напряжённая", "Tense"],
+  ["спокойная", "Calm"],
+  ["есть", "Present"],
+  ["Режим сохранения", "Saving mode"],
+  ["Не сохранять", "Do not save"],
+  ["Подача голоса изменена до перезапуска.", "Voice delivery changed until restart."],
+  ["Выразительность изменена до перезапуска.", "Expressiveness changed until restart."],
+  ["Модели недоступны.", "Models are unavailable."],
+  ["Не удалось начать загрузку модели.", "Could not start model download."],
+  ["Не удалось удалить модель.", "Could not remove model."],
+  ["Управление моделями", "Model management"],
+  ["Хранятся вне папки приложения", "Stored outside the application folder"],
+  ["Обновить", "Refresh"],
+  ["Установлена и проверена", "Installed and verified"],
+  ["Не установлена", "Not installed"],
+  ["Загружаем:", "Downloading:"],
+  ["Повторить загрузку", "Retry download"],
+  ["Загрузить", "Download"],
+  ["Удалить", "Delete"],
+  ["Создаём…", "Creating…"],
+  ["Создать копию", "Create backup"],
+  ["Резервные копии", "Backups"],
+  ["Не удалось создать резервную копию.", "Could not create a backup."],
+  ["Не удалось удалить резервную копию.", "Could not delete a backup."],
+  ["Удалить часть истории?", "Delete part of history?"],
+  ["Новый диалог", "New chat"],
+  ["Начать новый диалог?", "Start a new chat?"],
+  ["Очистить текущий чат и начать новый разговор", "Clear the current chat and start a new conversation"],
+  ["Отменить", "Cancel"],
+  ["Подтвердить", "Confirm"],
+  ["Напишите сообщение…", "Write a message…"],
+  ["Отправить сообщение", "Send message"],
+  ["Отправка сообщения", "Sending message"],
+  ["Подготавливаем сессию", "Preparing session"],
+  ["Включить микрофон", "Turn microphone on"],
+  ["Выключить микрофон", "Turn microphone off"],
+  ["Микрофон включён", "Microphone is on"],
+  ["Напишите сообщение или запишите голосовое.", "Write a message or record a voice message."],
+  ["Поиск по истории", "Search history"],
+  ["Найти в истории", "Search history"],
+  ["Обновить историю", "Refresh history"],
+  ["Удалить историю до этой даты", "Delete history before this date"],
+  ["Ничего не найдено", "Nothing found"],
+  ["История пока пуста", "History is empty"],
+  ["последняя активность в", "last active at"],
+  ["сообщение", "message"],
+  ["сообщений", "messages"],
+  ["Поиск по памяти", "Search memory"],
+  ["Найти в памяти", "Search memory"],
+  ["Дополнительные действия", "More actions"],
+  ["Закреплённая запись", "Pinned item"],
+  ["Заменено на:", "Replaced with:"],
+  ["Источник не указан", "Source is not specified"],
+  ["Источник:", "Source:"],
+  ["использовалось до замены", "used before replacement"],
+  ["использовано", "used"],
+  ["Состояние Iris", "Iris state"],
+  ["Настроение", "Mood"],
+  ["Отношения", "Relationship"],
+  ["Динамика", "Dynamics"],
+  ["Причины настроения", "Mood causes"],
+  ["Активных причин сейчас нет.", "There are no active causes right now."],
+  ["Сбросить настроение", "Reset mood"],
+  ["Сбросить отношения", "Reset relationship"],
+  ["Недавние события", "Recent events"],
+  ["Значимых событий пока нет.", "There are no notable events yet."],
+  ["Личные заметки Iris", "Iris personal notes"],
+  ["Создавать", "Create"],
+  ["Создание новых личных заметок отключено.", "Creating new personal notes is disabled."],
+  ["Пока нет субъективных заметок Iris.", "There are no subjective Iris notes yet."],
+  ["Запускаю Iris", "Starting Iris"],
+  ["Подготавливаю ядро, модель и голосовые сервисы", "Preparing the core, model, and voice services"],
+  ["Рада тебя видеть", "Glad to see you"],
+  ["Всё готово к разговору", "Everything is ready for a conversation"],
+  ["Не удалось запустить ядро", "Could not start the core"],
+  ["Проверь журнал диагностики или попробуй ещё раз", "Check the diagnostic log or try again"],
+  ["Ядро завершило работу", "The core stopped"],
+  ["Iris сохранила данные и готова к повторному запуску", "Iris saved your data and is ready to restart"],
+  ["Перезапускаю…", "Restarting…"],
+  ["Попробовать снова", "Try again"],
+  ["Начать запись", "Start recording"],
+  ["Остановить и сохранить", "Stop and save"],
+  ["Скачать manifest", "Download manifest"],
+  ["Сохранённые записи", "Saved recordings"],
+  ["Здесь появятся записи, которые можно скачать по одной.", "Recordings that you can download individually will appear here."],
+  ["Скачать WAV:", "Download WAV:"],
+  ["Сохранено сценариев:", "Saved scenarios:"],
+  ["Прогресс сбора тестовых записей", "Test-recording collection progress"],
+  ["Сценарий", "Scenario"],
+  ["из", "of"],
+  ["Эталонный текст", "Reference text"],
+  ["записано", "recorded"],
+  ["Сохраняю…", "Saving…"],
+  ["Подключаю микрофон…", "Connecting microphone…"],
+  ["Сервис недоступен", "Service is unavailable"],
+  ["Не удалось восстановить сессию.", "Could not restore the session."],
+  ["Не удалось обработать голосовой ввод", "Could not process voice input"],
+  ["Не удалось выполнить голосовой запрос", "Could not complete the voice request"],
+  ["Не удалось воспроизвести ответ:", "Could not play the reply:"],
+  ["Сохранено в памяти:", "Saved to memory:"],
+  ["Вы", "You"],
+  ["Микрофон", "Microphone"],
+  ["Устройство вывода", "Output device"],
+  ["fallback", "fallback"],
+  ["Не удалось проверить статус аудио", "Could not check audio status"],
+  ["Не удалось синтезировать голос", "Could not synthesize speech"],
+  ["Аудио ещё создаётся", "Audio is still being created"],
+  ["Неизвестный голос", "Unknown voice"],
+  ["Сессия ещё создаётся", "The session is still being created"],
+  ["Не удалось начать новый диалог.", "Could not start a new chat."],
+  ["Не удалось отправить сообщение", "Could not send the message"],
+  ["Не удалось переключить вывод звука:", "Could not switch audio output:"],
+  ["Потоковый режим недоступен: использован обычный ответ.", "Streaming mode is unavailable; a regular reply was used."],
+  ["Live-режим недоступен", "Live mode is unavailable"],
+  ["Live-аудио недоступно", "Live audio is unavailable"],
+  ["Live выключен", "Live is off"],
+  ["Live: вкл.", "Live: on"],
+  ["включить", "turn on"],
+  ["выключить", "turn off"],
+  ["Микрофон выключен", "Microphone is off"],
+  ["Слышу вас", "I can hear you"],
+  ["Распознаю", "Recognizing"],
+  ["Проверяю конец фразы", "Checking the end of the phrase"],
+  ["Думаю, стоит ли отвечать", "Deciding whether to reply"],
+  ["Жду продолжения", "Waiting for more"],
+  ["Iris отвечает", "Iris is replying"],
+  ["Iris вступает в разговор", "Iris is joining the conversation"],
+  ["Iris подождёт подходящую паузу", "Iris will wait for a suitable pause"],
+  ["Iris реагирует", "Iris is responding"],
+  ["Iris решила промолчать", "Iris decided not to respond"],
+  ["Все", "All"],
+  ["Информация", "Information"],
+  ["Предупреждения", "Warnings"],
+  ["Ошибки", "Errors"],
+  ["Критические", "Critical"],
+  ["Событий нет", "No events"],
+  ["Журнал системы", "System log"],
+  ["Технические события и диагностика", "Technical events and diagnostics"],
+  ["Необратимые действия вынесены отдельно", "Irreversible actions are separated"],
+  ["Не удалось завершить обслуживание.", "Could not complete maintenance."],
+  ["Перестроить индекс памяти", "Rebuild memory index"],
+  ["Перестроить индекс памяти?", "Rebuild the memory index?"],
+  ["Сами записи останутся на месте. Iris заново подготовит их для поиска.", "The records will remain. Iris will prepare them again for search."],
+  ["Индекс памяти перестроен.", "Memory index rebuilt."],
+  ["Очистить долгосрочную память?", "Clear long-term memory?"],
+  ["История диалогов сохранится, но восстановить записи памяти будет нельзя.", "Chat history will remain, but memory records cannot be restored."],
+  ["Долгосрочная память очищена.", "Long-term memory cleared."],
+  ["Очистить память", "Clear memory"],
+  ["Сбросить все данные Iris?", "Reset all Iris data?"],
+  ["История, сводки и долгосрочная память будут удалены без возможности восстановления.", "History, summaries, and long-term memory will be deleted permanently."],
+  ["Все данные помощника удалены.", "All companion data was deleted."],
+  ["Сбросить все данные", "Reset all data"],
+  ["Выполняю…", "Working…"],
+  ["Отмена", "Cancel"],
+  ["Резервная копия создана. Ключи API в неё не попадают.", "Backup created. It does not include API keys."],
+  ["Резервные копии недоступны.", "Backups are unavailable."],
+  ["Резервных копий пока нет.", "There are no backups yet."],
+  ["Удаление Iris не удаляет эти данные из профиля Windows.", "Deleting Iris does not delete this data from the Windows profile."],
+  ["Копии памяти и настроек профиля.", "Copies of memory and profile settings."],
+  ["Не удалось выполнить действие с аватаром.", "Could not complete the avatar action."],
+  ["Не удалось сохранить настройки оверлея.", "Could not save overlay settings."],
+  ["Не удалось сохранить отображение аватара.", "Could not save avatar visibility."],
+  ["Не удалось переключить размещение аватара.", "Could not switch avatar placement."],
+  ["Режим сохранён. Аватар появится внутри Iris на экране диалога.", "Saved. The avatar will appear inside Iris on the chat screen."],
+  ["Режим сохранён. Аватар снова будет отдельным оверлеем на рабочем столе.", "Saved. The avatar will again be a separate desktop overlay."],
+  ["Отображение аватара в диалоге обновлено.", "Avatar display in chat updated."],
+  ["Настройки оверлея обновлены.", "Overlay settings updated."],
+  ["Аватар будет показан в диалоге.", "The avatar will be shown in the chat."],
+  ["Аватар скрыт в диалоге.", "The avatar is hidden in the chat."],
+  ["Управление аватаром", "Avatar controls"],
+  ["Обновить статус аватара", "Refresh avatar status"],
+  ["Интеграция отключена", "Integration disabled"],
+  ["Внутри Iris", "Inside Iris"],
+  ["Отдельным оверлеем", "As a separate overlay"],
+  ["Где показывать аватар", "Where to show the avatar"],
+  ["Внизу слева на экране диалога, без второго окна.", "At the bottom left of the chat screen, without a second window."],
+  ["Поверх рабочего стола, как сейчас.", "Over the desktop, as it is now."],
+  ["Показывать в диалоге", "Show in chat"],
+  ["Показывать оверлей", "Show overlay"],
+  ["Поверх окон", "Always on top"],
+  ["Заблокировать клики", "Block clicks"],
+  ["Клиент", "Client"],
+  ["Последний сигнал", "Last signal"],
+  ["Целевая эмоция", "Target emotion"],
+  ["Протокол", "Protocol"],
+  ["Профиль движения", "Motion profile"],
+  ["Текущий жест", "Current gesture"],
+  ["Связь с движком", "Engine connection"],
+  ["не подключён", "not connected"],
+  ["Отключён", "Disabled"],
+  ["недоступен", "unavailable"],
+  ["недоступна", "unavailable"],
+  ["нет данных", "no data"],
+  ["нет", "none"],
+  ["настроена", "configured"],
+  ["резервная", "fallback"],
+  ["Масштаб оверлея", "Overlay scale"],
+  ["Тест эмоций и жестов", "Test emotions and gestures"],
+  ["Тестовая фраза", "Test phrase"],
+  ["Проверка аватара.", "Avatar test."],
+  ["Эмоция", "Emotion"],
+  ["Тестовый жест", "Test gesture"],
+  ["Интенсивность движения", "Motion intensity"],
+  ["Отправить фразу", "Send phrase"],
+  ["Отправить эмоцию", "Send emotion"],
+  ["Отправить жест", "Send gesture"],
+  ["Сбросить движение", "Reset motion"],
+  ["Тестовая фраза отправлена.", "Test phrase sent."],
+  ["Эмоция отправлена.", "Emotion sent."],
+  ["Тестовый жест отправлен.", "Test gesture sent."],
+  ["Движение сброшено.", "Motion reset."],
+  ["Нейтральная", "Neutral"],
+  ["Радость", "Joy"],
+  ["Грусть", "Sadness"],
+  ["Злость", "Anger"],
+  ["Раздражение", "Annoyance"],
+  ["Улыбка", "Smile"],
+  ["Задумчивость", "Thoughtfulness"],
+  ["Удивление", "Surprise"],
+  ["Смущение", "Embarrassment"],
+  ["Обеспокоенность", "Concern"],
+  ["Приветствие", "Greeting"],
+  ["Согласие", "Agreement"],
+  ["Несогласие", "Disagreement"],
+  ["Вопрос", "Question"],
+  ["Объяснение", "Explanation"],
+  ["Размышление", "Thinking"],
+  ["Фрустрация", "Frustration"],
+  ["Прощание", "Farewell"],
+  ["Пожимание плечами", "Shrug"],
+  ["Не удалось получить список устройств.", "Could not get the device list."],
+  ["Этот WebView не даёт получить список аудиоустройств.", "This WebView does not allow access to the audio-device list."],
+  ["Микрофоны не найдены. Проверьте доступ к микрофону в Windows.", "No microphones found. Check microphone access in Windows."],
+  ["Выбор устройства вывода не поддерживается WebView", "Output-device selection is not supported by this WebView"],
+  ["История недоступна", "History is unavailable"],
+  ["Не удалось выполнить поиск", "Could not complete the search"],
+  ["Сбросить", "Reset"],
+  ["Удаляю…", "Deleting…"],
+  ["Все сообщения по", "All messages through"],
+  ["включительно будут удалены без возможности восстановления.", "inclusive will be deleted permanently."],
+  ["Удалить историю", "Delete history"],
+  ["Здесь появятся прошлые разговоры.", "Past conversations will appear here."],
+  ["Доброй ночи", "Good night"],
+  ["Доброе утро", "Good morning"],
+  ["Добрый день", "Good afternoon"],
+  ["Добрый вечер", "Good evening"],
+  ["О чём поговорим?", "What would you like to talk about?"],
+  ["Iris рядом, когда хочется обсудить идею, разобрать задачу или просто выговориться.", "Iris is here when you want to discuss an idea, work through a task, or simply talk things out."],
+  ["Начать диалог", "Start chat"],
+  ["Не удалось обновить обзор. Проверь подключение к Iris.", "Could not refresh the overview. Check the connection to Iris."],
+  ["Данные обзора недоступны", "Overview data is unavailable"],
+  ["Последний разговор", "Latest conversation"],
+  ["Разговор с Iris", "Conversation with Iris"],
+  ["Начни диалог — он появится здесь.", "Start a chat and it will appear here."],
+  ["Открыть историю", "Open history"],
+  ["Начать разговор", "Start conversation"],
+  ["Нет сохранённых записей", "No saved records"],
+  ["сохранено", "saved"],
+  ["Iris самостоятельно поддерживает актуальность фактов.", "Iris independently keeps facts up to date."],
+  ["Открыть память", "Open memory"],
+  ["Backend недоступен", "Backend unavailable"],
+  ["Аватар подключён:", "Avatar connected:"],
+  ["Аватар ожидает подключения", "Avatar is waiting to connect"],
+  ["Аватар отключён", "Avatar disabled"],
+  ["Диагностика", "Diagnostics"],
+  ["Обновляю реальные данные", "Refreshing live data"],
+  ["Разделы памяти", "Memory sections"],
+  ["Текущие", "Current"],
+  ["Сохранённые", "Saved"],
+  ["Темы", "Topics"],
+  ["Планы и обещания", "Plans and commitments"],
+  ["Архив", "Archive"],
+  ["Заменённые", "Superseded"],
+  ["Удалённые", "Deleted"],
+  ["Отклонённые", "Rejected"],
+  ["Истёкшие", "Expired"],
+  ["Память недоступна", "Memory is unavailable"],
+  ["Не удалось выполнить действие", "Could not complete the action"],
+  ["Имя пользователя", "User name"],
+  ["Разработчик Iris", "Iris developer"],
+  ["Разработчики Iris", "Iris developers"],
+  ["Количество разработчиков Iris", "Number of Iris developers"],
+  ["Любимый жанр", "Favorite genre"],
+  ["Любимая игра", "Favorite game"],
+  ["Предпочтение", "Preference"],
+  ["Заметка", "Note"],
+  ["Друг", "Friend"],
+  ["Деталь игры", "Game detail"],
+  ["Текущее настроение", "Current mood"],
+  ["Текущее занятие", "Current activity"],
+  ["Текущая цель", "Current goal"],
+  ["Стиль ответов", "Response style"],
+  ["Ограничение здоровья", "Health constraint"],
+  ["Ограничение", "Constraint"],
+  ["Краткое описание ещё не сформировано.", "A short description has not been generated yet."],
+  ["Связи:", "Links:"],
+  ["доказательства:", "evidence:"],
+  ["Целостность памяти", "Memory integrity"],
+  ["Активные конфликты:", "Active conflicts:"],
+  ["без канонического слота:", "without canonical slot:"],
+  ["без источников:", "without sources:"],
+  ["Рассинхронизация источников:", "Source mismatches:"],
+  ["кандидаты:", "candidates:"],
+  ["ограничения:", "guards:"],
+  ["включены", "enabled"],
+  ["не установлены", "not installed"],
+  ["Автономные решения", "Autonomous decisions"],
+  ["автономно", "autonomous"],
+  ["нарушение", "violation"],
+  ["Принято:", "Accepted:"],
+  ["отклонено:", "rejected:"],
+  ["открытых уточнений:", "open clarifications:"],
+  ["Ручная очередь:", "Manual queue:"],
+  ["Здоровье поискового индекса", "Search-index health"],
+  ["отсутствует:", "missing:"],
+  ["устарело:", "stale:"],
+  ["Chroma синхронизирована; SQLite остаётся источником истины.", "Chroma is synchronized; SQLite remains the source of truth."],
+  ["Автопочинка памяти", "Memory auto-repair"],
+  ["Канонизировано:", "Canonicalized:"],
+  ["устранено дублей:", "duplicates removed:"],
+  ["перенесено доказательств:", "evidence moved:"],
+  ["Консолидация памяти", "Memory consolidation"],
+  ["Предложено:", "Proposed:"],
+  ["Причина:", "Reason:"],
+  ["Ошибок нет", "No errors"],
+  ["локальный путь", "local path"],
+  ["Конфликт:", "Conflict:"],
+  ["Диагностических записей пока нет", "There are no diagnostic records yet"],
+  ["Здесь появятся результаты фоновой консолидации и понятные причины нулевой записи.", "Background consolidation results and clear reasons for zero records will appear here."],
+  ["История записи", "Record history"],
+  ["Забыть", "Forget"],
+  ["Записей пока нет", "There are no records yet"],
+  ["Помощник предложит факты для сохранения после разговора.", "The assistant will suggest facts to save after the conversation."],
+  ["Внутренняя жизнь", "Inner life"],
+  ["Сейчас:", "Now:"],
+  ["Загружаем состояние…", "Loading state…"],
+  ["Режим инкогнито: новое состояние и личные заметки не сохраняются.", "Incognito mode does not save new state or personal notes."],
+  ["Главная эмоция", "Primary emotion"],
+  ["Вторичные эмоции", "Secondary emotions"],
+  ["Знакомство", "Familiarity"],
+  ["Доверие", "Trust"],
+  ["Теплота", "Warmth"],
+  ["Напряжение", "Tension"],
+  ["Игривость", "Playfulness"],
+  ["Текущая динамика", "Current dynamics"],
+  ["Нерешённая причина", "Unresolved cause"],
+  ["Сбросить настроение Iris? Отношения и память останутся.", "Reset Iris's mood? Relationship and memory will remain."],
+  ["Сбросить отношения Iris? Факты и личные заметки останутся.", "Reset Iris's relationship? Facts and personal notes will remain."],
+  ["Не удалось сохранить настройку личных заметок.", "Could not save the personal-notes setting."],
+  ["Удалить эту субъективную заметку Iris?", "Delete this subjective Iris note?"],
+  ["Состояние недоступно", "State is unavailable"],
+  ["Не удалось изменить выразительность.", "Could not change expressiveness."],
+  ["Не удалось изменить подачу голоса.", "Could not change voice delivery."],
+  ["Не удалось сохранить словарь распознавания.", "Could not save the recognition dictionary."],
+  ["Не удалось сохранить словарь.", "Could not save the dictionary."],
+  ["Словарь произношений сохранён и применён.", "The pronunciation dictionary has been saved and applied."],
+  ["Короткий шум пропущен", "Brief noise skipped"],
+  ["Отладка", "Debug"],
+  ["Собеседник", "Conversation partner"],
+  ["Создаю…", "Creating…"],
+  ["Не удалось сохранить", "Could not save"],
+  ["Аватар Iris", "Iris avatar"],
+  ["Обычная речь", "Normal speech"],
+  ["Быстрая речь", "Fast speech"],
+  ["Тихая речь", "Quiet speech"],
+  ["Короткое «Да»", "Short “Yes”"],
+  ["Короткое «Нет»", "Short “No”"],
+  ["Короткое «Ну»", "Short “Well”"],
+  ["Короткое «Что?»", "Short “What?”"],
+  ["Пауза внутри фразы", "Pause within a phrase"],
+  ["Незаконченная фраза", "Unfinished phrase"],
+  ["Термины: Iris и NeuroAsist", "Terms: Iris and NeuroAsist"],
+  ["Термины: GigaAM и DeepSeek", "Terms: GigaAM and DeepSeek"],
+  ["Термины: ComfyUI и GitHub", "Terms: ComfyUI and GitHub"],
+  ["Шум клавиатуры", "Keyboard noise"],
+  ["Шум вентилятора", "Fan noise"],
+  ["Микрофон гарнитуры", "Headset microphone"],
+  ["Колонки и эхоподавление", "Speakers and echo cancellation"],
+  ["Тихое окончание", "Quiet ending"],
+  ["Живой диалог · начало", "Live conversation · start"],
+  ["Живой диалог · продолжение", "Live conversation · continuation"],
+  ["Живой диалог · завершение", "Live conversation · completion"],
+  ["Локальное хранилище записей недоступно.", "Local recording storage is unavailable."],
+  ["Не удалось начать запись.", "Could not start recording."],
+  ["Запись пуста. Попробуйте записать сценарий ещё раз.", "The recording is empty. Try recording the scenario again."],
+  ["Запись сохранена локально на этом устройстве.", "The recording was saved locally on this device."],
+  ["Не удалось сохранить запись локально.", "Could not save the recording locally."],
+  ["Шумовой сценарий: оставьте поле пустым.", "Noise scenario: leave the field empty."],
+  ["Исправьте текст перед сохранением, если произнесли иначе.", "Correct the text before saving if you said it differently."],
+  ["— записано", "— recorded"],
+];
+
+const orderedPairs = [...RU_TO_EN].sort(([left], [right]) => right.length - left.length);
+const orderedReversePairs = [...new Map(RU_TO_EN.map(([ru, en]) => [en, ru])).entries()]
+  .sort(([left], [right]) => right.length - left.length) as TranslationPair[];
+
+// The legacy JSX keeps Russian copy as its source.  Several Russian forms
+// legitimately share one English translation (for example, "Сбалансированная"
+// and "Сбалансированное"). Remembering each DOM node's source keeps a switch
+// back to Russian exact instead of guessing the grammatical form from English.
+const originalTextByNode = new WeakMap<Text, string>();
+const originalAttributesByElement = new WeakMap<Element, Map<string, string>>();
+
+function replaceAll(value: string, pairs: readonly TranslationPair[]): string {
+  return pairs.reduce((result, [source, target]) => result.includes(source)
+    ? result.split(source).join(target)
+    : result, value);
+}
+
+export function translateInterfaceText(value: string, locale: InterfaceLocale): string {
+  return locale === "en" ? replaceAll(value, orderedPairs) : replaceAll(value, orderedReversePairs);
+}
+
+export function initialInterfaceLocale(): InterfaceLocale {
+  try {
+    const value = window.localStorage.getItem(INTERFACE_LOCALE_STORAGE_KEY);
+    return value === "en" || value === "ru" ? value : "ru";
+  } catch {
+    return "ru";
+  }
+}
+
+export function currentInterfaceLocale(): InterfaceLocale {
+  return initialInterfaceLocale();
+}
+
+export function interfaceIntlLocale(): "ru-RU" | "en-US" {
+  return currentInterfaceLocale() === "en" ? "en-US" : "ru-RU";
+}
+
+export function setInterfaceLocalePreference(locale: InterfaceLocale): void {
+  try {
+    window.localStorage.setItem(INTERFACE_LOCALE_STORAGE_KEY, locale);
+  } catch {
+    // The selected locale still applies for this page when browser storage is unavailable.
+  }
+  document.documentElement.lang = locale;
+  window.dispatchEvent(new CustomEvent<InterfaceLocale>(INTERFACE_LOCALE_CHANGED_EVENT, { detail: locale }));
+}
+
+function isSkipped(node: Node): boolean {
+  const element = node.parentElement;
+  return Boolean(element?.closest("[data-i18n-skip], script, style, pre, code"));
+}
+
+const LOCALIZED_ATTRIBUTES = ["aria-label", "title", "placeholder", "alt"];
+
+function localizeTextNode(node: Text, locale: InterfaceLocale): void {
+  if (isSkipped(node)) return;
+  const saved = originalTextByNode.get(node);
+  const englishSaved = saved ? translateInterfaceText(saved, "en") : undefined;
+  const source = !saved || (node.data !== saved && node.data !== englishSaved)
+    ? node.data
+    : saved;
+  originalTextByNode.set(node, source);
+  const next = translateInterfaceText(source, locale);
+  if (next !== node.data) node.data = next;
+}
+
+function localizeAttributes(element: Element, locale: InterfaceLocale): void {
+  if (element.closest("[data-i18n-skip]")) return;
+  const savedAttributes = originalAttributesByElement.get(element) ?? new Map<string, string>();
+  originalAttributesByElement.set(element, savedAttributes);
+  LOCALIZED_ATTRIBUTES.forEach((attribute) => {
+    const value = element.getAttribute(attribute);
+    if (!value) return;
+    const saved = savedAttributes.get(attribute);
+    const englishSaved = saved ? translateInterfaceText(saved, "en") : undefined;
+    const source = !saved || (value !== saved && value !== englishSaved) ? value : saved;
+    savedAttributes.set(attribute, source);
+    const next = translateInterfaceText(source, locale);
+    if (next !== value) element.setAttribute(attribute, next);
+  });
+}
+
+function localizeRoot(root: ParentNode, locale: InterfaceLocale): void {
+  const textNodes: Text[] = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) => isSkipped(node) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+  });
+  while (walker.nextNode()) textNodes.push(walker.currentNode as Text);
+  textNodes.forEach((node) => localizeTextNode(node, locale));
+
+  if (root instanceof Element) localizeAttributes(root, locale);
+  root.querySelectorAll?.("*").forEach((element) => {
+    localizeAttributes(element, locale);
+  });
+}
+
+function localizeAddedNode(node: Node, locale: InterfaceLocale): void {
+  if (node.nodeType === Node.TEXT_NODE) {
+    localizeTextNode(node as Text, locale);
+  } else if (node.nodeType === Node.ELEMENT_NODE) {
+    localizeRoot(node as Element, locale);
+  }
+}
+
+/** Apply the selected UI locale to legacy static JSX and new UI content alike. */
+export function useInterfaceLocale(locale: InterfaceLocale): void {
+  useLayoutEffect(() => {
+    document.documentElement.lang = locale;
+    // Vite mounts Iris into #root. Falling back to body also keeps embedded
+    // hosts and UI tests localized when they provide their own mount node.
+    const root = document.getElementById("root") ?? document.body;
+    localizeRoot(root, locale);
+    const pendingNodes = new Set<Node>();
+    let scheduled = false;
+    const applyPending = () => {
+      scheduled = false;
+      pendingNodes.forEach((node) => localizeAddedNode(node, locale));
+      pendingNodes.clear();
+    };
+    const observer = new MutationObserver((records) => {
+      records.forEach((record) => {
+        if (record.type === "childList") {
+          record.addedNodes.forEach((node) => pendingNodes.add(node));
+        } else if (record.type === "characterData") {
+          pendingNodes.add(record.target);
+        } else if (record.type === "attributes") {
+          pendingNodes.add(record.target);
+        }
+      });
+      if (scheduled) return;
+      scheduled = true;
+      queueMicrotask(applyPending);
+    });
+    observer.observe(root, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: LOCALIZED_ATTRIBUTES });
+    return () => observer.disconnect();
+  }, [locale]);
+}
