@@ -116,16 +116,14 @@ class ReflectionService:
             return True
         try:
             source_ids = [str(item) for item in payload.get("source_message_ids", [])]
-            messages = [self._store.get_message(message_id) for message_id in source_ids]
-            causal = [
-                item for item in messages
-                if item is not None and item.role in {"user", "assistant"} and item.status == "completed"
-            ]
-            rendered = "\n".join(
-                f"[{item.id}] {item.role}: {item.effective_content[:800]}" for item in causal[-8:]
+            # Every other store call in this worker already goes through a
+            # thread. This block did not, and it is the largest of them: up to
+            # eight `get_message` calls plus two snapshots, each opening its own
+            # connection, held the event loop for about 9 ms while a live turn
+            # was scheduling audio. One pinned connection off the loop takes 1.
+            rendered, state, participants = await asyncio.to_thread(
+                self._load_causal_window, source_ids,
             )
-            state = self._store.load_character_state_snapshot(PRIMARY_RELATIONSHIP_ID)
-            participants = self._store.load_participant_states(PRIMARY_RELATIONSHIP_ID)
             schema = ReflectionProposal.model_json_schema()
             prompt = (
                 f"TRIGGER: {payload['event_kind']}\n"
@@ -200,6 +198,23 @@ class ReflectionService:
                 "job_id": job_id, "error_codes": ["operational_failure"], "exception_type": type(exc).__name__,
             })
         return True
+
+    def _load_causal_window(
+        self, source_ids: list[str],
+    ) -> tuple[str, dict[str, object] | None, list[dict[str, object]]]:
+        """Read the reflection prompt material over one pinned connection."""
+        with self._store.read_scope():
+            messages = [self._store.get_message(message_id) for message_id in source_ids]
+            causal = [
+                item for item in messages
+                if item is not None and item.role in {"user", "assistant"} and item.status == "completed"
+            ]
+            rendered = "\n".join(
+                f"[{item.id}] {item.role}: {item.effective_content[:800]}" for item in causal[-8:]
+            )
+            state = self._store.load_character_state_snapshot(PRIMARY_RELATIONSHIP_ID)
+            participants = self._store.load_participant_states(PRIMARY_RELATIONSHIP_ID)
+        return rendered, state, participants
 
     @staticmethod
     def _parse(content: str) -> tuple[ReflectionProposal | None, list[str]]:

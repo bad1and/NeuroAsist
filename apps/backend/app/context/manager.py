@@ -32,6 +32,17 @@ class ContextManager:
         self.last: BuiltContext | None = None
 
     def build(self, user_text: str, *, session_id: str | None = None, current_message_id: str | None = None) -> BuiltContext:
+        # One build fans out into eight independent store calls (timeline
+        # material, clarification, memory retrieval, topics, commitments,
+        # reflections). Each used to open its own connection, and against a WAL
+        # database that file setup costs about a millisecond apiece regardless
+        # of the query, so the scope collapses eight of them into one.
+        with self._store.read_scope():
+            return self._build(
+                user_text, session_id=session_id, current_message_id=current_message_id,
+            )
+
+    def _build(self, user_text: str, *, session_id: str | None = None, current_message_id: str | None = None) -> BuiltContext:
         material = self._store.context_material(
             user_text, self._recent_turns, session_id=session_id, current_message_id=current_message_id,
         )
@@ -210,7 +221,6 @@ class ContextManager:
         )
         recent_turns = self._group_turns(recent)
         ambient_entries = [self._ambient_entry(row) for row in ambient_rows[-6:]]
-        dropped_summary_ids: list[str] = []
         dropped_turn_count = 0
 
         def ambient_message() -> ChatMessage | None:
@@ -252,36 +262,58 @@ class ContextManager:
         # Every continuity block has an independent cap before the final
         # context cap is enforced. This prevents verbose topics from evicting
         # identity, factual profile or open loops.
+        #
+        # `_estimate` is a plain per-message sum, so dropping one block item
+        # lowers the total by exactly that item's own cost. Re-assembling the
+        # whole context and re-summing it after every drop was quadratic in the
+        # number of blocks; carrying a running total gives the same numbers
+        # while touching each item once.
         def trim_block(items: list[tuple[str, ChatMessage]], budget: int) -> list[str]:
             dropped: list[str] = []
-            while self._estimate([message for _, message in items]) > budget and items:
-                dropped.append(items.pop()[0])
+            total = self._estimate([message for _, message in items])
+            while total > budget and items:
+                dropped_id, message = items.pop()
+                total -= self._estimate([message])
+                dropped.append(dropped_id)
             return dropped
 
         dropped_memory_ids = trim_block(selected_memories, 450)
         dropped_topic_ids = trim_block(selected_topics, 500)
         dropped_loop_ids = trim_block(selected_loops, 250)
         dropped_summary_ids: list[str] = trim_block(selected_summaries, 300)
-        messages = assemble()
-        while self._estimate(messages) > self._max_tokens and selected_summaries:
-            dropped_summary_ids.append(selected_summaries.pop()[0])
-            messages = assemble()
-        while self._estimate(messages) > self._max_tokens and selected_memories:
-            dropped_memory_ids.append(selected_memories.pop()[0])
-            messages = assemble()
-        while self._estimate(messages) > self._max_tokens and selected_topics:
-            dropped_topic_ids.append(selected_topics.pop()[0])
-            messages = assemble()
-        while self._estimate(messages) > self._max_tokens and recent_turns:
-            recent_turns.pop(0)
+
+        def ambient_tokens() -> int:
+            observed = ambient_message()
+            return self._estimate([observed]) if observed is not None else 0
+
+        remaining = self._estimate(assemble())
+
+        def drop_last(items: list[tuple[str, ChatMessage]], dropped: list[str]) -> None:
+            nonlocal remaining
+            dropped_id, message = items.pop()
+            dropped.append(dropped_id)
+            remaining -= self._estimate([message])
+
+        while remaining > self._max_tokens and selected_summaries:
+            drop_last(selected_summaries, dropped_summary_ids)
+        while remaining > self._max_tokens and selected_memories:
+            drop_last(selected_memories, dropped_memory_ids)
+        while remaining > self._max_tokens and selected_topics:
+            drop_last(selected_topics, dropped_topic_ids)
+        while remaining > self._max_tokens and recent_turns:
+            remaining -= self._estimate(recent_turns.pop(0))
             dropped_turn_count += 1
-            messages = assemble()
         dropped_ambient_count = 0
-        while self._estimate(messages) > self._max_tokens and ambient_entries:
+        while remaining > self._max_tokens and ambient_entries:
+            # Ambient observations share a single joined message, so their cost
+            # is not the sum of the parts and the block has to be re-measured
+            # rather than decremented by the dropped entry.
+            before = ambient_tokens()
             ambient_entries.pop(0)
+            remaining -= before - ambient_tokens()
             dropped_ambient_count += 1
-            messages = assemble()
-        built = BuiltContext(messages, self._estimate(messages), {
+        messages = assemble()
+        built = BuiltContext(messages, remaining, {
             "active_episode_id": material["active_episode_id"],
             "current_message_id": current_message_id,
             "current_sequence": material.get("causal_upper_bound"),

@@ -226,6 +226,8 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
     except HTTPException:
         raise
     except ValueError as exc:
+        if lease is not None:
+            await request.app.state.turn_coordinator.fail_assistant(payload.session_id, lease)
         logger.error(
             "Chat request failed: session_id=%s message_length=%s",
             payload.session_id,

@@ -772,6 +772,53 @@ class GigaAMSTTProvider(STTProvider):
         )
 
 
+def one_pole_highpass(samples: Any, sample_rate: int, cutoff_hz: float):
+    """Closed-form equivalent of ``y[n] = a * (y[n-1] + x[n] - x[n-1])``.
+
+    The recurrence used to be evaluated in a Python loop over every sample on
+    the live TTS path, which costs tens of milliseconds per segment. Expanding
+    it gives ``y[i] = a^(i+1) * (carry + sum_j a^-j * d[j])``, which vectorises,
+    but ``a^-j`` overflows on long signals. Working in blocks keeps that factor
+    inside a narrow range, so the result matches the scalar loop to well below
+    the int16 quantisation step while numpy does the work.
+    """
+    import numpy as np
+
+    if cutoff_hz <= 0 or sample_rate <= 0 or len(samples) < 2:
+        return samples
+    source = np.asarray(samples)
+    signal = source.astype(np.float64, copy=False)
+    rc = 1.0 / (2.0 * np.pi * cutoff_hz)
+    alpha = rc / (rc + 1.0 / sample_rate)
+    decay = -float(np.log(alpha)) if 0.0 < alpha < 1.0 else 0.0
+    if decay <= 0.0:
+        return samples
+    # Cap the spread of a^-j at e^18 so float64 keeps ~8 significant digits.
+    block = int(min(8192.0, max(2.0, 1.0 + 18.0 / decay)))
+
+    deltas = np.empty_like(signal)
+    deltas[0] = 0.0
+    np.subtract(signal[1:], signal[:-1], out=deltas[1:])
+
+    output = np.empty_like(signal)
+    output[0] = signal[0]
+    carry = float(signal[0])
+    index = 1
+    total = len(signal)
+    while index < total:
+        span = min(block, total - index)
+        growth = alpha ** np.arange(span, dtype=np.float64)
+        chunk = (alpha * growth) * (
+            carry + np.cumsum(deltas[index : index + span] / growth)
+        )
+        output[index : index + span] = chunk
+        carry = float(chunk[-1])
+        index += span
+    if np.issubdtype(source.dtype, np.floating):
+        return output.astype(source.dtype, copy=False)
+    return output
+
+
 def waveform_to_wav_bytes(waveform: Any, sample_rate: int) -> bytes:
     import numpy as np
 
@@ -868,15 +915,7 @@ def apply_wav_delivery(
         rendered = samples.astype(np.float32) / 32768.0
         rendered -= float(np.mean(rendered))
         if highpass_cutoff_hz > 0 and len(rendered) > 1:
-            rc = 1.0 / (2.0 * np.pi * highpass_cutoff_hz)
-            alpha = rc / (rc + 1.0 / sample_rate)
-            filtered = np.empty_like(rendered)
-            filtered[0] = rendered[0]
-            for index in range(1, len(rendered)):
-                filtered[index] = alpha * (
-                    filtered[index - 1] + rendered[index] - rendered[index - 1]
-                )
-            rendered = filtered
+            rendered = one_pole_highpass(rendered, sample_rate, highpass_cutoff_hz)
         active = np.abs(rendered) >= 10 ** (-45 / 20)
         if active.any():
             rms = float(np.sqrt(np.mean(np.square(rendered[active]))))
@@ -2003,24 +2042,7 @@ class SileroTTSProvider(TTSProvider):
 
     @staticmethod
     def _highpass_filter(samples: Any, sample_rate: int, cutoff_hz: float):
-        import numpy as np
-
-        if cutoff_hz <= 0 or len(samples) < 2:
-            return samples
-        rc = 1.0 / (2.0 * np.pi * cutoff_hz)
-        dt = 1.0 / sample_rate
-        alpha = rc / (rc + dt)
-        output = np.empty_like(samples)
-        output[0] = samples[0]
-        output[1:] = 0.0
-        previous_input = float(samples[0])
-        previous_output = float(output[0])
-        for index in range(1, len(samples)):
-            current = alpha * (previous_output + float(samples[index]) - previous_input)
-            output[index] = current
-            previous_input = float(samples[index])
-            previous_output = current
-        return output
+        return one_pole_highpass(samples, sample_rate, cutoff_hz)
 
     @staticmethod
     def _lowpass_filter(samples: Any, sample_rate: int, cutoff_hz: float):
@@ -2083,6 +2105,18 @@ class SileroTTSProvider(TTSProvider):
     def _normalize_speech_waveform(self, waveform: Any):
         return self._postprocess_speech_waveform(waveform, self.sample_rate)[0]
 
+    def _encode_segment_sync(
+        self, waveform: Any, sample_rate: int
+    ) -> tuple[bytes, float, dict[str, dict[str, float | int]]]:
+        normalized, audio_metrics = self._postprocess_speech_waveform(waveform, sample_rate)
+        wav_bytes = waveform_to_wav_bytes(normalized, sample_rate)
+        # The frame count is already known here, so re-parsing the header of the
+        # WAV we just wrote only to divide frames by rate is pure overhead.
+        frames = len(normalized)
+        if frames <= 0 or sample_rate <= 0:
+            raise RuntimeError("TTS provider returned zero-duration audio")
+        return wav_bytes, frames / sample_rate, audio_metrics
+
     async def _synthesize_wav_bytes(
         self, text: str, speaker: str, style: VoiceStyle | str = VoiceStyle.AUTO
     ) -> tuple[bytes, float, int]:
@@ -2095,37 +2129,39 @@ class SileroTTSProvider(TTSProvider):
                 timeout=self.timeout_seconds,
             )
         synthesis_ms = int((time.perf_counter() - started) * 1000)
-        normalized_waveform, audio_metrics = self._postprocess_speech_waveform(
-            waveform, output_sample_rate
+        # Filtering and PCM encoding are numpy-heavy and were running inline on
+        # the event loop, stalling the voice socket for the whole segment. They
+        # stay outside the inference lock so they overlap the next render.
+        wav_bytes, duration, audio_metrics = await asyncio.to_thread(
+            self._encode_segment_sync, waveform, output_sample_rate
         )
-        wav_bytes = waveform_to_wav_bytes(normalized_waveform, output_sample_rate)
-        duration = wav_duration_seconds(wav_bytes)
-        logger.info(
-            "Silero TTS segment synthesized: provider=silero model=%s speaker=%s device=%s "
-            "text_length=%s word_count=%s style=%s voice_conversion=%s synthesis_ms=%s "
-            "audio_duration_ms=%s RTF=%.3f audio_bytes=%s rms_dbfs=%.1f peak_dbfs=%.1f "
-            "dc_offset=%.6f input_dc_offset=%.6f clipped_samples=%s postprocessing=%s "
-            "highpass_hz=%.1f lowpass_hz=%.1f",
-            self.model_name,
-            speaker,
-            self._selected_device,
-            len(text),
-            len(text.split()),
-            str(style),
-            self._voice_converter is not None,
-            synthesis_ms,
-            int(duration * 1000),
-            (synthesis_ms / 1000) / duration if duration else 0.0,
-            len(wav_bytes),
-            audio_metrics["output"]["rms_dbfs"],
-            audio_metrics["output"]["peak_dbfs"],
-            audio_metrics["output"]["dc_offset"],
-            audio_metrics["input"]["dc_offset"],
-            audio_metrics["output"]["clipped_samples"],
-            self.audio_postprocessing_enabled,
-            self.highpass_cutoff_hz if self.audio_postprocessing_enabled else 0.0,
-            self.lowpass_cutoff_hz if self.audio_postprocessing_enabled else 0.0,
-        )
+        if logger.isEnabledFor(logging.INFO):
+            logger.info(
+                "Silero TTS segment synthesized: provider=silero model=%s speaker=%s device=%s "
+                "text_length=%s word_count=%s style=%s voice_conversion=%s synthesis_ms=%s "
+                "audio_duration_ms=%s RTF=%.3f audio_bytes=%s rms_dbfs=%.1f peak_dbfs=%.1f "
+                "dc_offset=%.6f input_dc_offset=%.6f clipped_samples=%s postprocessing=%s "
+                "highpass_hz=%.1f lowpass_hz=%.1f",
+                self.model_name,
+                speaker,
+                self._selected_device,
+                len(text),
+                len(text.split()),
+                str(style),
+                self._voice_converter is not None,
+                synthesis_ms,
+                int(duration * 1000),
+                (synthesis_ms / 1000) / duration if duration else 0.0,
+                len(wav_bytes),
+                audio_metrics["output"]["rms_dbfs"],
+                audio_metrics["output"]["peak_dbfs"],
+                audio_metrics["output"]["dc_offset"],
+                audio_metrics["input"]["dc_offset"],
+                audio_metrics["output"]["clipped_samples"],
+                self.audio_postprocessing_enabled,
+                self.highpass_cutoff_hz if self.audio_postprocessing_enabled else 0.0,
+                self.lowpass_cutoff_hz if self.audio_postprocessing_enabled else 0.0,
+            )
         return wav_bytes, duration, synthesis_ms
 
     async def stream(self, request: TTSRequest):

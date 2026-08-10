@@ -2,6 +2,7 @@ import json
 import logging
 import re
 from difflib import SequenceMatcher
+from functools import lru_cache
 from dataclasses import dataclass
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, Callable
@@ -33,6 +34,15 @@ class _ParseResult:
     valid: bool
     reason: str | None = None
     turn: CharacterTurn | None = None
+
+
+# A single turn normalises the same `previous_assistant_reply` and `user_text`
+# from several guard predicates in a row, and the regex walks every character
+# each time. The cache only has to span those few calls, so it is kept small
+# rather than growing into an accidental transcript of the conversation.
+@lru_cache(maxsize=32)
+def _normalize_for_similarity(value: str) -> str:
+    return " ".join(re.findall(r"[^\W_]+", value.lower(), flags=re.UNICODE))
 
 
 class CharacterAgent:
@@ -681,6 +691,12 @@ class CharacterAgent:
         buffered: list[str] = []
         released = False
         status_check = self._is_casual_status_check(user_text)
+        # Both depend only on the fixed arguments, so they are resolved once per
+        # turn rather than per delta: `_user_allows_repetition` runs a
+        # SequenceMatcher over the whole previous reply, and the buffering loop
+        # used to repeat it for every chunk before the first word reached TTS.
+        allows_repetition = self._user_allows_repetition(user_text, previous_assistant_reply)
+        duplicate_guard = bool(previous_assistant_reply and not allows_repetition)
         async for delta in self._llm_provider.stream(messages):
             if released:
                 yield delta
@@ -693,7 +709,6 @@ class CharacterAgent:
             # original first-sentence latency and delta cadence.
             sentence_count = len(re.findall(r"[.!?…](?:\s|$)", opening))
             suspicious_opener = bool(re.search(r"(?:^|\n)\s*(?:ну|а)\?\s*(?:я\s+здесь)?", opening.lower()))
-            duplicate_guard = bool(previous_assistant_reply and not self._user_allows_repetition(user_text, previous_assistant_reply))
             required_sentences = 3 if status_check else 2 if suspicious_opener or require_pending_response or duplicate_guard or required_anchors else 1
             if sentence_count < required_sentences and len(opening) < 220:
                 continue
@@ -1025,7 +1040,7 @@ class CharacterAgent:
 
     @staticmethod
     def _normalized_for_similarity(value: str) -> str:
-        return " ".join(re.findall(r"[^\W_]+", value.lower(), flags=re.UNICODE))
+        return _normalize_for_similarity(value)
 
     @classmethod
     def _user_allows_repetition(cls, user_text: str, previous_assistant_reply: str) -> bool:
