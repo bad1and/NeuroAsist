@@ -47,6 +47,13 @@ export const WS_EVENTS_URL =
   ?? import.meta.env.VITE_WS_EVENTS_URL
   ?? `${API_BASE_URL.replace(/^http/, "ws")}/ws/events`;
 
+/** Avatar commands use their own bidirectional protocol, not the events feed. */
+export function avatarWebSocketUrl(): string {
+  const base = API_BASE_URL.replace(/^http/, "ws");
+  const token = DESKTOP_RUNTIME?.apiToken;
+  return `${base}/ws/avatar?version=2${token ? `&token=${encodeURIComponent(token)}` : ""}`;
+}
+
 export function voiceWebSocketUrl(sessionId: string): string {
   const base = API_BASE_URL.replace(/^http/, "ws");
   const token = DESKTOP_RUNTIME?.apiToken;

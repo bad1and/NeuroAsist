@@ -339,6 +339,12 @@ impl DesktopState {
     }
 
     fn start_avatar_locked(&self, app: &AppHandle, placement: AvatarPlacement) -> Result<bool, String> {
+        // The in-app renderer is a Three.js canvas owned by the WebView.  Do
+        // not start Unity only to obtain a native surface in this mode.
+        if placement == AvatarPlacement::InApp {
+            let _ = app.emit("desktop-avatar-status", "threejs");
+            return Ok(false);
+        }
         if self.safe_mode || self.avatar.lock().map_err(|_| "avatar mutex poisoned")?.is_some() {
             return Ok(false);
         }
@@ -487,6 +493,13 @@ impl DesktopState {
 
     fn configure_avatar_placement(&self, app: &AppHandle, placement: AvatarPlacement) -> Result<AvatarHostStatus, String> {
         let _lifecycle = self.avatar_lifecycle.lock().map_err(|_| "avatar lifecycle mutex poisoned")?;
+        if placement == AvatarPlacement::InApp {
+            self.stop_avatar_locked();
+            let visible = avatar_in_app_visible_from_settings(&desktop_data_root(&self.root));
+            *self.avatar_visible.lock().map_err(|_| "avatar visibility mutex poisoned")? = visible;
+            let _ = app.emit("desktop-avatar-status", "threejs");
+            return Ok(AvatarHostStatus { placement, running: false, embedded: false, visible });
+        }
         let current = self.avatar.lock().map_err(|_| "avatar mutex poisoned")?
             .as_ref()
             .map(|process| process.placement);
@@ -587,6 +600,13 @@ impl DesktopState {
 
     fn toggle_avatar(&self, app: &AppHandle) -> Result<bool, String> {
         let _lifecycle = self.avatar_lifecycle.lock().map_err(|_| "avatar lifecycle mutex poisoned")?;
+        let configured_placement = avatar_placement_from_settings(&desktop_data_root(&self.root));
+        if configured_placement == AvatarPlacement::InApp {
+            let next = !avatar_in_app_visible_from_settings(&desktop_data_root(&self.root));
+            avatar_in_app_visibility_request(&self.runtime(), next)?;
+            let _ = app.emit("desktop-avatar-visibility", next);
+            return Ok(next);
+        }
         let placement = self.avatar.lock().map_err(|_| "avatar mutex poisoned")?
             .as_ref()
             .map(|process| process.placement);
@@ -612,7 +632,7 @@ impl DesktopState {
             let _ = app.emit("desktop-avatar-status", if next { "visible" } else { "hidden" });
             Ok(next)
         } else {
-            self.start_avatar_locked(app, avatar_placement_from_settings(&desktop_data_root(&self.root)))
+            self.start_avatar_locked(app, configured_placement)
         }
     }
 
