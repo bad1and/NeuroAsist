@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   Brain,
@@ -9,13 +9,15 @@ import {
   LayoutDashboard,
   MessageCircle,
   Mic,
+  MicOff,
   MonitorCog,
+  PanelLeftClose,
+  PanelLeftOpen,
   RefreshCw,
   SendHorizontal,
   Settings,
   SlidersHorizontal,
   Volume2,
-  X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -49,7 +51,6 @@ import {
   sendLiveTextMessage,
   searchTimeline,
   deleteTimelineRange,
-  sendVoiceMessage,
   updateRuntimeSettings,
   updatePronunciations,
   updateSttTerms,
@@ -68,6 +69,7 @@ import type {
   BackendEvent,
   AvatarStatusResponse,
   AvatarOverlaySettings,
+  AvatarPlacement,
   ChatMessage,
   EventLevel,
   PublicSettings,
@@ -75,32 +77,63 @@ import type {
   StatusResponse,
   TimelineJournalItem,
   TimelineMessage,
-  VoiceChatResponse,
   VoiceTtsStatusResponse,
   MemoryUpdate,
   ConversationDebug,
+  InterfaceLocale,
 } from "./types";
 import type { VoiceServerEvent } from "./types";
 import { PlaybackCoordinator, TTSStreamPlayer, VoiceSocketClient } from "./voice-live";
 import {
+  canSelectAudioOutput,
+  getAudioDeviceCatalog,
+  setAudioElementOutput,
+  type AudioDeviceCatalog,
+  type AudioDeviceOption,
+} from "./audio-devices";
+import {
   BrowserVadRecorder,
+  LIVE_MUTE_HOTKEY,
   PcmInputClient,
-  microphoneConstraints,
   type MicrophoneProfile,
-  type VadState,
 } from "./vad";
 import { JournalPage } from "./journal";
 import { MemoryPage } from "./memory";
 import { StatePage } from "./state";
 import { OverviewPage } from "./overview";
-import { getDesktopRuntime, initialCoreStatus, listenForCoreStatus, restartDesktopCore, type CoreStatus } from "./desktop";
+import { configureAvatarPlacement, getDesktopRuntime, initialCoreStatus, listenForAvatarVisibility, listenForCoreStatus, restartDesktopCore, setDesktopInterfaceLocale, type CoreStatus } from "./desktop";
 import { StartupScreen } from "./components/StartupScreen";
 import { WindowChrome } from "./components/WindowChrome";
 import { AppDialog } from "./components/AppDialog";
 import { GuidedSttCapture } from "./stt-capture";
+import { InAppAvatarHost } from "./components/InAppAvatarHost";
+import {
+  initialInterfaceLocale,
+  interfaceIntlLocale,
+  INTERFACE_LOCALE_CHANGED_EVENT,
+  setInterfaceLocalePreference,
+  useInterfaceLocale,
+} from "./i18n";
 
 type AppView = "overview" | "chat" | "journal" | "memory" | "state" | "settings";
-type SettingsSection = "general" | "voice" | "conversation" | "memory" | "system";
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "iris.sidebar.collapsed";
+const CHAT_ERROR_AUTO_DISMISS_MS = 8_000;
+type SettingsSection =
+  | "conversation"
+  | "avatar"
+  | "voice"
+  | "voice-devices"
+  | "voice-recognition"
+  | "voice-advanced"
+  | "memory"
+  | "system-interface"
+  | "system-overview"
+  | "models"
+  | "backups"
+  | "maintenance"
+  | "events";
+type RuntimeSettingsPatch = Parameters<typeof updateRuntimeSettings>[0];
+type AutoSaveStatus = "idle" | "saving" | "saved" | "error";
 type LiveConversationSettings = Pick<
   PublicSettings,
   | "live_conversation_enabled"
@@ -146,19 +179,100 @@ function parsePronunciations(value: string): Record<string, string> {
       .filter(([term, pronunciation]) => term && pronunciation),
   );
 }
-const RECORDING_MIME_TYPES = [
-  "audio/webm;codecs=opus",
-  "audio/webm",
-  "audio/ogg;codecs=opus",
-  "audio/ogg",
-  "audio/mp4",
-];
 
-function getRecordingMimeType(): string | undefined {
-  if (typeof MediaRecorder === "undefined") {
-    return undefined;
+function useRuntimeSettingsAutosave(onSettingsChanged: (settings: PublicSettings) => void) {
+  const pendingPatchRef = useRef<RuntimeSettingsPatch>({});
+  const failedPatchRef = useRef<RuntimeSettingsPatch | null>(null);
+  const rollbackRef = useRef<Array<() => void>>([]);
+  const runningRef = useRef(false);
+  const [status, setStatus] = useState<AutoSaveStatus>("idle");
+
+  const drain = useCallback(async () => {
+    if (runningRef.current || Object.keys(pendingPatchRef.current).length === 0) {
+      return;
+    }
+
+    runningRef.current = true;
+    const patch = pendingPatchRef.current;
+    const rollback = rollbackRef.current;
+    pendingPatchRef.current = {};
+    rollbackRef.current = [];
+    setStatus("saving");
+
+    try {
+      const nextSettings = await updateRuntimeSettings(patch);
+      failedPatchRef.current = null;
+      onSettingsChanged(nextSettings);
+      setStatus("saved");
+    } catch {
+      failedPatchRef.current = patch;
+      rollback.forEach((restore) => restore());
+      setStatus("error");
+    } finally {
+      runningRef.current = false;
+      if (Object.keys(pendingPatchRef.current).length > 0) {
+        void drain();
+      }
+    }
+  }, [onSettingsChanged]);
+
+  const save = useCallback((patch: RuntimeSettingsPatch, rollback?: () => void) => {
+    pendingPatchRef.current = { ...pendingPatchRef.current, ...patch };
+    if (rollback) {
+      rollbackRef.current.push(rollback);
+    }
+    void drain();
+  }, [drain]);
+
+  const retry = useCallback(() => {
+    if (!failedPatchRef.current) return;
+    pendingPatchRef.current = { ...failedPatchRef.current, ...pendingPatchRef.current };
+    failedPatchRef.current = null;
+    void drain();
+  }, [drain]);
+
+  return { save, retry, status };
+}
+
+function AutoSaveStatus({ status, onRetry }: { status: AutoSaveStatus; onRetry: () => void }) {
+  if (status === "saving") return <span className="settings-save-status is-saving" role="status">Сохраняем…</span>;
+  if (status === "error") {
+    return <span className="settings-save-status is-error" role="alert">Не удалось сохранить <button type="button" onClick={onRetry}>Повторить</button></span>;
   }
-  return RECORDING_MIME_TYPES.find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
+  if (status === "saved") return <span className="settings-save-status is-saved" role="status">Сохранено</span>;
+  return null;
+}
+
+function SettingsSwitch({
+  checked,
+  label,
+  description,
+  disabled,
+  onChange,
+}: {
+  checked: boolean;
+  label: string;
+  description?: string;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="settings-switch-row">
+      <span className="settings-switch-copy">
+        <strong>{label}</strong>
+        {description && <small>{description}</small>}
+      </span>
+      <input
+        className="settings-switch-input"
+        type="checkbox"
+        role="switch"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span className="settings-switch" aria-hidden="true"><span /></span>
+    </label>
+  );
 }
 
 function dedupeEvents(events: BackendEvent[]): BackendEvent[] {
@@ -174,15 +288,11 @@ function formatTime(value: string): string {
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleTimeString(interfaceIntlLocale(), { hour: "2-digit", minute: "2-digit" });
 }
 
 function boolLabel(value: boolean): string {
   return value ? "Да" : "Нет";
-}
-
-function personalityLabel(value: string): string {
-  return value === "default" ? "Стандартный" : value;
 }
 
 function isLiveVoiceTransportError(error: unknown): boolean {
@@ -231,16 +341,53 @@ export default function App() {
   const startupStartedAt = useRef(Date.now());
   const [activeView, setActiveView] = useState<AppView>("overview");
   const [navigationOpen, setNavigationOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  const menuToggleRef = useRef<HTMLButtonElement>(null);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [avatarStatus, setAvatarStatus] = useState<AvatarStatusResponse | null>(null);
+  const [avatarOverlay, setAvatarOverlay] = useState<AvatarOverlaySettings | null>(null);
   const [settings, setSettings] = useState<PublicSettings | null>(null);
+  const [interfaceLocale, setInterfaceLocale] = useState<InterfaceLocale>(initialInterfaceLocale);
   const [events, setEvents] = useState<BackendEvent[]>([]);
+  // A settings mutation is authoritative.  Do not allow an older polling
+  // request to overwrite it after the user has switched avatar placement.
+  const overviewRevision = useRef(0);
   const [wsState, setWsState] = useState<WsState>("disconnected");
   const [statusError, setStatusError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [startingSession, setStartingSession] = useState(false);
   const servicesReady = !desktopManaged || coreStatus === "ready";
   const setupRequired = Boolean(settings && !settings.api_key_configured && isDesktopManaged());
+
+  useInterfaceLocale(interfaceLocale);
+
+  useEffect(() => {
+    const handleLocaleChange = (event: Event) => {
+      const locale = (event as CustomEvent<InterfaceLocale>).detail;
+      if (locale === "ru" || locale === "en") setInterfaceLocale(locale);
+    };
+    window.addEventListener(INTERFACE_LOCALE_CHANGED_EVENT, handleLocaleChange);
+    return () => window.removeEventListener(INTERFACE_LOCALE_CHANGED_EVENT, handleLocaleChange);
+  }, []);
+
+  useEffect(() => {
+    if (!settings || !["ru", "en"].includes(settings.interface_locale)) return;
+    setInterfaceLocale(settings.interface_locale);
+    setInterfaceLocalePreference(settings.interface_locale);
+  }, [settings?.interface_locale]);
+
+  useEffect(() => {
+    void setDesktopInterfaceLocale(interfaceLocale).catch(() => {
+      // The browser build has no tray, and an older desktop shell can still
+      // show the app safely even if it does not expose this optional command.
+    });
+  }, [interfaceLocale]);
 
   useEffect(() => {
     let stop: (() => void) | undefined;
@@ -291,20 +438,22 @@ export default function App() {
   }, []);
 
   const refreshOverview = useCallback(async () => {
+    const revision = ++overviewRevision.current;
     try {
-      const [nextStatus, nextSettings] = await Promise.all([
+      const [nextStatus, nextSettings, nextAvatarStatus, nextAvatarOverlay] = await Promise.all([
         getStatus(),
         getSettings(),
+        getAvatarStatus().catch(() => null),
+        getAvatarOverlay().catch(() => null),
       ]);
+      if (revision !== overviewRevision.current) return;
       setStatus(nextStatus);
       setSettings(nextSettings);
-      try {
-        setAvatarStatus(await getAvatarStatus());
-      } catch {
-        setAvatarStatus(null);
-      }
+      setAvatarStatus(nextAvatarStatus);
+      setAvatarOverlay(nextAvatarOverlay);
       setStatusError(null);
     } catch (error) {
+      if (revision !== overviewRevision.current) return;
       setStatusError(error instanceof Error ? error.message : "Сервис недоступен");
     }
   }, []);
@@ -318,6 +467,47 @@ export default function App() {
     }, 10000);
     return () => window.clearInterval(timer);
   }, [refreshEvents, refreshOverview, servicesReady]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(sidebarCollapsed));
+    } catch {
+      // The sidebar remains usable when storage is unavailable.
+    }
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    if (!navigationOpen) return;
+    const focusMenuButton = window.setTimeout(() => menuToggleRef.current?.focus(), 0);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setNavigationOpen(false);
+      window.setTimeout(() => menuToggleRef.current?.focus(), 0);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.clearTimeout(focusMenuButton);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [navigationOpen]);
+
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    void listenForAvatarVisibility(() => {
+      void refreshOverview();
+    }).then((unlisten) => {
+      stop = unlisten;
+    });
+    return () => stop?.();
+  }, [refreshOverview]);
+
+  useEffect(() => {
+    if (!servicesReady || !settings) return;
+    void configureAvatarPlacement(settings.avatar_placement).catch(() => {
+      // Settings remain usable in a browser or when an optional avatar build
+      // is unavailable. Avatar diagnostics show the connection state.
+    });
+  }, [servicesReady, settings?.avatar_placement]);
 
   const startFreshSession = useCallback(async () => {
     setStartingSession(true);
@@ -403,22 +593,40 @@ export default function App() {
     return <div className="app-shell setup-shell"><SetupWizard onComplete={refreshOverview} /></div>;
   }
 
+  const closeNavigation = () => {
+    setNavigationOpen((current) => {
+      if (current) window.setTimeout(() => menuToggleRef.current?.focus(), 0);
+      return false;
+    });
+  };
+
+  const toggleNavigation = () => {
+    setNavigationOpen((current) => {
+      const next = !current;
+      if (!next) window.setTimeout(() => menuToggleRef.current?.focus(), 0);
+      return next;
+    });
+  };
+
   const switchView = (view: AppView) => {
     setActiveView(view);
-    setNavigationOpen(false);
+    closeNavigation();
   };
   return (
-    <div className="app-shell">
+    <div className={`app-shell${sidebarCollapsed ? " is-sidebar-collapsed" : ""}`}>
       <Sidebar
         activeView={activeView}
         isOpen={navigationOpen}
+        isCollapsed={sidebarCollapsed}
         onNavigate={switchView}
-        onClose={() => setNavigationOpen(false)}
+        onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
       />
-      {navigationOpen && <button className="navigation-scrim" aria-label="Закрыть меню" onClick={() => setNavigationOpen(false)} />}
+      {navigationOpen && <button className="navigation-scrim" type="button" aria-label="Закрыть меню" onClick={closeNavigation} />}
       <WindowChrome
         title=""
-        onOpenNavigation={() => setNavigationOpen(true)}
+        navigationOpen={navigationOpen}
+        navigationButtonRef={menuToggleRef}
+        onOpenNavigation={toggleNavigation}
       />
       <section className="app-content">
         <main className={`workspace workspace-${activeView}`}>
@@ -432,7 +640,7 @@ export default function App() {
               onOpenSettings={() => switchView("settings")}
             />
           )}
-          <div hidden={activeView !== "chat"}>
+          <div className="chat-view" hidden={activeView !== "chat"}>
             <ChatPage
               key={sessionId ?? "starting"}
               sessionId={sessionId}
@@ -441,8 +649,10 @@ export default function App() {
               events={events}
               settings={settings}
               avatarStatus={avatarStatus}
+              showInAppAvatar={settings?.avatar_placement === "in_app" && (settings.avatar_in_app_visible ?? true)}
               onRefreshEvents={refreshEvents}
               onOpenMemory={() => switchView("memory")}
+              onStartNewDialog={startFreshSession}
             />
           </div>
           {activeView === "journal" && <JournalPage />}
@@ -452,15 +662,24 @@ export default function App() {
             <SettingsPage
               settings={settings}
               avatarStatus={avatarStatus}
+              avatarOverlay={avatarOverlay}
               events={events}
               onRefreshEvents={refreshEvents}
               onRefreshAvatar={refreshOverview}
+              onAvatarOverlayChanged={(nextOverlay) => {
+                overviewRevision.current += 1;
+                setAvatarOverlay(nextOverlay);
+              }}
+              onInterfaceLocaleChange={(locale) => {
+                setInterfaceLocale(locale);
+                setInterfaceLocalePreference(locale);
+              }}
               onSettingsChanged={(nextSettings) => {
+                overviewRevision.current += 1;
                 setSettings(nextSettings);
                 void refreshOverview();
                 void refreshEvents();
               }}
-              onResetSession={startFreshSession}
             />
           )}
         </main>
@@ -520,28 +739,42 @@ const MAIN_NAVIGATION: Array<{ id: Exclude<AppView, "settings">; label: string; 
 function Sidebar({
   activeView,
   isOpen,
+  isCollapsed,
   onNavigate,
-  onClose,
+  onToggleCollapsed,
 }: {
   activeView: AppView;
   isOpen: boolean;
+  isCollapsed: boolean;
   onNavigate: (view: AppView) => void;
-  onClose: () => void;
+  onToggleCollapsed: () => void;
 }) {
   return (
-    <aside className={`sidebar${isOpen ? " is-open" : ""}`} aria-label="Основная навигация">
+    <aside id="main-sidebar" className={`sidebar${isOpen ? " is-open" : ""}`} aria-label="Основная навигация">
       <div className="sidebar-brand" data-tauri-drag-region>
-        <img className="brand-logo" src="/brand/iris-wordmark-light.svg" alt="Iris" />
+        <img className="brand-logo brand-logo-wordmark" src="/brand/iris-wordmark-light.svg" alt="Iris" />
+        <img className="brand-logo brand-logo-mark" src="/brand/iris-mark-light.svg" alt="" aria-hidden="true" />
         <span className="brand-alias" data-tauri-drag-region aria-hidden="true">ириска<sup>*</sup></span>
-        <button className="icon-button sidebar-close" aria-label="Закрыть меню" title="Закрыть меню" onClick={onClose}><X size={18} /></button>
       </div>
       <nav className="sidebar-nav" aria-label="Разделы приложения">
         {MAIN_NAVIGATION.map(({ id, label, icon: Icon }) => (
-          <NavigationButton key={id} icon={Icon} label={label} active={activeView === id} onClick={() => onNavigate(id)} />
+          <NavigationButton key={id} icon={Icon} label={label} active={activeView === id} compact={isCollapsed} onClick={() => onNavigate(id)} />
         ))}
       </nav>
       <div className="sidebar-footer">
-        <NavigationButton icon={Settings} label="Настройки" active={activeView === "settings"} onClick={() => onNavigate("settings")} />
+        <div className="sidebar-footer-row">
+          <NavigationButton icon={Settings} label="Настройки" active={activeView === "settings"} compact={isCollapsed} onClick={() => onNavigate("settings")} />
+          <button
+            className="icon-button sidebar-collapse-toggle"
+            type="button"
+            aria-label={isCollapsed ? "Развернуть меню" : "Свернуть меню"}
+            aria-pressed={isCollapsed}
+            title={isCollapsed ? "Развернуть меню" : "Свернуть меню"}
+            onClick={onToggleCollapsed}
+          >
+            {isCollapsed ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />}
+          </button>
+        </div>
       </div>
     </aside>
   );
@@ -551,15 +784,24 @@ function NavigationButton({
   icon: Icon,
   label,
   active,
+  compact = false,
   onClick,
 }: {
   icon: LucideIcon;
   label: string;
   active: boolean;
+  compact?: boolean;
   onClick: () => void;
 }) {
   return (
-    <button className={`navigation-button${active ? " is-active" : ""}`} aria-current={active ? "page" : undefined} onClick={onClick}>
+    <button
+      className={`navigation-button${active ? " is-active" : ""}`}
+      aria-label={label}
+      aria-current={active ? "page" : undefined}
+      data-tooltip={compact ? label : undefined}
+      title={compact ? label : undefined}
+      onClick={onClick}
+    >
       <Icon size={19} aria-hidden="true" />
       <span>{label}</span>
     </button>
@@ -573,8 +815,10 @@ function ChatPage({
   events,
   settings,
   avatarStatus,
+  showInAppAvatar,
   onRefreshEvents,
   onOpenMemory,
+  onStartNewDialog,
 }: {
   sessionId: string | null;
   sessionStarting: boolean;
@@ -582,8 +826,10 @@ function ChatPage({
   events: BackendEvent[];
   settings: PublicSettings | null;
   avatarStatus: AvatarStatusResponse | null;
+  showInAppAvatar: boolean;
   onRefreshEvents: () => Promise<void>;
   onOpenMemory: () => void;
+  onStartNewDialog: () => Promise<void>;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -592,22 +838,19 @@ function ChatPage({
   const [error, setError] = useState<string | null>(null);
   const [retryText, setRetryText] = useState<string | null>(null);
   const [memoryNotice, setMemoryNotice] = useState<string | null>(null);
-  const [handsFree, setHandsFree] = useState(false);
   const [liveConversation, setLiveConversation] = useState(false);
+  const [microphoneMuted, setMicrophoneMuted] = useState(false);
   const [conversationStatus, setConversationStatus] = useState("Микрофон включён");
   const [conversationDebug, setConversationDebug] = useState<ConversationDebug | null>(null);
-  const [vadState, setVadState] = useState<VadState>("idle");
+  const [newDialogConfirmationOpen, setNewDialogConfirmationOpen] = useState(false);
+  const [newDialogPending, setNewDialogPending] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const recordTimeoutRef = useRef<number | null>(null);
   const handledVoiceEventIdsRef = useRef<Set<string>>(new Set());
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
   const liveSocketRef = useRef<VoiceSocketClient | null>(null);
   const livePlayerRef = useRef<TTSStreamPlayer | null>(null);
   const vadRecorderRef = useRef<BrowserVadRecorder | null>(null);
   const pcmInputRef = useRef<PcmInputClient | null>(null);
-  const submitVoiceRef = useRef<(audio: Blob, endedAt?: number) => void>(() => undefined);
   const playbackCoordinatorRef = useRef(new PlaybackCoordinator());
   const avatarOwnsAudioRef = useRef(false);
   const liveAudioStartedRef = useRef(false);
@@ -617,7 +860,10 @@ function ChatPage({
   const playbackSegmentTextsRef = useRef<string[]>([]);
   const activeVoiceGenerationRef = useRef<number | undefined>(undefined);
   const conversationStatusTimerRef = useRef<number | null>(null);
-  const bargeInTimerRef = useRef<number | null>(null);
+  const pendingTextDeltasRef = useRef(new Map<string, string>());
+  const pendingTextDeltaTimerRef = useRef<number | null>(null);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  messagesRef.current = messages;
 
   const updateConversationStatus = useCallback((status: string, resetAfterMs?: number) => {
     if (conversationStatusTimerRef.current !== null) {
@@ -637,16 +883,65 @@ function ChatPage({
     if (conversationStatusTimerRef.current !== null) {
       window.clearTimeout(conversationStatusTimerRef.current);
     }
-    if (bargeInTimerRef.current !== null) {
-      window.clearTimeout(bargeInTimerRef.current);
-    }
   }, []);
+
+  useEffect(() => {
+    if (!error) return;
+
+    const visibleError = error;
+    const visibleRetryText = retryText;
+    const dismissTimer = window.setTimeout(() => {
+      setError((currentError) => currentError === visibleError ? null : currentError);
+      setRetryText((currentRetryText) => (
+        currentRetryText === visibleRetryText ? null : currentRetryText
+      ));
+    }, CHAT_ERROR_AUTO_DISMISS_MS);
+
+    return () => window.clearTimeout(dismissTimer);
+  }, [error, retryText]);
 
   const showMemoryUpdates = useCallback((updates?: MemoryUpdate[]) => {
     const update = updates && updates.length ? updates[updates.length - 1] : undefined;
     if (!update || update.action !== "saved") return;
     setMemoryNotice(`Сохранено в памяти: ${update.predicate}.`);
   }, []);
+
+  const flushPendingTextDeltas = useCallback(() => {
+    pendingTextDeltaTimerRef.current = null;
+    const pending = pendingTextDeltasRef.current;
+    if (pending.size === 0) return;
+    pendingTextDeltasRef.current = new Map();
+    setMessages((current) => {
+      let next = current;
+      for (const [utteranceId, delta] of pending) {
+        const index = next.findIndex((message) => message.utteranceId === utteranceId);
+        if (index < 0) {
+          next = [...next, {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: delta,
+            utteranceId,
+            emotion: liveMetadataRef.current.emotion,
+            intent: liveMetadataRef.current.intent,
+          }];
+          continue;
+        }
+        next = next.map((message, messageIndex) => messageIndex === index
+          ? { ...message, content: message.content + delta }
+          : message);
+      }
+      return next;
+    });
+  }, []);
+
+  const queueTextDelta = useCallback((utteranceId: string, delta: string) => {
+    pendingTextDeltasRef.current.set(
+      utteranceId,
+      `${pendingTextDeltasRef.current.get(utteranceId) ?? ""}${delta}`,
+    );
+    if (pendingTextDeltaTimerRef.current !== null) return;
+    pendingTextDeltaTimerRef.current = window.setTimeout(flushPendingTextDeltas, 16);
+  }, [flushPendingTextDeltas]);
 
   useEffect(() => {
       if (!sessionId) return;
@@ -679,11 +974,7 @@ function ChatPage({
     };
   }, [liveConversation, sessionId, settings?.conversation_diagnostics_enabled]);
 
-  const voiceSupported =
-    typeof navigator !== "undefined" &&
-    Boolean(navigator.mediaDevices?.getUserMedia) &&
-    typeof MediaRecorder !== "undefined";
-  const handsFreeSupported =
+  const liveVoiceSupported =
     typeof navigator !== "undefined"
     && Boolean(navigator.mediaDevices?.getUserMedia)
     && typeof AudioWorkletNode !== "undefined";
@@ -691,11 +982,41 @@ function ChatPage({
     typeof window !== "undefined" &&
     "speechSynthesis" in window &&
     "SpeechSynthesisUtterance" in window;
-  const avatarOwnsAudio = Boolean(avatarStatus?.enabled && avatarStatus.client_count > 0);
+  const selectedInputDeviceId = settings?.voice_input_device_id ?? "";
+  const selectedOutputDeviceId = settings?.voice_output_device_id ?? "";
+  // A concrete output requires Web Audio/HTML audio routing. In that mode the
+  // avatar remains visually in sync but its Unity AudioSource is muted by the
+  // backend, so the browser is the only audible playback owner.
+  const routeAvatarAudioThroughDesktop = Boolean(selectedOutputDeviceId && canSelectAudioOutput());
+  const avatarOwnsAudio = Boolean(
+    avatarStatus?.enabled
+    && avatarStatus.client_count > 0
+    && !routeAvatarAudioThroughDesktop,
+  );
 
   useEffect(() => {
     avatarOwnsAudioRef.current = avatarOwnsAudio;
   }, [avatarOwnsAudio]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const applyOutput = async () => {
+      try {
+        if (activeAudioRef.current) {
+          await setAudioElementOutput(activeAudioRef.current, selectedOutputDeviceId);
+        }
+        await livePlayerRef.current?.setOutputDevice(selectedOutputDeviceId);
+      } catch (outputError) {
+        if (!cancelled) {
+          setError(outputError instanceof Error
+            ? `Не удалось переключить вывод звука: ${outputError.message}`
+            : "Не удалось переключить вывод звука");
+        }
+      }
+    };
+    void applyOutput();
+    return () => { cancelled = true; };
+  }, [selectedOutputDeviceId]);
 
   const stopVoicePlayback = useCallback((except?: HTMLAudioElement) => {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
@@ -727,6 +1048,29 @@ function ChatPage({
     }
   }, [sessionId, stopVoicePlayback]);
 
+  const playMuteTone = useCallback((muted: boolean) => {
+    try {
+      const AudioContextConstructor = globalThis.AudioContext
+        ?? (globalThis as typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextConstructor) return;
+      const context = new AudioContextConstructor();
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      const now = context.currentTime;
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(muted ? 220 : 520, now);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.025, now + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.055);
+      oscillator.connect(gain).connect(context.destination);
+      oscillator.start(now);
+      oscillator.stop(now + 0.06);
+      oscillator.addEventListener("ended", () => { void context.close(); }, { once: true });
+    } catch {
+      // Audio feedback is optional and must never block microphone control.
+    }
+  }, []);
+
   const playAudioUrl = useCallback(
     async (audioUrl: string): Promise<boolean> => {
       stopVoicePlayback();
@@ -745,6 +1089,7 @@ function ChatPage({
       };
 
       try {
+        await setAudioElementOutput(audio, selectedOutputDeviceId);
         await audio.play();
         return true;
       } catch {
@@ -754,34 +1099,7 @@ function ChatPage({
         return false;
       }
     },
-    [settings?.voice_playback_rate, stopVoicePlayback],
-  );
-
-  const playMessageAudioTrack = useCallback(
-    async (_messageId: string, fallbackAudioUrl: string): Promise<boolean> => {
-      const audio = new Audio(fallbackAudioUrl);
-
-      stopVoicePlayback(audio);
-      audio.playbackRate = 1;
-      activeAudioRef.current = audio;
-      audio.onended = () => {
-        if (activeAudioRef.current === audio) {
-          activeAudioRef.current = null;
-        }
-      };
-
-      try {
-        audio.currentTime = 0;
-        await audio.play();
-        return true;
-      } catch {
-        if (activeAudioRef.current === audio) {
-          activeAudioRef.current = null;
-        }
-        return false;
-      }
-    },
-    [settings?.voice_playback_rate, stopVoicePlayback],
+    [selectedOutputDeviceId, settings?.voice_playback_rate, stopVoicePlayback],
   );
 
   const speakTextInBrowser = useCallback(
@@ -828,6 +1146,7 @@ function ChatPage({
           prebufferMs: settings?.voice_live_playback_prebuffer_ms ?? 0,
           playbackRate: 1,
           startLeadMs: settings?.voice_live_playback_start_lead_ms ?? 30,
+          outputDeviceId: selectedOutputDeviceId,
         },
         (gapMs) => {
           liveSocketRef.current?.send("playback.underrun", { underrun_ms: gapMs });
@@ -851,12 +1170,14 @@ function ChatPage({
       prebufferMs: settings?.voice_live_playback_prebuffer_ms ?? 0,
       playbackRate: 1,
       startLeadMs: settings?.voice_live_playback_start_lead_ms ?? 30,
+      outputDeviceId: selectedOutputDeviceId,
     });
     return livePlayerRef.current;
   }, [
     settings?.voice_live_playback_prebuffer_ms,
     settings?.voice_live_playback_prebuffer_segments,
     settings?.voice_live_playback_start_lead_ms,
+    selectedOutputDeviceId,
   ]);
 
   const ensureLiveVoice = useCallback(async () => {
@@ -885,21 +1206,9 @@ function ChatPage({
               : message,
           ));
         } else if (event.type === "voice.text.delta" && event.delta) {
-          setMessages((current) => {
-            const index = current.findIndex((message) => message.utteranceId === event.utterance_id);
-            if (index < 0) {
-              return [...current, {
-                id: crypto.randomUUID(), role: "assistant", content: event.delta!,
-                utteranceId: event.utterance_id,
-                emotion: liveMetadataRef.current.emotion,
-                intent: liveMetadataRef.current.intent,
-              }];
-            }
-            return current.map((message, messageIndex) => messageIndex === index
-              ? { ...message, content: message.content + event.delta }
-              : message);
-          });
+          queueTextDelta(event.utterance_id, event.delta);
         } else if (event.type === "voice.text.completed") {
+          flushPendingTextDeltas();
           showMemoryUpdates(event.memory_updates);
         } else if (event.type === "tts.segment.started") {
           latestPlaybackSegmentRef.current = event.text ?? "";
@@ -919,6 +1228,7 @@ function ChatPage({
             livePlayerRef.current?.finish(event.utterance_id);
           }
         } else if (event.type === "voice.utterance.cancelled") {
+          flushPendingTextDeltas();
           livePlayerRef.current?.stop();
           stopVoicePlayback();
           playbackCoordinatorRef.current.cancel();
@@ -926,6 +1236,7 @@ function ChatPage({
           setLoading(false);
           setVoiceState("idle");
         } else if (event.type === "voice.error") {
+          flushPendingTextDeltas();
           livePlayerRef.current?.stop();
           playbackCoordinatorRef.current.cancel();
           liveSocketRef.current?.clearActive();
@@ -958,13 +1269,16 @@ function ChatPage({
     }
     await player.unlock();
     await liveSocketRef.current.connect();
-  }, [ensureLivePlayer, sessionId, showMemoryUpdates, speakTextInBrowser, stopVoicePlayback]);
+  }, [ensureLivePlayer, flushPendingTextDeltas, queueTextDelta, sessionId, showMemoryUpdates, speakTextInBrowser, stopVoicePlayback]);
 
   useEffect(() => () => {
     livePlayerRef.current?.stop();
     liveSocketRef.current?.close();
     vadRecorderRef.current?.stop();
     pcmInputRef.current?.close();
+    if (pendingTextDeltaTimerRef.current !== null) {
+      window.clearTimeout(pendingTextDeltaTimerRef.current);
+    }
   }, []);
 
   useEffect(() => () => stopVoicePlayback(), [stopVoicePlayback]);
@@ -1045,55 +1359,26 @@ function ChatPage({
     [syncVoiceTtsStatus],
   );
 
-  const appendBatchVoiceResponse = useCallback(
-    (response: VoiceChatResponse) => {
-      showMemoryUpdates(response.memory_updates);
-      setMessages((current) => [
-        ...current,
-        {
-          id: crypto.randomUUID(),
-          role: "user",
-          content: response.transcript,
-        },
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: response.reply,
-          emotion: response.emotion,
-          intent: response.intent,
-          voiceRequestId: response.voice_request_id,
-          ttsStatus: response.tts_status,
-          audioUrl: response.reply_audio_url
-            ? resolveApiUrl(response.reply_audio_url)
-            : undefined,
-        },
-      ]);
-      if (response.tts_status === "queued") {
-        void pollVoiceTtsStatus(response.voice_request_id);
-      }
-    },
-    [pollVoiceTtsStatus, showMemoryUpdates],
-  );
-
-  useLayoutEffect(() => {
-    // ChatPage remains mounted while another section is open so the live
-    // connection survives navigation.  Its list can therefore receive its
-    // history while hidden; scroll only after it becomes visible and has a
-    // measurable layout.
-    if (!isActive || messages.length === 0) return;
-    listRef.current?.scrollTo({
-      top: listRef.current.scrollHeight,
-      behavior: "auto",
-    });
-  }, [isActive, messages.length]);
-
+  const scrollTimerRef = useRef<number | null>(null);
   useEffect(() => {
-    if (!isActive) return;
-    listRef.current?.scrollTo({
-      top: listRef.current.scrollHeight,
-      behavior: "smooth",
-    });
+    if (!isActive || messages.length === 0 || scrollTimerRef.current !== null) return;
+    // Streaming text can arrive many times per frame. Coalesce layout reads
+    // and writes so a long answer does not enqueue a smooth scroll animation
+    // for every token.
+    scrollTimerRef.current = window.setTimeout(() => {
+      scrollTimerRef.current = null;
+      listRef.current?.scrollTo({
+        top: listRef.current.scrollHeight,
+        behavior: "auto",
+      });
+    }, 32);
   }, [isActive, messages]);
+
+  useEffect(() => () => {
+    if (scrollTimerRef.current !== null) {
+      window.clearTimeout(scrollTimerRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     for (const event of events) {
@@ -1132,7 +1417,7 @@ function ChatPage({
           void playAudioUrl(resolvedAudioUrl);
         }
       } else {
-        const fallbackMessage = messages.find(
+        const fallbackMessage = messagesRef.current.find(
           (message) => message.voiceRequestId === voiceRequestId,
         );
         const fallbackAlreadyStarted = fallbackMessage?.ttsStatus === "browser_fallback";
@@ -1156,7 +1441,7 @@ function ChatPage({
         );
       }
     }
-  }, [avatarOwnsAudio, browserSpeechSupported, events, messages, playAudioUrl, speakTextInBrowser]);
+  }, [avatarOwnsAudio, browserSpeechSupported, events, playAudioUrl, speakTextInBrowser]);
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -1232,175 +1517,28 @@ function ChatPage({
     }
   };
 
-  const startRecording = async (bargeIn = false) => {
-    if (!voiceSupported || (!bargeIn && (loading || voiceState !== "idle"))) {
-      return;
-    }
-
-    if (bargeIn) {
-      interruptAssistantSpeech();
-    }
-    setError(null);
-    try {
-      await ensureLivePlayer().unlock();
-      const profile = (settings?.voice_microphone_profile ?? "balanced") as MicrophoneProfile;
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: microphoneConstraints(profile),
-      });
-      const mimeType = getRecordingMimeType();
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      chunksRef.current = [];
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunksRef.current.push(event.data);
-        }
-      };
-
-      recorder.onstop = () => {
-        if (recordTimeoutRef.current !== null) {
-          window.clearTimeout(recordTimeoutRef.current);
-          recordTimeoutRef.current = null;
-        }
-        stream.getTracks().forEach((track) => track.stop());
-        const audio = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
-        chunksRef.current = [];
-        void submitVoice(audio, Date.now());
-      };
-
-      recorderRef.current = recorder;
-      recorder.start();
-      recordTimeoutRef.current = window.setTimeout(() => {
-        stopRecording();
-      }, 60000);
-      setVoiceState("recording");
-    } catch (recordError) {
-      setError(
-        recordError instanceof Error ? recordError.message : "Микрофон недоступен",
-      );
-      setVoiceState("idle");
-    }
-  };
-
-  const stopRecording = () => {
-    if (recorderRef.current?.state === "recording") {
-      recorderRef.current.stop();
-      setVoiceState("transcribing");
-    }
-  };
-
-  const toggleRecording = async () => {
-    if (voiceState === "recording") {
-      stopRecording();
-      return;
-    }
-    // The avatar can still be speaking after the browser has released its
-    // local playback lease.  Treat every new push-to-talk recording as a
-    // barge-in instead of relying on UI state to detect that case.
-    await startRecording(true);
-  };
-
-  const submitVoice = async (audio: Blob, endOfSpeechUnixMs?: number) => {
+  const toggleLive = async () => {
     if (!sessionId) return;
-    if (audio.size === 0) {
-      setError("Запись пуста");
-      setVoiceState("idle");
-      return;
-    }
-    if (audio.size < 800) {
-      setError("Запись слишком короткая");
-      setVoiceState("idle");
-      return;
-    }
-
-    setLoading(true);
-    setVoiceState("transcribing");
-    setError(null);
-    const thinkingTimer = window.setTimeout(() => {
-      setVoiceState("thinking");
-    }, 500);
-    try {
-      let response;
-      try {
-        await ensureLiveVoice();
-        liveSocketRef.current?.clearActive();
-        liveAudioStartedRef.current = false;
-        response = await sendVoiceMessage(
-          sessionId,
-          audio,
-          settings?.voice_language ?? "ru",
-          true,
-          endOfSpeechUnixMs,
-        );
-      } catch (liveError) {
-        if (!isLiveVoiceTransportError(liveError)) {
-          throw liveError;
-        }
-        liveSocketRef.current?.close();
-        liveSocketRef.current = null;
-        response = await sendVoiceMessage(
-          sessionId,
-          audio,
-          settings?.voice_language ?? "ru",
-          false,
-          endOfSpeechUnixMs,
-        );
-      setError("Потоковый голосовой режим недоступен: использован обычный ответ.");
-      }
-      if ("status" in response) {
-        liveSocketRef.current?.activate(response.utterance_id);
-        setMessages((current) => [
-          ...current,
-          {
-            id: crypto.randomUUID(),
-            role: "user",
-            content: response.transcript,
-          },
-        ]);
-        setVoiceState("thinking");
-        return;
-      }
-      appendBatchVoiceResponse(response);
-      await onRefreshEvents();
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Не удалось отправить голосовое сообщение");
-    } finally {
-      window.clearTimeout(thinkingTimer);
-      if (!liveSocketRef.current?.activeUtteranceId) {
-        setLoading(false);
-        setVoiceState("idle");
-      }
-    }
-  };
-
-  useEffect(() => {
-    submitVoiceRef.current = (audio: Blob, endedAt?: number) => { void submitVoice(audio, endedAt); };
-  }, [submitVoice]);
-
-  const toggleHandsFree = async (mode: "hands_free" | "live_conversation" = "hands_free") => {
-    if (!sessionId) return;
-    const isLive = mode === "live_conversation";
-    const requestedModeActive = isLive ? liveConversation : handsFree;
-    if (requestedModeActive) {
+    if (liveConversation) {
       vadRecorderRef.current?.stop();
       pcmInputRef.current?.close();
       pcmInputRef.current = null;
       vadRecorderRef.current = null;
-      setHandsFree(false);
+      setMicrophoneMuted(false);
       setLiveConversation(false);
-      setVadState("idle");
-      updateConversationStatus("Микрофон включён");
+      setVoiceState("idle");
+      updateConversationStatus("Live выключен");
       return;
     }
     vadRecorderRef.current?.stop();
     pcmInputRef.current?.close();
     pcmInputRef.current = null;
     vadRecorderRef.current = null;
-    setHandsFree(false);
+    setMicrophoneMuted(false);
     setLiveConversation(false);
     try {
       await ensureLiveVoice();
-      const input = new PcmInputClient(voiceInputWebSocketUrl(sessionId, isLive ? 2 : 1), (event) => {
+      const input = new PcmInputClient(voiceInputWebSocketUrl(sessionId, 3), (event) => {
         if (event.type === "voice.input.transcript" && event.transcript) {
           setMessages((current) => [...current, {
             id: crypto.randomUUID(),
@@ -1408,7 +1546,7 @@ function ChatPage({
             content: event.transcript!,
             speakerLabel: pendingSpeakerLabelRef.current,
           }]);
-          if (!isLive || !event.observation_only) {
+          if (!event.observation_only) {
             setVoiceState("thinking");
             updateConversationStatus("Iris отвечает");
           }
@@ -1461,40 +1599,85 @@ function ChatPage({
       vadRecorderRef.current = recorder;
       const capture = await recorder.start(
         (pcm16) => pcmInputRef.current?.sendPcm(pcm16),
-        (nextState, event) => {
-          setVadState(nextState);
-          if (
-            nextState !== "speech"
-            && bargeInTimerRef.current !== null
-          ) {
-            window.clearTimeout(bargeInTimerRef.current);
-            bargeInTimerRef.current = null;
+        (_nextState, event) => {
+          if (event === "speech_started") {
+            interruptAssistantSpeech();
+            setVoiceState("recording");
+            updateConversationStatus("Слышу вас");
+          } else if (event === "speech_ended") {
+            setVoiceState("transcribing");
           }
-          if (event === "speech_started" && isLive) updateConversationStatus("Слышу вас");
         },
-        (settings?.voice_microphone_profile ?? "balanced") as MicrophoneProfile,
+        "live",
+        selectedInputDeviceId,
       );
       await input.connect(
         capture.sampleRate,
         settings?.voice_language ?? "ru",
-        isLive ? "live_conversation" : "hands_free",
         capture,
       );
-      setHandsFree(!isLive);
-      setLiveConversation(isLive);
+      setLiveConversation(true);
+      setMicrophoneMuted(false);
       updateConversationStatus("Микрофон включён");
     } catch (vadError) {
       vadRecorderRef.current?.stop();
+      pcmInputRef.current?.close();
       vadRecorderRef.current = null;
-      setError(vadError instanceof Error ? vadError.message : "Режим свободных рук недоступен");
-      setHandsFree(false);
+      pcmInputRef.current = null;
+      setMicrophoneMuted(false);
+      setError(vadError instanceof Error ? vadError.message : "Live-режим недоступен");
       setLiveConversation(false);
-      setVadState("idle");
+    }
+  };
+
+  const toggleMicrophoneMute = useCallback(() => {
+    if (!liveConversation || !vadRecorderRef.current) return;
+    const nextMuted = !microphoneMuted;
+    vadRecorderRef.current.setMuted(nextMuted);
+    setMicrophoneMuted(nextMuted);
+    playMuteTone(nextMuted);
+    updateConversationStatus(nextMuted ? "Микрофон выключен" : "Микрофон включён");
+  }, [liveConversation, microphoneMuted, playMuteTone, updateConversationStatus]);
+
+  useEffect(() => {
+    const handleMuteHotkey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== LIVE_MUTE_HOTKEY || event.repeat || !liveConversation) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.isContentEditable || (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
+      event.preventDefault();
+      toggleMicrophoneMute();
+    };
+    window.addEventListener("keydown", handleMuteHotkey);
+    return () => window.removeEventListener("keydown", handleMuteHotkey);
+  }, [liveConversation, toggleMicrophoneMute]);
+
+  const startNewDialog = async () => {
+    if (!sessionId || newDialogPending) return;
+    setNewDialogPending(true);
+    setError(null);
+    try {
+      // A new session must not inherit a live microphone stream or an answer
+      // that was still playing in the previous dialog.
+      vadRecorderRef.current?.stop();
+      pcmInputRef.current?.close();
+      pcmInputRef.current = null;
+      vadRecorderRef.current = null;
+      setLiveConversation(false);
+      setMicrophoneMuted(false);
+      interruptAssistantSpeech();
+      await onStartNewDialog();
+      setNewDialogConfirmationOpen(false);
+    } catch (newDialogError) {
+      setError(newDialogError instanceof Error ? newDialogError.message : "Не удалось начать новый диалог.");
+    } finally {
+      setNewDialogPending(false);
     }
   };
 
   return (
-    <section className="panel chat-panel">
+    <section className={`panel chat-panel${showInAppAvatar && isActive ? " has-in-app-avatar" : ""}`}>
+      {showInAppAvatar && isActive && <InAppAvatarHost />}
+      <div className="chat-content">
       {memoryNotice && <div className="notice" role="status">{memoryNotice}<button className="text-button" onClick={onOpenMemory}>Открыть память</button></div>}
       <div className="message-list" ref={listRef}>
         {messages.length === 0 && (
@@ -1507,60 +1690,8 @@ function ChatPage({
         {messages.map((message) => (
           <article className={`message ${message.role}`} key={message.id}>
             <div className="message-role">{message.role === "user" ? message.speakerLabel ?? "Вы" : "Iris"}</div>
-            <p>{message.content}</p>
-            {message.ttsError && <div className="message-error">{message.ttsError}</div>}
-            {message.role === "assistant" && (
-              <button
-                className="speak-button"
-                disabled={!message.audioUrl && !message.voiceRequestId && !browserSpeechSupported}
-                onClick={async () => {
-                  if (message.audioUrl) {
-                    const played = await playMessageAudioTrack(message.id, message.audioUrl);
-                    if (!played) {
-                      setMessages((current) =>
-                        current.map((currentMessage) =>
-                          currentMessage.id === message.id
-                            ? {
-                                ...currentMessage,
-                                ttsError: "Не удалось начать воспроизведение аудио",
-                              }
-                            : currentMessage,
-                        ),
-                      );
-                    }
-                    return;
-                  }
-                  if (message.voiceRequestId) {
-                    const status = await syncVoiceTtsStatus(message.voiceRequestId);
-                    if (status?.status === "ready" && status.audio_url) {
-                      const resolvedAudioUrl = resolveApiUrl(status.audio_url);
-                      window.setTimeout(() => {
-                        void playMessageAudioTrack(message.id, resolvedAudioUrl);
-                      }, 50);
-                    }
-                    return;
-                  }
-                  if (!speakTextInBrowser(message.content)) {
-                    setMessages((current) =>
-                      current.map((currentMessage) =>
-                        currentMessage.id === message.id
-                          ? {
-                              ...currentMessage,
-                              ttsError: "Аудио ещё не готово",
-                            }
-                          : currentMessage,
-                      ),
-                    );
-                  }
-                }}
-                type="button"
-              >
-                <Volume2 size={15} aria-hidden="true" />
-                {message.audioUrl || message.voiceRequestId || browserSpeechSupported
-                  ? "Воспроизвести"
-                  : "Аудио готовится"}
-              </button>
-            )}
+            <p data-i18n-skip>{message.content}</p>
+            {message.ttsError && <div className="message-error" data-i18n-skip>{message.ttsError}</div>}
           </article>
         ))}
         {loading && <div className="assistant-thinking" role="status"><span aria-hidden="true" /><span aria-hidden="true" /><span aria-hidden="true" />Iris печатает</div>}
@@ -1589,43 +1720,38 @@ function ChatPage({
 
         <div className="voice-controls">
           <button
-            className={`voice-button${voiceState === "recording" ? " recording" : ""}`}
-            disabled={!voiceSupported || voiceState === "transcribing" || voiceState === "stopping"}
-            onClick={() => void toggleRecording()}
+            className={liveConversation ? "voice-button recording" : "secondary voice-button"}
+            disabled={!liveVoiceSupported || voiceState === "stopping"}
+            onClick={() => void toggleLive()}
+            title="Непрерывный live-диалог с автоматическими паузами и перебиваниями"
             type="button"
           >
             <Mic size={18} aria-hidden="true" />
-            {voiceButtonLabel(voiceState)}
+            {liveConversation ? "Live: вкл." : "Live"}
           </button>
+          {liveConversation && (
+            <button
+              className={microphoneMuted ? "secondary voice-button muted" : "secondary voice-button"}
+              aria-label={microphoneMuted ? "Включить микрофон" : "Выключить микрофон"}
+              aria-pressed={microphoneMuted}
+              onClick={toggleMicrophoneMute}
+              title={`Микрофон: ${microphoneMuted ? "включить" : "выключить"} · клавиша ${LIVE_MUTE_HOTKEY.toUpperCase()}`}
+              type="button"
+            >
+              {microphoneMuted ? <MicOff size={18} aria-hidden="true" /> : <Mic size={18} aria-hidden="true" />}
+            </button>
+          )}
           <button
-            className={handsFree ? "voice-button recording" : "secondary voice-button"}
-            disabled={!handsFreeSupported || voiceState === "transcribing"}
-            onClick={() => void toggleHandsFree("hands_free")}
+            className="secondary voice-button new-dialog-button"
+            disabled={!sessionId || sessionStarting || newDialogPending || voiceState === "recording" || voiceState === "transcribing"}
+            onClick={() => setNewDialogConfirmationOpen(true)}
+            title="Очистить текущий чат и начать новый разговор"
             type="button"
           >
-            {handsFree ? "Свободные руки: вкл." : "Свободные руки"}
+            Новый диалог
           </button>
-          <button
-            className={liveConversation ? "voice-button recording" : "secondary voice-button"}
-            disabled={
-              !handsFreeSupported
-              || voiceState === "transcribing"
-              || !settings?.live_conversation_enabled
-            }
-            onClick={() => void toggleHandsFree("live_conversation")}
-            title={settings?.live_conversation_enabled
-              ? "Естественный разговор с решениями говорить или слушать"
-              : "Включите живой разговор в настройках"}
-            type="button"
-          >
-            {liveConversation ? "Живой разговор: вкл." : "Живой разговор"}
-          </button>
-          {(handsFree || liveConversation || voiceState !== "idle" || !voiceSupported) && <span>
-            {voiceSupported
-              ? liveConversation
-                ? conversationStatus
-                : `Голос: ${settings?.voice_language === "en" ? "английский" : "русский"}${handsFree ? ` · ${vadState}` : ""}`
-              : "Голосовой ввод недоступен"}
+          {(liveConversation || voiceState !== "idle" || !liveVoiceSupported) && <span>
+            {liveVoiceSupported ? conversationStatus : "Live-аудио недоступно"}
           </span>}
         </div>
         {import.meta.env.DEV && liveConversation && conversationDebug && (
@@ -1642,30 +1768,24 @@ function ChatPage({
           </details>
         )}
       </div>
+      <AppDialog
+        open={newDialogConfirmationOpen}
+        title="Начать новый диалог?"
+        description="Все сообщения и сводки текущего диалога будут удалены без возможности восстановления. Долгосрочная память Iris останется."
+        onClose={() => !newDialogPending && setNewDialogConfirmationOpen(false)}
+      >
+        <div className="dialog-actions">
+          <button className="secondary" type="button" disabled={newDialogPending} onClick={() => setNewDialogConfirmationOpen(false)}>
+            Отмена
+          </button>
+          <button className="danger-button" type="button" disabled={newDialogPending} onClick={() => void startNewDialog()}>
+            {newDialogPending ? "Создаю…" : "Начать новый диалог"}
+          </button>
+        </div>
+      </AppDialog>
+      </div>
     </section>
   );
-}
-
-function voiceButtonLabel(voiceState: VoiceState): string {
-  if (voiceState === "recording") {
-    return "Остановить и отправить";
-  }
-  if (voiceState === "transcribing") {
-    return "Распознаём речь";
-  }
-  if (voiceState === "thinking") {
-    return "Перебить и говорить";
-  }
-  if (voiceState === "speaking") {
-    return "Перебить и говорить";
-  }
-  if (voiceState === "stopping") {
-    return "Останавливаем";
-  }
-  if (voiceState === "error") {
-    return "Попробовать снова";
-  }
-  return "Голосовое сообщение";
 }
 
 function getStringMetadata(event: BackendEvent, key: string): string | null {
@@ -1733,7 +1853,7 @@ function EventsPage({
                 <span className="event-time">{formatTime(event.created_at)}</span>
                 <span className="event-level">{event.level}</span>
                 <span className="event-type">{event.type}</span>
-                <strong>{event.message}</strong>
+                <strong data-i18n-skip>{event.message}</strong>
               </div>
               <details className="event-details"><summary>Технические данные</summary><pre>{JSON.stringify(event.metadata, null, 2)}</pre></details>
             </article>
@@ -1746,24 +1866,38 @@ function EventsPage({
 function SettingsPage({
   settings,
   avatarStatus,
+  avatarOverlay,
   events,
   onRefreshEvents,
   onRefreshAvatar,
+  onAvatarOverlayChanged,
+  onInterfaceLocaleChange,
   onSettingsChanged,
-  onResetSession,
 }: {
   settings: PublicSettings | null;
   avatarStatus: AvatarStatusResponse | null;
+  avatarOverlay: AvatarOverlaySettings | null;
   events: BackendEvent[];
   onRefreshEvents: () => Promise<void>;
   onRefreshAvatar: () => Promise<void>;
+  onAvatarOverlayChanged: (overlay: AvatarOverlaySettings | null) => void;
+  onInterfaceLocaleChange: (locale: InterfaceLocale) => void;
   onSettingsChanged: (settings: PublicSettings) => void;
-  onResetSession: () => Promise<void>;
 }) {
-  const [activeSection, setActiveSection] = useState<SettingsSection>("general");
-  const [personality, setPersonality] = useState("");
+  const [activeSection, setActiveSection] = useState<SettingsSection>("conversation");
+  const [interfaceLocale, setInterfaceLocale] = useState<InterfaceLocale>("ru");
   const [voiceLanguage, setVoiceLanguage] = useState("ru");
   const [voiceMicrophoneProfile, setVoiceMicrophoneProfile] = useState<MicrophoneProfile>("balanced");
+  const [voiceInputDeviceId, setVoiceInputDeviceId] = useState("");
+  const [voiceOutputDeviceId, setVoiceOutputDeviceId] = useState("");
+  const [audioDevices, setAudioDevices] = useState<AudioDeviceCatalog>({
+    inputs: [],
+    outputs: [],
+    canEnumerate: false,
+    canSelectOutput: false,
+  });
+  const [audioDevicesLoading, setAudioDevicesLoading] = useState(false);
+  const [audioDevicesMessage, setAudioDevicesMessage] = useState<string | null>(null);
   const [voiceTtsVoice, setVoiceTtsVoice] = useState("");
   const [voiceTtsStyle, setVoiceTtsStyle] = useState("auto");
   const [voiceExpressionLevel, setVoiceExpressionLevel] = useState("natural");
@@ -1775,7 +1909,7 @@ function SettingsPage({
   const [memoryMode, setMemoryMode] = useState("balanced");
   const [memoryIncognito, setMemoryIncognito] = useState(false);
   const [liveSettings, setLiveSettings] = useState<LiveConversationSettings>({
-    live_conversation_enabled: false,
+    live_conversation_enabled: true,
     live_conversation_participant_mode: "one_to_one",
     live_conversation_engagement: "balanced",
     live_conversation_initiative: "rare",
@@ -1789,37 +1923,48 @@ function SettingsPage({
   });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [resetSessionDialog, setResetSessionDialog] = useState(false);
   const [showSttCapture, setShowSttCapture] = useState(false);
+  const autosaveTimersRef = useRef<Partial<Record<SettingsSection, number>>>({});
+  // Settings are polled by the app shell.  Once this form is open, a polling
+  // response must not replace a value the person has just selected before
+  // they get a chance to press Save (most visibly the participant mode).
+  const hasInitialSettings = useRef(false);
+  const autosave = useRuntimeSettingsAutosave(onSettingsChanged);
+
+  const applySettingsToForm = useCallback((nextSettings: PublicSettings) => {
+    setInterfaceLocale(nextSettings.interface_locale === "en" ? "en" : "ru");
+    setVoiceLanguage(nextSettings.voice_language);
+    setVoiceMicrophoneProfile(nextSettings.voice_microphone_profile ?? "balanced");
+    setVoiceInputDeviceId(nextSettings.voice_input_device_id ?? "");
+    setVoiceOutputDeviceId(nextSettings.voice_output_device_id ?? "");
+    setVoiceTtsVoice(nextSettings.voice_tts_voice);
+    setVoiceTtsStyle(nextSettings.voice_tts_style);
+    setVoiceExpressionLevel(nextSettings.voice_tts_expression_level);
+    setVoicePlaybackRate(nextSettings.voice_playback_rate);
+    setPrebufferSegments(nextSettings.voice_live_playback_prebuffer_segments);
+    setPrebufferMs(nextSettings.voice_live_playback_prebuffer_ms);
+    setMemoryMode(nextSettings.memory_mode);
+    setMemoryIncognito(nextSettings.memory_incognito);
+    setLiveSettings({
+      live_conversation_enabled: nextSettings.live_conversation_enabled,
+      live_conversation_participant_mode: nextSettings.live_conversation_participant_mode,
+      live_conversation_engagement: nextSettings.live_conversation_engagement,
+      live_conversation_initiative: nextSettings.live_conversation_initiative,
+      live_conversation_address_strictness: nextSettings.live_conversation_address_strictness,
+      live_conversation_interruption_sensitivity: nextSettings.live_conversation_interruption_sensitivity,
+      live_conversation_pause_tolerance: nextSettings.live_conversation_pause_tolerance,
+      live_conversation_emotion_expression: nextSettings.live_conversation_emotion_expression,
+      live_conversation_mood_recovery: nextSettings.live_conversation_mood_recovery,
+      live_conversation_recent_event_weight: nextSettings.live_conversation_recent_event_weight,
+      live_conversation_echo_mode: nextSettings.live_conversation_echo_mode,
+    });
+  }, []);
 
   useEffect(() => {
-    if (settings) {
-      setPersonality(settings.personality);
-      setVoiceLanguage(settings.voice_language);
-      setVoiceMicrophoneProfile(settings.voice_microphone_profile ?? "balanced");
-      setVoiceTtsVoice(settings.voice_tts_voice);
-      setVoiceTtsStyle(settings.voice_tts_style);
-      setVoiceExpressionLevel(settings.voice_tts_expression_level);
-      setVoicePlaybackRate(settings.voice_playback_rate);
-      setPrebufferSegments(settings.voice_live_playback_prebuffer_segments);
-      setPrebufferMs(settings.voice_live_playback_prebuffer_ms);
-      setMemoryMode(settings.memory_mode);
-      setMemoryIncognito(settings.memory_incognito);
-      setLiveSettings({
-        live_conversation_enabled: settings.live_conversation_enabled,
-        live_conversation_participant_mode: settings.live_conversation_participant_mode,
-        live_conversation_engagement: settings.live_conversation_engagement,
-        live_conversation_initiative: settings.live_conversation_initiative,
-        live_conversation_address_strictness: settings.live_conversation_address_strictness,
-        live_conversation_interruption_sensitivity: settings.live_conversation_interruption_sensitivity,
-        live_conversation_pause_tolerance: settings.live_conversation_pause_tolerance,
-        live_conversation_emotion_expression: settings.live_conversation_emotion_expression,
-        live_conversation_mood_recovery: settings.live_conversation_mood_recovery,
-        live_conversation_recent_event_weight: settings.live_conversation_recent_event_weight,
-        live_conversation_echo_mode: settings.live_conversation_echo_mode,
-      });
-    }
-  }, [settings]);
+    if (!settings || hasInitialSettings.current) return;
+    applySettingsToForm(settings);
+    hasInitialSettings.current = true;
+  }, [applySettingsToForm, settings]);
 
   useEffect(() => {
     void getPronunciations()
@@ -1830,39 +1975,69 @@ function SettingsPage({
       .catch(() => setSttTermsText(""));
   }, []);
 
+  const saveRuntimeSetting = useCallback((patch: RuntimeSettingsPatch, rollback?: () => void) => {
+    autosave.save(patch, rollback);
+  }, [autosave]);
+
   const updateLiveSetting = <K extends keyof LiveConversationSettings>(
     key: K,
     value: LiveConversationSettings[K],
   ) => {
+    const previousValue = liveSettings[key];
     setLiveSettings((current) => ({ ...current, [key]: value }));
+    saveRuntimeSetting(
+      { [key]: value } as RuntimeSettingsPatch,
+      () => setLiveSettings((current) => ({ ...current, [key]: previousValue })),
+    );
   };
 
-  const saveSettings = async () => {
-    setSaving(true);
-    setMessage(null);
+  const scheduleRuntimeSetting = useCallback((section: SettingsSection, patch: RuntimeSettingsPatch, rollback?: () => void) => {
+    const currentTimer = autosaveTimersRef.current[section];
+    if (currentTimer !== undefined) window.clearTimeout(currentTimer);
+    autosaveTimersRef.current[section] = window.setTimeout(() => {
+      delete autosaveTimersRef.current[section];
+      saveRuntimeSetting(patch, rollback);
+    }, 300);
+  }, [saveRuntimeSetting]);
+
+  useEffect(() => () => {
+    Object.values(autosaveTimersRef.current).forEach((timer) => {
+      if (timer !== undefined) window.clearTimeout(timer);
+    });
+  }, []);
+
+  const refreshAudioDevices = useCallback(async (requestMicrophoneAccess = false) => {
+    setAudioDevicesLoading(true);
+    setAudioDevicesMessage(null);
     try {
-      const nextSettings = await updateRuntimeSettings({
-        personality,
-        voice_language: voiceLanguage,
-        voice_microphone_profile: voiceMicrophoneProfile,
-        voice_tts_voice: voiceTtsVoice,
-        voice_playback_rate: voicePlaybackRate,
-        voice_live_playback_prebuffer_segments: prebufferSegments,
-        voice_live_playback_prebuffer_ms: prebufferMs,
-        memory_mode: memoryMode,
-        memory_incognito: memoryIncognito,
-        ...liveSettings,
-      });
-      onSettingsChanged(nextSettings);
-      setMessage("Настройки сохранены.");
+      const nextDevices = await getAudioDeviceCatalog(requestMicrophoneAccess);
+      setAudioDevices(nextDevices);
+      if (!nextDevices.canEnumerate) {
+        setAudioDevicesMessage("Этот WebView не даёт получить список аудиоустройств.");
+      } else if (requestMicrophoneAccess && nextDevices.inputs.length === 0) {
+        setAudioDevicesMessage("Микрофоны не найдены. Проверьте доступ к микрофону в Windows.");
+      }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Не удалось сохранить настройки.");
+      setAudioDevicesMessage(
+        error instanceof Error ? `Не удалось получить список устройств: ${error.message}` : "Не удалось получить список устройств.",
+      );
     } finally {
-      setSaving(false);
+      setAudioDevicesLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    void refreshAudioDevices();
+    const mediaDevices = typeof navigator === "undefined" ? undefined : navigator.mediaDevices;
+    if (!mediaDevices?.addEventListener) return undefined;
+    const handleDeviceChange = () => void refreshAudioDevices();
+    mediaDevices.addEventListener("devicechange", handleDeviceChange);
+    return () => mediaDevices.removeEventListener("devicechange", handleDeviceChange);
+  }, [refreshAudioDevices]);
 
   const changeVoiceStyle = async (value: string) => {
+    const previousValue = voiceTtsStyle;
+    setVoiceTtsStyle(value);
     setSaving(true);
     setMessage(null);
     try {
@@ -1871,6 +2046,7 @@ function SettingsPage({
       setVoiceTtsStyle(nextSettings.voice_tts_style);
       setMessage("Подача голоса изменена до перезапуска.");
     } catch (error) {
+      setVoiceTtsStyle(previousValue);
       setMessage(error instanceof Error ? error.message : "Не удалось изменить подачу голоса.");
     } finally {
       setSaving(false);
@@ -1878,6 +2054,8 @@ function SettingsPage({
   };
 
   const changeVoiceExpression = async (value: string) => {
+    const previousValue = voiceExpressionLevel;
+    setVoiceExpressionLevel(value);
     setSaving(true);
     setMessage(null);
     try {
@@ -1886,6 +2064,7 @@ function SettingsPage({
       setVoiceExpressionLevel(nextSettings.voice_tts_expression_level);
       setMessage("Выразительность изменена до перезапуска.");
     } catch (error) {
+      setVoiceExpressionLevel(previousValue);
       setMessage(error instanceof Error ? error.message : "Не удалось изменить выразительность.");
     } finally {
       setSaving(false);
@@ -1919,40 +2098,19 @@ function SettingsPage({
     .filter(Boolean)
     .join(" · ");
   const settingsSectionMeta: Record<SettingsSection, { title: string; description: string }> = {
-    general: {
-      title: "Общее",
-      description: "Характер Iris и базовое поведение приложения.",
-    },
-    voice: {
-      title: "Голос",
-      description: "Звучание, темп и произношение речи.",
-    },
-    conversation: {
-      title: "Живой разговор",
-      description: "Когда Iris слушает, вступает в разговор и выражает эмоции.",
-    },
-    memory: {
-      title: "Память",
-      description: "Какие сведения Iris может сохранять между разговорами.",
-    },
-    system: {
-      title: "Система",
-      description: "Модели, резервные копии и состояние компонентов.",
-    },
-  };
-
-  const resetSession = async () => {
-    setSaving(true);
-    setMessage(null);
-    try {
-      await onResetSession();
-      setMessage("Новая сессия начата. Диалог удалён, память Iris сохранена.");
-      setResetSessionDialog(false);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Не удалось сбросить сессию.");
-    } finally {
-      setSaving(false);
-    }
+    conversation: { title: "Живой разговор", description: "Когда Iris слушает, вступает в разговор и выражает эмоции." },
+    avatar: { title: "Аватар", description: "Размещение, внешний вид и тестовые команды Iris." },
+    voice: { title: "Голос", description: "Звучание, темп и подача речи." },
+    "voice-devices": { title: "Устройства", description: "Микрофон, наушники и профиль записи." },
+    "voice-recognition": { title: "Распознавание", description: "Словари и параметры распознавания речи." },
+    "voice-advanced": { title: "Дополнительно", description: "Буфер воспроизведения и приватный сбор тестовых записей." },
+    memory: { title: "Память", description: "Какие сведения Iris может сохранять между разговорами." },
+    "system-interface": { title: "Интерфейс", description: "Общие настройки интерфейса." },
+    "system-overview": { title: "Система", description: "Состояние подключения и компонентов Iris." },
+    models: { title: "Модели", description: "Загрузка и обслуживание локальных моделей." },
+    backups: { title: "Резервные копии", description: "Копии памяти и настроек профиля." },
+    maintenance: { title: "Обслуживание данных", description: "Индексы, очистка и необратимые действия." },
+    events: { title: "Журнал событий", description: "Технические события и диагностика." },
   };
 
   const saveSttTerms = async () => {
@@ -1968,26 +2126,45 @@ function SettingsPage({
       setSaving(false);
     }
   };
+
+  const includeSelectedAudioDevice = (
+    options: AudioDeviceOption[],
+    deviceId: string,
+    unavailableLabel: string,
+  ): AudioDeviceOption[] => (
+    deviceId && !options.some((option) => option.deviceId === deviceId)
+      ? [{ deviceId, label: unavailableLabel }, ...options]
+      : options
+  );
+  const inputDeviceOptions = includeSelectedAudioDevice(
+    audioDevices.inputs,
+    voiceInputDeviceId,
+    "Выбранный микрофон сейчас недоступен",
+  );
+  const outputDeviceOptions = includeSelectedAudioDevice(
+    audioDevices.outputs,
+    voiceOutputDeviceId,
+    "Выбранное устройство вывода сейчас недоступно",
+  );
+
   const activeSettingsMeta = settingsSectionMeta[activeSection];
 
   return (
     <section className="panel settings-panel">
-      <nav className="settings-navigation" aria-label="Разделы настроек">
-        <SettingsSectionButton section="general" current={activeSection} label="Общее" icon={SlidersHorizontal} onClick={setActiveSection} />
-        <SettingsSectionButton section="voice" current={activeSection} label="Голос" icon={Volume2} onClick={setActiveSection} />
-        <SettingsSectionButton section="conversation" current={activeSection} label="Живой разговор" icon={MessageCircle} onClick={setActiveSection} />
-        <SettingsSectionButton section="memory" current={activeSection} label="Память" icon={Brain} onClick={setActiveSection} />
-        <SettingsSectionButton section="system" current={activeSection} label="Система" icon={MonitorCog} onClick={setActiveSection} />
-      </nav>
+      <SettingsNavigation current={activeSection} onChange={setActiveSection} />
 
       <div className="settings-content">
         <header className="settings-heading">
-          <span>Настройки Iris</span>
-          <h2>{activeSettingsMeta.title}</h2>
-          <p>{activeSettingsMeta.description}</p>
+          <div className="settings-heading-row">
+            <div>
+              <h2>{activeSettingsMeta.title}</h2>
+              <p>{activeSettingsMeta.description}</p>
+            </div>
+            <AutoSaveStatus status={autosave.status} onRetry={autosave.retry} />
+          </div>
         </header>
 
-        <div className="settings-grid system-status-grid" hidden={activeSection !== "system"}>
+        <div className="settings-grid system-status-grid" hidden={activeSection !== "system-overview"}>
           <InfoRow label="Ключ API" value={settings.api_key_configured ? "Настроен" : "Не настроен"} />
           <InfoRow label="Провайдер" value={settings.provider} />
           <InfoRow label="Модель" value={settings.model} />
@@ -1999,45 +2176,70 @@ function SettingsPage({
           />
         </div>
 
-        <div className="system-stack" hidden={activeSection !== "system"}>
-          <ModelManager />
-          <BackupControls />
-          <SystemMaintenance />
-          <AvatarControls avatarStatus={avatarStatus} onRefresh={onRefreshAvatar} />
-          <details className="system-disclosure events-disclosure">
-            <summary>
-              <span><strong>Журнал событий</strong><small>Технические события и диагностика</small></span>
-              <ChevronDown size={18} aria-hidden="true" />
-            </summary>
-            <EventsPage events={events} onRefreshEvents={onRefreshEvents} compact />
-          </details>
+        <div className="form-grid settings-form" hidden={activeSection !== "system-interface"}>
+          <fieldset className="settings-group">
+            <legend>Интерфейс</legend>
+            <label>
+              Язык приложения
+              <select
+                value={interfaceLocale}
+                onChange={(event) => {
+                  const nextValue = event.target.value as InterfaceLocale;
+                  const previousValue = interfaceLocale;
+                  setInterfaceLocale(nextValue);
+                  onInterfaceLocaleChange(nextValue);
+                  saveRuntimeSetting(
+                    { interface_locale: nextValue },
+                    () => {
+                      setInterfaceLocale(previousValue);
+                      onInterfaceLocaleChange(previousValue);
+                    },
+                  );
+                }}
+              >
+                <option value="ru">Русский</option>
+                <option value="en">Английский</option>
+              </select>
+              <small>Выберите язык кнопок, меню и системных подсказок.</small>
+            </label>
+          </fieldset>
         </div>
 
-        <div className="form-grid settings-form" hidden={activeSection === "system"}>
-          <fieldset className="settings-group" hidden={activeSection !== "general"}>
-          <legend>Общее</legend>
-          <label>
-            Стиль общения
-            <select
-              value={personality}
-              onChange={(event) => setPersonality(event.target.value)}
-            >
-              {settings.available_personalities.map((availablePersonality) => (
-                <option key={availablePersonality} value={availablePersonality}>
-                  {personalityLabel(availablePersonality)}
-                </option>
-              ))}
-            </select>
-          </label>
-        </fieldset>
+        <div className="system-stack" hidden={!(["models", "backups", "maintenance", "events"] as SettingsSection[]).includes(activeSection)}>
+          <div hidden={activeSection !== "models"}><ModelManager /></div>
+          <div hidden={activeSection !== "backups"}><BackupControls /></div>
+          <div hidden={activeSection !== "maintenance"}><SystemMaintenance /></div>
+          <div hidden={activeSection !== "events"}>
+            <EventsPage events={events} onRefreshEvents={onRefreshEvents} compact />
+          </div>
+        </div>
 
+        <div hidden={activeSection !== "avatar"}>
+          <AvatarControls
+            avatarStatus={avatarStatus}
+            overlay={avatarOverlay}
+            placement={settings.avatar_placement}
+            inAppVisible={settings.avatar_in_app_visible}
+            interfaceLocale={interfaceLocale}
+            onRefresh={onRefreshAvatar}
+            onOverlayChanged={onAvatarOverlayChanged}
+            onSettingsChanged={onSettingsChanged}
+          />
+        </div>
+
+        <div className="form-grid settings-form" hidden={activeSection === "avatar" || activeSection === "system-interface" || activeSection === "system-overview" || ["models", "backups", "maintenance", "events"].includes(activeSection)}>
         <fieldset className="settings-group" hidden={activeSection !== "voice"}>
-          <legend>Голос</legend>
+          <legend>Основное</legend>
           <label>
             Язык голосового ввода
             <select
               value={voiceLanguage}
-              onChange={(event) => setVoiceLanguage(event.target.value)}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                const previousValue = voiceLanguage;
+                setVoiceLanguage(nextValue);
+                saveRuntimeSetting({ voice_language: nextValue }, () => setVoiceLanguage(previousValue));
+              }}
             >
               {settings.available_voice_languages.map((availableLanguage) => (
                 <option key={availableLanguage} value={availableLanguage}>
@@ -2046,12 +2248,20 @@ function SettingsPage({
               ))}
             </select>
           </label>
+        </fieldset>
 
+        <fieldset className="settings-group" hidden={activeSection !== "voice-devices"}>
+          <legend>Устройства</legend>
           <label>
             Профиль микрофона
             <select
               value={voiceMicrophoneProfile}
-              onChange={(event) => setVoiceMicrophoneProfile(event.target.value as MicrophoneProfile)}
+              onChange={(event) => {
+                const nextValue = event.target.value as MicrophoneProfile;
+                const previousValue = voiceMicrophoneProfile;
+                setVoiceMicrophoneProfile(nextValue);
+                saveRuntimeSetting({ voice_microphone_profile: nextValue }, () => setVoiceMicrophoneProfile(previousValue));
+              }}
             >
               <option value="balanced">Сбалансированный — рекомендуется</option>
               <option value="headset">Гарнитура</option>
@@ -2061,10 +2271,79 @@ function SettingsPage({
           </label>
 
           <label>
+            Источник входа (микрофон)
+            <select
+              value={voiceInputDeviceId}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                const previousValue = voiceInputDeviceId;
+                setVoiceInputDeviceId(nextValue);
+                saveRuntimeSetting({ voice_input_device_id: nextValue }, () => setVoiceInputDeviceId(previousValue));
+              }}
+              disabled={saving}
+            >
+              <option value="">Системный по умолчанию</option>
+              {inputDeviceOptions.map((device) => (
+                <option key={device.deviceId} value={device.deviceId} disabled={!audioDevices.canEnumerate}>
+                  {device.label}
+                </option>
+              ))}
+            </select>
+            <small>Используется для единственного голосового режима Live.</small>
+          </label>
+
+          <label>
+            Источник вывода (наушники или колонки)
+            <select
+              value={voiceOutputDeviceId}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                const previousValue = voiceOutputDeviceId;
+                setVoiceOutputDeviceId(nextValue);
+                saveRuntimeSetting({ voice_output_device_id: nextValue }, () => setVoiceOutputDeviceId(previousValue));
+              }}
+              disabled={saving}
+            >
+              <option value="">Системный по умолчанию</option>
+              {outputDeviceOptions.map((device) => (
+                <option key={device.deviceId} value={device.deviceId} disabled={!audioDevices.canSelectOutput}>
+                  {device.label}
+                </option>
+              ))}
+            </select>
+            <small>
+              {audioDevices.canSelectOutput
+                ? "Выбранное устройство используется для синтезированных аудиофайлов и воспроизведения сообщений; запасной системный голос браузера следует настройке Windows."
+                : "Этот WebView не поддерживает выбор устройства вывода."}
+            </small>
+          </label>
+
+          <div className="readonly-setting audio-device-refresh">
+            <span>Аудиоустройства</span>
+            <button
+              className="secondary"
+              type="button"
+              onClick={() => void refreshAudioDevices(true)}
+              disabled={saving || audioDevicesLoading}
+            >
+              {audioDevicesLoading ? "Обновляем…" : "Разрешить доступ и обновить"}
+            </button>
+            {audioDevicesMessage && <small role="status">{audioDevicesMessage}</small>}
+          </div>
+        </fieldset>
+
+        <fieldset className="settings-group" hidden={activeSection !== "voice"}>
+          <legend>Синтез речи</legend>
+          <label>
             Голос {ttsProviderLabel}
             <select
               value={voiceTtsVoice}
-              onChange={(event) => setVoiceTtsVoice(event.target.value)}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                const previousValue = voiceTtsVoice;
+                setVoiceTtsVoice(nextValue);
+                saveRuntimeSetting({ voice_tts_voice: nextValue }, () => setVoiceTtsVoice(previousValue));
+              }}
             >
               {settings.available_tts_voices.map((availableVoice) => (
                 <option key={availableVoice} value={availableVoice}>
@@ -2077,12 +2356,17 @@ function SettingsPage({
           <label>
             Скорость воспроизведения <strong>{voicePlaybackRate.toFixed(2)}×</strong>
             <input
-              min="0.75"
-              max="1.25"
+              min="0.70"
+              max="1.30"
               step="0.05"
               type="range"
               value={voicePlaybackRate}
-              onChange={(event) => setVoicePlaybackRate(Number(event.target.value))}
+              onChange={(event) => {
+                const nextValue = Number(event.target.value);
+                const previousValue = voicePlaybackRate;
+                setVoicePlaybackRate(nextValue);
+                scheduleRuntimeSetting("voice", { voice_playback_rate: nextValue }, () => setVoicePlaybackRate(previousValue));
+              }}
             />
           </label>
 
@@ -2116,6 +2400,10 @@ function SettingsPage({
               {" · активен"}
             </strong>
           </div>
+        </fieldset>
+
+        <fieldset className="settings-group" hidden={activeSection !== "voice-recognition"}>
+          <legend>Детектор речи</legend>
           <div className="readonly-setting">
             <span>Детектор речи</span>
             <strong>
@@ -2127,7 +2415,7 @@ function SettingsPage({
           </div>
         </fieldset>
 
-        <fieldset className="settings-group" hidden={activeSection !== "voice"}>
+        <fieldset className="settings-group" hidden={activeSection !== "voice-recognition"}>
           <legend>Словарь распознавания</legend>
           <label>
             Канонический термин = точный вариант | точный вариант
@@ -2145,7 +2433,7 @@ function SettingsPage({
           </button>
         </fieldset>
 
-        <fieldset className="settings-group" hidden={activeSection !== "voice"}>
+        <fieldset className="settings-group" hidden={activeSection !== "voice-recognition"}>
           <legend>Словарь произношений</legend>
           <label>
             Термин = как произносить
@@ -2166,7 +2454,7 @@ function SettingsPage({
           </button>
         </fieldset>
 
-        <fieldset className="settings-group" hidden={activeSection !== "voice"}>
+        <fieldset className="settings-group" hidden={activeSection !== "voice-advanced"}>
           <legend>Дополнительно</legend>
           <label>
             Сегментов в буфере
@@ -2176,7 +2464,12 @@ function SettingsPage({
               step="1"
               type="number"
               value={prebufferSegments}
-              onChange={(event) => setPrebufferSegments(Number(event.target.value))}
+              onChange={(event) => {
+                const nextValue = Number(event.target.value);
+                const previousValue = prebufferSegments;
+                setPrebufferSegments(nextValue);
+                scheduleRuntimeSetting("voice-advanced", { voice_live_playback_prebuffer_segments: nextValue }, () => setPrebufferSegments(previousValue));
+              }}
             />
           </label>
 
@@ -2188,7 +2481,12 @@ function SettingsPage({
               step="50"
               type="number"
               value={prebufferMs}
-              onChange={(event) => setPrebufferMs(Number(event.target.value))}
+              onChange={(event) => {
+                const nextValue = Number(event.target.value);
+                const previousValue = prebufferMs;
+                setPrebufferMs(nextValue);
+                scheduleRuntimeSetting("voice-advanced", { voice_live_playback_prebuffer_ms: nextValue }, () => setPrebufferMs(previousValue));
+              }}
             />
           </label>
           <button
@@ -2202,20 +2500,14 @@ function SettingsPage({
           </button>
         </fieldset>
 
-        {showSttCapture && activeSection === "voice" && <GuidedSttCapture profile={voiceMicrophoneProfile} />}
+        {showSttCapture && activeSection === "voice-advanced" && (
+          <GuidedSttCapture profile={voiceMicrophoneProfile} inputDeviceId={voiceInputDeviceId} />
+        )}
 
         <fieldset className="settings-group live-conversation-settings" hidden={activeSection !== "conversation"}>
           <legend>Живой разговор</legend>
-          <label className="settings-checkbox">
-            <input
-              type="checkbox"
-              checked={liveSettings.live_conversation_enabled}
-              onChange={(event) => updateLiveSetting("live_conversation_enabled", event.target.checked)}
-            />
-            Включить отдельный режим «Живой разговор»
-          </label>
           <small>
-            Текстовый чат, голосовые сообщения и «Свободные руки» сохраняют прежнее поведение.
+            Live — единственный голосовой режим. Реплики распознаются автоматически, без кнопки записи.
           </small>
 
           <label>
@@ -2365,50 +2657,154 @@ function SettingsPage({
               <option value="half_duplex">Не слушать во время ответа</option>
             </select>
           </label>
-          <div className="settings-danger-action">
-            <strong>Новая сессия</strong>
-            <small>Удалит текущий диалог и начнёт разговор с чистого листа. Долгосрочная память Iris сохранится.</small>
-            <button className="secondary danger-button" type="button" disabled={saving} onClick={() => setResetSessionDialog(true)}>
-              Сбросить сессию
-            </button>
-          </div>
         </fieldset>
 
         <fieldset className="settings-group" hidden={activeSection !== "memory"}>
           <legend>Память</legend>
           <label>
             Режим сохранения
-            <select value={memoryMode} onChange={(event) => setMemoryMode(event.target.value)}>
+            <select
+              value={memoryMode}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                const previousValue = memoryMode;
+                setMemoryMode(nextValue);
+                saveRuntimeSetting({ memory_mode: nextValue }, () => setMemoryMode(previousValue));
+              }}
+            >
               <option value="off">Не сохранять</option>
               <option value="balanced">Умный — только важные устойчивые факты</option>
               <option value="automatic">Автоматический — все обычные факты</option>
             </select>
           </label>
-          <label>
-            <input type="checkbox" checked={memoryIncognito} onChange={(event) => setMemoryIncognito(event.target.checked)} />
-            Не сохранять текущий разговор (инкогнито)
-          </label>
+          <SettingsSwitch
+            checked={memoryIncognito}
+            label="Не сохранять текущий разговор"
+            description="Режим инкогнито не добавляет новые данные в долгосрочную память."
+            onChange={(checked) => {
+              const previousValue = memoryIncognito;
+              setMemoryIncognito(checked);
+              saveRuntimeSetting({ memory_incognito: checked }, () => setMemoryIncognito(previousValue));
+            }}
+          />
         </fieldset>
-
-          <button className="primary-button settings-save" onClick={saveSettings} disabled={saving}>
-            {saving ? "Сохраняем…" : "Сохранить изменения"}
-          </button>
         </div>
 
         {message && <div className="notice" role="status">{message}</div>}
-        <AppDialog
-          open={resetSessionDialog}
-          title="Сбросить текущую сессию?"
-          description="Все сообщения и сводки текущего диалога будут удалены без возможности восстановления. Долгосрочная память Iris останется."
-          onClose={() => !saving && setResetSessionDialog(false)}
-        >
-          <div className="dialog-actions">
-            <button className="secondary" type="button" disabled={saving} onClick={() => setResetSessionDialog(false)}>Отмена</button>
-            <button className="danger-button" type="button" disabled={saving} onClick={() => void resetSession()}>{saving ? "Сбрасываю…" : "Сбросить сессию"}</button>
-          </div>
-        </AppDialog>
       </div>
     </section>
+  );
+}
+
+const SETTINGS_NAVIGATION: Array<{
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  directSection?: SettingsSection;
+  items: Array<{ section: SettingsSection; label: string }>;
+}> = [
+  {
+    id: "behavior",
+    label: "Поведение",
+    icon: SlidersHorizontal,
+    items: [{ section: "conversation", label: "Живой разговор" }],
+  },
+  {
+    id: "avatar",
+    label: "Аватар",
+    icon: Settings,
+    directSection: "avatar",
+    items: [],
+  },
+  {
+    id: "voice",
+    label: "Голос",
+    icon: Volume2,
+    items: [
+      { section: "voice", label: "Основное" },
+      { section: "voice-devices", label: "Устройства" },
+      { section: "voice-recognition", label: "Распознавание" },
+      { section: "voice-advanced", label: "Дополнительно" },
+    ],
+  },
+  {
+    id: "memory",
+    label: "Память",
+    icon: Brain,
+    directSection: "memory",
+    items: [],
+  },
+  {
+    id: "system",
+    label: "Система",
+    icon: MonitorCog,
+    items: [
+      { section: "system-interface", label: "Интерфейс" },
+      { section: "system-overview", label: "Обзор" },
+      { section: "models", label: "Модели" },
+      { section: "backups", label: "Резервные копии" },
+      { section: "maintenance", label: "Обслуживание данных" },
+      { section: "events", label: "Журнал событий" },
+    ],
+  },
+];
+
+function SettingsNavigation({ current, onChange }: { current: SettingsSection; onChange: (section: SettingsSection) => void }) {
+  const activeGroup = SETTINGS_NAVIGATION.find((group) => group.directSection === current || group.items.some((item) => item.section === current))?.id ?? "behavior";
+  const [expanded, setExpanded] = useState<Record<string, boolean>>(() => ({
+    behavior: true,
+    voice: true,
+    system: false,
+  }));
+
+  useEffect(() => {
+    setExpanded((value) => ({ ...value, [activeGroup]: true }));
+  }, [activeGroup]);
+
+  return (
+    <nav className="settings-navigation" aria-label="Разделы настроек">
+      {SETTINGS_NAVIGATION.map((group) => {
+        if (group.directSection) {
+          return (
+            <button
+              key={group.id}
+              type="button"
+              className={`settings-nav-direct${current === group.directSection ? " is-active" : ""}`}
+              aria-current={current === group.directSection ? "page" : undefined}
+              onClick={() => onChange(group.directSection!)}
+            >
+              <group.icon size={17} aria-hidden="true" />
+              <span>{group.label}</span>
+            </button>
+          );
+        }
+        const isExpanded = expanded[group.id] ?? false;
+        const isActive = group.id === activeGroup;
+        const childrenId = `settings-nav-children-${group.id}`;
+        return (
+          <div className={`settings-nav-group${isActive ? " is-active" : ""}`} key={group.id}>
+            <button
+              type="button"
+              className="settings-nav-group-button"
+              aria-expanded={isExpanded}
+              aria-controls={childrenId}
+              onClick={() => {
+                setExpanded((value) => ({ ...value, [group.id]: !isExpanded }));
+              }}
+            >
+              <group.icon size={17} aria-hidden="true" />
+              <span>{group.label}</span>
+              <ChevronDown className="settings-nav-chevron" size={15} aria-hidden="true" />
+            </button>
+            <div id={childrenId} className="settings-nav-children" hidden={!isExpanded}>
+              {group.items.map((item) => (
+                <SettingsSectionButton key={item.section} section={item.section} current={current} label={item.label} onClick={onChange} />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -2416,23 +2812,21 @@ function SettingsSectionButton({
   section,
   current,
   label,
-  icon: Icon,
   onClick,
 }: {
   section: SettingsSection;
   current: SettingsSection;
   label: string;
-  icon: LucideIcon;
   onClick: (section: SettingsSection) => void;
 }) {
   return (
     <button
+      type="button"
       className={`settings-nav-button${section === current ? " is-active" : ""}`}
       aria-current={section === current ? "page" : undefined}
       onClick={() => onClick(section)}
     >
-      <Icon size={17} aria-hidden="true" />
-      {label}
+      <span>{label}</span>
     </button>
   );
 }
@@ -2576,23 +2970,48 @@ function SystemMaintenance() {
 
 function AvatarControls({
   avatarStatus,
+  overlay: initialOverlay,
+  placement,
+  inAppVisible,
+  interfaceLocale,
   onRefresh,
+  onOverlayChanged,
+  onSettingsChanged,
 }: {
   avatarStatus: AvatarStatusResponse | null;
+  overlay: AvatarOverlaySettings | null;
+  placement: AvatarPlacement;
+  inAppVisible: boolean;
+  interfaceLocale: InterfaceLocale;
   onRefresh: () => Promise<void>;
+  onOverlayChanged: (overlay: AvatarOverlaySettings | null) => void;
+  onSettingsChanged: (settings: PublicSettings) => void;
 }) {
-  const [phrase, setPhrase] = useState("Проверка аватара.");
+  const defaultTestPhrase = interfaceLocale === "en" ? "Avatar test." : "Проверка аватара.";
+  const [phrase, setPhrase] = useState(defaultTestPhrase);
   const [emotion, setEmotion] = useState("happy");
   const [gesture, setGesture] = useState("greeting");
   const [motionIntensity, setMotionIntensity] = useState(0.8);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [overlay, setOverlay] = useState<AvatarOverlaySettings | null>(null);
+  const [overlay, setOverlay] = useState<AvatarOverlaySettings | null>(initialOverlay);
   const enabled = Boolean(avatarStatus?.enabled);
   const client = avatarStatus?.clients[0];
   const engine = avatarStatus?.emotion_engine;
 
-  useEffect(() => { void getAvatarOverlay().then(setOverlay).catch(() => setOverlay(null)); }, []);
+  useEffect(() => { setOverlay(initialOverlay); }, [initialOverlay]);
+  useEffect(() => {
+    setPhrase((current) => current === "Проверка аватара." || current === "Avatar test."
+      ? defaultTestPhrase
+      : current);
+  }, [defaultTestPhrase]);
+  useEffect(() => {
+    if (initialOverlay) return;
+    void getAvatarOverlay().then((nextOverlay) => {
+      setOverlay(nextOverlay);
+      onOverlayChanged(nextOverlay);
+    }).catch(() => setOverlay(null));
+  }, [initialOverlay, onOverlayChanged]);
 
   const run = async (action: () => Promise<unknown>, success: string) => {
     setBusy(true);
@@ -2610,22 +3029,64 @@ function AvatarControls({
 
   const updateOverlay = async (patch: Partial<AvatarOverlaySettings>) => {
     setBusy(true); setMessage(null);
-    try { setOverlay(await updateAvatarOverlay(patch)); setMessage("Настройки оверлея обновлены."); }
+    try {
+      const nextOverlay = await updateAvatarOverlay(patch);
+      setOverlay(nextOverlay);
+      onOverlayChanged(nextOverlay);
+      setMessage(placement === "in_app" ? "Отображение аватара в диалоге обновлено." : "Настройки оверлея обновлены.");
+    }
     catch { setMessage("Не удалось сохранить настройки оверлея."); }
     finally { setBusy(false); }
   };
 
+  const updateInAppVisibility = async (visible: boolean) => {
+    setBusy(true); setMessage(null);
+    try {
+      const nextSettings = await updateRuntimeSettings({ avatar_in_app_visible: visible });
+      onSettingsChanged(nextSettings);
+      setMessage(visible ? "Аватар будет показан в диалоге." : "Аватар скрыт в диалоге.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Не удалось сохранить отображение аватара.");
+    } finally { setBusy(false); }
+  };
+
+  const changePlacement = async (nextPlacement: AvatarPlacement) => {
+    if (nextPlacement === placement) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const nextSettings = await updateRuntimeSettings({ avatar_placement: nextPlacement });
+      onSettingsChanged(nextSettings);
+      // The app-level effect owns the native transition. Keeping a single
+      // caller avoids two concurrent Unity launches when this state update
+      // re-renders the app.
+      setMessage(nextPlacement === "in_app"
+        ? "Режим сохранён. Аватар появится внутри Iris на экране диалога."
+        : "Режим сохранён. Аватар снова будет отдельным оверлеем на рабочем столе.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Не удалось переключить размещение аватара.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <details className="system-disclosure">
-      <summary>
-        <span><strong>Аватар</strong><small>{enabled ? `${avatarStatus?.client_count ?? 0} подключено` : "Интеграция отключена"}</small></span>
-        <ChevronDown size={18} aria-hidden="true" />
-      </summary>
-      <section className="avatar-controls" aria-label="Управление аватаром">
-      <div className="disclosure-toolbar">
-        <span>{enabled ? "Управление оверлеем и тестовыми командами" : "Подключите Unity-аватар, чтобы отправлять команды"}</span>
+    <section className="avatar-controls" aria-label="Управление аватаром">
+      <div className="avatar-toolbar">
+        <span>{enabled ? `${avatarStatus?.client_count ?? 0} подключено` : "Интеграция отключена"}</span>
         <button className="icon-button" onClick={() => void onRefresh()} disabled={busy} aria-label="Обновить статус аватара" title="Обновить статус аватара"><RefreshCw size={16} /></button>
       </div>
+      <fieldset className="avatar-placement" disabled={busy}>
+        <legend>Где показывать аватар</legend>
+        <label>
+          <input type="radio" name="avatar-placement" aria-label="Внутри Iris" checked={placement === "in_app"} onChange={() => void changePlacement("in_app")} />
+          <span><strong>Внутри Iris</strong><small>Внизу слева на экране диалога, без второго окна.</small></span>
+        </label>
+        <label>
+          <input type="radio" name="avatar-placement" aria-label="Отдельным оверлеем" checked={placement === "desktop_overlay"} onChange={() => void changePlacement("desktop_overlay")} />
+          <span><strong>Отдельным оверлеем</strong><small>Поверх рабочего стола, как сейчас.</small></span>
+        </label>
+      </fieldset>
       <div className="avatar-summary-grid">
         <InfoRow label="Клиент" value={client?.client_name ?? "не подключён"} />
         <InfoRow label="Состояние" value={client?.state ?? "Отключён"} />
@@ -2642,24 +3103,24 @@ function AvatarControls({
         </div>
       </details>
       <div className="avatar-options">
-        <label>
-          <input type="checkbox" checked={overlay?.visible ?? true} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ visible: event.target.checked })} />
-          Показывать оверлей
-        </label>
-        <label>
-          <input type="checkbox" checked={overlay?.always_on_top ?? true} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ always_on_top: event.target.checked })} />
-          Поверх окон
-        </label>
-        <label>
-          <input type="checkbox" checked={overlay?.locked ?? true} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ locked: event.target.checked })} />
-          Заблокировать клики
-        </label>
+        <SettingsSwitch
+          checked={placement === "in_app" ? inAppVisible : (overlay?.visible ?? true)}
+          label={placement === "in_app" ? "Показывать в диалоге" : "Показывать оверлей"}
+          disabled={!enabled || busy}
+          onChange={(checked) => void (placement === "in_app" ? updateInAppVisibility(checked) : updateOverlay({ visible: checked }))}
+        />
+        {placement === "desktop_overlay" && <>
+          <SettingsSwitch checked={overlay?.always_on_top ?? true} label="Поверх окон" disabled={!enabled || busy} onChange={(checked) => void updateOverlay({ always_on_top: checked })} />
+          <SettingsSwitch checked={overlay?.locked ?? true} label="Заблокировать клики" disabled={!enabled || busy} onChange={(checked) => void updateOverlay({ locked: checked })} />
+        </>}
       </div>
-      <div className="avatar-test-grid">
-        <label>
+      <details className="avatar-test-disclosure">
+        <summary>Тест эмоций и жестов <ChevronDown size={16} aria-hidden="true" /></summary>
+        <div className="avatar-test-grid">
+        {placement === "desktop_overlay" && <label>
           Масштаб оверлея {overlay?.scale?.toFixed(1) ?? "1.0"}
           <input min="0.5" max="2" step="0.1" type="range" value={overlay?.scale ?? 1} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ scale: Number(event.target.value) })} />
-        </label>
+        </label>}
         <label>
           Тестовая фраза
           <input value={phrase} onChange={(event) => setPhrase(event.target.value)} disabled={!enabled || busy} />
@@ -2680,16 +3141,16 @@ function AvatarControls({
           Интенсивность движения {motionIntensity.toFixed(1)}
           <input min="0" max="1" step="0.1" type="range" value={motionIntensity} onChange={(event) => setMotionIntensity(Number(event.target.value))} disabled={!enabled || busy} />
         </label>
-      </div>
+        </div>
       <div className="avatar-test-actions">
         <button className="primary-button" onClick={() => void run(() => sendAvatarTestPhrase({ text: phrase, emotion }), "Тестовая фраза отправлена.")} disabled={!enabled || busy || !phrase.trim()}>Отправить фразу</button>
         <button className="secondary" onClick={() => void run(() => sendAvatarTestEmotion({ emotion, intensity: 1 }), "Эмоция отправлена.")} disabled={!enabled || busy}>Отправить эмоцию</button>
         <button className="secondary" onClick={() => void run(() => sendAvatarTestGesture({ gesture, intensity: motionIntensity, interrupt: true }), "Тестовый жест отправлен.")} disabled={!enabled || busy}>Отправить жест</button>
         <button className="secondary" onClick={() => void run(stopAvatar, "Движение сброшено.")} disabled={!enabled || busy}>Сбросить движение</button>
-      </div>
+        </div>
+      </details>
       {message && <div className="notice" role="status">{message}</div>}
-      </section>
-    </details>
+    </section>
   );
 }
 

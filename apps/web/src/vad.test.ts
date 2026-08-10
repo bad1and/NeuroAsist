@@ -38,6 +38,12 @@ describe("VoiceActivityGate", () => {
     expect(microphoneConstraints("speakers")).toMatchObject({
       echoCancellation: true, noiseSuppression: true, autoGainControl: false,
     });
+    expect(microphoneConstraints("live")).toMatchObject({
+      echoCancellation: true, noiseSuppression: true, autoGainControl: true,
+    });
+    expect(microphoneConstraints("balanced", "usb-microphone")).toMatchObject({
+      deviceId: { exact: "usb-microphone" },
+    });
   });
 
   it("buffers initial PCM until the backend ready handshake", async () => {
@@ -58,7 +64,7 @@ describe("VoiceActivityGate", () => {
     const client = new PcmInputClient("ws://voice", () => undefined);
     const first = new ArrayBuffer(640);
     client.sendPcm(first);
-    const connecting = client.connect(48_000, "ru", "hands_free");
+    const connecting = client.connect(48_000, "ru");
     FakeSocket.last.onopen?.();
 
     expect(FakeSocket.last.sent).toHaveLength(1);
@@ -70,5 +76,45 @@ describe("VoiceActivityGate", () => {
     FakeSocket.last.onmessage?.({ data: JSON.stringify({ type: "voice.input.ready" }) });
     await connecting;
     expect(FakeSocket.last.sent[1]).toBe(first);
+  });
+
+  it("reconnects the live input socket and flushes queued PCM", async () => {
+    vi.useFakeTimers();
+    try {
+      class FakeSocket {
+        static sockets: FakeSocket[] = [];
+        readyState = 1;
+        sent: unknown[] = [];
+        onopen: (() => void) | null = null;
+        onmessage: ((event: { data: string }) => void) | null = null;
+        onerror: (() => void) | null = null;
+        onclose: (() => void) | null = null;
+        constructor(_url: string) { FakeSocket.sockets.push(this); }
+        send(value: unknown) { this.sent.push(value); }
+        close() { this.readyState = 3; this.onclose?.(); }
+      }
+      Object.assign(FakeSocket, { OPEN: 1 });
+      vi.stubGlobal("WebSocket", FakeSocket);
+      const client = new PcmInputClient("ws://voice", () => undefined);
+      const connecting = client.connect(16_000, "ru");
+      const first = FakeSocket.sockets[0];
+      first.onopen?.();
+      first.onmessage?.({ data: JSON.stringify({ type: "voice.input.ready" }) });
+      await connecting;
+
+      const queued = new ArrayBuffer(320);
+      first.close();
+      client.sendPcm(queued);
+      await vi.advanceTimersByTimeAsync(250);
+
+      const second = FakeSocket.sockets[1];
+      expect(second).toBeDefined();
+      second.onopen?.();
+      second.onmessage?.({ data: JSON.stringify({ type: "voice.input.ready" }) });
+      expect(second.sent[1]).toBe(queued);
+      client.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

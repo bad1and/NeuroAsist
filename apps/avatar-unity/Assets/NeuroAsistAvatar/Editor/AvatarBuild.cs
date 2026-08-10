@@ -9,9 +9,9 @@ namespace NeuroAsist.AvatarEditor
         {
             // The avatar is a ScriptedImporter asset.  When this project is first
             // cloned, Unity may parse the scene before compiling that importer and
-            // leave Liqu as a "Missing Prefab" in Library.  Reimport it before
+            // leave IRIS as a "Missing Prefab" in Library.  Reimport it before
             // opening the canonical scene so its stable GUID resolves correctly.
-            AssetDatabase.ImportAsset("Assets/Liqu.vrm", ImportAssetOptions.ForceUpdate);
+            AssetDatabase.ImportAsset("Assets/IRIS.vrm", ImportAssetOptions.ForceUpdate);
             AssetDatabase.SaveAssets();
             AvatarRuntimeSetup.Setup();
             var output = Path.GetFullPath(Path.Combine("Builds", "NeuroAsistAvatar", "NeuroAsistAvatar.exe"));

@@ -9,20 +9,82 @@ use std::{
     time::Duration,
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use keyring::Entry;
 use tauri_plugin_shell::{process::{CommandChild, CommandEvent}, ShellExt};
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_global_shortcut::ShortcutState;
 
+#[cfg(windows)]
+use windows::Win32::{
+    Foundation::{COLORREF, HWND, LPARAM, POINT},
+    Graphics::Gdi::ClientToScreen,
+    UI::WindowsAndMessaging::{
+        EnumWindows, GetClassNameW, GetParent, GetWindowLongPtrW, GetWindowThreadProcessId,
+        SetLayeredWindowAttributes, SetParent, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+        GWL_EXSTYLE, GWL_STYLE, GWLP_HWNDPARENT, GWLP_USERDATA,
+        HWND_TOP, LWA_COLORKEY, SW_HIDE, SW_SHOWNA, SWP_ASYNCWINDOWPOS, SWP_FRAMECHANGED,
+        SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
+        WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
+    },
+};
+#[cfg(windows)]
+use windows::core::BOOL;
+
 const CORE_STARTUP_ATTEMPTS: u8 = 60;
 const CORE_STARTUP_DELAY: Duration = Duration::from_millis(250);
+// A cold Unity start loads Mono, D3D and the VRM scene before it creates the
+// player HWND. On the target machine this takes about fourteen seconds; five
+// seconds caused the desktop shell to kill a healthy player before it could
+// attach to the chat host.
+#[cfg(windows)]
+const UNITY_WINDOW_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(windows)]
+const UNITY_GRAPHICS_READY_TIMEOUT: Duration = Duration::from_secs(15);
+#[cfg(windows)]
+const UNITY_WINDOW_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const KEYRING_SERVICE: &str = "NeuroAsist";
 const KEYRING_ACCOUNT: &str = "deepseek_api_key";
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum AvatarPlacement {
+    DesktopOverlay,
+    InApp,
+}
+
+impl Default for AvatarPlacement {
+    fn default() -> Self { Self::DesktopOverlay }
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AvatarInAppBounds {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    revision: u64,
+}
+
+#[derive(Clone)]
+struct AvatarInAppVisibility {
+    visible: bool,
+    revision: u64,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AvatarHostStatus {
+    placement: AvatarPlacement,
+    running: bool,
+    embedded: bool,
+    visible: bool,
+}
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -39,7 +101,19 @@ struct DesktopState {
     safe_mode: bool,
     runtime: Mutex<DesktopRuntime>,
     core: Mutex<Option<CoreProcess>>,
-    avatar: Mutex<Option<Child>>,
+    avatar: Mutex<Option<AvatarProcess>>,
+    // Serializes every transition that creates or kills Unity. Without this,
+    // two settings updates can both observe `None` and start two players.
+    avatar_lifecycle: Mutex<()>,
+    in_app_avatar_bounds: Mutex<Option<AvatarInAppBounds>>,
+    // `None` means the React chat host has not reported yet.  Keeping this
+    // separate from the desktop-overlay preference avoids a late startup
+    // replacing a real `false` request with the persisted default.
+    in_app_avatar_visible: Mutex<Option<AvatarInAppVisibility>>,
+    // Bounds and visibility travel over separate asynchronous IPC calls. The
+    // shared revision makes late messages from an old chat host harmless.
+    in_app_avatar_revision: Mutex<u64>,
+    in_app_avatar_update: Mutex<()>,
     avatar_visible: Mutex<bool>,
     crash_restarts: Mutex<u8>,
     core_generation: AtomicU64,
@@ -48,6 +122,14 @@ struct DesktopState {
 enum CoreProcess {
     Native(Child),
     Sidecar(CommandChild),
+}
+
+struct AvatarProcess {
+    child: Child,
+    placement: AvatarPlacement,
+    // HWND is stored as an integer to keep the state platform-neutral. It is
+    // present only for the Windows-owned surface used by the in-app mode.
+    embedded_window: Option<usize>,
 }
 
 impl DesktopState {
@@ -72,6 +154,11 @@ impl DesktopState {
             }),
             core: Mutex::new(None),
             avatar: Mutex::new(None),
+            avatar_lifecycle: Mutex::new(()),
+            in_app_avatar_bounds: Mutex::new(None),
+            in_app_avatar_visible: Mutex::new(None),
+            in_app_avatar_revision: Mutex::new(0),
+            in_app_avatar_update: Mutex::new(()),
             avatar_visible: Mutex::new(true),
             crash_restarts: Mutex::new(0),
             core_generation: AtomicU64::new(0),
@@ -246,7 +333,18 @@ impl DesktopState {
             .filter(|path| path.exists())
     }
 
-    fn start_avatar(&self, app: &AppHandle) -> Result<bool, String> {
+    fn start_avatar(&self, app: &AppHandle, placement: AvatarPlacement) -> Result<bool, String> {
+        let _lifecycle = self.avatar_lifecycle.lock().map_err(|_| "avatar lifecycle mutex poisoned")?;
+        self.start_avatar_locked(app, placement)
+    }
+
+    fn start_avatar_locked(&self, app: &AppHandle, placement: AvatarPlacement) -> Result<bool, String> {
+        // The in-app renderer is a Three.js canvas owned by the WebView.  Do
+        // not start Unity only to obtain a native surface in this mode.
+        if placement == AvatarPlacement::InApp {
+            let _ = app.emit("desktop-avatar-status", "threejs");
+            return Ok(false);
+        }
         if self.safe_mode || self.avatar.lock().map_err(|_| "avatar mutex poisoned")?.is_some() {
             return Ok(false);
         }
@@ -255,28 +353,276 @@ impl DesktopState {
             return Ok(false);
         };
         let runtime = self.runtime();
-        let child = Command::new(path)
+        let mut command = Command::new(path);
+        command
             .current_dir(&self.root)
             .env("NEUROASIST_BACKEND_URL", &runtime.api_base_url)
             .env("NEUROASIST_BACKEND_TOKEN", &runtime.api_token)
+            .env(
+                "NEUROASIST_AVATAR_HOST",
+                if placement == AvatarPlacement::InApp { "embedded" } else { "overlay" },
+            );
+        if placement == AvatarPlacement::InApp {
+            // Colour-key transparency is unsupported by Unity's DXGI flip
+            // swapchain. The BitBlt D3D11 path is deliberate here: it keeps
+            // the native avatar surface transparent over the Iris UI.
+            //
+            // Do not use Unity's `-parentHWND ... delayed` option here. With
+            // this player and the Tauri WebView parent it never creates the
+            // Unity render HWND, so the shell correctly times out and kills
+            // the player. Start tiny, find its normal top-level render window,
+            // then convert it to an Iris-owned transparent popup ourselves.
+            #[cfg(windows)]
+            {
+                command.args([
+                    "-force-d3d11",
+                    "-force-d3d11-bitblt-model",
+                    "-screen-fullscreen",
+                    "0",
+                    "-screen-width",
+                    "1",
+                    "-screen-height",
+                    "1",
+                ]);
+            }
+            #[cfg(not(windows))]
+            {
+                return Err("The in-app avatar is currently supported on Windows only".into());
+            }
+        }
+        let child = command
             .spawn()
             .map_err(|error| format!("Could not start avatar process: {error}"))?;
-        *self.avatar.lock().map_err(|_| "avatar mutex poisoned")? = Some(child);
-        *self.avatar_visible.lock().map_err(|_| "avatar visibility mutex poisoned")? = true;
+        let process_id = child.id();
+        *self.avatar.lock().map_err(|_| "avatar mutex poisoned")? = Some(AvatarProcess {
+            child,
+            placement,
+            embedded_window: None,
+        });
+        // The popup stays hidden until both the React chat anchor and the
+        // requested visibility are known. This also preserves requests that
+        // arrived while Unity was still starting, rather than overwriting
+        // them with the persisted desktop-overlay preference.
+        let persisted_visible = if placement == AvatarPlacement::InApp {
+            avatar_in_app_visible_from_settings(&desktop_data_root(&self.root))
+        } else {
+            avatar_overlay_visible_from_settings(&desktop_data_root(&self.root))
+        };
+        let initial_visible = if placement == AvatarPlacement::InApp {
+            self.in_app_avatar_visible.lock().map_err(|_| "in-app avatar visibility mutex poisoned")?
+                .as_ref()
+                .map(|request| request.visible)
+                .unwrap_or(persisted_visible)
+        } else {
+            persisted_visible
+        };
+        *self.avatar_visible.lock().map_err(|_| "avatar visibility mutex poisoned")? = initial_visible;
+        if placement == AvatarPlacement::InApp {
+            // Unity takes several seconds to construct its native render
+            // window. Attaching it synchronously here blocks Tauri's command
+            // path and makes Iris appear frozen. The worker below waits in the
+            // background; bounds and visibility IPC are already queued in the
+            // shared DesktopState and are applied as soon as it attaches.
+            #[cfg(windows)]
+            self.attach_in_app_avatar_in_background(app.clone(), process_id);
+        }
         let _ = app.emit("desktop-avatar-status", "connecting");
         Ok(true)
     }
 
+    #[cfg(windows)]
+    fn attach_in_app_avatar_in_background(&self, app: AppHandle, process_id: u32) {
+        thread::spawn(move || {
+            let attached = attach_embedded_avatar_window(&app, process_id);
+            let state = app.state::<DesktopState>();
+            let Ok(_lifecycle) = state.avatar_lifecycle.lock() else { return };
+            let Ok(mut avatar) = state.avatar.lock() else { return };
+            let is_current_in_app_player = avatar.as_ref().is_some_and(|process| {
+                process.placement == AvatarPlacement::InApp && process.child.id() == process_id
+            });
+            if !is_current_in_app_player {
+                return;
+            }
+
+            match attached {
+                Ok(window) => {
+                    if let Some(process) = avatar.as_mut() {
+                        process.embedded_window = Some(window);
+                    }
+                    drop(avatar);
+                    let _ = state.apply_in_app_avatar_host(&app);
+                    let _ = app.emit("desktop-avatar-status", "connected");
+                }
+                Err(error) => {
+                    let failed = avatar.take();
+                    drop(avatar);
+                    if let Some(mut process) = failed {
+                        let _ = process.child.kill();
+                        let _ = process.child.wait();
+                    }
+                    let _ = app.emit("desktop-avatar-status", format!("failed: {error}"));
+                }
+            }
+        });
+    }
+
     fn stop_avatar(&self) {
+        let Ok(_lifecycle) = self.avatar_lifecycle.lock() else { return };
+        self.stop_avatar_locked();
+    }
+
+    fn stop_avatar_locked(&self) {
         let child = self.avatar.lock().ok().and_then(|mut avatar| avatar.take());
-        if let Some(mut child) = child {
-            let _ = child.kill();
-            let _ = child.wait();
+        if let Some(mut avatar) = child {
+            let _ = avatar.child.kill();
+            let _ = avatar.child.wait();
         }
     }
 
+    fn avatar_host_status(&self) -> Result<AvatarHostStatus, String> {
+        let avatar = self.avatar.lock().map_err(|_| "avatar mutex poisoned")?;
+        let visible = *self.avatar_visible.lock().map_err(|_| "avatar visibility mutex poisoned")?;
+        let placement = avatar.as_ref().map(|process| process.placement).unwrap_or_default();
+        Ok(AvatarHostStatus {
+            placement,
+            running: avatar.is_some(),
+            embedded: avatar.as_ref().is_some_and(|process| process.embedded_window.is_some()),
+            visible,
+        })
+    }
+
+    fn configure_avatar_placement(&self, app: &AppHandle, placement: AvatarPlacement) -> Result<AvatarHostStatus, String> {
+        let _lifecycle = self.avatar_lifecycle.lock().map_err(|_| "avatar lifecycle mutex poisoned")?;
+        if placement == AvatarPlacement::InApp {
+            self.stop_avatar_locked();
+            let visible = avatar_in_app_visible_from_settings(&desktop_data_root(&self.root));
+            *self.avatar_visible.lock().map_err(|_| "avatar visibility mutex poisoned")? = visible;
+            let _ = app.emit("desktop-avatar-status", "threejs");
+            return Ok(AvatarHostStatus { placement, running: false, embedded: false, visible });
+        }
+        let current = self.avatar.lock().map_err(|_| "avatar mutex poisoned")?
+            .as_ref()
+            .map(|process| process.placement);
+        if current != Some(placement) {
+            self.stop_avatar_locked();
+            let _ = self.start_avatar_locked(app, placement)?;
+        }
+        self.avatar_host_status()
+    }
+
+    fn set_avatar_in_app_bounds(&self, app: &AppHandle, bounds: AvatarInAppBounds) -> Result<(), String> {
+        let _update = self.in_app_avatar_update.lock().map_err(|_| "in-app avatar update mutex poisoned")?;
+        if bounds.width < 1 || bounds.height < 1 {
+            return Err("Avatar bounds must be positive".into());
+        }
+        if !self.accept_in_app_avatar_revision(bounds.revision)? {
+            return Ok(());
+        }
+        *self.in_app_avatar_bounds.lock().map_err(|_| "avatar bounds mutex poisoned")? = Some(bounds.clone());
+        self.apply_in_app_avatar_host(app)
+    }
+
+    /// An owned popup does not reliably follow a Tauri/WebView owner while
+    /// Windows is dragging it. Move it natively from the latest DOM rectangle
+    /// instead of waiting for React to re-render after a navigation change.
+    fn move_in_app_avatar_with_parent(&self, app: &AppHandle) -> Result<(), String> {
+        let _update = self.in_app_avatar_update.lock().map_err(|_| "in-app avatar update mutex poisoned")?;
+        let bounds = self.in_app_avatar_bounds.lock().map_err(|_| "avatar bounds mutex poisoned")?.clone();
+        let embedded_window = self.avatar.lock().map_err(|_| "avatar mutex poisoned")?
+            .as_ref()
+            .filter(|process| process.placement == AvatarPlacement::InApp)
+            .and_then(|process| process.embedded_window);
+        #[cfg(windows)]
+        if let (Some(bounds), Some(window)) = (bounds.as_ref(), embedded_window) {
+            move_embedded_avatar_window(app, window, bounds)?;
+        }
+        Ok(())
+    }
+
+    fn apply_in_app_avatar_host(&self, app: &AppHandle) -> Result<(), String> {
+        let bounds = self.in_app_avatar_bounds.lock().map_err(|_| "avatar bounds mutex poisoned")?.clone();
+        let fallback_visible = *self.avatar_visible.lock().map_err(|_| "avatar visibility mutex poisoned")?;
+        let visibility = self.in_app_avatar_visible.lock().map_err(|_| "in-app avatar visibility mutex poisoned")?.clone();
+        let requested_visible = visibility.as_ref().map(|request| request.visible).unwrap_or(fallback_visible);
+        // A visible request is valid only together with a geometry request of
+        // the same revision (or a newer one). This prevents a popup from
+        // briefly reappearing in an old chat rectangle while IPC catches up.
+        let has_current_bounds = matches!(
+            (&bounds, &visibility),
+            (Some(bounds), Some(visibility)) if bounds.revision >= visibility.revision
+        ) || (bounds.is_some() && visibility.is_none());
+        let embedded_window = self.avatar.lock().map_err(|_| "avatar mutex poisoned")?
+            .as_ref()
+            .filter(|process| process.placement == AvatarPlacement::InApp)
+            .and_then(|process| process.embedded_window);
+        if let Some(window) = embedded_window {
+            #[cfg(windows)]
+            {
+                if let Some(bounds) = bounds.as_ref() {
+                    resize_embedded_avatar_window(app, window, bounds)?;
+                }
+                // Never reveal the owned popup at Unity's startup size.
+                set_embedded_avatar_visibility(window, requested_visible && has_current_bounds)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn accept_in_app_avatar_revision(&self, revision: u64) -> Result<bool, String> {
+        if revision == 0 {
+            return Err("Avatar host revision must be positive".into());
+        }
+        let mut latest = self.in_app_avatar_revision.lock().map_err(|_| "in-app avatar revision mutex poisoned")?;
+        if revision < *latest {
+            return Ok(false);
+        }
+        *latest = revision;
+        Ok(true)
+    }
+
+    fn set_avatar_in_app_visible(&self, app: &AppHandle, visible: bool, revision: u64) -> Result<(), String> {
+        let _update = self.in_app_avatar_update.lock().map_err(|_| "in-app avatar update mutex poisoned")?;
+        if !self.accept_in_app_avatar_revision(revision)? {
+            return Ok(());
+        }
+        *self.in_app_avatar_visible.lock().map_err(|_| "in-app avatar visibility mutex poisoned")? = Some(AvatarInAppVisibility { visible, revision });
+        let in_app_running = self.avatar.lock().map_err(|_| "avatar mutex poisoned")?
+            .as_ref()
+            .is_some_and(|process| process.placement == AvatarPlacement::InApp);
+        if in_app_running {
+            *self.avatar_visible.lock().map_err(|_| "avatar visibility mutex poisoned")? = visible;
+        }
+        // Calling this command before Unity finishes starting is valid: the
+        // requested value remains queued and is applied by start_avatar. Once
+        // the native popup exists, apply it immediately as well.
+        self.apply_in_app_avatar_host(app)
+    }
+
     fn toggle_avatar(&self, app: &AppHandle) -> Result<bool, String> {
-        if self.avatar.lock().map_err(|_| "avatar mutex poisoned")?.is_some() {
+        let _lifecycle = self.avatar_lifecycle.lock().map_err(|_| "avatar lifecycle mutex poisoned")?;
+        let configured_placement = avatar_placement_from_settings(&desktop_data_root(&self.root));
+        if configured_placement == AvatarPlacement::InApp {
+            let next = !avatar_in_app_visible_from_settings(&desktop_data_root(&self.root));
+            avatar_in_app_visibility_request(&self.runtime(), next)?;
+            let _ = app.emit("desktop-avatar-visibility", next);
+            return Ok(next);
+        }
+        let placement = self.avatar.lock().map_err(|_| "avatar mutex poisoned")?
+            .as_ref()
+            .map(|process| process.placement);
+        let running = placement.is_some();
+        if running {
+            if placement == Some(AvatarPlacement::InApp) {
+                // The embedded player is only allowed to be visible while its
+                // React chat host exists.  The tray shortcut changes the
+                // persisted preference and lets React mount or unmount that
+                // host; showing the native child directly here could place it
+                // over Settings or another non-chat screen.
+                let next = !avatar_in_app_visible_from_settings(&desktop_data_root(&self.root));
+                avatar_in_app_visibility_request(&self.runtime(), next)?;
+                let _ = app.emit("desktop-avatar-visibility", next);
+                return Ok(next);
+            }
             let next = {
                 let mut visible = self.avatar_visible.lock().map_err(|_| "avatar visibility mutex poisoned")?;
                 *visible = !*visible;
@@ -286,7 +632,7 @@ impl DesktopState {
             let _ = app.emit("desktop-avatar-status", if next { "visible" } else { "hidden" });
             Ok(next)
         } else {
-            self.start_avatar(app)
+            self.start_avatar_locked(app, configured_placement)
         }
     }
 
@@ -307,9 +653,41 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
+/// The web UI owns the saved preference; the native shell mirrors it so the
+/// system tray remains in the same language as the application interface.
+#[tauri::command]
+fn set_interface_locale(app: AppHandle, locale: String) -> Result<(), String> {
+    if !matches!(locale.as_str(), "ru" | "en") {
+        return Err("Unsupported interface locale".into());
+    }
+    let menu = build_tray_menu(&app, &locale).map_err(|error| error.to_string())?;
+    let tray = app
+        .tray_by_id("companion")
+        .ok_or("Could not find Iris tray icon")?;
+    tray.set_menu(Some(menu)).map_err(|error| error.to_string())?;
+    tray.set_tooltip(Some(tray_tooltip(&locale)))
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 fn toggle_avatar(app: AppHandle) -> Result<bool, String> {
     app.state::<DesktopState>().toggle_avatar(&app)
+}
+
+#[tauri::command]
+fn configure_avatar_placement(app: AppHandle, placement: AvatarPlacement) -> Result<AvatarHostStatus, String> {
+    app.state::<DesktopState>().configure_avatar_placement(&app, placement)
+}
+
+#[tauri::command]
+fn set_avatar_in_app_bounds(app: AppHandle, bounds: AvatarInAppBounds) -> Result<(), String> {
+    app.state::<DesktopState>().set_avatar_in_app_bounds(&app, bounds)
+}
+
+#[tauri::command]
+fn set_avatar_in_app_visible(app: AppHandle, visible: bool, revision: u64) -> Result<(), String> {
+    app.state::<DesktopState>().set_avatar_in_app_visible(&app, visible, revision)
 }
 
 #[tauri::command]
@@ -346,6 +724,30 @@ fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| show_main_window(app)))
         .plugin(tauri_plugin_shell::init())
+        .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
+            match event {
+                WindowEvent::Moved(_) => {
+                    // Keep the transparent Unity popup in its chat slot while
+                    // Iris is being dragged. This uses only a native position
+                    // update (no resize or Z-order change), so it does not
+                    // compete with Windows' drag loop.
+                    let app = window.app_handle();
+                    let _ = app.state::<DesktopState>().move_in_app_avatar_with_parent(app);
+                }
+                WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                    // The owned Unity popup moves together with Iris. Calling
+                    // SetWindowPos for every native `Moved` event fights the
+                    // Windows drag loop and makes the whole window stutter.
+                    // On resize/DPI changes React supplies one coalesced,
+                    // fresh physical chat-slot rectangle instead.
+                    let _ = window.emit("desktop-avatar-layout-invalidated", ());
+                }
+                _ => {}
+            }
+        })
         .setup(|app| {
             let state = DesktopState::new();
             app.manage(state);
@@ -364,7 +766,8 @@ fn main() {
             thread::spawn(move || {
                 let state = startup_handle.state::<DesktopState>();
                 if state.start_core(&startup_handle).is_ok() {
-                    let _ = state.start_avatar(&startup_handle);
+                    let placement = avatar_placement_from_settings(&desktop_data_root(&state.root));
+                    let _ = state.start_avatar(&startup_handle, placement);
                 }
             });
             #[cfg(desktop)]
@@ -384,7 +787,7 @@ fn main() {
             )?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![desktop_runtime, restart_core, quit_app, toggle_avatar, api_key_configured, save_api_key, remove_api_key])
+        .invoke_handler(tauri::generate_handler![desktop_runtime, restart_core, quit_app, set_interface_locale, toggle_avatar, configure_avatar_placement, set_avatar_in_app_bounds, set_avatar_in_app_visible, api_key_configured, save_api_key, remove_api_key])
         .build(tauri::generate_context!())
         .expect("error while building Iris desktop shell");
 
@@ -408,14 +811,12 @@ fn create_main_window(app: &AppHandle, runtime: DesktopRuntime) -> tauri::Result
 }
 
 fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
-    let show = MenuItemBuilder::with_id("show", "Show Iris").build(app)?;
-    let avatar = MenuItemBuilder::with_id("avatar", "Show / hide avatar").build(app)?;
-    let safe_mode = MenuItemBuilder::with_id("safe-mode", "Restart in Safe Mode").build(app)?;
-    let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
-    let menu = MenuBuilder::new(app).items(&[&show, &avatar, &safe_mode, &quit]).build()?;
+    let state = app.state::<DesktopState>();
+    let locale = interface_locale_from_settings(&desktop_data_root(&state.root));
+    let menu = build_tray_menu(app, &locale)?;
     TrayIconBuilder::with_id("companion")
         .icon(tauri::include_image!("./icons/32x32.png"))
-        .tooltip("Iris companion")
+        .tooltip(tray_tooltip(&locale))
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => show_main_window(app),
@@ -469,6 +870,295 @@ fn desktop_data_root(root: &PathBuf) -> PathBuf {
         .map(PathBuf::from)
         .map(|path| path.join("NeuroAsist"))
         .unwrap_or_else(|| root.join("data"))
+}
+
+/// The backend owns this persisted preference. The shell reads it only before
+/// React has connected, preventing a one-frame desktop-overlay flash when the
+/// previous session used the in-app renderer.
+fn avatar_placement_from_settings(data_root: &PathBuf) -> AvatarPlacement {
+    let path = data_root.join("settings.json");
+    std::fs::read_to_string(path)
+        .map(|json| avatar_placement_from_json(&json))
+        .unwrap_or_default()
+}
+
+fn avatar_placement_from_json(json: &str) -> AvatarPlacement {
+    let value = serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|payload| payload.get("settings")?.get("avatar_placement")?.as_str().map(str::to_owned));
+    match value.as_deref() {
+        Some("in_app") => AvatarPlacement::InApp,
+        _ => AvatarPlacement::DesktopOverlay,
+    }
+}
+
+fn avatar_overlay_visible_from_settings(data_root: &PathBuf) -> bool {
+    std::fs::read_to_string(data_root.join("settings.json"))
+        .map(|json| avatar_overlay_visible_from_json(&json))
+        .unwrap_or(true)
+}
+
+fn avatar_overlay_visible_from_json(json: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|payload| payload.get("settings")?.get("avatar_overlay_visible")?.as_bool())
+        .unwrap_or(true)
+}
+
+fn avatar_in_app_visible_from_settings(data_root: &PathBuf) -> bool {
+    std::fs::read_to_string(data_root.join("settings.json"))
+        .map(|json| avatar_in_app_visible_from_json(&json))
+        .unwrap_or(true)
+}
+
+fn avatar_in_app_visible_from_json(json: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|payload| payload.get("settings")?.get("avatar_in_app_visible")?.as_bool())
+        .unwrap_or(true)
+}
+
+#[cfg(windows)]
+fn attach_embedded_avatar_window(app: &AppHandle, process_id: u32) -> Result<usize, String> {
+    let parent = app
+        .get_webview_window("main")
+        .ok_or("Could not find Iris main window")?
+        .hwnd()
+        .map_err(|error| format!("Could not get Iris native window handle: {error}"))?;
+
+    let started_at = std::time::Instant::now();
+    let window = loop {
+        if let Some(window) = unity_window_for_process(process_id) {
+            break window;
+        }
+        if started_at.elapsed() >= UNITY_WINDOW_DISCOVERY_TIMEOUT {
+            return Err("Unity avatar did not create an embeddable window within 30 seconds".into());
+        }
+        thread::sleep(UNITY_WINDOW_POLL_INTERVAL);
+    };
+
+    unsafe {
+        // Unity starts at 1×1. Hide it before the final graphics startup and
+        // never expose its standalone player bounds to the desktop.
+        let _ = ShowWindow(window, SW_HIDE);
+    }
+    wait_for_unity_graphics(window)?;
+
+    unsafe {
+        // A layered Direct3D child window cannot reliably apply a colour key on
+        // Windows. Convert it to a popup *before* detaching it: changing the
+        // window relationship in this order follows Win32's child/popup style
+        // transition rules and prevents an invalid intermediate fullscreen
+        // client surface.
+        // Replace the complete overlapped-window style, not only WS_CHILD.
+        // Keeping Unity's caption bits was the source of the white native
+        // title bar above an otherwise embedded avatar.
+        SetWindowLongPtrW(window, GWL_STYLE, WS_POPUP.0 as isize);
+        if GetParent(window).map(|current| !current.0.is_null()).unwrap_or(false) {
+            SetParent(window, None)
+                .map_err(|error| format!("Could not detach Unity avatar window from Iris: {error}"))?;
+        }
+        // Keep Unity as an owned popup: it has no Alt+Tab or taskbar presence,
+        // stays within Iris' Z-order, but retains the transparent overlay path.
+        let extended = GetWindowLongPtrW(window, GWL_EXSTYLE) as u32;
+        let embedded_extended = extended | WS_EX_LAYERED.0 | WS_EX_TRANSPARENT.0 | WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0;
+        SetWindowLongPtrW(window, GWL_EXSTYLE, embedded_extended as isize);
+        SetWindowLongPtrW(window, GWLP_HWNDPARENT, parent.0 as isize);
+        SetLayeredWindowAttributes(window, COLORREF(49 | (77 << 8) | (121 << 16)), 0, LWA_COLORKEY)
+            .map_err(|error| format!("Could not make Unity avatar background transparent: {error}"))?;
+        SetWindowPos(window, Some(HWND_TOP), 0, 0, 1, 1, SWP_NOACTIVATE | SWP_FRAMECHANGED)
+            .map_err(|error| format!("Could not initialize Unity avatar host bounds: {error}"))?;
+        let _ = ShowWindow(window, SW_HIDE);
+    }
+    Ok(window.0 as usize)
+}
+
+#[cfg(windows)]
+fn wait_for_unity_graphics(window: HWND) -> Result<(), String> {
+    let started_at = std::time::Instant::now();
+    loop {
+        let flags = unsafe { GetWindowLongPtrW(window, GWLP_USERDATA) as usize };
+        if flags & 1 == 1 {
+            return Ok(());
+        }
+        if started_at.elapsed() >= UNITY_GRAPHICS_READY_TIMEOUT {
+            return Err("Unity avatar graphics did not initialize within 15 seconds".into());
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+}
+
+#[cfg(windows)]
+fn resize_embedded_avatar_window(app: &AppHandle, window: usize, bounds: &AvatarInAppBounds) -> Result<(), String> {
+    let parent = app
+        .get_webview_window("main")
+        .ok_or("Could not find Iris main window")?
+        .hwnd()
+        .map_err(|error| format!("Could not get Iris native window handle: {error}"))?;
+    unsafe {
+        // DOM rectangles start at the WebView client origin; owned popups use
+        // physical screen coordinates.  ClientToScreen accounts for the title
+        // bar, window movement, and Windows DPI scaling.
+        let mut position = POINT { x: bounds.x, y: bounds.y };
+        ClientToScreen(parent, &mut position)
+            .ok()
+            .map_err(|error| format!("Could not map avatar host bounds to screen: {error}"))?;
+        SetWindowPos(
+            HWND(window as *mut core::ffi::c_void),
+            None,
+            position.x,
+            position.y,
+            bounds.width,
+            bounds.height,
+            SWP_NOACTIVATE | SWP_NOZORDER,
+        ).map_err(|error| format!("Could not resize Unity avatar host: {error}"))?;
+    }
+    Ok(())
+}
+
+fn interface_locale_from_settings(data_root: &PathBuf) -> String {
+    std::fs::read_to_string(data_root.join("settings.json"))
+        .ok()
+        .and_then(|json| {
+            serde_json::from_str::<serde_json::Value>(&json)
+                .ok()
+                .and_then(|payload| payload.get("settings")?.get("interface_locale")?.as_str().map(str::to_owned))
+        })
+        .filter(|locale| matches!(locale.as_str(), "ru" | "en"))
+        .unwrap_or_else(|| "ru".to_owned())
+}
+
+fn tray_copy(locale: &str) -> (&'static str, &'static str, &'static str, &'static str) {
+    match locale {
+        "en" => ("Show Iris", "Show / hide avatar", "Restart in Safe Mode", "Quit"),
+        _ => ("Показать Iris", "Показать / скрыть аватар", "Перезапустить в безопасном режиме", "Выйти"),
+    }
+}
+
+fn tray_tooltip(locale: &str) -> &'static str {
+    if locale == "en" { "Iris companion" } else { "Компаньон Iris" }
+}
+
+fn build_tray_menu<R: tauri::Runtime, M: Manager<R>>(
+    manager: &M,
+    locale: &str,
+) -> tauri::Result<tauri::menu::Menu<R>> {
+    let (show_label, avatar_label, safe_mode_label, quit_label) = tray_copy(locale);
+    let show = MenuItemBuilder::with_id("show", show_label).build(manager)?;
+    let avatar = MenuItemBuilder::with_id("avatar", avatar_label).build(manager)?;
+    let safe_mode = MenuItemBuilder::with_id("safe-mode", safe_mode_label).build(manager)?;
+    let quit = MenuItemBuilder::with_id("quit", quit_label).build(manager)?;
+    MenuBuilder::new(manager).items(&[&show, &avatar, &safe_mode, &quit]).build()
+}
+
+#[cfg(windows)]
+fn move_embedded_avatar_window(app: &AppHandle, window: usize, bounds: &AvatarInAppBounds) -> Result<(), String> {
+    let parent = app
+        .get_webview_window("main")
+        .ok_or("Could not find Iris main window")?
+        .hwnd()
+        .map_err(|error| format!("Could not get Iris native window handle: {error}"))?;
+    unsafe {
+        let mut position = POINT { x: bounds.x, y: bounds.y };
+        ClientToScreen(parent, &mut position)
+            .ok()
+            .map_err(|error| format!("Could not map avatar move to screen: {error}"))?;
+        SetWindowPos(
+            HWND(window as *mut core::ffi::c_void),
+            None,
+            position.x,
+            position.y,
+            0,
+            0,
+            SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER,
+        ).map_err(|error| format!("Could not move Unity avatar host: {error}"))?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn set_embedded_avatar_visibility(window: usize, visible: bool) -> Result<(), String> {
+    unsafe {
+        let hwnd = HWND(window as *mut core::ffi::c_void);
+        // ShowWindow returns the previous visibility, not an error code. It is
+        // therefore intentionally best-effort while shutdown is in progress.
+        let _ = ShowWindow(hwnd, if visible { SW_SHOWNA } else { SW_HIDE });
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn unity_window_for_process(process_id: u32) -> Option<HWND> {
+    struct Search {
+        process_id: u32,
+        window: Option<HWND>,
+    }
+    unsafe extern "system" fn visit(window: HWND, lparam: LPARAM) -> BOOL {
+        let search = &mut *(lparam.0 as *mut Search);
+        let mut owner = 0_u32;
+        GetWindowThreadProcessId(window, Some(&mut owner));
+        if owner == search.process_id && is_unity_render_window(window) {
+            search.window = Some(window);
+            return BOOL(0);
+        }
+        BOOL(1)
+    }
+
+    let mut search = Search { process_id, window: None };
+    unsafe {
+        // The player starts as a normal tiny top-level window. Its rendering
+        // surface is always a UnityWndClass; helper and splash windows are
+        // skipped by the class-name check.
+        let _ = EnumWindows(Some(visit), LPARAM((&mut search as *mut Search) as isize));
+    }
+    search.window
+}
+
+#[cfg(windows)]
+unsafe fn is_unity_render_window(window: HWND) -> bool {
+    let mut class_name = [0_u16; 128];
+    let length = GetClassNameW(window, &mut class_name);
+    if length <= 0 {
+        return false;
+    }
+    let class_name = String::from_utf16_lossy(&class_name[..length as usize]);
+    class_name.contains("UnityWndClass")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn avatar_placement_json_accepts_only_the_embedded_value() {
+        assert_eq!(
+            avatar_placement_from_json(r#"{"settings":{"avatar_placement":"in_app"}}"#),
+            AvatarPlacement::InApp,
+        );
+        assert_eq!(
+            avatar_placement_from_json(r#"{"settings":{"avatar_placement":"desktop_overlay"}}"#),
+            AvatarPlacement::DesktopOverlay,
+        );
+        assert_eq!(avatar_placement_from_json("not json"), AvatarPlacement::DesktopOverlay);
+    }
+
+    #[test]
+    fn avatar_visibility_defaults_to_enabled_for_existing_settings() {
+        assert!(!avatar_overlay_visible_from_json(r#"{"settings":{"avatar_overlay_visible":false}}"#));
+        assert!(avatar_overlay_visible_from_json(r#"{"settings":{}}"#));
+        assert!(!avatar_in_app_visible_from_json(r#"{"settings":{"avatar_in_app_visible":false}}"#));
+        assert!(avatar_in_app_visible_from_json(r#"{"settings":{}}"#));
+    }
+
+    #[test]
+    fn avatar_host_revisions_reject_stale_ipc() {
+        let state = DesktopState::new();
+        assert!(state.accept_in_app_avatar_revision(41).unwrap());
+        assert!(state.accept_in_app_avatar_revision(41).unwrap());
+        assert!(!state.accept_in_app_avatar_revision(40).unwrap());
+        assert!(state.accept_in_app_avatar_revision(42).unwrap());
+        assert!(state.accept_in_app_avatar_revision(0).is_err());
+    }
 }
 
 fn read_api_key() -> Result<Option<String>, String> {
@@ -540,6 +1230,18 @@ fn avatar_overlay_visibility_request(runtime: &DesktopRuntime, visible: bool) ->
     stream.set_read_timeout(Some(Duration::from_secs(1))).map_err(|error| error.to_string())?;
     let body = format!(r#"{{"visible":{visible}}}"#);
     let request = format!("PUT /avatar/overlay HTTP/1.1\r\nHost: {address}\r\nX-NeuroAsist-Token: {}\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}", runtime.api_token, body.len());
+    stream.write_all(request.as_bytes()).map_err(|error| error.to_string())?;
+    let mut response = String::new();
+    stream.read_to_string(&mut response).map_err(|error| error.to_string())?;
+    if response.starts_with("HTTP/1.1 2") { Ok(()) } else { Err(response.lines().next().unwrap_or("No HTTP response").into()) }
+}
+
+fn avatar_in_app_visibility_request(runtime: &DesktopRuntime, visible: bool) -> Result<(), String> {
+    let address = runtime.api_base_url.trim_start_matches("http://");
+    let mut stream = TcpStream::connect(address).map_err(|error| error.to_string())?;
+    stream.set_read_timeout(Some(Duration::from_secs(1))).map_err(|error| error.to_string())?;
+    let body = format!(r#"{{"avatar_in_app_visible":{visible}}}"#);
+    let request = format!("PATCH /settings/runtime HTTP/1.1\r\nHost: {address}\r\nX-NeuroAsist-Token: {}\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}", runtime.api_token, body.len());
     stream.write_all(request.as_bytes()).map_err(|error| error.to_string())?;
     let mut response = String::new();
     stream.read_to_string(&mut response).map_err(|error| error.to_string())?;

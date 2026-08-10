@@ -29,6 +29,10 @@ namespace NeuroAsist.Avatar
         public AudioSource Source => audioSource;
         public int Generation => generation;
         public void Configure(AvatarRuntimeSettings value, AudioSource source) { settings = value; audioSource = source; }
+        // The WebView can target a concrete Windows output device. Keep Unity
+        // playing silently in that mode so its lip-sync remains driven by the
+        // same clip without producing a second audible copy of the voice.
+        public void SetMuted(bool muted) { if (audioSource != null) audioSource.mute = muted; }
 
         public void Play(string audioUrl, int token, Action onStarted, Action onFinished, Action<string> onFailed)
         {

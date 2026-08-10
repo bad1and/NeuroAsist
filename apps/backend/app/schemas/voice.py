@@ -1,29 +1,6 @@
 from pydantic import BaseModel, Field
 
 
-class VoiceProviderStats(BaseModel):
-    provider: str
-    model: str | None = None
-    language: str | None = None
-    voice: str | None = None
-    duration_ms: int
-
-
-class VoiceChatResponse(BaseModel):
-    voice_request_id: str
-    transcript: str
-    raw_transcript: str | None = None
-    corrections: list[dict[str, object]] = Field(default_factory=list)
-    reply: str
-    emotion: str = "neutral"
-    intent: str = "casual_chat"
-    reply_audio_url: str | None = None
-    tts_status: str = "queued"
-    stt: VoiceProviderStats
-    tts: VoiceProviderStats
-    memory_updates: list[dict[str, str]] = []
-
-
 class VoiceTTSStatusResponse(BaseModel):
     voice_request_id: str
     status: str

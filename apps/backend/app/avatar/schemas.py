@@ -104,6 +104,10 @@ class StopPayload(ProtocolModel):
     utterance_id: str | None = None
 
 
+class AudioMutePayload(ProtocolModel):
+    muted: bool = False
+
+
 class OverlayPayload(ProtocolModel):
     visible: bool = True
     always_on_top: bool = True

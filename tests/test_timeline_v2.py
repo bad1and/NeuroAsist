@@ -194,3 +194,57 @@ def test_legacy_chat_contract_writes_to_primary_timeline(monkeypatch, tmp_path: 
         ("user", "Продолжим"), ("assistant", "Одна история"),
     ]
     assert {item["metadata"]["legacy_session_id"] for item in appended} == {"old-session-name"}
+
+
+def test_read_scope_pins_one_connection_across_nested_store_calls(tmp_path: Path) -> None:
+    """The scope exists to collapse a burst of store calls onto one connection."""
+    store = TimelineStore(tmp_path / "scope.sqlite3")
+    store.init_db()
+    store.append_message(role="user", content="Первое", input_mode="text")
+
+    real_connect = sqlite3.connect
+    opened = 0
+
+    def counting_connect(*args, **kwargs):
+        nonlocal opened
+        opened += 1
+        return real_connect(*args, **kwargs)
+
+    def three_calls() -> None:
+        store.context_material("первое", 4)
+        store.list_topics(status="active", limit=4)
+        store.list_commitments(status="open", limit=4)
+
+    try:
+        sqlite3.connect = counting_connect
+        three_calls()
+        unpinned = opened
+        opened = 0
+        with store.read_scope():
+            three_calls()
+        pinned = opened
+    finally:
+        sqlite3.connect = real_connect
+
+    assert unpinned >= 3
+    assert pinned == 1
+
+
+def test_consolidation_transaction_refuses_to_nest_inside_a_read_scope(tmp_path: Path) -> None:
+    """Reusing the deferred scope connection would drop the BEGIN IMMEDIATE."""
+    store = TimelineStore(tmp_path / "nested.sqlite3")
+    store.init_db()
+
+    with store.read_scope():
+        with pytest.raises(RuntimeError, match="read_scope"):
+            with store.consolidation_transaction():
+                pass
+
+    # The guard is one-directional: reads may still ride a writer transaction,
+    # and the scope has to leave the thread-local clean for the next turn.
+    with store.consolidation_transaction() as writer:
+        with store.read_scope() as reused:
+            assert reused is writer
+
+    with store.consolidation_transaction() as connection:
+        assert connection.in_transaction

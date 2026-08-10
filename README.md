@@ -6,7 +6,7 @@
 
 ### Local-first voice AI character and future neuro‑VTuber platform
 
-[![Version](https://img.shields.io/badge/version-0.6.0--dev-7c3aed?style=flat-square)](https://github.com/bad1and/NeuroAsist/tree/v0.6)
+[![Version](https://img.shields.io/badge/version-0.8.0--dev-7c3aed?style=flat-square)](https://github.com/bad1and/NeuroAsist)
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776ab?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-24%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.116-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -18,8 +18,16 @@
 </div>
 
 > [!IMPORTANT]
-> **Iris v0.6 is an experimental local desktop development branch.**
+> **Iris v0.8 is an experimental local desktop development branch.**
 > The Tauri shell starts the React UI and FastAPI core together. Text and voice chat, long-term memory, and an optional Unity VRM avatar runtime are available.
+
+## What's new in v0.8
+
+- Choose the microphone input and audio output device in Voice Settings; selections persist locally.
+- Show the Unity avatar either as a transparent desktop overlay or natively inside the chat without a second visible window.
+- Start a **New dialog** from the chat; it clears the current conversation while preserving long-term memory.
+- Temporary chat transport errors now disappear automatically instead of remaining on screen.
+- Switch the complete application interface between Russian and English in **Settings → System → Interface**. The choice persists locally, including the desktop tray, and does not affect Iris replies, memories, or voice/STT/TTS settings.
 
 Iris is the official name. You can also call her **Ирис**, **Айрис**, or **Ириска**.
 
@@ -47,6 +55,8 @@ The V0.5 direction is a single continuous desktop companion: one character, one 
 | Text conversation | ✅ | FastAPI chat endpoint |
 | Push-to-talk voice chat | ✅ | Browser `MediaRecorder` |
 | Live voice response | ✅ | WebSocket audio segments |
+| Audio device selection | ✅ | Choose a microphone and playback device in Voice Settings; selections persist locally |
+| Russian and English interface | ✅ | Switch UI copy, system labels, dates, and the desktop tray in Settings; conversation content and voice behaviour remain unchanged |
 | Local speech-to-text | ✅ | GigaAM v3, `faster-whisper` fallback |
 | Local text-to-speech | ✅ | Silero v5_5_ru, Baya by default |
 | Conversation history and journal | ✅ | SQLite timeline, episodes, and summaries |
@@ -55,7 +65,7 @@ The V0.5 direction is a single continuous desktop companion: one character, one 
 | Runtime events | ✅ | REST and WebSocket |
 | Voice and runtime settings | ✅ | Local React control panel |
 | Browser speech fallback | ✅ | Used when backend TTS fails |
-| Unity VRM avatar and lip sync | ✅ | Optional WebSocket client with UniVRM/uLipSync |
+| Unity VRM avatar and lip sync | ✅ | Optional WebSocket client with UniVRM/uLipSync, shown either in the chat or as a desktop overlay |
 | Continuous companion runtime | 🧭 | Timeline, episodes, summaries, controlled long-term memory, and the validated Tauri shell are implemented |
 | Development agent, sandbox, and desktop control | 🚫 | Explicitly out of V0.5 scope |
 
@@ -72,11 +82,11 @@ The V0.5 direction is a single continuous desktop companion: one character, one 
 
 The React control panel contains five main sections:
 
-- **Chat** — text messages, microphone recording, transcription, AI replies, and audio playback.
+- **Chat** — text messages, microphone recording, transcription, automatically played AI replies, and a confirmed **New dialog** action that clears the current conversation while preserving long-term memory. Temporary connection errors dismiss themselves automatically.
 - **Journal** — the continuous timeline and internal conversation episodes.
 - **Memory** — saved facts, provenance, review, and a full reset of memory and history.
 - **Events** — live backend, LLM, STT, TTS, and connection events.
-- **Settings** — voice language, TTS voice, playback speed, live prebuffer, runtime options, and avatar test controls.
+- **Settings** — application interface language (Russian or English), voice language, input microphone, output device, TTS voice, playback speed, live prebuffer, runtime options, and avatar test controls. Changing the interface language does not change Iris replies or speech settings.
 
 The header displays backend status, WebSocket connection state, API-key availability, and the fixed LLM model.
 
@@ -118,7 +128,7 @@ The header displays backend status, WebSocket connection state, API-key availabi
 ### 1. Clone the development branch
 
 ```powershell
-git clone --branch v0.6 --single-branch https://github.com/bad1and/NeuroAsist.git Iris
+git clone --branch "v0.8(avatar-remove/UI)" --single-branch https://github.com/bad1and/NeuroAsist.git Iris
 cd Iris
 ```
 
@@ -449,7 +459,9 @@ Chat or non-live voice response
   → Unity AudioSource, lip sync, and VRM expression
 ```
 
-The avatar bridge remains optional: unavailable Unity clients do not delay or fail text chat or TTS. The renderer source lives in [`apps/avatar-unity`](apps/avatar-unity/README.md); Tauri launches it with an authenticated dynamic-port WebSocket and exposes overlay controls through the Settings page and tray.
+The avatar bridge remains optional: unavailable Unity clients do not delay or fail text chat or TTS. The renderer source lives in [`apps/avatar-unity`](apps/avatar-unity/README.md); Tauri launches it with an authenticated dynamic-port WebSocket and exposes controls through the Settings page and tray.
+
+In **Settings → System → Avatar**, choose whether the renderer appears as a separate desktop overlay or **inside Iris**. On Windows, in-app mode presents Unity as a transparent, borderless native surface owned by the Iris window in the lower-left column of the **Dialog** page. It follows the chat layout, DPI, and available window size; it remains proportional on maximized windows, has no Unity title bar, stays out of Alt+Tab, and does not create a second visible application window. The **Show in dialog** switch is stored separately from the visibility of the external overlay, so hiding the latter never suppresses the in-app avatar. Speech, lip sync, expressions, and gestures work identically in both modes.
 
 ## Project structure
 

@@ -63,6 +63,12 @@ class Settings(BaseSettings):
     cors_origin_regex: str = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
     voice_stt_provider: str = "gigaam"
     voice_stt_model: str = "v3_rnnt"
+    # Optional second local model. It is lazy-loaded and called only for an
+    # empty/low-confidence/low-SNR primary result.
+    voice_stt_fallback_provider: str = ""
+    voice_stt_fallback_model: str = ""
+    voice_stt_fallback_confidence_threshold: float = 0.60
+    voice_stt_fallback_min_rms: float = 0.008
     voice_stt_device: str = "cpu"
     voice_stt_compute_type: str = "int8"
     voice_torch_cpu_threads: int = 4
@@ -89,6 +95,7 @@ class Settings(BaseSettings):
     voice_stress_cpu_threads: int = 1
     voice_tts_postprocessing_enabled: bool = True
     voice_tts_highpass_cutoff_hz: float = 60.0
+    voice_tts_lowpass_cutoff_hz: float = 12000.0
     voice_tts_adaptive_prosody: bool = True
     voice_cmudict_enabled: bool = True
     voice_cmudict_cache_dir: str = ".cache/cmudict"
@@ -109,8 +116,10 @@ class Settings(BaseSettings):
     voice_tts_timeout_seconds: int = 45
     voice_live_queue_size: int = 3
     voice_live_idle_flush_ms: int = 500
-    voice_live_first_idle_flush_ms: int = 180
-    voice_live_next_idle_flush_ms: int = 350
+    # Safe chunk boundaries still require whitespace/punctuation; these only
+    # bound a stalled LLM delta gap before the first/next TTS job is released.
+    voice_live_first_idle_flush_ms: int = 120
+    voice_live_next_idle_flush_ms: int = 250
     voice_live_first_segment_chars: int = 32
     voice_live_next_segment_chars: int = 75
     voice_live_max_segment_chars: int = 110

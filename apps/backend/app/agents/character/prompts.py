@@ -64,7 +64,7 @@ def character_json_prompt(persona: PersonaConfig | None = None, state_context: s
   "intent": "casual_chat|question|task_request|unknown",
   "affect": {{"emotion": "neutral|happy|sad|angry|annoyed|smirk|thinking|surprised|embarrassed|concerned", "intensity": 0.0, "valence": 0.0, "arousal": 0.0}},
   "gesture": {{"name": "none|auto|talk|greeting|agreement|disagreement|question|explanation|thinking|surprise|frustration|farewell|shrug", "intensity": 0.0, "interrupt": true}},
-  "delivery": {{"pace": "slow|normal|fast", "emphasis": 0.0, "overrides": [{{"segment": 1, "pace": "slow|normal|fast", "emphasis": "none|light"}}]}},
+  "delivery": {{"pace": "slow|normal|fast", "emphasis": 0.0, "overrides": [{{"segment": 1, "pace": "slow|normal|fast", "speed": 0.85, "emphasis": "none|light"}}]}},
   "continuity": {{"referenced_memory_ids": [], "referenced_episode_ids": [], "closes_open_loop_ids": []}},
   "memory_candidates": [],
   "memory_decisions": []
@@ -91,6 +91,7 @@ action=accept|reject|clarify, reason, optional predicate и clarification_id. О
 delivery.overrides — необязательные редкие изменения подачи отдельных предложений.
 segment — номер предложения в reply, начиная с 1. Не больше трёх overrides. Используй их
 только когда смысл действительно требует слегка замедлить или ускорить одну фразу;
+speed — необязательный множитель скорости от 0.70 до 1.30, он важнее pace;
 emphasis может быть только none или light. Не меняй голос, высоту тона или громкость.
 
 В голосовых расшифровках возможны опечатки, пропуски букв и искажённые имена.

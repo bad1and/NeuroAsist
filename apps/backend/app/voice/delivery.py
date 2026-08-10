@@ -24,6 +24,8 @@ BASE_TEMPO = {
     SpeechPace.NORMAL: 1.0,
     SpeechPace.FAST: 1.02,
 }
+MIN_SPEECH_TEMPO = 0.70
+MAX_SPEECH_TEMPO = 1.30
 OVERRIDE_TEMPO = {
     SpeechPace.SLOW: 0.95,
     SpeechPace.NORMAL: 1.0,
@@ -49,6 +51,7 @@ def coerce_speech_emphasis(value: object) -> SpeechEmphasis:
 class VoiceDirective:
     pace: SpeechPace = SpeechPace.NORMAL
     emphasis: SpeechEmphasis = SpeechEmphasis.NONE
+    speed: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,7 +108,11 @@ def make_speech_segment(
 ) -> SpeechSegment:
     pace = directive.pace if directive is not None else coerce_speech_pace(base_pace)
     emphasis = directive.emphasis if directive is not None else SpeechEmphasis.NONE
-    tempo = OVERRIDE_TEMPO[pace] if directive is not None else BASE_TEMPO[pace]
+    tempo = (
+        max(MIN_SPEECH_TEMPO, min(MAX_SPEECH_TEMPO, float(directive.speed)))
+        if directive is not None and directive.speed is not None
+        else OVERRIDE_TEMPO[pace] if directive is not None else BASE_TEMPO[pace]
+    )
     return SpeechSegment(
         text=text.strip(),
         pace=pace,
@@ -127,6 +134,7 @@ def plan_speech(text: str, delivery=None) -> list[SpeechSegment]:
         int(item.segment): VoiceDirective(
             coerce_speech_pace(item.pace),
             coerce_speech_emphasis(item.emphasis),
+            getattr(item, "speed", None),
         )
         for item in list(getattr(delivery, "overrides", ()) or ())[:3]
         if 1 <= int(item.segment) <= len(sentences)

@@ -8,7 +8,12 @@ import wave
 from pathlib import Path
 from uuid import uuid4
 
-from apps.backend.app.voice.delivery import SpeechSegment, plan_speech
+from apps.backend.app.voice.delivery import (
+    MAX_SPEECH_TEMPO,
+    MIN_SPEECH_TEMPO,
+    SpeechSegment,
+    plan_speech,
+)
 from apps.backend.app.voice.providers import TTSRequest, TTSResult, split_tts_chunks
 from apps.backend.app.voice.style import VoiceStyle
 
@@ -189,14 +194,14 @@ class SpeechOrchestrator:
         segments = plan_speech(text, delivery)
         if not segments:
             raise ValueError("No speakable text")
-        rate = max(0.75, min(1.25, float(playback_rate)))
+        rate = max(MIN_SPEECH_TEMPO, min(MAX_SPEECH_TEMPO, float(playback_rate)))
         pcm_parts: list[bytes] = []
         wave_params: tuple[int, int, int] | None = None
         for segment in segments:
             effective = SpeechSegment(
                 text=segment.text,
                 pace=segment.pace,
-                tempo=max(0.75, min(1.25, segment.tempo * rate)),
+                tempo=max(MIN_SPEECH_TEMPO, min(MAX_SPEECH_TEMPO, segment.tempo * rate)),
                 emphasis=segment.emphasis,
                 pause_before_ms=segment.pause_before_ms,
                 pause_after_ms=segment.pause_after_ms,

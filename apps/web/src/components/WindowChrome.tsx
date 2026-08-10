@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import { Copy, Menu, Minus, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
@@ -7,10 +7,14 @@ import { isDesktopApp, quitDesktopApp } from "../desktop";
 export function WindowChrome({
   title,
   onOpenNavigation,
+  navigationOpen = false,
+  navigationButtonRef,
   compact = false,
 }: {
   title: string;
   onOpenNavigation?: () => void;
+  navigationOpen?: boolean;
+  navigationButtonRef?: RefObject<HTMLButtonElement | null>;
   compact?: boolean;
 }) {
   const desktop = isDesktopApp();
@@ -46,8 +50,17 @@ export function WindowChrome({
     >
       <div className="window-chrome-title" data-tauri-drag-region>
         {onOpenNavigation && (
-          <button className="icon-button menu-toggle" onClick={onOpenNavigation} aria-label="Открыть меню">
-            <Menu size={19} aria-hidden="true" />
+          <button
+            ref={navigationButtonRef}
+            className="icon-button menu-toggle"
+            type="button"
+            onClick={onOpenNavigation}
+            aria-label={navigationOpen ? "Закрыть меню" : "Открыть меню"}
+            aria-expanded={navigationOpen}
+            aria-controls="main-sidebar"
+            title={navigationOpen ? "Закрыть меню" : "Открыть меню"}
+          >
+            {navigationOpen ? <X size={19} aria-hidden="true" /> : <Menu size={19} aria-hidden="true" />}
           </button>
         )}
         {title && <h1 data-tauri-drag-region>{title}</h1>}

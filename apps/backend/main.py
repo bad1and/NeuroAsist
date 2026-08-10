@@ -3,6 +3,10 @@ import logging
 import re
 import sqlite3
 import time
+import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,12 +63,16 @@ from apps.backend.app.conversation.service import LiveConversationService
 from apps.backend.app.conversation.state_service import CharacterStateService
 from apps.backend.app.conversation.turn_coordinator import ConversationTurnCoordinator
 from apps.backend.app.conversation.turn import SmartTurnDetector
-from apps.backend.app.llm.providers.deepseek import DeepSeekProvider
+from apps.backend.app.llm.providers.deepseek import DeepSeekProvider, close_shared_clients
 
 logger = logging.getLogger(__name__)
 
 TTS_AUDIO_CLEANUP_INTERVAL_SECONDS = 20 * 60
 TTS_AUDIO_RETENTION_SECONDS = 2 * 60
+# Idle background workers back off instead of polling SQLite once a second.
+# The ceiling stays low so a queued job is still picked up promptly.
+IDLE_WORKER_POLL_MIN_SECONDS = 1.0
+IDLE_WORKER_POLL_MAX_SECONDS = 5.0
 
 
 def create_app() -> FastAPI:
@@ -78,7 +86,7 @@ def create_app() -> FastAPI:
     if not settings.llm_api_key:
         logger.warning("DeepSeek API key is not configured")
 
-    app = FastAPI(title=settings.app_name, version="0.6.0")
+    app = FastAPI(title=settings.app_name, version="0.8.0")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
@@ -275,6 +283,7 @@ def create_app() -> FastAPI:
             width=runtime_settings.avatar_overlay_width,
             height=runtime_settings.avatar_overlay_height,
         ),
+        audio_muted=bool(runtime_settings.voice_output_device_id),
         on_overlay_bounds_changed=persist_avatar_overlay_bounds,
     )
     voice_session_manager.bind_avatar_service(avatar_service)
@@ -375,16 +384,12 @@ def create_app() -> FastAPI:
         language,
         connection,
     ) -> None:
-        if conversation_service is not None and connection.mode == "live_conversation":
+        if conversation_service is not None:
             await conversation_service.phase(session_id, ConversationPhase.TRANSCRIBING, connection.send)
         stt_result = await voice_service.transcribe_pcm16(audio, language)
         transcript = stt_result.text.strip()
         if not transcript:
-            if (
-                conversation_service is not None
-                and connection.version == 2
-                and connection.mode == "live_conversation"
-            ):
+            if conversation_service is not None:
                 await connection.send({
                     "type": "conversation.noise_ignored",
                     "reason": "empty_transcript",
@@ -406,14 +411,12 @@ def create_app() -> FastAPI:
             event_publisher=event_bus.publish, context_manager=context_manager, memory_service=memory_service,
             persona_name=runtime_settings.personality,
         )
-        utterance_id = __import__("uuid").uuid4().hex
+        utterance_id = uuid.uuid4().hex
         voice = voice_service.resolve_tts_voice(language, runtime_settings.voice_tts_voice)
-        if (
-            conversation_service is not None
-            and connection.version == 2
-            and connection.mode == "live_conversation"
-            and runtime_settings.live_conversation_enabled
-        ):
+        stt_uncertain = stt_result.fallback or (
+            stt_result.confidence is not None and stt_result.confidence < 0.6
+        )
+        if conversation_service is not None:
             result = await conversation_service.ingest_observation(
                 session_id=session_id,
                 transcript=stt_result.raw_text or stt_result.text,
@@ -436,6 +439,7 @@ def create_app() -> FastAPI:
                     if runtime_settings.live_conversation_participant_mode == "group"
                     else 0.9
                 ),
+                stt_uncertain=stt_uncertain,
             )
             if result.generation != conversation_service.session(session_id).generation:
                 return
@@ -444,6 +448,12 @@ def create_app() -> FastAPI:
                 "transcript": stt_result.text,
                 "raw_transcript": stt_result.raw_text,
                 "corrections": list(stt_result.corrections),
+                "provider": stt_result.provider,
+                "model": stt_result.model,
+                "confidence": stt_result.confidence,
+                "fallback": stt_result.fallback,
+                "fallback_reason": stt_result.fallback_reason,
+                "stt_uncertain": stt_uncertain,
                 "utterance_id": result.utterance_id,
                 "generation": result.generation,
                 "observation_only": result.decision.action not in {
@@ -467,6 +477,7 @@ def create_app() -> FastAPI:
                 generation=result.generation,
                 source_message=result.message,
                 state_context=result.state_context,
+                pipeline_started_at=connection.pipeline_started_at or None,
                 raw_transcript=stt_result.raw_text,
                 transcript_corrections=stt_result.corrections,
             )
@@ -476,11 +487,17 @@ def create_app() -> FastAPI:
             "transcript": stt_result.text,
             "raw_transcript": stt_result.raw_text,
             "corrections": list(stt_result.corrections),
+            "provider": stt_result.provider,
+            "model": stt_result.model,
+            "confidence": stt_result.confidence,
+            "fallback": stt_result.fallback,
+            "fallback_reason": stt_result.fallback_reason,
             "utterance_id": utterance_id,
         })
         await voice_session_manager.start(
             session_id=session_id, utterance_id=utterance_id, transcript=stt_result.text,
             language=stt_result.language, voice=voice, agent=agent,
+            pipeline_started_at=connection.pipeline_started_at or None,
             raw_transcript=stt_result.raw_text,
             transcript_corrections=stt_result.corrections,
         )
@@ -506,11 +523,20 @@ def create_app() -> FastAPI:
     # whether the resulting candidate is a complete turn. Older .env files
     # used very short values, so the runtime safeguards existing installs too.
     pause_profile = {
-        "short": (600, 650, 900, 1500),
-        "natural": (720, 750, 1100, 2500),
-        "patient": (900, 1100, 1500, 4000),
-    }.get(runtime_settings.live_conversation_pause_tolerance, (720, 750, 1100, 2500))
-    hands_free_end_silence_ms, live_end_silence_ms, live_fallback_end_silence_ms, max_turn_silence_ms = pause_profile
+        "short": (650, 900, 1500),
+        "natural": (750, 1100, 2500),
+        "patient": (900, 1500, 4000),
+    }.get(runtime_settings.live_conversation_pause_tolerance, (750, 1100, 2500))
+    live_end_silence_ms, live_fallback_end_silence_ms, max_turn_silence_ms = pause_profile
+    # Smart Turn is already the semantic guard for a candidate endpoint. Give
+    # it a candidate sooner, but keep the conservative fallback unchanged when
+    # the model is unavailable. An incomplete candidate remains in pending_turn
+    # and continues accumulating audio; inference timeout/error still waits for
+    # the existing max-turn-silence safeguard rather than speaking early.
+    semantic_end_silence_ms = max(
+        450,
+        min(settings.voice_vad_live_end_silence_ms, live_end_silence_ms) - 250,
+    )
 
     voice_input_session_manager = VoiceInputSessionManager(
         voice_service, process_pcm_utterance, pcm_speech_started,
@@ -526,8 +552,8 @@ def create_app() -> FastAPI:
         # older .env still specifies the former 500 ms default.
         pre_roll_ms=max(settings.voice_vad_pre_roll_ms, 900),
         post_roll_ms=settings.voice_vad_post_roll_ms,
-        end_silence_ms=max(settings.voice_vad_end_silence_ms, hands_free_end_silence_ms),
         live_end_silence_ms=max(settings.voice_vad_live_end_silence_ms, live_end_silence_ms),
+        semantic_end_silence_ms=semantic_end_silence_ms,
         live_fallback_end_silence_ms=max(
             settings.voice_vad_live_fallback_end_silence_ms,
             live_fallback_end_silence_ms,
@@ -568,47 +594,136 @@ def create_app() -> FastAPI:
         except asyncio.CancelledError:
             raise
 
+    async def poll_worker_forever(run_once: Callable[[], Awaitable[Any]]) -> None:
+        """Drain a background queue, backing off while it stays empty.
+
+        A flat one-second poll kept four workers hitting SQLite every second
+        for the whole session, competing for WAL locks with the voice path.
+        Backoff only grows while idle and collapses back to the original
+        cadence as soon as there is work, so burst latency is unchanged.
+        """
+        idle_delay = IDLE_WORKER_POLL_MIN_SECONDS
+        try:
+            while True:
+                worked = await run_once()
+                if worked:
+                    idle_delay = IDLE_WORKER_POLL_MIN_SECONDS
+                    await asyncio.sleep(0)
+                    continue
+                await asyncio.sleep(idle_delay)
+                idle_delay = min(idle_delay * 2, IDLE_WORKER_POLL_MAX_SECONDS)
+        except asyncio.CancelledError:
+            raise
+
     async def summarize_forever() -> None:
         if summary_worker is None:
             return
-        try:
-            while True:
-                worked = await summary_worker.run_once()
-                await asyncio.sleep(0 if worked else 1)
-        except asyncio.CancelledError:
-            raise
+        await poll_worker_forever(summary_worker.run_once)
 
     async def sync_semantic_forever() -> None:
         if semantic_sync_worker is None:
             return
-        try:
-            while True:
-                worked = await semantic_sync_worker.run_once()
-                await asyncio.sleep(0 if worked else 1)
-        except asyncio.CancelledError:
-            raise
+        await poll_worker_forever(semantic_sync_worker.run_once)
 
     async def extract_memory_forever() -> None:
         if memory_extraction_worker is None:
             return
-        try:
-            while True:
-                worked = await memory_extraction_worker.run_once()
-                await asyncio.sleep(0 if worked else 1)
-        except asyncio.CancelledError:
-            raise
+        await poll_worker_forever(memory_extraction_worker.run_once)
 
     async def reflect_forever() -> None:
         if character_state_service is None:
             return
-        try:
-            while True:
-                worked = await character_state_service.run_reflection_once()
-                await asyncio.sleep(0 if worked else 1)
-        except asyncio.CancelledError:
-            raise
+        await poll_worker_forever(character_state_service.run_reflection_once)
 
-    @app.on_event("startup")
+    def run_storage_repair() -> list[tuple[str, str, str, dict[str, Any]]]:
+        """Synchronous startup repair chain, meant to run in a worker thread.
+
+        Returns the events to publish instead of publishing them itself, so
+        every event reaches subscribers from the event loop thread.
+        """
+        events: list[tuple[str, str, str, dict[str, Any]]] = []
+        history.init_db()
+        if timeline_store is not None:
+            timeline_store.recover_active_episode()
+            timeline_store.recover_memory_index_jobs()
+        if memory_service is None:
+            return events
+
+        repaired = memory_service.repair_legacy_identity_candidates()
+        if repaired:
+            events.append((
+                "memory.legacy_identity_repaired",
+                "info",
+                "Legacy identity memories repaired",
+                {"count": len(repaired)},
+            ))
+        rejected_identities = memory_service.reject_invalid_interrogative_identity_memories()
+        if rejected_identities:
+            events.append((
+                "memory.invalid_identity_rejected",
+                "warning",
+                "Question-derived identity memories rejected",
+                {"count": len(rejected_identities)},
+            ))
+        rejected_assistant_facts = memory_service.reject_assistant_only_profile_memories()
+        if rejected_assistant_facts:
+            events.append((
+                "memory.assistant_only_facts_rejected",
+                "warning",
+                "Assistant-only profile memories rejected",
+                {"count": len(rejected_assistant_facts)},
+            ))
+        repaired_preferences = memory_service.repair_legacy_response_length_preferences()
+        if repaired_preferences:
+            events.append((
+                "memory.legacy_preference_repaired",
+                "info",
+                "Legacy response-length preferences repaired",
+                {"count": len(repaired_preferences)},
+            ))
+        repaired_relationships = memory_service.repair_ambiguous_relationship_memories()
+        if repaired_relationships:
+            events.append((
+                "memory.ambiguous_relationships_reviewed",
+                "info",
+                "Ambiguous relationship memories moved to review",
+                {"count": len(repaired_relationships)},
+            ))
+        events.append((
+            "memory.v17_repair",
+            "info",
+            "Canonical memory v17 repair checked",
+            memory_service.repair_v17_canonical_memory(),
+        ))
+        events.append((
+            "memory.v18_repair",
+            "info",
+            "Memory integrity v18 repair checked",
+            memory_service.repair_v18_memory_integrity(),
+        ))
+        events.append((
+            "memory.v19_repair",
+            "info",
+            "Autonomous memory v19 repair checked",
+            memory_service.repair_v19_autonomous_memory(),
+        ))
+        expired = memory_service.expire_due_memories()
+        if expired:
+            events.append((
+                "memory.temporal_expired",
+                "info",
+                "Expired temporal memories archived",
+                {"count": expired},
+            ))
+        index_repair = memory_service.reindex()
+        events.append((
+            "memory.index_reconciled",
+            "info" if index_repair.get("semantic_enabled") else "warning",
+            "Rebuildable memory index reconciled with SQLite",
+            index_repair,
+        ))
+        return events
+
     async def startup() -> None:
         nonlocal tts_audio_cleanup_task, summary_worker_task, semantic_sync_worker_task, memory_extraction_worker_task, reflection_worker_task
         removed = await asyncio.to_thread(voice_service.clear_tts_audio)
@@ -663,87 +778,13 @@ def create_app() -> FastAPI:
                             "to_version": LATEST_SCHEMA_VERSION,
                         },
                     )
-            history.init_db()
-            if timeline_store is not None:
-                timeline_store.recover_active_episode()
-                timeline_store.recover_memory_index_jobs()
-            if memory_service is not None:
-                repaired = memory_service.repair_legacy_identity_candidates()
-                if repaired:
-                    event_bus.publish(
-                        "memory.legacy_identity_repaired",
-                        "info",
-                        "Legacy identity memories repaired",
-                        {"count": len(repaired)},
-                    )
-                rejected_identities = memory_service.reject_invalid_interrogative_identity_memories()
-                if rejected_identities:
-                    event_bus.publish(
-                        "memory.invalid_identity_rejected",
-                        "warning",
-                        "Question-derived identity memories rejected",
-                        {"count": len(rejected_identities)},
-                    )
-                rejected_assistant_facts = memory_service.reject_assistant_only_profile_memories()
-                if rejected_assistant_facts:
-                    event_bus.publish(
-                        "memory.assistant_only_facts_rejected",
-                        "warning",
-                        "Assistant-only profile memories rejected",
-                        {"count": len(rejected_assistant_facts)},
-                    )
-                repaired_preferences = memory_service.repair_legacy_response_length_preferences()
-                if repaired_preferences:
-                    event_bus.publish(
-                        "memory.legacy_preference_repaired",
-                        "info",
-                        "Legacy response-length preferences repaired",
-                        {"count": len(repaired_preferences)},
-                    )
-                repaired_relationships = memory_service.repair_ambiguous_relationship_memories()
-                if repaired_relationships:
-                    event_bus.publish(
-                        "memory.ambiguous_relationships_reviewed",
-                        "info",
-                        "Ambiguous relationship memories moved to review",
-                        {"count": len(repaired_relationships)},
-                    )
-                repair_v17 = memory_service.repair_v17_canonical_memory()
-                event_bus.publish(
-                    "memory.v17_repair",
-                    "info",
-                    "Canonical memory v17 repair checked",
-                    repair_v17,
-                )
-                repair_v18 = memory_service.repair_v18_memory_integrity()
-                event_bus.publish(
-                    "memory.v18_repair",
-                    "info",
-                    "Memory integrity v18 repair checked",
-                    repair_v18,
-                )
-                repair_v19 = memory_service.repair_v19_autonomous_memory()
-                event_bus.publish(
-                    "memory.v19_repair",
-                    "info",
-                    "Autonomous memory v19 repair checked",
-                    repair_v19,
-                )
-                expired = memory_service.expire_due_memories()
-                if expired:
-                    event_bus.publish(
-                        "memory.temporal_expired",
-                        "info",
-                        "Expired temporal memories archived",
-                        {"count": expired},
-                    )
-                index_repair = await asyncio.to_thread(memory_service.reindex)
-                event_bus.publish(
-                    "memory.index_reconciled",
-                    "info" if index_repair.get("semantic_enabled") else "warning",
-                    "Rebuildable memory index reconciled with SQLite",
-                    index_repair,
-                )
+            # Storage repair is a long chain of synchronous SQLite passes. Run
+            # it in a worker thread and replay its events on the loop, so the
+            # health endpoint stays responsive while the database is repaired.
+            for event_type, level, message, metadata in await asyncio.to_thread(
+                run_storage_repair
+            ):
+                event_bus.publish(event_type, level, message, metadata)
         except Exception:
             logger.critical("Storage initialization failed", exc_info=True)
             event_bus.publish(
@@ -828,7 +869,6 @@ def create_app() -> FastAPI:
         memory_extraction_worker_task = asyncio.create_task(extract_memory_forever())
         reflection_worker_task = asyncio.create_task(reflect_forever())
 
-    @app.on_event("shutdown")
     async def shutdown() -> None:
         if reflection_worker_task is not None:
             reflection_worker_task.cancel()
@@ -843,7 +883,7 @@ def create_app() -> FastAPI:
         if summary_worker is not None:
             try:
                 await asyncio.wait_for(summary_worker.run_once(), timeout=1)
-            except (TimeoutError, Exception):
+            except Exception:
                 logger.warning("Bounded shutdown summary pass did not complete", exc_info=True)
         if tts_audio_cleanup_task is not None:
             tts_audio_cleanup_task.cancel()
@@ -871,6 +911,19 @@ def create_app() -> FastAPI:
                 pass
         await speech_orchestrator.close()
         await avatar_service.close()
+        await close_shared_clients()
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        # Same ordering contract the deprecated on_event handlers had: a failed
+        # startup propagates and shutdown does not run.
+        await startup()
+        try:
+            yield
+        finally:
+            await shutdown()
+
+    app.router.lifespan_context = lifespan
 
     @app.get("/health")
     def health() -> dict[str, str]:

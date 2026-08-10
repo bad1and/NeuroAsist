@@ -287,6 +287,87 @@ async def test_one_to_one_spoken_request_responds_without_saying_iris(tmp_path: 
 
 
 @pytest.mark.anyio
+async def test_group_contextual_implicit_request_continues_recent_iris_turn(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    service = LiveConversationService(
+        store,
+        runtime(live_conversation_participant_mode="group"),
+    )
+    session = service.session("session")
+    session.last_iris_activity_at = __import__("time").monotonic()
+    session.last_generated_assistant_reply = "Привет, Федь. Как ты?"
+
+    result = await service.ingest_observation(
+        session_id="session",
+        transcript=(
+            "да нормально вот расскажи че ты допустим какие игры ты любишь "
+            "и сколько у тебя на рдоте"
+        ),
+        language="ru",
+    )
+
+    assert result.decision.action is ConversationAction.RESPOND
+    assert result.decision.reason.value == "invited"
+    assert result.decision.addressedness >= 0.82
+    observations = store.recent_conversation_observations("session")
+    assert observations[0]["metadata"]["addressing_reasons"] == [
+        "implicit_request",
+        "recent_dialogue_continuity"
+    ]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "transcript",
+    [
+        "Олег, расскажи какие игры ты любишь",
+        "не обращай внимания, расскажи какие игры ты любишь",
+        "расскажи какие игры ты любишь",
+    ],
+)
+async def test_group_implicit_request_without_safe_dialogue_context_stays_observed(
+    tmp_path: Path,
+    transcript: str,
+) -> None:
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    service = LiveConversationService(
+        store,
+        runtime(live_conversation_participant_mode="group"),
+    )
+
+    result = await service.ingest_observation(
+        session_id="session",
+        transcript=transcript,
+        language="ru",
+    )
+
+    assert result.decision.action is ConversationAction.OBSERVE
+
+
+@pytest.mark.anyio
+async def test_group_implicit_request_after_iris_question_needs_reply_evidence(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    service = LiveConversationService(
+        store,
+        runtime(live_conversation_participant_mode="group"),
+    )
+    session = service.session("session")
+    session.last_iris_activity_at = __import__("time").monotonic()
+    session.last_generated_assistant_reply = "Как у тебя дела?"
+
+    result = await service.ingest_observation(
+        session_id="session",
+        transcript="расскажи про игры",
+        language="ru",
+    )
+
+    assert result.decision.action is ConversationAction.OBSERVE
+
+
+@pytest.mark.anyio
 async def test_follow_up_to_recent_iris_turn_keeps_conversation_addressed(tmp_path: Path) -> None:
     store = TimelineStore(tmp_path / "timeline.sqlite3")
     store.init_db()
@@ -486,7 +567,7 @@ async def test_incognito_observation_stays_ephemeral(tmp_path: Path) -> None:
 async def test_smart_turn_missing_model_degrades_safely(tmp_path: Path) -> None:
     detector = SmartTurnDetector(tmp_path / "missing.onnx")
     result = await detector.analyze(b"\0\0" * 16000, 16000)
-    assert result.complete is True
+    assert result.complete is False
     assert result.fallback is True
     assert result.provider == "heuristic"
 

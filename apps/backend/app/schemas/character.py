@@ -71,6 +71,12 @@ class DeliveryOverride(ProtocolModel):
 
     segment: int = Field(ge=1, le=100)
     pace: str = Field(default="normal", pattern="^(slow|normal|fast)$")
+    speed: float | None = Field(
+        default=None,
+        ge=0.70,
+        le=1.30,
+        description="Optional pitch-preserving speed multiplier for this sentence (0.70–1.30).",
+    )
     emphasis: str = Field(default="none", pattern="^(none|light)$")
 
 

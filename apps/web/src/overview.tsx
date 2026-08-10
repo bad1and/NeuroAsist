@@ -3,6 +3,7 @@ import { ArrowRight, Brain, MessageCircle, Orbit, RefreshCw } from "lucide-react
 
 import { getMemories, getTimelineJournal } from "./api";
 import type { AvatarStatusResponse, MemoryItem, StatusResponse, TimelineJournalItem } from "./types";
+import { interfaceIntlLocale } from "./i18n";
 
 function greeting(): string {
   const hour = new Date().getHours();
@@ -15,7 +16,7 @@ function greeting(): string {
 function formatRelative(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("ru-RU", {
+  return new Intl.DateTimeFormat(interfaceIntlLocale(), {
     day: "numeric",
     month: "long",
     hour: "2-digit",
@@ -88,7 +89,7 @@ export function OverviewPage({
           <div className="overview-card-icon"><MessageCircle size={20} /></div>
           <div>
             <span>Последний разговор</span>
-            <h3>{latest?.title || (latest ? "Разговор с Iris" : "История пока пуста")}</h3>
+            <h3 data-i18n-skip={latest?.title && latest.title !== "Разговор с Iris" ? "" : undefined}>{latest?.title || (latest ? "Разговор с Iris" : "История пока пуста")}</h3>
             <p>{latest ? `${latest.message_count} сообщ. · ${formatRelative(latest.last_activity_at)}` : "Начни диалог — он появится здесь."}</p>
           </div>
           <button className="card-link" onClick={latest ? onOpenHistory : onOpenChat}>{latest ? "Открыть историю" : "Начать разговор"}<ArrowRight size={15} /></button>

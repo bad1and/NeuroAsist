@@ -66,9 +66,12 @@ def test_public_settings_does_not_return_api_key(client: TestClient) -> None:
     assert body["model"] == app.state.settings.deepseek_model
     assert "available_models" not in body
     assert body["available_personalities"] == ["default"]
+    assert body["interface_locale"] == "ru"
     assert body["voice_language"] == "ru"
     assert body["voice_stt_model"] == "v3_rnnt"
     assert body["voice_tts_enabled"] is True
+    assert body["avatar_placement"] == "desktop_overlay"
+    assert body["avatar_in_app_visible"] is True
     assert body["voice_tts_provider"] == app.state.voice_service.tts_provider.name
     assert body["voice_tts_style"] == "auto"
     assert body["voice_tts_voice"]
@@ -77,7 +80,7 @@ def test_public_settings_does_not_return_api_key(client: TestClient) -> None:
     assert 0 <= body["voice_live_playback_prebuffer_ms"] <= 1500
     assert body["available_voice_languages"] == ["auto", "ru", "en"]
     assert body["available_tts_voices"]
-    assert body["live_conversation_enabled"] is False
+    assert body["live_conversation_enabled"] is True
     assert body["live_conversation_participant_mode"] == "one_to_one"
     assert "api_key" not in body
     assert "DEEPSEEK_API_KEY" not in response.text
@@ -90,6 +93,44 @@ def test_runtime_settings_rejects_model_patch(client: TestClient) -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_runtime_interface_locale_can_be_updated_without_affecting_voice(client: TestClient) -> None:
+    original = client.get("/settings/public").json()
+    try:
+        response = client.patch("/settings/runtime", json={"interface_locale": "en"})
+
+        assert response.status_code == 200
+        assert response.json()["interface_locale"] == "en"
+        assert response.json()["voice_language"] == original["voice_language"]
+
+        unsupported = client.patch("/settings/runtime", json={"interface_locale": "de"})
+        assert unsupported.status_code == 400
+    finally:
+        client.patch("/settings/runtime", json={"interface_locale": original["interface_locale"]})
+
+
+def test_runtime_avatar_placement_can_be_updated_and_validated(client: TestClient) -> None:
+    original = client.get("/settings/public").json()["avatar_placement"]
+    try:
+        response = client.patch("/settings/runtime", json={"avatar_placement": "in_app"})
+        assert response.status_code == 200
+        assert response.json()["avatar_placement"] == "in_app"
+
+        unsupported = client.patch("/settings/runtime", json={"avatar_placement": "outside"})
+        assert unsupported.status_code == 400
+    finally:
+        client.patch("/settings/runtime", json={"avatar_placement": original})
+
+
+def test_runtime_in_app_avatar_visibility_can_be_updated(client: TestClient) -> None:
+    original = client.get("/settings/public").json()["avatar_in_app_visible"]
+    try:
+        response = client.patch("/settings/runtime", json={"avatar_in_app_visible": False})
+        assert response.status_code == 200
+        assert response.json()["avatar_in_app_visible"] is False
+    finally:
+        client.patch("/settings/runtime", json={"avatar_in_app_visible": original})
 
 
 def test_runtime_voice_settings_can_be_updated(client: TestClient) -> None:

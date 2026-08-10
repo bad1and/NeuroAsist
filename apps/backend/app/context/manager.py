@@ -32,13 +32,27 @@ class ContextManager:
         self.last: BuiltContext | None = None
 
     def build(self, user_text: str, *, session_id: str | None = None, current_message_id: str | None = None) -> BuiltContext:
+        # One build fans out into eight independent store calls (timeline
+        # material, clarification, memory retrieval, topics, commitments,
+        # reflections). Each used to open its own connection, and against a WAL
+        # database that file setup costs about a millisecond apiece regardless
+        # of the query, so the scope collapses eight of them into one.
+        with self._store.read_scope():
+            return self._build(
+                user_text, session_id=session_id, current_message_id=current_message_id,
+            )
+
+    def _build(self, user_text: str, *, session_id: str | None = None, current_message_id: str | None = None) -> BuiltContext:
         material = self._store.context_material(
             user_text, self._recent_turns, session_id=session_id, current_message_id=current_message_id,
         )
         name_only_followup = self._is_name_only_followup(user_text)
+        explicit_readdressment = self._is_explicit_readdressment(user_text)
         pending_direct_rows = (
             self._pending_followup_rows(material)
             if name_only_followup
+            else self._readdressed_implicit_rows(material)
+            if explicit_readdressment
             else []
         )
         response_target_text = (
@@ -193,8 +207,8 @@ class ContextManager:
             ChatMessage(
                 role="system",
                 content=(
-                    "Пользователь после этих прямых реплик только обратился к тебе по имени. "
-                    "Это сигнал вернуться к неотвеченной мысли: ответь по существу на неё, "
+                    "Пользователь явно вернул тебя к этим неотвеченным репликам. "
+                    "Это сигнал вернуться к неотвеченной мысли и ответить по существу, "
                     "не спрашивай, зачем он тебя позвал, и не упрекай его за повтор.\n"
                     + "\n".join(
                         f"- user: {row['corrected_content'] or row['content']}"
@@ -207,7 +221,6 @@ class ContextManager:
         )
         recent_turns = self._group_turns(recent)
         ambient_entries = [self._ambient_entry(row) for row in ambient_rows[-6:]]
-        dropped_summary_ids: list[str] = []
         dropped_turn_count = 0
 
         def ambient_message() -> ChatMessage | None:
@@ -249,36 +262,58 @@ class ContextManager:
         # Every continuity block has an independent cap before the final
         # context cap is enforced. This prevents verbose topics from evicting
         # identity, factual profile or open loops.
+        #
+        # `_estimate` is a plain per-message sum, so dropping one block item
+        # lowers the total by exactly that item's own cost. Re-assembling the
+        # whole context and re-summing it after every drop was quadratic in the
+        # number of blocks; carrying a running total gives the same numbers
+        # while touching each item once.
         def trim_block(items: list[tuple[str, ChatMessage]], budget: int) -> list[str]:
             dropped: list[str] = []
-            while self._estimate([message for _, message in items]) > budget and items:
-                dropped.append(items.pop()[0])
+            total = self._estimate([message for _, message in items])
+            while total > budget and items:
+                dropped_id, message = items.pop()
+                total -= self._estimate([message])
+                dropped.append(dropped_id)
             return dropped
 
         dropped_memory_ids = trim_block(selected_memories, 450)
         dropped_topic_ids = trim_block(selected_topics, 500)
         dropped_loop_ids = trim_block(selected_loops, 250)
         dropped_summary_ids: list[str] = trim_block(selected_summaries, 300)
-        messages = assemble()
-        while self._estimate(messages) > self._max_tokens and selected_summaries:
-            dropped_summary_ids.append(selected_summaries.pop()[0])
-            messages = assemble()
-        while self._estimate(messages) > self._max_tokens and selected_memories:
-            dropped_memory_ids.append(selected_memories.pop()[0])
-            messages = assemble()
-        while self._estimate(messages) > self._max_tokens and selected_topics:
-            dropped_topic_ids.append(selected_topics.pop()[0])
-            messages = assemble()
-        while self._estimate(messages) > self._max_tokens and recent_turns:
-            recent_turns.pop(0)
+
+        def ambient_tokens() -> int:
+            observed = ambient_message()
+            return self._estimate([observed]) if observed is not None else 0
+
+        remaining = self._estimate(assemble())
+
+        def drop_last(items: list[tuple[str, ChatMessage]], dropped: list[str]) -> None:
+            nonlocal remaining
+            dropped_id, message = items.pop()
+            dropped.append(dropped_id)
+            remaining -= self._estimate([message])
+
+        while remaining > self._max_tokens and selected_summaries:
+            drop_last(selected_summaries, dropped_summary_ids)
+        while remaining > self._max_tokens and selected_memories:
+            drop_last(selected_memories, dropped_memory_ids)
+        while remaining > self._max_tokens and selected_topics:
+            drop_last(selected_topics, dropped_topic_ids)
+        while remaining > self._max_tokens and recent_turns:
+            remaining -= self._estimate(recent_turns.pop(0))
             dropped_turn_count += 1
-            messages = assemble()
         dropped_ambient_count = 0
-        while self._estimate(messages) > self._max_tokens and ambient_entries:
+        while remaining > self._max_tokens and ambient_entries:
+            # Ambient observations share a single joined message, so their cost
+            # is not the sum of the parts and the block has to be re-measured
+            # rather than decremented by the dropped entry.
+            before = ambient_tokens()
             ambient_entries.pop(0)
+            remaining -= before - ambient_tokens()
             dropped_ambient_count += 1
-            messages = assemble()
-        built = BuiltContext(messages, self._estimate(messages), {
+        messages = assemble()
+        built = BuiltContext(messages, remaining, {
             "active_episode_id": material["active_episode_id"],
             "current_message_id": current_message_id,
             "current_sequence": material.get("causal_upper_bound"),
@@ -287,8 +322,13 @@ class ContextManager:
             "pending_user_message_count": len(pending_user_message_ids),
             "burst_compacted": burst_compacted,
             "name_only_followup": name_only_followup,
+            "explicit_readdressment": explicit_readdressment,
             "addressing_reasons": (
-                ["name_only_resume"] if pending_direct_rows else []
+                ["name_only_resume"]
+                if name_only_followup and pending_direct_rows
+                else ["explicit_readdressment"]
+                if explicit_readdressment and pending_direct_rows
+                else []
             ),
             "pending_direct_message_count": len(pending_direct_rows),
             "response_target_message_ids": list(response_target_message_ids),
@@ -340,6 +380,58 @@ class ContextManager:
     def _is_name_only_followup(text: str) -> bool:
         normalized = re.sub(r"[^\wа-яё]", "", text.lower(), flags=re.IGNORECASE)
         return normalized in {"iris", "ирис", "айрис", "ириска", "ириск", "ирес", "иреск"}
+
+    @staticmethod
+    def _is_explicit_readdressment(text: str) -> bool:
+        """Recognize a user explicitly assigning the previous thought to Iris."""
+        normalized = re.sub(r"\s+", " ", text.casefold().replace("ё", "е")).strip()
+        return bool(re.search(
+            r"(?:^|\b)(?:это\s+(?:было\s+)?тебе|вопрос\s+(?:был\s+)?тебе|"
+            r"я\s+(?:к\s+)?тебе)(?:\b|$)",
+            normalized,
+        ))
+
+    @classmethod
+    def _readdressed_implicit_rows(
+        cls,
+        material: dict[str, object],
+    ) -> list[dict[str, object]]:
+        """Recover one recently silenced implicit request after a clear repair.
+
+        This intentionally does not reinterpret a named third-party request.
+        It only covers the known false-negative shape: an unknown speaker's
+        ``relevant_opening`` that itself reads as an Iris-directed request.
+        """
+        current_created_at = material.get("current_created_at")
+        if not current_created_at:
+            return []
+        for row in reversed(material["recent"]):
+            if row.get("role") == "assistant":
+                break
+            if row.get("role") != "user":
+                break
+            if not cls._within_followup_window(
+                row.get("created_at"),
+                current_created_at,
+                maximum_seconds=120.0,
+            ):
+                break
+            if (
+                row.get("decision_action") != "observe"
+                or row.get("decision_reason") != "relevant_opening"
+                or row.get("speaker_role") != "unknown"
+            ):
+                break
+            text = str(row.get("corrected_content") or row.get("content") or "").strip()
+            addressing = cls._addressing.analyze_addressing(text)
+            if (
+                not addressing.implicit_iris
+                or addressing.other_person
+                or cls._addressing.is_self_talk(text)
+            ):
+                return []
+            return [row]
+        return []
 
     @classmethod
     def _pending_followup_rows(

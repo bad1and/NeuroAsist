@@ -3,7 +3,6 @@ import time
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.llm.base import ChatMessage, LLMProvider, LLMResponse
@@ -20,9 +19,6 @@ from apps.backend.app.voice.delivery import (
     VoiceDirective,
     clean_voice_directives,
 )
-from apps.backend.main import app
-from apps.backend.app.api.routes import voice as voice_route
-from apps.backend.app.voice.service import VoiceService
 
 
 class StreamingProvider(LLMProvider):
@@ -218,6 +214,72 @@ async def test_adaptive_split_retries_unsent_text(monkeypatch) -> None:
     ]
 
 
+def _wav_bytes(seconds: float, sample_rate: int = 24000) -> bytes:
+    import io
+    import wave
+
+    frames = int(seconds * sample_rate)
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(sample_rate)
+        audio.writeframes(b"\0\0" * frames)
+    return buffer.getvalue()
+
+
+def test_validate_audio_reads_wav_duration_from_the_header() -> None:
+    manager = VoiceSessionManager(MockTTSProvider())
+
+    duration = manager._validate_audio(_wav_bytes(1.5), "wav", "любой текст")
+
+    assert duration == pytest.approx(1.5)
+
+
+def test_validate_audio_rejects_truncated_wav_payload() -> None:
+    manager = VoiceSessionManager(MockTTSProvider())
+    truncated = _wav_bytes(1.5)[: 44 + 200]
+
+    with pytest.raises(RuntimeError, match="undecodable"):
+        manager._validate_audio(truncated, "wav", "любой текст")
+
+
+def test_validate_audio_rejects_empty_and_zero_duration_audio() -> None:
+    manager = VoiceSessionManager(MockTTSProvider())
+
+    with pytest.raises(RuntimeError, match="empty"):
+        manager._validate_audio(b"", "wav", "текст")
+    with pytest.raises(RuntimeError, match="zero-duration"):
+        manager._validate_audio(_wav_bytes(0.0), "wav", "текст")
+
+
+def test_tts_concurrency_honours_configured_bounds() -> None:
+    resolve = VoiceSessionManager._resolve_tts_concurrency
+
+    # Defaults stay serial.
+    assert resolve("1", 1, 2) == 1
+    # A configured ceiling above two is no longer silently discarded.
+    assert resolve("4", 1, 4) == 4
+    assert resolve("9", 1, 3) == 3
+    # "auto" respects the configured floor instead of dropping below it.
+    assert resolve("auto", 1, 2) == 1
+    assert resolve("auto", 2, 4) == 2
+    # Garbage falls back to the floor.
+    assert resolve("many", 2, 4) == 2
+
+
+def test_split_tts_jobs_tracks_configured_max_words() -> None:
+    text = " ".join(f"слово{index}" for index in range(40))
+    manager = VoiceSessionManager(MockTTSProvider(), max_segment_words=6)
+
+    jobs = manager._split_tts_jobs(text)
+
+    assert len(jobs) > 1
+    # Every job honours the configured ceiling; this used to be hardcoded to 18,
+    # so a smaller configured value produced oversized segments.
+    assert max(len(job.split()) for job in jobs) <= 6
+
+
 @pytest.mark.anyio
 async def test_tts_worker_synthesizes_concurrently_but_sends_in_order(monkeypatch) -> None:
     class DelayedProvider:
@@ -395,48 +457,24 @@ def test_local_intent(text: str, expected: str) -> None:
     assert CharacterAgent.classify_intent(text) == expected
 
 
-def test_live_rest_and_websocket_stream_protocol(monkeypatch, tmp_path: Path) -> None:
-    class RouteStreamingProvider(StreamingProvider):
-        def __init__(self, settings, model=None):
-            pass
+def test_live_input_uses_only_protocol_v3() -> None:
+    from fastapi.testclient import TestClient
 
-    settings = app.state.settings
-    previous_service = app.state.voice_service
-    previous_manager = app.state.voice_session_manager
-    previous_stt = settings.voice_stt_provider
-    previous_tts = settings.voice_tts_provider
-    previous_audio_dir = settings.voice_audio_dir
-    settings.voice_stt_provider = "mock"
-    settings.voice_tts_provider = "mock"
-    settings.voice_audio_dir = str(tmp_path / "audio")
-    app.state.voice_service = VoiceService(settings)
-    app.state.voice_session_manager = VoiceSessionManager(app.state.voice_service.tts_provider, tts_timeout=2)
-    monkeypatch.setattr(voice_route, "DeepSeekProvider", RouteStreamingProvider)
-    try:
-        with TestClient(app) as client:
-            with client.websocket_connect("/ws/voice/live-test?version=1") as socket:
-                response = client.post(
-                    "/voice/chat",
-                    data={"session_id": "live-test", "language": "ru", "live": "true"},
-                    files={"audio": ("voice.webm", b"test-audio", "audio/webm")},
-                )
-                assert response.status_code == 200
-                body = response.json()
-                assert body["status"] == "streaming"
-                assert body["transcript"] == "Тестовое голосовое сообщение"
-                events = [socket.receive_json() for _ in range(4)]
-                event_types = [event["type"] for event in events]
-                assert event_types[:3] == [
-                    "voice.utterance.started", "voice.metadata", "voice.text.delta",
-                ]
-                # The relevance guard may release a short safe reply in one
-                # buffered delta, followed immediately by completion.
-                assert event_types[3] in {"voice.text.delta", "tts.segment.started", "voice.text.completed"}
-                assert all(event["utterance_id"] == body["utterance_id"] for event in events)
-    finally:
-        app.state.voice_service.clear_audio_dir()
-        app.state.voice_service = previous_service
-        app.state.voice_session_manager = previous_manager
-        settings.voice_stt_provider = previous_stt
-        settings.voice_tts_provider = previous_tts
-        settings.voice_audio_dir = previous_audio_dir
+    from apps.backend.main import app
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/voice-input/live-test?version=3") as socket:
+            socket.send_json({
+                "type": "voice.input.start",
+                "protocol_version": 3,
+                "sample_rate": 16000,
+                "channels": 1,
+                "format": "pcm_s16le",
+                "language": "ru",
+                "capture_profile": "live",
+            })
+            ready = socket.receive_json()
+            assert ready["type"] == "voice.input.ready"
+            assert ready["protocol_version"] == 3
+            socket.send_bytes(b"\0\0" * 512)
+            socket.send_json({"type": "voice.input.stop"})

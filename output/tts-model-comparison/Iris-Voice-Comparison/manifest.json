@@ -1,0 +1,66 @@
+{
+  "text": "Привет… Я рядом. Расскажешь, как у тебя дела?",
+  "steps": 6,
+  "samples": [
+    {
+      "voice": "F1",
+      "audio": "F1.wav",
+      "generation_seconds": 0.8371,
+      "model_duration_seconds": 4.7038,
+      "rtf": 0.178,
+      "metrics": {
+        "duration_seconds": 4.7369,
+        "rms_dbfs": -26.47,
+        "peak_dbfs": -9.89
+      }
+    },
+    {
+      "voice": "F2",
+      "audio": "F2.wav",
+      "generation_seconds": 0.8281,
+      "model_duration_seconds": 4.4202,
+      "rtf": 0.1873,
+      "metrics": {
+        "duration_seconds": 4.4582,
+        "rms_dbfs": -27.31,
+        "peak_dbfs": -9.03
+      }
+    },
+    {
+      "voice": "F3",
+      "audio": "F3.wav",
+      "generation_seconds": 1.4292,
+      "model_duration_seconds": 4.8501,
+      "rtf": 0.2947,
+      "metrics": {
+        "duration_seconds": 4.8762,
+        "rms_dbfs": -27.65,
+        "peak_dbfs": -6.0
+      }
+    },
+    {
+      "voice": "F4",
+      "audio": "F4.wav",
+      "generation_seconds": 1.1661,
+      "model_duration_seconds": 4.086,
+      "rtf": 0.2854,
+      "metrics": {
+        "duration_seconds": 4.1099,
+        "rms_dbfs": -27.44,
+        "peak_dbfs": -10.1
+      }
+    },
+    {
+      "voice": "F5",
+      "audio": "F5.wav",
+      "generation_seconds": 1.1877,
+      "model_duration_seconds": 4.5476,
+      "rtf": 0.2612,
+      "metrics": {
+        "duration_seconds": 4.5976,
+        "rms_dbfs": -26.67,
+        "peak_dbfs": -12.19
+      }
+    }
+  ]
+}

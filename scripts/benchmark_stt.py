@@ -61,6 +61,9 @@ class SampleResult:
     audio_ms: float
     stt_ms: float
     end_to_transcript_ms: float
+    confidence: float | None
+    fallback: bool
+    fallback_reason: str | None
 
 
 def _tokens(value: str) -> list[str]:
@@ -225,6 +228,14 @@ def _term_score(reference: str, hypothesis: str, terms: dict[str, list[str]]) ->
 
 
 async def _run(args: argparse.Namespace) -> dict:
+    if args.provider:
+        os.environ["VOICE_STT_PROVIDER"] = args.provider
+    if args.model:
+        os.environ["VOICE_STT_MODEL"] = args.model
+    if args.device:
+        os.environ["VOICE_STT_DEVICE"] = args.device
+    if args.compute_type:
+        os.environ["VOICE_STT_COMPUTE_TYPE"] = args.compute_type
     if args.torch_threads is not None:
         os.environ["VOICE_TORCH_CPU_THREADS"] = str(args.torch_threads)
     settings = get_settings()
@@ -324,6 +335,9 @@ async def _run(args: argparse.Namespace) -> dict:
             audio_ms=audio.duration_seconds * 1000,
             stt_ms=stt_ms,
             end_to_transcript_ms=stt_ms,
+            confidence=result.confidence,
+            fallback=result.fallback,
+            fallback_reason=result.fallback_reason,
         ))
         peak_rss = max(peak_rss, process.memory_info().rss)
 
@@ -340,6 +354,11 @@ async def _run(args: argparse.Namespace) -> dict:
         "last_token_deletions": sum(item.last_token_deleted for item in results),
         "false_positive_vad": sum(item.false_positive_vad for item in results),
         "short_utterance_misses": sum(item.short_utterance_missed for item in results),
+        "fallback_count": sum(item.fallback for item in results),
+        "uncertain_count": sum(
+            item.confidence is not None and item.confidence < 0.6
+            for item in results
+        ),
         "stt_p50_ms": _percentile(latencies, .50),
         "stt_p95_ms": _percentile(latencies, .95),
         "end_to_transcript_p50_ms": _percentile(
@@ -372,6 +391,12 @@ async def _run(args: argparse.Namespace) -> dict:
         "provider": settings.voice_stt_provider,
         "model": settings.voice_stt_model,
         "device": settings.voice_stt_device,
+        "candidate": {
+            "provider": settings.voice_stt_provider,
+            "model": settings.voice_stt_model,
+            "device": settings.voice_stt_device,
+            "compute_type": settings.voice_stt_compute_type,
+        },
         "metrics": metrics,
         "samples": [asdict(item) for item in results],
     }
@@ -392,11 +417,18 @@ def _compare(baseline_path: Path, candidate_path: Path) -> dict:
         left["end_to_transcript_p95_ms"] * 1.10,
         left["end_to_transcript_p95_ms"] + 100,
     )
+    short_miss_rate = right["short_utterance_misses"] / max(1, right["sample_count"])
     gates = {
         "quality_not_worse": not regressions,
-        "term_accuracy_100_percent": right["term_accuracy"] == 1.0,
+        "wer_improves_at_least_30_percent": (
+            left["wer"] > 0 and right["wer"] <= left["wer"] * 0.70
+        ),
+        "term_accuracy_at_least_90_percent": right["term_accuracy"] >= 0.90,
+        "short_utterance_miss_rate_at_most_1_percent": short_miss_rate <= 0.01,
         "stt_p95_within_5_percent": right["stt_p95_ms"] <= latency_limit,
         "full_p95_within_10_percent_or_100ms": right["end_to_transcript_p95_ms"] <= full_limit,
+        "stt_p95_at_most_1500ms": right["stt_p95_ms"] <= 1500,
+        "end_to_transcript_p95_at_most_1500ms": right["end_to_transcript_p95_ms"] <= 1500,
         "boundary_or_short_metric_improved": any(
             right[key] < left[key]
             for key in ("first_token_deletions", "last_token_deletions", "short_utterance_misses")
@@ -421,6 +453,14 @@ def _thread_sweep(args: argparse.Namespace) -> dict:
             "--manifest", str(args.manifest), "--output", str(output),
             "--torch-threads", str(threads),
         ]
+        if args.provider:
+            command.extend(["--provider", args.provider])
+        if args.model:
+            command.extend(["--model", args.model])
+        if args.device:
+            command.extend(["--device", args.device])
+        if args.compute_type:
+            command.extend(["--compute-type", args.compute_type])
         if args.streaming_replay:
             command.append("--streaming-replay")
         command.append("--tts-probe")
@@ -466,6 +506,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--streaming-replay", action="store_true")
     parser.add_argument("--frame-ms", type=int, default=20)
     parser.add_argument("--torch-threads", type=int, choices=(1, 2, 4, 8))
+    parser.add_argument("--provider", choices=("gigaam", "faster_whisper", "qwen3_asr", "mock"))
+    parser.add_argument("--model")
+    parser.add_argument("--device", choices=("cpu", "cuda", "auto"))
+    parser.add_argument("--compute-type")
     parser.add_argument("--tts-probe", action="store_true")
     return parser
 
