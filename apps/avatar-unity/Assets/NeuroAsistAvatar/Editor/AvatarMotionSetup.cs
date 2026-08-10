@@ -21,9 +21,11 @@ namespace NeuroAsist.AvatarEditor
             var controller = EnsureController();
             var mask = EnsureMask();
             if (controller.layers.Length > 1) { var layers = controller.layers; layers[1].avatarMask = mask; controller.layers = layers; }
+            AssignIncludedClips(controller);
             EditorUtility.SetDirty(settings);
+            EditorUtility.SetDirty(controller);
             AssetDatabase.SaveAssets();
-            Debug.Log("[AvatarMotion] Motion assets created. Run Setup Canonical Scene to assign the controller to the VRM Animator. Animation slots deliberately contain no third-party clips.");
+            Debug.Log("[AvatarMotion] Motion assets and included Mixamo clips are configured. Run Setup Canonical Scene to assign the controller to the VRM Animator.");
         }
 
         internal static AvatarMotionSettings EnsureSettings()
@@ -89,6 +91,50 @@ namespace NeuroAsist.AvatarEditor
             AddStates(layers[1].stateMachine, new[] { "Empty", "TalkGesture01", "Greeting", "Agreement", "Disagreement", "Question", "Explanation", "Thinking", "Surprise", "Frustration", "Farewell", "Shrug" }, "Empty");
             controller.layers = layers;
             return controller;
+        }
+        private static void AssignIncludedClips(AnimatorController controller)
+        {
+            var clips = new Dictionary<string, AnimationClip>();
+            foreach (var item in new[] {
+                "X Bot@Idle", "X Bot@Idle 1", "X Bot@Batter On Deck", "X Bot@Look Around", "X Bot@Thinking",
+                "X Bot@Talking", "X Bot@TalkingQuestion", "X Bot@Waving", "X Bot@WavingGoodbye", "X Bot@Agreeing",
+                "X Bot@Shaking Head No", "X Bot@Shrugging", "X Bot@Surprised", "X Bot@Angry",
+            })
+            {
+                var path = "Assets/NeuroAsistAvatar/Animations/" + item + ".fbx";
+                foreach (var asset in AssetDatabase.LoadAllAssetsAtPath(path))
+                    if (asset is AnimationClip clip && !clip.name.StartsWith("__preview__")) { clips[item] = clip; break; }
+            }
+
+            var assignments = new Dictionary<string, string>
+            {
+                ["IdleNeutral"] = "X Bot@Idle",
+                ["IdleRelaxed"] = "X Bot@Idle 1",
+                ["IdleEnergetic"] = "X Bot@Batter On Deck",
+                ["IdleSad"] = "X Bot@Thinking",
+                ["IdleThinking"] = "X Bot@Thinking",
+                ["IdleLookAround"] = "X Bot@Look Around",
+                ["IdleShiftWeight"] = "X Bot@Idle 1",
+                ["IdleSmallStretch"] = "X Bot@Batter On Deck",
+                ["TalkGesture01"] = "X Bot@Talking",
+                ["Greeting"] = "X Bot@Waving",
+                ["Agreement"] = "X Bot@Agreeing",
+                ["Disagreement"] = "X Bot@Shaking Head No",
+                ["Question"] = "X Bot@TalkingQuestion",
+                ["Explanation"] = "X Bot@Talking",
+                ["Thinking"] = "X Bot@Thinking",
+                ["Surprise"] = "X Bot@Surprised",
+                ["Frustration"] = "X Bot@Angry",
+                ["Farewell"] = "X Bot@WavingGoodbye",
+                ["Shrug"] = "X Bot@Shrugging",
+            };
+            foreach (var layer in controller.layers) AssignLayerClips(layer.stateMachine, assignments, clips);
+        }
+        private static void AssignLayerClips(AnimatorStateMachine machine, IDictionary<string, string> assignments, IDictionary<string, AnimationClip> clips)
+        {
+            foreach (var child in machine.states)
+                if (assignments.TryGetValue(child.state.name, out var assetName) && clips.TryGetValue(assetName, out var clip)) child.state.motion = clip;
+            foreach (var child in machine.stateMachines) AssignLayerClips(child.stateMachine, assignments, clips);
         }
         private static void AddStates(AnimatorStateMachine machine, IEnumerable<string> names, string defaultName)
         {

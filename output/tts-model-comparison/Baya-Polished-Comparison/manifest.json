@@ -1,0 +1,64 @@
+{
+  "provider": "silero",
+  "model": "v5_5_ru",
+  "speaker": "baya",
+  "device": "cpu",
+  "stress": "ready",
+  "filter_cutoff_hz": 12000,
+  "text": "Привет. Я рядом. Можешь спокойно рассказать, что случилось? Я всё выслушаю и постараюсь помочь.",
+  "load_seconds": 7.1043,
+  "samples": [
+    {
+      "variant_id": "balanced",
+      "label": "Чистый и ровный",
+      "description": "Без искусственных смысловых пауз, темп 1.0.",
+      "audio": "baya_balanced.wav",
+      "tempo": 1.0,
+      "style": "normal",
+      "adaptive_prosody": false,
+      "expression_level": "natural",
+      "generation_seconds": 0.4355,
+      "audio_duration_seconds": 7.2005,
+      "rtf": 0.0605
+    },
+    {
+      "variant_id": "slow_soft",
+      "label": "Чистый и мягкий",
+      "description": "Чуть медленнее и спокойнее, без лишней театральности.",
+      "audio": "baya_slow_soft.wav",
+      "tempo": 0.98,
+      "style": "calm",
+      "adaptive_prosody": false,
+      "expression_level": "minimal",
+      "generation_seconds": 0.4141,
+      "audio_duration_seconds": 7.3739,
+      "rtf": 0.0562
+    },
+    {
+      "variant_id": "natural_pauses",
+      "label": "С естественными паузами",
+      "description": "Сохранены адаптивные паузы, но сипение убрано.",
+      "audio": "baya_natural_pauses.wav",
+      "tempo": 1.0,
+      "style": "normal",
+      "adaptive_prosody": true,
+      "expression_level": "natural",
+      "generation_seconds": 0.3716,
+      "audio_duration_seconds": 7.2005,
+      "rtf": 0.0516
+    },
+    {
+      "variant_id": "lively",
+      "label": "Чуть живее",
+      "description": "Немного быстрее, чтобы убрать ощущение монотонности.",
+      "audio": "baya_lively.wav",
+      "tempo": 1.02,
+      "style": "normal",
+      "adaptive_prosody": true,
+      "expression_level": "natural",
+      "generation_seconds": 0.4136,
+      "audio_duration_seconds": 7.0566,
+      "rtf": 0.0586
+    }
+  ]
+}

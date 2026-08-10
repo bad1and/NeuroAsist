@@ -1,23 +1,32 @@
 export type VadState = "idle" | "listening" | "speech_candidate" | "speech" | "end_pending";
 export type VadEvent = "speech_started" | "speech_ended" | null;
 export type MicrophoneProfile = "headset" | "balanced" | "speakers";
+export type CaptureProfile = MicrophoneProfile | "live";
 
 export type CaptureMetadata = {
   sampleRate: number;
   channels: number;
-  profile: MicrophoneProfile;
+  profile: CaptureProfile;
   settings: MediaTrackSettings;
   constraints: MediaTrackConstraints;
   supportedConstraints: MediaTrackSupportedConstraints;
 };
 
-export function microphoneConstraints(profile: MicrophoneProfile): MediaTrackConstraints {
+// Temporary default until the key becomes a runtime setting.
+export const LIVE_MUTE_HOTKEY = "m";
+
+export function microphoneConstraints(profile: CaptureProfile, inputDeviceId = ""): MediaTrackConstraints {
   const processing = {
+    live: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     headset: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
     balanced: { echoCancellation: true, noiseSuppression: false, autoGainControl: false },
     speakers: { echoCancellation: true, noiseSuppression: true, autoGainControl: false },
   }[profile];
-  return { channelCount: { ideal: 1 }, ...processing };
+  return {
+    channelCount: { ideal: 1 },
+    ...processing,
+    ...(inputDeviceId ? { deviceId: { exact: inputDeviceId } } : {}),
+  };
 }
 
 /** Deterministic debounce layer used by the AudioWorklet RMS monitor. */
@@ -26,8 +35,8 @@ export class VoiceActivityGate {
   private since = 0;
 
   constructor(
-    private readonly threshold = 0.018,
-    private readonly candidateMs = 120,
+    private readonly threshold = 0.012,
+    private readonly candidateMs = 160,
     private readonly silenceMs = 700,
   ) {}
 
@@ -61,6 +70,7 @@ class NeuroVadProcessor extends AudioWorkletProcessor {
     super();
     this.pending = [];
     this.frameSamples = Math.max(1, Math.round(sampleRate * 0.020));
+    this.gain = 1;
   }
   process(inputs) {
     const channels = inputs[0];
@@ -73,11 +83,21 @@ class NeuroVadProcessor extends AudioWorkletProcessor {
     while (this.pending.length >= this.frameSamples) {
       const samples = this.pending.splice(0, this.frameSamples);
       const pcm = new Int16Array(samples.length);
+      let inputSum = 0;
+      for (let i = 0; i < samples.length; i++) inputSum += samples[i] * samples[i];
+      const inputRms = Math.sqrt(inputSum / samples.length);
+      if (inputRms > 0.0025) {
+        const targetGain = Math.max(0.65, Math.min(2.0, 0.045 / inputRms));
+        this.gain += (targetGain - this.gain) * 0.12;
+      } else {
+        this.gain += (1 - this.gain) * 0.04;
+      }
       let sum = 0;
       for (let i = 0; i < samples.length; i++) {
-        const value = Math.max(-1, Math.min(1, samples[i]));
+        const amplified = Math.max(-1.2, Math.min(1.2, samples[i] * this.gain));
+        const value = Math.tanh(amplified * 1.25);
         sum += value * value;
-        pcm[i] = value <= -1 ? -32768 : Math.round(value * 32767);
+        pcm[i] = Math.round(value * 32767);
       }
       this.port.postMessage({
         rms: Math.sqrt(sum / samples.length),
@@ -93,7 +113,7 @@ registerProcessor('neuro-vad', NeuroVadProcessor);`;
 
 /**
  * Browser-only monitor. It emits PCM16 frames directly from AudioWorklet; no
- * MediaRecorder blob or local microphone file is created.
+ * Encoded audio blob or local microphone file is created.
  */
 export class BrowserVadRecorder {
   private stream: MediaStream | null = null;
@@ -102,11 +122,13 @@ export class BrowserVadRecorder {
   private sink: GainNode | null = null;
   private objectUrl: string | null = null;
   private readonly gate = new VoiceActivityGate();
+  private muted = false;
 
   async start(
     onPcm: (pcm16: ArrayBuffer, sampleRate: number) => void,
     onState: (state: VadState, event: VadEvent) => void,
-    profile: MicrophoneProfile = "balanced",
+    profile: CaptureProfile = "live",
+    inputDeviceId = "",
   ): Promise<CaptureMetadata> {
     if (this.stream && this.context) {
       const track = this.stream.getAudioTracks()[0];
@@ -122,7 +144,7 @@ export class BrowserVadRecorder {
     if (!globalThis.AudioWorkletNode || !navigator.mediaDevices?.getUserMedia) {
       throw new Error("AudioWorklet VAD is unavailable in this browser");
     }
-    const requestedConstraints = microphoneConstraints(profile);
+    const requestedConstraints = microphoneConstraints(profile, inputDeviceId);
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: requestedConstraints,
     });
@@ -136,9 +158,17 @@ export class BrowserVadRecorder {
     source.connect(this.node);
     this.node.connect(this.sink).connect(this.context.destination);
     this.gate.start(performance.now());
+    this.muted = false;
     onState("listening", null);
     this.node.port.onmessage = ({ data }) => {
-      onPcm(data.pcm as ArrayBuffer, Number(data.sampleRate) || this.context?.sampleRate || 48000);
+      const pcm = data.pcm as ArrayBuffer;
+      // Keep feeding silence while muted so backend VAD can close a speech
+      // turn cleanly without tearing down the live session.
+      onPcm(
+        this.muted ? new ArrayBuffer(pcm.byteLength) : pcm,
+        Number(data.sampleRate) || this.context?.sampleRate || 48000,
+      );
+      if (this.muted) return;
       const previousState = this.gate.snapshot();
       const event = this.gate.feed(Number(data.rms) || 0, performance.now());
       const nextState = this.gate.snapshot();
@@ -160,7 +190,19 @@ export class BrowserVadRecorder {
     };
   }
 
+  setMuted(muted: boolean): void {
+    this.muted = muted;
+    const track = this.stream?.getAudioTracks()[0];
+    if (track) track.enabled = !muted;
+    if (muted) {
+      this.gate.stop();
+    } else if (this.context) {
+      this.gate.start(performance.now());
+    }
+  }
+
   stop(): void {
+    this.muted = false;
     this.gate.stop();
     this.node?.disconnect();
     this.sink?.disconnect();
@@ -177,6 +219,11 @@ export class PcmInputClient {
   private pending: ArrayBuffer[] = [];
   private pendingBytes = 0;
   private maxPendingBytes = 192000;
+  private connectionPromise: Promise<void> | null = null;
+  private reconnectTimer: number | null = null;
+  private reconnectAttempt = 0;
+  private manuallyClosed = true;
+  private config: { sampleRate: number; language: string; capture?: CaptureMetadata } | null = null;
   constructor(
     private readonly url: string,
     private readonly onEvent: (event: {
@@ -195,30 +242,48 @@ export class PcmInputClient {
   async connect(
     sampleRate: number,
     language: string,
-    mode: "hands_free" | "live_conversation" = "hands_free",
     capture?: CaptureMetadata,
   ): Promise<void> {
+    this.config = { sampleRate, language, capture };
+    this.manuallyClosed = false;
     if (this.socket?.readyState === WebSocket.OPEN) return;
+    if (this.connectionPromise) return this.connectionPromise;
+    this.connectionPromise = this.openSocket();
+    try {
+      await this.connectionPromise;
+    } finally {
+      this.connectionPromise = null;
+    }
+  }
+
+  private async openSocket(): Promise<void> {
+    const config = this.config;
+    if (!config || this.manuallyClosed) return;
     const socket = new WebSocket(this.url);
     this.socket = socket;
     await new Promise<void>((resolve, reject) => {
       let settled = false;
       socket.onopen = () => {
-        this.maxPendingBytes = Math.max(32000, sampleRate * 2);
+        this.maxPendingBytes = Math.max(32000, config.sampleRate * 2);
         socket.send(JSON.stringify({
           type: "voice.input.start",
-          sample_rate: sampleRate,
+          protocol_version: 3,
+          sample_rate: config.sampleRate,
           channels: 1,
           format: "pcm_s16le",
-          language,
-          mode,
-          capture_profile: capture?.profile ?? "balanced",
-          capture_settings: capture?.settings ?? {},
-          capture_constraints: capture?.constraints ?? {},
-          supported_constraints: capture?.supportedConstraints ?? {},
+          language: config.language,
+          capture_profile: config.capture?.profile ?? "live",
+          capture_settings: config.capture?.settings ?? {},
+          capture_constraints: config.capture?.constraints ?? {},
+          supported_constraints: config.capture?.supportedConstraints ?? {},
         }));
       };
-      socket.onerror = () => reject(new Error("PCM input WebSocket failed"));
+      socket.onerror = () => {
+        if (!settled) {
+          settled = true;
+          reject(new Error("PCM input WebSocket failed"));
+        }
+      };
       socket.onmessage = (message) => {
         const event = JSON.parse(String(message.data));
         if (event.type === "voice.input.ready") {
@@ -226,17 +291,38 @@ export class PcmInputClient {
           for (const frame of this.pending) socket.send(frame);
           this.pending = [];
           this.pendingBytes = 0;
+          this.reconnectAttempt = 0;
           settled = true;
           resolve();
         }
         this.onEvent(event);
       };
       socket.onclose = () => {
+        const isCurrent = this.socket === socket;
+        if (isCurrent) {
+          this.socket = null;
+          this.ready = false;
+        }
         if (!settled) reject(new Error("PCM input WebSocket closed before ready"));
+        if (isCurrent && !this.manuallyClosed) this.scheduleReconnect();
       };
     });
   }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer !== null || this.manuallyClosed || !this.config) return;
+    const delay = Math.min(2000, 250 * (2 ** this.reconnectAttempt));
+    this.reconnectAttempt = Math.min(this.reconnectAttempt + 1, 4);
+    this.onEvent({ type: "voice.input.reconnecting", message: `Повторное подключение через ${delay} мс` });
+    this.reconnectTimer = globalThis.setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.connect(this.config!.sampleRate, this.config!.language, this.config!.capture)
+        .catch(() => undefined);
+    }, delay);
+  }
+
   sendPcm(pcm16: ArrayBuffer): void {
+    if (this.manuallyClosed && this.config !== null) return;
     if (this.ready && this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(pcm16);
       return;
@@ -248,7 +334,15 @@ export class PcmInputClient {
     }
   }
   close(): void {
-    this.socket?.send(JSON.stringify({ type: "voice.input.stop" }));
+    this.manuallyClosed = true;
+    this.config = null;
+    if (this.reconnectTimer !== null) {
+      globalThis.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify({ type: "voice.input.stop" }));
+    }
     this.socket?.close();
     this.socket = null;
     this.ready = false;

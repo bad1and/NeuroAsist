@@ -1,0 +1,67 @@
+{
+  "provider": "silero",
+  "model": "v5_5_ru",
+  "speaker": "baya",
+  "device": "cpu",
+  "stress": "ready",
+  "text": "Привет. Я рядом. Можешь спокойно рассказать, что случилось? Я всё выслушаю и постараюсь помочь.",
+  "load_seconds": 7.1403,
+  "samples": [
+    {
+      "variant_id": "current_48k",
+      "label": "48 кГц, текущая обработка",
+      "description": "Текущий формат приложения: постобработка и целевая громкость −18 dBFS.",
+      "audio": "baya_current_48k.wav",
+      "sample_rate": 48000,
+      "postprocess": true,
+      "generation_seconds": 0.4035,
+      "audio_duration_seconds": 7.2,
+      "rtf": 0.056
+    },
+    {
+      "variant_id": "native_24k",
+      "label": "24 кГц, текущая обработка",
+      "description": "Ближе к исходному формату модели; постобработка сохранена.",
+      "audio": "baya_native_24k.wav",
+      "sample_rate": 24000,
+      "postprocess": true,
+      "generation_seconds": 0.5663,
+      "audio_duration_seconds": 7.2,
+      "rtf": 0.0787
+    },
+    {
+      "variant_id": "raw_48k",
+      "label": "48 кГц, без постобработки",
+      "description": "Сырой вывод модели без усиления и фильтров.",
+      "audio": "baya_raw_48k.wav",
+      "sample_rate": 48000,
+      "postprocess": false,
+      "generation_seconds": 0.2859,
+      "audio_duration_seconds": 7.2,
+      "rtf": 0.0397
+    },
+    {
+      "variant_id": "raw_24k",
+      "label": "24 кГц, без постобработки",
+      "description": "Сырой вывод в формате 24 кГц.",
+      "audio": "baya_raw_24k.wav",
+      "sample_rate": 24000,
+      "postprocess": false,
+      "generation_seconds": 0.4357,
+      "audio_duration_seconds": 7.2,
+      "rtf": 0.0605
+    },
+    {
+      "variant_id": "lowpass_12k",
+      "label": "Мягкий фильтр до 12 кГц",
+      "audio": "baya_lowpass_12k.wav",
+      "cutoff_hz": 12000
+    },
+    {
+      "variant_id": "lowpass_10k",
+      "label": "Более сильный фильтр до 10 кГц",
+      "audio": "baya_lowpass_10k.wav",
+      "cutoff_hz": 10000
+    }
+  ]
+}

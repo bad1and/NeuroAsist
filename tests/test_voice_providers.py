@@ -14,20 +14,26 @@ import numpy as np
 import pytest
 
 from apps.backend.app.core.config import Settings
+from apps.backend.app.voice.audio import Pcm16Audio
 from apps.backend.app.voice.providers import (
     AudioChunk,
+    FallbackSTTProvider,
     FasterWhisperSTTProvider,
     GigaAMSTTProvider,
+    Qwen3ASRProvider,
     MockTTSProvider,
     SileroTTSProvider,
     TTSProvider,
     TTSRequest,
+    STTProvider,
+    STTResult,
     configure_cmudict,
     normalize_russian_tts_text,
     prepare_english_tts_text,
     split_multilingual_tts_segments,
     split_tts_chunks,
     waveform_to_wav_bytes,
+    one_pole_highpass,
     apply_wav_delivery,
 )
 from apps.backend.app.voice.service import VoiceService
@@ -202,6 +208,65 @@ def test_gigaam_auto_falls_back_to_cpu_during_load(monkeypatch: pytest.MonkeyPat
     assert provider._selected_device == "cpu"
 
 
+def test_qwen3_asr_provider_is_lazy_and_uses_russian_language_hint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FakeModel:
+        def transcribe(self, **kwargs):
+            calls.append(kwargs)
+            return [SimpleNamespace(language="Russian", text="проверка qwen")]
+
+    class FakeQwen:
+        @staticmethod
+        def from_pretrained(model_name: str, **kwargs):
+            calls.append({"model": model_name, **kwargs})
+            return FakeModel()
+
+    monkeypatch.setitem(sys.modules, "qwen_asr", SimpleNamespace(Qwen3ASRModel=FakeQwen))
+    audio_path = tmp_path / "input.wav"
+    audio_path.write_bytes(b"fake")
+    provider = Qwen3ASRProvider("Qwen/Qwen3-ASR-0.6B", "cpu")
+
+    result = asyncio.run(provider.transcribe(audio_path, "ru"))
+
+    assert result.text == "проверка qwen"
+    assert result.provider == "qwen3_asr"
+    assert result.model == "Qwen/Qwen3-ASR-0.6B"
+    assert calls[0]["model"] == "Qwen/Qwen3-ASR-0.6B"
+    assert calls[1] == {"audio": str(audio_path), "language": "Russian"}
+
+
+def test_stt_fallback_runs_only_for_low_snr() -> None:
+    class Primary(STTProvider):
+        async def transcribe(self, audio_path: Path, language: str) -> STTResult:
+            return STTResult("первичный", language, 1, "primary")
+
+        async def transcribe_pcm16(self, audio: Pcm16Audio, language: str) -> STTResult:
+            return STTResult("первичный", language, 1, "primary")
+
+    class Secondary(STTProvider):
+        async def transcribe(self, audio_path: Path, language: str) -> STTResult:
+            return STTResult("вторичный", language, 1, "secondary")
+
+        async def transcribe_pcm16(self, audio: Pcm16Audio, language: str) -> STTResult:
+            return STTResult("вторичный", language, 1, "secondary")
+
+    provider = FallbackSTTProvider(Primary(), Secondary(), min_rms=.01)
+    loud = Pcm16Audio((np.full(1600, 3000, dtype="<i2")).tobytes())
+    quiet = Pcm16Audio((np.full(1600, 100, dtype="<i2")).tobytes())
+
+    loud_result = asyncio.run(provider.transcribe_pcm16(loud, "ru"))
+    quiet_result = asyncio.run(provider.transcribe_pcm16(quiet, "ru"))
+
+    assert loud_result.provider == "primary"
+    assert quiet_result.provider == "secondary"
+    assert quiet_result.fallback is True
+    assert quiet_result.fallback_reason == "low_snr"
+
+
 def test_gigaam_long_audio_split_preserves_pcm_and_stays_under_limit() -> None:
     provider = GigaAMSTTProvider("v3_rnnt", "cpu")
     samples = np.full(30 * 16000, 1000, dtype="<i2")
@@ -214,6 +279,41 @@ def test_gigaam_long_audio_split_preserves_pcm_and_stays_under_limit() -> None:
     assert b"".join(chunks) == pcm16
     assert all(len(chunk) // 2 <= 24 * 16000 for chunk in chunks)
     assert abs((len(chunks[0]) // 2) - int(18.05 * 16000)) <= 1600
+
+
+def test_one_pole_highpass_matches_the_scalar_recurrence() -> None:
+    sample_rate = 48000
+    samples = (
+        np.random.default_rng(7).standard_normal(sample_rate) * 0.3
+    ).astype(np.float32)
+
+    def scalar(cutoff_hz: float) -> np.ndarray:
+        rc = 1.0 / (2.0 * np.pi * cutoff_hz)
+        alpha = rc / (rc + 1.0 / sample_rate)
+        expected = np.empty_like(samples)
+        expected[0] = samples[0]
+        previous_input = float(samples[0])
+        previous_output = float(samples[0])
+        for index in range(1, len(samples)):
+            current = alpha * (previous_output + float(samples[index]) - previous_input)
+            expected[index] = current
+            previous_input = float(samples[index])
+            previous_output = current
+        return expected
+
+    for cutoff_hz in (20.0, 60.0, 1000.0):
+        filtered = one_pole_highpass(samples, sample_rate, cutoff_hz)
+        # Well below the 1/32767 step the waveform is quantised to on the way out.
+        assert np.max(np.abs(filtered - scalar(cutoff_hz))) < 1e-7
+
+
+def test_one_pole_highpass_passes_through_degenerate_input() -> None:
+    samples = np.array([0.5, -0.5], dtype=np.float32)
+    single = samples[:1]
+
+    assert one_pole_highpass(samples, 48000, 0.0) is samples
+    assert one_pole_highpass(samples, 0, 60.0) is samples
+    assert one_pole_highpass(single, 48000, 60.0) is single
 
 
 def test_waveform_to_wav_bytes_clamps_and_writes_pcm16_wav() -> None:
@@ -469,6 +569,27 @@ def test_silero_uses_local_stress_accentor_before_synthesis(
     assert loads == 1
     assert [_spoken_ssml(call) for call in model.calls] == ["м+ама"]
     assert provider.metadata["stress"] == "ready"
+
+
+def test_silero_context_pronunciation_override_bypasses_automatic_stress(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    install_fake_torch(monkeypatch)
+    model = FakeSileroModel()
+
+    provider = SileroTTSProvider(
+        model_loader=lambda: model,
+        stress_accentor_loader=lambda: (lambda text: text.replace("замок", "зам+ок")),
+        warmup=False,
+    )
+    provider.set_pronunciations({
+        "На двери новый замок": "На двери новый з+амок",
+    })
+
+    asyncio.run(provider.synthesize("На двери новый замок.", "baya", tmp_path / "reply.wav"))
+
+    assert [_spoken_ssml(call) for call in model.calls] == ["На двери новый з+амок."]
 
 
 def test_silero_stress_failure_keeps_builtin_stress_fallback(

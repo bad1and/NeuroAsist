@@ -11,14 +11,16 @@ from apps.backend.app.schemas.settings import (
 
 router = APIRouter()
 AVAILABLE_PERSONALITIES = ["default"]
+AVAILABLE_INTERFACE_LOCALES = {"ru", "en"}
 AVAILABLE_VOICE_LANGUAGES = ["auto", "ru", "en"]
-MIN_PLAYBACK_RATE = 0.75
-MAX_PLAYBACK_RATE = 1.25
+MIN_PLAYBACK_RATE = 0.70
+MAX_PLAYBACK_RATE = 1.30
 MIN_PREBUFFER_SEGMENTS = 1
 MAX_PREBUFFER_SEGMENTS = 4
 MIN_PREBUFFER_MS = 0
 MAX_PREBUFFER_MS = 1500
 MEMORY_MODES = {"off", "balanced", "automatic", "ask"}
+AVATAR_PLACEMENTS = {"desktop_overlay", "in_app"}
 LIVE_SETTING_VALUES = {
     "live_conversation_participant_mode": {"one_to_one", "group"},
     "live_conversation_engagement": {"low", "balanced", "high"},
@@ -49,8 +51,11 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         provider="deepseek",
         model=settings.deepseek_model,
         personality=runtime_settings.personality,
+        interface_locale=runtime_settings.interface_locale,
         voice_language=runtime_settings.voice_language,
         voice_microphone_profile=runtime_settings.voice_microphone_profile,
+        voice_input_device_id=runtime_settings.voice_input_device_id,
+        voice_output_device_id=runtime_settings.voice_output_device_id,
         voice_vad=dict(request.app.state.voice_input_session_manager.vad_status),
         voice_input_diagnostic_audio_enabled=settings.voice_input_diagnostic_audio,
         voice_stt_model=settings.voice_stt_model,
@@ -59,6 +64,8 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         voice_tts_model=tts_metadata.get("model"),
         voice_tts_device=tts_metadata.get("device"),
         avatar_enabled=settings.avatar_enabled,
+        avatar_placement=runtime_settings.avatar_placement,
+        avatar_in_app_visible=runtime_settings.avatar_in_app_visible,
         voice_tts_voice=runtime_settings.voice_tts_voice or settings.voice_tts_default_voice,
         voice_tts_style=str(getattr(request.app.state, "voice_tts_style", "auto")),
         voice_tts_expression_level=str(getattr(request.app.state, "voice_tts_expression_level", "natural")),
@@ -98,7 +105,7 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
 
 
 @router.patch("/settings/runtime", response_model=PublicSettingsResponse)
-def patch_runtime_settings(
+async def patch_runtime_settings(
     payload: RuntimeSettingsPatch,
     request: Request,
 ) -> PublicSettingsResponse:
@@ -113,6 +120,14 @@ def patch_runtime_settings(
                 detail="Unsupported personality",
             )
         runtime_settings.personality = payload.personality
+
+    if payload.interface_locale is not None:
+        if payload.interface_locale not in AVAILABLE_INTERFACE_LOCALES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unsupported interface locale",
+            )
+        runtime_settings.interface_locale = payload.interface_locale
 
     if payload.voice_language is not None:
         if payload.voice_language not in AVAILABLE_VOICE_LANGUAGES:
@@ -129,6 +144,12 @@ def patch_runtime_settings(
                 detail="Unsupported microphone profile",
             )
         runtime_settings.voice_microphone_profile = payload.voice_microphone_profile
+
+    if payload.voice_input_device_id is not None:
+        runtime_settings.voice_input_device_id = payload.voice_input_device_id
+
+    if payload.voice_output_device_id is not None:
+        runtime_settings.voice_output_device_id = payload.voice_output_device_id
 
     if payload.voice_tts_voice is not None:
         if payload.voice_tts_voice not in _available_tts_voices(request):
@@ -180,7 +201,17 @@ def patch_runtime_settings(
         runtime_settings.reflection_min_significance = round(payload.reflection_min_significance, 2)
 
     if payload.live_conversation_enabled is not None:
-        runtime_settings.live_conversation_enabled = payload.live_conversation_enabled
+        # Kept as a compatibility field for old clients; live is the only
+        # supported voice mode and therefore cannot be disabled here.
+        runtime_settings.live_conversation_enabled = True
+
+    if payload.avatar_placement is not None:
+        if payload.avatar_placement not in AVATAR_PLACEMENTS:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported avatar placement")
+        runtime_settings.avatar_placement = payload.avatar_placement
+
+    if payload.avatar_in_app_visible is not None:
+        runtime_settings.avatar_in_app_visible = payload.avatar_in_app_visible
 
     for field_name, allowed_values in LIVE_SETTING_VALUES.items():
         value = getattr(payload, field_name)
@@ -201,6 +232,14 @@ def patch_runtime_settings(
             detail="Could not persist settings",
         ) from error
 
+    # A selected output is rendered by the WebView because it can target a
+    # concrete Windows device. Unity keeps decoding the same stream for lip
+    # sync, but must stay muted so the answer is never played twice.
+    if payload.voice_output_device_id is not None:
+        await request.app.state.avatar_service.set_audio_muted(
+            bool(runtime_settings.voice_output_device_id),
+        )
+
     event_bus.publish(
         "backend.status",
         "info",
@@ -208,8 +247,11 @@ def patch_runtime_settings(
         {
             "model": settings.deepseek_model,
             "personality": runtime_settings.personality,
+            "interface_locale": runtime_settings.interface_locale,
             "voice_language": runtime_settings.voice_language,
             "voice_microphone_profile": runtime_settings.voice_microphone_profile,
+            "voice_input_device_id": runtime_settings.voice_input_device_id,
+            "voice_output_device_id": runtime_settings.voice_output_device_id,
             "voice_tts_voice": runtime_settings.voice_tts_voice,
             "voice_playback_rate": runtime_settings.voice_playback_rate,
             "voice_live_playback_prebuffer_segments": runtime_settings.voice_live_playback_prebuffer_segments,
@@ -219,6 +261,8 @@ def patch_runtime_settings(
             "reflections_enabled": runtime_settings.reflections_enabled,
             "reflection_min_significance": runtime_settings.reflection_min_significance,
             "live_conversation_enabled": runtime_settings.live_conversation_enabled,
+            "avatar_placement": runtime_settings.avatar_placement,
+            "avatar_in_app_visible": runtime_settings.avatar_in_app_visible,
             **{
                 field_name: getattr(runtime_settings, field_name)
                 for field_name in LIVE_SETTING_VALUES

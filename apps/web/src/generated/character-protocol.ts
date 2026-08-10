@@ -6,7 +6,7 @@ export type Gesture = "none" | "auto" | "talk" | "greeting" | "agreement" | "dis
 
 export type AffectCue = { emotion: Emotion; intensity: number; valence: number; arousal: number };
 export type GestureCue = { name: Gesture; intensity: number; interrupt: boolean };
-export type DeliveryOverride = { segment: number; pace: "slow" | "normal" | "fast"; emphasis: "none" | "light" };
+export type DeliveryOverride = { segment: number; pace: "slow" | "normal" | "fast"; speed?: number | null; emphasis: "none" | "light" };
 export type DeliveryCue = { pace: "slow" | "normal" | "fast"; emphasis: number; overrides: DeliveryOverride[] };
 export type ContinuityCue = { referenced_memory_ids: string[]; referenced_episode_ids: string[]; closes_open_loop_ids: string[] };
 export type CharacterTurn = { protocol_version: 3; reply: string; intent: Intent; affect: AffectCue; gesture: GestureCue; delivery: DeliveryCue; continuity?: ContinuityCue | null };

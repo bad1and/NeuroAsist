@@ -1,0 +1,202 @@
+{
+  "profile": {
+    "id": "iris_cute_v1",
+    "description": "Экспериментальный мягкий и живой голос Ирис для прослушивания перед интеграцией.",
+    "provider": "supertonic",
+    "model": "supertonic-3",
+    "language": "ru",
+    "voice": "F2",
+    "custom_voice_style_path": null,
+    "voice_source": "built-in F2; заменить на Iris-Cute.json после Voice Builder",
+    "generation": {
+      "total_steps": 6,
+      "speed": 1.0,
+      "max_chunk_length": 300,
+      "silence_duration_seconds": 0.15
+    },
+    "delivery": {
+      "tempo": 1.0,
+      "pause_before_ms": 0,
+      "pause_after_ms": 100,
+      "loudness_target_dbfs": -18.0,
+      "peak_ceiling_dbfs": -1.0,
+      "highpass_cutoff_hz": 60.0,
+      "pitch_shift_semitones": 0.0,
+      "pitch_shift_max_semitones": 1.0,
+      "pitch_shift_enabled": false
+    },
+    "persona": {
+      "tone": "soft, bright, playful, warm, natural",
+      "avoid": [
+        "baby-talk",
+        "constant diminutives",
+        "forced high pitch",
+        "mewing in every reply",
+        "overacting"
+      ],
+      "expression_tags": [
+        "breath",
+        "laugh",
+        "sigh"
+      ]
+    },
+    "stress": {
+      "enabled": false,
+      "marker": "combining acute accent U+0301",
+      "example": "поняла́, за́мок, муку́",
+      "plus_notation": false,
+      "notes": "Отключено: Supertonic не документирует этот маркер, а локальный тест дал надрыв. Использовать только лексические перефразы."
+    },
+    "cases": [
+      {
+        "id": "01_greeting",
+        "label": "Мягкое приветствие",
+        "text": "Привет. Я рядом. Расскажешь, как у тебя дела?",
+        "tts_text": "Привет… Я рядом. Расскажешь, как у тебя дела?"
+      },
+      {
+        "id": "02_reaction",
+        "label": "Светлая реакция",
+        "text": "Ой, правда? Это так здорово! Я немножко волновалась, но теперь всё хорошо.",
+        "tts_text": "Ой, правда? Это так здорово! Я немножко волновалась, но теперь всё хорошо."
+      },
+      {
+        "id": "03_support",
+        "label": "Заботливый тон",
+        "text": "Давай спокойно разберёмся. Я помогу, а ты можешь не спешить.",
+        "tts_text": "Давай спокойно разберёмся. Я помогу, а ты можешь не спешить."
+      },
+      {
+        "id": "04_technical",
+        "label": "Техническая фраза после нормализации",
+        "text": "Проверка завершена 5 августа 2026 года в 21:45. Видеокарта GTX 1660 SUPER имеет 6 гигабайт VRAM; API ответил за 187 миллисекунд, а версия приложения — 0.5.3.",
+        "tts_text": "Проверка завершена пятого августа две тысячи двадцать шестого года в двадцать один час сорок пять минут. Видеокарта джи ти икс одна тысяча шестьсот шестьдесят супер имеет шесть гигабайт ви рам; эй пи ай ответил за сто восемьдесят семь миллисекунд, а версия приложения — ноль точка пять точка три."
+      },
+      {
+        "id": "05_breath",
+        "label": "Мягкая пауза и дыхание",
+        "text": "Ох… Я немного устала, но всё равно рада тебя слышать.",
+        "tts_text": "Ох… <breath> Я немного устала, но всё равно рада тебя слышать."
+      },
+      {
+        "id": "06_natural_long",
+        "label": "Длинная естественная реплика",
+        "text": "Иногда мне хочется просто побыть рядом и спокойно поговорить. Без спешки, без лишнего шума — только ты, я и то, что сейчас действительно важно.",
+        "tts_text": "Иногда мне хочется просто побыть рядом и спокойно поговорить. Без спешки, без лишнего шума — только ты, я и то, что сейчас действительно важно."
+      }
+    ]
+  },
+  "profile_path": "D:\\NeroPizda\\NeuroAsist\\output\\tts-model-comparison\\iris_cute_v1.json",
+  "model_dir": "C:\\Users\\Romanov\\.cache\\supertonic3",
+  "voice_used": "F2",
+  "samples": [
+    {
+      "id": "01_greeting",
+      "label": "Мягкое приветствие",
+      "text": "Привет. Я рядом. Расскажешь, как у тебя дела?",
+      "tts_text": "Привет… Я рядом. Расскажешь, как у тебя дела?",
+      "audio": "01_greeting.wav",
+      "voice": "F2",
+      "generation_seconds": 0.8926,
+      "model_duration_seconds": 4.4202,
+      "rtf": 0.2019,
+      "audio_metrics": {
+        "sample_rate": 44100,
+        "duration_seconds": 4.5582,
+        "rms_dbfs": -22.28,
+        "peak_dbfs": -2.57,
+        "clipped_samples_percent": 0.0
+      }
+    },
+    {
+      "id": "02_reaction",
+      "label": "Светлая реакция",
+      "text": "Ой, правда? Это так здорово! Я немножко волновалась, но теперь всё хорошо.",
+      "tts_text": "Ой, правда? Это так здорово! Я немножко волновалась, но теперь всё хорошо.",
+      "audio": "02_reaction.wav",
+      "voice": "F2",
+      "generation_seconds": 1.3978,
+      "model_duration_seconds": 7.5541,
+      "rtf": 0.185,
+      "audio_metrics": {
+        "sample_rate": 44100,
+        "duration_seconds": 7.6929,
+        "rms_dbfs": -22.2,
+        "peak_dbfs": -2.89,
+        "clipped_samples_percent": 0.0
+      }
+    },
+    {
+      "id": "03_support",
+      "label": "Заботливый тон",
+      "text": "Давай спокойно разберёмся. Я помогу, а ты можешь не спешить.",
+      "tts_text": "Давай спокойно разберёмся. Я помогу, а ты можешь не спешить.",
+      "audio": "03_support.wav",
+      "voice": "F2",
+      "generation_seconds": 1.2728,
+      "model_duration_seconds": 5.0621,
+      "rtf": 0.2514,
+      "audio_metrics": {
+        "sample_rate": 44100,
+        "duration_seconds": 5.1852,
+        "rms_dbfs": -21.5,
+        "peak_dbfs": -3.69,
+        "clipped_samples_percent": 0.0
+      }
+    },
+    {
+      "id": "04_technical",
+      "label": "Техническая фраза после нормализации",
+      "text": "Проверка завершена 5 августа 2026 года в 21:45. Видеокарта GTX 1660 SUPER имеет 6 гигабайт VRAM; API ответил за 187 миллисекунд, а версия приложения — 0.5.3.",
+      "tts_text": "Проверка завершена пятого августа две тысячи двадцать шестого года в двадцать один час сорок пять минут. Видеокарта джи ти икс одна тысяча шестьсот шестьдесят супер имеет шесть гигабайт ви рам; эй пи ай ответил за сто восемьдесят семь миллисекунд, а версия приложения — ноль точка пять точка три.",
+      "audio": "04_technical.wav",
+      "voice": "F2",
+      "generation_seconds": 4.3164,
+      "model_duration_seconds": 20.7197,
+      "rtf": 0.2083,
+      "audio_metrics": {
+        "sample_rate": 44100,
+        "duration_seconds": 20.8586,
+        "rms_dbfs": -20.69,
+        "peak_dbfs": -4.08,
+        "clipped_samples_percent": 0.0
+      }
+    },
+    {
+      "id": "05_breath",
+      "label": "Мягкая пауза и дыхание",
+      "text": "Ох… Я немного устала, но всё равно рада тебя слышать.",
+      "tts_text": "Ох… <breath> Я немного устала, но всё равно рада тебя слышать.",
+      "audio": "05_breath.wav",
+      "voice": "F2",
+      "generation_seconds": 0.9905,
+      "model_duration_seconds": 5.0118,
+      "rtf": 0.1976,
+      "audio_metrics": {
+        "sample_rate": 44100,
+        "duration_seconds": 5.1155,
+        "rms_dbfs": -21.73,
+        "peak_dbfs": -5.85,
+        "clipped_samples_percent": 0.0
+      }
+    },
+    {
+      "id": "06_natural_long",
+      "label": "Длинная естественная реплика",
+      "text": "Иногда мне хочется просто побыть рядом и спокойно поговорить. Без спешки, без лишнего шума — только ты, я и то, что сейчас действительно важно.",
+      "tts_text": "Иногда мне хочется просто побыть рядом и спокойно поговорить. Без спешки, без лишнего шума — только ты, я и то, что сейчас действительно важно.",
+      "audio": "06_natural_long.wav",
+      "voice": "F2",
+      "generation_seconds": 2.6724,
+      "model_duration_seconds": 10.6063,
+      "rtf": 0.252,
+      "audio_metrics": {
+        "sample_rate": 44100,
+        "duration_seconds": 10.758,
+        "rms_dbfs": -20.79,
+        "peak_dbfs": -3.26,
+        "clipped_samples_percent": 0.0
+      }
+    }
+  ]
+}

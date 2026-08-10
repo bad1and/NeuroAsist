@@ -1,7 +1,9 @@
+import asyncio
 import json
 import logging
 import re
 from difflib import SequenceMatcher
+from functools import lru_cache
 from dataclasses import dataclass
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, Callable
@@ -35,6 +37,15 @@ class _ParseResult:
     turn: CharacterTurn | None = None
 
 
+# A single turn normalises the same `previous_assistant_reply` and `user_text`
+# from several guard predicates in a row, and the regex walks every character
+# each time. The cache only has to span those few calls, so it is kept small
+# rather than growing into an accidental transcript of the conversation.
+@lru_cache(maxsize=32)
+def _normalize_for_similarity(value: str) -> str:
+    return " ".join(re.findall(r"[^\W_]+", value.lower(), flags=re.UNICODE))
+
+
 class CharacterAgent:
     def __init__(
         self,
@@ -59,20 +70,17 @@ class CharacterAgent:
         self._last_user_message = None
         self._active_turn_id: str | None = None
 
-    async def handle_user_message(
+    def _prepare_turn(
         self,
         session_id: str,
         user_text: str,
-        input_mode: str = "text",
+        input_mode: str,
         *,
         source_message=None,
-        persist_reply: bool = True,
-        persist_reply_callback: Callable[[str], Any] | None = None,
-        state_context: str | None = None,
-        state_behavior: "BehaviorGuide | None" = None,
         raw_user_text: str | None = None,
         voice_corrections: tuple[dict[str, object], ...] = (),
-    ) -> dict[str, Any]:
+    ):
+        """Perform synchronous persistence/context work outside the event loop."""
         interpreted = (
             VoiceInputInterpretation(user_text, len(voice_corrections), voice_corrections)
             if input_mode == "voice" and raw_user_text is not None
@@ -113,8 +121,38 @@ class CharacterAgent:
                 self._last_user_message,
             )
         built_context = (
-            self._context_manager.build(effective_text, session_id=session_id, current_message_id=getattr(self._last_user_message, "id", None))
-            if self._context_manager else None
+            self._context_manager.build(
+                effective_text,
+                session_id=session_id,
+                current_message_id=getattr(self._last_user_message, "id", None),
+            )
+            if self._context_manager
+            else None
+        )
+        return interpreted, effective_text, built_context
+
+    async def handle_user_message(
+        self,
+        session_id: str,
+        user_text: str,
+        input_mode: str = "text",
+        *,
+        source_message=None,
+        persist_reply: bool = True,
+        persist_reply_callback: Callable[[str], Any] | None = None,
+        state_context: str | None = None,
+        state_behavior: "BehaviorGuide | None" = None,
+        raw_user_text: str | None = None,
+        voice_corrections: tuple[dict[str, object], ...] = (),
+    ) -> dict[str, Any]:
+        interpreted, effective_text, built_context = await asyncio.to_thread(
+            self._prepare_turn,
+            session_id,
+            user_text,
+            input_mode,
+            source_message=source_message,
+            raw_user_text=raw_user_text,
+            voice_corrections=voice_corrections,
         )
         prompt_user_text = (
             built_context.effective_user_text
@@ -344,46 +382,14 @@ class CharacterAgent:
         voice_corrections: tuple[dict[str, object], ...] = (),
     ) -> AsyncIterator[str]:
         """Stream plain reply text and commit history only after clean completion."""
-        interpreted = (
-            VoiceInputInterpretation(user_text, len(voice_corrections), voice_corrections)
-            if input_mode == "voice" and raw_user_text is not None
-            else self._voice_input.interpret(user_text, input_mode)
-        )
-        effective_text = interpreted.text
-        if source_message is None:
-            self.last_memory_updates = self._persist_user_message(
-                session_id,
-                raw_user_text if raw_user_text is not None else user_text,
-                input_mode,
-                interpreted,
-            )
-        else:
-            self._last_user_message = source_message
-            if interpreted.changed:
-                apply_interpretation = getattr(self._history, "apply_voice_interpretation", None)
-                if callable(apply_interpretation):
-                    self._last_user_message = apply_interpretation(
-                        source_message.id,
-                        interpreted.text,
-                        interpreted.replacement_count,
-                        list(interpreted.replacements),
-                    )
-            self._active_turn_id = getattr(source_message, "turn_id", None)
-            self.last_memory_updates = []
-        if self._memory_service is not None:
-            resolved = self._memory_service.resolve_clarification_response(
-                self._last_user_message,
-            )
-            self.last_memory_updates.extend(
-                self._memory_service.memory_update(memory)
-                for memory in resolved
-            )
-            self._memory_service.prepare_clarification_from_message(
-                self._last_user_message,
-            )
-        built_context = (
-            self._context_manager.build(effective_text, session_id=session_id, current_message_id=getattr(self._last_user_message, "id", None))
-            if self._context_manager else None
+        interpreted, effective_text, built_context = await asyncio.to_thread(
+            self._prepare_turn,
+            session_id,
+            user_text,
+            input_mode,
+            source_message=source_message,
+            raw_user_text=raw_user_text,
+            voice_corrections=voice_corrections,
         )
         prompt_user_text = (
             built_context.effective_user_text
@@ -681,6 +687,12 @@ class CharacterAgent:
         buffered: list[str] = []
         released = False
         status_check = self._is_casual_status_check(user_text)
+        # Both depend only on the fixed arguments, so they are resolved once per
+        # turn rather than per delta: `_user_allows_repetition` runs a
+        # SequenceMatcher over the whole previous reply, and the buffering loop
+        # used to repeat it for every chunk before the first word reached TTS.
+        allows_repetition = self._user_allows_repetition(user_text, previous_assistant_reply)
+        duplicate_guard = bool(previous_assistant_reply and not allows_repetition)
         async for delta in self._llm_provider.stream(messages):
             if released:
                 yield delta
@@ -693,7 +705,6 @@ class CharacterAgent:
             # original first-sentence latency and delta cadence.
             sentence_count = len(re.findall(r"[.!?…](?:\s|$)", opening))
             suspicious_opener = bool(re.search(r"(?:^|\n)\s*(?:ну|а)\?\s*(?:я\s+здесь)?", opening.lower()))
-            duplicate_guard = bool(previous_assistant_reply and not self._user_allows_repetition(user_text, previous_assistant_reply))
             required_sentences = 3 if status_check else 2 if suspicious_opener or require_pending_response or duplicate_guard or required_anchors else 1
             if sentence_count < required_sentences and len(opening) < 220:
                 continue
@@ -1025,7 +1036,7 @@ class CharacterAgent:
 
     @staticmethod
     def _normalized_for_similarity(value: str) -> str:
-        return " ".join(re.findall(r"[^\W_]+", value.lower(), flags=re.UNICODE))
+        return _normalize_for_similarity(value)
 
     @classmethod
     def _user_allows_repetition(cls, user_text: str, previous_assistant_reply: str) -> bool:

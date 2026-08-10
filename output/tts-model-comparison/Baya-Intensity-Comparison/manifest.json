@@ -1,0 +1,35 @@
+{
+  "provider": "silero",
+  "model": "v5_5_ru",
+  "speaker": "baya",
+  "device": "cpu",
+  "stress": "ready",
+  "filter_cutoff_hz": 12000,
+  "text": "Привет! Я рядом. Не спеши, расскажи, что случилось — я тебя внимательно выслушаю. Хорошо?",
+  "samples": [
+    {
+      "intensity": 2,
+      "label": "Мягче",
+      "description": "Меньше выраженности, спокойнее интонация.",
+      "audio": "baya_intensity_2.wav"
+    },
+    {
+      "intensity": 3,
+      "label": "Баланс",
+      "description": "Текущий уровень Silero.",
+      "audio": "baya_intensity_3.wav"
+    },
+    {
+      "intensity": 4,
+      "label": "Выразительнее",
+      "description": "Заметнее интонационные движения.",
+      "audio": "baya_intensity_4.wav"
+    },
+    {
+      "intensity": 5,
+      "label": "Максимум",
+      "description": "Верхняя граница для проверки; может быть слишком театрально.",
+      "audio": "baya_intensity_5.wav"
+    }
+  ]
+}

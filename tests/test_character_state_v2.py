@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from pathlib import Path
 
 from apps.backend.app.conversation.schemas import SpeakerRole
@@ -95,3 +96,52 @@ def test_v1_snapshot_adapts_and_disabled_reflection_never_queues(tmp_path: Path)
     service.prepare(transcript="Мы закончили, получилось! " + "важно " * 30, message_id="disabled")
     assert asyncio.run(service.run_reflection_once()) is False
     assert store.list_reflections("primary") == []
+
+
+def test_reflection_causal_window_loads_off_the_event_loop(monkeypatch, tmp_path: Path) -> None:
+    """The worker reads its prompt material in a thread, not on the loop.
+
+    A live turn schedules audio on this same loop, and the read block used to
+    hold it for about 9 ms. It must also complete over one pinned connection.
+    """
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    for index in range(8):
+        store.append_message(
+            role="user" if index % 2 == 0 else "assistant",
+            content=f"реплика {index} " + "несколько слов для контекста " * 10,
+            input_mode="text",
+        )
+    trigger, _ = store.append_message(
+        role="user",
+        content="Мы закончили, получилось! " + "важно " * 30,
+        input_mode="text",
+    )
+    service = CharacterStateService(
+        store,
+        reflection_llm_provider=ReflectionProvider(),
+        event_publisher=lambda *_args, **_kwargs: None,
+    )
+    service.prepare(transcript="Мы закончили, получилось! " + "важно " * 30, message_id=str(trigger.id))
+
+    calls: list[tuple[int, str]] = []
+    for target in (
+        store.get_message,
+        store.load_character_state_snapshot,
+        store.load_participant_states,
+    ):
+        name = getattr(target, "__name__", "?")
+        monkeypatch.setattr(
+            store, name,
+            (lambda wrapped: lambda *args, **kwargs: (
+                calls.append((threading.get_ident(), name)),
+                wrapped(*args, **kwargs),
+            )[1])(target),
+        )
+
+    loop_tid = threading.get_ident()
+    asyncio.run(service.run_reflection_once())
+
+    assert calls, "the worker must read the prompt material"
+    assert all(tid != loop_tid for tid, _ in calls), "reads must happen off the event loop"
+    assert store.list_reflections("primary")

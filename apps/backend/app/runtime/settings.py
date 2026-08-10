@@ -8,9 +8,17 @@ from pathlib import Path
 
 @dataclass
 class RuntimeSettings:
+    # This controls only the application chrome and visible UI copy.  It must
+    # stay independent from ``voice_language`` so changing the interface does
+    # not alter Iris, STT, TTS, or the user's conversation data.
+    interface_locale: str = "ru"
     personality: str = "default"
     voice_language: str = "ru"
     voice_microphone_profile: str = "balanced"
+    # Browser/Windows device IDs are opaque, machine-local identifiers. An
+    # empty value deliberately means "follow the operating-system default".
+    voice_input_device_id: str = ""
+    voice_output_device_id: str = ""
     voice_tts_voice: str | None = None
     voice_playback_rate: float = 1.0
     voice_live_playback_prebuffer_segments: int = 1
@@ -19,7 +27,7 @@ class RuntimeSettings:
     memory_incognito: bool = False
     reflections_enabled: bool = True
     reflection_min_significance: float = 0.55
-    live_conversation_enabled: bool = False
+    live_conversation_enabled: bool = True
     live_conversation_participant_mode: str = "one_to_one"
     live_conversation_engagement: str = "balanced"
     live_conversation_initiative: str = "rare"
@@ -30,6 +38,14 @@ class RuntimeSettings:
     live_conversation_mood_recovery: str = "natural"
     live_conversation_recent_event_weight: str = "balanced"
     live_conversation_echo_mode: str = "auto"
+    # The desktop shell consumes this preference before it starts the Unity
+    # renderer.  It intentionally lives next to the overlay preferences so a
+    # backup restores the avatar exactly as the person left it.
+    avatar_placement: str = "desktop_overlay"
+    # This controls the chat-hosted avatar only.  It must not reuse the
+    # desktop-overlay flag: a hidden desktop popup must not make the avatar
+    # disappear after switching it into Iris.
+    avatar_in_app_visible: bool = True
     avatar_overlay_visible: bool = True
     avatar_overlay_always_on_top: bool = True
     avatar_overlay_locked: bool = True
@@ -71,6 +87,13 @@ class RuntimeSettingsStore:
         # behaviour after upgrading.
         if values.get("memory_mode") == "ask":
             values["memory_mode"] = "balanced"
+        # Voice is live-only since protocol v3. Keep the field readable for
+        # old settings files, but never allow a persisted flag to disable it.
+        values["live_conversation_enabled"] = True
+        if values.get("interface_locale") not in {None, "ru", "en"}:
+            values["interface_locale"] = defaults.interface_locale
+        if values.get("avatar_placement") not in {None, "desktop_overlay", "in_app"}:
+            values["avatar_placement"] = defaults.avatar_placement
         try:
             loaded = RuntimeSettings(**{**defaults_dict, **values})
         except TypeError:

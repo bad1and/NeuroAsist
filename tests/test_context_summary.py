@@ -317,6 +317,93 @@ def test_name_only_followup_does_not_revive_message_after_thirty_seconds(
     assert context.diagnostics["pending_direct_message_count"] == 0
 
 
+def test_explicit_readdressment_recovers_recent_silenced_implicit_request(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "readdressment.sqlite3")
+    store.init_db()
+    question, _ = store.append_message(
+        role="user",
+        content="да нормально вот расскажи какие игры ты любишь",
+        input_mode="voice",
+        created_at="2026-08-02T18:06:04+00:00",
+    )
+    store.save_conversation_observation(
+        message_id=question.id,
+        session_id="live",
+        turn_id=question.turn_id or "question",
+        utterance_id="question",
+        generation=2,
+        speaker_role="unknown",
+        speaker_confidence=.62,
+        addressedness=.08,
+        addressed_confidence=.65,
+        end_of_turn_confidence=1.0,
+        significance=.3,
+        metadata={"addressing_reasons": ["implicit_request"]},
+    )
+    store.set_observation_decision(question.id, "observe", "relevant_opening")
+    current, _ = store.append_message(
+        role="user",
+        content="Это тебе было",
+        input_mode="text",
+        created_at="2026-08-02T18:07:22+00:00",
+    )
+
+    context = ContextManager(store, max_tokens=900, recent_turns=8).build(
+        current.content,
+        current_message_id=current.id,
+    )
+
+    assert context.effective_user_text == question.content
+    assert context.response_target_text == question.content
+    assert context.response_target_message_ids == (question.id,)
+    assert context.diagnostics["explicit_readdressment"] is True
+    assert context.diagnostics["addressing_reasons"] == ["explicit_readdressment"]
+    assert any(
+        message.role == "system" and question.content in message.content
+        for message in context.messages
+    )
+
+
+def test_explicit_readdressment_does_not_revive_named_other_person_request(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "readdressment-other.sqlite3")
+    store.init_db()
+    request, _ = store.append_message(
+        role="user",
+        content="Олег, расскажи какие игры ты любишь",
+        input_mode="voice",
+        created_at="2026-08-02T18:06:04+00:00",
+    )
+    store.save_conversation_observation(
+        message_id=request.id,
+        session_id="live",
+        turn_id=request.turn_id or "request",
+        utterance_id="request",
+        generation=2,
+        speaker_role="unknown",
+        speaker_confidence=.62,
+        addressedness=.08,
+        addressed_confidence=.65,
+        end_of_turn_confidence=1.0,
+        significance=.3,
+        metadata={},
+    )
+    store.set_observation_decision(request.id, "observe", "relevant_opening")
+    current, _ = store.append_message(
+        role="user",
+        content="вопрос был тебе",
+        input_mode="text",
+        created_at="2026-08-02T18:06:20+00:00",
+    )
+
+    context = ContextManager(store, max_tokens=900, recent_turns=8).build(
+        current.content,
+        current_message_id=current.id,
+    )
+
+    assert context.response_target_text is None
+    assert context.diagnostics["explicit_readdressment"] is True
+
+
 def test_context_recovers_question_word_and_stt_iris_alias_from_false_ambient_labels(tmp_path: Path) -> None:
     store = TimelineStore(tmp_path / "recover-direct.sqlite3")
     store.init_db()

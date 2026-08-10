@@ -51,26 +51,6 @@ export type VoiceTtsStatus =
   | "disabled"
   | "skipped";
 
-export type VoiceChatResponse = ChatResponse & {
-  voice_request_id: string;
-  transcript: string;
-  raw_transcript?: string | null;
-  corrections?: Array<{ source: string; target: string; start: number; end: number }>;
-  reply_audio_url?: string | null;
-  tts_status: VoiceTtsStatus;
-  stt: {
-    provider: string;
-    model?: string | null;
-    language?: string | null;
-    duration_ms: number;
-  };
-  tts: {
-    provider: string;
-    voice?: string | null;
-    duration_ms: number;
-  };
-};
-
 export type VoiceLiveResponse = {
   session_id: string;
   utterance_id: string;
@@ -193,12 +173,18 @@ export type AvatarOverlaySettings = {
   height: number;
 };
 
+export type AvatarPlacement = "desktop_overlay" | "in_app";
+export type InterfaceLocale = "ru" | "en";
+
 export type PublicSettings = {
   provider: string;
   model: string;
   personality: string;
+  interface_locale: InterfaceLocale;
   voice_language: string;
   voice_microphone_profile: "headset" | "balanced" | "speakers";
+  voice_input_device_id: string;
+  voice_output_device_id: string;
   voice_vad: {
     configured_provider: string;
     active_provider: string;
@@ -217,6 +203,8 @@ export type PublicSettings = {
   voice_tts_model: string | null;
   voice_tts_device: string | null;
   avatar_enabled: boolean;
+  avatar_placement: AvatarPlacement;
+  avatar_in_app_visible: boolean;
   voice_tts_voice: string;
   voice_tts_style: string;
   voice_tts_expression_level: string;

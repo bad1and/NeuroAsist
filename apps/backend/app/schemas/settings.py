@@ -1,12 +1,15 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PublicSettingsResponse(BaseModel):
     provider: str
     model: str
     personality: str
+    interface_locale: str
     voice_language: str
     voice_microphone_profile: str
+    voice_input_device_id: str
+    voice_output_device_id: str
     voice_vad: dict[str, object]
     voice_input_diagnostic_audio_enabled: bool
     voice_stt_model: str
@@ -15,6 +18,8 @@ class PublicSettingsResponse(BaseModel):
     voice_tts_model: str | None = None
     voice_tts_device: str | None = None
     avatar_enabled: bool
+    avatar_placement: str
+    avatar_in_app_visible: bool
     voice_tts_voice: str
     voice_tts_style: str
     voice_tts_expression_level: str
@@ -56,8 +61,11 @@ class RuntimeSettingsPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     personality: str | None = None
+    interface_locale: str | None = None
     voice_language: str | None = None
     voice_microphone_profile: str | None = None
+    voice_input_device_id: str | None = Field(default=None, max_length=2048)
+    voice_output_device_id: str | None = Field(default=None, max_length=2048)
     voice_tts_voice: str | None = None
     voice_playback_rate: float | None = None
     voice_live_playback_prebuffer_segments: int | None = None
@@ -77,6 +85,8 @@ class RuntimeSettingsPatch(BaseModel):
     live_conversation_mood_recovery: str | None = None
     live_conversation_recent_event_weight: str | None = None
     live_conversation_echo_mode: str | None = None
+    avatar_placement: str | None = None
+    avatar_in_app_visible: bool | None = None
 
 
 class VoiceStylePatch(BaseModel):

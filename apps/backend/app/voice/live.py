@@ -4,6 +4,7 @@ import io
 import logging
 import re
 import time
+import wave
 from dataclasses import dataclass, field
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
@@ -23,6 +24,8 @@ from apps.backend.app.voice.directives import (
 )
 from apps.backend.app.voice.delivery import (
     LiveVoiceDirectiveParser,
+    MAX_SPEECH_TEMPO,
+    MIN_SPEECH_TEMPO,
     SpeechPace,
     SpeechSegment,
     VoiceDirective,
@@ -178,6 +181,7 @@ class VoiceSessionManager:
         raw_transcript: str | None = None,
         transcript_corrections: tuple[dict[str, object], ...] = (),
         playback_rate: float = 1.0,
+        pipeline_started_at: float | None = None,
     ) -> asyncio.Task[None]:
         if not self.connected(session_id):
             raise RuntimeError("Voice WebSocket is not connected")
@@ -188,7 +192,8 @@ class VoiceSessionManager:
             generation=generation,
             voice_style=coerce_voice_style(style_override),
             base_pace=self._pace_for_style(style_override),
-            playback_rate=max(0.75, min(1.25, float(playback_rate))),
+            playback_rate=max(MIN_SPEECH_TEMPO, min(MAX_SPEECH_TEMPO, float(playback_rate))),
+            started_at=pipeline_started_at or time.perf_counter(),
         )
         self._active[session_id] = context
         context.task = asyncio.create_task(
@@ -249,6 +254,15 @@ class VoiceSessionManager:
         directive_sent = False
         pending_voice_directive: VoiceDirective | None = None
         speech_sequence = 0
+        avatar_start_task: asyncio.Task | None = None
+
+        async def ensure_avatar_stream_started() -> None:
+            nonlocal avatar_start_task
+            if avatar_start_task is None:
+                return
+            task = avatar_start_task
+            avatar_start_task = None
+            await task
 
         async def apply_directive(directive: AvatarDirective) -> None:
             nonlocal directive_sent
@@ -271,6 +285,7 @@ class VoiceSessionManager:
             )
             if presentation_cue is not None:
                 context.base_pace = coerce_speech_pace(presentation_cue.tts_pace)
+            await ensure_avatar_stream_started()
             frame = metadata_frame(
                 intent=intent,
                 emotion=directive.emotion.value,
@@ -319,7 +334,7 @@ class VoiceSessionManager:
             segment = SpeechSegment(
                 text=segment.text,
                 pace=segment.pace,
-                tempo=max(0.75, min(1.25, segment.tempo * context.playback_rate)),
+                tempo=max(MIN_SPEECH_TEMPO, min(MAX_SPEECH_TEMPO, segment.tempo * context.playback_rate)),
                 emphasis=segment.emphasis,
                 pause_before_ms=segment.pause_before_ms,
                 pause_after_ms=paragraph_pause,
@@ -361,10 +376,17 @@ class VoiceSessionManager:
             if self._avatar_service is not None:
                 if not self._is_active(context):
                     raise asyncio.CancelledError
-                await self._avatar_service.stream_start(
-                    session_id=context.session_id,
-                    utterance_id=context.utterance_id,
-                    intent=intent,
+                # Avatar startup is independent of LLM preparation. Keep the
+                # ordering guarantee by awaiting it before metadata, while
+                # allowing its websocket round-trip to overlap first-token
+                # latency.
+                avatar_start_task = asyncio.create_task(
+                    self._avatar_service.stream_start(
+                        session_id=context.session_id,
+                        utterance_id=context.utterance_id,
+                        intent=intent,
+                    ),
+                    name=f"avatar-stream-start-{context.utterance_id}",
                 )
             iterator = agent.stream_user_message(
                 context.session_id,
@@ -455,6 +477,10 @@ class VoiceSessionManager:
         except asyncio.CancelledError:
             if on_assistant_interrupted is not None:
                 await on_assistant_interrupted("".join(reply_parts).strip())
+            if avatar_start_task is not None:
+                avatar_start_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await avatar_start_task
             worker.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await worker
@@ -462,6 +488,9 @@ class VoiceSessionManager:
         except Exception as exc:
             if on_assistant_interrupted is not None:
                 await on_assistant_interrupted("".join(reply_parts).strip())
+            if avatar_start_task is not None:
+                with contextlib.suppress(Exception):
+                    await avatar_start_task
             worker.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await worker
@@ -715,7 +744,6 @@ class VoiceSessionManager:
                             (chunk.metadata or {}).get("tempo_processing_ms", 0)
                         )
 
-            last_error: Exception | None = None
             try:
                 async with self._tts_semaphore:
                     await asyncio.wait_for(collect(), timeout=self._tts_timeout)
@@ -797,8 +825,12 @@ class VoiceSessionManager:
         text = self._SPACE_RE.sub(" ", text).strip()
         if not text:
             return []
+        # `max_segment_words` is configurable, so the split bounds have to track
+        # it. They used to be hardcoded to its default, which silently ignored
+        # any other configured value everywhere except the early-return below.
+        max_words = int(self._chunker_options["max_words"])
         words = text.split()
-        if len(words) <= min(self._chunker_options["max_words"], self._safe_segment_words or 18):
+        if len(words) <= min(max_words, self._safe_segment_words or max_words):
             return [self._cleanup_tts_job_text(text, keep_final_punctuation=True)]
 
         jobs: list[str] = []
@@ -806,15 +838,22 @@ class VoiceSessionManager:
         first = True
         while remaining:
             remaining_words = remaining.split()
-            if len(remaining_words) <= 18:
+            if len(remaining_words) <= max_words:
                 jobs.append(self._cleanup_tts_job_text(remaining, keep_final_punctuation=True))
                 break
             # A seven-word opening is quick, but makes ordinary conversational
             # sentences sound like independently stitched fragments.  Keep a
             # complete thought whenever possible; only use the shorter split
             # after a genuine provider recovery path requires it.
-            target = min(14, self._safe_segment_words or 14) if first else (self._safe_segment_words or 18)
-            split_at = self._preferred_split_offset(remaining, target_words=target, max_words=18)
+            opening_words = min(14, max_words)
+            target = (
+                min(opening_words, self._safe_segment_words or opening_words)
+                if first
+                else (self._safe_segment_words or max_words)
+            )
+            split_at = self._preferred_split_offset(
+                remaining, target_words=target, max_words=max_words
+            )
             left = self._cleanup_tts_job_text(
                 remaining[:split_at],
                 keep_final_punctuation=True,
@@ -831,7 +870,7 @@ class VoiceSessionManager:
 
         if len(jobs) >= 2 and len(jobs[-1].split()) <= 3:
             candidate = f"{jobs[-2]} {jobs[-1]}"
-            if len(candidate.split()) <= 18:
+            if len(candidate.split()) <= max_words:
                 jobs[-2] = candidate
                 jobs.pop()
         return jobs or [text]
@@ -924,6 +963,27 @@ class VoiceSessionManager:
             text = self._SPACE_RE.sub(" ", text).strip()
         return text
 
+    @staticmethod
+    def _wav_duration_seconds(audio: bytes) -> float:
+        """Duration from the RIFF header, without decoding the PCM payload.
+
+        The local Silero path yields WAV for every segment, so this replaces a
+        full PyAV decode (~9 ms per 3 s segment) on the critical path. The
+        declared frame count is cross-checked against the bytes actually
+        present, so a truncated payload still fails validation.
+        """
+        with wave.open(io.BytesIO(audio), "rb") as container:
+            frames = container.getnframes()
+            frame_rate = container.getframerate()
+            block_align = max(1, container.getnchannels() * container.getsampwidth())
+        if frame_rate <= 0:
+            raise RuntimeError("WAV header declares a non-positive sample rate")
+        # `getnframes()` reflects the declared data-chunk size; if the provider
+        # truncated the stream mid-chunk the buffer is shorter than that.
+        if frames * block_align > len(audio):
+            raise RuntimeError("WAV payload is shorter than its declared data chunk")
+        return frames / frame_rate
+
     def _validate_audio(
         self,
         audio: bytes,
@@ -934,13 +994,16 @@ class VoiceSessionManager:
         if not audio:
             raise RuntimeError("TTS provider returned empty audio")
         try:
-            import av
+            if audio_format == "wav":
+                duration = self._wav_duration_seconds(audio)
+            else:
+                import av
 
-            duration = 0.0
-            with av.open(io.BytesIO(audio), mode="r") as container:
-                for frame in container.decode(audio=0):
-                    if frame.sample_rate:
-                        duration += frame.samples / frame.sample_rate
+                duration = 0.0
+                with av.open(io.BytesIO(audio), mode="r") as container:
+                    for frame in container.decode(audio=0):
+                        if frame.sample_rate:
+                            duration += frame.samples / frame.sample_rate
         except Exception as exc:
             raise RuntimeError("TTS provider returned undecodable audio") from exc
         if duration <= 0:
@@ -1049,8 +1112,14 @@ class VoiceSessionManager:
         minimum = max(1, minimum)
         maximum = max(minimum, maximum)
         if mode == "auto":
-            return 1
+            # Silero serialises inference behind its own lock, so extra slots
+            # only buy the overlap of one segment's encode with the next
+            # render. Stay at the configured floor rather than below it.
+            return minimum
         try:
-            return max(minimum, min(min(maximum, 2), int(mode)))
+            requested = int(mode)
         except ValueError:
             return minimum
+        # `maximum` is the configured ceiling. It used to be intersected with a
+        # hardcoded 2, which silently discarded any larger configured value.
+        return max(minimum, min(maximum, requested))

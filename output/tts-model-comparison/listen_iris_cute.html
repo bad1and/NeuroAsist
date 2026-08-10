@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Iris cute voice profile</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #17131b; color: #f8eef8; }
+    body { max-width: 920px; margin: 0 auto; padding: 32px 20px 56px; }
+    h1 { margin-bottom: 6px; }
+    .muted { color: #cdbdce; }
+    .card { background: #241c28; border: 1px solid #4b3850; border-radius: 16px; padding: 18px; margin: 16px 0; }
+    audio { width: 100%; margin: 8px 0 12px; }
+    p { line-height: 1.5; }
+    .metrics { color: #e7b9df; font-size: 0.92rem; }
+    code { color: #ffd4f7; }
+  </style>
+</head>
+<body>
+  <h1>Iris cute v1</h1>
+  <p class="muted">Экспериментальный профиль. Голос: <code>F2</code>; шаги: <code>6</code>; скорость: <code>1.0</code>.</p>
+  <p>При прослушивании оцени: мягкость, милоту без писка, естественность, разборчивость, отсутствие переигрывания.</p>
+  <article class="card">
+  <h2>Мягкое приветствие</h2>
+  <audio controls preload="metadata" src="Iris-Cute-v1/01_greeting.wav"></audio>
+  <p><strong>Исходный текст:</strong> Привет. Я рядом. Расскажешь, как у тебя дела?</p>
+  <p class="muted"><strong>TTS-текст:</strong> Привет… Я рядом. Расскажешь, как у тебя дела?</p>
+  <p class="metrics">0.89 с генерации · 4.56 с аудио · RTF 0.202 · RMS -22.3 dBFS</p>
+</article><article class="card">
+  <h2>Светлая реакция</h2>
+  <audio controls preload="metadata" src="Iris-Cute-v1/02_reaction.wav"></audio>
+  <p><strong>Исходный текст:</strong> Ой, правда? Это так здорово! Я немножко волновалась, но теперь всё хорошо.</p>
+  <p class="muted"><strong>TTS-текст:</strong> Ой, правда? Это так здорово! Я немножко волновалась, но теперь всё хорошо.</p>
+  <p class="metrics">1.40 с генерации · 7.69 с аудио · RTF 0.185 · RMS -22.2 dBFS</p>
+</article><article class="card">
+  <h2>Заботливый тон</h2>
+  <audio controls preload="metadata" src="Iris-Cute-v1/03_support.wav"></audio>
+  <p><strong>Исходный текст:</strong> Давай спокойно разберёмся. Я помогу, а ты можешь не спешить.</p>
+  <p class="muted"><strong>TTS-текст:</strong> Давай спокойно разберёмся. Я помогу, а ты можешь не спешить.</p>
+  <p class="metrics">1.27 с генерации · 5.19 с аудио · RTF 0.251 · RMS -21.5 dBFS</p>
+</article><article class="card">
+  <h2>Техническая фраза после нормализации</h2>
+  <audio controls preload="metadata" src="Iris-Cute-v1/04_technical.wav"></audio>
+  <p><strong>Исходный текст:</strong> Проверка завершена 5 августа 2026 года в 21:45. Видеокарта GTX 1660 SUPER имеет 6 гигабайт VRAM; API ответил за 187 миллисекунд, а версия приложения — 0.5.3.</p>
+  <p class="muted"><strong>TTS-текст:</strong> Проверка завершена пятого августа две тысячи двадцать шестого года в двадцать один час сорок пять минут. Видеокарта джи ти икс одна тысяча шестьсот шестьдесят супер имеет шесть гигабайт ви рам; эй пи ай ответил за сто восемьдесят семь миллисекунд, а версия приложения — ноль точка пять точка три.</p>
+  <p class="metrics">4.32 с генерации · 20.86 с аудио · RTF 0.208 · RMS -20.7 dBFS</p>
+</article><article class="card">
+  <h2>Мягкая пауза и дыхание</h2>
+  <audio controls preload="metadata" src="Iris-Cute-v1/05_breath.wav"></audio>
+  <p><strong>Исходный текст:</strong> Ох… Я немного устала, но всё равно рада тебя слышать.</p>
+  <p class="muted"><strong>TTS-текст:</strong> Ох… <breath> Я немного устала, но всё равно рада тебя слышать.</p>
+  <p class="metrics">0.99 с генерации · 5.12 с аудио · RTF 0.198 · RMS -21.7 dBFS</p>
+</article><article class="card">
+  <h2>Длинная естественная реплика</h2>
+  <audio controls preload="metadata" src="Iris-Cute-v1/06_natural_long.wav"></audio>
+  <p><strong>Исходный текст:</strong> Иногда мне хочется просто побыть рядом и спокойно поговорить. Без спешки, без лишнего шума — только ты, я и то, что сейчас действительно важно.</p>
+  <p class="muted"><strong>TTS-текст:</strong> Иногда мне хочется просто побыть рядом и спокойно поговорить. Без спешки, без лишнего шума — только ты, я и то, что сейчас действительно важно.</p>
+  <p class="metrics">2.67 с генерации · 10.76 с аудио · RTF 0.252 · RMS -20.8 dBFS</p>
+</article>
+</body>
+</html>

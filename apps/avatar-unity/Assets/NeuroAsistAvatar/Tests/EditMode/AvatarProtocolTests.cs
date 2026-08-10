@@ -12,5 +12,7 @@ namespace NeuroAsist.Avatar.Tests
         [Test] public void BuildsDesktopWebSocketFromDynamicPortAndEscapedToken() { Assert.That(AvatarEndpointResolver.BuildWebSocketUrl("http://127.0.0.1:43123", "a token&value"), Is.EqualTo("ws://127.0.0.1:43123/ws/avatar?version=2&token=a%20token%26value")); }
         [Test] public void DedupCacheIsBounded() { var cache = new BoundedMessageCache(2); Assert.That(cache.Add("1"), Is.True); Assert.That(cache.Add("1"), Is.False); cache.Add("2"); cache.Add("3"); Assert.That(cache.Count, Is.EqualTo(2)); Assert.That(cache.Add("1"), Is.True); }
         [Test] public void BackoffCapsAtFifteenSeconds() { Assert.That(ReconnectBackoff.GetDelay(0), Is.EqualTo(1)); Assert.That(ReconnectBackoff.GetDelay(99), Is.EqualTo(15)); }
+        [Test] public void DetectsEmbeddedDesktopHostOnly() { Assert.That(WindowsDesktopOverlay.IsEmbeddedHost("embedded"), Is.True); Assert.That(WindowsDesktopOverlay.IsEmbeddedHost("overlay"), Is.False); Assert.That(WindowsDesktopOverlay.IsEmbeddedHost(null), Is.False); }
+        [Test] public void LetsIrisHostControlEmbeddedResolution() { Assert.That(AvatarPerformanceProfile.ShouldSetStandaloneResolution(true), Is.False); Assert.That(AvatarPerformanceProfile.ShouldSetStandaloneResolution(false), Is.True); }
     }
 }

@@ -2,7 +2,7 @@
 
 Это единая карта работ по V0.5. Здесь находятся цель, результат и текущий статус каждого milestone. Детали реализации, API и тесты остаются в отдельных отчётах, на которые ведут ссылки ниже.
 
-**Актуальный статус: 16 июля 2026.** V0.5 остаётся архитектурной картой, а ветка V0.6 развивает локальный desktop companion. Публичный release пока не готовится.
+**Актуальный статус: 9 августа 2026.** V0.5 остаётся архитектурной картой, а ветка V0.8 развивает локальный desktop companion. Публичный release пока не готовится.
 
 ## Карта статусов
 
@@ -29,7 +29,8 @@
 
 **Сделано.** Описаны baseline, feature flags, совместимость старой истории и ожидания от Unity handoff.
 
-**Результат.** Новые изменения не должны ломать старые `/chat`, `/voice/chat` и данные SQLite.
+**Результат.** Новые изменения не должны ломать `/chat` и данные SQLite; voice
+input развивается отдельным live-only WebSocket v3 контрактом.
 
 **Подробности:** [milestone-0-freeze.md](milestone-0-freeze.md).
 
@@ -115,9 +116,13 @@
 
 **Цель.** Перейти от записи «нажал–сказал–отправил» к естественному разговору.
 
-**Сделано.** Browser AudioWorklet PCM, input WebSocket, RAM-only ring buffer, Silero/energy VAD, barge-in, отмена generation, PlaybackCoordinator и push-to-talk fallback. Подтверждённое начало речи сразу останавливает browser/live/Unity-аудио, а backend отменяет streaming и незавершённый batch TTS только текущей сессии.
+**Сделано.** Browser AudioWorklet PCM, live-only input WebSocket v3, RAM-only
+ring buffer, Silero/energy VAD, Smart Turn, barge-in, reconnect и отмена
+generation. Подтверждённое начало речи сразу останавливает browser/live/Unity-
+аудио, а backend отменяет streaming TTS только текущей сессии.
 
-**Результат.** Hands-free слушает только при включённом режиме и не сохраняет сырой микрофонный звук по умолчанию.
+**Результат.** Кнопка `Live` запускает постоянную сессию без ручного управления
+репликами; сырой микрофонный звук не сохраняется по умолчанию.
 
 **Подробности:** [milestone-9-live-voice.md](milestone-9-live-voice.md).
 
@@ -125,7 +130,7 @@
 
 **Цель.** Сделать локальное приложение удобным для запуска без ручной настройки путей к моделям и ключам.
 
-**Сделано.** Persistent runtime settings, first-run key setup через Windows Credential Manager, Model Manager с прогрессом и checksum, diagnostics, backup и retention. Данные desktop-режима живут в `%LOCALAPPDATA%\NeuroAsist`.
+**Сделано.** Persistent runtime settings, first-run key setup через Windows Credential Manager, Model Manager с прогрессом и checksum, diagnostics, backup и retention. Добавлен выбор языка интерфейса `ru`/`en`: он сохраняется локально, меняет UI, даты и системный tray, но не влияет на Iris, память и голосовые настройки. Данные desktop-режима живут в `%LOCALAPPDATA%\NeuroAsist`.
 
 **Результат.** Локальный Tauri development-режим запускается одной командой; API key не попадает в JSON settings, backup или Git.
 

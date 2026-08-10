@@ -55,6 +55,7 @@ class FakeAudioContext {
     FakeAudioContext.instance = this;
   }
   resume = vi.fn(async () => undefined);
+  setSinkId = vi.fn(async () => undefined);
   decodeAudioData = vi.fn(() => new Promise<AudioBuffer>((resolve, reject) => {
     this.deferred.push({ resolve, reject });
   }));
@@ -81,6 +82,12 @@ describe("TTSStreamPlayer", () => {
     const player = new TTSStreamPlayer(vi.fn(), vi.fn(), vi.fn());
     await player.unlock();
     expect(FakeAudioContext.instance.resume).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes live synthesis to the selected output device", async () => {
+    const player = new TTSStreamPlayer(vi.fn(), vi.fn(), vi.fn(), { outputDeviceId: "headphones" });
+    await player.unlock();
+    expect(FakeAudioContext.instance.setSinkId).toHaveBeenCalledWith("headphones");
   });
 
   it("decodes and schedules segments strictly in sequence", async () => {
@@ -183,6 +190,56 @@ describe("TTSStreamPlayer", () => {
     context.deferred[0].resolve(buffer(1));
     await pending;
     expect(context.createBufferSource).not.toHaveBeenCalled();
+  });
+
+  it("honours a segment threshold when no time-based prebuffer is configured", async () => {
+    const player = new TTSStreamPlayer(vi.fn(), vi.fn(), vi.fn(), { prebufferSegments: 2 });
+    player.begin("utterance");
+    const first = player.enqueue("utterance", 0, audio());
+    await tick();
+    const context = FakeAudioContext.instance;
+    context.deferred[0].resolve(buffer(0.5));
+    await first;
+    expect(context.createBufferSource).not.toHaveBeenCalled();
+
+    const second = player.enqueue("utterance", 1, audio());
+    await tick();
+    context.deferred[1].resolve(buffer(0.5));
+    await second;
+    expect(context.createBufferSource).toHaveBeenCalledTimes(2);
+  });
+
+  it("releases the underrun prebuffer after an utterance plays clean", async () => {
+    const player = new TTSStreamPlayer(vi.fn(), vi.fn(), vi.fn());
+    const play = async (utteranceId: string, gapBefore = 0) => {
+      player.begin(utteranceId);
+      const pending = player.enqueue(utteranceId, 0, audio());
+      await tick();
+      const context = FakeAudioContext.instance;
+      context.currentTime += gapBefore;
+      context.deferred[context.deferred.length - 1].resolve(buffer(0.5));
+      await pending;
+      return context;
+    };
+
+    await play("first");
+    const context = FakeAudioContext.instance;
+    // Starve the second utterance: playback is under way, so the next segment
+    // arriving after `scheduledUntil` counts as an underrun and lifts the bar.
+    const second = player.enqueue("first", 1, audio());
+    await tick();
+    context.currentTime = 10;
+    context.deferred[1].resolve(buffer(0.5));
+    await second;
+
+    // Raised bar: one ready segment no longer starts playback.
+    const before = context.createBufferSource.mock.calls.length;
+    await play("second");
+    expect(context.createBufferSource.mock.calls.length).toBe(before);
+
+    // That utterance never starved, so the bar drops back and one segment plays.
+    await play("third");
+    expect(context.createBufferSource.mock.calls.length).toBeGreaterThan(before);
   });
 
   it("reports decode failures", async () => {

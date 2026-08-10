@@ -2,6 +2,7 @@ import asyncio
 import array
 import io
 import logging
+import math
 import os
 import re
 import subprocess
@@ -10,12 +11,17 @@ import threading
 import time
 import warnings
 import wave
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable
 
 from apps.backend.app.voice.audio import Pcm16Audio, write_pcm16_wav
-from apps.backend.app.voice.delivery import SpeechEmphasis, SpeechPace
+from apps.backend.app.voice.delivery import (
+    MAX_SPEECH_TEMPO,
+    MIN_SPEECH_TEMPO,
+    SpeechEmphasis,
+    SpeechPace,
+)
 from apps.backend.app.voice.style import VoiceExpressionLevel, VoiceStyle, coerce_voice_expression_level, coerce_voice_style, make_silero_ssml, profile_for
 from apps.backend.app.voice.lexicon import (
     normalize_tts_orthography,
@@ -36,6 +42,9 @@ class STTResult:
     model: str | None = None
     raw_text: str | None = None
     corrections: tuple[dict[str, object], ...] = ()
+    confidence: float | None = None
+    fallback: bool = False
+    fallback_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -123,6 +132,7 @@ class MockSTTProvider(STTProvider):
             duration_ms=0,
             provider="mock",
             model="mock",
+            confidence=1.0,
         )
 
 
@@ -255,7 +265,18 @@ class FasterWhisperSTTProvider(STTProvider):
             compression_ratio_threshold=2.4,
             log_prob_threshold=-1.0,
         )
-        text = " ".join(segment.text.strip() for segment in segments).strip()
+        segment_list = list(segments)
+        text = " ".join(segment.text.strip() for segment in segment_list).strip()
+        confidence_values: list[float] = []
+        for segment in segment_list:
+            avg_logprob = getattr(segment, "avg_logprob", None)
+            no_speech_prob = getattr(segment, "no_speech_prob", 0.0)
+            if avg_logprob is None:
+                continue
+            confidence_values.append(
+                max(0.0, min(1.0, math.exp(max(-10.0, min(0.0, float(avg_logprob))))))
+                * max(0.0, min(1.0, 1.0 - float(no_speech_prob)))
+            )
         detected_language = getattr(info, "language", None) or selected_language or "auto"
         return STTResult(
             text=text,
@@ -263,6 +284,7 @@ class FasterWhisperSTTProvider(STTProvider):
             duration_ms=int((time.perf_counter() - started) * 1000),
             provider="faster_whisper",
             model=self._model_name,
+            confidence=(sum(confidence_values) / len(confidence_values)) if confidence_values else None,
         )
 
     def _initial_prompt(self, language: str | None) -> str | None:
@@ -286,6 +308,170 @@ class FasterWhisperSTTProvider(STTProvider):
             "library",
         )
         return any(marker in message for marker in cuda_markers)
+
+
+class Qwen3ASRProvider(STTProvider):
+    """Optional local Qwen3-ASR adapter used for Russian benchmark/fallback runs.
+
+    ``qwen-asr`` is intentionally imported lazily. The default installation
+    stays lightweight, while a machine with the optional package can select
+    ``qwen3_asr`` through ``VOICE_STT_PROVIDER`` or the fallback setting.
+    """
+
+    _LANGUAGES = {"ru": "Russian", "en": "English"}
+
+    def __init__(self, model_name: str, device: str) -> None:
+        if device not in {"cpu", "cuda", "auto"}:
+            raise ValueError("VOICE_STT_DEVICE must be one of: cpu, cuda, auto")
+        self._model_name = (
+            model_name
+            if model_name and model_name not in {"v3_rnnt", "v3_e2e_rnnt"}
+            else "Qwen/Qwen3-ASR-1.7B"
+        )
+        self._device = device
+        self._model = None
+        self._selected_device: str | None = None
+        self._load_lock = threading.Lock()
+
+    async def transcribe(self, audio_path: Path, language: str) -> STTResult:
+        started = time.perf_counter()
+        return await asyncio.to_thread(self._transcribe_sync, audio_path, language, started)
+
+    async def preload(self) -> None:
+        await asyncio.to_thread(self._ensure_model)
+
+    @property
+    def metadata(self) -> dict[str, object]:
+        return {
+            "provider": "qwen3_asr",
+            "model": self._model_name,
+            "device": self._selected_device or self._device,
+        }
+
+    def _ensure_model(self):
+        try:
+            import torch
+            from qwen_asr import Qwen3ASRModel
+        except ImportError as exc:
+            raise RuntimeError(
+                "Qwen3-ASR is not installed; install the optional qwen-asr package"
+            ) from exc
+
+        if self._model is not None:
+            return self._model
+        with self._load_lock:
+            if self._model is not None:
+                return self._model
+            selected_device = self._device
+            if selected_device == "auto":
+                selected_device = "cuda:0" if torch.cuda.is_available() else "cpu"
+            elif selected_device == "cuda":
+                selected_device = "cuda:0"
+            dtype = torch.bfloat16 if selected_device.startswith("cuda") else torch.float32
+            self._model = Qwen3ASRModel.from_pretrained(
+                self._model_name,
+                dtype=dtype,
+                device_map=selected_device,
+                max_inference_batch_size=1,
+                max_new_tokens=256,
+            )
+            self._selected_device = selected_device
+        return self._model
+
+    def _transcribe_sync(self, audio_path: Path, language: str, started: float) -> STTResult:
+        model = self._ensure_model()
+        selected_language = self._LANGUAGES.get(language)
+        results = model.transcribe(audio=str(audio_path), language=selected_language)
+        first = results[0] if isinstance(results, (list, tuple)) else results
+        text = str(getattr(first, "text", first)).strip()
+        detected_language = str(getattr(first, "language", None) or language or "auto")
+        return STTResult(
+            text=text,
+            language=detected_language,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            provider="qwen3_asr",
+            model=self._model_name,
+        )
+
+
+class FallbackSTTProvider(STTProvider):
+    """Run a configured secondary model only when the primary looks uncertain."""
+
+    def __init__(
+        self,
+        primary: STTProvider,
+        fallback: STTProvider,
+        *,
+        confidence_threshold: float = 0.60,
+        min_rms: float = 0.008,
+    ) -> None:
+        self.primary = primary
+        self.fallback = fallback
+        self.confidence_threshold = confidence_threshold
+        self.min_rms = min_rms
+
+    async def preload(self) -> None:
+        # Keep the secondary model cold until it is actually needed. This is
+        # important for a live session's startup time and resident memory.
+        await self.primary.preload()
+
+    async def transcribe(self, audio_path: Path, language: str) -> STTResult:
+        primary_result = await self.primary.transcribe(audio_path, language)
+        reason = self._fallback_reason(primary_result, None)
+        if reason is None:
+            return primary_result
+        return await self._run_fallback(primary_result, audio_path, language, reason)
+
+    async def transcribe_pcm16(self, audio: Pcm16Audio, language: str) -> STTResult:
+        primary_result = await self.primary.transcribe_pcm16(audio, language)
+        reason = self._fallback_reason(primary_result, self._rms(audio))
+        if reason is None:
+            return primary_result
+        try:
+            fallback_result = await self.fallback.transcribe_pcm16(audio, language)
+        except Exception as exc:
+            logger.warning(
+                "STT fallback failed; keeping primary result: provider=%s error_type=%s",
+                getattr(self.fallback, "name", self.fallback.__class__.__name__),
+                type(exc).__name__,
+            )
+            return replace(primary_result, fallback_reason=f"{reason}:unavailable")
+        return replace(fallback_result, fallback=True, fallback_reason=reason)
+
+    async def _run_fallback(
+        self,
+        primary_result: STTResult,
+        audio_path: Path,
+        language: str,
+        reason: str,
+    ) -> STTResult:
+        try:
+            fallback_result = await self.fallback.transcribe(audio_path, language)
+        except Exception as exc:
+            logger.warning(
+                "STT fallback failed; keeping primary result: provider=%s error_type=%s",
+                self.fallback.__class__.__name__,
+                type(exc).__name__,
+            )
+            return replace(primary_result, fallback_reason=f"{reason}:unavailable")
+        return replace(fallback_result, fallback=True, fallback_reason=reason)
+
+    def _fallback_reason(self, result: STTResult, rms: float | None) -> str | None:
+        if not result.text.strip():
+            return "empty_result"
+        if result.confidence is not None and result.confidence < self.confidence_threshold:
+            return "low_confidence"
+        if rms is not None and rms < self.min_rms:
+            return "low_snr"
+        return None
+
+    @staticmethod
+    def _rms(audio: Pcm16Audio) -> float:
+        samples = array.array("h")
+        samples.frombytes(audio.data)
+        if not samples:
+            return 0.0
+        return math.sqrt(sum(sample * sample for sample in samples) / len(samples)) / 32768.0
 
 
 class GigaAMSTTProvider(STTProvider):
@@ -465,9 +651,9 @@ class GigaAMSTTProvider(STTProvider):
             return self._transcribe_short_pcm(model, audio.data)
         texts = [
             self._transcribe_short_pcm(model, chunk)
-            for chunk in self._split_pcm16_on_quiet(audio.data)
+            for chunk in self._split_pcm16_on_quiet(audio.data, overlap_seconds=0.75)
         ]
-        return " ".join(text for text in texts if text).strip()
+        return self._merge_overlapped_texts(texts)
 
     @staticmethod
     def _transcribe_short_pcm(model: Any, pcm16: bytes) -> str:
@@ -490,7 +676,7 @@ class GigaAMSTTProvider(STTProvider):
 
     def _transcribe_long(self, model: Any, audio_path: Path) -> str:
         pcm16 = self._decode_pcm16(audio_path)
-        chunks = self._split_pcm16_on_quiet(pcm16)
+        chunks = self._split_pcm16_on_quiet(pcm16, overlap_seconds=0.75)
         texts: list[str] = []
         with tempfile.TemporaryDirectory(prefix="neuroasist-gigaam-") as temp_dir:
             for index, chunk in enumerate(chunks):
@@ -503,7 +689,7 @@ class GigaAMSTTProvider(STTProvider):
                 text = self._transcribe_short(model, chunk_path)
                 if text:
                     texts.append(text)
-        return " ".join(texts).strip()
+        return self._merge_overlapped_texts(texts)
 
     def _decode_pcm16(self, audio_path: Path) -> bytes:
         command = [
@@ -528,7 +714,7 @@ class GigaAMSTTProvider(STTProvider):
             raise RuntimeError("Could not decode long audio for GigaAM")
         return completed.stdout
 
-    def _split_pcm16_on_quiet(self, pcm16: bytes) -> list[bytes]:
+    def _split_pcm16_on_quiet(self, pcm16: bytes, *, overlap_seconds: float = 0.0) -> list[bytes]:
         samples = array.array("h")
         samples.frombytes(pcm16)
         max_samples = self._MAX_SHORT_SECONDS * self._SAMPLE_RATE
@@ -539,6 +725,7 @@ class GigaAMSTTProvider(STTProvider):
         max_chunk = 23 * self._SAMPLE_RATE
         min_tail = 5 * self._SAMPLE_RATE
         frame = self._SAMPLE_RATE // 10
+        overlap_samples = max(0, round(overlap_seconds * self._SAMPLE_RATE))
         chunks: list[bytes] = []
         start = 0
         while len(samples) - start > max_samples:
@@ -553,11 +740,27 @@ class GigaAMSTTProvider(STTProvider):
                     key=lambda offset: sum(value * value for value in samples[offset : offset + frame]),
                 )
                 cut = quiet_start + frame // 2
-            chunks.append(samples[start:cut].tobytes())
+            chunks.append(samples[max(0, start - overlap_samples):cut].tobytes())
             start = cut
         if start < len(samples):
-            chunks.append(samples[start:].tobytes())
+            chunks.append(samples[max(0, start - overlap_samples):].tobytes())
         return chunks
+
+    @staticmethod
+    def _merge_overlapped_texts(texts: list[str]) -> str:
+        merged: list[str] = []
+        for text in texts:
+            tokens = text.split()
+            if not tokens:
+                continue
+            overlap = 0
+            max_overlap = min(8, len(merged), len(tokens))
+            for size in range(max_overlap, 0, -1):
+                if [item.casefold() for item in merged[-size:]] == [item.casefold() for item in tokens[:size]]:
+                    overlap = size
+                    break
+            merged.extend(tokens[overlap:])
+        return " ".join(merged).strip()
 
     def _should_retry_on_cpu(self, exc: Exception) -> bool:
         if self._device != "auto" or self._selected_device != "cuda":
@@ -567,6 +770,53 @@ class GigaAMSTTProvider(STTProvider):
             marker in message
             for marker in ("cuda", "cublas", "cudnn", "out of memory", "driver")
         )
+
+
+def one_pole_highpass(samples: Any, sample_rate: int, cutoff_hz: float):
+    """Closed-form equivalent of ``y[n] = a * (y[n-1] + x[n] - x[n-1])``.
+
+    The recurrence used to be evaluated in a Python loop over every sample on
+    the live TTS path, which costs tens of milliseconds per segment. Expanding
+    it gives ``y[i] = a^(i+1) * (carry + sum_j a^-j * d[j])``, which vectorises,
+    but ``a^-j`` overflows on long signals. Working in blocks keeps that factor
+    inside a narrow range, so the result matches the scalar loop to well below
+    the int16 quantisation step while numpy does the work.
+    """
+    import numpy as np
+
+    if cutoff_hz <= 0 or sample_rate <= 0 or len(samples) < 2:
+        return samples
+    source = np.asarray(samples)
+    signal = source.astype(np.float64, copy=False)
+    rc = 1.0 / (2.0 * np.pi * cutoff_hz)
+    alpha = rc / (rc + 1.0 / sample_rate)
+    decay = -float(np.log(alpha)) if 0.0 < alpha < 1.0 else 0.0
+    if decay <= 0.0:
+        return samples
+    # Cap the spread of a^-j at e^18 so float64 keeps ~8 significant digits.
+    block = int(min(8192.0, max(2.0, 1.0 + 18.0 / decay)))
+
+    deltas = np.empty_like(signal)
+    deltas[0] = 0.0
+    np.subtract(signal[1:], signal[:-1], out=deltas[1:])
+
+    output = np.empty_like(signal)
+    output[0] = signal[0]
+    carry = float(signal[0])
+    index = 1
+    total = len(signal)
+    while index < total:
+        span = min(block, total - index)
+        growth = alpha ** np.arange(span, dtype=np.float64)
+        chunk = (alpha * growth) * (
+            carry + np.cumsum(deltas[index : index + span] / growth)
+        )
+        output[index : index + span] = chunk
+        carry = float(chunk[-1])
+        index += span
+    if np.issubdtype(source.dtype, np.floating):
+        return output.astype(source.dtype, copy=False)
+    return output
 
 
 def waveform_to_wav_bytes(waveform: Any, sample_rate: int) -> bytes:
@@ -615,7 +865,7 @@ def apply_wav_delivery(
     """Apply pitch-preserving tempo and explicit silence to mono PCM16 WAV."""
     import numpy as np
 
-    tempo = max(0.75, min(1.25, float(tempo)))
+    tempo = max(MIN_SPEECH_TEMPO, min(MAX_SPEECH_TEMPO, float(tempo)))
     with wave.open(io.BytesIO(wav_bytes), "rb") as source:
         channels = source.getnchannels()
         sample_width = source.getsampwidth()
@@ -665,15 +915,7 @@ def apply_wav_delivery(
         rendered = samples.astype(np.float32) / 32768.0
         rendered -= float(np.mean(rendered))
         if highpass_cutoff_hz > 0 and len(rendered) > 1:
-            rc = 1.0 / (2.0 * np.pi * highpass_cutoff_hz)
-            alpha = rc / (rc + 1.0 / sample_rate)
-            filtered = np.empty_like(rendered)
-            filtered[0] = rendered[0]
-            for index in range(1, len(rendered)):
-                filtered[index] = alpha * (
-                    filtered[index - 1] + rendered[index] - rendered[index - 1]
-                )
-            rendered = filtered
+            rendered = one_pole_highpass(rendered, sample_rate, highpass_cutoff_hz)
         active = np.abs(rendered) >= 10 ** (-45 / 20)
         if active.any():
             rms = float(np.sqrt(np.mean(np.square(rendered[active]))))
@@ -1359,6 +1601,7 @@ class SileroTTSProvider(TTSProvider):
         stress_cpu_threads: int = 1,
         audio_postprocessing_enabled: bool = True,
         highpass_cutoff_hz: float = 60.0,
+        lowpass_cutoff_hz: float = 12000.0,
         adaptive_prosody: bool = True,
         openvoice_enabled: bool = False,
         openvoice_reference_audio_path: Path | None = None,
@@ -1391,6 +1634,7 @@ class SileroTTSProvider(TTSProvider):
         self.cmudict_cache_dir = cmudict_cache_dir or Path(".cache/cmudict")
         self.audio_postprocessing_enabled = audio_postprocessing_enabled
         self.highpass_cutoff_hz = max(0.0, highpass_cutoff_hz)
+        self.lowpass_cutoff_hz = max(0.0, lowpass_cutoff_hz)
         self.adaptive_prosody = adaptive_prosody
         self._stress_accentor = LocalStressAccentor(
             enabled=stress_enabled,
@@ -1446,6 +1690,7 @@ class SileroTTSProvider(TTSProvider):
             "stress": self._stress_accentor.status,
             "audio_postprocessing": self.audio_postprocessing_enabled,
             "highpass_cutoff_hz": self.highpass_cutoff_hz if self.audio_postprocessing_enabled else 0.0,
+            "lowpass_cutoff_hz": self.lowpass_cutoff_hz if self.audio_postprocessing_enabled else 0.0,
             "adaptive_prosody": self.adaptive_prosody,
         }
 
@@ -1797,24 +2042,30 @@ class SileroTTSProvider(TTSProvider):
 
     @staticmethod
     def _highpass_filter(samples: Any, sample_rate: int, cutoff_hz: float):
+        return one_pole_highpass(samples, sample_rate, cutoff_hz)
+
+    @staticmethod
+    def _lowpass_filter(samples: Any, sample_rate: int, cutoff_hz: float):
+        """Apply a gentle zero-phase low-pass without adding a SciPy dependency."""
         import numpy as np
 
-        if cutoff_hz <= 0 or len(samples) < 2:
+        if cutoff_hz <= 0 or sample_rate <= 0 or len(samples) < 3:
             return samples
-        rc = 1.0 / (2.0 * np.pi * cutoff_hz)
-        dt = 1.0 / sample_rate
-        alpha = rc / (rc + dt)
-        output = np.empty_like(samples)
-        output[0] = samples[0]
-        output[1:] = 0.0
-        previous_input = float(samples[0])
-        previous_output = float(output[0])
-        for index in range(1, len(samples)):
-            current = alpha * (previous_output + float(samples[index]) - previous_input)
-            output[index] = current
-            previous_input = float(samples[index])
-            previous_output = current
-        return output
+        cutoff_hz = min(cutoff_hz, sample_rate * 0.45)
+        if cutoff_hz <= 0:
+            return samples
+        # A cosine transition avoids the ringing of a hard FFT cutoff while
+        # keeping the operation vectorized for low-latency TTS segments.
+        frequencies = np.fft.rfftfreq(len(samples), 1.0 / sample_rate)
+        transition_start = cutoff_hz * 0.82
+        gain = np.ones_like(frequencies, dtype=np.float32)
+        gain[frequencies >= cutoff_hz] = 0.0
+        transition = (frequencies > transition_start) & (frequencies < cutoff_hz)
+        ratio = (frequencies[transition] - transition_start) / (cutoff_hz - transition_start)
+        gain[transition] = 0.5 * (1.0 + np.cos(np.pi * ratio))
+        spectrum = np.fft.rfft(np.asarray(samples, dtype=np.float32))
+        filtered = np.fft.irfft(spectrum * gain, n=len(samples))
+        return filtered.astype(np.asarray(samples).dtype, copy=False)
 
     @staticmethod
     def _apply_edge_fades(samples: Any, sample_rate: int):
@@ -1838,6 +2089,7 @@ class SileroTTSProvider(TTSProvider):
         if self.audio_postprocessing_enabled and len(samples):
             samples = samples - np.mean(samples)
             samples = self._highpass_filter(samples, sample_rate, self.highpass_cutoff_hz)
+            samples = self._lowpass_filter(samples, sample_rate, self.lowpass_cutoff_hz)
             samples = self._apply_edge_fades(samples, sample_rate)
         active = np.abs(samples) >= 10 ** (-45 / 20)
         if active.any():
@@ -1853,6 +2105,18 @@ class SileroTTSProvider(TTSProvider):
     def _normalize_speech_waveform(self, waveform: Any):
         return self._postprocess_speech_waveform(waveform, self.sample_rate)[0]
 
+    def _encode_segment_sync(
+        self, waveform: Any, sample_rate: int
+    ) -> tuple[bytes, float, dict[str, dict[str, float | int]]]:
+        normalized, audio_metrics = self._postprocess_speech_waveform(waveform, sample_rate)
+        wav_bytes = waveform_to_wav_bytes(normalized, sample_rate)
+        # The frame count is already known here, so re-parsing the header of the
+        # WAV we just wrote only to divide frames by rate is pure overhead.
+        frames = len(normalized)
+        if frames <= 0 or sample_rate <= 0:
+            raise RuntimeError("TTS provider returned zero-duration audio")
+        return wav_bytes, frames / sample_rate, audio_metrics
+
     async def _synthesize_wav_bytes(
         self, text: str, speaker: str, style: VoiceStyle | str = VoiceStyle.AUTO
     ) -> tuple[bytes, float, int]:
@@ -1865,35 +2129,39 @@ class SileroTTSProvider(TTSProvider):
                 timeout=self.timeout_seconds,
             )
         synthesis_ms = int((time.perf_counter() - started) * 1000)
-        normalized_waveform, audio_metrics = self._postprocess_speech_waveform(
-            waveform, output_sample_rate
+        # Filtering and PCM encoding are numpy-heavy and were running inline on
+        # the event loop, stalling the voice socket for the whole segment. They
+        # stay outside the inference lock so they overlap the next render.
+        wav_bytes, duration, audio_metrics = await asyncio.to_thread(
+            self._encode_segment_sync, waveform, output_sample_rate
         )
-        wav_bytes = waveform_to_wav_bytes(normalized_waveform, output_sample_rate)
-        duration = wav_duration_seconds(wav_bytes)
-        logger.info(
-            "Silero TTS segment synthesized: provider=silero model=%s speaker=%s device=%s "
-            "text_length=%s word_count=%s style=%s voice_conversion=%s synthesis_ms=%s "
-            "audio_duration_ms=%s RTF=%.3f audio_bytes=%s rms_dbfs=%.1f peak_dbfs=%.1f "
-            "dc_offset=%.6f input_dc_offset=%.6f clipped_samples=%s postprocessing=%s highpass_hz=%.1f",
-            self.model_name,
-            speaker,
-            self._selected_device,
-            len(text),
-            len(text.split()),
-            str(style),
-            self._voice_converter is not None,
-            synthesis_ms,
-            int(duration * 1000),
-            (synthesis_ms / 1000) / duration if duration else 0.0,
-            len(wav_bytes),
-            audio_metrics["output"]["rms_dbfs"],
-            audio_metrics["output"]["peak_dbfs"],
-            audio_metrics["output"]["dc_offset"],
-            audio_metrics["input"]["dc_offset"],
-            audio_metrics["output"]["clipped_samples"],
-            self.audio_postprocessing_enabled,
-            self.highpass_cutoff_hz if self.audio_postprocessing_enabled else 0.0,
-        )
+        if logger.isEnabledFor(logging.INFO):
+            logger.info(
+                "Silero TTS segment synthesized: provider=silero model=%s speaker=%s device=%s "
+                "text_length=%s word_count=%s style=%s voice_conversion=%s synthesis_ms=%s "
+                "audio_duration_ms=%s RTF=%.3f audio_bytes=%s rms_dbfs=%.1f peak_dbfs=%.1f "
+                "dc_offset=%.6f input_dc_offset=%.6f clipped_samples=%s postprocessing=%s "
+                "highpass_hz=%.1f lowpass_hz=%.1f",
+                self.model_name,
+                speaker,
+                self._selected_device,
+                len(text),
+                len(text.split()),
+                str(style),
+                self._voice_converter is not None,
+                synthesis_ms,
+                int(duration * 1000),
+                (synthesis_ms / 1000) / duration if duration else 0.0,
+                len(wav_bytes),
+                audio_metrics["output"]["rms_dbfs"],
+                audio_metrics["output"]["peak_dbfs"],
+                audio_metrics["output"]["dc_offset"],
+                audio_metrics["input"]["dc_offset"],
+                audio_metrics["output"]["clipped_samples"],
+                self.audio_postprocessing_enabled,
+                self.highpass_cutoff_hz if self.audio_postprocessing_enabled else 0.0,
+                self.lowpass_cutoff_hz if self.audio_postprocessing_enabled else 0.0,
+            )
         return wav_bytes, duration, synthesis_ms
 
     async def stream(self, request: TTSRequest):
@@ -1904,13 +2172,22 @@ class SileroTTSProvider(TTSProvider):
         style = coerce_voice_style(request.style)
         wav_bytes, _, _ = await self._synthesize_wav_bytes(text, speaker, style)
         tempo_started = time.perf_counter()
+        # `_synthesize_wav_bytes` already applies the full quality pipeline
+        # (including the configured low-pass filter). Repeating that work in
+        # delivery is unnecessary when no time-stretch is requested. Keep the
+        # second pass for non-unit tempo, because the pitch-preserving filter
+        # can change level after it transforms the waveform.
+        delivery_postprocess = (
+            self.audio_postprocessing_enabled
+            and abs(float(request.tempo) - 1.0) >= 0.001
+        )
         wav_bytes = await asyncio.to_thread(
             apply_wav_delivery,
             wav_bytes,
             tempo=request.tempo,
             pause_before_ms=request.pause_before_ms,
             pause_after_ms=request.pause_after_ms,
-            postprocess=True,
+            postprocess=delivery_postprocess,
             loudness_target_dbfs=self.loudness_target_dbfs,
             peak_ceiling_dbfs=self.peak_ceiling_dbfs,
             highpass_cutoff_hz=self.highpass_cutoff_hz

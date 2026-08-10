@@ -214,13 +214,12 @@ async def test_continuation_during_endpoint_inference_keeps_entire_turn(tmp_path
         turn_detector=detector,
     )
     socket = FakeSocket()
-    await manager.register("s", socket, version=2)
+    await manager.register("s", socket, version=3)
     await manager.start(
         "s",
         sample_rate=16000,
         channels=1,
         language="ru",
-        mode="live_conversation",
     )
     session = manager._sessions["s"]
     session.gate.start_ms = 0
@@ -258,13 +257,12 @@ async def test_incomplete_turn_is_forced_complete_after_silence(tmp_path: Path) 
         max_turn_silence_ms=100,
     )
     socket = FakeSocket()
-    await manager.register("s", socket, version=2)
+    await manager.register("s", socket, version=3)
     await manager.start(
         "s",
         sample_rate=16000,
         channels=1,
         language="ru",
-        mode="live_conversation",
     )
     session = manager._sessions["s"]
     session.gate.start_ms = 0
@@ -304,13 +302,12 @@ async def test_short_noise_during_iris_speech_does_not_barge_in(tmp_path: Path) 
         barge_in_confirmation_ms=100,
     )
     socket = FakeSocket()
-    await manager.register("s", socket, version=2)
+    await manager.register("s", socket, version=3)
     await manager.start(
         "s",
         sample_rate=16000,
         channels=1,
         language="ru",
-        mode="live_conversation",
     )
     session = manager._sessions["s"]
     session.gate.start_ms = 0
@@ -344,13 +341,12 @@ async def test_sustained_speech_during_iris_turn_confirms_barge_in(tmp_path: Pat
         barge_in_confirmation_ms=100,
     )
     socket = FakeSocket()
-    await manager.register("s", socket, version=2)
+    await manager.register("s", socket, version=3)
     await manager.start(
         "s",
         sample_rate=16000,
         channels=1,
         language="ru",
-        mode="live_conversation",
     )
     session = manager._sessions["s"]
     session.gate.start_ms = 0

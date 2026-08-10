@@ -1435,7 +1435,14 @@ class TimelineStore:
             ).fetchall()
         return [self._row_to_message(row) for row in reversed(rows)]
 
-    def list_memories(self, *, status: str | None = None, query: str | None = None, limit: int = 100) -> list[dict[str, object]]:
+    def list_memories(
+        self,
+        *,
+        status: str | None = None,
+        query: str | None = None,
+        limit: int = 100,
+        include_enrichment: bool = True,
+    ) -> list[dict[str, object]]:
         with self._connect() as connection:
             if query and self._fts_query(query):
                 rows = connection.execute(
@@ -1449,7 +1456,9 @@ class TimelineStore:
                     "SELECT * FROM memory_items WHERE relationship_id = ? AND (? IS NULL OR status = ?) ORDER BY importance DESC, updated_at DESC LIMIT ?",
                     (PRIMARY_RELATIONSHIP_ID, status, status, limit),
                 ).fetchall()
-            return [self._enrich_memory_row(connection, row) for row in rows]
+            if include_enrichment:
+                return [self._enrich_memory_row(connection, row) for row in rows]
+            return [self._memory_row(row) for row in rows]
 
     def create_memory(self, values: dict[str, object], *, actor: str, action: str = "autonomous_accepted") -> dict[str, object]:
         now = self._now()
@@ -1704,7 +1713,14 @@ class TimelineStore:
             self._index_topic(connection, topic_id, f"{title} {summary}")
         return self.get_topic(topic_id) or {}
 
-    def list_topics(self, *, status: str | None = None, query: str | None = None, limit: int = 100) -> list[dict[str, object]]:
+    def list_topics(
+        self,
+        *,
+        status: str | None = None,
+        query: str | None = None,
+        limit: int = 100,
+        include_details: bool = True,
+    ) -> list[dict[str, object]]:
         with self._connect() as connection:
             if query and self._fts_query(query):
                 rows = connection.execute(
@@ -1714,7 +1730,9 @@ class TimelineStore:
                 ).fetchall()
             else:
                 rows = connection.execute("SELECT * FROM memory_topics WHERE relationship_id = ? AND (? IS NULL OR status = ?) ORDER BY updated_at DESC LIMIT ?", (PRIMARY_RELATIONSHIP_ID, status, status, limit)).fetchall()
-        return [self._topic_row(row) for row in rows]
+        if include_details:
+            return [self._topic_row(row) for row in rows]
+        return [dict(row) | {"user_locked": bool(row["user_locked"])} for row in rows]
 
     def get_topic(self, topic_id: str) -> dict[str, object] | None:
         with self._connect() as connection:
@@ -1770,10 +1788,35 @@ class TimelineStore:
                 self._add_evidence(connection, "commitment", commitment_id, str(message_id), values.get("source_episode_id"), "user", float(values.get("source_quality", 1.0)), "commitment", None)
         return self.get_commitment(commitment_id) or {}
 
-    def list_commitments(self, *, status: str | None = None, limit: int = 100) -> list[dict[str, object]]:
+    def list_commitments(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+        include_evidence: bool = True,
+    ) -> list[dict[str, object]]:
         with self._connect() as connection:
             rows = connection.execute("SELECT * FROM memory_commitments WHERE relationship_id = ? AND (? IS NULL OR status = ?) ORDER BY importance DESC, updated_at DESC LIMIT ?", (PRIMARY_RELATIONSHIP_ID, status, status, limit)).fetchall()
-        return [dict(row) | {"user_locked": bool(row["user_locked"]), "evidence": self.memory_evidence("commitment", row["id"])} for row in rows]
+            if not include_evidence:
+                return [dict(row) | {"user_locked": bool(row["user_locked"]), "evidence": []} for row in rows]
+            if not rows:
+                return []
+            placeholders = ", ".join("?" for _ in rows)
+            evidence_rows = connection.execute(
+                f"SELECT * FROM memory_evidence WHERE entity_type = 'commitment' AND entity_id IN ({placeholders}) ORDER BY created_at, id",
+                tuple(str(row["id"]) for row in rows),
+            ).fetchall()
+        evidence_by_id: dict[str, list[dict[str, object]]] = {str(row["id"]): [] for row in rows}
+        for evidence in evidence_rows:
+            evidence_by_id.setdefault(str(evidence["entity_id"]), []).append(dict(evidence))
+        return [
+            dict(row)
+            | {
+                "user_locked": bool(row["user_locked"]),
+                "evidence": evidence_by_id.get(str(row["id"]), []),
+            }
+            for row in rows
+        ]
 
     def get_commitment(self, commitment_id: str) -> dict[str, object] | None:
         with self._connect() as connection:
@@ -1982,15 +2025,77 @@ class TimelineStore:
         return [{**dict(row), "source_message_ids": json.loads(row["source_message_ids_json"])} for row in rows]
 
     def record_memory_retrieval(self, memory_id: str) -> None:
+        self.record_memory_retrievals([memory_id])
+
+    def record_memory_retrievals(self, memory_ids: list[str]) -> None:
+        """Record a retrieval batch in one connection while preserving the audit trail."""
+        ids = list(dict.fromkeys(str(memory_id) for memory_id in memory_ids if memory_id))
+        if not ids:
+            return
+        placeholders = ", ".join("?" for _ in ids)
         with self._connect() as connection:
-            row = connection.execute("SELECT * FROM memory_items WHERE id = ?", (memory_id,)).fetchone()
-            if row is None:
-                return
-            before = self._memory_row(row)
+            rows = connection.execute(
+                f"SELECT * FROM memory_items WHERE id IN ({placeholders})",
+                tuple(ids),
+            ).fetchall()
             now = self._now()
-            connection.execute("UPDATE memory_items SET access_count = access_count + 1, last_accessed_at = ? WHERE id = ?", (now, memory_id))
-            after = self._memory_row(connection.execute("SELECT * FROM memory_items WHERE id = ?", (memory_id,)).fetchone())
-            self._audit_memory(connection, memory_id, "retrieved", "system", before, after, None, after["source_message_ids"])
+            for row in rows:
+                memory_id = str(row["id"])
+                before = self._memory_row(row)
+                after = dict(before)
+                after["access_count"] = int(row["access_count"] or 0) + 1
+                after["last_accessed_at"] = now
+                connection.execute(
+                    "UPDATE memory_items SET access_count = access_count + 1, last_accessed_at = ? WHERE id = ?",
+                    (now, memory_id),
+                )
+                self._audit_memory(
+                    connection,
+                    memory_id,
+                    "retrieved",
+                    "system",
+                    before,
+                    after,
+                    None,
+                    after["source_message_ids"],
+                )
+
+    def memory_source_eligibility(self, memory_ids: list[str]) -> dict[str, bool]:
+        """Return source-policy eligibility for many memories with one SQL query."""
+        ids = list(dict.fromkeys(str(memory_id) for memory_id in memory_ids if memory_id))
+        if not ids:
+            return {}
+        placeholders = ", ".join("?" for _ in ids)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT mi.id,
+                       CASE
+                         WHEN json_array_length(COALESCE(mi.source_message_ids_json, '[]')) = 0 THEN 1
+                         WHEN NOT EXISTS (
+                           SELECT 1
+                           FROM json_each(COALESCE(mi.source_message_ids_json, '[]')) source_id
+                           JOIN conversation_messages source_message
+                             ON source_message.id = source_id.value
+                         ) THEN 1
+                         WHEN EXISTS (
+                           SELECT 1
+                           FROM json_each(COALESCE(mi.source_message_ids_json, '[]')) source_id
+                           JOIN conversation_messages source_message
+                             ON source_message.id = source_id.value
+                           WHERE COALESCE(json_extract(source_message.metadata_json, '$.dialogue_scope'), '')
+                                   NOT IN ('ambient', 'incomplete')
+                             AND COALESCE(json_extract(source_message.metadata_json, '$.conversation_decision.reason'), '')
+                                   NOT IN ('ambient_speech', 'self_talk', 'other_person', 'incomplete_turn')
+                         ) THEN 1
+                         ELSE 0
+                       END AS eligible
+                FROM memory_items mi
+                WHERE mi.id IN ({placeholders})
+                """,
+                tuple(ids),
+            ).fetchall()
+        return {str(row["id"]): bool(row["eligible"]) for row in rows}
 
     def reindex_memories(self) -> int:
         with self._connect() as connection:
@@ -3562,6 +3667,15 @@ class TimelineStore:
         """Share one BEGIN IMMEDIATE connection across nested store methods."""
         ambient = getattr(self._transaction_local, "connection", None)
         if ambient is not None:
+            if getattr(self._transaction_local, "read_scope", False):
+                # A read scope pins a deferred connection. Handing it back here
+                # would silently turn a writer transaction into a deferred one,
+                # which takes the write lock only at the first statement and can
+                # lose the race it is meant to win. No caller does this today;
+                # fail loudly rather than let one start.
+                raise RuntimeError(
+                    "consolidation_transaction cannot be opened inside read_scope"
+                )
             yield ambient
             return
         connection = sqlite3.connect(self._db_path, timeout=5)
@@ -3579,6 +3693,41 @@ class TimelineStore:
             raise
         finally:
             self._transaction_local.connection = None
+            connection.close()
+
+    @contextmanager
+    def read_scope(self) -> Iterator[sqlite3.Connection]:
+        """Pin one connection across a burst of store calls that form one turn.
+
+        Opening a connection against a WAL database costs about a millisecond
+        of file setup regardless of the query, and a single context build
+        issues eight independent store calls. Pinning one connection collapses
+        that to one.
+
+        This changes connection count, not isolation: sqlite3 leaves plain
+        SELECTs in autocommit, so a scope still sees writes committed by other
+        connections while it is open. It is named ``read_scope`` because that
+        is what it is meant to wrap -- a write issued inside one opens a
+        deferred transaction that holds the write lock and stays uncommitted
+        until the scope exits, so it must not wrap anything long-running.
+        """
+        ambient = getattr(self._transaction_local, "connection", None)
+        if ambient is not None:
+            yield ambient
+            return
+        connection = sqlite3.connect(self._db_path)
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute("PRAGMA busy_timeout = 5000")
+            self._transaction_local.connection = connection
+            self._transaction_local.read_scope = True
+            with connection:
+                yield connection
+        finally:
+            self._transaction_local.connection = None
+            self._transaction_local.read_scope = False
             connection.close()
 
     @contextmanager
