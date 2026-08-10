@@ -181,6 +181,7 @@ class VoiceSessionManager:
         raw_transcript: str | None = None,
         transcript_corrections: tuple[dict[str, object], ...] = (),
         playback_rate: float = 1.0,
+        pipeline_started_at: float | None = None,
     ) -> asyncio.Task[None]:
         if not self.connected(session_id):
             raise RuntimeError("Voice WebSocket is not connected")
@@ -192,6 +193,7 @@ class VoiceSessionManager:
             voice_style=coerce_voice_style(style_override),
             base_pace=self._pace_for_style(style_override),
             playback_rate=max(MIN_SPEECH_TEMPO, min(MAX_SPEECH_TEMPO, float(playback_rate))),
+            started_at=pipeline_started_at or time.perf_counter(),
         )
         self._active[session_id] = context
         context.task = asyncio.create_task(
@@ -252,6 +254,15 @@ class VoiceSessionManager:
         directive_sent = False
         pending_voice_directive: VoiceDirective | None = None
         speech_sequence = 0
+        avatar_start_task: asyncio.Task | None = None
+
+        async def ensure_avatar_stream_started() -> None:
+            nonlocal avatar_start_task
+            if avatar_start_task is None:
+                return
+            task = avatar_start_task
+            avatar_start_task = None
+            await task
 
         async def apply_directive(directive: AvatarDirective) -> None:
             nonlocal directive_sent
@@ -274,6 +285,7 @@ class VoiceSessionManager:
             )
             if presentation_cue is not None:
                 context.base_pace = coerce_speech_pace(presentation_cue.tts_pace)
+            await ensure_avatar_stream_started()
             frame = metadata_frame(
                 intent=intent,
                 emotion=directive.emotion.value,
@@ -364,10 +376,17 @@ class VoiceSessionManager:
             if self._avatar_service is not None:
                 if not self._is_active(context):
                     raise asyncio.CancelledError
-                await self._avatar_service.stream_start(
-                    session_id=context.session_id,
-                    utterance_id=context.utterance_id,
-                    intent=intent,
+                # Avatar startup is independent of LLM preparation. Keep the
+                # ordering guarantee by awaiting it before metadata, while
+                # allowing its websocket round-trip to overlap first-token
+                # latency.
+                avatar_start_task = asyncio.create_task(
+                    self._avatar_service.stream_start(
+                        session_id=context.session_id,
+                        utterance_id=context.utterance_id,
+                        intent=intent,
+                    ),
+                    name=f"avatar-stream-start-{context.utterance_id}",
                 )
             iterator = agent.stream_user_message(
                 context.session_id,
@@ -458,6 +477,10 @@ class VoiceSessionManager:
         except asyncio.CancelledError:
             if on_assistant_interrupted is not None:
                 await on_assistant_interrupted("".join(reply_parts).strip())
+            if avatar_start_task is not None:
+                avatar_start_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await avatar_start_task
             worker.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await worker
@@ -465,6 +488,9 @@ class VoiceSessionManager:
         except Exception as exc:
             if on_assistant_interrupted is not None:
                 await on_assistant_interrupted("".join(reply_parts).strip())
+            if avatar_start_task is not None:
+                with contextlib.suppress(Exception):
+                    await avatar_start_task
             worker.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await worker

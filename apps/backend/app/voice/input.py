@@ -325,6 +325,8 @@ class InputConnection:
     websocket: WebSocket
     version: int = 3
     generation: int = 0
+    # Captured at the candidate endpoint for end-to-end latency diagnostics.
+    pipeline_started_at: float = 0.0
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     async def send(self, payload: dict) -> None:
@@ -386,6 +388,7 @@ class VoiceInputSessionManager:
         pre_roll_ms: int = 900,
         post_roll_ms: int = 180,
         live_end_silence_ms: int = 750,
+        semantic_end_silence_ms: int | None = None,
         live_fallback_end_silence_ms: int = 1100,
         max_utterance_seconds: int = 45,
         max_turn_silence_ms: int = 2500,
@@ -406,7 +409,12 @@ class VoiceInputSessionManager:
         self._energy_start_ms = max(32, energy_start_ms)
         self._pre_roll_ms = pre_roll_ms
         self._post_roll_ms = max(0, post_roll_ms)
-        self._live_end_silence_ms = max(100, live_end_silence_ms)
+        self._semantic_end_silence_ms = max(
+            100,
+            semantic_end_silence_ms
+            if semantic_end_silence_ms is not None
+            else live_end_silence_ms,
+        )
         self._live_fallback_end_silence_ms = max(100, live_fallback_end_silence_ms)
         self._max_utterance_seconds = max_utterance_seconds
         self._max_turn_silence_ms = max(100, max_turn_silence_ms)
@@ -540,7 +548,7 @@ class VoiceInputSessionManager:
             end_threshold=self._silero_end_threshold if silero_active else self._energy_end_rms,
             start_ms=self._silero_start_ms if silero_active else self._energy_start_ms,
             end_ms=(
-                self._live_end_silence_ms
+                self._semantic_end_silence_ms
                 if semantic_ready
                 else self._live_fallback_end_silence_ms
             ),
@@ -630,7 +638,16 @@ class VoiceInputSessionManager:
         self._append_ring(session, pcm16)
         now = time.monotonic()
         try:
-            observations = session.vad_stream.feed(pcm16) if session.vad_stream is not None else []
+            vad_stream = session.vad_stream
+            if vad_stream is None:
+                observations = []
+            elif vad_stream.name == "silero":
+                # Torch inference is synchronous. Running it in the asyncio
+                # loop stalls PCM ingestion, event delivery, and TTS playback
+                # on every ~20 ms browser frame.
+                observations = await asyncio.to_thread(vad_stream.feed, pcm16)
+            else:
+                observations = vad_stream.feed(pcm16)
         except VadRuntimeError as exc:
             await self._switch_to_energy(session, str(exc))
             observations = session.vad_stream.feed(pcm16)
@@ -833,6 +850,7 @@ class VoiceInputSessionManager:
             session.connection.websocket,
             version=session.connection.version,
             generation=generation,
+            pipeline_started_at=time.perf_counter(),
             lock=session.connection.lock,
         )
         try:

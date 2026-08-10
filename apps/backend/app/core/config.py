@@ -116,8 +116,10 @@ class Settings(BaseSettings):
     voice_tts_timeout_seconds: int = 45
     voice_live_queue_size: int = 3
     voice_live_idle_flush_ms: int = 500
-    voice_live_first_idle_flush_ms: int = 180
-    voice_live_next_idle_flush_ms: int = 350
+    # Safe chunk boundaries still require whitespace/punctuation; these only
+    # bound a stalled LLM delta gap before the first/next TTS job is released.
+    voice_live_first_idle_flush_ms: int = 120
+    voice_live_next_idle_flush_ms: int = 250
     voice_live_first_segment_chars: int = 32
     voice_live_next_segment_chars: int = 75
     voice_live_max_segment_chars: int = 110

@@ -477,6 +477,7 @@ def create_app() -> FastAPI:
                 generation=result.generation,
                 source_message=result.message,
                 state_context=result.state_context,
+                pipeline_started_at=connection.pipeline_started_at or None,
                 raw_transcript=stt_result.raw_text,
                 transcript_corrections=stt_result.corrections,
             )
@@ -496,6 +497,7 @@ def create_app() -> FastAPI:
         await voice_session_manager.start(
             session_id=session_id, utterance_id=utterance_id, transcript=stt_result.text,
             language=stt_result.language, voice=voice, agent=agent,
+            pipeline_started_at=connection.pipeline_started_at or None,
             raw_transcript=stt_result.raw_text,
             transcript_corrections=stt_result.corrections,
         )
@@ -526,6 +528,15 @@ def create_app() -> FastAPI:
         "patient": (900, 1500, 4000),
     }.get(runtime_settings.live_conversation_pause_tolerance, (750, 1100, 2500))
     live_end_silence_ms, live_fallback_end_silence_ms, max_turn_silence_ms = pause_profile
+    # Smart Turn is already the semantic guard for a candidate endpoint. Give
+    # it a candidate sooner, but keep the conservative fallback unchanged when
+    # the model is unavailable. An incomplete candidate remains in pending_turn
+    # and continues accumulating audio; inference timeout/error still waits for
+    # the existing max-turn-silence safeguard rather than speaking early.
+    semantic_end_silence_ms = max(
+        450,
+        min(settings.voice_vad_live_end_silence_ms, live_end_silence_ms) - 250,
+    )
 
     voice_input_session_manager = VoiceInputSessionManager(
         voice_service, process_pcm_utterance, pcm_speech_started,
@@ -542,6 +553,7 @@ def create_app() -> FastAPI:
         pre_roll_ms=max(settings.voice_vad_pre_roll_ms, 900),
         post_roll_ms=settings.voice_vad_post_roll_ms,
         live_end_silence_ms=max(settings.voice_vad_live_end_silence_ms, live_end_silence_ms),
+        semantic_end_silence_ms=semantic_end_silence_ms,
         live_fallback_end_silence_ms=max(
             settings.voice_vad_live_fallback_end_silence_ms,
             live_fallback_end_silence_ms,

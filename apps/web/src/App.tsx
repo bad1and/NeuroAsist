@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   Brain,
@@ -860,6 +860,10 @@ function ChatPage({
   const playbackSegmentTextsRef = useRef<string[]>([]);
   const activeVoiceGenerationRef = useRef<number | undefined>(undefined);
   const conversationStatusTimerRef = useRef<number | null>(null);
+  const pendingTextDeltasRef = useRef(new Map<string, string>());
+  const pendingTextDeltaTimerRef = useRef<number | null>(null);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  messagesRef.current = messages;
 
   const updateConversationStatus = useCallback((status: string, resetAfterMs?: number) => {
     if (conversationStatusTimerRef.current !== null) {
@@ -901,6 +905,43 @@ function ChatPage({
     if (!update || update.action !== "saved") return;
     setMemoryNotice(`Сохранено в памяти: ${update.predicate}.`);
   }, []);
+
+  const flushPendingTextDeltas = useCallback(() => {
+    pendingTextDeltaTimerRef.current = null;
+    const pending = pendingTextDeltasRef.current;
+    if (pending.size === 0) return;
+    pendingTextDeltasRef.current = new Map();
+    setMessages((current) => {
+      let next = current;
+      for (const [utteranceId, delta] of pending) {
+        const index = next.findIndex((message) => message.utteranceId === utteranceId);
+        if (index < 0) {
+          next = [...next, {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: delta,
+            utteranceId,
+            emotion: liveMetadataRef.current.emotion,
+            intent: liveMetadataRef.current.intent,
+          }];
+          continue;
+        }
+        next = next.map((message, messageIndex) => messageIndex === index
+          ? { ...message, content: message.content + delta }
+          : message);
+      }
+      return next;
+    });
+  }, []);
+
+  const queueTextDelta = useCallback((utteranceId: string, delta: string) => {
+    pendingTextDeltasRef.current.set(
+      utteranceId,
+      `${pendingTextDeltasRef.current.get(utteranceId) ?? ""}${delta}`,
+    );
+    if (pendingTextDeltaTimerRef.current !== null) return;
+    pendingTextDeltaTimerRef.current = window.setTimeout(flushPendingTextDeltas, 16);
+  }, [flushPendingTextDeltas]);
 
   useEffect(() => {
       if (!sessionId) return;
@@ -1165,21 +1206,9 @@ function ChatPage({
               : message,
           ));
         } else if (event.type === "voice.text.delta" && event.delta) {
-          setMessages((current) => {
-            const index = current.findIndex((message) => message.utteranceId === event.utterance_id);
-            if (index < 0) {
-              return [...current, {
-                id: crypto.randomUUID(), role: "assistant", content: event.delta!,
-                utteranceId: event.utterance_id,
-                emotion: liveMetadataRef.current.emotion,
-                intent: liveMetadataRef.current.intent,
-              }];
-            }
-            return current.map((message, messageIndex) => messageIndex === index
-              ? { ...message, content: message.content + event.delta }
-              : message);
-          });
+          queueTextDelta(event.utterance_id, event.delta);
         } else if (event.type === "voice.text.completed") {
+          flushPendingTextDeltas();
           showMemoryUpdates(event.memory_updates);
         } else if (event.type === "tts.segment.started") {
           latestPlaybackSegmentRef.current = event.text ?? "";
@@ -1199,6 +1228,7 @@ function ChatPage({
             livePlayerRef.current?.finish(event.utterance_id);
           }
         } else if (event.type === "voice.utterance.cancelled") {
+          flushPendingTextDeltas();
           livePlayerRef.current?.stop();
           stopVoicePlayback();
           playbackCoordinatorRef.current.cancel();
@@ -1206,6 +1236,7 @@ function ChatPage({
           setLoading(false);
           setVoiceState("idle");
         } else if (event.type === "voice.error") {
+          flushPendingTextDeltas();
           livePlayerRef.current?.stop();
           playbackCoordinatorRef.current.cancel();
           liveSocketRef.current?.clearActive();
@@ -1238,13 +1269,16 @@ function ChatPage({
     }
     await player.unlock();
     await liveSocketRef.current.connect();
-  }, [ensureLivePlayer, sessionId, showMemoryUpdates, speakTextInBrowser, stopVoicePlayback]);
+  }, [ensureLivePlayer, flushPendingTextDeltas, queueTextDelta, sessionId, showMemoryUpdates, speakTextInBrowser, stopVoicePlayback]);
 
   useEffect(() => () => {
     livePlayerRef.current?.stop();
     liveSocketRef.current?.close();
     vadRecorderRef.current?.stop();
     pcmInputRef.current?.close();
+    if (pendingTextDeltaTimerRef.current !== null) {
+      window.clearTimeout(pendingTextDeltaTimerRef.current);
+    }
   }, []);
 
   useEffect(() => () => stopVoicePlayback(), [stopVoicePlayback]);
@@ -1325,25 +1359,26 @@ function ChatPage({
     [syncVoiceTtsStatus],
   );
 
-  useLayoutEffect(() => {
-    // ChatPage remains mounted while another section is open so the live
-    // connection survives navigation.  Its list can therefore receive its
-    // history while hidden; scroll only after it becomes visible and has a
-    // measurable layout.
-    if (!isActive || messages.length === 0) return;
-    listRef.current?.scrollTo({
-      top: listRef.current.scrollHeight,
-      behavior: "auto",
-    });
-  }, [isActive, messages.length]);
-
+  const scrollTimerRef = useRef<number | null>(null);
   useEffect(() => {
-    if (!isActive) return;
-    listRef.current?.scrollTo({
-      top: listRef.current.scrollHeight,
-      behavior: "smooth",
-    });
+    if (!isActive || messages.length === 0 || scrollTimerRef.current !== null) return;
+    // Streaming text can arrive many times per frame. Coalesce layout reads
+    // and writes so a long answer does not enqueue a smooth scroll animation
+    // for every token.
+    scrollTimerRef.current = window.setTimeout(() => {
+      scrollTimerRef.current = null;
+      listRef.current?.scrollTo({
+        top: listRef.current.scrollHeight,
+        behavior: "auto",
+      });
+    }, 32);
   }, [isActive, messages]);
+
+  useEffect(() => () => {
+    if (scrollTimerRef.current !== null) {
+      window.clearTimeout(scrollTimerRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     for (const event of events) {
@@ -1382,7 +1417,7 @@ function ChatPage({
           void playAudioUrl(resolvedAudioUrl);
         }
       } else {
-        const fallbackMessage = messages.find(
+        const fallbackMessage = messagesRef.current.find(
           (message) => message.voiceRequestId === voiceRequestId,
         );
         const fallbackAlreadyStarted = fallbackMessage?.ttsStatus === "browser_fallback";
@@ -1406,7 +1441,7 @@ function ChatPage({
         );
       }
     }
-  }, [avatarOwnsAudio, browserSpeechSupported, events, messages, playAudioUrl, speakTextInBrowser]);
+  }, [avatarOwnsAudio, browserSpeechSupported, events, playAudioUrl, speakTextInBrowser]);
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
