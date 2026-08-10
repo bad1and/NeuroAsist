@@ -19,8 +19,8 @@ namespace NeuroAsist.Avatar
         public float EmotionBlendInSeconds = .15f;
         public float EmotionBlendOutSeconds = .2f;
         [Range(0f, 1f)] public float StreamPlaybackPrebufferSeconds = .2f;
-        public bool ApplyAvatarLowProfile = true;
-        public int AvatarFrameRate = 30;
+        public bool ApplyAvatarLowProfile;
+        public int AvatarFrameRate = 60;
         public int AvatarWidth = 1280;
         public int AvatarHeight = 720;
         public bool DebugLogging;
