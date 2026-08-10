@@ -23,8 +23,8 @@ MonoBehaviour:
   EmotionBlendInSeconds: 0.15
   EmotionBlendOutSeconds: 0.2
   StreamPlaybackPrebufferSeconds: 0.2
-  ApplyAvatarLowProfile: 1
-  AvatarFrameRate: 30
+  ApplyAvatarLowProfile: 0
+  AvatarFrameRate: 60
   AvatarWidth: 1280
   AvatarHeight: 720
   DebugLogging: 0

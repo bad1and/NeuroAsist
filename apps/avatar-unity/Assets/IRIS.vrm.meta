@@ -1,0 +1,13 @@
+fileFormatVersion: 2
+guid: 30f8e7038b1e4586b81e60fc7b4b6f11
+ScriptedImporter:
+  internalIDToNameTable: []
+  externalObjects: {}
+  serializedVersion: 2
+  userData:
+  assetBundleName:
+  assetBundleVariant:
+  script: {fileID: 11500000, guid: f66ead3390398f443aa127b741826ad9, type: 3}
+  MigrateToVrm1: 1
+  # The desktop overlay uses the built-in renderer, rather than URP MToon.
+  RenderPipeline: 1
