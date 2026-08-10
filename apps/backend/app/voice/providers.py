@@ -2172,13 +2172,22 @@ class SileroTTSProvider(TTSProvider):
         style = coerce_voice_style(request.style)
         wav_bytes, _, _ = await self._synthesize_wav_bytes(text, speaker, style)
         tempo_started = time.perf_counter()
+        # `_synthesize_wav_bytes` already applies the full quality pipeline
+        # (including the configured low-pass filter). Repeating that work in
+        # delivery is unnecessary when no time-stretch is requested. Keep the
+        # second pass for non-unit tempo, because the pitch-preserving filter
+        # can change level after it transforms the waveform.
+        delivery_postprocess = (
+            self.audio_postprocessing_enabled
+            and abs(float(request.tempo) - 1.0) >= 0.001
+        )
         wav_bytes = await asyncio.to_thread(
             apply_wav_delivery,
             wav_bytes,
             tempo=request.tempo,
             pause_before_ms=request.pause_before_ms,
             pause_after_ms=request.pause_after_ms,
-            postprocess=True,
+            postprocess=delivery_postprocess,
             loudness_target_dbfs=self.loudness_target_dbfs,
             peak_ceiling_dbfs=self.peak_ceiling_dbfs,
             highpass_cutoff_hz=self.highpass_cutoff_hz

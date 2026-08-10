@@ -235,13 +235,15 @@ class MemoryService:
             return []
         self.expire_due_memories()
         normalized_query = self._normalize(query)
-        active_profile = self._store.list_memories(status="active", limit=250)
         developer_query = bool(re.search(
             r"\b(?:разработчик|разработчики|создатель|developer|developers)\b"
             r"|\bкак\s+зовут\s+(?:твоего\s+)?второго\b",
             normalized_query,
         ))
         if developer_query:
+            active_profile = self._store.list_memories(
+                status="active", limit=250, include_enrichment=False,
+            )
             memories = [
                 item for item in active_profile
                 if item.get("slot_key") in {"assistant.developer", "assistant.developer_count"}
@@ -250,6 +252,9 @@ class MemoryService:
                 memories, {str(item["id"]): 1.0 for item in memories}, {}, temporal=False,
             )
         elif self._is_identity_query(normalized_query):
+            active_profile = self._store.list_memories(
+                status="active", limit=250, include_enrichment=False,
+            )
             memories = [
                 item for item in active_profile
                 if item.get("slot_key") == "user.name"
@@ -264,8 +269,12 @@ class MemoryService:
         # Separate namespaces prevent a free-form topic reflection from being
         # treated as a factual assertion.  Topic and commitment rows use a
         # small common display contract for ContextManager and diagnostics.
-        topic_rows = self._store.list_topics(status="active", query=query, limit=limit)
-        commitment_rows = self._store.list_commitments(status="open", limit=limit)
+        topic_rows = self._store.list_topics(
+            status="active", query=query, limit=limit, include_details=False,
+        )
+        commitment_rows = self._store.list_commitments(
+            status="open", limit=limit, include_evidence=False,
+        )
         query_terms = set(re.findall(r"[^\W_]+", self._normalize(query), flags=re.UNICODE))
         for topic in topic_rows:
             text = f"{topic['title']} {topic['summary_text']}"
@@ -277,13 +286,29 @@ class MemoryService:
             overlap = len(query_terms & set(re.findall(r"[^\W_]+", self._normalize(text), flags=re.UNICODE)))
             if overlap or any(marker in self._normalize(query) for marker in ("план", "обещ", "задач", "loop", "обяз")):
                 memories.append({"id": f"commitment:{commitment['id']}", "namespace": "commitment_memory", "predicate": str(commitment["title"]), "value_text": str(commitment["details"] or commitment["title"]), "importance": float(commitment["importance"]), "confidence": float(commitment["confidence"]), "status": "active", "source_message_ids": [], "retrieval": {"score": round(.5 + .1 * overlap + .1 * float(commitment["importance"]), 4), "components": {"open_loop": 1, "fts": overlap, "importance": commitment["importance"]}, "reasons": ["open_commitment"]}})
+        eligibility = None
+        source_eligibility = getattr(self._store, "memory_source_eligibility", None)
+        factual_ids = [
+            str(memory["id"])
+            for memory in memories
+            if not str(memory["id"]).startswith(("topic:", "commitment:"))
+        ]
+        if callable(source_eligibility):
+            eligibility = source_eligibility(factual_ids)
         memories = [
             memory for memory in memories
-            if self._memory_has_eligible_source(memory)
+            if (
+                str(memory["id"]).startswith(("topic:", "commitment:"))
+                or eligibility is None
+                and self._memory_has_eligible_source(memory)
+                or eligibility is not None
+                and eligibility.get(str(memory["id"]), True)
+            )
         ]
         selected: list[dict[str, object]] = []
         used_tokens = 0
         seen: set[str] = set()
+        retrieved_ids: list[str] = []
         for memory in sorted(memories, key=lambda item: float(dict(item.get("retrieval", {})).get("score", 0)), reverse=True):
             fingerprint = self._fingerprint(str(memory.get("namespace", "factual_memory")), str(memory["predicate"]), str(memory["value_text"]))
             if fingerprint in seen:
@@ -295,7 +320,14 @@ class MemoryService:
             used_tokens += estimate
             selected.append(memory)
             if not str(memory["id"]).startswith(("topic:", "commitment:")):
-                self._record_retrieval(memory)
+                retrieved_ids.append(str(memory["id"]))
+        if retrieved_ids:
+            record_batch = getattr(self._store, "record_memory_retrievals", None)
+            if callable(record_batch):
+                record_batch(retrieved_ids)
+            else:
+                for memory_id in retrieved_ids:
+                    self._store.record_memory_retrieval(memory_id)
         return selected
 
     def explain_retrieval(self, query: str, limit: int = 8) -> dict[str, object]:
@@ -1673,7 +1705,12 @@ class MemoryService:
         }
 
     def _hybrid_retrieve(self, query: str, limit: int) -> list[dict[str, object]]:
-        fts = self._store.list_memories(status="active", query=query, limit=max(limit, self._semantic_limit))
+        fts = self._store.list_memories(
+            status="active",
+            query=query,
+            limit=max(limit, self._semantic_limit),
+            include_enrichment=False,
+        )
         fts_scores = {str(item["id"]): 1.0 / (position + 1) for position, item in enumerate(fts)}
         semantic_scores: dict[str, float] = {}
         candidates = {str(item["id"]): item for item in fts}
@@ -1791,7 +1828,9 @@ class MemoryService:
             self._store.supersede_memory(str(conflict["id"]), memory_id)
 
     def _match_existing(self, values: dict[str, object], exclude_id: str | None = None) -> tuple[dict[str, object] | None, dict[str, object] | None]:
-        active = self._store.list_memories(status="active", limit=250)
+        active = self._store.list_memories(
+            status="active", limit=250, include_enrichment=False,
+        )
         subject, predicate = str(values["subject"]), str(values["predicate"])
         candidate_value = self._normalize(str(values["value_text"]))
         slot_key = str(values.get("slot_key") or "")
@@ -2228,7 +2267,9 @@ class MemoryService:
     def _close_satisfied_commitments(self, slot_key: str) -> None:
         if not slot_key:
             return
-        for commitment in self._store.list_commitments(status="open", limit=100):
+        for commitment in self._store.list_commitments(
+            status="open", limit=100, include_evidence=False,
+        ):
             target = str(commitment.get("target_slot") or "")
             text = self._normalize(f"{commitment.get('title', '')} {commitment.get('details', '')}")
             inferred_name = slot_key == "user.name" and (
@@ -2242,7 +2283,9 @@ class MemoryService:
     def expire_due_memories(self) -> int:
         now = datetime.now(UTC)
         expired = 0
-        for item in self._store.list_memories(status="active", limit=500):
+        for item in self._store.list_memories(
+            status="active", limit=500, include_enrichment=False,
+        ):
             raw = item.get("expires_at")
             if not raw:
                 continue

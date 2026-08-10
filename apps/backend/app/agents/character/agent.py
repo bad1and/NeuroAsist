@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -69,20 +70,17 @@ class CharacterAgent:
         self._last_user_message = None
         self._active_turn_id: str | None = None
 
-    async def handle_user_message(
+    def _prepare_turn(
         self,
         session_id: str,
         user_text: str,
-        input_mode: str = "text",
+        input_mode: str,
         *,
         source_message=None,
-        persist_reply: bool = True,
-        persist_reply_callback: Callable[[str], Any] | None = None,
-        state_context: str | None = None,
-        state_behavior: "BehaviorGuide | None" = None,
         raw_user_text: str | None = None,
         voice_corrections: tuple[dict[str, object], ...] = (),
-    ) -> dict[str, Any]:
+    ):
+        """Perform synchronous persistence/context work outside the event loop."""
         interpreted = (
             VoiceInputInterpretation(user_text, len(voice_corrections), voice_corrections)
             if input_mode == "voice" and raw_user_text is not None
@@ -123,8 +121,38 @@ class CharacterAgent:
                 self._last_user_message,
             )
         built_context = (
-            self._context_manager.build(effective_text, session_id=session_id, current_message_id=getattr(self._last_user_message, "id", None))
-            if self._context_manager else None
+            self._context_manager.build(
+                effective_text,
+                session_id=session_id,
+                current_message_id=getattr(self._last_user_message, "id", None),
+            )
+            if self._context_manager
+            else None
+        )
+        return interpreted, effective_text, built_context
+
+    async def handle_user_message(
+        self,
+        session_id: str,
+        user_text: str,
+        input_mode: str = "text",
+        *,
+        source_message=None,
+        persist_reply: bool = True,
+        persist_reply_callback: Callable[[str], Any] | None = None,
+        state_context: str | None = None,
+        state_behavior: "BehaviorGuide | None" = None,
+        raw_user_text: str | None = None,
+        voice_corrections: tuple[dict[str, object], ...] = (),
+    ) -> dict[str, Any]:
+        interpreted, effective_text, built_context = await asyncio.to_thread(
+            self._prepare_turn,
+            session_id,
+            user_text,
+            input_mode,
+            source_message=source_message,
+            raw_user_text=raw_user_text,
+            voice_corrections=voice_corrections,
         )
         prompt_user_text = (
             built_context.effective_user_text
@@ -354,46 +382,14 @@ class CharacterAgent:
         voice_corrections: tuple[dict[str, object], ...] = (),
     ) -> AsyncIterator[str]:
         """Stream plain reply text and commit history only after clean completion."""
-        interpreted = (
-            VoiceInputInterpretation(user_text, len(voice_corrections), voice_corrections)
-            if input_mode == "voice" and raw_user_text is not None
-            else self._voice_input.interpret(user_text, input_mode)
-        )
-        effective_text = interpreted.text
-        if source_message is None:
-            self.last_memory_updates = self._persist_user_message(
-                session_id,
-                raw_user_text if raw_user_text is not None else user_text,
-                input_mode,
-                interpreted,
-            )
-        else:
-            self._last_user_message = source_message
-            if interpreted.changed:
-                apply_interpretation = getattr(self._history, "apply_voice_interpretation", None)
-                if callable(apply_interpretation):
-                    self._last_user_message = apply_interpretation(
-                        source_message.id,
-                        interpreted.text,
-                        interpreted.replacement_count,
-                        list(interpreted.replacements),
-                    )
-            self._active_turn_id = getattr(source_message, "turn_id", None)
-            self.last_memory_updates = []
-        if self._memory_service is not None:
-            resolved = self._memory_service.resolve_clarification_response(
-                self._last_user_message,
-            )
-            self.last_memory_updates.extend(
-                self._memory_service.memory_update(memory)
-                for memory in resolved
-            )
-            self._memory_service.prepare_clarification_from_message(
-                self._last_user_message,
-            )
-        built_context = (
-            self._context_manager.build(effective_text, session_id=session_id, current_message_id=getattr(self._last_user_message, "id", None))
-            if self._context_manager else None
+        interpreted, effective_text, built_context = await asyncio.to_thread(
+            self._prepare_turn,
+            session_id,
+            user_text,
+            input_mode,
+            source_message=source_message,
+            raw_user_text=raw_user_text,
+            voice_corrections=voice_corrections,
         )
         prompt_user_text = (
             built_context.effective_user_text

@@ -82,8 +82,10 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
         lease = await coordinator.begin_assistant(accepted, commit_policy="generated_text")
         state_service = getattr(request.app.state, "character_state_service", None)
         if state_service is not None:
-            state_turn = state_service.prepare(
-                transcript=payload.message, message_id=source_message.id,
+            state_turn = await asyncio.to_thread(
+                state_service.prepare,
+                transcript=payload.message,
+                message_id=source_message.id,
             )
             state_context, state_behavior = state_turn.prompt_block(), state_turn.behavior
     else:
@@ -198,8 +200,10 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             coordinator.register_generation_task(lease)
             state_service = getattr(request.app.state, "character_state_service", None)
             if state_service is not None:
-                state_turn = state_service.prepare(
-                    transcript=payload.message, message_id=accepted.message.id,
+                state_turn = await asyncio.to_thread(
+                    state_service.prepare,
+                    transcript=payload.message,
+                    message_id=accepted.message.id,
                 )
                 state_context, state_behavior = state_turn.prompt_block(), state_turn.behavior
             result = await agent.handle_user_message(

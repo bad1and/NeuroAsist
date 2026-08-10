@@ -589,7 +589,8 @@ class LiveConversationService:
         )
         if state_applied:
             if self._state_service is not None and message is not None:
-                shared = self._state_service.prepare(
+                shared = await asyncio.to_thread(
+                    self._state_service.prepare,
                     transcript=corrected_content or transcript,
                     message_id=message.id,
                     participant_key=appraisal.target_participant,
