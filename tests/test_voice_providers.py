@@ -33,6 +33,7 @@ from apps.backend.app.voice.providers import (
     split_multilingual_tts_segments,
     split_tts_chunks,
     waveform_to_wav_bytes,
+    one_pole_highpass,
     apply_wav_delivery,
 )
 from apps.backend.app.voice.service import VoiceService
@@ -278,6 +279,41 @@ def test_gigaam_long_audio_split_preserves_pcm_and_stays_under_limit() -> None:
     assert b"".join(chunks) == pcm16
     assert all(len(chunk) // 2 <= 24 * 16000 for chunk in chunks)
     assert abs((len(chunks[0]) // 2) - int(18.05 * 16000)) <= 1600
+
+
+def test_one_pole_highpass_matches_the_scalar_recurrence() -> None:
+    sample_rate = 48000
+    samples = (
+        np.random.default_rng(7).standard_normal(sample_rate) * 0.3
+    ).astype(np.float32)
+
+    def scalar(cutoff_hz: float) -> np.ndarray:
+        rc = 1.0 / (2.0 * np.pi * cutoff_hz)
+        alpha = rc / (rc + 1.0 / sample_rate)
+        expected = np.empty_like(samples)
+        expected[0] = samples[0]
+        previous_input = float(samples[0])
+        previous_output = float(samples[0])
+        for index in range(1, len(samples)):
+            current = alpha * (previous_output + float(samples[index]) - previous_input)
+            expected[index] = current
+            previous_input = float(samples[index])
+            previous_output = current
+        return expected
+
+    for cutoff_hz in (20.0, 60.0, 1000.0):
+        filtered = one_pole_highpass(samples, sample_rate, cutoff_hz)
+        # Well below the 1/32767 step the waveform is quantised to on the way out.
+        assert np.max(np.abs(filtered - scalar(cutoff_hz))) < 1e-7
+
+
+def test_one_pole_highpass_passes_through_degenerate_input() -> None:
+    samples = np.array([0.5, -0.5], dtype=np.float32)
+    single = samples[:1]
+
+    assert one_pole_highpass(samples, 48000, 0.0) is samples
+    assert one_pole_highpass(samples, 0, 60.0) is samples
+    assert one_pole_highpass(single, 48000, 60.0) is single
 
 
 def test_waveform_to_wav_bytes_clamps_and_writes_pcm16_wav() -> None:

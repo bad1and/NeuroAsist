@@ -214,6 +214,72 @@ async def test_adaptive_split_retries_unsent_text(monkeypatch) -> None:
     ]
 
 
+def _wav_bytes(seconds: float, sample_rate: int = 24000) -> bytes:
+    import io
+    import wave
+
+    frames = int(seconds * sample_rate)
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(sample_rate)
+        audio.writeframes(b"\0\0" * frames)
+    return buffer.getvalue()
+
+
+def test_validate_audio_reads_wav_duration_from_the_header() -> None:
+    manager = VoiceSessionManager(MockTTSProvider())
+
+    duration = manager._validate_audio(_wav_bytes(1.5), "wav", "любой текст")
+
+    assert duration == pytest.approx(1.5)
+
+
+def test_validate_audio_rejects_truncated_wav_payload() -> None:
+    manager = VoiceSessionManager(MockTTSProvider())
+    truncated = _wav_bytes(1.5)[: 44 + 200]
+
+    with pytest.raises(RuntimeError, match="undecodable"):
+        manager._validate_audio(truncated, "wav", "любой текст")
+
+
+def test_validate_audio_rejects_empty_and_zero_duration_audio() -> None:
+    manager = VoiceSessionManager(MockTTSProvider())
+
+    with pytest.raises(RuntimeError, match="empty"):
+        manager._validate_audio(b"", "wav", "текст")
+    with pytest.raises(RuntimeError, match="zero-duration"):
+        manager._validate_audio(_wav_bytes(0.0), "wav", "текст")
+
+
+def test_tts_concurrency_honours_configured_bounds() -> None:
+    resolve = VoiceSessionManager._resolve_tts_concurrency
+
+    # Defaults stay serial.
+    assert resolve("1", 1, 2) == 1
+    # A configured ceiling above two is no longer silently discarded.
+    assert resolve("4", 1, 4) == 4
+    assert resolve("9", 1, 3) == 3
+    # "auto" respects the configured floor instead of dropping below it.
+    assert resolve("auto", 1, 2) == 1
+    assert resolve("auto", 2, 4) == 2
+    # Garbage falls back to the floor.
+    assert resolve("many", 2, 4) == 2
+
+
+def test_split_tts_jobs_tracks_configured_max_words() -> None:
+    text = " ".join(f"слово{index}" for index in range(40))
+    manager = VoiceSessionManager(MockTTSProvider(), max_segment_words=6)
+
+    jobs = manager._split_tts_jobs(text)
+
+    assert len(jobs) > 1
+    # Every job honours the configured ceiling; this used to be hardcoded to 18,
+    # so a smaller configured value produced oversized segments.
+    assert max(len(job.split()) for job in jobs) <= 6
+
+
 @pytest.mark.anyio
 async def test_tts_worker_synthesizes_concurrently_but_sends_in_order(monkeypatch) -> None:
     class DelayedProvider:

@@ -487,6 +487,51 @@ def test_explicit_request_to_repeat_does_not_trigger_stale_guard() -> None:
     assert result["reply"] == previous
 
 
+def test_duplicate_guard_hold_survives_being_hoisted_out_of_the_delta_loop() -> None:
+    """The two-sentence hold is what lets the guard see a stale continuation.
+
+    `duplicate_guard` is now resolved once per turn instead of on every delta.
+    It still has to gate `required_sentences`, so a turn with a previous reply
+    must buffer past the first sentence while a turn without one releases it
+    immediately.
+    """
+    previous = "Заварку я бы не стала доливать кипятком, вкус уходит совсем."
+
+    class PreviousReplyContext:
+        def __init__(self, messages):
+            self._messages = messages
+
+        def build(self, *_args, **_kwargs):
+            return BuiltContext(list(self._messages), 0, {})
+
+    class SentenceStream:
+        async def stream(self, _messages):
+            yield "Ага, ясно. "
+            yield "Тогда возьми другой сорт. "
+            yield "И вода пусть остынет."
+
+        async def generate(self, _messages):
+            raise AssertionError("live path must not call generate")
+
+    def first_chunk(context) -> str:
+        agent = CharacterAgent(
+            SentenceStream(), InMemoryHistory(), history_limit=0, context_manager=context,
+        )
+
+        async def collect():
+            return [chunk async for chunk in agent.stream_user_message("s1", "а с чаем что")]
+
+        return anyio.run(collect)[0]
+
+    guarded = first_chunk(
+        PreviousReplyContext([ChatMessage(role="assistant", content=previous)]),
+    )
+    unguarded = first_chunk(PreviousReplyContext([]))
+
+    assert guarded == "Ага, ясно. Тогда возьми другой сорт. "
+    assert unguarded == "Ага, ясно. "
+
+
 def test_stale_duplicate_retry_failure_uses_safe_fallback() -> None:
     previous = "Горячим — это уже другой разговор. Ты каждый раз делаешь новую заварку или доливаешь кипяток?"
 

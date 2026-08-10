@@ -70,6 +70,7 @@ export class TTSStreamPlayer {
   private prebufferTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
   private prebufferSegments: number;
   private underrunPrebufferSegments = 0;
+  private underrunsThisUtterance = 0;
   private prebufferMs: number;
   private startLeadMs: number;
   private outputDeviceId: string;
@@ -108,7 +109,17 @@ export class TTSStreamPlayer {
   }
 
   begin(utteranceId: string): void {
-    if (this.activeUtteranceId !== utteranceId) this.stop();
+    if (this.activeUtteranceId !== utteranceId) {
+      // The underrun ratchet buys smoothness with latency, so it has to be able
+      // to give that latency back: an utterance that never starved lowers it by
+      // one step. Without this it only ever climbs, and the first stutter of a
+      // session taxes every reply after it.
+      if (this.underrunsThisUtterance === 0 && this.underrunPrebufferSegments > 0) {
+        this.underrunPrebufferSegments -= 1;
+      }
+      this.underrunsThisUtterance = 0;
+      this.stop();
+    }
     this.activeUtteranceId = utteranceId;
     this.serverFinished = false;
   }
@@ -209,10 +220,15 @@ export class TTSStreamPlayer {
       if (!this.started) {
         this.readyBuffers.push(decoded);
         this.armPrebufferTimer();
+        // `prebufferMs === 0` means "no time-based prebuffer at all". Comparing
+        // against it unguarded made `bufferedSeconds >= 0` trivially true, so
+        // playback always started on the first segment and both the configured
+        // and the underrun-adaptive segment thresholds were dead code.
+        const targetSegments = Math.max(this.prebufferSegments, this.underrunPrebufferSegments);
         const bufferedSeconds = this.readyBuffers.reduce((sum, item) => sum + item.buffer.duration, 0);
         if (
-          this.readyBuffers.length >= Math.max(this.prebufferSegments, this.underrunPrebufferSegments)
-          || bufferedSeconds >= this.prebufferMs / 1000
+          this.readyBuffers.length >= targetSegments
+          || (this.prebufferMs > 0 && bufferedSeconds >= this.prebufferMs / 1000)
           || this.serverFinished
         ) {
           this.flushPrebuffer();
@@ -243,6 +259,7 @@ export class TTSStreamPlayer {
     const context = this.context!;
     const gapMs = this.started ? Math.max(0, (context.currentTime - this.scheduledUntil) * 1000) : 0;
     if (gapMs > 50) {
+      this.underrunsThisUtterance += 1;
       this.underrunPrebufferSegments = Math.min(
         3,
         Math.max(this.prebufferSegments, this.underrunPrebufferSegments) + 1,

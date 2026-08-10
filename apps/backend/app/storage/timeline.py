@@ -3562,6 +3562,15 @@ class TimelineStore:
         """Share one BEGIN IMMEDIATE connection across nested store methods."""
         ambient = getattr(self._transaction_local, "connection", None)
         if ambient is not None:
+            if getattr(self._transaction_local, "read_scope", False):
+                # A read scope pins a deferred connection. Handing it back here
+                # would silently turn a writer transaction into a deferred one,
+                # which takes the write lock only at the first statement and can
+                # lose the race it is meant to win. No caller does this today;
+                # fail loudly rather than let one start.
+                raise RuntimeError(
+                    "consolidation_transaction cannot be opened inside read_scope"
+                )
             yield ambient
             return
         connection = sqlite3.connect(self._db_path, timeout=5)
@@ -3579,6 +3588,41 @@ class TimelineStore:
             raise
         finally:
             self._transaction_local.connection = None
+            connection.close()
+
+    @contextmanager
+    def read_scope(self) -> Iterator[sqlite3.Connection]:
+        """Pin one connection across a burst of store calls that form one turn.
+
+        Opening a connection against a WAL database costs about a millisecond
+        of file setup regardless of the query, and a single context build
+        issues eight independent store calls. Pinning one connection collapses
+        that to one.
+
+        This changes connection count, not isolation: sqlite3 leaves plain
+        SELECTs in autocommit, so a scope still sees writes committed by other
+        connections while it is open. It is named ``read_scope`` because that
+        is what it is meant to wrap -- a write issued inside one opens a
+        deferred transaction that holds the write lock and stays uncommitted
+        until the scope exits, so it must not wrap anything long-running.
+        """
+        ambient = getattr(self._transaction_local, "connection", None)
+        if ambient is not None:
+            yield ambient
+            return
+        connection = sqlite3.connect(self._db_path)
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute("PRAGMA busy_timeout = 5000")
+            self._transaction_local.connection = connection
+            self._transaction_local.read_scope = True
+            with connection:
+                yield connection
+        finally:
+            self._transaction_local.connection = None
+            self._transaction_local.read_scope = False
             connection.close()
 
     @contextmanager
