@@ -17,6 +17,8 @@ import type {
   ConversationDebug,
   CharacterStateView,
   CharacterStateEvent,
+  CodingStatus,
+  CodingTask,
 } from "./types";
 
 const DESKTOP_RUNTIME =
@@ -159,11 +161,52 @@ export function updateRuntimeSettings(payload: {
   live_conversation_echo_mode?: PublicSettings["live_conversation_echo_mode"];
   avatar_placement?: AvatarPlacement;
   avatar_in_app_visible?: boolean;
+  coding_agent_enabled?: boolean;
+  coding_model?: PublicSettings["coding_model"];
+  coding_project_root?: string;
+  coding_workspace_name?: string;
+  coding_auto_delegate?: boolean;
 }): Promise<PublicSettings> {
   return requestJson<PublicSettings>("/settings/runtime", {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
+}
+
+export function getCodingStatus(refresh = false): Promise<CodingStatus> {
+  return requestJson(`/coding/status${refresh ? "?refresh=true" : ""}`);
+}
+
+export function getCodingTasks(limit = 100): Promise<CodingTask[]> {
+  return requestJson(`/coding/tasks?limit=${limit}`);
+}
+
+export function clearCodingTasks(): Promise<{ removed_tasks: number; preserved_workspaces: boolean }> {
+  return requestJson("/coding/tasks", { method: "DELETE" });
+}
+
+export function getCodingTask(taskId: string): Promise<CodingTask> {
+  return requestJson(`/coding/tasks/${encodeURIComponent(taskId)}`);
+}
+
+export function createCodingTask(payload: { objective: string; project_root?: string; context_files?: string[] }): Promise<CodingTask> {
+  return requestJson("/coding/tasks", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function addCodingInstruction(taskId: string, text: string): Promise<CodingTask> {
+  return requestJson(`/coding/tasks/${encodeURIComponent(taskId)}/instructions`, { method: "POST", body: JSON.stringify({ text }) });
+}
+
+export function cancelCodingTask(taskId: string): Promise<CodingTask> {
+  return requestJson(`/coding/tasks/${encodeURIComponent(taskId)}/cancel`, { method: "POST" });
+}
+
+export function retryCodingTask(taskId: string): Promise<CodingTask> {
+  return requestJson(`/coding/tasks/${encodeURIComponent(taskId)}/retry`, { method: "POST" });
+}
+
+export function applyCodingTask(taskId: string): Promise<CodingTask> {
+  return requestJson(`/coding/tasks/${encodeURIComponent(taskId)}/apply`, { method: "POST" });
 }
 
 export function updateVoiceStyle(voice_tts_style: string): Promise<PublicSettings> {

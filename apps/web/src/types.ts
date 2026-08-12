@@ -235,9 +235,75 @@ export type PublicSettings = {
   live_conversation_echo_mode: "auto" | "half_duplex";
   log_level: string;
   api_key_configured: boolean;
+  coding_api_key_configured: boolean;
+  coding_agent_enabled: boolean;
+  coding_model: "deepseek-v4-flash" | "deepseek-v4-pro";
+  coding_project_root: string;
+  coding_workspace_name: string;
+  coding_auto_delegate: boolean;
+  coding_available_models: Array<"deepseek-v4-flash" | "deepseek-v4-pro">;
+  coding_allowed_project_roots: string[];
   available_personalities: string[];
   available_voice_languages: string[];
   available_tts_voices: string[];
+};
+
+export type CodingTaskStatus =
+  | "pending"
+  | "running"
+  | "waiting_for_input"
+  | "review_ready"
+  | "failed"
+  | "cancelled"
+  | "applied"
+  | "conflicted";
+
+export type CodingTaskEvent = {
+  id: number;
+  task_id: string;
+  type: string;
+  level: EventLevel;
+  message: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+};
+
+export type CodingTask = {
+  id: string;
+  objective: string;
+  model: string;
+  project_root: string;
+  workspace_name: string;
+  status: CodingTaskStatus;
+  cancellation_requested: boolean;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string | null;
+  workspace_path?: string | null;
+  context_files: string[];
+  base_manifest: Record<string, unknown>;
+  result: Record<string, unknown>;
+  patch_text?: string | null;
+  error_text?: string | null;
+  events: CodingTaskEvent[];
+  instructions: Array<{ id: number; text: string; status: string; created_at: string; consumed_at?: string | null }>;
+};
+
+export type CodingStatus = {
+  enabled: boolean;
+  configured_enabled: boolean;
+  available: boolean;
+  availability_reason?: string | null;
+  model: string;
+  available_models: string[];
+  project_root: string;
+  allowed_project_roots: string[];
+  workspace_name: string;
+  workspace_root: string;
+  auto_delegate: boolean;
+  active_task_id?: string | null;
+  active_task_status?: CodingTaskStatus | null;
+  queued_count: number;
 };
 
 export type ManagedModel = {

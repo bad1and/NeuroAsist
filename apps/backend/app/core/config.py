@@ -156,6 +156,42 @@ class Settings(BaseSettings):
     avatar_emotion_mapping_path: str = "apps/protocol/avatar-emotion-mapping.json"
     avatar_heartbeat_interval_seconds: float = 15.0
     avatar_client_timeout_seconds: float = 45.0
+    # v0.9 Coding Agent. Runtime preferences (enabled/model/workspace profile)
+    # live in RuntimeSettings; these values define the non-negotiable host-side
+    # security boundary and are intentionally not editable from the WebView.
+    # Feature availability can be disabled by an administrator; individual
+    # desktop users still start with the agent switched off in RuntimeSettings.
+    coding_agent_enabled: bool = True
+    coding_api_key: str | None = Field(default=None, validation_alias="CODING_API_KEY")
+    coding_base_url: str | None = None
+    # A stable image name lets every project release use the same local coding
+    # runtime. Operators may still override it when they maintain their own.
+    coding_docker_image: str = "neuroasist-coding"
+    # Optional operator-selected parent directory for task-private workspaces.
+    # The portable default is a sibling of this checkout, never below it.
+    coding_workspace_root: str | None = None
+    coding_allowed_project_roots: str = ""
+    coding_max_concurrent_tasks: int = 1
+    coding_max_iterations: int = 48
+    # A source checkout with documentation, protocol artefacts and frontend
+    # code easily exceeds the original prototype cap (2,500 files / 40 MB).
+    # These limits still exclude environments, dependencies, secrets and
+    # generated directories through PathPolicy, while allowing NeuroAsist's
+    # own approved source tree to be snapshotted in one task.
+    coding_max_files: int = 10_000
+    coding_max_total_bytes: int = 128_000_000
+    coding_max_file_bytes: int = 500_000
+    coding_max_output_bytes: int = 200_000
+    coding_max_patch_bytes: int = 600_000
+    coding_command_timeout_seconds: float = 180.0
+    coding_llm_timeout_seconds: float = 180.0
+    coding_memory_mb: int = 2048
+    coding_cpus: float = 2.0
+    coding_pids_limit: int = 128
+    coding_workspace_retention_days: int = 14
+    coding_allowed_extensions: str = (
+        ".py,.pyi,.ts,.tsx,.js,.jsx,.json,.toml,.yaml,.yml,.md,.txt,.css,.html,.rs,.cs,.ini,.cfg"
+    )
 
     @field_validator("voice_tts_provider", mode="before")
     @classmethod
@@ -167,6 +203,15 @@ class Settings(BaseSettings):
     @property
     def llm_api_key(self) -> str | None:
         return self.deepseek_api_key or self.legacy_api_key
+
+    @property
+    def coding_llm_api_key(self) -> str | None:
+        """Dedicated key when configured, otherwise the existing DeepSeek key."""
+        return self.coding_api_key or self.llm_api_key
+
+    @property
+    def coding_llm_base_url(self) -> str:
+        return self.coding_base_url or self.deepseek_base_url
 
     @property
     def database_path(self) -> Path:
@@ -191,6 +236,40 @@ class Settings(BaseSettings):
         if local_app_data:
             return Path(local_app_data) / "NeuroAsist"
         return Path.home() / ".local" / "share" / "NeuroAsist"
+
+    @property
+    def coding_workspace_path(self) -> Path:
+        """Task workspace parent, normally a sibling of the repository tree."""
+        if self.coding_workspace_root:
+            path = Path(self.coding_workspace_root).expanduser()
+            return path if path.is_absolute() else (ROOT_DIR / path).resolve()
+        return (ROOT_DIR.parent / "CodingAgentWorkspace").resolve()
+
+    @property
+    def coding_allowed_project_paths(self) -> tuple[Path, ...]:
+        """Canonical source roots that may be snapshotted or receive a reviewed patch."""
+        configured = [item.strip() for item in self.coding_allowed_project_roots.split(",") if item.strip()]
+        roots = configured or [str(ROOT_DIR)]
+        resolved: list[Path] = []
+        for value in roots:
+            path = Path(value).expanduser()
+            if not path.is_absolute():
+                path = ROOT_DIR / path
+            try:
+                candidate = path.resolve()
+            except OSError:
+                continue
+            if candidate not in resolved:
+                resolved.append(candidate)
+        return tuple(resolved)
+
+    @property
+    def coding_allowed_extension_set(self) -> frozenset[str]:
+        return frozenset(
+            suffix.strip().casefold()
+            for suffix in self.coding_allowed_extensions.split(",")
+            if suffix.strip().startswith(".")
+        )
 
     @property
     def semantic_chroma_directory(self) -> Path:

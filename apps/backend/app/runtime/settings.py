@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -55,6 +56,14 @@ class RuntimeSettings:
     avatar_overlay_y: float = 80.0
     avatar_overlay_width: float = 640.0
     avatar_overlay_height: float = 720.0
+    # Coding Agent preferences are deliberately non-secret.  The service
+    # receives credentials only from static Settings / the desktop keyring.
+    coding_agent_enabled: bool = False
+    coding_model: str = "deepseek-v4-flash"
+    # Empty means the first server-configured allowed project root.
+    coding_project_root: str = ""
+    coding_workspace_name: str = "default"
+    coding_auto_delegate: bool = True
 
 
 class RuntimeSettingsStore:
@@ -94,6 +103,11 @@ class RuntimeSettingsStore:
             values["interface_locale"] = defaults.interface_locale
         if values.get("avatar_placement") not in {None, "desktop_overlay", "in_app"}:
             values["avatar_placement"] = defaults.avatar_placement
+        if values.get("coding_model") not in {None, "deepseek-v4-flash", "deepseek-v4-pro"}:
+            values["coding_model"] = defaults.coding_model
+        workspace_name = values.get("coding_workspace_name")
+        if workspace_name is not None and not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}", workspace_name):
+            values["coding_workspace_name"] = defaults.coding_workspace_name
         try:
             loaded = RuntimeSettings(**{**defaults_dict, **values})
         except TypeError:

@@ -18,7 +18,7 @@ from apps.backend.app.llm.base import ChatMessage
 
 PRIMARY_RELATIONSHIP_ID = "primary"
 PRIMARY_TIMELINE_ID = "primary-timeline"
-LATEST_SCHEMA_VERSION = 19
+LATEST_SCHEMA_VERSION = 20
 
 
 @dataclass(frozen=True)
@@ -179,6 +179,9 @@ class TimelineStore:
             if 19 not in applied:
                 self._apply_v19_autonomous_memory_schema(connection)
                 connection.execute("INSERT INTO schema_migrations (version, applied_at) VALUES (19, ?)", (self._now(),))
+            if 20 not in applied:
+                self._apply_v20_coding_agent_schema(connection)
+                connection.execute("INSERT INTO schema_migrations (version, applied_at) VALUES (20, ?)", (self._now(),))
             # v12 reached some development databases before all of its
             # additive objects existed.  Keep this repair idempotent and run
             # it even when the migration marker is already present.
@@ -190,6 +193,7 @@ class TimelineStore:
             self._apply_v17_canonical_memory_schema(connection)
             self._apply_v18_memory_integrity_schema(connection)
             self._apply_v19_autonomous_memory_schema(connection)
+            self._apply_v20_coding_agent_schema(connection)
             self._ensure_primary_timeline(connection)
             self._migrate_legacy_messages(connection)
             # Legacy V0.4 rows are imported after migrations, so backfill their
@@ -836,6 +840,260 @@ class TimelineStore:
 
     def claim_reflection_job(self) -> dict[str, object] | None:
         return self._claim_job("character_reflection")
+
+    # Coding Agent tasks use the same durable queue and leases as memory jobs,
+    # but retain their audit trail in dedicated tables.  Keeping the task in
+    # SQLite means a desktop restart never turns a live code-editing run into
+    # an untraceable in-memory operation.
+    def create_coding_task(
+        self,
+        *,
+        objective: str,
+        model: str,
+        project_root: str,
+        workspace_name: str,
+        session_id: str | None = None,
+        source_message_id: str | None = None,
+        context_files: list[str] | None = None,
+    ) -> dict[str, object]:
+        task_id, now = uuid4().hex, self._now()
+        task = {
+            "id": task_id,
+            "objective": objective,
+            "model": model,
+            "project_root": project_root,
+            "workspace_name": workspace_name,
+            "session_id": session_id,
+            "source_message_id": source_message_id,
+            "context_files": context_files or [],
+        }
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO coding_tasks (
+                    id, session_id, source_message_id, objective, model, project_root,
+                    workspace_name, context_files_json, status, cancellation_requested,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)""",
+                (task_id, session_id, source_message_id, objective, model, project_root,
+                 workspace_name, json.dumps(context_files or [], ensure_ascii=False), now, now),
+            )
+            connection.execute(
+                """INSERT INTO background_jobs (
+                    id, type, status, payload_json, idempotency_key, available_at, created_at, updated_at
+                ) VALUES (?, 'coding_task', 'pending', ?, ?, ?, ?, ?)""",
+                (uuid4().hex, json.dumps({"task_id": task_id}), f"coding-task:{task_id}", now, now, now),
+            )
+        self.append_coding_event(task_id, "task.queued", "info", "Coding task queued", {"model": model})
+        return self.get_coding_task(task_id) or task
+
+    def claim_coding_task_job(self) -> dict[str, object] | None:
+        return self._claim_job("coding_task", lease_seconds=60 * 60)
+
+    def recover_coding_task_jobs(self) -> None:
+        now = self._now()
+        with self._connect() as connection:
+            connection.execute(
+                """UPDATE background_jobs
+                   SET status = 'pending', available_at = ?, updated_at = ?, lease_owner = NULL, lease_until = NULL
+                   WHERE type = 'coding_task' AND status = 'running'""",
+                (now, now),
+            )
+            connection.execute(
+                """UPDATE coding_tasks SET status = 'pending', updated_at = ?
+                   WHERE status = 'running'""",
+                (now,),
+            )
+
+    def get_coding_task(self, task_id: str, *, include_events: bool = True) -> dict[str, object] | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM coding_tasks WHERE id = ?", (task_id,)).fetchone()
+            if row is None:
+                return None
+            task = self._coding_task_row(row)
+            if include_events:
+                rows = connection.execute(
+                    "SELECT * FROM coding_task_events WHERE task_id = ? ORDER BY id", (task_id,)
+                ).fetchall()
+                task["events"] = [self._coding_event_row(item) for item in rows]
+                instruction_rows = connection.execute(
+                    "SELECT * FROM coding_task_instructions WHERE task_id = ? ORDER BY id", (task_id,)
+                ).fetchall()
+                task["instructions"] = [self._coding_instruction_row(item) for item in instruction_rows]
+        return task
+
+    def list_coding_tasks(self, *, limit: int = 100) -> list[dict[str, object]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM coding_tasks ORDER BY created_at DESC LIMIT ?", (max(1, min(limit, 300)),)
+            ).fetchall()
+        return [self._coding_task_row(row) for row in rows]
+
+    def clear_completed_coding_tasks(self) -> int:
+        """Remove only terminal task records and their cascading audit trail.
+
+        Task workspaces deliberately remain on disk: they can contain files a
+        user wants to keep, and clearing a UI history should never erase them.
+        """
+        terminal = ("review_ready", "failed", "cancelled", "applied", "conflicted")
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id FROM coding_tasks WHERE status IN (?, ?, ?, ?, ?)", terminal
+            ).fetchall()
+            task_ids = [str(row["id"]) for row in rows]
+            if not task_ids:
+                return 0
+            placeholders = ", ".join("?" for _ in task_ids)
+            # Task events/instructions use ON DELETE CASCADE.  The queue rows
+            # are not visible to users, but terminal rows are removed too so
+            # a clear operation remains a genuine history cleanup.
+            connection.execute(
+                f"DELETE FROM background_jobs WHERE type = 'coding_task' AND status IN ('completed', 'failed', 'cancelled') "
+                f"AND json_extract(payload_json, '$.task_id') IN ({placeholders})",
+                task_ids,
+            )
+            connection.execute(
+                f"DELETE FROM coding_tasks WHERE id IN ({placeholders})", task_ids
+            )
+        return len(task_ids)
+
+    def append_coding_event(
+        self,
+        task_id: str,
+        event_type: str,
+        level: str,
+        message: str,
+        payload: dict[str, object] | None = None,
+    ) -> None:
+        now = self._now()
+        payload = payload or {}
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO coding_task_events (task_id, type, level, message, payload_json, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (task_id, event_type, level, message[:2000], json.dumps(payload, ensure_ascii=False), now),
+            )
+            connection.execute("UPDATE coding_tasks SET updated_at = ? WHERE id = ?", (now, task_id))
+        if self._event_publisher is not None:
+            self._event_publisher("coding." + event_type, level, message[:500], {"task_id": task_id, **payload})
+
+    def update_coding_task(
+        self,
+        task_id: str,
+        *,
+        status: str | None = None,
+        workspace_path: str | None = None,
+        base_manifest: dict[str, object] | None = None,
+        result: dict[str, object] | None = None,
+        patch_text: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        allowed = {"pending", "running", "waiting_for_input", "review_ready", "failed", "cancelled", "applied", "conflicted"}
+        if status is not None and status not in allowed:
+            raise ValueError("Unsupported coding task status")
+        values: dict[str, object] = {"updated_at": self._now()}
+        if status is not None:
+            values["status"] = status
+            if status in {"review_ready", "failed", "cancelled", "applied", "conflicted"}:
+                values["completed_at"] = self._now()
+        if workspace_path is not None:
+            values["workspace_path"] = workspace_path
+        if base_manifest is not None:
+            values["base_manifest_json"] = json.dumps(base_manifest, ensure_ascii=False)
+        if result is not None:
+            values["result_json"] = json.dumps(result, ensure_ascii=False)
+        if patch_text is not None:
+            values["patch_text"] = patch_text
+        if error is not None:
+            values["error_text"] = error[:2000]
+        assignments = ", ".join(f"{key} = ?" for key in values)
+        with self._connect() as connection:
+            connection.execute(f"UPDATE coding_tasks SET {assignments} WHERE id = ?", (*values.values(), task_id))
+
+    def request_coding_cancel(self, task_id: str) -> dict[str, object] | None:
+        now = self._now()
+        with self._connect() as connection:
+            connection.execute(
+                """UPDATE coding_tasks
+                   SET cancellation_requested = 1,
+                       status = CASE WHEN status IN ('pending', 'waiting_for_input') THEN 'cancelled' ELSE status END,
+                       completed_at = CASE WHEN status IN ('pending', 'waiting_for_input') THEN ? ELSE completed_at END,
+                       updated_at = ? WHERE id = ?""",
+                (now, now, task_id),
+            )
+        self.append_coding_event(task_id, "task.cancel_requested", "warning", "Cancellation requested")
+        return self.get_coding_task(task_id)
+
+    def coding_task_cancel_requested(self, task_id: str) -> bool:
+        with self._connect() as connection:
+            row = connection.execute("SELECT cancellation_requested FROM coding_tasks WHERE id = ?", (task_id,)).fetchone()
+        return bool(row and row[0])
+
+    def add_coding_instruction(self, task_id: str, text: str) -> dict[str, object] | None:
+        now = self._now()
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO coding_task_instructions (task_id, text, status, created_at)
+                   VALUES (?, ?, 'pending', ?)""",
+                (task_id, text, now),
+            )
+            connection.execute(
+                "UPDATE coding_tasks SET updated_at = ? WHERE id = ?", (now, task_id),
+            )
+        self.append_coding_event(task_id, "instruction.received", "info", "Additional instruction received")
+        return self.get_coding_task(task_id)
+
+    def consume_coding_instructions(self, task_id: str) -> list[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id, text FROM coding_task_instructions WHERE task_id = ? AND status = 'pending' ORDER BY id",
+                (task_id,),
+            ).fetchall()
+            if rows:
+                connection.executemany(
+                    "UPDATE coding_task_instructions SET status = 'consumed', consumed_at = ? WHERE id = ?",
+                    [(self._now(), row["id"]) for row in rows],
+                )
+        return [str(row["text"]) for row in rows]
+
+    def requeue_coding_task(self, task_id: str) -> dict[str, object] | None:
+        now = self._now()
+        with self._connect() as connection:
+            row = connection.execute("SELECT id FROM coding_tasks WHERE id = ?", (task_id,)).fetchone()
+            if row is None:
+                return None
+            connection.execute(
+                """UPDATE coding_tasks SET status = 'pending', cancellation_requested = 0,
+                   error_text = NULL, completed_at = NULL, updated_at = ? WHERE id = ?""",
+                (now, task_id),
+            )
+            connection.execute(
+                """INSERT INTO background_jobs (
+                   id, type, status, payload_json, idempotency_key, available_at, created_at, updated_at
+                ) VALUES (?, 'coding_task', 'pending', ?, ?, ?, ?, ?)
+                ON CONFLICT(type, idempotency_key) WHERE idempotency_key IS NOT NULL DO UPDATE SET
+                  status = 'pending', available_at = excluded.available_at, updated_at = excluded.updated_at,
+                  lease_owner = NULL, lease_until = NULL""",
+                (uuid4().hex, json.dumps({"task_id": task_id}), f"coding-task:{task_id}", now, now, now),
+            )
+        self.append_coding_event(task_id, "task.requeued", "info", "Coding task requeued")
+        return self.get_coding_task(task_id)
+
+    def detach_coding_task_from_project(self, task_id: str) -> bool:
+        """Convert a failed legacy whole-project task to a standalone task.
+
+        Early v09 UI versions implicitly selected the repository even when a
+        task only asked to create a new file.  This migration is intentionally
+        narrow and is used only for snapshot-limit failures on retry.
+        """
+        with self._connect() as connection:
+            updated = connection.execute(
+                """UPDATE coding_tasks
+                   SET project_root = '', workspace_path = NULL,
+                       base_manifest_json = '{}', patch_text = NULL, updated_at = ?
+                   WHERE id = ?""",
+                (self._now(), task_id),
+            ).rowcount
+        return bool(updated)
 
     def recover_memory_index_jobs(self) -> None:
         """A process crash may leave a claimed job running; make it retry on startup."""
@@ -3212,6 +3470,159 @@ class TimelineStore:
             """
         )
 
+    def _apply_v20_coding_agent_schema(self, connection: sqlite3.Connection) -> None:
+        """Auditable task and review state for the isolated Coding Agent.
+
+        An unpublished pre-v09 experiment used migration number 20 for a
+        narrower ``coding_tasks`` table.  Development installations can
+        therefore carry a v20 marker while lacking the final columns.  Detect
+        that shape rather than trusting the marker, archive the old table, and
+        copy its records into the review-first shape.
+        """
+        required_columns = {
+            "id", "session_id", "source_message_id", "objective", "model",
+            "project_root", "workspace_name", "workspace_path",
+            "context_files_json", "base_manifest_json", "result_json",
+            "patch_text", "status", "cancellation_requested", "error_text",
+            "created_at", "updated_at", "completed_at",
+        }
+        existing_columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(coding_tasks)").fetchall()
+        }
+        legacy_tasks: list[dict[str, object]] = []
+        legacy_events: list[dict[str, object]] = []
+        legacy_instructions: list[dict[str, object]] = []
+        if existing_columns and not required_columns.issubset(existing_columns):
+            legacy_tasks = [dict(row) for row in connection.execute("SELECT * FROM coding_tasks").fetchall()]
+            # The first released v09 build may already have created these
+            # child tables while its parent table still had the experimental
+            # shape. Preserve their rows before rebuilding the relationship.
+            for table, target in (
+                ("coding_task_events", legacy_events),
+                ("coding_task_instructions", legacy_instructions),
+            ):
+                exists = connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+                ).fetchone()
+                if exists is not None:
+                    target.extend(dict(row) for row in connection.execute(f"SELECT * FROM {table}").fetchall())
+                    connection.execute(f"DROP TABLE {table}")
+            legacy_name = f"coding_tasks_legacy_v09_{uuid4().hex[:8]}"
+            connection.execute(f"ALTER TABLE coding_tasks RENAME TO {legacy_name}")
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS coding_tasks (
+                id TEXT PRIMARY KEY,
+                session_id TEXT,
+                source_message_id TEXT,
+                objective TEXT NOT NULL,
+                model TEXT NOT NULL,
+                project_root TEXT NOT NULL,
+                workspace_name TEXT NOT NULL,
+                workspace_path TEXT,
+                context_files_json TEXT NOT NULL DEFAULT '[]',
+                base_manifest_json TEXT NOT NULL DEFAULT '{}',
+                result_json TEXT NOT NULL DEFAULT '{}',
+                patch_text TEXT,
+                status TEXT NOT NULL CHECK(status IN (
+                    'pending', 'running', 'waiting_for_input', 'review_ready',
+                    'failed', 'cancelled', 'applied', 'conflicted'
+                )),
+                cancellation_requested INTEGER NOT NULL DEFAULT 0,
+                error_text TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_coding_tasks_status_created
+                ON coding_tasks(status, created_at DESC);
+            CREATE TABLE IF NOT EXISTS coding_task_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT NOT NULL REFERENCES coding_tasks(id) ON DELETE CASCADE,
+                type TEXT NOT NULL,
+                level TEXT NOT NULL,
+                message TEXT NOT NULL,
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_coding_task_events_task_id
+                ON coding_task_events(task_id, id);
+            CREATE TABLE IF NOT EXISTS coding_task_instructions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT NOT NULL REFERENCES coding_tasks(id) ON DELETE CASCADE,
+                text TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending', 'consumed')),
+                created_at TEXT NOT NULL,
+                consumed_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_coding_task_instructions_pending
+                ON coding_task_instructions(task_id, status, id);
+            """
+        )
+        if legacy_tasks:
+            for legacy in legacy_tasks:
+                task_json = self._safe_json_object(legacy.get("task_json"))
+                old_status = str(legacy.get("status") or "failed")
+                status_map = {
+                    "pending": "failed", "running": "failed", "succeeded": "review_ready",
+                    "rejected": "failed", "failed": "failed", "applied": "applied", "cancelled": "cancelled",
+                }
+                status = status_map.get(old_status, "failed")
+                archived_error = str(legacy.get("error_text") or "")
+                if old_status in {"pending", "running"}:
+                    archived_error = (
+                        "Archived pre-v09 Coding Agent task: it cannot resume in the review-first runtime. "
+                        "Create a new task to run it safely."
+                    )
+                result = self._safe_json_object(legacy.get("result_json"))
+                connection.execute(
+                    """INSERT INTO coding_tasks (
+                        id, session_id, source_message_id, objective, model, project_root,
+                        workspace_name, workspace_path, context_files_json, base_manifest_json,
+                        result_json, patch_text, status, cancellation_requested, error_text,
+                        created_at, updated_at, completed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?, ?, 0, ?, ?, ?, ?)""",
+                    (
+                        str(legacy["id"]), legacy.get("session_id"), legacy.get("source_message_id"),
+                        str(legacy.get("objective") or "Archived Coding Agent task"),
+                        str(task_json.get("model") or "deepseek-v4-flash"),
+                        str(task_json.get("project_root") or ""),
+                        str(task_json.get("workspace_name") or "default"),
+                        legacy.get("workspace_dir") or task_json.get("workspace_path"),
+                        json.dumps(task_json.get("context_files") or [], ensure_ascii=False),
+                        json.dumps(result, ensure_ascii=False), legacy.get("patch_text"), status,
+                        archived_error or None, str(legacy.get("created_at") or self._now()),
+                        str(legacy.get("updated_at") or self._now()), legacy.get("completed_at"),
+                    ),
+                )
+        for legacy in legacy_events:
+            task_id = str(legacy.get("task_id") or "")
+            if not task_id:
+                continue
+            connection.execute(
+                """INSERT INTO coding_task_events (task_id, type, level, message, payload_json, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    task_id, str(legacy.get("type") or legacy.get("event_type") or "legacy.event"),
+                    str(legacy.get("level") or "info"), str(legacy.get("message") or "Legacy Coding Agent event"),
+                    str(legacy.get("payload_json") or "{}"), str(legacy.get("created_at") or self._now()),
+                ),
+            )
+        for legacy in legacy_instructions:
+            task_id = str(legacy.get("task_id") or "")
+            text = str(legacy.get("text") or "")
+            if not task_id or not text:
+                continue
+            connection.execute(
+                """INSERT INTO coding_task_instructions (task_id, text, status, created_at, consumed_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (
+                    task_id, text, "consumed" if legacy.get("consumed_at") else "pending",
+                    str(legacy.get("created_at") or self._now()), legacy.get("consumed_at"),
+                ),
+            )
+
     def ensure_autonomous_memory_guards(self) -> None:
         """Forbid reintroducing the retired manual-review status."""
         with self._connect() as connection:
@@ -3265,6 +3676,42 @@ class TimelineStore:
         # a prefix query; otherwise `какую-нибудь` is parsed as a column query.
         terms = re.findall(r"[^\W_]+", text, flags=re.UNICODE)
         return " OR ".join(f'"{term}"*' for term in terms if len(term) >= 2)
+
+    @staticmethod
+    def _safe_json_object(value: object) -> dict[str, object]:
+        try:
+            decoded = json.loads(str(value or "{}"))
+        except (TypeError, json.JSONDecodeError):
+            return {}
+        return decoded if isinstance(decoded, dict) else {}
+
+    @staticmethod
+    def _coding_task_row(row: sqlite3.Row) -> dict[str, object]:
+        values = dict(row)
+        for field, default in (
+            ("context_files_json", []),
+            ("base_manifest_json", {}),
+            ("result_json", {}),
+        ):
+            try:
+                values[field.removesuffix("_json")] = json.loads(values.pop(field) or json.dumps(default))
+            except (json.JSONDecodeError, TypeError):
+                values[field.removesuffix("_json")] = default
+        values["cancellation_requested"] = bool(values["cancellation_requested"])
+        return values
+
+    @staticmethod
+    def _coding_event_row(row: sqlite3.Row) -> dict[str, object]:
+        values = dict(row)
+        try:
+            values["payload"] = json.loads(values.pop("payload_json") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            values["payload"] = {}
+        return values
+
+    @staticmethod
+    def _coding_instruction_row(row: sqlite3.Row) -> dict[str, object]:
+        return dict(row)
 
     @staticmethod
     def _memory_row(row: sqlite3.Row) -> dict[str, object]:

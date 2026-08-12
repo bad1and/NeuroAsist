@@ -6,7 +6,7 @@
 
 ### Local-first voice AI character and future neuro‑VTuber platform
 
-[![Version](https://img.shields.io/badge/version-0.8.0--dev-7c3aed?style=flat-square)](https://github.com/bad1and/NeuroAsist)
+[![Version](https://img.shields.io/badge/version-0.9.0--dev-7c3aed?style=flat-square)](https://github.com/bad1and/NeuroAsist)
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776ab?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-24%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.116-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -18,13 +18,36 @@
 </div>
 
 > [!IMPORTANT]
-> **Iris v0.8 is an experimental local desktop development branch.**
+> **Iris v0.9 is an experimental local desktop development branch.**
 > The Tauri shell starts the React UI and FastAPI core together. Text and voice chat, long-term memory, and an optional Unity VRM avatar runtime are available.
 
-## What's new in v0.8
+## What's new in v0.9
+
+- **Coding Agent** is a separately managed, review-first code worker. Iris remains the primary conversational orchestrator and can delegate explicit coding requests, pass follow-up instructions, report status, and request cancellation.
+- Coding work starts in a task-private folder by default. Optional explicitly selected project files are copied to Docker; there is no host shell fallback, network, or live project mount. The UI exposes model, allowed project context, queue, logs, commands, tests, diff, retry/cancel, and explicit review.
+- See [V0.9 Coding Agent](Docs/v09-coding-agent.md) for Docker setup, policy and security limits.
 
 - Choose the microphone input and audio output device in Voice Settings; selections persist locally.
 - Show the Unity avatar either as a transparent desktop overlay or natively inside the chat without a second visible window.
+
+### Coding Agent setup
+
+Add a dedicated second DeepSeek key for Coding Agent to `.env`; it keeps coding
+workload credentials separate from Iris's main conversation key:
+
+```env
+CODING_AGENT_ENABLED=true
+CODING_API_KEY=your_second_deepseek_api_key
+CODING_BASE_URL=https://api.deepseek.com
+```
+
+Build the Docker sandbox once before using Coding Agent. Re-run the same command
+after changing `apps/backend/docker/coding.Dockerfile`; it rebuilds the local
+`neuroasist-coding` image under the stable tag used by the application.
+
+```powershell
+docker build -t neuroasist-coding -f apps/backend/docker/coding.Dockerfile .
+```
 - Start a **New dialog** from the chat; it clears the current conversation while preserving long-term memory.
 - Temporary chat transport errors now disappear automatically instead of remaining on screen.
 - Switch the complete application interface between Russian and English in **Settings → System → Interface**. The choice persists locally, including the desktop tray, and does not affect Iris replies, memories, or voice/STT/TTS settings.
@@ -46,7 +69,7 @@ flowchart LR
     E --> F[Voice playback]
 ```
 
-The V0.5 direction is a single continuous desktop companion: one character, one shared conversation history, internal episodes, summaries, and controlled long-term memory. It is not a product with user-created chats. Development-agent, sandbox, and desktop-control features are out of V0.5 scope.
+The V0.5 direction is a single continuous desktop companion: one character, one shared conversation history, internal episodes, summaries, and controlled long-term memory. It is not a product with user-created chats. V0.9 adds one tightly constrained Coding Agent, documented separately; it has no desktop control and cannot access the live assistant project while executing.
 
 ## Current capabilities
 
@@ -67,7 +90,8 @@ The V0.5 direction is a single continuous desktop companion: one character, one 
 | Browser speech fallback | ✅ | Used when backend TTS fails |
 | Unity VRM avatar and lip sync | ✅ | Optional WebSocket client with UniVRM/uLipSync, shown either in the chat or as a desktop overlay |
 | Continuous companion runtime | 🧭 | Timeline, episodes, summaries, controlled long-term memory, and the validated Tauri shell are implemented |
-| Development agent, sandbox, and desktop control | 🚫 | Explicitly out of V0.5 scope |
+| Coding Agent | 🧪 | Durable task queue, isolated Docker snapshot, logs/diff, and explicit review/apply; see [v0.9 guide](Docs/v09-coding-agent.md) |
+| Desktop control | 🚫 | Not in scope |
 
 ## Key ideas
 

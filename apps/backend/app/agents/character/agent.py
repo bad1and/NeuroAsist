@@ -56,6 +56,7 @@ class CharacterAgent:
         context_manager=None,
         memory_service=None,
         persona_name: str = "default",
+        coding_bridge=None,
     ) -> None:
         self._llm_provider = llm_provider
         self._history = history
@@ -65,6 +66,7 @@ class CharacterAgent:
         self._memory_service = memory_service
         self._voice_input = VoiceInputInterpreter(memory_service)
         self._persona = get_persona(persona_name)
+        self._coding_bridge = coding_bridge
         self.last_turn: CharacterTurn | None = None
         self.last_memory_updates: list[dict[str, str]] = []
         self._last_user_message = None
@@ -159,6 +161,13 @@ class CharacterAgent:
             if built_context is not None and built_context.effective_user_text
             else effective_text
         )
+        coding_context = (
+            self._coding_bridge.observe_user_message(session_id, effective_text, self._last_user_message)
+            if self._coding_bridge is not None
+            else None
+        )
+        if coding_context:
+            state_context = "\n\n".join(part for part in (state_context, f"CODING AGENT COORDINATION:\n{coding_context}") if part)
         required_anchors = self._required_response_anchors(prompt_user_text)
         if built_context is not None:
             built_context.diagnostics["relevance_guard"] = {
@@ -396,6 +405,13 @@ class CharacterAgent:
             if built_context is not None and built_context.effective_user_text
             else effective_text
         )
+        coding_context = (
+            self._coding_bridge.observe_user_message(session_id, effective_text, self._last_user_message)
+            if self._coding_bridge is not None
+            else None
+        )
+        if coding_context:
+            state_context = "\n\n".join(part for part in (state_context, f"CODING AGENT COORDINATION:\n{coding_context}") if part)
         required_anchors = self._required_response_anchors(prompt_user_text)
         if built_context is not None:
             built_context.diagnostics["relevance_guard"] = {

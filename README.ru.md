@@ -6,7 +6,7 @@
 
 ### Локальный голосовой AI‑персонаж и будущая neuro‑VTuber платформа
 
-[![Версия](https://img.shields.io/badge/version-0.6.0--dev-7c3aed?style=flat-square)](https://github.com/bad1and/NeuroAsist/tree/v0.6)
+[![Версия](https://img.shields.io/badge/version-0.9.0--dev-7c3aed?style=flat-square)](https://github.com/bad1and/NeuroAsist)
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776ab?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-24%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.116-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -18,7 +18,7 @@
 </div>
 
 > [!IMPORTANT]
-> **Iris v0.6 — экспериментальная development-ветка локального desktop-приложения.**
+> **Iris v0.9 — экспериментальная development-ветка локального desktop-приложения.**
 > Tauri запускает React-интерфейс и FastAPI core вместе. Доступны текстовый/голосовой чат, долгосрочная память и опциональный Unity VRM-аватар.
 
 Iris — официальное имя. К ней также можно обращаться: **Ирис**, **Айрис** или **Ириска**.
@@ -38,9 +38,9 @@ flowchart LR
     E --> F[Воспроизведение голоса]
 ```
 
-Направление V0.5 — desktop-компаньон с одной активной сессией: при новом запуске или ручном сбросе диалог начинается с чистого листа, а управляемая долгосрочная память сохраняется. Внутри сессии используются episodes и summaries. Это не продукт с вручную созданными чатами. Dev-agent, sandbox и управление рабочим столом исключены из V0.5.
+Направление V0.5 — desktop-компаньон с одной активной сессией: при новом запуске или ручном сбросе диалог начинается с чистого листа, а управляемая долгосрочная память сохраняется. Внутри сессии используются episodes и summaries. Это не продукт с вручную созданными чатами. В v09 добавлен отдельный строго ограниченный Coding Agent; он не получает live-доступ к проекту и не управляет рабочим столом.
 
-## Возможности v0.6
+## Возможности v0.9
 
 | Возможность | Статус | Реализация |
 |---|:---:|---|
@@ -57,7 +57,27 @@ flowchart LR
 | Browser speech fallback | ✅ | При ошибке backend TTS |
 | Unity VRM-аватар и lipsync | ✅ | Опциональный WebSocket-клиент с UniVRM/uLipSync |
 | Runtime continuous companion | 🧭 | Реализованы timeline, episodes, summaries, управляемая долгосрочная память и проверенный Tauri shell |
-| Dev-agent, sandbox и управление ПК | 🚫 | Явно вне scope V0.5 |
+| Coding Agent | 🧪 | Очередь задач, отдельные рабочие папки Docker, логи/diff и явное ревью; см. [документ v09](Docs/v09-coding-agent.md) |
+| Управление ПК | 🚫 | Вне scope |
+
+### Настройка Coding Agent
+
+Добавьте в `.env` отдельный второй ключ DeepSeek для Coding Agent. Так ключ и
+лимиты coding-задач отделены от основного ключа Iris:
+
+```env
+CODING_AGENT_ENABLED=true
+CODING_API_KEY=ваш_второй_ключ_deepseek
+CODING_BASE_URL=https://api.deepseek.com
+```
+
+Перед первым запуском Coding Agent соберите Docker-образ. Повторите эту же
+команду после изменений в `apps/backend/docker/coding.Dockerfile`: она
+пересоберёт локальный образ `neuroasist-coding` с тем же стабильным тегом.
+
+```powershell
+docker build -t neuroasist-coding -f apps/backend/docker/coding.Dockerfile .
+```
 
 ## Основные идеи
 

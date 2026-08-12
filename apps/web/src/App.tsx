@@ -4,6 +4,7 @@ import {
   Brain,
   ChevronDown,
   CircleAlert,
+  Code2,
   Database,
   History,
   LayoutDashboard,
@@ -101,6 +102,7 @@ import { JournalPage } from "./journal";
 import { MemoryPage } from "./memory";
 import { StatePage } from "./state";
 import { OverviewPage } from "./overview";
+import { CodingAgentPage } from "./coding";
 import { configureAvatarPlacement, getDesktopRuntime, initialCoreStatus, listenForAvatarVisibility, listenForCoreStatus, restartDesktopCore, setDesktopInterfaceLocale, type CoreStatus } from "./desktop";
 import { StartupScreen } from "./components/StartupScreen";
 import { WindowChrome } from "./components/WindowChrome";
@@ -115,7 +117,7 @@ import {
   useInterfaceLocale,
 } from "./i18n";
 
-type AppView = "overview" | "chat" | "journal" | "memory" | "state" | "settings";
+type AppView = "overview" | "chat" | "journal" | "memory" | "state" | "coding" | "settings";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "iris.sidebar.collapsed";
 const CHAT_ERROR_AUTO_DISMISS_MS = 8_000;
 type SettingsSection =
@@ -658,6 +660,16 @@ export default function App() {
           {activeView === "journal" && <JournalPage />}
           {activeView === "memory" && <MemoryPage />}
           {activeView === "state" && <StatePage events={events} />}
+          {activeView === "coding" && (
+            <CodingAgentPage
+              settings={settings}
+              events={events}
+              onSettingsChanged={(nextSettings) => {
+                overviewRevision.current += 1;
+                setSettings(nextSettings);
+              }}
+            />
+          )}
           {activeView === "settings" && (
             <SettingsPage
               settings={settings}
@@ -734,6 +746,7 @@ const MAIN_NAVIGATION: Array<{ id: Exclude<AppView, "settings">; label: string; 
   { id: "journal", label: "История", icon: History },
   { id: "memory", label: "Память", icon: Brain },
   { id: "state", label: "Состояние", icon: SlidersHorizontal },
+  { id: "coding", label: "Coding Agent", icon: Code2 },
 ];
 
 function Sidebar({

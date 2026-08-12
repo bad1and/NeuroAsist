@@ -1,0 +1,247 @@
+import asyncio
+import sqlite3
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from apps.backend import main as backend_main
+from apps.backend.app.coding.orchestration import CodingBridge
+from apps.backend.app.coding.runner import DockerSandboxRunner
+from apps.backend.app.coding.sandbox import SnapshotLimitError, TaskSandbox
+from apps.backend.app.coding.service import CodingAgentService
+from apps.backend.app.core.config import ROOT_DIR, Settings
+from apps.backend.app.runtime.settings import RuntimeSettings
+from apps.backend.app.storage.timeline import TimelineStore
+
+
+def coding_settings(tmp_path: Path, project: Path) -> Settings:
+    return Settings(
+        deepseek_api_key="test-key",
+        app_data_dir=str(tmp_path / "app-data"),
+        sqlite_path=str(tmp_path / "timeline.sqlite3"),
+        coding_workspace_root=str(tmp_path / "coding-workspaces"),
+        coding_allowed_project_roots=str(project),
+        log_to_file=False,
+    )
+
+
+def test_coding_defaults_are_portable_between_project_locations() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.coding_docker_image == "neuroasist-coding"
+    assert settings.coding_workspace_path == (ROOT_DIR.parent / "CodingAgentWorkspace")
+
+
+def test_task_sandbox_copies_then_applies_only_after_explicit_review(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    source = project / "answer.py"
+    source.write_text("ANSWER = 1\n", encoding="utf-8")
+    # Secrets and ignored build folders cannot reach the snapshot.
+    (project / ".env").write_text("secret=never-copy", encoding="utf-8")
+    settings = coding_settings(tmp_path, project)
+    sandbox = TaskSandbox(settings, task_id="task-one", project_root=project, workspace_name="default")
+
+    manifest = sandbox.create_snapshot()
+    assert set(manifest["files"]) == {"answer.py"}
+    sandbox.write_text("answer.py", "ANSWER = 2\n")
+
+    assert source.read_text(encoding="utf-8") == "ANSWER = 1\n"
+    assert [item.path for item in sandbox.changed_files()] == ["answer.py"]
+    sandbox.apply_to_source()
+    assert source.read_text(encoding="utf-8") == "ANSWER = 2\n"
+
+
+def test_task_sandbox_blocks_apply_when_original_source_changed(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    source = project / "answer.py"
+    source.write_text("ANSWER = 1\n", encoding="utf-8")
+    sandbox = TaskSandbox(coding_settings(tmp_path, project), task_id="task-two", project_root=project, workspace_name="default")
+    sandbox.create_snapshot()
+    sandbox.write_text("answer.py", "ANSWER = 2\n")
+    source.write_text("ANSWER = 3\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="changed since the task snapshot"):
+        sandbox.apply_to_source()
+    assert source.read_text(encoding="utf-8") == "ANSWER = 3\n"
+
+
+def test_task_sandbox_reports_the_limit_that_was_exceeded(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "one.py").write_text("one = 1\n", encoding="utf-8")
+    (project / "two.py").write_text("two = 2\n", encoding="utf-8")
+    settings = coding_settings(tmp_path, project).model_copy(update={"coding_max_files": 1})
+    sandbox = TaskSandbox(settings, task_id="task-limit", project_root=project, workspace_name="default")
+
+    with pytest.raises(SnapshotLimitError, match="file limit"):
+        sandbox.create_snapshot()
+
+
+def test_standalone_workspace_never_copies_or_modifies_the_project(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    source = project / "original.py"
+    source.write_text("VALUE = 'original'\n", encoding="utf-8")
+    workspace_root = tmp_path / "coding-work"
+    settings = coding_settings(tmp_path, project).model_copy(update={"coding_workspace_root": str(workspace_root)})
+    sandbox = TaskSandbox(settings, task_id="standalone", project_root=None, workspace_name="default")
+
+    manifest = sandbox.create_empty_workspace()
+    sandbox.write_text("hello_world.py", "print('hello')\n")
+
+    assert manifest["files"] == {}
+    assert (sandbox.work_root / "hello_world.py").is_file()
+    assert not (sandbox.work_root / "original.py").exists()
+    assert sandbox.apply_to_source()[0].path == "hello_world.py"
+    assert source.read_text(encoding="utf-8") == "VALUE = 'original'\n"
+
+
+def test_coding_tasks_are_durable_and_main_bridge_queues_explicit_request(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "module.py").write_text("x = 1\n", encoding="utf-8")
+    settings = coding_settings(tmp_path, project)
+    store = TimelineStore(settings.database_path)
+    store.init_db()
+    runtime = RuntimeSettings(coding_agent_enabled=True, coding_project_root=str(project))
+    service = CodingAgentService(settings, runtime, store, lambda *_: None)
+    bridge = CodingBridge(service)
+
+    coordination = bridge.observe_user_message("session-a", "Исправь баг в Python файле и добавь тесты")
+
+    assert coordination is not None
+    tasks = store.list_coding_tasks()
+    assert len(tasks) == 1
+    assert tasks[0]["status"] == "pending"
+    assert store.claim_coding_task_job() is not None
+    store.append_coding_event(tasks[0]["id"], "command.completed", "info", "Sandbox command completed", {"exit_code": 0})
+    loaded = store.get_coding_task(tasks[0]["id"])
+    assert loaded is not None
+    assert loaded["events"][-1]["payload"]["exit_code"] == 0
+
+    queued = service.create_task("Добавь тест для Python модуля")
+    cancelled = store.request_coding_cancel(str(queued["id"]))
+    assert cancelled is not None
+    assert cancelled["status"] == "cancelled"
+
+
+def test_coding_settings_and_task_api_contract(monkeypatch, tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "module.py").write_text("x = 1\n", encoding="utf-8")
+    settings = Settings(
+        deepseek_api_key="test-key",
+        app_data_dir=str(tmp_path / "app-data"),
+        sqlite_path=str(tmp_path / "timeline.sqlite3"),
+        coding_workspace_root=str(tmp_path / "coding-workspaces"),
+        coding_allowed_project_roots=str(project),
+        log_to_file=False,
+        voice_preload_stt_model=False,
+        voice_preload_tts_model=False,
+        voice_stt_provider="mock",
+        voice_tts_provider="mock",
+    )
+    monkeypatch.setattr(backend_main, "get_settings", lambda: settings)
+
+    with TestClient(backend_main.create_app()) as client:
+        initial = client.get("/settings/public")
+        assert initial.status_code == 200
+        assert initial.json()["coding_agent_enabled"] is False
+        assert initial.json()["coding_allowed_project_roots"] == [str(project.resolve())]
+
+        patched = client.patch("/settings/runtime", json={
+            "coding_agent_enabled": True,
+            "coding_model": "deepseek-v4-pro",
+            "coding_project_root": str(project),
+            "coding_workspace_name": "qa-workspace",
+        })
+        assert patched.status_code == 200
+        assert patched.json()["coding_model"] == "deepseek-v4-pro"
+
+        created = client.post("/coding/tasks", json={"objective": "Добавь тест к Python модулю"})
+        assert created.status_code == 201
+        assert created.json()["status"] == "pending"
+        assert client.get("/coding/tasks").json()[0]["id"] == created.json()["id"]
+
+        blocked_clear = client.delete("/coding/tasks")
+        assert blocked_clear.status_code == 409
+        client.app.state.timeline_store.update_coding_task(created.json()["id"], status="failed")
+        cleared = client.delete("/coding/tasks")
+        assert cleared.status_code == 200
+        assert cleared.json() == {"removed_tasks": 1, "preserved_workspaces": True}
+        assert client.get("/coding/tasks").json() == []
+
+
+def test_docker_availability_accepts_successful_cli_and_image(monkeypatch, tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    runner = DockerSandboxRunner(coding_settings(tmp_path, project))
+
+    async def successful_exec(argv: list[str], *, timeout: float) -> dict[str, object]:
+        return {"exit_code": 0, "stdout": "ok", "stderr": "", "timed_out": False}
+
+    monkeypatch.setattr(runner, "_exec", successful_exec)
+
+    assert asyncio.run(runner.availability()) == (True, None)
+
+
+def test_docker_runner_uses_portable_writable_bind_mount(monkeypatch, tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runner = DockerSandboxRunner(coding_settings(tmp_path, project))
+    captured: list[list[str]] = []
+
+    async def successful_exec(argv: list[str], *, timeout: float) -> dict[str, object]:
+        captured.append(argv)
+        return {"exit_code": 0, "stdout": "ok", "stderr": "", "timed_out": False}
+
+    monkeypatch.setattr(runner, "_exec", successful_exec)
+
+    result = asyncio.run(runner.run("mount-test", workspace, ["python", "hello_world.py"]))
+
+    assert result.exit_code == 0
+    assert result.command == ["python3", "hello_world.py"]
+    mount = captured[0][captured[0].index("--mount") + 1]
+    assert mount == f"type=bind,src={workspace.resolve()},dst=/workspace"
+
+
+def test_v09_repairs_pre_release_coding_task_table_with_v20_marker(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    store = TimelineStore(coding_settings(tmp_path, project).database_path)
+    store.init_db()
+    with sqlite3.connect(store._db_path) as connection:
+        connection.execute("DROP TABLE coding_task_events")
+        connection.execute("DROP TABLE coding_task_instructions")
+        connection.execute("DROP TABLE coding_tasks")
+        connection.execute(
+            """CREATE TABLE coding_tasks (
+                id TEXT PRIMARY KEY, session_id TEXT, source_message_id TEXT,
+                status TEXT NOT NULL, objective TEXT NOT NULL, task_json TEXT NOT NULL,
+                result_json TEXT, diagnostics_json TEXT, patch_text TEXT, workspace_dir TEXT,
+                error_text TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                completed_at TEXT, applied_at TEXT
+            )"""
+        )
+        connection.execute(
+            """INSERT INTO coding_tasks VALUES (
+                'legacy-task', NULL, NULL, 'succeeded', 'old task',
+                '{"model":"deepseek-v4-pro"}', '{}', NULL, NULL, NULL, NULL,
+                '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', NULL, NULL
+            )"""
+        )
+
+    store.init_db()
+
+    task = store.get_coding_task("legacy-task")
+    assert task is not None
+    assert task["model"] == "deepseek-v4-pro"
+    assert task["status"] == "review_ready"
+    with sqlite3.connect(store._db_path) as connection:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(coding_tasks)")}
+        assert {"model", "project_root", "workspace_name"}.issubset(columns)
