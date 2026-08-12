@@ -52,6 +52,7 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
         context_manager=request.app.state.context_manager,
         memory_service=request.app.state.memory_service,
         persona_name=runtime_settings.personality,
+        coding_bridge=getattr(request.app.state, "coding_bridge", None),
     )
     voice = request.app.state.voice_service.resolve_tts_voice(
         runtime_settings.voice_language,
@@ -174,6 +175,7 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             context_manager=request.app.state.context_manager,
             memory_service=request.app.state.memory_service,
             persona_name=request.app.state.runtime_settings.personality,
+            coding_bridge=getattr(request.app.state, "coding_bridge", None),
         )
         coordinator = getattr(request.app.state, "turn_coordinator", None)
         if coordinator is not None:

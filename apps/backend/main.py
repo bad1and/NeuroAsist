@@ -25,6 +25,7 @@ from apps.backend.app.api.routes.memory import router as memory_router
 from apps.backend.app.api.routes.models import router as models_router
 from apps.backend.app.api.routes.maintenance import router as maintenance_router
 from apps.backend.app.api.routes.conversation import router as conversation_router
+from apps.backend.app.api.routes.coding import router as coding_router
 from apps.backend.app.api.websocket import router as websocket_router
 from apps.backend.app.core.config import ROOT_DIR, get_settings
 from apps.backend.app.core.logging import configure_logging
@@ -64,6 +65,8 @@ from apps.backend.app.conversation.state_service import CharacterStateService
 from apps.backend.app.conversation.turn_coordinator import ConversationTurnCoordinator
 from apps.backend.app.conversation.turn import SmartTurnDetector
 from apps.backend.app.llm.providers.deepseek import DeepSeekProvider, close_shared_clients
+from apps.backend.app.coding.service import CodingAgentService
+from apps.backend.app.coding.orchestration import CodingBridge
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +89,7 @@ def create_app() -> FastAPI:
     if not settings.llm_api_key:
         logger.warning("DeepSeek API key is not configured")
 
-    app = FastAPI(title=settings.app_name, version="0.8.0")
+    app = FastAPI(title=settings.app_name, version="0.9.0")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
@@ -130,6 +133,8 @@ def create_app() -> FastAPI:
     )
     runtime_settings_store = RuntimeSettingsStore(settings.app_data_path / "settings.json")
     runtime_settings = runtime_settings_store.load(runtime_defaults)
+    coding_agent_service = CodingAgentService(settings, runtime_settings, timeline_store, event_bus.publish)
+    coding_bridge = CodingBridge(coding_agent_service)
     app.state.voice_tts_style = "auto"
     app.state.voice_tts_expression_level = "natural"
     model_manager = ModelManager(settings.app_data_path / "models", event_bus.publish)
@@ -332,6 +337,7 @@ def create_app() -> FastAPI:
                 context_manager=context_manager,
                 memory_service=memory_service,
                 persona_name=runtime_settings.personality,
+                coding_bridge=coding_bridge,
             )
             source_message = (
                 timeline_store.get_message(reaction.source_message_id)
@@ -410,6 +416,7 @@ def create_app() -> FastAPI:
             llm_provider=DeepSeekProvider(settings), history=history, history_limit=settings.chat_history_limit,
             event_publisher=event_bus.publish, context_manager=context_manager, memory_service=memory_service,
             persona_name=runtime_settings.personality,
+            coding_bridge=coding_bridge,
         )
         utterance_id = uuid.uuid4().hex
         voice = voice_service.resolve_tts_voice(language, runtime_settings.voice_tts_voice)
@@ -580,6 +587,7 @@ def create_app() -> FastAPI:
     summary_worker_task: asyncio.Task[None] | None = None
     semantic_sync_worker_task: asyncio.Task[None] | None = None
     memory_extraction_worker_task: asyncio.Task[None] | None = None
+    coding_worker_task: asyncio.Task[None] | None = None
 
     async def cleanup_tts_audio_forever() -> None:
         try:
@@ -635,6 +643,9 @@ def create_app() -> FastAPI:
             return
         await poll_worker_forever(character_state_service.run_reflection_once)
 
+    async def run_coding_forever() -> None:
+        await poll_worker_forever(coding_agent_service.run_once)
+
     def run_storage_repair() -> list[tuple[str, str, str, dict[str, Any]]]:
         """Synchronous startup repair chain, meant to run in a worker thread.
 
@@ -646,6 +657,7 @@ def create_app() -> FastAPI:
         if timeline_store is not None:
             timeline_store.recover_active_episode()
             timeline_store.recover_memory_index_jobs()
+            timeline_store.recover_coding_task_jobs()
         if memory_service is None:
             return events
 
@@ -725,7 +737,7 @@ def create_app() -> FastAPI:
         return events
 
     async def startup() -> None:
-        nonlocal tts_audio_cleanup_task, summary_worker_task, semantic_sync_worker_task, memory_extraction_worker_task, reflection_worker_task
+        nonlocal tts_audio_cleanup_task, summary_worker_task, semantic_sync_worker_task, memory_extraction_worker_task, reflection_worker_task, coding_worker_task
         removed = await asyncio.to_thread(voice_service.clear_tts_audio)
         clear_stale_uploads = getattr(voice_service, "clear_stale_uploads", None)
         stale_uploads = (
@@ -868,12 +880,19 @@ def create_app() -> FastAPI:
         semantic_sync_worker_task = asyncio.create_task(sync_semantic_forever())
         memory_extraction_worker_task = asyncio.create_task(extract_memory_forever())
         reflection_worker_task = asyncio.create_task(reflect_forever())
+        coding_worker_task = asyncio.create_task(run_coding_forever())
 
     async def shutdown() -> None:
         if reflection_worker_task is not None:
             reflection_worker_task.cancel()
             try:
                 await reflection_worker_task
+            except asyncio.CancelledError:
+                pass
+        if coding_worker_task is not None:
+            coding_worker_task.cancel()
+            try:
+                await coding_worker_task
             except asyncio.CancelledError:
                 pass
         if conversation_service is not None:
@@ -940,6 +959,8 @@ def create_app() -> FastAPI:
     app.state.event_bus = event_bus
     app.state.runtime_settings = runtime_settings
     app.state.runtime_settings_store = runtime_settings_store
+    app.state.coding_agent_service = coding_agent_service
+    app.state.coding_bridge = coding_bridge
     app.state.model_manager = model_manager
     app.state.backup_service = backup_service
     app.state.voice_service = voice_service
@@ -961,6 +982,7 @@ def create_app() -> FastAPI:
     app.include_router(models_router)
     app.include_router(maintenance_router)
     app.include_router(conversation_router)
+    app.include_router(coding_router)
     app.include_router(websocket_router)
     return app
 

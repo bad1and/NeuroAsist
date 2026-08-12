@@ -52,6 +52,14 @@ class PublicSettingsResponse(BaseModel):
     live_conversation_echo_mode: str
     log_level: str
     api_key_configured: bool
+    coding_api_key_configured: bool
+    coding_agent_enabled: bool
+    coding_model: str
+    coding_project_root: str
+    coding_workspace_name: str
+    coding_auto_delegate: bool
+    coding_available_models: list[str]
+    coding_allowed_project_roots: list[str]
     available_personalities: list[str]
     available_voice_languages: list[str]
     available_tts_voices: list[str]
@@ -87,6 +95,11 @@ class RuntimeSettingsPatch(BaseModel):
     live_conversation_echo_mode: str | None = None
     avatar_placement: str | None = None
     avatar_in_app_visible: bool | None = None
+    coding_agent_enabled: bool | None = None
+    coding_model: str | None = None
+    coding_project_root: str | None = Field(default=None, max_length=4096)
+    coding_workspace_name: str | None = Field(default=None, max_length=80)
+    coding_auto_delegate: bool | None = None
 
 
 class VoiceStylePatch(BaseModel):

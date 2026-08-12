@@ -1,3 +1,6 @@
+from pathlib import Path
+import re
+
 from fastapi import APIRouter, HTTPException, Request, status
 
 from apps.backend.app.schemas.settings import (
@@ -21,6 +24,8 @@ MIN_PREBUFFER_MS = 0
 MAX_PREBUFFER_MS = 1500
 MEMORY_MODES = {"off", "balanced", "automatic", "ask"}
 AVATAR_PLACEMENTS = {"desktop_overlay", "in_app"}
+CODING_MODELS = {"deepseek-v4-flash", "deepseek-v4-pro"}
+WORKSPACE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$")
 LIVE_SETTING_VALUES = {
     "live_conversation_participant_mode": {"one_to_one", "group"},
     "live_conversation_engagement": {"low", "balanced", "high"},
@@ -38,6 +43,20 @@ LIVE_SETTING_VALUES = {
 def _available_tts_voices(request: Request) -> list[str]:
     voice_service = request.app.state.voice_service
     return voice_service.available_tts_voices()
+
+
+def _resolved_coding_project_root(settings, runtime_settings) -> str:
+    """Return a server-approved project root; never trust a stale preference."""
+    allowed_roots = settings.coding_allowed_project_paths
+    selected = runtime_settings.coding_project_root
+    if selected:
+        try:
+            resolved = Path(selected).resolve()
+        except OSError:
+            resolved = None
+        if resolved in allowed_roots:
+            return str(resolved)
+    return str(allowed_roots[0])
 
 
 @router.get("/settings/public", response_model=PublicSettingsResponse)
@@ -98,6 +117,14 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         live_conversation_echo_mode=runtime_settings.live_conversation_echo_mode,
         log_level=settings.log_level,
         api_key_configured=bool(settings.llm_api_key),
+        coding_api_key_configured=bool(settings.coding_llm_api_key),
+        coding_agent_enabled=runtime_settings.coding_agent_enabled,
+        coding_model=runtime_settings.coding_model,
+        coding_project_root=_resolved_coding_project_root(settings, runtime_settings),
+        coding_workspace_name=runtime_settings.coding_workspace_name,
+        coding_auto_delegate=runtime_settings.coding_auto_delegate,
+        coding_available_models=sorted(CODING_MODELS),
+        coding_allowed_project_roots=[str(path) for path in settings.coding_allowed_project_paths],
         available_personalities=AVAILABLE_PERSONALITIES,
         available_voice_languages=AVAILABLE_VOICE_LANGUAGES,
         available_tts_voices=_available_tts_voices(request),
@@ -213,6 +240,31 @@ async def patch_runtime_settings(
     if payload.avatar_in_app_visible is not None:
         runtime_settings.avatar_in_app_visible = payload.avatar_in_app_visible
 
+    if payload.coding_agent_enabled is not None:
+        runtime_settings.coding_agent_enabled = payload.coding_agent_enabled
+
+    if payload.coding_model is not None:
+        if payload.coding_model not in CODING_MODELS:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported coding model")
+        runtime_settings.coding_model = payload.coding_model
+
+    if payload.coding_project_root is not None:
+        try:
+            project_root = Path(payload.coding_project_root).resolve()
+        except OSError as error:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid coding project root") from error
+        if project_root not in settings.coding_allowed_project_paths:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported coding project root")
+        runtime_settings.coding_project_root = str(project_root)
+
+    if payload.coding_workspace_name is not None:
+        if not WORKSPACE_NAME_RE.fullmatch(payload.coding_workspace_name):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid coding workspace name")
+        runtime_settings.coding_workspace_name = payload.coding_workspace_name
+
+    if payload.coding_auto_delegate is not None:
+        runtime_settings.coding_auto_delegate = payload.coding_auto_delegate
+
     for field_name, allowed_values in LIVE_SETTING_VALUES.items():
         value = getattr(payload, field_name)
         if value is None:
@@ -263,6 +315,11 @@ async def patch_runtime_settings(
             "live_conversation_enabled": runtime_settings.live_conversation_enabled,
             "avatar_placement": runtime_settings.avatar_placement,
             "avatar_in_app_visible": runtime_settings.avatar_in_app_visible,
+            "coding_agent_enabled": runtime_settings.coding_agent_enabled,
+            "coding_model": runtime_settings.coding_model,
+            "coding_project_root": _resolved_coding_project_root(settings, runtime_settings),
+            "coding_workspace_name": runtime_settings.coding_workspace_name,
+            "coding_auto_delegate": runtime_settings.coding_auto_delegate,
             **{
                 field_name: getattr(runtime_settings, field_name)
                 for field_name in LIVE_SETTING_VALUES

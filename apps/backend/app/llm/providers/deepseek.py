@@ -59,13 +59,23 @@ async def close_shared_clients() -> None:
 
 
 class DeepSeekProvider(LLMProvider):
-    def __init__(self, settings: Settings, model: str | None = None) -> None:
-        self._api_key = settings.llm_api_key
+    def __init__(
+        self,
+        settings: Settings,
+        model: str | None = None,
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        timeout: float | None = None,
+    ) -> None:
+        # Optional overrides let specialized agents use a separately scoped
+        # credential without changing the main conversational provider.
+        self._api_key = api_key if api_key is not None else settings.llm_api_key
         self._model = model or settings.deepseek_model
-        self._base_url = settings.deepseek_base_url
+        self._base_url = base_url or settings.deepseek_base_url
         # An unbounded request keeps the assistant lease open forever when the
         # provider stalls; voice_llm_timeout_seconds finally gets applied here.
-        self._timeout = float(settings.voice_llm_timeout_seconds)
+        self._timeout = float(timeout if timeout is not None else settings.voice_llm_timeout_seconds)
 
     @property
     def _client(self) -> AsyncOpenAI | None:
