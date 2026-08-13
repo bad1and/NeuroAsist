@@ -210,9 +210,40 @@ def test_enabled_coding_request_is_queued_without_main_model_generating_code(tmp
     result = asyncio.run(agent.handle_user_message("session", "Дай агенту задачу написать простой Python файл для теста"))
 
     assert "поставлена в очередь" in result["reply"]
+    assert "Идентификатор" not in result["reply"]
+    assert str(store.list_coding_tasks()[0]["id"]) not in result["reply"]
     assert "```" not in result["reply"]
     assert provider.calls == 0
     assert len(store.list_coding_tasks()) == 1
+
+
+def test_natural_language_request_to_code_agent_is_queued_when_auto_delegate_is_enabled(tmp_path: Path) -> None:
+    class NeverCalledProvider:
+        calls = 0
+
+        async def generate(self, _messages):
+            self.calls += 1
+            raise AssertionError("A Coding Agent delegation must not be answered by the main model")
+
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = coding_settings(tmp_path, project)
+    store = TimelineStore(settings.database_path)
+    store.init_db()
+    runtime = RuntimeSettings(coding_agent_enabled=True, coding_auto_delegate=True)
+    service = CodingAgentService(settings, runtime, store, lambda *_: None)
+    provider = NeverCalledProvider()
+    agent = CharacterAgent(provider, TimelineHistoryAdapter(store), history_limit=5, coding_bridge=CodingBridge(service))
+    request = "Ирис, я хочу, чтобы агент накодил мне питоновский файл с простой пузырьковой сортировкой"
+
+    result = asyncio.run(agent.handle_user_message("session", request))
+
+    assert "поставлена в очередь" in result["reply"]
+    assert "автоделегирование выключено" not in result["reply"]
+    assert provider.calls == 0
+    tasks = store.list_coding_tasks()
+    assert len(tasks) == 1
+    assert tasks[0]["objective"] == request
 
 
 def test_disabled_agent_keeps_follow_up_code_detail_for_a_later_confirmation(tmp_path: Path) -> None:
@@ -275,6 +306,84 @@ def test_coding_task_result_is_reported_without_returning_code_to_chat(tmp_path:
     assert provider.calls == 0
 
 
+def test_review_ready_coding_task_notifies_its_source_chat_once(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = coding_settings(tmp_path, project)
+    store = TimelineStore(settings.database_path)
+    store.init_db()
+    events: list[tuple[str, str, str, dict[str, object]]] = []
+    service = CodingAgentService(
+        settings,
+        RuntimeSettings(coding_agent_enabled=True),
+        store,
+        lambda event_type, level, message, metadata: events.append((event_type, level, message, metadata)),
+    )
+    task = service.create_task("Напиши Python файл", session_id="chat-session")
+
+    service._notify_review_ready(task)
+    service._notify_review_ready(task)
+
+    messages, _ = store.list_messages(limit=20, session_id="chat-session")
+    notifications = [message for message in messages if message.metadata.get("kind") == "coding_review_ready"]
+    assert len(notifications) == 1
+    assert notifications[0].role == "assistant"
+    assert "готов к проверке" in notifications[0].content
+    assert "```" not in notifications[0].content
+    assert events == [
+        (
+            "coding.review_notification",
+            "info",
+            "Coding Agent task is ready for review",
+            {
+                "task_id": task["id"],
+                "session_id": "chat-session",
+                "message_id": notifications[0].id,
+                "notification": notifications[0].content,
+            },
+        )
+    ]
+
+
+def test_failed_coding_task_notifies_its_source_chat_once(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = coding_settings(tmp_path, project)
+    store = TimelineStore(settings.database_path)
+    store.init_db()
+    events: list[tuple[str, str, str, dict[str, object]]] = []
+    service = CodingAgentService(
+        settings,
+        RuntimeSettings(coding_agent_enabled=True),
+        store,
+        lambda event_type, level, message, metadata: events.append((event_type, level, message, metadata)),
+    )
+    task = service.create_task("Проверь Python файл", session_id="chat-session")
+
+    service._notify_task_failed(task)
+    service._notify_task_failed(task)
+
+    messages, _ = store.list_messages(limit=20, session_id="chat-session")
+    notifications = [message for message in messages if message.metadata.get("kind") == "coding_task_failed"]
+    assert len(notifications) == 1
+    assert notifications[0].role == "assistant"
+    assert "ошибкой" in notifications[0].content
+    assert "```" not in notifications[0].content
+    assert events == [
+        (
+            "coding.attention_notification",
+            "warning",
+            "Coding Agent task failed and needs attention",
+            {
+                "task_id": task["id"],
+                "session_id": "chat-session",
+                "message_id": notifications[0].id,
+                "notification": notifications[0].content,
+            },
+        )
+    ]
+
+
 def test_coding_settings_and_task_api_contract(monkeypatch, tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
@@ -308,9 +417,15 @@ def test_coding_settings_and_task_api_contract(monkeypatch, tmp_path: Path) -> N
         assert patched.status_code == 200
         assert patched.json()["coding_model"] == "deepseek-v4-pro"
 
-        created = client.post("/coding/tasks", json={"objective": "Добавь тест к Python модулю"})
+        session = client.post("/conversation/session")
+        assert session.status_code == 200
+        created = client.post("/coding/tasks", json={
+            "objective": "Добавь тест к Python модулю",
+            "session_id": session.json()["session_id"],
+        })
         assert created.status_code == 201
         assert created.json()["status"] == "pending"
+        assert created.json()["session_id"] == session.json()["session_id"]
         assert client.get("/coding/tasks").json()[0]["id"] == created.json()["id"]
 
         blocked_clear = client.delete("/coding/tasks")

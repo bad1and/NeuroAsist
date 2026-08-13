@@ -664,6 +664,7 @@ export default function App() {
             <CodingAgentPage
               settings={settings}
               events={events}
+              sessionId={sessionId}
               onSettingsChanged={(nextSettings) => {
                 overviewRevision.current += 1;
                 setSettings(nextSettings);
@@ -876,6 +877,7 @@ function ChatPage({
   const pendingTextDeltasRef = useRef(new Map<string, string>());
   const pendingTextDeltaTimerRef = useRef<number | null>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
+  const handledCodingReviewEventIdsRef = useRef<Set<string>>(new Set());
   messagesRef.current = messages;
 
   const updateConversationStatus = useCallback((status: string, resetAfterMs?: number) => {
@@ -956,9 +958,9 @@ function ChatPage({
     pendingTextDeltaTimerRef.current = window.setTimeout(flushPendingTextDeltas, 16);
   }, [flushPendingTextDeltas]);
 
-  useEffect(() => {
-      if (!sessionId) return;
-      void getTimelineMessages(50, sessionId).then((payload) => {
+  const refreshTimelineMessages = useCallback(() => {
+    if (!sessionId) return Promise.resolve();
+    return getTimelineMessages(50, sessionId).then((payload) => {
       setMessages(payload.items
         .filter((message) => message.role === "user" || message.role === "assistant")
         .map((message) => ({ id: message.id, role: message.role as "user" | "assistant", content: message.content })));
@@ -966,6 +968,28 @@ function ChatPage({
       // The V0.4 compatibility backend may intentionally keep Timeline V2 disabled.
     });
   }, [sessionId]);
+
+  useEffect(() => { void refreshTimelineMessages(); }, [refreshTimelineMessages]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    for (const event of events) {
+      if (
+        (event.type !== "coding.review_notification" && event.type !== "coding.attention_notification")
+        || handledCodingReviewEventIdsRef.current.has(event.id)
+      ) {
+        continue;
+      }
+      handledCodingReviewEventIdsRef.current.add(event.id);
+      if (getStringMetadata(event, "session_id") !== sessionId) continue;
+      const messageId = getStringMetadata(event, "message_id");
+      const content = getStringMetadata(event, "notification");
+      if (!messageId || !content) continue;
+      setMessages((current) => current.some((message) => message.id === messageId)
+        ? current
+        : [...current, { id: messageId, role: "assistant", content }]);
+    }
+  }, [events, sessionId]);
 
   useEffect(() => {
     if (!import.meta.env.DEV || !liveConversation || !settings?.conversation_diagnostics_enabled) {

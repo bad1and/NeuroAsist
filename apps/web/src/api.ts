@@ -189,7 +189,7 @@ export function getCodingTask(taskId: string): Promise<CodingTask> {
   return requestJson(`/coding/tasks/${encodeURIComponent(taskId)}`);
 }
 
-export function createCodingTask(payload: { objective: string; project_root?: string; context_files?: string[] }): Promise<CodingTask> {
+export function createCodingTask(payload: { objective: string; session_id?: string; project_root?: string; context_files?: string[] }): Promise<CodingTask> {
   return requestJson("/coding/tasks", { method: "POST", body: JSON.stringify(payload) });
 }
 
