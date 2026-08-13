@@ -89,6 +89,35 @@ def test_sequence_numbers_are_causal_when_timestamps_collide(tmp_path: Path) -> 
     assert [item.content for item in store.get_recent_messages("default", 2)] == ["первая мысль", "ответ на первую"]
 
 
+def test_legacy_continuity_backfill_preserves_extra_assistant_message_without_duplicate_reply_link(tmp_path: Path) -> None:
+    database = tmp_path / "legacy-order.sqlite3"
+    store = TimelineStore(database)
+    store.init_db()
+    user, _ = store.append_message(role="user", content="Проверь задачу", input_mode="text")
+    linked, _ = store.append_message(
+        role="assistant", content="Первый ответ", input_mode="text",
+        turn_id=user.turn_id, reply_to_message_id=user.id,
+    )
+    extra, _ = store.append_message(role="assistant", content="Позднее уведомление", input_mode="system")
+
+    # A pre-release database may have been reordered after an assistant reply
+    # was already linked to its user message.  The next startup must retain
+    # both messages instead of failing the unique reply-lease index.
+    with sqlite3.connect(database) as connection:
+        connection.execute("UPDATE conversation_messages SET sequence_no = NULL")
+        connection.execute("UPDATE conversation_messages SET sequence_no = 1 WHERE id = ?", (linked.id,))
+        connection.execute("UPDATE conversation_messages SET sequence_no = 2 WHERE id = ?", (user.id,))
+        connection.execute("UPDATE conversation_messages SET sequence_no = 3 WHERE id = ?", (extra.id,))
+
+    store.init_db()
+
+    messages, _ = store.list_messages(10)
+    by_id = {message.id: message for message in messages}
+    assert by_id[linked.id].reply_to_message_id == user.id
+    assert by_id[extra.id].reply_to_message_id is None
+    assert [message.content for message in messages] == ["Первый ответ", "Проверь задачу", "Позднее уведомление"]
+
+
 def test_session_reset_erases_dialog_but_preserves_memory_and_rejects_old_session(tmp_path: Path) -> None:
     store = TimelineStore(tmp_path / "session.sqlite3")
     store.init_db()

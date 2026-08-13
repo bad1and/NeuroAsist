@@ -4073,6 +4073,19 @@ class TimelineStore:
             (PRIMARY_TIMELINE_ID,),
         ).fetchall()
         pending_user: sqlite3.Row | None = None
+        # Legacy and pre-release databases can contain an assistant row whose
+        # sequence was later reordered around the user it already answers.
+        # A one-to-one reply lease is important for active turns, but a
+        # historical extra assistant message must remain visible instead of
+        # preventing the entire application from starting.
+        # Prefer the first existing link in causal order.  It may point to a
+        # user row that appears later after a legacy reorder, so collect these
+        # owners before assigning any previously empty links.
+        existing_reply_owner: dict[str, str] = {}
+        for row in rows:
+            if row["role"] == "assistant" and row["reply_to_message_id"] is not None:
+                existing_reply_owner.setdefault(str(row["reply_to_message_id"]), str(row["id"]))
+        claimed_reply_targets: set[str] = set()
         for row in rows:
             if row["role"] == "user":
                 turn_id = row["turn_id"] or f"legacy-turn-{row['id']}"
@@ -4083,13 +4096,39 @@ class TimelineStore:
             if row["role"] == "assistant":
                 if pending_user is not None:
                     turn_id = row["turn_id"] or pending_user["turn_id"] or f"legacy-turn-{pending_user['id']}"
-                    reply_to = row["reply_to_message_id"] or pending_user["id"]
+                    reply_to = row["reply_to_message_id"]
+                    if reply_to is None:
+                        target = str(pending_user["id"])
+                        if target not in claimed_reply_targets and target not in existing_reply_owner:
+                            reply_to = target
+                    elif (
+                        existing_reply_owner.get(str(reply_to)) != str(row["id"])
+                        or str(reply_to) in claimed_reply_targets
+                    ):
+                        # Keep the later historical answer as a normal
+                        # assistant message, but do not make it a second
+                        # durable lease for the same user turn.
+                        reply_to = None
                     connection.execute(
                         "UPDATE conversation_messages SET turn_id = ?, reply_to_message_id = ? WHERE id = ?",
                         (turn_id, reply_to, row["id"]),
                     )
-                elif row["turn_id"] is None:
-                    connection.execute("UPDATE conversation_messages SET turn_id = ? WHERE id = ?", (f"legacy-turn-{row['id']}", row["id"]))
+                    if reply_to is not None:
+                        claimed_reply_targets.add(str(reply_to))
+                else:
+                    if row["turn_id"] is None:
+                        connection.execute("UPDATE conversation_messages SET turn_id = ? WHERE id = ?", (f"legacy-turn-{row['id']}", row["id"]))
+                    # This row was already causally linked, even when its
+                    # user occurs earlier or later in a repaired ordering.
+                    if row["reply_to_message_id"] is not None:
+                        target = str(row["reply_to_message_id"])
+                        if (
+                            existing_reply_owner.get(target) != str(row["id"])
+                            or target in claimed_reply_targets
+                        ):
+                            connection.execute("UPDATE conversation_messages SET reply_to_message_id = NULL WHERE id = ?", (row["id"],))
+                        else:
+                            claimed_reply_targets.add(target)
                 pending_user = None
             else:
                 pending_user = None
