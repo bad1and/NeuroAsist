@@ -14,7 +14,7 @@ from apps.backend.app.agents.character.prompts import (
     character_live_prompt,
 )
 from apps.backend.app.agents.character.persona import get_persona
-from apps.backend.app.agents.character.protocol import classify_intent, legacy_result, parse_turn
+from apps.backend.app.agents.character.protocol import classify_intent, deterministic_turn, legacy_result, parse_turn
 from apps.backend.app.agents.character.voice_input import (
     VoiceInputInterpretation,
     VoiceInputInterpreter,
@@ -166,6 +166,16 @@ class CharacterAgent:
             if self._coding_bridge is not None
             else None
         )
+        forced_coding_reply = (
+            self._coding_bridge.forced_reply(coding_context)
+            if self._coding_bridge is not None
+            else None
+        )
+        if forced_coding_reply is not None:
+            return self._complete_forced_reply(
+                session_id, forced_coding_reply, prompt_user_text, input_mode,
+                persist_reply=persist_reply, persist_reply_callback=persist_reply_callback,
+            )
         if coding_context:
             state_context = "\n\n".join(part for part in (state_context, f"CODING AGENT COORDINATION:\n{coding_context}") if part)
         required_anchors = self._required_response_anchors(prompt_user_text)
@@ -410,6 +420,20 @@ class CharacterAgent:
             if self._coding_bridge is not None
             else None
         )
+        forced_coding_reply = (
+            self._coding_bridge.forced_reply(coding_context)
+            if self._coding_bridge is not None
+            else None
+        )
+        if forced_coding_reply is not None:
+            reply = stored_reply_transform(forced_coding_reply) if stored_reply_transform is not None else forced_coding_reply
+            if persist_reply is None:
+                persist_reply = source_message is None
+            result = self._complete_forced_reply(
+                session_id, reply, prompt_user_text, input_mode, persist_reply=persist_reply,
+            )
+            yield str(result["reply"])
+            return
         if coding_context:
             state_context = "\n\n".join(part for part in (state_context, f"CODING AGENT COORDINATION:\n{coding_context}") if part)
         required_anchors = self._required_response_anchors(prompt_user_text)
@@ -520,6 +544,36 @@ class CharacterAgent:
         except TypeError:
             # V0.4 test doubles and the legacy history implementation only expose three arguments.
             return self._history.save_message(session_id, role, content)
+
+    def _complete_forced_reply(
+        self,
+        session_id: str,
+        reply: str,
+        user_text: str,
+        input_mode: str,
+        *,
+        persist_reply: bool,
+        persist_reply_callback: Callable[[str], Any] | None = None,
+    ) -> dict[str, Any]:
+        """Persist an execution-boundary response without consulting the LLM."""
+        turn = deterministic_turn(reply, user_text)
+        payload = legacy_result(turn)
+        if persist_reply_callback is not None:
+            assistant_message = persist_reply_callback(turn.reply)
+        elif self._should_persist_timeline() and persist_reply:
+            assistant_message = self._save_message(
+                session_id, "assistant", turn.reply, input_mode,
+                turn_id=self._active_turn_id, reply_to_message_id=getattr(self._last_user_message, "id", None),
+            )
+        else:
+            assistant_message = None
+        if self._memory_service is not None:
+            if self._memory_service.uses_background_extraction:
+                created = self._memory_service.extract_high_precision_from_message(self._last_user_message)
+                self.last_memory_updates.extend(self._memory_service.memory_update(memory) for memory in created)
+            self._memory_service.schedule_extraction(assistant_message)
+        self.last_turn = turn
+        return payload
 
     def _should_persist_timeline(self) -> bool:
         return self._memory_service is None or self._memory_service.should_persist_timeline()

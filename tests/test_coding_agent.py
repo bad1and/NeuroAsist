@@ -6,13 +6,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from apps.backend import main as backend_main
+from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.coding.orchestration import CodingBridge
 from apps.backend.app.coding.runner import DockerSandboxRunner
 from apps.backend.app.coding.sandbox import SnapshotLimitError, TaskSandbox
 from apps.backend.app.coding.service import CodingAgentService
 from apps.backend.app.core.config import ROOT_DIR, Settings
+from apps.backend.app.llm.base import LLMResponse
 from apps.backend.app.runtime.settings import RuntimeSettings
-from apps.backend.app.storage.timeline import TimelineStore
+from apps.backend.app.storage.timeline import TimelineHistoryAdapter, TimelineStore
 
 
 def coding_settings(tmp_path: Path, project: Path) -> Settings:
@@ -22,6 +24,7 @@ def coding_settings(tmp_path: Path, project: Path) -> Settings:
         sqlite_path=str(tmp_path / "timeline.sqlite3"),
         coding_workspace_root=str(tmp_path / "coding-workspaces"),
         coding_allowed_project_roots=str(project),
+        coding_agent_enabled=True,
         log_to_file=False,
     )
 
@@ -126,6 +129,150 @@ def test_coding_tasks_are_durable_and_main_bridge_queues_explicit_request(tmp_pa
     cancelled = store.request_coding_cancel(str(queued["id"]))
     assert cancelled is not None
     assert cancelled["status"] == "cancelled"
+
+
+def test_disabled_coding_agent_never_allows_iris_to_claim_delegation(tmp_path: Path) -> None:
+    class NeverCalledProvider:
+        calls = 0
+
+        async def generate(self, _messages):
+            self.calls += 1
+            return LLMResponse(
+                content='{"reply":"I sent it to Coding Agent","emotion":"happy","intent":"task_request"}',
+                model="test",
+            )
+
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = coding_settings(tmp_path, project)
+    store = TimelineStore(settings.database_path)
+    store.init_db()
+    service = CodingAgentService(settings, RuntimeSettings(coding_agent_enabled=False), store, lambda *_: None)
+    bridge = CodingBridge(service)
+    provider = NeverCalledProvider()
+    agent = CharacterAgent(provider, TimelineHistoryAdapter(store), history_limit=5, coding_bridge=bridge)
+
+    result = asyncio.run(agent.handle_user_message("session", "Сможешь сейчас дать задачу агенту и создать Python файл?"))
+
+    assert "выключен" in result["reply"]
+    assert "не могу передать" in result["reply"]
+    assert provider.calls == 0
+    assert store.list_coding_tasks() == []
+
+
+def test_enabling_agent_accepts_recent_deferred_task_without_model_hallucination(tmp_path: Path) -> None:
+    class NeverCalledProvider:
+        calls = 0
+
+        async def generate(self, _messages):
+            self.calls += 1
+            raise AssertionError("A deferred Coding Agent task must not ask the main model for a reply")
+
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = coding_settings(tmp_path, project)
+    store = TimelineStore(settings.database_path)
+    store.init_db()
+    runtime = RuntimeSettings(coding_agent_enabled=False, coding_auto_delegate=True)
+    bridge = CodingBridge(CodingAgentService(settings, runtime, store, lambda *_: None))
+    provider = NeverCalledProvider()
+    agent = CharacterAgent(provider, TimelineHistoryAdapter(store), history_limit=5, coding_bridge=bridge)
+
+    disabled = asyncio.run(agent.handle_user_message("session", "Передай агенту задачу: напиши тестовый Python файл"))
+    runtime.coding_agent_enabled = True
+    queued = asyncio.run(agent.handle_user_message("session", "Ирис, ну а сейчас"))
+
+    assert "выключен" in disabled["reply"]
+    assert "поставлена в очередь" in queued["reply"]
+    assert provider.calls == 0
+    tasks = store.list_coding_tasks()
+    assert len(tasks) == 1
+    assert tasks[0]["objective"] == "Передай агенту задачу: напиши тестовый Python файл"
+
+
+def test_enabled_coding_request_is_queued_without_main_model_generating_code(tmp_path: Path) -> None:
+    class NeverCalledProvider:
+        calls = 0
+
+        async def generate(self, _messages):
+            self.calls += 1
+            raise AssertionError("Coding delegation must not ask the main model for a code reply")
+
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = coding_settings(tmp_path, project)
+    store = TimelineStore(settings.database_path)
+    store.init_db()
+    service = CodingAgentService(settings, RuntimeSettings(coding_agent_enabled=True), store, lambda *_: None)
+    provider = NeverCalledProvider()
+    agent = CharacterAgent(provider, TimelineHistoryAdapter(store), history_limit=5, coding_bridge=CodingBridge(service))
+
+    result = asyncio.run(agent.handle_user_message("session", "Дай агенту задачу написать простой Python файл для теста"))
+
+    assert "поставлена в очередь" in result["reply"]
+    assert "```" not in result["reply"]
+    assert provider.calls == 0
+    assert len(store.list_coding_tasks()) == 1
+
+
+def test_disabled_agent_keeps_follow_up_code_detail_for_a_later_confirmation(tmp_path: Path) -> None:
+    class NeverCalledProvider:
+        calls = 0
+
+        async def generate(self, _messages):
+            self.calls += 1
+            raise AssertionError("A deferred Coding Agent conversation must not generate code in chat")
+
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = coding_settings(tmp_path, project)
+    store = TimelineStore(settings.database_path)
+    store.init_db()
+    runtime = RuntimeSettings(coding_agent_enabled=False, coding_auto_delegate=True)
+    bridge = CodingBridge(CodingAgentService(settings, runtime, store, lambda *_: None))
+    provider = NeverCalledProvider()
+    agent = CharacterAgent(provider, TimelineHistoryAdapter(store), history_limit=5, coding_bridge=bridge)
+
+    asyncio.run(agent.handle_user_message("session", "Можешь передать задачу агенту?"))
+    deferred = asyncio.run(agent.handle_user_message("session", "Простой Python файл для теста"))
+    runtime.coding_agent_enabled = True
+    queued = asyncio.run(agent.handle_user_message("session", "А сейчас"))
+
+    assert "выключен" in deferred["reply"]
+    assert "поставлена в очередь" in queued["reply"]
+    assert provider.calls == 0
+    assert store.list_coding_tasks()[0]["objective"] == "Простой Python файл для теста"
+
+
+def test_coding_task_result_is_reported_without_returning_code_to_chat(tmp_path: Path) -> None:
+    class NeverCalledProvider:
+        calls = 0
+
+        async def generate(self, _messages):
+            self.calls += 1
+            raise AssertionError("Coding Agent status must not ask the main model to generate code")
+
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = coding_settings(tmp_path, project)
+    store = TimelineStore(settings.database_path)
+    store.init_db()
+    service = CodingAgentService(settings, RuntimeSettings(coding_agent_enabled=True), store, lambda *_: None)
+    task = service.create_task("Напиши Python файл")
+    store.update_coding_task(
+        str(task["id"]),
+        status="review_ready",
+        result={"summary": "Created hello.py with print('hello')"},
+    )
+    provider = NeverCalledProvider()
+    agent = CharacterAgent(provider, TimelineHistoryAdapter(store), history_limit=5, coding_bridge=CodingBridge(service))
+
+    result = asyncio.run(agent.handle_user_message("session", "Что выполнил агент?"))
+
+    assert "review_ready" in result["reply"]
+    assert "hello.py" not in result["reply"]
+    assert "```" not in result["reply"]
+    assert provider.calls == 0
 
 
 def test_coding_settings_and_task_api_contract(monkeypatch, tmp_path: Path) -> None:
