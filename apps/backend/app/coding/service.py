@@ -135,7 +135,18 @@ class CodingAgentService:
             self.store.finish_background_job(str(job["id"]), result={"outcome": "missing_task"}, diagnostics={})
             return True
         if task["status"] in {"cancelled", "applied", "failed", "conflicted"}:
+            if task["status"] == "failed":
+                # Recover a notification if a process stopped after persisting
+                # the failure but before Iris could update the chat.
+                self._notify_task_failed(task)
             self.store.finish_background_job(str(job["id"]), result={"outcome": str(task["status"])}, diagnostics={})
+            return True
+        if task["status"] == "review_ready":
+            # A process can stop after the durable task update but before its
+            # chat notification.  The notification is idempotent, so recover
+            # it when the queued job is observed again.
+            self._notify_review_ready(task)
+            self.store.finish_background_job(str(job["id"]), result={"outcome": "review_ready"}, diagnostics={})
             return True
         self._active_task_id = task_id
         try:
@@ -145,6 +156,7 @@ class CodingAgentService:
             logger.exception("Coding task failed: %s", task_id)
             self.store.update_coding_task(task_id, status="failed", error=f"{type(error).__name__}: {error}")
             self.store.append_coding_event(task_id, "task.failed", "error", "Coding task failed", {"error": str(error)[:1000]})
+            self._notify_task_failed(task)
             self.store.finish_background_job(
                 str(job["id"]), result={"outcome": "failed"}, diagnostics={}, status="failed", error=str(error),
             )
@@ -305,12 +317,107 @@ class CodingAgentService:
                 result["changed_files"] = [item.__dict__ for item in sandbox.changed_files()]
                 self.store.update_coding_task(task_id, status="review_ready", result=result, patch_text=patch)
                 self.store.append_coding_event(task_id, "task.review_ready", "info", "Changes are ready for review", {"changed_files": result["changed_files"], "tests": result.get("tests")})
+                self._notify_review_ready(task)
                 return
             if terminal == "waiting_for_input":
                 self.store.update_coding_task(task_id, status="waiting_for_input", result=tool_result)
                 self.store.append_coding_event(task_id, "task.waiting_for_input", "warning", "Coding Agent needs a user decision", tool_result)
                 return
         raise RuntimeError("Coding Agent reached the iteration limit without a reviewable result")
+
+    def _notify_review_ready(self, task: dict[str, object]) -> None:
+        """Append a single, review-only Iris notification to the source chat.
+
+        This deliberately has no LLM or TTS call: the notification must stay
+        factual, contain no generated code, and never interrupt the user.
+        ``client_message_id`` makes retries and worker recovery safe.
+        """
+        if self.store is None:
+            return
+        session_id = str(task.get("session_id") or "").strip()
+        task_id = str(task.get("id") or "").strip()
+        if not session_id or not task_id:
+            return
+        message, created = self.store.append_message(
+            role="assistant",
+            content=self._review_ready_notification(task),
+            input_mode="system",
+            session_id=session_id,
+            client_message_id=f"coding-review-ready:{task_id}",
+            metadata={"kind": "coding_review_ready", "coding_task_id": task_id},
+        )
+        if created and self.event_publisher is not None:
+            self.event_publisher(
+                "coding.review_notification",
+                "info",
+                "Coding Agent task is ready for review",
+                {
+                    "task_id": task_id,
+                    "session_id": session_id,
+                    "message_id": message.id,
+                    "notification": message.content,
+                },
+            )
+
+    def _notify_task_failed(self, task: dict[str, object]) -> None:
+        """Tell the originating chat about a durable task failure once."""
+        if self.store is None:
+            return
+        session_id = str(task.get("session_id") or "").strip()
+        task_id = str(task.get("id") or "").strip()
+        if not session_id or not task_id:
+            return
+        message, created = self.store.append_message(
+            role="assistant",
+            content=self._failed_task_notification(task),
+            input_mode="system",
+            session_id=session_id,
+            client_message_id=f"coding-task-failed:{task_id}",
+            metadata={"kind": "coding_task_failed", "coding_task_id": task_id},
+        )
+        if created and self.event_publisher is not None:
+            self.event_publisher(
+                "coding.attention_notification",
+                "warning",
+                "Coding Agent task failed and needs attention",
+                {
+                    "task_id": task_id,
+                    "session_id": session_id,
+                    "message_id": message.id,
+                    "notification": message.content,
+                },
+            )
+
+    @staticmethod
+    def _review_ready_notification(task: dict[str, object]) -> str:
+        objective = str(task.get("objective") or "")
+        has_project_changes = bool(str(task.get("project_root") or ""))
+        if any("А" <= char <= "я" or char in "Ёё" for char in objective):
+            action = "нажми «Применить изменения»" if has_project_changes else "нажми «Подтвердить результат»"
+            return (
+                "Coding Agent закончил задачу. Результат готов к проверке: открой раздел Coding Agent, "
+                f"посмотри изменения, логи и тесты, затем, если всё устраивает, {action}. "
+                "Я ничего не применяю автоматически."
+            )
+        action = "choose \"Apply changes\"" if has_project_changes else "choose \"Confirm result\""
+        return (
+            "Coding Agent has finished the task. The result is ready for review: open the Coding Agent section, "
+            f"check the changes, logs, and tests, then {action} if everything looks right. "
+            "Nothing is applied automatically."
+        )
+
+    @staticmethod
+    def _failed_task_notification(task: dict[str, object]) -> str:
+        objective = str(task.get("objective") or "")
+        if any("А" <= char <= "я" or char in "Ёё" for char in objective):
+            return (
+                "Coding Agent остановил задачу с ошибкой. Открой раздел Coding Agent: там доступны логи, "
+                "команды и подробности ошибки. Рабочая папка задачи сохранена, ничего не применено автоматически."
+            )
+        return (
+            "Coding Agent stopped the task with an error. Open the Coding Agent section for logs, commands, "
+            "and error details. The task workspace is preserved and nothing was applied automatically."
+        )
 
     async def _dispatch(self, task_id: str, sandbox: TaskSandbox, action: dict[str, object]) -> tuple[dict[str, object], str | None]:
         name = str(action["action"])

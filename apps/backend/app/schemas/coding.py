@@ -11,6 +11,9 @@ class CodingTaskCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objective: str = Field(min_length=3, max_length=12_000)
+    # The browser supplies its currently active conversation so a manually
+    # created task can notify Iris's chat after it reaches review.
+    session_id: str | None = Field(default=None, min_length=1, max_length=128)
     project_root: str | None = Field(default=None, max_length=4096)
     context_files: list[str] = Field(default_factory=list, max_length=40)
 

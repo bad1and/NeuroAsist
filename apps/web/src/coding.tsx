@@ -29,10 +29,12 @@ function statusLabel(status: string): string {
 export function CodingAgentPage({
   settings,
   events,
+  sessionId,
   onSettingsChanged,
 }: {
   settings: PublicSettings | null;
   events: BackendEvent[];
+  sessionId: string | null;
   onSettingsChanged: (settings: PublicSettings) => void;
 }) {
   const [status, setStatus] = useState<CodingStatus | null>(null);
@@ -89,7 +91,11 @@ export function CodingAgentPage({
     const requestedFiles = contextFiles.split(/[\n,]/).map((value) => value.trim()).filter(Boolean).slice(0, 40);
     setBusy(true);
     try {
-      const task = await createCodingTask({ objective: objective.trim(), ...(requestedFiles.length ? { context_files: requestedFiles } : {}) });
+      const task = await createCodingTask({
+        objective: objective.trim(),
+        ...(sessionId ? { session_id: sessionId } : {}),
+        ...(requestedFiles.length ? { context_files: requestedFiles } : {}),
+      });
       setObjective(""); setContextFiles(""); setSelectedId(task.id); await refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось поставить задачу в очередь."); }
     finally { setBusy(false); }

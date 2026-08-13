@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request, status
 
+from apps.backend.app.api.routes.conversation import require_active_session
 from apps.backend.app.schemas.coding import (
     CodingInstructionCreate,
     CodingStatusResponse,
@@ -53,8 +54,11 @@ def clear_tasks(request: Request) -> CodingTaskClearResponse:
 @router.post("/tasks", response_model=CodingTaskResponse, status_code=status.HTTP_201_CREATED)
 def create_task(payload: CodingTaskCreate, request: Request) -> CodingTaskResponse:
     try:
+        if payload.session_id:
+            require_active_session(request, payload.session_id)
         task = _service(request).create_task(
             payload.objective,
+            session_id=payload.session_id,
             context_files=payload.context_files,
             project_root=payload.project_root,
         )

@@ -40,6 +40,13 @@ class CodingBridge:
         r"\bagent\b.{0,64}(?:task|code|file|test|delegat|run|creat|writ|did|complet|result|done))",
         re.IGNORECASE,
     )
+    _delegation_request_signal = re.compile(
+        r"(?:хочу|хотел(?:s+бы)?|нужно|надо|давай|мож(?:ешь|но)|смож(?:ешь|ет)|пожалуйста|"
+        r"i\s+want|i(?:'d|\s+would)\s+like|can\s+you|could\s+you|please|need).{0,96}"
+        r"(?:coding\s*agent|(?:кодинг|кодовый)\s+агент|агент[а-яё]*|agent).{0,96}"
+        r"(?:код|накод|файл|тест|программ|python|typescript|javascript|react|backend|frontend|api|bug|баг|ошибк)",
+        re.IGNORECASE,
+    )
     _forced_reply_prefix = "CODING_AGENT_FORCED_REPLY:"
     _deferred_confirmation_signal = re.compile(
         r"(?:^|\b)(?:(?:ирис\s+)?(?:ну\s+)?а\s+сейчас|(?:а\s+)?теперь|"
@@ -59,7 +66,7 @@ class CodingBridge:
             if self._status_signal.search(user_text) and self._is_coding_task_reference(user_text, has_tasks=bool(tasks)):
                 latest = tasks[0] if tasks else None
                 return self._forced_reply(self._disabled_status_reply(str(latest["status"]) if latest else None, user_text))
-            if self._is_coding_request(user_text) or self._agent_task_signal.search(user_text):
+            if self._is_coding_delegation_request(user_text) or self._agent_task_signal.search(user_text):
                 self._deferred_objectives[session_id] = (user_text, time.monotonic())
                 return self._forced_reply(self._disabled_reply(user_text))
             if self._has_recent_deferred_objective(session_id) and (
@@ -97,7 +104,7 @@ class CodingBridge:
         if active and self._instruction_signal.search(user_text) and coding_reference:
             self.service.add_instruction(str(active["id"]), user_text)
             return self._forced_reply(self._instruction_reply(user_text))
-        if self.service.runtime_settings.coding_auto_delegate and self._is_coding_request(user_text):
+        if self.service.runtime_settings.coding_auto_delegate and self._is_coding_delegation_request(user_text):
             task = self.service.create_task(
                 user_text, session_id=session_id, source_message_id=source_message_id,
             )
@@ -106,12 +113,19 @@ class CodingBridge:
             # "а сейчас" must not queue that old request a second time.
             self._deferred_objectives.pop(session_id, None)
             return self._forced_reply(self._queued_reply(task, user_text))
-        if self._is_coding_request(user_text) or self._agent_task_signal.search(user_text):
+        if self._is_coding_delegation_request(user_text):
             return self._forced_reply(self._auto_delegate_disabled_reply(user_text))
         return None
 
     def _is_coding_request(self, user_text: str) -> bool:
         return bool(self._code_signal.search(user_text) and self._action_signal.search(user_text))
+
+    def _is_coding_delegation_request(self, user_text: str) -> bool:
+        """Recognise both imperative and natural-language delegation requests."""
+        return bool(
+            self._is_coding_request(user_text)
+            or self._delegation_request_signal.search(user_text)
+        )
 
     def _is_coding_task_reference(self, user_text: str, *, has_tasks: bool) -> bool:
         """Recognise task control/status language without treating a generic agent as coding.
@@ -181,11 +195,11 @@ class CodingBridge:
         if self._uses_russian(user_text):
             return (
                 "Задача передана Coding Agent и поставлена в очередь. "
-                f"Идентификатор: {task['id']}. Ход работы и результат видны в разделе Coding Agent."
+                "Ход работы и результат видны в разделе Coding Agent."
             )
         return (
             "The task was delegated to Coding Agent and queued. "
-            f"ID: {task['id']}. Progress and the result are available in the Coding Agent section."
+            "Progress and the result are available in the Coding Agent section."
         )
 
     def _cancel_reply(self, user_text: str) -> str:
