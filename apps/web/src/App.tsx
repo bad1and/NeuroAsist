@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   Brain,
@@ -1530,6 +1530,15 @@ function ChatPage({
     }
   };
 
+  const submitOnEnter = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    // Chat uses Enter for the common one-line send action.  Keep multiline
+    // prompts available through Shift+Enter and never interrupt IME text
+    // composition (important for Russian and other non-Latin input methods).
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
+  };
+
   const toggleLive = async () => {
     if (!sessionId) return;
     if (liveConversation) {
@@ -1717,8 +1726,10 @@ function ChatPage({
           <textarea
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={submitOnEnter}
             placeholder="Напишите сообщение…"
             rows={2}
+            title="Enter — отправить сообщение; Shift+Enter — новая строка"
           />
           <button
             className="primary-button send-button"

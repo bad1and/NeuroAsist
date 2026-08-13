@@ -33,6 +33,9 @@ describe("interface translations", () => {
     expect(translateInterfaceText("Начать новый диалог", "en")).toBe("Start new chat");
     expect(translateInterfaceText("Все сообщения и сводки текущего диалога будут удалены без возможности восстановления. Долгосрочная память Iris останется.", "en"))
       .toBe("All messages and summaries in the current chat will be deleted permanently. Iris's long-term memory will remain.");
+    expect(translateInterfaceText("Обновить среду", "en")).toBe("Refresh environment");
+    expect(translateInterfaceText("Logs, commands, and errors", "ru")).toBe("Логи, команды и ошибки");
+    expect(translateInterfaceText("Planning step 3", "ru")).toBe("Шаг планирования 3");
   });
 
   it("restores the original Russian grammatical form after switching back", () => {

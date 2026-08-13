@@ -109,6 +109,16 @@ describe("русский интерфейс", () => {
     expect(screen.queryByRole("button", { name: "Свободные руки" })).not.toBeInTheDocument();
   });
 
+  it("отправляет форму по Enter и оставляет Shift+Enter для новой строки", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
+    const composer = screen.getByPlaceholderText("Напишите сообщение…");
+
+    expect(fireEvent.keyDown(composer, { key: "Enter" })).toBe(false);
+    expect(fireEvent.keyDown(composer, { key: "Enter", shiftKey: true })).toBe(true);
+  });
+
   it("переключает sidebar в компактный режим без смены активного раздела", async () => {
     const { container } = render(<App />);
 
