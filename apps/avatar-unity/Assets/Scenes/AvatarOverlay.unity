@@ -543,7 +543,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   avatarCamera: {fileID: 963194227}
   avatar: {fileID: 1949565771}
-  verticalFieldOfView: 34
+  verticalFieldOfView: 30
   framingPadding: 1.12
   portraitHeightFraction: 0.48
   portraitCenterFromTop: 0.52

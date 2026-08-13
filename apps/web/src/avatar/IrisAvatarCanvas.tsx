@@ -11,58 +11,96 @@ import {
 } from "@pixiv/three-vrm";
 
 import { avatarWebSocketUrl, resolveApiUrl } from "../api";
+import type { Emotion } from "../generated/character-protocol";
 import { AvatarAudioQueue } from "./AvatarAudioQueue";
 import { AvatarProtocolClient, type AvatarEnvelope } from "./AvatarProtocolClient";
+import {
+  EMOTION_PROFILES,
+  EmotionBlendController,
+  IdleMotionScheduler,
+  parseEmotion,
+  type IdleCandidate,
+} from "./avatar-motion-state";
+import {
+  createIrisTargetBindRotations,
+  createProceduralIdlePose,
+  retargetMixamoPose,
+  type ProceduralIdleKind,
+  type RetargetedPose,
+  type SourceBoneReference,
+} from "./avatar-retarget";
 
-const IDLE_FILES = ["X Bot@Idle.fbx", "X Bot@Idle 1.fbx", "X Bot@Look Around.fbx"];
-const GESTURE_FILES: Record<string, string> = {
-  talk: "X Bot@Talking.fbx",
-  greeting: "X Bot@Waving.fbx",
-  agreement: "X Bot@Agreeing.fbx",
-  disagreement: "X Bot@Shaking Head No.fbx",
-  question: "X Bot@TalkingQuestion.fbx",
-  explanation: "X Bot@Talking.fbx",
-  thinking: "X Bot@Thinking.fbx",
-  surprise: "X Bot@Surprised.fbx",
-  frustration: "X Bot@Angry.fbx",
-  farewell: "X Bot@WavingGoodbye.fbx",
-  shrug: "X Bot@Shrugging.fbx",
-};
+const IDLE_DEFINITIONS: readonly IdleCandidate[] = [
+  { id: "idle-neutral", category: "micro", durationSeconds: 8, cooldownSeconds: 10 },
+  { id: "idle-weight-shift", category: "normal", durationSeconds: 7, cooldownSeconds: 18 },
+  { id: "idle-look-around", category: "normal", durationSeconds: 6, cooldownSeconds: 22 },
+];
 
-const MIXAMO_BONE_NAMES: Record<string, string> = {
-  J_Bip_C_Hips: "mixamorigHips", J_Bip_C_Spine: "mixamorigSpine", J_Bip_C_Chest: "mixamorigSpine1", J_Bip_C_UpperChest: "mixamorigSpine2", J_Bip_C_Neck: "mixamorigNeck", J_Bip_C_Head: "mixamorigHead",
-  J_Bip_L_Shoulder: "mixamorigLeftShoulder", J_Bip_L_UpperArm: "mixamorigLeftArm", J_Bip_L_LowerArm: "mixamorigLeftForeArm", J_Bip_L_Hand: "mixamorigLeftHand",
-  J_Bip_R_Shoulder: "mixamorigRightShoulder", J_Bip_R_UpperArm: "mixamorigRightArm", J_Bip_R_LowerArm: "mixamorigRightForeArm", J_Bip_R_Hand: "mixamorigRightHand",
-  J_Bip_L_UpperLeg: "mixamorigLeftUpLeg", J_Bip_L_LowerLeg: "mixamorigLeftLeg", J_Bip_L_Foot: "mixamorigLeftFoot", J_Bip_L_ToeBase: "mixamorigLeftToeBase",
-  J_Bip_R_UpperLeg: "mixamorigRightUpLeg", J_Bip_R_LowerLeg: "mixamorigRightLeg", J_Bip_R_Foot: "mixamorigRightFoot", J_Bip_R_ToeBase: "mixamorigRightToeBase",
-};
+const EMOTION_EXPRESSION_KEYS = [
+  VRMExpressionPresetName.Neutral,
+  VRMExpressionPresetName.Happy,
+  VRMExpressionPresetName.Sad,
+  VRMExpressionPresetName.Angry,
+  VRMExpressionPresetName.Relaxed,
+  "Surprised",
+];
 
-// Mixamo FBX files store root translations in centimetres, while the VRM
-// scene uses metres. Without this conversion the idle clip lifts the hips to
-// roughly Y=100 and the avatar leaves the camera after the first frame.
-const MIXAMO_TRANSLATION_SCALE = 0.01;
-const RAW_ARM_REST_CORRECTIONS: Record<string, number> = {
-  J_Bip_L_UpperArm: Math.PI * 0.43,
-  J_Bip_R_UpperArm: -Math.PI * 0.43,
-  J_Bip_L_LowerArm: -Math.PI * 0.12,
-  J_Bip_R_LowerArm: Math.PI * 0.12,
+const MOTION_PROFILES: Record<string, { intervalMinSeconds: number; intervalMaxSeconds: number; probability: number }> = {
+  idle: { intervalMinSeconds: 7, intervalMaxSeconds: 15, probability: 0.85 },
+  energetic: { intervalMinSeconds: 5.5, intervalMaxSeconds: 12, probability: 0.95 },
+  calm: { intervalMinSeconds: 9, intervalMaxSeconds: 18, probability: 0.7 },
+  tense: { intervalMinSeconds: 6, intervalMaxSeconds: 13, probability: 0.85 },
+  playful: { intervalMinSeconds: 6, intervalMaxSeconds: 13, probability: 0.9 },
+  thoughtful: { intervalMinSeconds: 8, intervalMaxSeconds: 17, probability: 0.72 },
+  alert: { intervalMinSeconds: 5, intervalMaxSeconds: 11, probability: 0.9 },
+  shy: { intervalMinSeconds: 8, intervalMaxSeconds: 17, probability: 0.68 },
+  attentive: { intervalMinSeconds: 7, intervalMaxSeconds: 15, probability: 0.8 },
 };
-const ARM_RETARGET_DAMPING: Record<string, number> = {
-  J_Bip_L_Shoulder: 0.35, J_Bip_R_Shoulder: 0.35,
-  J_Bip_L_UpperArm: 0.45, J_Bip_R_UpperArm: 0.45,
-  J_Bip_L_LowerArm: 0.82, J_Bip_R_LowerArm: 0.82,
-  J_Bip_L_Hand: 0.72, J_Bip_R_Hand: 0.72,
-};
-const IDENTITY_QUATERNION = new THREE.Quaternion();
 
 type ExpressionName = string;
 
-function assetUrl(file: string): string {
-  // Vite resolves static files with a literal `@` in the filename. Encode
-  // spaces and other unsafe characters, but do not turn `@` into `%40` or it
-  // falls through to index.html instead of returning the FBX binary.
-  return `/avatar/animations/${encodeURI(file)}`;
-}
+type MotionClip = {
+  id: string;
+  root: THREE.Group | null;
+  mixer: THREE.AnimationMixer | null;
+  action: THREE.AnimationAction | null;
+  duration: number;
+  loop: boolean;
+  time: number;
+  bones: Map<string, THREE.Object3D>;
+  reference: Map<string, SourceBoneReference>;
+  sample: (time: number) => NormalizedPose;
+};
+
+type NormalizedPose = RetargetedPose;
+
+type ClipSource = {
+  file: string;
+  loop: boolean;
+  aliasOf?: string;
+};
+
+const CLIP_SOURCES: Record<string, ClipSource> = {
+  thinking: { file: "X Bot@Thinking.fbx", loop: false },
+  angry: { file: "X Bot@Angry.fbx", loop: false },
+  frustration: { file: "X Bot@Angry.fbx", loop: false, aliasOf: "angry" },
+  surprise: { file: "X Bot@Surprised.fbx", loop: false },
+  greeting: { file: "X Bot@Waving.fbx", loop: false },
+  farewell: { file: "X Bot@WavingGoodbye.fbx", loop: false },
+  shrug: { file: "X Bot@Shrugging.fbx", loop: false },
+  agreement: { file: "X Bot@Agreeing.fbx", loop: false },
+  disagreement: { file: "X Bot@Shaking Head No.fbx", loop: false },
+  talk: { file: "X Bot@Talking.fbx", loop: true },
+  talkingquestion: { file: "X Bot@TalkingQuestion.fbx", loop: true },
+  question: { file: "X Bot@TalkingQuestion.fbx", loop: true, aliasOf: "talkingquestion" },
+  explanation: { file: "X Bot@Talking.fbx", loop: true, aliasOf: "talk" },
+};
+
+const PROCEDURAL_IDLE_CLIPS: Record<string, { kind: ProceduralIdleKind; duration: number }> = {
+  "idle-neutral": { kind: "neutral", duration: 8 },
+  "idle-weight-shift": { kind: "weight-shift", duration: 7 },
+  "idle-look-around": { kind: "look-around", duration: 6 },
+};
 
 function payloadString(payload: Record<string, unknown>, key: string, fallback = ""): string {
   return typeof payload[key] === "string" ? payload[key] : fallback;
@@ -92,245 +130,296 @@ function emotionPreset(emotion: string): ExpressionName {
 }
 
 class AvatarMotionPlayer {
-  private readonly loader = new FBXLoader();
-  private readonly clips = new Map<string, THREE.AnimationClip>();
-  private readonly mixer: THREE.AnimationMixer;
-  private readonly retargetTarget: THREE.SkinnedMesh | null;
-  private readonly normalizedNameByRawName = new Map<string, string>();
-  private active: THREE.AnimationAction | null = null;
-  private idleAction: THREE.AnimationAction | null = null;
+  private readonly idleScheduler = new IdleMotionScheduler();
+  private readonly clips = new Map<string, MotionClip>();
+  private readonly normalizedByHuman = new Map<VRMHumanBoneName, THREE.Object3D>();
+  private readonly normalizedRestPositions = new Map<VRMHumanBoneName, THREE.Vector3>();
+  private readonly targetBindRotations = createIrisTargetBindRotations();
+  private readonly transitionFrom = new Map<VRMHumanBoneName, { position: THREE.Vector3; quaternion: THREE.Quaternion }>();
+  private clipsReady: Promise<void> | null = null;
+  private motionProfile = "idle";
+  private elapsedSeconds = 0;
+  private gazeTime = 0;
+  private speaking = false;
+  private gestureGeneration = 0;
   private fallbackGesture = "";
   private fallbackUntil = 0;
+  private currentIdleId = "idle-neutral";
+  private currentIdleTime = 0;
+  private activeClip: MotionClip | null = null;
+  private transitionElapsed = 1;
+  private transitionDuration = 0.4;
   private disposed = false;
 
   constructor(private readonly vrm: VRM) {
-    // The normalized VRM rig is a technical retargeting rig and its rest pose
-    // is not Iris's authored pose. Keep the visible raw bones in control and
-    // let VRM continue updating expressions and spring bones around them.
-    if (vrm.humanoid) vrm.humanoid.autoUpdateHumanBones = false;
-    this.mixer = new THREE.AnimationMixer(vrm.scene);
-    this.retargetTarget = this.createRetargetTarget();
-    this.applyAuthoredRestPose();
+    if (!vrm.humanoid) return;
+    // The normalized VRM rig is the contract between a generic humanoid
+    // animation and this model. Writing raw Iris bones directly was the cause
+    // of the old head-only/T-pose behaviour.
+    vrm.humanoid.autoUpdateHumanBones = true;
+    vrm.humanoid.resetNormalizedPose();
+    for (const humanBoneName of Object.values(VRMHumanBoneName) as VRMHumanBoneName[]) {
+      const node = vrm.humanoid.getNormalizedBoneNode(humanBoneName);
+      if (node) {
+        this.normalizedByHuman.set(humanBoneName, node);
+        this.normalizedRestPositions.set(humanBoneName, node.position.clone());
+      }
+    }
+    this.createProceduralIdleClips();
   }
 
   async startIdle(): Promise<void> {
-    const file = IDLE_FILES[0];
-    const clip = await this.load(file);
-    if (!clip || this.disposed) return;
-    this.idleAction = this.mixer.clipAction(clip).reset().setLoop(THREE.LoopRepeat, Infinity);
-    // A gesture can arrive while the idle FBX is still loading. Installing
-    // the idle action is always safe, but it must not interrupt that gesture.
-    if (!this.active) this.playIdle();
+    if (this.disposed || !this.vrm.humanoid) return;
+    await this.ensureClipsLoaded();
+    if (this.disposed) return;
+    this.idleScheduler.start(this.elapsedSeconds);
+    if (!this.fallbackGesture && !this.speaking) this.switchTo("idle-neutral", 0.45);
   }
 
-  async trigger(gesture: string, intensity: number): Promise<number> {
-    if (this.disposed) return 0;
-    const normalized = gesture.toLowerCase();
-    const file = GESTURE_FILES[normalized] ?? GESTURE_FILES.talk;
-    const clip = await this.load(file);
-    if (!clip) {
-      this.fallbackGesture = normalized;
-      this.fallbackUntil = performance.now() + 1_400 * Math.max(0.45, intensity);
-      return 1_400 * Math.max(0.45, intensity);
+  setSpeaking(value: boolean): void {
+    if (this.speaking === value) return;
+    this.speaking = value;
+    if (value && !this.fallbackGesture) {
+      if (this.clips.has("talk")) this.switchTo("talk", 0.25);
+      else {
+        void this.ensureClipsLoaded().then(() => {
+          if (!this.disposed && this.speaking && !this.fallbackGesture) this.switchTo("talk", 0.25);
+        });
+      }
     }
+    if (!value && !this.fallbackGesture) this.returnToCurrentIdle(0.3);
+  }
+
+  setMotionProfile(profileName: string): void {
+    this.motionProfile = profileName in MOTION_PROFILES ? profileName : "idle";
+    const profile = MOTION_PROFILES[this.motionProfile];
+    this.idleScheduler.setProfile({
+      intervalMinSeconds: profile.intervalMinSeconds,
+      intervalMaxSeconds: profile.intervalMaxSeconds,
+      alternativeProbability: profile.probability,
+    });
+  }
+
+  async trigger(gesture: string, intensity: number): Promise<{ durationMs: number; generation: number }> {
+    const generation = ++this.gestureGeneration;
+    if (this.disposed) return { durationMs: 0, generation };
+    await this.ensureClipsLoaded();
+    // A gesture may have been superseded while its FBX files were loading.
+    // Never let that stale async continuation overwrite the newer pose.
+    if (this.disposed || generation !== this.gestureGeneration) return { durationMs: 0, generation };
+    const normalized = gesture.toLowerCase();
+    const clipId = CLIP_SOURCES[normalized] ? normalized : "talk";
+    const clip = this.clips.get(clipId);
+    if (!clip) return { durationMs: 0, generation };
+    this.captureCurrentIdle();
+    this.fallbackGesture = normalized;
+    const durationMs = clip.duration * 1_000 * Math.max(0.65, intensity);
+    this.fallbackUntil = performance.now() + durationMs;
+    this.switchTo(clipId, 0.2);
+    return { durationMs, generation };
+  }
+
+  isGestureGenerationCurrent(generation: number): boolean {
+    return !this.disposed && generation === this.gestureGeneration;
+  }
+
+  stop(): void {
+    this.gestureGeneration += 1;
     this.fallbackGesture = "";
     this.fallbackUntil = 0;
-    const action = this.mixer.clipAction(clip).reset().setLoop(THREE.LoopOnce, 1);
-    action.clampWhenFinished = true;
-    this.crossFadeTo(action, Math.min(1, Math.max(0.3, intensity)), 0.12);
-    return clip.duration * 1_000;
+    this.speaking = false;
+    this.returnToCurrentIdle(0.32);
   }
 
   update(delta: number): void {
-    this.mixer.update(delta);
-    if (this.active && this.active !== this.idleAction && !this.active.isRunning()) this.playIdle();
-    const head = this.vrm.humanoid?.getRawBoneNode(VRMHumanBoneName.Head);
-    if (!head || performance.now() >= this.fallbackUntil) return;
-    const phase = performance.now() / 150;
-    if (this.fallbackGesture === "agreement") head.rotation.x += Math.sin(phase) * 0.012;
-    if (this.fallbackGesture === "disagreement") head.rotation.y += Math.sin(phase) * 0.015;
-    if (this.fallbackGesture === "thinking") head.rotation.z += 0.0015;
+    const safeDelta = Math.max(0, delta);
+    this.elapsedSeconds += safeDelta;
+    if (this.fallbackGesture && performance.now() >= this.fallbackUntil) {
+      this.fallbackGesture = "";
+      this.fallbackUntil = 0;
+      if (this.speaking) this.switchTo("talk", 0.3);
+      else this.returnToCurrentIdle(0.3);
+    }
+
+    if (this.activeClip) {
+      this.activeClip.mixer?.update(safeDelta);
+      const duration = Math.max(0.001, this.activeClip.duration);
+      this.activeClip.time = this.activeClip.loop
+        ? (this.activeClip.time + safeDelta) % duration
+        : Math.min(duration, this.activeClip.time + safeDelta);
+      this.transitionElapsed += safeDelta;
+      this.applySample(this.activeClip.sample(this.activeClip.time));
+      if (!this.fallbackGesture && !this.speaking && this.activeClip.id === this.currentIdleId) {
+        this.currentIdleTime = this.activeClip.time;
+      }
+    }
+
+    if (!this.fallbackGesture && !this.speaking) {
+      const candidate = this.idleScheduler.schedule(this.elapsedSeconds, IDLE_DEFINITIONS, { speaking: false, gesturePlaying: false });
+      if (candidate) {
+        this.currentIdleId = candidate.id;
+        this.currentIdleTime = 0;
+        this.switchTo(candidate.id, 0.42);
+      }
+    }
+  }
+
+  // Gaze is applied to the same normalized rig after the clip has been
+  // sampled, then VRM copies it to Iris's authored raw bones in vrm.update().
+  applyPreVrmPose(delta: number): void {
+    this.gazeTime += Math.max(0, delta);
+    const head = this.normalizedByHuman.get(VRMHumanBoneName.Head);
+    if (!head) return;
+    const intensity = this.fallbackGesture ? 0.35 : 1;
+    head.rotation.x += Math.sin(this.gazeTime * 0.57) * 0.004 * intensity;
+    head.rotation.y += Math.sin(this.gazeTime * 0.31 + 1.7) * 0.009 * intensity;
+    head.rotation.z += Math.sin(this.gazeTime * 0.23 + 0.6) * 0.002 * intensity;
+  }
+
+  private ensureClipsLoaded(): Promise<void> {
+    this.clipsReady ??= this.loadClips();
+    return this.clipsReady;
+  }
+
+  private async loadClips(): Promise<void> {
+    const sources = Object.entries(CLIP_SOURCES).map(([id, source]) => ({ id, source }));
+    const loaded = await Promise.all(sources.map(async ({ id, source }) => {
+      if (source.aliasOf) return null;
+      try {
+        const root = await new FBXLoader().loadAsync(`/avatar/animations/${source.file}`);
+        if (!root.animations[0]) return null;
+        const bones = new Map<string, THREE.Object3D>();
+        const reference = new Map<string, { position: THREE.Vector3; quaternion: THREE.Quaternion }>();
+        root.traverse((node) => {
+          if (node.type !== "Bone") return;
+          bones.set(node.name, node);
+        });
+        const mixer = new THREE.AnimationMixer(root);
+        const action = mixer.clipAction(root.animations[0]);
+        action.setLoop(source.loop ? THREE.LoopRepeat : THREE.LoopOnce, source.loop ? Infinity : 1);
+        action.clampWhenFinished = !source.loop;
+        action.play();
+        // Mixamo's bind pose is not the entry pose of the exported clip. The
+        // first animated frame is the only safe reference for a seamless entry
+        // into the model's authored neutral pose.
+        mixer.setTime(0);
+        root.updateMatrixWorld(true);
+        for (const [name, node] of bones) {
+          reference.set(name, {
+            position: node.position.clone(),
+            quaternion: node.quaternion.clone(),
+          });
+        }
+        return {
+          id,
+          root,
+          mixer,
+          action,
+          duration: root.animations[0].duration,
+          loop: source.loop,
+          time: 0,
+          bones,
+          reference,
+          sample: () => retargetMixamoPose(
+            bones,
+            reference,
+            this.targetBindRotations,
+            this.normalizedRestPositions,
+          ),
+        } satisfies MotionClip;
+      } catch {
+        return null;
+      }
+    }));
+    for (const clip of loaded) {
+      if (!clip) continue;
+      this.clips.set(clip.id, clip);
+    }
+    for (const [id, source] of Object.entries(CLIP_SOURCES)) {
+      if (!source.aliasOf) continue;
+      const clip = this.clips.get(source.aliasOf);
+      if (clip) this.clips.set(id, clip);
+    }
+  }
+
+  private switchTo(id: string, duration: number, initialTime = 0): void {
+    const next = this.clips.get(id);
+    if (!next || this.activeClip === next && Math.abs(initialTime - next.time) < 0.01) return;
+    this.transitionFrom.clear();
+    for (const [human, node] of this.normalizedByHuman) {
+      this.transitionFrom.set(human, {
+        position: node.position.clone(),
+        quaternion: node.quaternion.clone(),
+      });
+    }
+    const startTime = Math.max(0, initialTime) % Math.max(0.001, next.duration);
+    next.action?.reset().play();
+    next.mixer?.setTime(startTime);
+    next.time = startTime;
+    this.activeClip = next;
+    this.transitionElapsed = 0;
+    this.transitionDuration = Math.max(0.05, duration);
+  }
+
+  private captureCurrentIdle(): void {
+    if (this.activeClip && this.activeClip.id === this.currentIdleId && !this.fallbackGesture && !this.speaking) {
+      this.currentIdleTime = this.activeClip.time;
+    }
+  }
+
+  private returnToCurrentIdle(duration: number): void {
+    const id = this.clips.has(this.currentIdleId) ? this.currentIdleId : "idle-neutral";
+    this.switchTo(id, duration, this.currentIdleTime);
+  }
+
+  private createProceduralIdleClips(): void {
+    for (const [id, definition] of Object.entries(PROCEDURAL_IDLE_CLIPS)) {
+      this.clips.set(id, {
+        id,
+        root: null,
+        mixer: null,
+        action: null,
+        duration: definition.duration,
+        loop: true,
+        time: 0,
+        bones: new Map(),
+        reference: new Map(),
+        sample: (time) => createProceduralIdlePose(
+          definition.kind,
+          time,
+          this.targetBindRotations,
+          this.normalizedRestPositions,
+        ),
+      });
+    }
+  }
+
+  private applySample(pose: NormalizedPose): void {
+    const rawBlend = Math.min(1, this.transitionElapsed / this.transitionDuration);
+    const blend = rawBlend * rawBlend * (3 - 2 * rawBlend);
+    const quaternion = new THREE.Quaternion();
+    for (const [human, node] of this.normalizedByHuman) {
+      const target = pose.rotations.get(human);
+      if (!target) continue;
+      const from = this.transitionFrom.get(human);
+      if (from) {
+        quaternion.copy(from.quaternion).slerp(target, blend).normalize();
+        node.quaternion.copy(quaternion);
+        if (human === VRMHumanBoneName.Hips) node.position.lerpVectors(from.position, pose.hipsPosition, blend);
+      } else {
+        node.quaternion.copy(target);
+        if (human === VRMHumanBoneName.Hips) node.position.copy(pose.hipsPosition);
+      }
+    }
   }
 
   dispose(): void {
     this.disposed = true;
-    this.mixer.stopAllAction();
-    this.mixer.uncacheRoot(this.vrm.scene);
-    this.retargetTarget?.geometry.dispose();
-    if (Array.isArray(this.retargetTarget?.material)) this.retargetTarget.material.forEach((material) => material.dispose());
-    else this.retargetTarget?.material.dispose();
-    this.active = null;
-    this.idleAction = null;
-  }
-
-  private playIdle(): void {
-    if (!this.idleAction || this.disposed) return;
-    if (this.active === this.idleAction && this.idleAction.isRunning()) return;
-    this.crossFadeTo(this.idleAction, 1, 0.18);
-  }
-
-  private crossFadeTo(action: THREE.AnimationAction, weight: number, duration: number): void {
-    if (this.active && this.active !== action) this.active.fadeOut(duration);
-    action
-      .reset()
-      .setLoop(action === this.idleAction ? THREE.LoopRepeat : THREE.LoopOnce, action === this.idleAction ? Infinity : 1)
-      .setEffectiveTimeScale(1)
-      .setEffectiveWeight(weight)
-      .fadeIn(duration)
-      .play();
-    this.active = action;
-  }
-
-  private async load(file: string): Promise<THREE.AnimationClip | null> {
-    const cached = this.clips.get(file);
-    if (cached) return cached;
-    try {
-      const source = await this.loader.loadAsync(assetUrl(file));
-      const sourceClip = source.animations[0];
-      if (!sourceClip) return null;
-      const sourceBones: THREE.Bone[] = [];
-      source.traverse((node) => { if ((node as THREE.Bone).isBone) sourceBones.push(node as THREE.Bone); });
-      if (sourceBones.length === 0 || !this.retargetTarget) return null;
-      // Retarget local motion relative to each Mixamo bone's rest pose. The
-      // FBX armature stores its limbs with a different axis basis than the
-      // normalized VRM rig (e.g. the Mixamo leg has a 180° rest rotation).
-      // Copying absolute FBX quaternions makes arms turn backwards and flips
-      // the lower body. Applying only rest-relative deltas keeps the VRM
-      // proportions and lets the full humanoid chain move naturally.
-      const clip = this.createRetargetedClip(source, sourceBones, sourceClip);
-      this.clips.set(file, clip);
-      return clip;
-    } catch {
-      return null;
+    for (const clip of this.clips.values()) {
+      clip.action?.stop();
+      if (clip.root) clip.mixer?.uncacheRoot(clip.root);
     }
-  }
-
-  private createRetargetedClip(
-    source: THREE.Object3D,
-    sourceBones: THREE.Bone[],
-    sourceClip: THREE.AnimationClip,
-  ): THREE.AnimationClip {
-    const sourceByName = new Map(sourceBones.map((bone) => [bone.name, bone]));
-    const targetByRawName = new Map(this.retargetTarget!.skeleton.bones.map((bone) => [bone.name, bone]));
-    const targetRest = new Map(this.retargetTarget!.skeleton.bones.map((bone) => [bone.name, {
-      position: bone.position.clone(),
-      quaternion: bone.quaternion.clone(),
-    }]));
-
-    const sourceFps = Math.max(...sourceClip.tracks.map((track) => track.times.length)) / sourceClip.duration;
-    const fps = Math.min(60, Math.max(24, Math.ceil(sourceFps || 30)));
-    const frameCount = Math.max(2, Math.ceil(sourceClip.duration * fps) + 1);
-    const times = new Float32Array(frameCount);
-    const quaternionValues = new Map<string, Float32Array>();
-    const hipPositionValues = new Float32Array(frameCount * 3);
-
-    for (const [rawName] of Object.entries(MIXAMO_BONE_NAMES)) {
-      if (targetByRawName.has(rawName)) quaternionValues.set(rawName, new Float32Array(frameCount * 4));
-    }
-
-    const sourceMixer = new THREE.AnimationMixer(source);
-    sourceMixer.clipAction(sourceClip).play();
-    // These FBX files are animation-only exports. Their embedded bind pose
-    // is not the pose the clip starts from, so use frame zero as the motion
-    // baseline. This prevents a visible T-pose jump when idle begins.
-    sourceMixer.setTime(0);
-    source.updateMatrixWorld(true);
-    const sourceRest = new Map(sourceBones.map((bone) => [bone.name, {
-      position: bone.position.clone(),
-      quaternion: bone.quaternion.clone(),
-    }]));
-    const sourceDelta = new THREE.Quaternion();
-    const targetQuaternion = new THREE.Quaternion();
-    const frameTime = sourceClip.duration / (frameCount - 1);
-
-    for (let frame = 0; frame < frameCount; frame += 1) {
-      const time = Math.min(sourceClip.duration, frame * frameTime);
-      times[frame] = time;
-      sourceMixer.setTime(time);
-      source.updateMatrixWorld(true);
-
-      for (const [rawName, sourceName] of Object.entries(MIXAMO_BONE_NAMES)) {
-        const sourceBone = sourceByName.get(sourceName);
-        const targetBone = targetByRawName.get(rawName);
-        const sourceRestBone = sourceRest.get(sourceName);
-        const targetRestBone = targetRest.get(rawName);
-        const values = quaternionValues.get(rawName);
-        if (!sourceBone || !targetBone || !sourceRestBone || !targetRestBone || !values) continue;
-
-        sourceDelta.copy(sourceRestBone.quaternion).invert().multiply(sourceBone.quaternion).normalize();
-        const armDamping = ARM_RETARGET_DAMPING[rawName];
-        if (armDamping !== undefined) sourceDelta.slerp(IDENTITY_QUATERNION, 1 - armDamping);
-        targetQuaternion.copy(targetRestBone.quaternion).multiply(sourceDelta).normalize();
-        targetQuaternion.toArray(values, frame * 4);
-
-        if (rawName === "J_Bip_C_Hips") {
-          const positionOffset = sourceBone.position.clone().sub(sourceRestBone.position).multiplyScalar(MIXAMO_TRANSLATION_SCALE);
-          hipPositionValues[frame * 3] = targetRestBone.position.x + positionOffset.x;
-          hipPositionValues[frame * 3 + 1] = targetRestBone.position.y + positionOffset.y;
-          hipPositionValues[frame * 3 + 2] = targetRestBone.position.z + positionOffset.z;
-        }
-      }
-    }
-
-    sourceMixer.stopAllAction();
-    sourceMixer.uncacheAction(sourceClip);
-    sourceMixer.uncacheRoot(source);
-
-    const tracks: THREE.KeyframeTrack[] = [];
-    for (const [rawName, values] of quaternionValues) {
-      const animationName = this.normalizedNameByRawName.get(rawName);
-      if (!animationName) continue;
-      tracks.push(new THREE.QuaternionKeyframeTrack(`${animationName}.quaternion`, times, values));
-    }
-    const hipsName = this.normalizedNameByRawName.get("J_Bip_C_Hips");
-    if (hipsName) tracks.push(new THREE.VectorKeyframeTrack(`${hipsName}.position`, times, hipPositionValues));
-    return new THREE.AnimationClip(sourceClip.name, sourceClip.duration, tracks);
-  }
-
-  private applyAuthoredRestPose(): void {
-    for (const [rawName, angle] of Object.entries(RAW_ARM_REST_CORRECTIONS)) {
-      const bone = this.vrm.scene.getObjectByName(rawName) as THREE.Bone | undefined;
-      if (!bone?.isBone) continue;
-      bone.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), angle));
-    }
-  }
-
-  private createRetargetTarget(): THREE.SkinnedMesh | null {
-    const humanoid = this.vrm.humanoid;
-    if (!humanoid) return null;
-
-    const targetBones: THREE.Bone[] = [];
-    for (const humanBoneName of Object.values(VRMHumanBoneName) as VRMHumanBoneName[]) {
-      const rawNode = humanoid.getRawBoneNode(humanBoneName);
-      const normalizedNode = humanoid.getNormalizedBoneNode(humanBoneName);
-      if (!rawNode || !normalizedNode || !MIXAMO_BONE_NAMES[rawNode.name]) continue;
-      // Tracks are bound to the visible raw VRM nodes. The normalized node is
-      // only queried here to ensure the human bone is available.
-      this.normalizedNameByRawName.set(rawNode.name, rawNode.name);
-    }
-    if (this.normalizedNameByRawName.size === 0) return null;
-
-    const rawRoot = humanoid.getRawBoneNode(VRMHumanBoneName.Hips);
-    if (!rawRoot) return null;
-    const cloneNode = (source: THREE.Object3D): THREE.Bone => {
-      const clone = new THREE.Bone();
-      clone.name = source.name;
-      clone.position.copy(source.position);
-      clone.quaternion.copy(source.quaternion);
-      const correction = RAW_ARM_REST_CORRECTIONS[clone.name];
-      if (correction) clone.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), correction));
-      clone.scale.copy(source.scale);
-      if (this.normalizedNameByRawName.has(clone.name)) targetBones.push(clone);
-      source.children.forEach((child) => clone.add(cloneNode(child)));
-      return clone;
-    };
-
-    const cloneRoot = cloneNode(rawRoot);
-    const target = new THREE.SkinnedMesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial());
-    target.add(cloneRoot);
-    target.updateMatrixWorld(true);
-    target.bind(new THREE.Skeleton(targetBones));
-    return target;
+    this.clips.clear();
   }
 }
 
@@ -353,8 +442,7 @@ export function IrisAvatarCanvas() {
     let resizeObserver: ResizeObserver | null = null;
     let vrm: VRM | null = null;
     let motion: AvatarMotionPlayer | null = null;
-    let currentEmotion: ExpressionName = VRMExpressionPresetName.Neutral;
-    let currentEmotionIntensity = 0;
+    const emotionController = new EmotionBlendController();
     let currentUtterance: string | null = null;
     let gestureTimer: number | null = null;
     const audio = new AvatarAudioQueue();
@@ -373,23 +461,38 @@ export function IrisAvatarCanvas() {
         expressions.setValue(key, 0);
       }
     };
-    const applyEmotion = (value: string, intensity = 1) => {
-      const nextEmotion = emotionPreset(value);
-      const nextIntensity = Math.min(1, Math.max(0, intensity));
-      const previousEmotion = currentEmotion;
-      currentEmotion = nextEmotion;
-      currentEmotionIntensity = nextIntensity;
+    const applyEmotionExpressions = (weights: ReadonlyMap<Emotion, number>) => {
       const expressions = vrm?.expressionManager;
       if (!expressions) return;
-      expressions.setValue(previousEmotion, 0);
-      expressions.setValue(nextEmotion, nextIntensity);
+      const values = new Map<ExpressionName, number>();
+      for (const [emotion, weight] of weights) {
+        if (weight <= 0.0005) continue;
+        const key = emotionPreset(emotion);
+        values.set(key, Math.max(values.get(key) ?? 0, weight));
+      }
+      for (const key of EMOTION_EXPRESSION_KEYS) expressions.setValue(key, 0);
+      for (const [key, value] of values) expressions.setValue(key, Math.min(1, value));
+    };
+    const applyEmotion = (value: string, intensity = 1) => {
+      const emotion = parseEmotion(value);
+      emotionController.setTarget(emotion, intensity, performance.now());
+      motion?.setMotionProfile(EMOTION_PROFILES[emotion].motionProfile);
+    };
+    const releaseEmotion = () => {
+      const snapshot = emotionController.releaseToNeutral(performance.now());
+      if (snapshot.targetEmotion === "neutral") motion?.setMotionProfile(EMOTION_PROFILES.neutral.motionProfile);
     };
     const playGesture = async (client: AvatarProtocolClient, gesture: string, intensity: number, replyTo: string) => {
       if (!motion || gesture === "none" || gesture === "auto") return;
+      const result = await motion.trigger(gesture, intensity);
+      if (!motion.isGestureGenerationCurrent(result.generation)) return;
       client.send("avatar.gesture.started", { gesture, intensity }, replyTo);
-      const duration = await motion.trigger(gesture, intensity);
       if (gestureTimer !== null) window.clearTimeout(gestureTimer);
-      gestureTimer = window.setTimeout(() => client.send("avatar.gesture.finished", { gesture, intensity }, replyTo), duration);
+      gestureTimer = window.setTimeout(() => {
+        if (motion?.isGestureGenerationCurrent(result.generation)) {
+          client.send("avatar.gesture.finished", { gesture, intensity }, replyTo);
+        }
+      }, result.durationMs);
     };
     const protocol = new AvatarProtocolClient({
       url: avatarWebSocketUrl(),
@@ -399,17 +502,24 @@ export function IrisAvatarCanvas() {
     const playbackHandlers = (utteranceId: string, replyTo: string) => ({
       onStarted: () => {
         currentUtterance = utteranceId;
+        motion?.setSpeaking(true);
         sendState(protocol, "Speaking");
         protocol.send("avatar.playback.started", { utterance_id: utteranceId, client_latency_ms: 0 }, replyTo);
       },
       onFinished: () => {
         clearMouth();
+        motion?.setSpeaking(false);
+        motion?.stop();
+        releaseEmotion();
         if (currentUtterance === utteranceId) currentUtterance = null;
         sendState(protocol, "Idle");
         protocol.send("avatar.playback.finished", { utterance_id: utteranceId, client_latency_ms: 0 }, replyTo);
       },
       onFailed: (reason: string) => {
         clearMouth();
+        motion?.setSpeaking(false);
+        motion?.stop();
+        releaseEmotion();
         if (currentUtterance === utteranceId) currentUtterance = null;
         sendState(protocol, "Error");
         protocol.send("avatar.playback.failed", { utterance_id: utteranceId, reason, client_latency_ms: 0 }, replyTo);
@@ -432,6 +542,7 @@ export function IrisAvatarCanvas() {
           case "avatar.stream.start": {
             const utterance = payloadString(payload, "utterance_id");
             if (payloadBoolean(payload, "interrupt", true)) audio.stop();
+            motion?.setSpeaking(true);
             audio.beginStream(playbackHandlers(utterance, message.message_id));
             break;
           }
@@ -452,7 +563,10 @@ export function IrisAvatarCanvas() {
             break;
           case "avatar.stop":
             audio.stop();
+            motion?.setSpeaking(false);
+            motion?.stop();
             clearMouth();
+            releaseEmotion();
             sendState(protocol, "Idle");
             break;
           case "avatar.emotion":
@@ -484,18 +598,25 @@ export function IrisAvatarCanvas() {
       if (!vrm) return;
       const bounds = new THREE.Box3().setFromObject(vrm.scene);
       const size = bounds.getSize(new THREE.Vector3());
-      // Keep the complete rig inside the frame. The feet are part of the
-      // motion proof: cropping them makes a working leg animation look frozen.
-      const top = bounds.max.y + size.y * 0.06;
-      const bottom = bounds.min.y - size.y * 0.04;
-      const portraitHeight = Math.max(0.1, top - bottom);
-      const portraitWidth = Math.max(0.1, size.x * 1.24);
-      const verticalDistance = portraitHeight / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
-      const horizontalDistance = portraitWidth / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect);
+      // Match the Unity portrait camera: keep the face and upper torso in
+      // frame instead of fitting the complete doll. The target is measured
+      // from the top of the rig so changes to hair, shoes, or spring-bone
+      // bounds do not pull the face away from the center of the shot.
+      const portraitHeight = Math.max(0.1, size.y * 0.48);
+      const framingPadding = 1.12;
+      const halfHeight = portraitHeight * 0.5 * framingPadding;
+      const portraitWidth = portraitHeight * Math.max(0.72, camera.aspect) * 0.9;
+      const halfWidth = portraitWidth * 0.5 * framingPadding;
+      const verticalDistance = halfHeight / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+      const horizontalFov = 2 * Math.atan(
+        Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect,
+      );
+      const horizontalDistance = halfWidth / Math.tan(horizontalFov / 2);
       const center = bounds.getCenter(new THREE.Vector3());
-      const portraitZoom = 1.1;
-      camera.position.set(center.x, (top + bottom) / 2, (Math.max(verticalDistance, horizontalDistance) + 0.15) / portraitZoom + center.z);
-      camera.lookAt(center.x, (top + bottom) / 2, center.z);
+      const targetY = bounds.max.y - portraitHeight * 0.52;
+      const distance = Math.max(verticalDistance, horizontalDistance, 0.1);
+      camera.position.set(center.x, targetY, distance + center.z);
+      camera.lookAt(center.x, targetY, center.z);
       camera.updateProjectionMatrix();
     };
     const resize = () => {
@@ -519,6 +640,8 @@ export function IrisAvatarCanvas() {
       const volume = audio.volume();
       if (vrm?.expressionManager) {
         clearMouth();
+        const emotionSnapshot = emotionController.update(delta, performance.now());
+        applyEmotionExpressions(emotionSnapshot.weights);
         const blinkPhase = (performance.now() % 4_200) / 4_200;
         const blink = blinkPhase > 0.91 && blinkPhase < 0.95
           ? 1 - Math.abs(blinkPhase - 0.93) / 0.02
@@ -530,9 +653,8 @@ export function IrisAvatarCanvas() {
           vrm.expressionManager.setValue(vowel, Math.min(1, volume * 1.5));
         }
       }
-      // The motion mixer drives the authored raw VRM bones; VRM.update keeps
-      // expressions and spring bones alive without overwriting that pose.
       motion?.update(delta);
+      motion?.applyPreVrmPose(delta);
       vrm?.update(delta);
       renderer.render(scene, camera);
     };
@@ -561,7 +683,7 @@ export function IrisAvatarCanvas() {
         scene.add(vrm.scene);
         motion = new AvatarMotionPlayer(vrm);
         vrm.update(0);
-        applyEmotion(currentEmotion, currentEmotionIntensity);
+        applyEmotionExpressions(emotionController.snapshot().weights);
         void motion.startIdle().then(() => { if (!disposed) fitPortrait(); });
         fitPortrait();
         setStatus("ready");
