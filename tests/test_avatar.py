@@ -9,8 +9,10 @@ from apps.backend.app.avatar.protocol import AvatarProtocolError, parse_incoming
 from apps.backend.app.avatar.service import AvatarService
 from apps.backend.app.avatar.schemas import (
     MAX_STREAM_AUDIO_BASE64_CHARS,
+    ClientStatePayload,
     OverlayPayload,
     SpeakPayload,
+    StatePayload,
     StreamSegmentPayload,
 )
 from apps.backend.app.events.bus import EventBus
@@ -91,6 +93,13 @@ def test_speak_gesture_is_backward_compatible_and_unknown_falls_back() -> None:
     assert unknown.gesture == "auto"
 
 
+def test_avatar_presence_states_are_normalized_for_new_and_legacy_clients() -> None:
+    assert StatePayload(state="LISTENING").state == "listening"
+    assert ClientStatePayload(state="Thinking").state == "thinking"
+    assert StatePayload(state="unsupported").state == "idle"
+    assert ClientStatePayload(state="Speaking").state == "speaking"
+
+
 @pytest.mark.anyio
 async def test_disabled_avatar_service_is_safe_noop() -> None:
     service = AvatarService(AvatarConnectionManager(), EventBus(), enabled=False, heartbeat_interval_seconds=1, client_timeout_seconds=2)
@@ -118,6 +127,32 @@ async def test_gesture_command_and_motion_events_are_structured() -> None:
     })
     await service.inbound(client.client_id, envelope, payload)
     assert (await service.status()).clients[0].current_motion_profile == "happy"
+
+
+@pytest.mark.anyio
+async def test_presence_command_is_protocol_v1_compatible_and_tracks_renderer_ack() -> None:
+    events = EventBus()
+    manager = AvatarConnectionManager()
+    socket = FakeSocket()
+    client = await manager.register(socket)
+    service = AvatarService(manager, events, enabled=True, heartbeat_interval_seconds=1, client_timeout_seconds=2)
+
+    result = await service.set_presence(session_id="default", state="thinking")
+    assert result.sent == 1
+    assert socket.sent[-1]["protocol_version"] == 1
+    assert socket.sent[-1]["type"] == "avatar.state"
+    assert socket.sent[-1]["payload"] == {"state": "thinking"}
+
+    envelope, payload = parse_incoming({
+        "protocol_version": 1, "type": "avatar.state.changed", "message_id": "presence",
+        "timestamp": "2026-01-01T00:00:00Z", "session_id": "default",
+        "payload": {"state": "LISTENING"},
+    })
+    await service.inbound(client.client_id, envelope, payload)
+    assert (await service.status()).clients[0].state == "listening"
+    repeated = await service.set_presence(session_id="default", state="LISTENING")
+    assert repeated.sent == 0
+    assert len(socket.sent) == 1
 
 
 @pytest.mark.anyio

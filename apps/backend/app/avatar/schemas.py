@@ -22,6 +22,7 @@ GESTURE_TAGS = frozenset({
     "question", "explanation", "thinking", "surprise", "frustration",
     "farewell", "shrug",
 })
+AVATAR_PRESENCE_STATES = frozenset({"idle", "listening", "thinking", "speaking"})
 
 
 def normalize_gesture(value: object) -> str:
@@ -29,6 +30,11 @@ def normalize_gesture(value: object) -> str:
     raw = getattr(value, "value", value)
     normalized = str(raw or "auto").strip().lower()
     return normalized if normalized in GESTURE_TAGS else "auto"
+
+
+def normalize_avatar_presence(value: object) -> str:
+    normalized = str(value or "idle").strip().lower()
+    return normalized if normalized in AVATAR_PRESENCE_STATES else "idle"
 
 
 def utc_now() -> datetime:
@@ -136,7 +142,9 @@ class GesturePayload(ProtocolModel):
 
 
 class StatePayload(ProtocolModel):
-    state: str
+    state: str = "idle"
+
+    _normalize_state = field_validator("state", mode="before")(normalize_avatar_presence)
 
 
 class PingPayload(ProtocolModel):
@@ -177,7 +185,9 @@ class PlaybackPayload(ProtocolModel):
 
 
 class ClientStatePayload(ProtocolModel):
-    state: str = Field(min_length=1, max_length=64)
+    state: str = "idle"
+
+    _normalize_state = field_validator("state", mode="before")(normalize_avatar_presence)
 
 
 class MotionProfilePayload(ProtocolModel):
@@ -195,7 +205,7 @@ class AvatarStatusClient(ProtocolModel):
     client_name: str | None = None
     client_version: str | None = None
     platform: str | None = None
-    state: str = "Idle"
+    state: str = "idle"
     current_utterance_id: str | None = None
     current_motion_profile: str | None = None
     current_gesture: str | None = None

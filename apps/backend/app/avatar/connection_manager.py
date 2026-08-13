@@ -24,7 +24,7 @@ class AvatarClient:
     client_name: str | None = None
     client_version: str | None = None
     platform: str | None = None
-    state: str = "Idle"
+    state: str = "idle"
     current_utterance_id: str | None = None
     current_motion_profile: str | None = None
     current_gesture: str | None = None
