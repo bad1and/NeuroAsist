@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   EMOTION_PROFILES,
+  BlinkScheduler,
   EmotionBlendController,
   IdleMotionScheduler,
   parseEmotion,
@@ -27,6 +28,19 @@ describe("IdleMotionScheduler", () => {
     expect(scheduler.schedule(7, shortCandidates, { speaking: false, gesturePlaying: false })?.id).toBe("look");
   });
 
+  it("uses candidate weights without allowing an immediate repeat", () => {
+    const scheduler = new IdleMotionScheduler(() => 0.95);
+    scheduler.setProfile({ intervalMinSeconds: 1, intervalMaxSeconds: 1, alternativeProbability: 1 });
+    scheduler.start(0);
+    const weighted: IdleCandidate[] = [
+      { id: "common", category: "micro", durationSeconds: 1, cooldownSeconds: 0, selectionWeight: 8 },
+      { id: "rare", category: "normal", durationSeconds: 1, cooldownSeconds: 0, selectionWeight: 1 },
+    ];
+
+    expect(scheduler.schedule(1, weighted, { speaking: false, gesturePlaying: false })?.id).toBe("rare");
+    expect(scheduler.schedule(2, weighted, { speaking: false, gesturePlaying: false })?.id).toBe("common");
+  });
+
   it("blocks long idles while speaking and all alternatives during a gesture", () => {
     const scheduler = new IdleMotionScheduler(() => 0);
     scheduler.setProfile({ intervalMinSeconds: 1, intervalMaxSeconds: 1, alternativeProbability: 1 });
@@ -34,6 +48,21 @@ describe("IdleMotionScheduler", () => {
 
     expect(scheduler.schedule(1, [candidates[2]], { speaking: true, gesturePlaying: false })).toBeNull();
     expect(scheduler.schedule(2, candidates, { speaking: false, gesturePlaying: true })).toBeNull();
+  });
+});
+
+describe("BlinkScheduler", () => {
+  it("creates a short, non-periodic eyelid pulse", () => {
+    const scheduler = new BlinkScheduler(() => 0);
+    scheduler.start(0);
+
+    expect(scheduler.update(2_799)).toBe(0);
+    expect(scheduler.update(2_800)).toBe(0);
+    expect(scheduler.update(2_850)).toBeGreaterThan(0);
+    expect(scheduler.update(3_000)).toBe(0);
+    expect(scheduler.update(3_114)).toBe(0);
+    expect(scheduler.update(3_115)).toBe(0);
+    expect(scheduler.update(3_165)).toBeGreaterThan(0);
   });
 });
 

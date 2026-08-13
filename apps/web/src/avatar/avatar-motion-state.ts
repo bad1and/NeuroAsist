@@ -7,6 +7,8 @@ export type IdleCandidate = {
   category: IdleCategory;
   durationSeconds: number;
   cooldownSeconds: number;
+  /** Relative chance amongst eligible idles. Defaults to one for legacy callers. */
+  selectionWeight?: number;
 };
 
 export type IdleSchedulerProfile = {
@@ -29,16 +31,16 @@ export type EmotionProfile = {
 };
 
 export const EMOTION_PROFILES: Record<Emotion, EmotionProfile> = {
-  neutral: { weight: 0.35, attackMs: 180, minimumHoldMs: 450, releaseMs: 260, motionProfile: "idle" },
-  happy: { weight: 0.8, attackMs: 150, minimumHoldMs: 550, releaseMs: 240, motionProfile: "energetic" },
-  sad: { weight: 0.7, attackMs: 240, minimumHoldMs: 700, releaseMs: 320, motionProfile: "calm" },
-  angry: { weight: 0.75, attackMs: 130, minimumHoldMs: 600, releaseMs: 300, motionProfile: "tense" },
-  annoyed: { weight: 0.65, attackMs: 160, minimumHoldMs: 550, releaseMs: 280, motionProfile: "tense" },
-  smirk: { weight: 0.6, attackMs: 180, minimumHoldMs: 500, releaseMs: 240, motionProfile: "playful" },
-  thinking: { weight: 0.6, attackMs: 180, minimumHoldMs: 500, releaseMs: 260, motionProfile: "thoughtful" },
-  surprised: { weight: 0.8, attackMs: 90, minimumHoldMs: 450, releaseMs: 300, motionProfile: "alert" },
-  embarrassed: { weight: 0.65, attackMs: 200, minimumHoldMs: 500, releaseMs: 280, motionProfile: "shy" },
-  concerned: { weight: 0.7, attackMs: 180, minimumHoldMs: 550, releaseMs: 300, motionProfile: "attentive" },
+  neutral: { weight: 0.35, attackMs: 360, minimumHoldMs: 700, releaseMs: 520, motionProfile: "idle" },
+  happy: { weight: 0.8, attackMs: 340, minimumHoldMs: 850, releaseMs: 480, motionProfile: "energetic" },
+  sad: { weight: 0.7, attackMs: 480, minimumHoldMs: 1_000, releaseMs: 620, motionProfile: "calm" },
+  angry: { weight: 0.75, attackMs: 290, minimumHoldMs: 900, releaseMs: 580, motionProfile: "tense" },
+  annoyed: { weight: 0.65, attackMs: 340, minimumHoldMs: 850, releaseMs: 540, motionProfile: "tense" },
+  smirk: { weight: 0.6, attackMs: 380, minimumHoldMs: 800, releaseMs: 480, motionProfile: "playful" },
+  thinking: { weight: 0.6, attackMs: 420, minimumHoldMs: 900, releaseMs: 520, motionProfile: "thoughtful" },
+  surprised: { weight: 0.8, attackMs: 220, minimumHoldMs: 700, releaseMs: 540, motionProfile: "alert" },
+  embarrassed: { weight: 0.65, attackMs: 440, minimumHoldMs: 850, releaseMs: 540, motionProfile: "shy" },
+  concerned: { weight: 0.7, attackMs: 400, minimumHoldMs: 900, releaseMs: 580, motionProfile: "attentive" },
 };
 
 const EMOTIONS = Object.keys(EMOTION_PROFILES) as Emotion[];
@@ -202,7 +204,17 @@ export class IdleMotionScheduler {
     });
     if (eligible.length === 0) return null;
 
-    const selected = eligible[Math.min(eligible.length - 1, Math.floor(this.random() * eligible.length))];
+    const totalWeight = eligible.reduce((total, candidate) => total + Math.max(0, candidate.selectionWeight ?? 1), 0);
+    if (totalWeight <= 0) return null;
+    let cursor = clamp(this.random(), 0, 0.999999) * totalWeight;
+    let selected = eligible[eligible.length - 1];
+    for (const candidate of eligible) {
+      cursor -= Math.max(0, candidate.selectionWeight ?? 1);
+      if (cursor < 0) {
+        selected = candidate;
+        break;
+      }
+    }
     this.previousId = selected.id;
     this.lastPlayedAt.set(selected.id, nowSeconds);
     return selected;
@@ -211,5 +223,48 @@ export class IdleMotionScheduler {
   private randomInterval(): number {
     return this.profile.intervalMinSeconds
       + (this.profile.intervalMaxSeconds - this.profile.intervalMinSeconds) * clamp(this.random(), 0, 1);
+  }
+}
+
+/**
+ * A small state machine rather than a modulo timer. It avoids the uncanny
+ * regular 4.2-second blink and still gives a deterministic, testable output.
+ */
+export class BlinkScheduler {
+  private nextBlinkAtMs = Number.POSITIVE_INFINITY;
+  private blinkStartedAtMs: number | null = null;
+  private blinkDurationMs = 140;
+
+  constructor(private readonly random: () => number = Math.random) {}
+
+  start(nowMs = 0): void {
+    this.blinkStartedAtMs = null;
+    this.nextBlinkAtMs = nowMs + this.randomIntervalMs();
+  }
+
+  update(nowMs: number): number {
+    if (this.nextBlinkAtMs === Number.POSITIVE_INFINITY) this.start(nowMs);
+    if (this.blinkStartedAtMs === null && nowMs >= this.nextBlinkAtMs) {
+      this.blinkStartedAtMs = nowMs;
+      // A slight duration range keeps blinks from reading as a looping effect.
+      this.blinkDurationMs = 118 + this.random() * 52;
+    }
+    if (this.blinkStartedAtMs === null) return 0;
+
+    const progress = Math.max(0, (nowMs - this.blinkStartedAtMs) / this.blinkDurationMs);
+    if (progress >= 1) {
+      this.blinkStartedAtMs = null;
+      // Rare, natural double blink; otherwise leave a comfortably long pause.
+      const doubleBlink = this.random() < 0.12;
+      this.nextBlinkAtMs = nowMs + (doubleBlink ? 115 + this.random() * 95 : this.randomIntervalMs());
+      return 0;
+    }
+    const half = progress <= 0.46 ? progress / 0.46 : (1 - progress) / 0.54;
+    const eased = clamp(half, 0, 1);
+    return eased * eased * (3 - 2 * eased);
+  }
+
+  private randomIntervalMs(): number {
+    return 2_800 + this.random() * 3_600;
   }
 }
