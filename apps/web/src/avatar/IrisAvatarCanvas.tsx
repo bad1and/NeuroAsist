@@ -16,6 +16,7 @@ import { AvatarAudioQueue } from "./AvatarAudioQueue";
 import { AvatarProtocolClient, type AvatarEnvelope } from "./AvatarProtocolClient";
 import {
   EMOTION_PROFILES,
+  BlinkScheduler,
   EmotionBlendController,
   IdleMotionScheduler,
   parseEmotion,
@@ -31,9 +32,12 @@ import {
 } from "./avatar-retarget";
 
 const IDLE_DEFINITIONS: readonly IdleCandidate[] = [
-  { id: "idle-neutral", category: "micro", durationSeconds: 8, cooldownSeconds: 10 },
-  { id: "idle-weight-shift", category: "normal", durationSeconds: 7, cooldownSeconds: 18 },
-  { id: "idle-look-around", category: "normal", durationSeconds: 6, cooldownSeconds: 22 },
+  // Neutral breathing is the default state. Deliberate motions are rarer,
+  // weighted, and have long independent cool-downs to avoid a visible loop.
+  { id: "idle-neutral", category: "micro", durationSeconds: 18, cooldownSeconds: 14, selectionWeight: 1.45 },
+  { id: "idle-refocus", category: "micro", durationSeconds: 6.5, cooldownSeconds: 34, selectionWeight: 0.75 },
+  { id: "idle-weight-shift", category: "normal", durationSeconds: 9, cooldownSeconds: 46, selectionWeight: 0.58 },
+  { id: "idle-look-around", category: "normal", durationSeconds: 7, cooldownSeconds: 72, selectionWeight: 0.27 },
 ];
 
 const EMOTION_EXPRESSION_KEYS = [
@@ -46,15 +50,15 @@ const EMOTION_EXPRESSION_KEYS = [
 ];
 
 const MOTION_PROFILES: Record<string, { intervalMinSeconds: number; intervalMaxSeconds: number; probability: number }> = {
-  idle: { intervalMinSeconds: 7, intervalMaxSeconds: 15, probability: 0.85 },
-  energetic: { intervalMinSeconds: 5.5, intervalMaxSeconds: 12, probability: 0.95 },
-  calm: { intervalMinSeconds: 9, intervalMaxSeconds: 18, probability: 0.7 },
-  tense: { intervalMinSeconds: 6, intervalMaxSeconds: 13, probability: 0.85 },
-  playful: { intervalMinSeconds: 6, intervalMaxSeconds: 13, probability: 0.9 },
-  thoughtful: { intervalMinSeconds: 8, intervalMaxSeconds: 17, probability: 0.72 },
-  alert: { intervalMinSeconds: 5, intervalMaxSeconds: 11, probability: 0.9 },
-  shy: { intervalMinSeconds: 8, intervalMaxSeconds: 17, probability: 0.68 },
-  attentive: { intervalMinSeconds: 7, intervalMaxSeconds: 15, probability: 0.8 },
+  idle: { intervalMinSeconds: 14, intervalMaxSeconds: 28, probability: 0.76 },
+  energetic: { intervalMinSeconds: 11, intervalMaxSeconds: 23, probability: 0.84 },
+  calm: { intervalMinSeconds: 18, intervalMaxSeconds: 34, probability: 0.64 },
+  tense: { intervalMinSeconds: 12, intervalMaxSeconds: 25, probability: 0.74 },
+  playful: { intervalMinSeconds: 12, intervalMaxSeconds: 24, probability: 0.8 },
+  thoughtful: { intervalMinSeconds: 16, intervalMaxSeconds: 31, probability: 0.66 },
+  alert: { intervalMinSeconds: 10, intervalMaxSeconds: 20, probability: 0.8 },
+  shy: { intervalMinSeconds: 16, intervalMaxSeconds: 31, probability: 0.62 },
+  attentive: { intervalMinSeconds: 14, intervalMaxSeconds: 27, probability: 0.72 },
 };
 
 type ExpressionName = string;
@@ -97,9 +101,10 @@ const CLIP_SOURCES: Record<string, ClipSource> = {
 };
 
 const PROCEDURAL_IDLE_CLIPS: Record<string, { kind: ProceduralIdleKind; duration: number }> = {
-  "idle-neutral": { kind: "neutral", duration: 8 },
-  "idle-weight-shift": { kind: "weight-shift", duration: 7 },
-  "idle-look-around": { kind: "look-around", duration: 6 },
+  "idle-neutral": { kind: "neutral", duration: 18 },
+  "idle-refocus": { kind: "refocus", duration: 6.5 },
+  "idle-weight-shift": { kind: "weight-shift", duration: 9 },
+  "idle-look-around": { kind: "look-around", duration: 7 },
 };
 
 function payloadString(payload: Record<string, unknown>, key: string, fallback = ""): string {
@@ -129,6 +134,22 @@ function emotionPreset(emotion: string): ExpressionName {
   }
 }
 
+/**
+ * `talk` is the continuous locomotion state for an utterance, not a one-shot
+ * gesture. Treating it as both caused the animation to restart from frame zero
+ * shortly after playback began, which was most visible in the shoulders.
+ */
+export function speechClipId(gesture: string): "talk" | "talkingquestion" {
+  const normalized = gesture.toLowerCase();
+  return normalized === "question" || normalized === "talkingquestion"
+    ? "talkingquestion"
+    : "talk";
+}
+
+export function isSpeechGesture(gesture: string): boolean {
+  return ["", "none", "auto", "talk", "explanation", "question", "talkingquestion"].includes(gesture.toLowerCase());
+}
+
 class AvatarMotionPlayer {
   private readonly idleScheduler = new IdleMotionScheduler();
   private readonly clips = new Map<string, MotionClip>();
@@ -136,11 +157,13 @@ class AvatarMotionPlayer {
   private readonly normalizedRestPositions = new Map<VRMHumanBoneName, THREE.Vector3>();
   private readonly targetBindRotations = createIrisTargetBindRotations();
   private readonly transitionFrom = new Map<VRMHumanBoneName, { position: THREE.Vector3; quaternion: THREE.Quaternion }>();
+  private readonly idleVariations = new Map<string, number>();
   private clipsReady: Promise<void> | null = null;
   private motionProfile = "idle";
   private elapsedSeconds = 0;
   private gazeTime = 0;
   private speaking = false;
+  private speakingClipId: "talk" | "talkingquestion" = "talk";
   private gestureGeneration = 0;
   private fallbackGesture = "";
   private fallbackUntil = 0;
@@ -173,21 +196,32 @@ class AvatarMotionPlayer {
     await this.ensureClipsLoaded();
     if (this.disposed) return;
     this.idleScheduler.start(this.elapsedSeconds);
+    this.seedIdleVariation("idle-neutral");
     if (!this.fallbackGesture && !this.speaking) this.switchTo("idle-neutral", 0.45);
   }
 
-  setSpeaking(value: boolean): void {
-    if (this.speaking === value) return;
+  setSpeaking(value: boolean, preferredClipId?: "talk" | "talkingquestion"): void {
+    const nextSpeechClipId = preferredClipId ?? this.speakingClipId;
+    if (value) this.speakingClipId = nextSpeechClipId;
+    if (this.speaking === value) {
+      // Metadata can arrive after a streaming utterance has already begun. In
+      // that case only change the loop when the requested conversational
+      // cadence genuinely differs; do not reset the current clip every time.
+      if (value && !this.fallbackGesture && this.activeClip?.id !== nextSpeechClipId) {
+        this.switchTo(nextSpeechClipId, 0.38);
+      }
+      return;
+    }
     this.speaking = value;
     if (value && !this.fallbackGesture) {
-      if (this.clips.has("talk")) this.switchTo("talk", 0.25);
+      if (this.clips.has(nextSpeechClipId)) this.switchTo(nextSpeechClipId, 0.38);
       else {
         void this.ensureClipsLoaded().then(() => {
-          if (!this.disposed && this.speaking && !this.fallbackGesture) this.switchTo("talk", 0.25);
+          if (!this.disposed && this.speaking && !this.fallbackGesture) this.switchTo(this.speakingClipId, 0.38);
         });
       }
     }
-    if (!value && !this.fallbackGesture) this.returnToCurrentIdle(0.3);
+    if (!value && !this.fallbackGesture) this.returnToCurrentIdle(0.38);
   }
 
   setMotionProfile(profileName: string): void {
@@ -215,7 +249,7 @@ class AvatarMotionPlayer {
     this.fallbackGesture = normalized;
     const durationMs = clip.duration * 1_000 * Math.max(0.65, intensity);
     this.fallbackUntil = performance.now() + durationMs;
-    this.switchTo(clipId, 0.2);
+    this.switchTo(clipId, 0.34);
     return { durationMs, generation };
   }
 
@@ -237,8 +271,8 @@ class AvatarMotionPlayer {
     if (this.fallbackGesture && performance.now() >= this.fallbackUntil) {
       this.fallbackGesture = "";
       this.fallbackUntil = 0;
-      if (this.speaking) this.switchTo("talk", 0.3);
-      else this.returnToCurrentIdle(0.3);
+      if (this.speaking) this.switchTo(this.speakingClipId, 0.38);
+      else this.returnToCurrentIdle(0.38);
     }
 
     if (this.activeClip) {
@@ -259,7 +293,10 @@ class AvatarMotionPlayer {
       if (candidate) {
         this.currentIdleId = candidate.id;
         this.currentIdleTime = 0;
-        this.switchTo(candidate.id, 0.42);
+        this.seedIdleVariation(candidate.id);
+        // Idle clips may enter from their closest compatible phase. This
+        // avoids treating a cross-fade as a bandage for a pose mismatch.
+        this.switchTo(candidate.id, 0.58, 0, true);
       }
     }
   }
@@ -342,7 +379,7 @@ class AvatarMotionPlayer {
     }
   }
 
-  private switchTo(id: string, duration: number, initialTime = 0): void {
+  private switchTo(id: string, duration: number, initialTime = 0, matchLoopPhase = false): void {
     const next = this.clips.get(id);
     if (!next || this.activeClip === next && Math.abs(initialTime - next.time) < 0.01) return;
     this.transitionFrom.clear();
@@ -352,13 +389,53 @@ class AvatarMotionPlayer {
         quaternion: node.quaternion.clone(),
       });
     }
-    const startTime = Math.max(0, initialTime) % Math.max(0.001, next.duration);
+    const startTime = matchLoopPhase
+      ? this.findClosestLoopEntryTime(next)
+      : Math.max(0, initialTime) % Math.max(0.001, next.duration);
+    // `sample` for imported FBX clips reads the bones that its mixer writes.
+    // Set the entry time before sampling: evaluating its former frame here was
+    // the source of a one-frame jump at every clip switch.
     next.action?.reset().play();
     next.mixer?.setTime(startTime);
+    next.root?.updateMatrixWorld(true);
+    const entryPose = next.sample(startTime);
+    let largestJointChange = 0;
+    for (const [human, node] of this.normalizedByHuman) {
+      const target = entryPose.rotations.get(human);
+      if (target) largestJointChange = Math.max(largestJointChange, node.quaternion.angleTo(target));
+    }
     next.time = startTime;
     this.activeClip = next;
     this.transitionElapsed = 0;
-    this.transitionDuration = Math.max(0.05, duration);
+    // Big pose changes need more time than breathing-scale changes. This
+    // prevents a sudden gesture from reading as a limb snap while keeping
+    // routine conversational motion responsive.
+    this.transitionDuration = Math.min(0.9, Math.max(0.05, duration, largestJointChange * 0.26));
+  }
+
+  private findClosestLoopEntryTime(next: MotionClip): number {
+    if (next.root || !next.loop || next.duration <= 0) return 0;
+    const sampleCount = 36;
+    let bestTime = 0;
+    let bestScore = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < sampleCount; index += 1) {
+      const time = next.duration * index / sampleCount;
+      const pose = next.sample(time);
+      let score = 0;
+      for (const [human, node] of this.normalizedByHuman) {
+        const target = pose.rotations.get(human);
+        if (!target) continue;
+        const multiplier = human === VRMHumanBoneName.Hips || human === VRMHumanBoneName.Spine || human === VRMHumanBoneName.Chest ? 1.35 : 1;
+        score += node.quaternion.angleTo(target) ** 2 * multiplier;
+      }
+      const hips = this.normalizedByHuman.get(VRMHumanBoneName.Hips);
+      if (hips) score += hips.position.distanceToSquared(pose.hipsPosition) * 18;
+      if (score < bestScore) {
+        bestScore = score;
+        bestTime = time;
+      }
+    }
+    return bestTime;
   }
 
   private captureCurrentIdle(): void {
@@ -389,9 +466,14 @@ class AvatarMotionPlayer {
           time,
           this.targetBindRotations,
           this.normalizedRestPositions,
+          this.idleVariations.get(id) ?? 0,
         ),
       });
     }
+  }
+
+  private seedIdleVariation(id: string): void {
+    this.idleVariations.set(id, Math.random() * Math.PI * 2);
   }
 
   private applySample(pose: NormalizedPose): void {
@@ -443,6 +525,7 @@ export function IrisAvatarCanvas() {
     let vrm: VRM | null = null;
     let motion: AvatarMotionPlayer | null = null;
     const emotionController = new EmotionBlendController();
+    const blinkScheduler = new BlinkScheduler();
     let currentUtterance: string | null = null;
     let gestureTimer: number | null = null;
     const audio = new AvatarAudioQueue();
@@ -483,7 +566,9 @@ export function IrisAvatarCanvas() {
       if (snapshot.targetEmotion === "neutral") motion?.setMotionProfile(EMOTION_PROFILES.neutral.motionProfile);
     };
     const playGesture = async (client: AvatarProtocolClient, gesture: string, intensity: number, replyTo: string) => {
-      if (!motion || gesture === "none" || gesture === "auto") return;
+      // The speech loop is selected by setSpeaking. Starting it here as a
+      // finite gesture would make it expire and restart while audio continues.
+      if (!motion || isSpeechGesture(gesture)) return;
       const result = await motion.trigger(gesture, intensity);
       if (!motion.isGestureGenerationCurrent(result.generation)) return;
       client.send("avatar.gesture.started", { gesture, intensity }, replyTo);
@@ -534,8 +619,13 @@ export function IrisAvatarCanvas() {
             return;
           case "avatar.speak": {
             const utterance = payloadString(payload, "utterance_id");
+            const gesture = payloadString(payload, "gesture", "talk");
             applyEmotion(payloadString(payload, "emotion"), payloadNumber(payload, "gesture_intensity"));
-            void playGesture(protocol, payloadString(payload, "gesture", "talk"), payloadNumber(payload, "gesture_intensity"), message.message_id);
+            // Start the continuous speech state before the audio callback so
+            // its entry transition overlaps decoding rather than popping on
+            // the first audible sample.
+            motion?.setSpeaking(true, speechClipId(gesture));
+            void playGesture(protocol, gesture, payloadNumber(payload, "gesture_intensity"), message.message_id);
             await audio.playUrl(resolveApiUrl(payloadString(payload, "audio_url")), playbackHandlers(utterance, message.message_id));
             break;
           }
@@ -546,10 +636,13 @@ export function IrisAvatarCanvas() {
             audio.beginStream(playbackHandlers(utterance, message.message_id));
             break;
           }
-          case "avatar.stream.metadata":
+          case "avatar.stream.metadata": {
+            const gesture = payloadString(payload, "gesture", "talk");
             applyEmotion(payloadString(payload, "emotion"), payloadNumber(payload, "gesture_intensity"));
-            void playGesture(protocol, payloadString(payload, "gesture", "talk"), payloadNumber(payload, "gesture_intensity"), message.message_id);
+            motion?.setSpeaking(true, speechClipId(gesture));
+            void playGesture(protocol, gesture, payloadNumber(payload, "gesture_intensity"), message.message_id);
             break;
+          }
           case "avatar.stream.segment":
             await audio.enqueueBase64Wav(payloadNumber(payload, "sequence", 0), payloadString(payload, "audio_base64"));
             protocol.send("avatar.stream.received", {
@@ -642,10 +735,7 @@ export function IrisAvatarCanvas() {
         clearMouth();
         const emotionSnapshot = emotionController.update(delta, performance.now());
         applyEmotionExpressions(emotionSnapshot.weights);
-        const blinkPhase = (performance.now() % 4_200) / 4_200;
-        const blink = blinkPhase > 0.91 && blinkPhase < 0.95
-          ? 1 - Math.abs(blinkPhase - 0.93) / 0.02
-          : 0;
+        const blink = blinkScheduler.update(performance.now());
         vrm.expressionManager.setValue(VRMExpressionPresetName.Blink, Math.max(0, blink));
         if (volume > 0.018) {
           const vowels = [VRMExpressionPresetName.Aa, VRMExpressionPresetName.Ih, VRMExpressionPresetName.Ou, VRMExpressionPresetName.Ee, VRMExpressionPresetName.Oh];

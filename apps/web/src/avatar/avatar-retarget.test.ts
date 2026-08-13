@@ -28,7 +28,7 @@ describe("Mixamo to normalized VRM retargeting", () => {
     expect(result.hipsPosition.toArray()).toEqual([0, 0.862, 0]);
   });
 
-  it("maps a source delta onto the same target bind frame", () => {
+  it("keeps imported arm chains on the authored Iris bind frame", () => {
     const referenceQuaternion = new THREE.Quaternion();
     const source = new THREE.Object3D();
     source.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 4);
@@ -39,8 +39,28 @@ describe("Mixamo to normalized VRM retargeting", () => {
       bind,
       new Map(),
     );
-    const expected = source.quaternion.clone().multiply(bind.get(VRMHumanBoneName.LeftUpperArm)!).normalize();
-    expect(result.rotations.get(VRMHumanBoneName.LeftUpperArm)!.angleTo(expected)).toBeLessThan(0.00001);
+    expect(result.rotations.get(VRMHumanBoneName.LeftUpperArm)!.angleTo(bind.get(VRMHumanBoneName.LeftUpperArm)!)).toBeLessThan(0.00001);
+  });
+
+  it("does not allow extreme Mixamo arm or wrist rotations to change Iris's pose", () => {
+    const source = new THREE.Object3D();
+    source.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+    const bind = createIrisTargetBindRotations();
+    const result = retargetMixamoPose(
+      new Map([
+        ["mixamorigLeftArm", source],
+        ["mixamorigLeftHand", source],
+      ]),
+      new Map([
+        ["mixamorigLeftArm", { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() }],
+        ["mixamorigLeftHand", { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() }],
+      ]),
+      bind,
+      new Map(),
+    );
+
+    expect(result.rotations.get(VRMHumanBoneName.LeftUpperArm)!.angleTo(bind.get(VRMHumanBoneName.LeftUpperArm)!)).toBeLessThan(0.00001);
+    expect(result.rotations.get(VRMHumanBoneName.LeftHand)!.angleTo(new THREE.Quaternion())).toBeLessThan(0.00001);
   });
 
   it("keeps the procedural neutral idle on the authored bind frame", () => {
@@ -51,5 +71,19 @@ describe("Mixamo to normalized VRM retargeting", () => {
     expect(pose.hipsPosition.toArray()).toEqual([0, 0.862, 0]);
     expect(pose.rotations.get(VRMHumanBoneName.LeftUpperArm)!.angleTo(bind.get(VRMHumanBoneName.LeftUpperArm)!)).toBeLessThan(0.00001);
     expect(pose.rotations.get(VRMHumanBoneName.RightUpperArm)!.angleTo(bind.get(VRMHumanBoneName.RightUpperArm)!)).toBeLessThan(0.00001);
+  });
+
+  it("keeps every procedural idle at its authored pose when its loop closes", () => {
+    const bind = createIrisTargetBindRotations();
+    const rest = new Map([[VRMHumanBoneName.Hips, new THREE.Vector3(0, 0.862, 0)]]);
+    const durations = { neutral: 18, "weight-shift": 9, "look-around": 7, refocus: 6.5 } as const;
+
+    for (const [kind, duration] of Object.entries(durations) as [keyof typeof durations, number][]) {
+      const start = createProceduralIdlePose(kind, 0, bind, rest, 1.7);
+      const end = createProceduralIdlePose(kind, duration, bind, rest, 1.7);
+      expect(end.hipsPosition.distanceTo(start.hipsPosition)).toBeLessThan(0.00001);
+      expect(end.rotations.get(VRMHumanBoneName.Head)!.angleTo(start.rotations.get(VRMHumanBoneName.Head)!)).toBeLessThan(0.00001);
+      expect(end.rotations.get(VRMHumanBoneName.Chest)!.angleTo(start.rotations.get(VRMHumanBoneName.Chest)!)).toBeLessThan(0.00001);
+    }
   });
 });
