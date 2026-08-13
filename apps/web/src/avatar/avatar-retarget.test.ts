@@ -28,7 +28,7 @@ describe("Mixamo to normalized VRM retargeting", () => {
     expect(result.hipsPosition.toArray()).toEqual([0, 0.862, 0]);
   });
 
-  it("keeps imported arm chains on the authored Iris bind frame", () => {
+  it("retargets a safe arm delta relative to Iris's authored bind frame", () => {
     const referenceQuaternion = new THREE.Quaternion();
     const source = new THREE.Object3D();
     source.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 4);
@@ -39,10 +39,10 @@ describe("Mixamo to normalized VRM retargeting", () => {
       bind,
       new Map(),
     );
-    expect(result.rotations.get(VRMHumanBoneName.LeftUpperArm)!.angleTo(bind.get(VRMHumanBoneName.LeftUpperArm)!)).toBeLessThan(0.00001);
+    expect(result.rotations.get(VRMHumanBoneName.LeftUpperArm)!.angleTo(bind.get(VRMHumanBoneName.LeftUpperArm)!)).toBeGreaterThan(0.1);
   });
 
-  it("does not allow extreme Mixamo arm or wrist rotations to change Iris's pose", () => {
+  it("falls back to the authored bind frame for extreme Mixamo arm or wrist rotations", () => {
     const source = new THREE.Object3D();
     source.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
     const bind = createIrisTargetBindRotations();
@@ -63,6 +63,19 @@ describe("Mixamo to normalized VRM retargeting", () => {
     expect(result.rotations.get(VRMHumanBoneName.LeftHand)!.angleTo(new THREE.Quaternion())).toBeLessThan(0.00001);
   });
 
+  it("bounds an extreme torso bend instead of folding Iris at the start of a clip", () => {
+    const source = new THREE.Object3D();
+    source.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+    const result = retargetMixamoPose(
+      new Map([["mixamorigSpine1", source]]),
+      new Map([["mixamorigSpine1", { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() }]]),
+      new Map(),
+      new Map(),
+    );
+
+    expect(result.rotations.get(VRMHumanBoneName.Chest)!.angleTo(new THREE.Quaternion())).toBeLessThanOrEqual(THREE.MathUtils.degToRad(22.01));
+  });
+
   it("keeps the procedural neutral idle on the authored bind frame", () => {
     const bind = createIrisTargetBindRotations();
     const rest = new Map([[VRMHumanBoneName.Hips, new THREE.Vector3(0, 0.862, 0)]]);
@@ -76,7 +89,10 @@ describe("Mixamo to normalized VRM retargeting", () => {
   it("keeps every procedural idle at its authored pose when its loop closes", () => {
     const bind = createIrisTargetBindRotations();
     const rest = new Map([[VRMHumanBoneName.Hips, new THREE.Vector3(0, 0.862, 0)]]);
-    const durations = { neutral: 18, "weight-shift": 9, "look-around": 7, refocus: 6.5 } as const;
+    const durations = {
+      neutral: 18, "weight-shift": 9, "look-around": 7, refocus: 6.5,
+      "soft-sway": 14, "shoulder-release": 8, listening: 12, thinking: 10,
+    } as const;
 
     for (const [kind, duration] of Object.entries(durations) as [keyof typeof durations, number][]) {
       const start = createProceduralIdlePose(kind, 0, bind, rest, 1.7);

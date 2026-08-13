@@ -38,6 +38,34 @@ Present and verified in the repository on 2026-08-12:
 | `X Bot@WavingGoodbye.fbx` | Runtime farewell source | One-shot farewell gesture |
 | `X Bot@Shrugging.fbx` | Runtime shrug source | One-shot shrug gesture |
 
+### Role-based motion library
+
+`apps/web/public/avatar/animations/manifest.json` is the stable registry for
+the role-based downloads. On 2026-08-13, seven animation-only FBX files were
+downloaded via Adobe Mixamo with `FBX Binary`, `Without Skin`, `30 FPS`, and
+no keyframe reduction. The runtime retains a safe procedural or checked-in
+fallback for every role, so an optional missing FBX cannot break a pose or
+delay avatar startup.
+
+| Runtime role | Requested Mixamo source | Runtime fallback |
+| --- | --- | --- |
+| `idle_calm_a` | Standing Idle | procedural soft sway |
+| `idle_calm_b` | Neutral Idle | procedural shoulder release |
+| `listening` | Unarmed Idle (neutral fallback; `Listening` only returned a music/headphone clip) | procedural attentive listening |
+| `thinking` | Thinking | procedural thoughtful presence |
+| `talk_calm` | Talking | `X Bot@Talking.fbx` |
+| `talk_question` | Talking — Asking A Question | `X Bot@TalkingQuestion.fbx` |
+| `accent_affirm` | Thoughtful Head Nod | `X Bot@Agreeing.fbx` |
+| `accent_explain` | Shrugging | `X Bot@Shrugging.fbx` |
+
+The `listening` fallback was selected but its browser download did not finish,
+so it deliberately remains procedural. All raw source files remain embedded
+application assets only and must not be republished as an asset pack.
+
+The downloaded `Thinking` clip is retained as an embedded reference asset, but
+is not played as Iris's presence loop: its source torso bend is unsuitable for
+the portrait rig. The calibrated procedural `thinking` pose remains active.
+
 Facial expressions are not Mixamo assets. They come from the VRM expression
 blend shapes and are blended by the Three.js emotion controller. Production
 idle motion is implemented in `apps/web/src/avatar/avatar-retarget.ts` so that

@@ -20,6 +20,9 @@ export class AvatarAudioQueue {
   private muted = false;
   private nextSequence: number | null = null;
   private samples = new Uint8Array(256);
+  private frequencySamples = new Uint8Array(128);
+  private smoothedVolume = 0;
+  private smoothedTone = 0;
 
   async playUrl(url: string, handlers: PlaybackHandlers): Promise<void> {
     const generation = this.reset();
@@ -79,15 +82,50 @@ export class AvatarAudioQueue {
     if (this.gain) this.gain.gain.value = muted ? 0 : 1;
   }
 
-  volume(): number {
-    if (!this.analyser || !this.source) return 0;
-    this.analyser.getByteTimeDomainData(this.samples);
-    let energy = 0;
-    for (const value of this.samples) {
-      const sample = (value - 128) / 128;
-      energy += sample * sample;
+  /**
+   * Returns a smoothed speech signal for the avatar mouth.
+   *
+   * The old renderer chose a vowel by wall-clock time. That made the mouth
+   * cycle even during a held vowel and made pauses look like speech. Keep the
+   * amplitude signal stable, and expose a coarse spectral tone so the renderer
+   * can choose a nearby viseme without pretending that amplitude is phoneme
+   * data.
+   */
+  mouthSignal(deltaSeconds = 1 / 60): { level: number; tone: number } {
+    const safeDelta = Math.max(0, deltaSeconds);
+    let level = 0;
+    let tone = 0;
+    if (!this.muted && this.analyser && this.source) {
+      this.analyser.getByteTimeDomainData(this.samples);
+      let energy = 0;
+      for (const value of this.samples) {
+        const sample = (value - 128) / 128;
+        energy += sample * sample;
+      }
+      level = Math.min(1, Math.sqrt(energy / this.samples.length) * 4.5);
+
+      this.analyser.getByteFrequencyData(this.frequencySamples);
+      let total = 0;
+      let weighted = 0;
+      for (let index = 0; index < this.frequencySamples.length; index += 1) {
+        const value = this.frequencySamples[index] / 255;
+        total += value;
+        weighted += value * index;
+      }
+      tone = total > 0 ? weighted / total / Math.max(1, this.frequencySamples.length - 1) : 0;
     }
-    return Math.min(1, Math.sqrt(energy / this.samples.length) * 4.5);
+
+    const attack = 1 - Math.exp(-safeDelta / 0.045);
+    const release = 1 - Math.exp(-safeDelta / 0.12);
+    const levelResponse = level > this.smoothedVolume ? attack : release;
+    this.smoothedVolume += (level - this.smoothedVolume) * levelResponse;
+    const toneResponse = 1 - Math.exp(-safeDelta / 0.09);
+    this.smoothedTone += (tone - this.smoothedTone) * toneResponse;
+    return { level: this.smoothedVolume, tone: this.smoothedTone };
+  }
+
+  volume(deltaSeconds = 1 / 60): number {
+    return this.mouthSignal(deltaSeconds).level;
   }
 
   private audioContext(): AudioContext {
@@ -112,6 +150,8 @@ export class AvatarAudioQueue {
     this.streamStarted = false;
     this.nextSequence = null;
     this.handlers = null;
+    this.smoothedVolume = 0;
+    this.smoothedTone = 0;
     return this.generation;
   }
 

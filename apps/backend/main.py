@@ -384,6 +384,10 @@ def create_app() -> FastAPI:
         language,
         connection,
     ) -> None:
+        # The VAD has already confirmed human speech. Only now do we leave the
+        # attentive listening pose: processing an unconfirmed audio frame would
+        # make the avatar twitch on room noise.
+        await avatar_service.set_presence(session_id=session_id, state="thinking")
         if conversation_service is not None:
             await conversation_service.phase(session_id, ConversationPhase.TRANSCRIBING, connection.send)
         stt_result = await voice_service.transcribe_pcm16(audio, language)
@@ -402,6 +406,7 @@ def create_app() -> FastAPI:
                 )
             else:
                 await connection.send({"type": "voice.input.error", "message": "Could not transcribe speech"})
+            await avatar_service.set_presence(session_id=session_id, state="listening")
             return
         if not voice_session_manager.connected(session_id):
             await connection.send({"type": "voice.input.error", "message": "Live output WebSocket is not connected"})
@@ -465,6 +470,7 @@ def create_app() -> FastAPI:
                 ConversationAction.BACKCHANNEL,
                 ConversationAction.RESPOND,
             }:
+                await avatar_service.set_presence(session_id=session_id, state="listening")
                 return
             utterance_id = result.utterance_id
             await voice_session_manager.start(
@@ -509,6 +515,7 @@ def create_app() -> FastAPI:
             else None
         )
         await interrupt_voice_session(session_id)
+        await avatar_service.set_presence(session_id=session_id, state="listening")
         return generation
 
     def barge_in_guard_active(session_id: str) -> bool:

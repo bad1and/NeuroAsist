@@ -5,6 +5,8 @@ import {
   BlinkScheduler,
   EmotionBlendController,
   IdleMotionScheduler,
+  OrganicMotionDirector,
+  SpeechAccentScheduler,
   parseEmotion,
   type IdleCandidate,
 } from "./avatar-motion-state";
@@ -28,6 +30,14 @@ describe("IdleMotionScheduler", () => {
     expect(scheduler.schedule(7, shortCandidates, { speaking: false, gesturePlaying: false })?.id).toBe("look");
   });
 
+  it("treats the visible startup idle as already played", () => {
+    const scheduler = new IdleMotionScheduler(() => 0);
+    scheduler.setProfile({ intervalMinSeconds: 1, intervalMaxSeconds: 1, alternativeProbability: 1 });
+    scheduler.start(0, "look");
+
+    expect(scheduler.schedule(1, candidates.slice(0, 2), { speaking: false, gesturePlaying: false })?.id).toBe("stretch");
+  });
+
   it("uses candidate weights without allowing an immediate repeat", () => {
     const scheduler = new IdleMotionScheduler(() => 0.95);
     scheduler.setProfile({ intervalMinSeconds: 1, intervalMaxSeconds: 1, alternativeProbability: 1 });
@@ -48,6 +58,82 @@ describe("IdleMotionScheduler", () => {
 
     expect(scheduler.schedule(1, [candidates[2]], { speaking: true, gesturePlaying: false })).toBeNull();
     expect(scheduler.schedule(2, candidates, { speaking: false, gesturePlaying: true })).toBeNull();
+  });
+
+  it("does not schedule a wandering idle while Iris is listening or thinking", () => {
+    const scheduler = new IdleMotionScheduler(() => 0);
+    scheduler.setProfile({ intervalMinSeconds: 1, intervalMaxSeconds: 1, alternativeProbability: 1 });
+    scheduler.start(0);
+    expect(scheduler.schedule(1, candidates, { speaking: false, gesturePlaying: false, presence: "listening" })).toBeNull();
+    expect(scheduler.schedule(2, candidates, { speaking: false, gesturePlaying: false, presence: "thinking" })).toBeNull();
+  });
+
+  it("plans each idle as a varied phrase instead of replaying a whole loop", () => {
+    const scheduler = new IdleMotionScheduler(() => 0.5);
+    const plan = scheduler.planPhrase(candidates[1]);
+
+    expect(plan.durationSeconds).toBeGreaterThan(1.2);
+    expect(plan.durationSeconds).toBeLessThan(candidates[1].durationSeconds);
+    expect(plan.recoverySeconds).toBeGreaterThanOrEqual(0.8);
+    expect(plan.recoverySeconds).toBeLessThanOrEqual(4);
+    expect(plan.playbackRate).toBeGreaterThanOrEqual(0.9);
+    expect(plan.playbackRate).toBeLessThanOrEqual(1.12);
+  });
+
+  it("can schedule the next idle immediately after the planned recovery", () => {
+    const scheduler = new IdleMotionScheduler(() => 0);
+    scheduler.setProfile({ intervalMinSeconds: 1, intervalMaxSeconds: 1, alternativeProbability: 1 });
+    scheduler.start(0);
+    const shortCandidates = candidates.slice(0, 2);
+
+    expect(scheduler.schedule(1, shortCandidates, { speaking: false, gesturePlaying: false })?.id).toBe("look");
+    scheduler.deferUntil(3);
+    expect(scheduler.schedule(3, shortCandidates, { speaking: false, gesturePlaying: false })?.id).toBe("stretch");
+  });
+
+  it("reduces recently used families and does not alternate in a fixed category pattern", () => {
+    const scheduler = new IdleMotionScheduler(() => 0.99);
+    scheduler.setProfile({ intervalMinSeconds: 1, intervalMaxSeconds: 1, alternativeProbability: 1 });
+    scheduler.start(0);
+    const varied: IdleCandidate[] = [
+      { id: "breath-a", family: "breath", category: "micro", durationSeconds: 1, cooldownSeconds: 0, selectionWeight: 8 },
+      { id: "breath-b", family: "breath", category: "micro", durationSeconds: 1, cooldownSeconds: 0, selectionWeight: 8 },
+      { id: "shift", family: "posture", category: "normal", durationSeconds: 1, cooldownSeconds: 0, selectionWeight: 1 },
+    ];
+
+    expect(scheduler.schedule(1, varied, { speaking: false, gesturePlaying: false })?.id).toBe("shift");
+    expect(scheduler.schedule(2, varied, { speaking: false, gesturePlaying: false })?.family).toBe("breath");
+    expect(scheduler.schedule(3, varied, { speaking: false, gesturePlaying: false })?.id).not.toBe("breath-b");
+  });
+});
+
+describe("OrganicMotionDirector", () => {
+  it("retargets smoothly and keeps listening more forward-facing than thinking", () => {
+    const listening = new OrganicMotionDirector(() => 1);
+    const thinking = new OrganicMotionDirector(() => 1);
+    listening.reset(0, "listening");
+    thinking.reset(0, "thinking");
+
+    const attentive = listening.update(10, 10, "listening");
+    const thoughtful = thinking.update(10, 10, "thinking");
+    expect(Math.abs(attentive.headYaw)).toBeLessThanOrEqual(0.007);
+    expect(Math.abs(thoughtful.headYaw)).toBeGreaterThan(Math.abs(attentive.headYaw));
+    expect(thoughtful.headPitch).toBeGreaterThan(attentive.headPitch);
+  });
+});
+
+describe("SpeechAccentScheduler", () => {
+  it("spaces accents, prevents immediate repeats, and yields to an explicit gesture", () => {
+    const scheduler = new SpeechAccentScheduler(() => 0);
+    const accents = [
+      { id: "affirm", cooldownSeconds: 30 },
+      { id: "explain", cooldownSeconds: 30 },
+    ];
+    scheduler.start(0);
+    expect(scheduler.schedule(6.9, accents, { speaking: true, explicitGesturePlaying: false })).toBeNull();
+    expect(scheduler.schedule(7, accents, { speaking: true, explicitGesturePlaying: true })).toBeNull();
+    expect(scheduler.schedule(15, accents, { speaking: true, explicitGesturePlaying: false })?.id).toBe("affirm");
+    expect(scheduler.schedule(22, accents, { speaking: true, explicitGesturePlaying: false })?.id).toBe("explain");
   });
 });
 
