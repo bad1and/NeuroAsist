@@ -11,7 +11,15 @@ export type RetargetedPose = {
   hipsPosition: THREE.Vector3;
 };
 
-export type ProceduralIdleKind = "neutral" | "weight-shift" | "look-around" | "refocus";
+export type ProceduralIdleKind =
+  | "neutral"
+  | "weight-shift"
+  | "look-around"
+  | "refocus"
+  | "soft-sway"
+  | "shoulder-release"
+  | "listening"
+  | "thinking";
 
 /** Mixamo's humanoid names mapped to the VRM humanoid contract. */
 export const MIXAMO_BONE_MAP: readonly (readonly [VRMHumanBoneName, string])[] = [
@@ -39,17 +47,35 @@ export const MIXAMO_BONE_MAP: readonly (readonly [VRMHumanBoneName, string])[] =
   [VRMHumanBoneName.RightToes, "mixamorigRightToeBase"],
 ];
 
-const MIXAMO_TRANSLATION_SCALE = 0.01;
+const MIXAMO_ARM_BONES = new Set<VRMHumanBoneName>([
+  VRMHumanBoneName.LeftShoulder, VRMHumanBoneName.LeftUpperArm,
+  VRMHumanBoneName.LeftLowerArm, VRMHumanBoneName.LeftHand,
+  VRMHumanBoneName.RightShoulder, VRMHumanBoneName.RightUpperArm,
+  VRMHumanBoneName.RightLowerArm, VRMHumanBoneName.RightHand,
+]);
 
-const UNSAFE_MIXAMO_ARM_BONES = new Set<VRMHumanBoneName>([
-  VRMHumanBoneName.LeftShoulder,
-  VRMHumanBoneName.LeftUpperArm,
-  VRMHumanBoneName.LeftLowerArm,
-  VRMHumanBoneName.LeftHand,
-  VRMHumanBoneName.RightShoulder,
-  VRMHumanBoneName.RightUpperArm,
-  VRMHumanBoneName.RightLowerArm,
-  VRMHumanBoneName.RightHand,
+const ARM_ANGLE_LIMITS = new Map<VRMHumanBoneName, number>([
+  [VRMHumanBoneName.LeftShoulder, THREE.MathUtils.degToRad(24)],
+  [VRMHumanBoneName.RightShoulder, THREE.MathUtils.degToRad(24)],
+  [VRMHumanBoneName.LeftUpperArm, THREE.MathUtils.degToRad(72)],
+  [VRMHumanBoneName.RightUpperArm, THREE.MathUtils.degToRad(72)],
+  [VRMHumanBoneName.LeftLowerArm, THREE.MathUtils.degToRad(88)],
+  [VRMHumanBoneName.RightLowerArm, THREE.MathUtils.degToRad(88)],
+  [VRMHumanBoneName.LeftHand, THREE.MathUtils.degToRad(52)],
+  [VRMHumanBoneName.RightHand, THREE.MathUtils.degToRad(52)],
+]);
+
+// Animation-only Mixamo exports can contain a very deep bend intended for a
+// different body proportion. Iris is framed as a portrait, so a large torso
+// fold reads as a broken rig rather than an expressive pose. Keep the body
+// readable while allowing authored one-shot gestures to retain their arms.
+const TORSO_ANGLE_LIMITS = new Map<VRMHumanBoneName, number>([
+  [VRMHumanBoneName.Hips, THREE.MathUtils.degToRad(16)],
+  [VRMHumanBoneName.Spine, THREE.MathUtils.degToRad(18)],
+  [VRMHumanBoneName.Chest, THREE.MathUtils.degToRad(22)],
+  [VRMHumanBoneName.UpperChest, THREE.MathUtils.degToRad(20)],
+  [VRMHumanBoneName.Neck, THREE.MathUtils.degToRad(24)],
+  [VRMHumanBoneName.Head, THREE.MathUtils.degToRad(28)],
 ]);
 
 /**
@@ -78,10 +104,9 @@ export function createIrisTargetBindRotations(): Map<VRMHumanBoneName, THREE.Qua
  * animation-only exports commonly have a different bind frame from their
  * first keyframe; subtracting the FBX bind pose would otherwise introduce a
  * T-pose on entry. The target bind rotation is then applied uniformly to the
- * source delta. Iris and Mixamo use incompatible arm-axis conventions, so
- * imported clips intentionally do not control the arm chains: their authored
- * A-pose remains fixed and cannot twist through the body. Author-controlled
- * idle movement still adds a small, safe arm sway independently.
+ * source delta. Iris and Mixamo use different arm-axis conventions, so arm
+ * deltas are clamped against Iris's authored A-pose. A malformed clip is
+ * safely masked at the offending joint rather than twisting the whole rig.
  */
 export function retargetMixamoPose(
   bones: ReadonlyMap<string, THREE.Object3D>,
@@ -98,18 +123,39 @@ export function retargetMixamoPose(
     if (!source || !reference) continue;
 
     const targetBind = targetRestRotations.get(humanBone) ?? new THREE.Quaternion();
-    if (UNSAFE_MIXAMO_ARM_BONES.has(humanBone)) {
-      rotations.set(humanBone, targetBind.clone());
-      continue;
-    }
     const sourceDelta = source.quaternion.clone()
       .multiply(reference.quaternion.clone().invert())
       .normalize();
-    rotations.set(humanBone, sourceDelta.multiply(targetBind).normalize());
-
-    if (humanBone === VRMHumanBoneName.Hips) {
-      hipsPosition.add(source.position.clone().sub(reference.position).multiplyScalar(MIXAMO_TRANSLATION_SCALE));
+    const retargeted = sourceDelta.multiply(targetBind).normalize();
+    if (MIXAMO_ARM_BONES.has(humanBone)) {
+      const limit = ARM_ANGLE_LIMITS.get(humanBone) ?? THREE.MathUtils.degToRad(45);
+      const difference = targetBind.clone().invert().multiply(retargeted).normalize();
+      const angle = difference.angleTo(new THREE.Quaternion());
+      if (!Number.isFinite(angle) || angle > limit) {
+        // Per-joint fallback: keep the rest of the gesture alive even when a
+        // particular Mixamo arm keyframe is incompatible with Iris's axes.
+        rotations.set(humanBone, targetBind.clone());
+        continue;
+      }
     }
+    const torsoLimit = TORSO_ANGLE_LIMITS.get(humanBone);
+    if (torsoLimit) {
+      const difference = targetBind.clone().invert().multiply(retargeted).normalize();
+      const angle = difference.angleTo(new THREE.Quaternion());
+      if (!Number.isFinite(angle)) {
+        rotations.set(humanBone, targetBind.clone());
+        continue;
+      }
+      if (angle > torsoLimit) {
+        const boundedDelta = new THREE.Quaternion().slerp(difference, torsoLimit / angle);
+        rotations.set(humanBone, targetBind.clone().multiply(boundedDelta).normalize());
+        continue;
+      }
+    }
+    rotations.set(humanBone, retargeted);
+
+    // Root motion is deliberately baked out. Iris is framed as a portrait and
+    // a source locomotion offset would read as a camera-breaking slide.
   }
 
   return { rotations, hipsPosition };
@@ -156,6 +202,10 @@ export function createProceduralIdlePose(
     "weight-shift": 9,
     "look-around": 7,
     refocus: 6.5,
+    "soft-sway": 14,
+    "shoulder-release": 8,
+    listening: 12,
+    thinking: 10,
   };
   const phase = (timeSeconds / durations[kind]) * Math.PI * 2;
   // Every term evaluates to zero at both ends of the loop. That lets a new
@@ -201,7 +251,7 @@ export function createProceduralIdlePose(
       addLocalRotation(rotations, VRMHumanBoneName.Head, targetBindRotations, slowWave * 0.008, wave * 0.105, slowWave * 0.016);
       addLocalRotation(rotations, VRMHumanBoneName.LeftUpperArm, targetBindRotations, 0, 0, slowWave * 0.019);
       addLocalRotation(rotations, VRMHumanBoneName.RightUpperArm, targetBindRotations, 0, 0, -slowWave * 0.019);
-    } else {
+    } else if (kind === "refocus") {
       // A short, contained refocus: the eyes/head acknowledge something,
       // then the full torso settles back. It is deliberately quieter than a
       // gesture and only the scheduler may choose it.
@@ -211,6 +261,40 @@ export function createProceduralIdlePose(
       addLocalRotation(rotations, VRMHumanBoneName.Chest, targetBindRotations, settle * 0.016, wave * 0.024, -settle * 0.014);
       addLocalRotation(rotations, VRMHumanBoneName.Neck, targetBindRotations, settle * 0.012, wave * 0.048, 0);
       addLocalRotation(rotations, VRMHumanBoneName.Head, targetBindRotations, settle * 0.017, wave * 0.071, 0);
+    } else if (kind === "soft-sway") {
+      hipsPosition.x += slowWave * 0.012;
+      addLocalRotation(rotations, VRMHumanBoneName.Hips, targetBindRotations, wave * 0.006, 0, slowWave * 0.028);
+      addLocalRotation(rotations, VRMHumanBoneName.Spine, targetBindRotations, wave * 0.013, 0.007 * slowWave, -slowWave * 0.021);
+      addLocalRotation(rotations, VRMHumanBoneName.Chest, targetBindRotations, wave * 0.019, 0.012 * slowWave, -slowWave * 0.031);
+      addLocalRotation(rotations, VRMHumanBoneName.Neck, targetBindRotations, 0.009 * wave, 0.017 * slowWave, 0);
+      addLocalRotation(rotations, VRMHumanBoneName.Head, targetBindRotations, 0.011 * wave, 0.024 * slowWave, 0);
+    } else if (kind === "shoulder-release") {
+      const release = 0.5 - 0.5 * Math.cos(phase);
+      addLocalRotation(rotations, VRMHumanBoneName.Spine, targetBindRotations, release * 0.012, 0, 0);
+      addLocalRotation(rotations, VRMHumanBoneName.Chest, targetBindRotations, release * 0.023, wave * 0.009, 0);
+      addLocalRotation(rotations, VRMHumanBoneName.LeftShoulder, targetBindRotations, 0, 0, -release * 0.035);
+      addLocalRotation(rotations, VRMHumanBoneName.RightShoulder, targetBindRotations, 0, 0, release * 0.035);
+      addLocalRotation(rotations, VRMHumanBoneName.LeftUpperArm, targetBindRotations, 0, 0, release * 0.039);
+      addLocalRotation(rotations, VRMHumanBoneName.RightUpperArm, targetBindRotations, 0, 0, -release * 0.039);
+    } else if (kind === "listening") {
+      // Attentive and forward-facing: no autonomous look-away while the user
+      // speaks. The small nod is intentionally much quieter than agreement.
+      const attentive = Math.sin(phase) * 0.5 + Math.sin(phase * 2 + variation) * 0.18;
+      addLocalRotation(rotations, VRMHumanBoneName.Hips, targetBindRotations, 0.003 * attentive, 0, 0.006 * attentive);
+      addLocalRotation(rotations, VRMHumanBoneName.Spine, targetBindRotations, 0.009 * attentive, 0.005 * slowWave, -0.007 * attentive);
+      addLocalRotation(rotations, VRMHumanBoneName.Chest, targetBindRotations, 0.014 * attentive, 0.008 * slowWave, -0.011 * attentive);
+      addLocalRotation(rotations, VRMHumanBoneName.Neck, targetBindRotations, 0.018 * attentive, 0.006 * slowWave, 0);
+      addLocalRotation(rotations, VRMHumanBoneName.Head, targetBindRotations, 0.024 * attentive, 0.007 * slowWave, 0);
+    } else {
+      // Thought reads through a restrained downward/sideward focus and an
+      // occasional torso settle, not a full-body fidget.
+      const thought = 0.5 - 0.5 * Math.cos(phase);
+      addLocalRotation(rotations, VRMHumanBoneName.Hips, targetBindRotations, thought * 0.008, 0, -thought * 0.012);
+      addLocalRotation(rotations, VRMHumanBoneName.Spine, targetBindRotations, thought * 0.017, wave * 0.012, -thought * 0.018);
+      addLocalRotation(rotations, VRMHumanBoneName.Chest, targetBindRotations, thought * 0.024, wave * 0.019, -thought * 0.028);
+      addLocalRotation(rotations, VRMHumanBoneName.UpperChest, targetBindRotations, thought * 0.016, wave * 0.016, -thought * 0.017);
+      addLocalRotation(rotations, VRMHumanBoneName.Neck, targetBindRotations, thought * 0.024, wave * 0.045, 0);
+      addLocalRotation(rotations, VRMHumanBoneName.Head, targetBindRotations, thought * 0.039, wave * 0.067, slowWave * 0.01);
     }
   }
 

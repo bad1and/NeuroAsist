@@ -1,6 +1,7 @@
 import type { Emotion } from "../generated/character-protocol";
 
 export type IdleCategory = "micro" | "normal" | "long";
+export type AvatarPresence = "idle" | "listening" | "thinking" | "speaking";
 
 export type IdleCandidate = {
   id: string;
@@ -9,6 +10,8 @@ export type IdleCandidate = {
   cooldownSeconds: number;
   /** Relative chance amongst eligible idles. Defaults to one for legacy callers. */
   selectionWeight?: number;
+  /** Similar phrases are deliberately separated even when their ids differ. */
+  family?: string;
 };
 
 export type IdleSchedulerProfile = {
@@ -20,6 +23,30 @@ export type IdleSchedulerProfile = {
 export type IdleSchedulerContext = {
   speaking: boolean;
   gesturePlaying: boolean;
+  presence?: AvatarPresence;
+};
+
+export type IdlePhrasePlan = {
+  durationSeconds: number;
+  recoverySeconds: number;
+  amplitude: number;
+  playbackRate: number;
+  variation: number;
+};
+
+export type OrganicMotionSample = {
+  hipsX: number;
+  chestPitch: number;
+  chestYaw: number;
+  headPitch: number;
+  headYaw: number;
+  headRoll: number;
+};
+
+export type SpeechAccentCandidate = {
+  id: string;
+  cooldownSeconds: number;
+  selectionWeight?: number;
 };
 
 export type EmotionProfile = {
@@ -157,8 +184,11 @@ export class IdleMotionScheduler {
     alternativeProbability: 1,
   };
   private readonly lastPlayedAt = new Map<string, number>();
+  private readonly recentIds: string[] = [];
+  private readonly recentFamilies: string[] = [];
   private nextDueAt = 0;
   private previousId: string | null = null;
+  private previousCategory: IdleCategory | null = null;
   private generation = 0;
 
   constructor(private readonly random: () => number = Math.random) {}
@@ -174,7 +204,15 @@ export class IdleMotionScheduler {
     this.generation += 1;
   }
 
-  start(nowSeconds: number): void {
+  start(nowSeconds: number, initialId?: string): void {
+    if (initialId) {
+      // The base loop is already visible when scheduling begins. Remember it
+      // so the first deliberate idle is guaranteed to be a different pose.
+      this.previousId = initialId;
+      this.lastPlayedAt.set(initialId, nowSeconds);
+      this.recentIds.unshift(initialId);
+      this.recentIds.splice(4);
+    }
     this.nextDueAt = nowSeconds + this.randomInterval();
   }
 
@@ -194,10 +232,185 @@ export class IdleMotionScheduler {
   ): IdleCandidate | null {
     if (nowSeconds < this.nextDueAt) return null;
     this.nextDueAt = nowSeconds + this.randomInterval();
-    if (context.gesturePlaying || this.random() > this.profile.alternativeProbability) return null;
+    if (context.gesturePlaying || context.presence === "listening" || context.presence === "thinking" || this.random() > this.profile.alternativeProbability) return null;
 
     const eligible = candidates.filter((candidate) => {
       if (context.speaking && candidate.category === "long") return false;
+      if (candidate.id === this.previousId && candidates.length > 1) return false;
+      const lastPlayed = this.lastPlayedAt.get(candidate.id);
+      return lastPlayed === undefined || nowSeconds - lastPlayed >= candidate.cooldownSeconds;
+    });
+    if (eligible.length === 0) return null;
+
+    const useDiversityPressure = candidates.length >= 3;
+    const candidateWeight = (candidate: IdleCandidate): number => {
+      let weight = Math.max(0, candidate.selectionWeight ?? 1);
+      if (!useDiversityPressure) return weight;
+      const family = candidate.family ?? candidate.id;
+      if (this.recentIds.includes(candidate.id)) weight *= 0.14;
+      if (this.recentFamilies.includes(family)) weight *= 0.42;
+      if (candidate.category === this.previousCategory) weight *= 0.62;
+      return weight;
+    };
+    const totalWeight = eligible.reduce((total, candidate) => total + candidateWeight(candidate), 0);
+    if (totalWeight <= 0) return null;
+    let cursor = clamp(this.random(), 0, 0.999999) * totalWeight;
+    let selected = eligible[eligible.length - 1];
+    for (const candidate of eligible) {
+      cursor -= candidateWeight(candidate);
+      if (cursor < 0) {
+        selected = candidate;
+        break;
+      }
+    }
+    this.previousId = selected.id;
+    this.previousCategory = selected.category;
+    this.lastPlayedAt.set(selected.id, nowSeconds);
+    this.recentIds.unshift(selected.id);
+    this.recentIds.splice(4);
+    this.recentFamilies.unshift(selected.family ?? selected.id);
+    this.recentFamilies.splice(3);
+    return selected;
+  }
+
+  /**
+   * A phrase is intentionally shorter than the source loop. Iris enters at a
+   * compatible phase, says something through the body, then returns to a
+   * living base pose before a viewer can recognize a repeated cycle.
+   */
+  planPhrase(candidate: IdleCandidate): IdlePhrasePlan {
+    const durationRatio = 0.64 + this.random() * 0.28;
+    return {
+      durationSeconds: Math.max(1.2, candidate.durationSeconds * durationRatio),
+      recoverySeconds: 0.8 + this.random() * 3.2,
+      amplitude: 0.8 + this.random() * 0.36,
+      playbackRate: 0.9 + this.random() * 0.22,
+      variation: this.random() * Math.PI * 2,
+    };
+  }
+
+  deferUntil(nowSeconds: number): void {
+    // `nowSeconds` already includes the phrase recovery. Adding another idle
+    // interval here made the next movement wait twice after every phrase.
+    this.nextDueAt = nowSeconds;
+  }
+
+  private randomInterval(): number {
+    // A squared random value creates many normal pauses and occasional long
+    // rests. Uniform intervals were the main source of the old metronome.
+    const drift = clamp(this.random(), 0, 1) ** 2;
+    return this.profile.intervalMinSeconds
+      + (this.profile.intervalMaxSeconds - this.profile.intervalMinSeconds) * drift;
+  }
+}
+
+const ORGANIC_ZERO: OrganicMotionSample = {
+  hipsX: 0,
+  chestPitch: 0,
+  chestYaw: 0,
+  headPitch: 0,
+  headYaw: 0,
+  headRoll: 0,
+};
+
+function organicRange(presence: AvatarPresence): OrganicMotionSample {
+  switch (presence) {
+    case "listening":
+      return { hipsX: 0.0014, chestPitch: 0.0035, chestYaw: 0.003, headPitch: 0.005, headYaw: 0.007, headRoll: 0.003 };
+    case "thinking":
+      return { hipsX: 0.0025, chestPitch: 0.007, chestYaw: 0.011, headPitch: 0.016, headYaw: 0.034, headRoll: 0.007 };
+    case "speaking":
+      return { hipsX: 0.002, chestPitch: 0.005, chestYaw: 0.007, headPitch: 0.008, headYaw: 0.016, headRoll: 0.004 };
+    default:
+      return { hipsX: 0.0038, chestPitch: 0.0085, chestYaw: 0.014, headPitch: 0.015, headYaw: 0.032, headRoll: 0.008 };
+  }
+}
+
+/**
+ * Smooth, non-periodic postural drift. It does not replace an authored clip;
+ * it prevents its neutral moments from restarting at exactly the same pose.
+ */
+export class OrganicMotionDirector {
+  private value: OrganicMotionSample = { ...ORGANIC_ZERO };
+  private target: OrganicMotionSample = { ...ORGANIC_ZERO };
+  private nextRetargetAt = 0;
+  private presence: AvatarPresence = "idle";
+
+  constructor(private readonly random: () => number = Math.random) {}
+
+  reset(nowSeconds = 0, presence: AvatarPresence = "idle"): void {
+    this.value = { ...ORGANIC_ZERO };
+    this.presence = presence;
+    this.retarget(nowSeconds, presence);
+  }
+
+  update(nowSeconds: number, deltaSeconds: number, presence: AvatarPresence, suppress = false): OrganicMotionSample {
+    if (presence !== this.presence || nowSeconds >= this.nextRetargetAt) {
+      this.presence = presence;
+      this.retarget(nowSeconds, presence);
+    }
+    const response = 1 - Math.exp(-Math.max(0, deltaSeconds) * 2.45);
+    for (const key of Object.keys(ORGANIC_ZERO) as (keyof OrganicMotionSample)[]) {
+      this.value[key] += (this.target[key] - this.value[key]) * response;
+    }
+    if (!suppress) return { ...this.value };
+    return {
+      hipsX: this.value.hipsX * 0.3,
+      chestPitch: this.value.chestPitch * 0.3,
+      chestYaw: this.value.chestYaw * 0.3,
+      headPitch: this.value.headPitch * 0.3,
+      headYaw: this.value.headYaw * 0.3,
+      headRoll: this.value.headRoll * 0.3,
+    };
+  }
+
+  private retarget(nowSeconds: number, presence: AvatarPresence): void {
+    const range = organicRange(presence);
+    const centered = (limit: number) => (this.random() * 2 - 1) * limit;
+    this.target = {
+      hipsX: centered(range.hipsX),
+      chestPitch: centered(range.chestPitch) + (presence === "thinking" ? range.chestPitch * 0.35 : 0),
+      chestYaw: centered(range.chestYaw),
+      headPitch: centered(range.headPitch) + (presence === "thinking" ? range.headPitch * 0.4 : 0),
+      headYaw: centered(range.headYaw),
+      headRoll: centered(range.headRoll),
+    };
+    // Retargets land on uneven holds, so even the quiet in-between moments
+    // have no fixed period. Listening holds longer and keeps its gaze forward.
+    const base = presence === "listening" ? 2.4 : presence === "thinking" ? 1.7 : 0.95;
+    const spread = presence === "listening" ? 4.6 : presence === "idle" ? 3.1 : 3.9;
+    this.nextRetargetAt = nowSeconds + base + (this.random() ** 2) * spread;
+  }
+}
+
+/**
+ * Keeps conversational accents sparse.  Speech has a visible cadence already;
+ * an accent is punctuation, never a replacement for the talking loop.
+ */
+export class SpeechAccentScheduler {
+  private readonly lastPlayedAt = new Map<string, number>();
+  private previousId: string | null = null;
+  private nextDueAt = 0;
+
+  constructor(private readonly random: () => number = Math.random) {}
+
+  start(nowSeconds: number): void {
+    this.nextDueAt = nowSeconds + this.nextInterval();
+  }
+
+  stop(): void {
+    this.nextDueAt = Number.POSITIVE_INFINITY;
+    this.previousId = null;
+  }
+
+  schedule(
+    nowSeconds: number,
+    candidates: readonly SpeechAccentCandidate[],
+    context: { speaking: boolean; explicitGesturePlaying: boolean },
+  ): SpeechAccentCandidate | null {
+    if (!context.speaking || context.explicitGesturePlaying || nowSeconds < this.nextDueAt) return null;
+    this.nextDueAt = nowSeconds + this.nextInterval();
+    const eligible = candidates.filter((candidate) => {
       if (candidate.id === this.previousId && candidates.length > 1) return false;
       const lastPlayed = this.lastPlayedAt.get(candidate.id);
       return lastPlayed === undefined || nowSeconds - lastPlayed >= candidate.cooldownSeconds;
@@ -220,9 +433,10 @@ export class IdleMotionScheduler {
     return selected;
   }
 
-  private randomInterval(): number {
-    return this.profile.intervalMinSeconds
-      + (this.profile.intervalMaxSeconds - this.profile.intervalMinSeconds) * clamp(this.random(), 0, 1);
+  private nextInterval(): number {
+    // Seven to twelve seconds gives an answer room to breathe and avoids a
+    // metronomic "talk with hands" loop during long answers.
+    return 7 + this.random() * 5;
   }
 }
 

@@ -57,6 +57,7 @@ class AvatarService:
         self.on_overlay_bounds_changed = on_overlay_bounds_changed
         self._heartbeat_task: asyncio.Task[None] | None = None
         self._playback_finished_handler: PlaybackFinishedHandler | None = None
+        self._presence_by_session: dict[str, str] = {}
 
     def bind_playback_finished_handler(
         self,
@@ -119,6 +120,14 @@ class AvatarService:
             "avatar.stop", session_id, StopPayload(utterance_id=utterance_id).model_dump(mode="json"),
             utterance_id=utterance_id,
         )
+
+    async def set_presence(self, *, session_id: str, state: str) -> BroadcastResult:
+        """Dispatch a renderer-presence state without touching emotion state."""
+        normalized = StatePayload(state=state).state
+        if self._presence_by_session.get(session_id) == normalized:
+            return BroadcastResult(attempted=0, sent=0, failed=0)
+        self._presence_by_session[session_id] = normalized
+        return await self.set_state(session_id=session_id, state=normalized)
 
     async def stream_start(
         self, *, session_id: str, utterance_id: str, intent: str, interrupt: bool = True
@@ -255,20 +264,25 @@ class AvatarService:
         elif envelope.type == "avatar.ack":
             self.event_bus.publish("avatar.command_sent", "info", "Avatar command acknowledged", {"client_id": client_id, "message_id": payload.reply_to, "accepted": payload.accepted})
         elif envelope.type == "avatar.playback.started":
-            await self.manager.update(client_id, current_utterance_id=payload.utterance_id, state="Speaking")
+            await self.manager.update(client_id, current_utterance_id=payload.utterance_id, state="speaking")
             self.event_bus.publish("avatar.speaking_started", "info", "Avatar playback started", {"client_id": client_id, "utterance_id": payload.utterance_id, "client_latency_ms": payload.client_latency_ms})
         elif envelope.type == "avatar.playback.finished":
-            await self.manager.update(client_id, current_utterance_id=None, state="Idle")
+            await self.manager.update(client_id, current_utterance_id=None, state="idle")
             self.emotion_engine.stop(payload.utterance_id)
             self.event_bus.publish("avatar.speaking_finished", "info", "Avatar playback finished", {"client_id": client_id, "utterance_id": payload.utterance_id})
             if self._playback_finished_handler is not None:
                 await self._playback_finished_handler(payload.utterance_id)
         elif envelope.type == "avatar.playback.failed":
-            await self.manager.update(client_id, current_utterance_id=None, state="Error")
+            await self.manager.update(client_id, current_utterance_id=None, state="idle")
             self.emotion_engine.stop(payload.utterance_id)
             self.event_bus.publish("avatar.playback_failed", "warning", "Avatar playback failed", {"client_id": client_id, "utterance_id": payload.utterance_id, "reason": payload.reason})
         elif envelope.type == "avatar.state.changed":
             await self.manager.update(client_id, state=payload.state)
+            # The renderer can move into a presence state on an audio boundary
+            # before the next backend event. Keep the outbound deduplicator in
+            # step with that acknowledgement so it does not echo the exact
+            # same state back to every connected avatar.
+            self._presence_by_session[envelope.session_id] = payload.state
             self.event_bus.publish("avatar.state_changed", "info", "Avatar state changed", {"client_id": client_id, "state": payload.state})
         elif envelope.type == "avatar.gesture.started":
             await self.manager.update(client_id, current_gesture=payload.gesture)
