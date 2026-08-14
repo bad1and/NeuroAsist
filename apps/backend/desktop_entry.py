@@ -20,9 +20,10 @@ def create_desktop_app() -> FastAPI:
     # ``apps.backend.main`` constructs its compatibility ASGI app at import time,
     # which also caches Settings. Import it only after safe-mode environment
     # overrides have been applied by ``main``.
-    from apps.backend.main import create_app
-
-    app = create_app()
+    # Reuse that already-constructed instance. Calling create_app() here built
+    # a second complete service graph (and duplicated startup work) for every
+    # desktop launch.
+    from apps.backend.main import app
 
     @app.post("/internal/shutdown", include_in_schema=False)
     async def request_graceful_shutdown() -> dict[str, str]:

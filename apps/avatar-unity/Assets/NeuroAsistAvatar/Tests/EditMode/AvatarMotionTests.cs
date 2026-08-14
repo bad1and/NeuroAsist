@@ -26,6 +26,14 @@ namespace NeuroAsist.Avatar.Tests
             var longIdle = new AlternativeIdleDefinition { Id = "long", AnimatorState = "long", Category = IdleCategory.Long };
             Assert.That(AvatarIdleScheduler.Select(new List<AlternativeIdleDefinition> { longIdle }, null, 0f, new Dictionary<string, float>(), new FixedRandom(), true, false), Is.Null);
         }
+        [Test] public void PortraitMicroIdlesRotateWithoutRepetition()
+        {
+            var first = new AlternativeIdleDefinition { Id = "wander", AnimatorState = "IdleNeutral", LookPattern = IdleLookPattern.Wander, CooldownSeconds = 20f };
+            var second = new AlternativeIdleDefinition { Id = "glance", AnimatorState = "IdleNeutral", LookPattern = IdleLookPattern.SideGlance, CooldownSeconds = 20f };
+            var picked = AvatarIdleScheduler.Select(new List<AlternativeIdleDefinition> { first, second }, "wander", 10f, new Dictionary<string, float> { ["wander"] = 0f }, new FixedRandom(), false, false);
+            Assert.That(picked, Is.SameAs(second));
+            Assert.That(picked.LookPattern, Is.EqualTo(IdleLookPattern.SideGlance));
+        }
         [Test] public void GestureSelectionHonorsCooldownAndEmotion()
         {
             var gesture = ScriptableObject.CreateInstance<GestureDefinition>();
@@ -43,6 +51,24 @@ namespace NeuroAsist.Avatar.Tests
         {
             var profile = ScriptableObject.CreateInstance<MotionProfile>(); profile.IdleIntervalMinSeconds = 8f; profile.IdleIntervalMaxSeconds = 2f; profile.ValidateValues();
             Assert.That(profile.IdleIntervalMaxSeconds, Is.EqualTo(8f)); Object.DestroyImmediate(profile);
+        }
+        [Test] public void AutomaticSpeechAccentRespectsLengthAndTurnBudget()
+        {
+            var history = new List<float> { 0f };
+            Assert.That(AvatarMotionController.CanScheduleAutomaticAccent(1.6f, GestureTag.Auto, 10f, history), Is.False);
+            Assert.That(AvatarMotionController.CanScheduleAutomaticAccent(3f, GestureTag.Auto, 5f, history), Is.False);
+            Assert.That(AvatarMotionController.CanScheduleAutomaticAccent(1.8f, GestureTag.Auto, 7f, history), Is.True);
+            Assert.That(AvatarMotionController.CanScheduleAutomaticAccent(3f, GestureTag.Question, 2f, new List<float>()), Is.True);
+            Assert.That(AvatarMotionController.CanScheduleAutomaticAccent(3f, GestureTag.Auto, 40f, new List<float> { 1f, 9f }), Is.True);
+            Assert.That(AvatarMotionController.CanScheduleAutomaticAccent(3f, GestureTag.Auto, 25f, new List<float> { 1f, 10f, 20f }), Is.False);
+        }
+        [Test] public void GestureVariantAvoidsRecentStateWhenAlternativeExists()
+        {
+            var gesture = ScriptableObject.CreateInstance<GestureDefinition>();
+            gesture.AnimatorState = "Talk"; gesture.VariantAnimatorStates.Add("TalkMirror");
+            var selected = gesture.SelectAnimatorState(new FixedRandom(), new[] { "Talk" });
+            Assert.That(selected, Is.EqualTo("TalkMirror"));
+            Object.DestroyImmediate(gesture);
         }
     }
 }

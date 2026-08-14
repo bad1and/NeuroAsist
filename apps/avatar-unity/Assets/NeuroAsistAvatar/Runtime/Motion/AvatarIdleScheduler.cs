@@ -7,6 +7,12 @@ namespace NeuroAsist.Avatar
 {
     public sealed class AvatarIdleScheduler : MonoBehaviour
     {
+        private static readonly AlternativeIdleDefinition[] SafePortraitIdles =
+        {
+            new AlternativeIdleDefinition { Id = "IdleLookWander", AnimatorState = AvatarMotionNames.DefaultIdleState, LookPattern = IdleLookPattern.Wander, Category = IdleCategory.Micro, DurationSeconds = 4.5f, CooldownSeconds = 18f },
+            new AlternativeIdleDefinition { Id = "IdleSideGlance", AnimatorState = AvatarMotionNames.DefaultIdleState, LookPattern = IdleLookPattern.SideGlance, Category = IdleCategory.Micro, DurationSeconds = 3.5f, CooldownSeconds = 16f },
+            new AlternativeIdleDefinition { Id = "IdleThoughtfulLook", AnimatorState = AvatarMotionNames.DefaultIdleState, LookPattern = IdleLookPattern.Thoughtful, Category = IdleCategory.Micro, DurationSeconds = 4f, CooldownSeconds = 24f },
+        };
         [SerializeField] private AvatarMotionSettings settings;
         private readonly Dictionary<string, float> lastPlayed = new Dictionary<string, float>();
         private IMotionRandom random = new UnityMotionRandom();
@@ -45,7 +51,7 @@ namespace NeuroAsist.Avatar
                 yield return new WaitForSeconds(random.Range(current.IdleIntervalMinSeconds, current.IdleIntervalMaxSeconds));
                 if (token != generation || IsBlocked != null && IsBlocked()) continue;
                 if (random.Range(0f, 1f) > current.AlternativeIdleProbability) continue;
-                var next = Select(current.AlternativeIdles, previousId, Time.unscaledTime, lastPlayed, random, IsSpeaking != null && IsSpeaking(), current.AllowLongIdleWhileSpeaking);
+                var next = Select(ResolveIdles(current), previousId, Time.unscaledTime, lastPlayed, random, IsSpeaking != null && IsSpeaking(), current.AllowLongIdleWhileSpeaking);
                 if (next == null) continue;
                 previousId = next.Id;
                 lastPlayed[next.Id] = Time.unscaledTime;
@@ -69,6 +75,16 @@ namespace NeuroAsist.Avatar
                 eligible.Add(item);
             }
             return eligible.Count == 0 ? null : eligible[random.Range(0, eligible.Count)];
+        }
+        private static IList<AlternativeIdleDefinition> ResolveIdles(MotionProfile current)
+        {
+            var valid = 0;
+            if (current != null && current.AlternativeIdles != null)
+                foreach (var item in current.AlternativeIdles)
+                    if (item != null && !string.IsNullOrWhiteSpace(item.AnimatorState)) valid++;
+            // Existing checked-in profiles have one real idle and two empty slots. Keep
+            // old scenes safe immediately; the editor setup persists this same layout.
+            return valid >= 3 ? current.AlternativeIdles : SafePortraitIdles;
         }
     }
 }

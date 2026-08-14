@@ -10,7 +10,11 @@ namespace NeuroAsist.Avatar
         public string Id = "TalkGesture01";
         public GestureTag Tag = GestureTag.Talk;
         public string AnimatorState = "TalkGesture01";
+        [Tooltip("Optional safe alternatives of the same upper-body clip (for example a mirrored state).")]
+        public List<string> VariantAnimatorStates = new List<string>();
+        [Min(.05f)] public float BlendInSeconds = .55f;
         [Min(.05f)] public float DurationSeconds = 1.5f;
+        [Min(.05f)] public float BlendOutSeconds = .65f;
         [Range(0f, 2f)] public float Weight = 1f;
         [Range(.1f, 2f)] public float Speed = 1f;
         [Min(0f)] public float CooldownSeconds = 4f;
@@ -26,6 +30,21 @@ namespace NeuroAsist.Avatar
             return (!speaking || CanRunWhileSpeaking)
                 && !DeniedEmotions.Contains(emotion)
                 && (AllowedEmotions.Count == 0 || AllowedEmotions.Contains(emotion));
+        }
+
+        public string SelectAnimatorState(IMotionRandom random, ICollection<string> excluded = null)
+        {
+            var choices = new List<string>();
+            if (!string.IsNullOrWhiteSpace(AnimatorState)) choices.Add(AnimatorState);
+            foreach (var state in VariantAnimatorStates)
+                if (!string.IsNullOrWhiteSpace(state) && !choices.Contains(state)) choices.Add(state);
+            if (choices.Count == 0) return null;
+            if (excluded != null && choices.Count > 1)
+            {
+                var fresh = choices.FindAll(value => !excluded.Contains(value));
+                if (fresh.Count > 0) choices = fresh;
+            }
+            return choices[random.Range(0, choices.Count)];
         }
     }
 }

@@ -26,6 +26,7 @@ from apps.backend.app.voice.delivery import (
     LiveVoiceDirectiveParser,
     MAX_SPEECH_TEMPO,
     MIN_SPEECH_TEMPO,
+    SpeechEmphasis,
     SpeechPace,
     SpeechSegment,
     VoiceDirective,
@@ -33,6 +34,7 @@ from apps.backend.app.voice.delivery import (
     make_speech_segment,
 )
 from apps.backend.app.voice.style import VoiceStyle, coerce_voice_style, resolve_voice_style
+from apps.backend.app.avatar.schemas import StreamMotionCuePayload
 
 logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
@@ -339,6 +341,7 @@ class VoiceSessionManager:
                 pause_before_ms=segment.pause_before_ms,
                 pause_after_ms=paragraph_pause,
                 sequence=segment.sequence,
+                motion_gesture=segment.motion_gesture,
             )
             if speech_sequence == 0:
                 self._publish_latency(
@@ -492,7 +495,10 @@ class VoiceSessionManager:
                 with contextlib.suppress(Exception):
                     await avatar_start_task
             worker.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            # The original failure may have come from the worker itself.  Do
+            # not let awaiting that already-failed task replace the controlled
+            # voice.error below, otherwise the client stays in "typing".
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await worker
             tts_failed = worker.done() and not worker.cancelled() and worker.exception() is not None
             code = "provider_unavailable" if context.text_completed or tts_failed else "llm_error"
@@ -663,6 +669,10 @@ class VoiceSessionManager:
                 duration_seconds=duration,
                 sample_rate=getattr(self._tts_provider, "sample_rate", 24000),
                 is_final=False,
+                motion=StreamMotionCuePayload(
+                    gesture=part_text.motion_gesture,
+                    emphasized=part_text.emphasis is SpeechEmphasis.LIGHT,
+                ),
             )
             if not self._is_active(context):
                 await self._avatar_service.stop(
@@ -899,6 +909,7 @@ class VoiceSessionManager:
             pause_before_ms=0 if final else parent.pause_before_ms,
             pause_after_ms=parent.pause_after_ms if final else 60,
             sequence=parent.sequence,
+            motion_gesture=parent.motion_gesture,
         )
 
     def _preferred_split_offset(self, text: str, *, target_words: int, max_words: int) -> int:
@@ -1056,6 +1067,8 @@ class VoiceSessionManager:
                 pause_before_ms=segment.pause_before_ms if is_first else 0,
                 pause_after_ms=segment.pause_after_ms if is_last else 60,
                 sequence=segment.sequence + index,
+                # A retry-safe subchunk must not replay the same semantic accent.
+                motion_gesture=segment.motion_gesture if is_first else "auto",
             )
             await self._enqueue(queue, worker, job)
         if len(jobs) > 1:

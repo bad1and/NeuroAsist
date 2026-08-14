@@ -16,6 +16,15 @@ namespace NeuroAsist.Avatar
         private GestureTag pendingStreamGesture = GestureTag.Auto;
         private float pendingStreamGestureIntensity = 1f;
         private string currentStreamEmotion = "neutral";
+        private void OnEnable()
+        {
+            if (player != null) player.StreamClipStarted += OnStreamClipStarted;
+        }
+        private void OnDisable()
+        {
+            if (player != null) player.StreamClipStarted -= OnStreamClipStarted;
+        }
+        private void OnStreamClipStarted(int sequence) => motion?.OnSpeechSegmentStarted(sequence);
         public void SetAudioMuted(bool muted) { player?.SetMuted(muted); }
         public void Speak(AvatarCommand command, AvatarCommandPayload payload)
         {
@@ -41,7 +50,7 @@ namespace NeuroAsist.Avatar
         {
             generation++; currentUtterance = payload.utterance_id; nextStreamSequence = 0; pendingStreamGesture = GestureTag.Auto; pendingStreamGestureIntensity = 1f; currentStreamEmotion = payload.emotion ?? "thinking";
             emotion.SetEmotion(payload.emotion ?? "thinking", 1f); motion?.SetEmotion(payload.emotion ?? "thinking");
-            motion?.StopGesture(false); state.SetState(AvatarState.Thinking);
+            motion?.StopGesture(false); motion?.BeginSpeechMotion(); state.SetState(AvatarState.Thinking);
             var localGeneration = generation;
             player.BeginStream(localGeneration,
                 () => { if (localGeneration != generation) return; if (AvatarEmotionController.IsTransient(currentStreamEmotion)) emotion.SetEmotion("neutral", 1f); state.SetState(AvatarState.Speaking); motion?.TriggerGesture(pendingStreamGesture, pendingStreamGestureIntensity, true); client.SendPlayback("avatar.playback.started", currentUtterance, command.message_id, null, AvatarProtocol.ClientLatencyMs(command)); },
@@ -64,7 +73,8 @@ namespace NeuroAsist.Avatar
         {
             if (payload.utterance_id != currentUtterance || payload.sequence != nextStreamSequence) throw new System.InvalidOperationException("Unexpected stream segment order");
             fallback.SetActive(fallback.ShouldBeActive());
-            player.EnqueueWav(audio, generation); nextStreamSequence++;
+            motion?.QueueSpeechCue(payload.sequence, payload.duration_seconds, payload.motion);
+            player.EnqueueWav(audio, generation, payload.sequence); nextStreamSequence++;
             if (payload.is_final) player.EndStream(generation);
         }
 

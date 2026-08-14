@@ -9,7 +9,7 @@ namespace NeuroAsist.Avatar
     {
         [SerializeField] private AvatarRuntimeSettings settings;
         [SerializeField] private Vrm10Instance vrm;
-        private ExpressionKey active = ExpressionKey.Neutral;
+        private readonly Dictionary<ExpressionKey, float> applied = new Dictionary<ExpressionKey, float>(ExpressionKey.Comparer);
         private Coroutine blend;
         private HashSet<ExpressionKey> supported;
         private void Awake() { if (vrm == null) vrm = GetComponentInChildren<Vrm10Instance>(); }
@@ -21,12 +21,28 @@ namespace NeuroAsist.Avatar
         }
         private IEnumerator Blend(ExpressionKey next, float intensity)
         {
-            var seconds = settings != null ? settings.EmotionBlendInSeconds : .15f;
-            for (var t = 0f; t < 1f; t += Time.deltaTime / Mathf.Max(.01f, seconds)) { Apply(active, 1f - t); Apply(next, intensity * t); yield return null; }
-            Apply(active, 0f); Apply(next, intensity); active = next;
+            // Use the longer side of the blend when replacing one expression with
+            // another.  This prevents a sharp "pop" through neutral on interruptions.
+            var blendIn = settings != null ? settings.EmotionBlendInSeconds : .45f;
+            var blendOut = settings != null ? settings.EmotionBlendOutSeconds : .6f;
+            var seconds = ExpressionKey.Comparer.Equals(next, ExpressionKey.Neutral)
+                ? blendOut
+                : Mathf.Max(blendIn, blendOut);
+            var start = new Dictionary<ExpressionKey, float>(applied, ExpressionKey.Comparer);
+            if (!start.ContainsKey(next)) start[next] = 0f;
+            for (var t = 0f; t < 1f; t += Time.deltaTime / Mathf.Max(.01f, seconds))
+            {
+                var eased = t * t * (3f - 2f * t);
+                foreach (var item in start) Apply(item.Key, ExpressionKey.Comparer.Equals(item.Key, next) ? Mathf.Lerp(item.Value, intensity, eased) : item.Value * (1f - eased));
+                yield return null;
+            }
+            foreach (var item in start) if (!ExpressionKey.Comparer.Equals(item.Key, next)) Apply(item.Key, 0f);
+            Apply(next, intensity);
+            blend = null;
         }
         private void Apply(ExpressionKey key, float weight)
         {
+            applied[key] = weight;
             if (vrm == null || vrm.Runtime == null) return;
             vrm.Runtime.Expression.SetWeight(key, weight);
         }

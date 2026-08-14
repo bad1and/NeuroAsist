@@ -330,6 +330,7 @@ GameObject:
   - component: {fileID: 975465927}
   - component: {fileID: 975465928}
   - component: {fileID: 975465929}
+  - component: {fileID: 975465930}
   m_Layer: 0
   m_Name: NeuroAsistAvatarRuntime
   m_TagString: Untagged
@@ -450,7 +451,7 @@ MonoBehaviour:
   idleScheduler: {fileID: 975465926}
   gestureController: {fileID: 975465925}
   lookController: {fileID: 975465924}
-  transitionSeconds: 0.45
+  transitionSeconds: 0.7
   rootDriftWarningDistance: 0.02
 --- !u!114 &975465924
 MonoBehaviour:
@@ -471,6 +472,7 @@ MonoBehaviour:
   maxYaw: 35
   maxPitch: 20
   turnSpeed: 5
+  targetMoveSeconds: 0.75
 --- !u!114 &975465925
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -547,6 +549,23 @@ MonoBehaviour:
   framingPadding: 1.12
   portraitHeightFraction: 0.48
   portraitCenterFromTop: 0.52
+--- !u!114 &975465930
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 975465916}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 12c0f52dbd4a4edc978bc917cf8a4bf1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  animator: {fileID: 1949565772}
+  vrm: {fileID: 1949565771}
+  motion: {fileID: 975465923}
+  state: {fileID: 975465921}
+  intensity: 1
 --- !u!1 &1594657433
 GameObject:
   m_ObjectHideFlags: 0

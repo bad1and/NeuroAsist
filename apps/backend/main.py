@@ -6,6 +6,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+import contextlib
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -81,10 +82,11 @@ IDLE_WORKER_POLL_MAX_SECONDS = 5.0
 def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings)
-    torch_threading = configure_torch_threads(
-        settings.voice_torch_cpu_threads,
-        settings.voice_torch_interop_threads,
-    )
+    # Torch and local voice models are intentionally not touched while the
+    # ASGI application graph is being built.  The first paint only needs the
+    # text stack; voice preparation starts after migrations make that stack
+    # usable.
+    torch_threading: dict[str, int] | None = None
 
     if not settings.llm_api_key:
         logger.warning("DeepSeek API key is not configured")
@@ -378,9 +380,12 @@ def create_app() -> FastAPI:
         )
         return {"batch": batch_cancelled}
 
+    # Start with a zero-dependency fallback.  Silero and Smart Turn are
+    # replaced atomically by background startup tasks once their optional
+    # runtimes/models are available.
     vad_model_path = settings.voice_silero_vad_model or model_manager.path_for("silero-vad")
-    vad_provider = SileroVadProvider(vad_model_path) if settings.voice_vad_provider == "silero" else VadProvider()
-    turn_detector = SmartTurnDetector(model_manager.path_for("smart-turn-v3.2"))
+    vad_provider = VadProvider()
+    turn_detector = SmartTurnDetector(None)
     if conversation_service is not None:
         conversation_service.bind_turn_detector(turn_detector)
 
@@ -583,13 +588,17 @@ def create_app() -> FastAPI:
         event_publisher=event_bus.publish,
     )
     initial_vad_status = voice_input_session_manager.vad_status
+    initial_vad_is_fallback = settings.voice_vad_provider == "silero"
     event_bus.publish(
-        "voice.vad_ready" if initial_vad_status["ready"] else "voice.vad_fallback",
-        "info" if initial_vad_status["ready"] else "warning",
-        "Silero VAD is ready" if initial_vad_status["ready"] else "Energy VAD fallback is active",
+        "voice.vad_fallback" if initial_vad_is_fallback else "voice.vad_ready",
+        "warning" if initial_vad_is_fallback else "info",
+        "Energy VAD fallback is active" if initial_vad_is_fallback else "Energy VAD is ready",
         initial_vad_status,
     )
     tts_audio_cleanup_task: asyncio.Task[None] | None = None
+    storage_maintenance_task: asyncio.Task[None] | None = None
+    voice_preload_task: asyncio.Task[None] | None = None
+    avatar_start_task: asyncio.Task[None] | None = None
     reflection_worker_task: asyncio.Task[None] | None = None
     summary_worker_task: asyncio.Task[None] | None = None
     semantic_sync_worker_task: asyncio.Task[None] | None = None
@@ -653,6 +662,10 @@ def create_app() -> FastAPI:
     async def run_coding_forever() -> None:
         await poll_worker_forever(coding_agent_service.run_once)
 
+    def run_storage_migrations() -> None:
+        """Apply schema migrations required before text chat is exposed."""
+        history.init_db()
+
     def run_storage_repair() -> list[tuple[str, str, str, dict[str, Any]]]:
         """Synchronous startup repair chain, meant to run in a worker thread.
 
@@ -660,7 +673,6 @@ def create_app() -> FastAPI:
         every event reaches subscribers from the event loop thread.
         """
         events: list[tuple[str, str, str, dict[str, Any]]] = []
-        history.init_db()
         if timeline_store is not None:
             timeline_store.recover_active_episode()
             timeline_store.recover_memory_index_jobs()
@@ -743,24 +755,227 @@ def create_app() -> FastAPI:
         ))
         return events
 
-    async def startup() -> None:
-        nonlocal tts_audio_cleanup_task, summary_worker_task, semantic_sync_worker_task, memory_extraction_worker_task, reflection_worker_task, coding_worker_task
-        removed = await asyncio.to_thread(voice_service.clear_tts_audio)
-        clear_stale_uploads = getattr(voice_service, "clear_stale_uploads", None)
-        stale_uploads = (
-            await asyncio.to_thread(clear_stale_uploads)
-            if clear_stale_uploads is not None
-            else 0
+    readiness: dict[str, Any] = {
+        "phase": "starting",
+        "text_chat": "loading",
+        "stt": "loading" if settings.voice_preload_stt_model else "disabled",
+        "tts": (
+            "loading"
+            if settings.voice_preload_tts_model and settings.voice_tts_enabled
+            else "disabled"
+        ),
+        "vad": "fallback" if settings.voice_vad_provider == "silero" else "ready",
+        "live_ready": False,
+        "errors": [],
+    }
+
+    def update_readiness(
+        component: str,
+        status: str,
+        error: str | None = None,
+    ) -> None:
+        readiness[component] = status
+        if error:
+            errors = readiness["errors"]
+            if error not in errors:
+                errors.append(error)
+        readiness["live_ready"] = (
+            readiness["text_chat"] == "ready"
+            and readiness["stt"] == "ready"
+            and readiness["tts"] == "ready"
+            and readiness["vad"] in {"ready", "fallback"}
         )
-        if removed:
-            logger.info("Generated WAV startup cleanup complete: removed=%s", removed)
-        if stale_uploads:
-            event_bus.publish(
-                "voice.stale_uploads_removed",
-                "info",
-                "Abandoned temporary voice uploads removed",
-                {"count": stale_uploads},
+        if readiness["text_chat"] == "failed":
+            readiness["phase"] = "degraded"
+        elif any(readiness[name] == "failed" for name in ("stt", "tts", "vad")):
+            readiness["phase"] = "degraded"
+        elif readiness["text_chat"] != "ready":
+            readiness["phase"] = "starting"
+        elif readiness["live_ready"]:
+            readiness["phase"] = "ready"
+        else:
+            readiness["phase"] = "text_ready"
+
+    async def run_storage_maintenance() -> None:
+        """Defer repair, reindex, and cleanup until after text UI is usable."""
+        try:
+            removed = await asyncio.to_thread(voice_service.clear_tts_audio)
+            clear_stale_uploads = getattr(voice_service, "clear_stale_uploads", None)
+            stale_uploads = (
+                await asyncio.to_thread(clear_stale_uploads)
+                if clear_stale_uploads is not None
+                else 0
             )
+            if removed:
+                logger.info("Generated WAV startup cleanup complete: removed=%s", removed)
+            if stale_uploads:
+                event_bus.publish(
+                    "voice.stale_uploads_removed",
+                    "info",
+                    "Abandoned temporary voice uploads removed",
+                    {"count": stale_uploads},
+                )
+            for event_type, level, message, metadata in await asyncio.to_thread(
+                run_storage_repair
+            ):
+                event_bus.publish(event_type, level, message, metadata)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("Deferred storage maintenance failed", exc_info=True)
+            event_bus.publish(
+                "backend.status",
+                "warning",
+                "Deferred storage maintenance failed; text chat remains available",
+                {},
+            )
+
+    async def preload_stt() -> None:
+        if not settings.voice_preload_stt_model:
+            return
+        try:
+            await voice_service.preload_stt()
+            update_readiness("stt", "ready")
+            event_bus.publish(
+                "voice.stt_preloaded",
+                "info",
+                "Voice STT model preloaded",
+                {
+                    "provider": settings.voice_stt_provider,
+                    "model": settings.voice_stt_model,
+                    "device": settings.voice_stt_device,
+                    "threading": torch_threading or {},
+                    **dict(getattr(voice_service.stt_provider, "metadata", {})),
+                },
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Voice STT preload failed", exc_info=True)
+            update_readiness("stt", "failed", f"stt: {type(exc).__name__}: {exc}")
+            event_bus.publish(
+                "voice.stt_preload_failed",
+                "warning",
+                "Voice STT preload failed; first request will retry lazy load",
+                {"provider": settings.voice_stt_provider, "model": settings.voice_stt_model},
+            )
+
+    async def preload_tts() -> None:
+        if not settings.voice_preload_tts_model or not settings.voice_tts_enabled:
+            return
+        tts_metadata = dict(getattr(voice_service.tts_provider, "metadata", {}))
+        tts_metadata.setdefault("provider", voice_service.tts_provider.name)
+        event_bus.publish(
+            "voice.tts_preloading_started",
+            "info",
+            "Voice TTS model preloading started",
+            tts_metadata,
+        )
+        preload_started = time.perf_counter()
+        try:
+            await voice_service.preload_tts()
+            duration_ms = int((time.perf_counter() - preload_started) * 1000)
+            update_readiness("tts", "ready")
+            event_bus.publish(
+                "voice.tts_preloaded",
+                "info",
+                "Voice TTS model preloaded",
+                {**tts_metadata, "duration_ms": duration_ms},
+            )
+            if getattr(voice_service.tts_provider, "warmup_enabled", False):
+                event_bus.publish(
+                    "voice.tts_warmed_up",
+                    "info",
+                    "Voice TTS model warmed up",
+                    {**tts_metadata, "duration_ms": duration_ms},
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Voice TTS preload failed", exc_info=True)
+            update_readiness("tts", "failed", f"tts: {type(exc).__name__}: {exc}")
+            event_bus.publish(
+                "voice.tts_preload_failed",
+                "warning",
+                "Voice TTS preload failed; browser speech fallback remains available",
+                tts_metadata,
+            )
+
+    async def preload_vad() -> None:
+        if settings.voice_vad_provider != "silero":
+            update_readiness("vad", "ready")
+            return
+        try:
+            provider = await asyncio.to_thread(SileroVadProvider, vad_model_path)
+            if provider.ready:
+                voice_input_session_manager.set_vad_provider(provider)
+                update_readiness("vad", "ready")
+                event_bus.publish("voice.vad_ready", "info", "Silero VAD is ready", voice_input_session_manager.vad_status)
+            else:
+                reason = provider.error or "Silero VAD is unavailable"
+                update_readiness("vad", "fallback", f"vad: {reason}")
+                event_bus.publish("voice.vad_fallback", "warning", "Energy VAD fallback is active", {"reason": reason})
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Silero VAD preload failed", exc_info=True)
+            update_readiness("vad", "fallback", f"vad: {type(exc).__name__}: {exc}")
+            event_bus.publish("voice.vad_fallback", "warning", "Energy VAD fallback is active", {"reason": str(exc)})
+
+    async def preload_turn_detector() -> None:
+        try:
+            detector = await asyncio.to_thread(
+                SmartTurnDetector,
+                model_manager.path_for("smart-turn-v3.2"),
+            )
+            voice_input_session_manager.set_turn_detector(detector)
+            if conversation_service is not None:
+                conversation_service.bind_turn_detector(detector)
+            if not detector.ready:
+                event_bus.publish(
+                    "voice.smart_turn_fallback",
+                    "warning",
+                    "Smart Turn fallback is active",
+                    {"error": detector.error},
+                )
+                readiness["errors"].append(f"smart_turn: {detector.error}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Smart Turn preload failed", exc_info=True)
+            readiness["errors"].append(f"smart_turn: {type(exc).__name__}: {exc}")
+
+    async def preload_voice_runtime() -> None:
+        nonlocal torch_threading
+        async def configure_torch() -> None:
+            nonlocal torch_threading
+            try:
+                torch_threading = await asyncio.to_thread(
+                    configure_torch_threads,
+                    settings.voice_torch_cpu_threads,
+                    settings.voice_torch_interop_threads,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("Voice Torch threading setup failed", exc_info=True)
+                readiness["errors"].append(f"torch: {type(exc).__name__}: {exc}")
+
+        # Keep all optional preparation off the critical startup path. The
+        # thread policy runs alongside provider preparation; providers also
+        # enforce their own bounded executors, so a slow model cannot starve
+        # the event loop or text API.
+        await asyncio.gather(
+            configure_torch(),
+            preload_stt(),
+            preload_tts(),
+            preload_vad(),
+            preload_turn_detector(),
+        )
+
+    async def startup() -> None:
+        nonlocal tts_audio_cleanup_task, storage_maintenance_task, voice_preload_task, avatar_start_task
+        nonlocal summary_worker_task, semantic_sync_worker_task, memory_extraction_worker_task, reflection_worker_task, coding_worker_task
 
         try:
             if timeline_store is not None and settings.database_path.exists():
@@ -797,13 +1012,7 @@ def create_app() -> FastAPI:
                             "to_version": LATEST_SCHEMA_VERSION,
                         },
                     )
-            # Storage repair is a long chain of synchronous SQLite passes. Run
-            # it in a worker thread and replay its events on the loop, so the
-            # health endpoint stays responsive while the database is repaired.
-            for event_type, level, message, metadata in await asyncio.to_thread(
-                run_storage_repair
-            ):
-                event_bus.publish(event_type, level, message, metadata)
+            await asyncio.to_thread(run_storage_migrations)
         except Exception:
             logger.critical("Storage initialization failed", exc_info=True)
             event_bus.publish(
@@ -814,64 +1023,7 @@ def create_app() -> FastAPI:
             )
             raise
 
-        if settings.voice_preload_stt_model:
-            try:
-                await voice_service.preload_stt()
-                event_bus.publish(
-                    "voice.stt_preloaded",
-                    "info",
-                    "Voice STT model preloaded",
-                    {
-                        "provider": settings.voice_stt_provider,
-                        "model": settings.voice_stt_model,
-                        "device": settings.voice_stt_device,
-                        "threading": torch_threading,
-                        **dict(getattr(voice_service.stt_provider, "metadata", {})),
-                    },
-                )
-            except Exception:
-                logger.warning("Voice STT preload failed", exc_info=True)
-                event_bus.publish(
-                    "voice.stt_preload_failed",
-                    "warning",
-                    "Voice STT preload failed; first request will retry lazy load",
-                    {"provider": settings.voice_stt_provider, "model": settings.voice_stt_model},
-                )
-
-        if settings.voice_preload_tts_model and settings.voice_tts_enabled:
-            tts_metadata = dict(getattr(voice_service.tts_provider, "metadata", {}))
-            tts_metadata.setdefault("provider", voice_service.tts_provider.name)
-            event_bus.publish(
-                "voice.tts_preloading_started",
-                "info",
-                "Voice TTS model preloading started",
-                tts_metadata,
-            )
-            preload_started = time.perf_counter()
-            try:
-                await voice_service.preload_tts()
-                duration_ms = int((time.perf_counter() - preload_started) * 1000)
-                event_bus.publish(
-                    "voice.tts_preloaded",
-                    "info",
-                    "Voice TTS model preloaded",
-                    {**tts_metadata, "duration_ms": duration_ms},
-                )
-                if getattr(voice_service.tts_provider, "warmup_enabled", False):
-                    event_bus.publish(
-                        "voice.tts_warmed_up",
-                        "info",
-                        "Voice TTS model warmed up",
-                        {**tts_metadata, "duration_ms": duration_ms},
-                    )
-            except Exception:
-                logger.warning("Voice TTS preload failed", exc_info=True)
-                event_bus.publish(
-                    "voice.tts_preload_failed",
-                    "warning",
-                    "Voice TTS preload failed; browser speech fallback remains available",
-                    tts_metadata,
-                )
+        update_readiness("text_chat", "ready")
 
         event_bus.publish(
             "backend.status",
@@ -879,17 +1031,41 @@ def create_app() -> FastAPI:
             "Backend startup complete",
             {"version": app.version},
         )
-        logger.info("Backend startup complete")
+        logger.info("Backend text stack ready; voice preparation continues in background")
 
-        await avatar_service.start()
+        storage_maintenance_task = asyncio.create_task(run_storage_maintenance())
+        voice_preload_task = asyncio.create_task(preload_voice_runtime())
+
+        async def start_avatar_after_ui() -> None:
+            try:
+                await avatar_service.start()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning("Avatar service startup failed", exc_info=True)
+
+        avatar_start_task = asyncio.create_task(start_avatar_after_ui())
         tts_audio_cleanup_task = asyncio.create_task(cleanup_tts_audio_forever())
         summary_worker_task = asyncio.create_task(summarize_forever())
         semantic_sync_worker_task = asyncio.create_task(sync_semantic_forever())
         memory_extraction_worker_task = asyncio.create_task(extract_memory_forever())
         reflection_worker_task = asyncio.create_task(reflect_forever())
         coding_worker_task = asyncio.create_task(run_coding_forever())
+        # Let zero-cost preload failures/events be observed by the first
+        # request without waiting for model downloads or Torch import.
+        await asyncio.sleep(0)
 
     async def shutdown() -> None:
+        for task in (storage_maintenance_task, voice_preload_task, avatar_start_task):
+            if task is not None and not task.done():
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=5)
+                except asyncio.TimeoutError:
+                    task.cancel()
+                    with contextlib.suppress(BaseException):
+                        await task
+                except Exception:
+                    logger.warning("Deferred startup task ended with an error", exc_info=True)
         if reflection_worker_task is not None:
             reflection_worker_task.cancel()
             try:
@@ -954,6 +1130,18 @@ def create_app() -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/readiness")
+    def readiness_status() -> dict[str, Any]:
+        return {
+            "phase": readiness["phase"],
+            "text_chat": readiness["text_chat"],
+            "stt": readiness["stt"],
+            "tts": readiness["tts"],
+            "vad": readiness["vad"],
+            "live_ready": readiness["live_ready"],
+            "errors": list(readiness["errors"]),
+        }
 
     app.state.settings = settings
     app.state.history = history

@@ -80,6 +80,15 @@ class StreamMetadataPayload(ProtocolModel):
     gesture_intensity: float = Field(default=1.0, ge=0.0, le=1.0)
 
 
+class StreamMotionCuePayload(ProtocolModel):
+    """Optional per-spoken-segment movement hint for protocol-v2 renderers."""
+
+    gesture: str = "auto"
+    emphasized: bool = False
+
+    _normalize_gesture = field_validator("gesture", mode="before")(normalize_gesture)
+
+
 class StreamSegmentPayload(ProtocolModel):
     utterance_id: str
     sequence: int = Field(ge=0)
@@ -89,6 +98,7 @@ class StreamSegmentPayload(ProtocolModel):
     channels: int = Field(default=1, ge=1, le=2)
     duration_seconds: float = Field(gt=0, le=120)
     is_final: bool = False
+    motion: StreamMotionCuePayload = Field(default_factory=StreamMotionCuePayload)
 
 
 class StreamEndPayload(ProtocolModel):

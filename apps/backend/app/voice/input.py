@@ -441,6 +441,14 @@ class VoiceInputSessionManager:
             "version": getattr(self._vad, "version", None),
         }
 
+    def set_vad_provider(self, provider: VadProvider) -> None:
+        """Switch the provider for new sessions without interrupting active ones."""
+        self._vad = provider
+
+    def set_turn_detector(self, detector) -> None:
+        """Switch semantic turn detection after its optional model is ready."""
+        self._turn_detector = detector
+
     async def register(self, session_id: str, websocket: WebSocket, *, version: int = 3) -> InputConnection:
         previous = self._sessions.get(session_id)
         if previous is not None:
