@@ -52,6 +52,10 @@ class VoiceDirective:
     pace: SpeechPace = SpeechPace.NORMAL
     emphasis: SpeechEmphasis = SpeechEmphasis.NONE
     speed: float | None = None
+    # This is deliberately a small, renderer-neutral semantic hint.  It never
+    # becomes visible text and the avatar service still validates it against
+    # the active emotional profile before it reaches Unity.
+    gesture: str = "auto"
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +67,7 @@ class SpeechSegment:
     pause_after_ms: int = 100
     sequence: int = 0
     pause_before_ms: int = 0
+    motion_gesture: str = "auto"
 
     def with_sequence(self, sequence: int) -> "SpeechSegment":
         return SpeechSegment(
@@ -73,6 +78,7 @@ class SpeechSegment:
             pause_after_ms=self.pause_after_ms,
             sequence=sequence,
             pause_before_ms=self.pause_before_ms,
+            motion_gesture=self.motion_gesture,
         )
 
 
@@ -121,6 +127,7 @@ def make_speech_segment(
         pause_before_ms=35 if emphasis is SpeechEmphasis.LIGHT else 0,
         pause_after_ms=pause_after_ms(text, forced_clause_split=forced_clause_split),
         sequence=sequence,
+        motion_gesture=directive.gesture if directive is not None else "auto",
     )
 
 
@@ -156,15 +163,17 @@ class LiveVoiceDirectiveParser:
     _START = "[[voice"
     _MAX_TAG = 128
     _TAG_RE = re.compile(
-        r"^\[\[voice\s+pace=(?P<pace>[a-z_]+)\s+emphasis=(?P<emphasis>[a-z_]+)\s*\]\]$",
+        r"^\[\[voice\s+pace=(?P<pace>[a-z_]+)\s+emphasis=(?P<emphasis>[a-z_]+)(?:\s+gesture=(?P<gesture>[a-z_]+))?\s*\]\]$",
         re.IGNORECASE,
     )
 
-    def __init__(self, max_directives: int = 3) -> None:
+    def __init__(self, max_directives: int = 3, max_motion_directives: int = 2) -> None:
         self._buffer = ""
         self._discarding_tag = False
         self._max_directives = max(0, max_directives)
+        self._max_motion_directives = max(0, max_motion_directives)
         self._accepted = 0
+        self._accepted_motion = 0
 
     def feed(self, delta: str) -> list[str | VoiceDirective]:
         if not delta:
@@ -225,12 +234,19 @@ class LiveVoiceDirectiveParser:
             if match is None:
                 output.append(VoiceDirective())
                 continue
-            output.append(
-                VoiceDirective(
-                    coerce_speech_pace(match.group("pace").lower()),
-                    coerce_speech_emphasis(match.group("emphasis").lower()),
-                )
-            )
+            gesture = (match.group("gesture") or "auto").lower()
+            # Do not let a chatty model turn every sentence into choreography.
+            # The automatic director remains responsible for all unmarked lines.
+            if gesture != "auto":
+                if self._accepted_motion >= self._max_motion_directives:
+                    gesture = "auto"
+                else:
+                    self._accepted_motion += 1
+            output.append(VoiceDirective(
+                coerce_speech_pace(match.group("pace").lower()),
+                coerce_speech_emphasis(match.group("emphasis").lower()),
+                gesture=gesture,
+            ))
         return [item for item in output if not isinstance(item, str) or item]
 
 

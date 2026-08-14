@@ -16,6 +16,8 @@ namespace NeuroAsist.Avatar
         [Range(0f, 2f)] public float GestureFrequencyMultiplier = 1f;
         [Range(0f, 2f)] public float GestureIntensityMultiplier = 1f;
         [Range(0f, 1f)] public float HeadLookWeight = 1f;
+        [Range(0f, 1f)] public float LifeMotionIntensity = 1f;
+        [Range(0f, 1f)] public float GazeInterest = .6f;
         [Range(0.1f, 20f)] public float HeadTurnSpeed = 5f;
         public bool AllowLongIdleWhileSpeaking;
         public List<AlternativeIdleDefinition> AlternativeIdles = new List<AlternativeIdleDefinition>();

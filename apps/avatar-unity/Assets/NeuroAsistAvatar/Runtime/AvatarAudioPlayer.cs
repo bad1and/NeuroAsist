@@ -12,6 +12,7 @@ namespace NeuroAsist.Avatar
         {
             public AudioClip Clip;
             public int Token;
+            public int Sequence;
         }
 
         [SerializeField] private AvatarRuntimeSettings settings;
@@ -28,6 +29,8 @@ namespace NeuroAsist.Avatar
 
         public AudioSource Source => audioSource;
         public int Generation => generation;
+        public event Action<int> StreamClipStarted;
+        public event Action<int> StreamClipFinished;
         public void Configure(AvatarRuntimeSettings value, AudioSource source) { settings = value; audioSource = source; }
         // The WebView can target a concrete Windows output device. Keep Unity
         // playing silently in that mode so its lip-sync remains driven by the
@@ -45,12 +48,12 @@ namespace NeuroAsist.Avatar
             onStreamStarted = onStarted; onStreamFinished = onFinished; onStreamFailed = onFailed;
         }
 
-        public void EnqueueWav(byte[] wav, int token)
+        public void EnqueueWav(byte[] wav, int token, int sequence = 0)
         {
             if (token != generation) return;
             try
             {
-                queued.Enqueue(new QueuedClip { Clip = WavClipDecoder.Decode(wav, "avatar-stream-" + token), Token = token });
+                queued.Enqueue(new QueuedClip { Clip = WavClipDecoder.Decode(wav, "avatar-stream-" + token), Token = token, Sequence = sequence });
                 StartNextStreamClip();
             }
             catch (Exception ex) { onStreamFailed?.Invoke(ex.Message); Stop(); }
@@ -90,10 +93,12 @@ namespace NeuroAsist.Avatar
             runtimeClip = item.Clip;
             audioSource.clip = runtimeClip; audioSource.volume = settings.AudioVolume; audioSource.Play();
             if (!streamStarted) { streamStarted = true; onStreamStarted?.Invoke(); }
+            StreamClipStarted?.Invoke(item.Sequence);
             while (item.Token == generation && audioSource.isPlaying) yield return null;
             if (runtimeClip == item.Clip) { audioSource.clip = null; Destroy(runtimeClip); runtimeClip = null; }
             playback = null;
             if (item.Token != generation) yield break;
+            StreamClipFinished?.Invoke(item.Sequence);
             if (queued.Count > 0) StartNextStreamClip(); else if (streamEnded) FinishStream(item.Token);
         }
 

@@ -15,7 +15,11 @@ MonoBehaviour:
   Id: QuestionGesture
   Tag: 6
   AnimatorState: Question
+  VariantAnimatorStates:
+  - QuestionMirror
+  BlendInSeconds: 0.55
   DurationSeconds: 2
+  BlendOutSeconds: 0.65
   Weight: 1
   Speed: 1
   CooldownSeconds: 5

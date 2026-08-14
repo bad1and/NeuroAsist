@@ -15,7 +15,11 @@ MonoBehaviour:
   Id: ThinkingGesture
   Tag: 8
   AnimatorState: Thinking
+  VariantAnimatorStates:
+  - ThinkingMirror
+  BlendInSeconds: 0.55
   DurationSeconds: 2.5
+  BlendOutSeconds: 0.65
   Weight: 1
   Speed: 1
   CooldownSeconds: 8

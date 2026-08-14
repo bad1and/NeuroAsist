@@ -20,10 +20,6 @@ use tauri::{
     AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_global_shortcut::ShortcutState;
-use tauri_plugin_shell::{
-    process::{CommandChild, CommandEvent},
-    ShellExt,
-};
 
 #[cfg(windows)]
 use windows::core::BOOL;
@@ -133,7 +129,6 @@ struct DesktopState {
 
 enum CoreProcess {
     Native(Child),
-    Sidecar(CommandChild),
 }
 
 struct AvatarProcess {
@@ -207,7 +202,6 @@ impl DesktopState {
         let port = runtime.api_base_url.rsplit(':').next().unwrap_or("8000");
         let api_key = read_api_key()?;
         let avatar_enabled = self.avatar_executable(app).is_some() && !self.safe_mode;
-        let mut sidecar_events = None;
         let process =
             if cfg!(debug_assertions) || env::var_os("NEUROASIST_CORE_EXECUTABLE").is_some() {
                 let mut command = core_command(&self.root)?;
@@ -227,55 +221,41 @@ impl DesktopState {
                         .map_err(|error| format!("Could not start Neuro Core: {error}"))?,
                 )
             } else {
-                let mut command = app
-                    .shell()
-                    .sidecar("neuroasist-core")
-                    .map_err(|error| format!("Could not locate bundled Neuro Core: {error}"))?
-                    .current_dir(&data_root)
-                    .env("NEUROASIST_PORT", port)
-                    .env("NEUROASIST_DESKTOP_TOKEN", &runtime.api_token)
-                    .env("NEUROASIST_APP_DATA_DIR", &data_root)
-                    .env(
-                        "SQLITE_PATH",
-                        data_root.join("data").join("neuroasist.sqlite3"),
-                    )
-                    .env("VOICE_AUDIO_DIR", data_root.join("data").join("audio"))
-                    .env("LOG_TO_FILE", "true")
-                    .env("LOG_FILE_PATH", data_root.join("logs").join("app.log"))
-                    .env(
-                        "NEUROASIST_SAFE_MODE",
-                        if self.safe_mode { "1" } else { "0" },
-                    );
-                command = command.env(
-                    "AVATAR_ENABLED",
-                    if avatar_enabled { "true" } else { "false" },
-                );
-                if let Some(api_key) = api_key.as_deref() {
-                    command = command.env("DEEPSEEK_API_KEY", api_key);
+                let executable = app
+                    .path()
+                    .resource_dir()
+                    .map_err(|error| format!("Could not resolve Iris resources: {error}"))?
+                    .join("core")
+                    .join("neuroasist-core.exe");
+                if !executable.exists() {
+                    return Err(format!(
+                        "Bundled Neuro Core is missing: {}",
+                        executable.display()
+                    ));
                 }
-                let (events, child) = command
+                let mut command = Command::new(&executable);
+                configure_core_command(
+                    &mut command,
+                    &self.root,
+                    &data_root,
+                    port,
+                    &runtime.api_token,
+                    self.safe_mode,
+                    avatar_enabled,
+                    api_key.as_deref(),
+                );
+                // PyInstaller onedir resolves its bundled DLLs relative to
+                // the resource directory. The source checkout root is only
+                // valid for the development Python launcher.
+                if let Some(resource_root) = executable.parent() {
+                    command.current_dir(resource_root);
+                }
+                let child = command
                     .spawn()
                     .map_err(|error| format!("Could not start bundled Neuro Core: {error}"))?;
-                sidecar_events = Some(events);
-                CoreProcess::Sidecar(child)
+                CoreProcess::Native(child)
             };
         *self.core.lock().map_err(|_| "core mutex poisoned")? = Some(process);
-        if let Some(mut events) = sidecar_events {
-            let app = app.clone();
-            tauri::async_runtime::spawn(async move {
-                while let Some(event) = events.recv().await {
-                    if matches!(event, CommandEvent::Terminated(_)) {
-                        let state = app.state::<DesktopState>();
-                        if state.core_generation.load(Ordering::SeqCst) == generation {
-                            if let Ok(mut core) = state.core.lock() {
-                                *core = None;
-                            }
-                        }
-                        break;
-                    }
-                }
-            });
-        }
 
         for _ in 0..CORE_STARTUP_ATTEMPTS {
             if core_health_is_ready(&runtime) {
@@ -331,15 +311,14 @@ impl DesktopState {
         let Some(child) = core.as_mut() else {
             return Ok(true);
         };
-        if let CoreProcess::Native(child) = child {
-            if child
-                .try_wait()
-                .map_err(|error| error.to_string())?
-                .is_some()
-            {
-                *core = None;
-                return Ok(true);
-            }
+        let CoreProcess::Native(child) = child;
+        if child
+            .try_wait()
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            *core = None;
+            return Ok(true);
         }
         Ok(false)
     }
@@ -370,9 +349,6 @@ impl DesktopState {
                     }
                     let _ = child.kill();
                     let _ = child.wait();
-                }
-                CoreProcess::Sidecar(child) => {
-                    let _ = child.kill();
                 }
             }
         }
@@ -548,6 +524,14 @@ impl DesktopState {
                         let _ = process.child.wait();
                     }
                     let _ = app.emit("desktop-avatar-status", format!("failed: {error}"));
+                    // Unity can create its native window after the discovery
+                    // timeout on a cold graphics start. Retry the whole
+                    // player, but only if the user still wants in-app mode.
+                    let retry_app = app.clone();
+                    thread::spawn(move || {
+                        thread::sleep(Duration::from_secs(1));
+                        start_avatar_with_retries(retry_app, AvatarPlacement::InApp);
+                    });
                 }
             }
         });
@@ -812,6 +796,29 @@ impl DesktopState {
     }
 }
 
+fn start_avatar_with_retries(app: AppHandle, placement: AvatarPlacement) {
+    let state = app.state::<DesktopState>();
+    if avatar_placement_from_settings(&desktop_data_root(&state.root)) != placement {
+        return;
+    }
+    for attempt in 0..5 {
+        match state.start_avatar(&app, placement) {
+            Ok(true) | Ok(false) => break,
+            Err(error) => {
+                eprintln!(
+                    "Could not start Unity avatar (attempt {}/5): {}",
+                    attempt + 1,
+                    error
+                );
+                let _ = app.emit("desktop-avatar-status", format!("failed: {error}"));
+                if attempt < 4 {
+                    thread::sleep(Duration::from_secs(1));
+                }
+            }
+        }
+    }
+}
+
 #[tauri::command]
 fn restart_core(app: AppHandle) -> Result<DesktopRuntime, String> {
     app.state::<DesktopState>().restart_core(&app)
@@ -908,7 +915,6 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             show_main_window(app)
         }))
-        .plugin(tauri_plugin_shell::init())
         .on_window_event(|window, event| {
             if window.label() != "main" {
                 return;
@@ -950,13 +956,19 @@ fn main() {
             let state = app.state::<DesktopState>();
             create_main_window(&app.handle(), state.runtime())?;
             setup_tray(app)?;
-            let startup_handle = app.handle().clone();
+            // Core health and Unity window discovery are independent. Start
+            // both workers immediately so a cold Unity launch cannot delay the
+            // text UI, while the existing attach/retry logic remains intact.
+            let avatar_handle = app.handle().clone();
             thread::spawn(move || {
-                let state = startup_handle.state::<DesktopState>();
-                if state.start_core(&startup_handle).is_ok() {
-                    let placement = avatar_placement_from_settings(&desktop_data_root(&state.root));
-                    let _ = state.start_avatar(&startup_handle, placement);
-                }
+                let state = avatar_handle.state::<DesktopState>();
+                let placement = avatar_placement_from_settings(&desktop_data_root(&state.root));
+                start_avatar_with_retries(avatar_handle, placement);
+            });
+            let core_handle = app.handle().clone();
+            thread::spawn(move || {
+                let state = core_handle.state::<DesktopState>();
+                let _ = state.start_core(&core_handle);
             });
             #[cfg(desktop)]
             app.handle().plugin(

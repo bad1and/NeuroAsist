@@ -19,6 +19,7 @@ import type {
   CharacterStateEvent,
   CodingStatus,
   CodingTask,
+  ReadinessResponse,
 } from "./types";
 
 const DESKTOP_RUNTIME =
@@ -106,6 +107,10 @@ async function requestJson<T>(
 
 export function getStatus(): Promise<StatusResponse> {
   return requestJson<StatusResponse>("/status");
+}
+
+export function getReadiness(): Promise<ReadinessResponse> {
+  return requestJson<ReadinessResponse>("/readiness");
 }
 
 export function getSettings(): Promise<PublicSettings> {

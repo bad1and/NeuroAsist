@@ -9,12 +9,13 @@ namespace NeuroAsist.Avatar
     {
         [SerializeField] private Animator animator;
         [SerializeField] private AvatarMotionSettings settings;
-        [Range(0.01f, 1f)] [SerializeField] private float blendSeconds = .2f;
+        [Range(0.01f, 1f)] [SerializeField] private float blendSeconds = .35f;
         private readonly Dictionary<string, float> lastPlayed = new Dictionary<string, float>();
         private Coroutine activeRoutine;
         private GestureDefinition active;
         private int generation;
         private int layer = -1;
+        private string activeVariantId;
         private IMotionRandom random = new UnityMotionRandom();
         public event Action<GestureDefinition> Started;
         public event Action<GestureDefinition> Finished;
@@ -22,61 +23,65 @@ namespace NeuroAsist.Avatar
         public Action<float> SetHeadLookSuppression;
         public bool IsPlaying => active != null;
         public GestureDefinition Active => active;
+        public string ActiveVariantId => activeVariantId;
 
         public void Configure(AvatarMotionSettings value, Animator valueAnimator) { settings = value; animator = valueAnimator; CacheLayer(); }
         public void SetRandom(IMotionRandom value) => random = value ?? new UnityMotionRandom();
         private void Awake() => CacheLayer();
         private void CacheLayer() { layer = animator == null ? -1 : animator.GetLayerIndex(AvatarMotionNames.GestureLayer); }
-        public bool Trigger(GestureTag tag, AvatarEmotion emotion, bool speaking, float intensity, bool interrupt)
+        public bool Trigger(GestureTag tag, AvatarEmotion emotion, bool speaking, float intensity, bool interrupt, ICollection<string> recentVariants = null)
         {
             if (settings == null || !settings.MotionEnabled) return false;
             var next = Select(settings.GestureDefinitions, tag, emotion, speaking, active == null ? -1 : active.Priority, Time.unscaledTime, lastPlayed, random);
             if (next == null) return false;
             if (active != null && (!interrupt || !active.CanInterrupt || next.Priority < active.Priority)) return false;
+            var variant = next.SelectAnimatorState(random, recentVariants);
+            if (string.IsNullOrWhiteSpace(variant)) return false;
             Stop(false);
             active = next;
+            activeVariantId = variant;
             var token = ++generation;
-            activeRoutine = StartCoroutine(Run(next, Mathf.Clamp01(intensity), token));
+            activeRoutine = StartCoroutine(Run(next, variant, Mathf.Clamp01(intensity), token));
             return true;
         }
         public void Stop(bool immediate)
         {
             generation++;
             if (activeRoutine != null) { StopCoroutine(activeRoutine); activeRoutine = null; }
-            var old = active; active = null;
-            if (immediate) SetWeight(0f); else StartCoroutine(FadeTo(0f, generation));
+            var old = active; active = null; activeVariantId = null;
+            if (immediate) SetWeight(0f); else StartCoroutine(FadeTo(0f, generation, old != null ? old.BlendOutSeconds : blendSeconds));
             SetHeadLookSuppression?.Invoke(0f);
             if (old != null) Finished?.Invoke(old);
         }
-        private IEnumerator Run(GestureDefinition definition, float intensity, int token)
+        private IEnumerator Run(GestureDefinition definition, string animatorState, float intensity, int token)
         {
-            var statePath = AvatarMotionNames.StatePath(AvatarMotionNames.GestureLayer, definition.AnimatorState);
+            var statePath = AvatarMotionNames.StatePath(AvatarMotionNames.GestureLayer, animatorState);
             if (animator == null || layer < 0 || !animator.HasState(layer, Animator.StringToHash(statePath)))
             {
                 if (token == generation) { active = null; Failed?.Invoke(definition, "Animator gesture state is missing"); }
                 yield break;
             }
-            animator.CrossFadeInFixedTime(statePath, blendSeconds, layer, 0f);
+            animator.CrossFadeInFixedTime(statePath, definition.BlendInSeconds, layer, 0f);
             lastPlayed[definition.Id] = Time.unscaledTime;
             SetHeadLookSuppression?.Invoke(definition.HeadLookSuppression);
             Started?.Invoke(definition);
-            yield return FadeTo(Mathf.Clamp01(definition.Weight * intensity), token);
+            yield return FadeTo(Mathf.Clamp01(definition.Weight * intensity), token, definition.BlendInSeconds);
             yield return new WaitForSeconds(Mathf.Max(.05f, definition.DurationSeconds / definition.Speed));
             if (token != generation) yield break;
-            yield return FadeTo(0f, token);
+            yield return FadeTo(0f, token, definition.BlendOutSeconds);
             if (token != generation) yield break;
-            animator.CrossFadeInFixedTime(AvatarMotionNames.StatePath(AvatarMotionNames.GestureLayer, AvatarMotionNames.EmptyGestureState), blendSeconds, layer, 0f);
+            animator.CrossFadeInFixedTime(AvatarMotionNames.StatePath(AvatarMotionNames.GestureLayer, AvatarMotionNames.EmptyGestureState), definition.BlendOutSeconds, layer, 0f);
             SetHeadLookSuppression?.Invoke(0f);
-            active = null; activeRoutine = null;
+            active = null; activeVariantId = null; activeRoutine = null;
             Finished?.Invoke(definition);
         }
-        private IEnumerator FadeTo(float target, int token)
+        private IEnumerator FadeTo(float target, int token, float seconds)
         {
             var start = GetWeight();
-            for (var elapsed = 0f; elapsed < blendSeconds; elapsed += Time.deltaTime)
+            for (var elapsed = 0f; elapsed < seconds; elapsed += Time.deltaTime)
             {
                 if (token != generation) yield break;
-                SetWeight(Mathf.Lerp(start, target, elapsed / blendSeconds));
+                SetWeight(Mathf.Lerp(start, target, elapsed / seconds));
                 yield return null;
             }
             if (token == generation) SetWeight(target);

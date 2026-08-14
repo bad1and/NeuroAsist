@@ -48,7 +48,7 @@ MonoBehaviour:
   IdleSchedulingEnabled: 1
   AutoGestureIntervalMinSeconds: 3
   AutoGestureIntervalMaxSeconds: 8
-  AutoGestureProbability: 0
+  AutoGestureProbability: 0.3
   DefaultMotionIntensity: 1
   HeadLookEnabled: 1
   HeadLookWeight: 1

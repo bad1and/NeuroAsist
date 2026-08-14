@@ -15,30 +15,35 @@ MonoBehaviour:
   ProfileId: annoyed
   BaseIdleState: IdleNeutral
   BaseIdleSpeed: 1
-  IdleIntervalMinSeconds: 6
-  IdleIntervalMaxSeconds: 15
-  AlternativeIdleProbability: 1
+  IdleIntervalMinSeconds: 3.8
+  IdleIntervalMaxSeconds: 8
+  AlternativeIdleProbability: 0.65
   GestureFrequencyMultiplier: 0.8
   GestureIntensityMultiplier: 0.9
   HeadLookWeight: 1.1
   HeadTurnSpeed: 5
+  LifeMotionIntensity: 1.08
+  GazeInterest: 0.78
   AllowLongIdleWhileSpeaking: 0
   AlternativeIdles:
-  - Id: IdleLookAround
-    AnimatorState: IdleLookAround
+  - Id: IdleLookWander
+    AnimatorState: IdleNeutral
     Category: 0
-    DurationSeconds: 8
-    CooldownSeconds: 20
+    LookPattern: 1
+    DurationSeconds: 4.5
+    CooldownSeconds: 18
     Speed: 1
-  - Id: IdleShiftWeight
-    AnimatorState: 
-    Category: 1
-    DurationSeconds: 3
-    CooldownSeconds: 20
+  - Id: IdleSideGlance
+    AnimatorState: IdleNeutral
+    Category: 0
+    LookPattern: 2
+    DurationSeconds: 3.5
+    CooldownSeconds: 16
     Speed: 1
-  - Id: IdleSmallStretch
-    AnimatorState: 
-    Category: 2
+  - Id: IdleThoughtfulLook
+    AnimatorState: IdleNeutral
+    Category: 0
+    LookPattern: 3
     DurationSeconds: 4
-    CooldownSeconds: 20
+    CooldownSeconds: 24
     Speed: 1

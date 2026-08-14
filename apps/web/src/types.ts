@@ -125,6 +125,16 @@ export type StatusResponse = {
   database: string;
 };
 
+export type ReadinessResponse = {
+  phase: "starting" | "text_ready" | "ready" | "degraded";
+  text_chat: "loading" | "ready" | "failed";
+  stt: "loading" | "ready" | "failed" | "disabled";
+  tts: "loading" | "ready" | "failed" | "disabled";
+  vad: "loading" | "ready" | "fallback" | "failed";
+  live_ready: boolean;
+  errors: string[];
+};
+
 export type AvatarClientStatus = {
   client_id: string;
   connected_at: string;

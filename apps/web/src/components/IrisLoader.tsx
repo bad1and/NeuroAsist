@@ -1,12 +1,11 @@
 import { useEffect, useRef } from "react";
 import type { AnimationItem } from "lottie-web";
 
-import animationData from "../brand/iris-loader.json";
-
 const lottiePlayer =
   import.meta.env.MODE === "test"
     ? null
     : import("lottie-web/build/player/lottie_light").then(({ default: lottie }) => lottie);
+const animationDataPromise = import("../brand/iris-loader.json").then(({ default: animationData }) => animationData);
 
 export type IrisLoaderSize = "compact" | "standard" | "hero";
 
@@ -55,8 +54,9 @@ export function IrisLoader({
       }
     };
 
-    void lottiePlayer?.then((lottie) => {
+    void Promise.all([lottiePlayer, animationDataPromise]).then(([lottie, animationData]) => {
       if (disposed) return;
+      if (!lottie) return;
       animation = lottie.loadAnimation({
         container,
         renderer: "svg",
@@ -102,6 +102,7 @@ export function IrisLoader({
       aria-hidden={label ? undefined : true}
     >
       <div className="iris-loader-media">
+        <span className="iris-loader-fallback" aria-hidden="true" />
         <div ref={containerRef} className="iris-loader-canvas" aria-hidden="true" />
       </div>
     </div>

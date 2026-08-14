@@ -17,8 +17,11 @@ namespace NeuroAsist.AvatarEditor
         public static void SetupAssets()
         {
             EnsureFolders();
+            ConfigureIncludedClipImporters();
             var settings = EnsureSettings();
+            RepairLegacyIdleProfiles(settings);
             var controller = EnsureController();
+            EnsureGestureVariants(settings, controller);
             var mask = EnsureMask();
             if (controller.layers.Length > 1) { var layers = controller.layers; layers[1].avatarMask = mask; controller.layers = layers; }
             AssignIncludedClips(controller);
@@ -96,7 +99,7 @@ namespace NeuroAsist.AvatarEditor
         {
             var clips = new Dictionary<string, AnimationClip>();
             foreach (var item in new[] {
-                "X Bot@Idle", "X Bot@Idle 1", "X Bot@Batter On Deck", "X Bot@Look Around", "X Bot@Thinking",
+                "X Bot@Idle", "X Bot@Thinking",
                 "X Bot@Talking", "X Bot@TalkingQuestion", "X Bot@Waving", "X Bot@WavingGoodbye", "X Bot@Agreeing",
                 "X Bot@Shaking Head No", "X Bot@Shrugging", "X Bot@Surprised", "X Bot@Angry",
             })
@@ -109,13 +112,16 @@ namespace NeuroAsist.AvatarEditor
             var assignments = new Dictionary<string, string>
             {
                 ["IdleNeutral"] = "X Bot@Idle",
-                ["IdleRelaxed"] = "X Bot@Idle 1",
-                ["IdleEnergetic"] = "X Bot@Batter On Deck",
-                ["IdleSad"] = "X Bot@Thinking",
-                ["IdleThinking"] = "X Bot@Thinking",
-                ["IdleLookAround"] = "X Bot@Look Around",
-                ["IdleShiftWeight"] = "X Bot@Idle 1",
-                ["IdleSmallStretch"] = "X Bot@Batter On Deck",
+                // All persistent base states begin from the same stationary pose. Emotional
+                // movement is an upper-body gesture, otherwise crossfading between arbitrary
+                // Mixamo entry poses makes the portrait visibly pop or slide its feet.
+                ["IdleRelaxed"] = "X Bot@Idle",
+                ["IdleEnergetic"] = "X Bot@Idle",
+                ["IdleSad"] = "X Bot@Idle",
+                ["IdleThinking"] = "X Bot@Idle",
+                ["IdleLookAround"] = "X Bot@Idle",
+                ["IdleShiftWeight"] = "X Bot@Idle",
+                ["IdleSmallStretch"] = "X Bot@Idle",
                 ["TalkGesture01"] = "X Bot@Talking",
                 ["Greeting"] = "X Bot@Waving",
                 ["Agreement"] = "X Bot@Agreeing",
@@ -130,11 +136,95 @@ namespace NeuroAsist.AvatarEditor
             };
             foreach (var layer in controller.layers) AssignLayerClips(layer.stateMachine, assignments, clips);
         }
+        private static void ConfigureIncludedClipImporters()
+        {
+            var looping = new HashSet<string> { "X Bot@Idle", "X Bot@Talking", "X Bot@TalkingQuestion" };
+            foreach (var item in new[] {
+                "X Bot@Idle", "X Bot@Thinking", "X Bot@Talking", "X Bot@TalkingQuestion", "X Bot@Waving",
+                "X Bot@WavingGoodbye", "X Bot@Agreeing", "X Bot@Shaking Head No", "X Bot@Shrugging",
+                "X Bot@Surprised", "X Bot@Angry",
+            })
+            {
+                var path = "Assets/NeuroAsistAvatar/Animations/" + item + ".fbx";
+                var importer = AssetImporter.GetAtPath(path) as ModelImporter;
+                if (importer == null) continue;
+                importer.animationType = ModelImporterAnimationType.Human;
+                importer.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
+                importer.animationCompression = ModelImporterAnimationCompression.Off;
+                var clips = importer.defaultClipAnimations;
+                foreach (var clip in clips)
+                {
+                    var isLoop = looping.Contains(item);
+                    clip.loopTime = isLoop;
+                    clip.keepOriginalOrientation = true;
+                    clip.keepOriginalPositionY = true;
+                    clip.keepOriginalPositionXZ = true;
+                }
+                importer.clipAnimations = clips;
+                importer.SaveAndReimport();
+            }
+        }
+        private static void RepairLegacyIdleProfiles(AvatarMotionSettings settings)
+        {
+            if (settings == null) return;
+            var profiles = new List<MotionProfile> { settings.DefaultProfile };
+            foreach (var mapping in settings.EmotionProfiles) if (mapping != null) profiles.Add(mapping.Profile);
+            var repaired = new HashSet<MotionProfile>();
+            foreach (var profile in profiles)
+            {
+                if (profile == null || !repaired.Add(profile)) continue;
+                // The old generated assets contained two empty state slots. Replace exactly
+                // that legacy layout with three root-safe, non-repeating look variations.
+                if (profile.AlternativeIdles.Count != 3 || profile.AlternativeIdles[1] == null || profile.AlternativeIdles[2] == null
+                    || !string.IsNullOrWhiteSpace(profile.AlternativeIdles[1].AnimatorState) || !string.IsNullOrWhiteSpace(profile.AlternativeIdles[2].AnimatorState)) continue;
+                profile.AlternativeIdles.Clear();
+                profile.AlternativeIdles.Add(new AlternativeIdleDefinition { Id = "IdleLookWander", AnimatorState = AvatarMotionNames.DefaultIdleState, LookPattern = IdleLookPattern.Wander, Category = IdleCategory.Micro, DurationSeconds = 4.5f, CooldownSeconds = 18f });
+                profile.AlternativeIdles.Add(new AlternativeIdleDefinition { Id = "IdleSideGlance", AnimatorState = AvatarMotionNames.DefaultIdleState, LookPattern = IdleLookPattern.SideGlance, Category = IdleCategory.Micro, DurationSeconds = 3.5f, CooldownSeconds = 16f });
+                profile.AlternativeIdles.Add(new AlternativeIdleDefinition { Id = "IdleThoughtfulLook", AnimatorState = AvatarMotionNames.DefaultIdleState, LookPattern = IdleLookPattern.Thoughtful, Category = IdleCategory.Micro, DurationSeconds = 4f, CooldownSeconds = 24f });
+                profile.AlternativeIdleProbability = .65f;
+                EditorUtility.SetDirty(profile);
+            }
+        }
+        private static void EnsureGestureVariants(AvatarMotionSettings settings, AnimatorController controller)
+        {
+            if (settings == null || controller == null || controller.layers.Length < 2) return;
+            var safe = new HashSet<GestureTag> {
+                GestureTag.Talk, GestureTag.Question, GestureTag.Thinking, GestureTag.Explanation,
+                GestureTag.Agreement, GestureTag.Disagreement, GestureTag.Shrug,
+            };
+            var machine = controller.layers[1].stateMachine;
+            foreach (var definition in settings.GestureDefinitions)
+            {
+                if (definition == null || !safe.Contains(definition.Tag)) continue;
+                var mirrorName = definition.AnimatorState + "Mirror";
+                var mirror = FindState(machine, mirrorName);
+                if (mirror == null)
+                {
+                    mirror = machine.AddState(mirrorName);
+                    mirror.mirror = true;
+                }
+                if (!definition.VariantAnimatorStates.Contains(mirrorName))
+                {
+                    definition.VariantAnimatorStates.Add(mirrorName);
+                    EditorUtility.SetDirty(definition);
+                }
+            }
+        }
         private static void AssignLayerClips(AnimatorStateMachine machine, IDictionary<string, string> assignments, IDictionary<string, AnimationClip> clips)
         {
             foreach (var child in machine.states)
-                if (assignments.TryGetValue(child.state.name, out var assetName) && clips.TryGetValue(assetName, out var clip)) child.state.motion = clip;
+            {
+                var stateName = child.state.name.EndsWith("Mirror")
+                    ? child.state.name.Substring(0, child.state.name.Length - "Mirror".Length)
+                    : child.state.name;
+                if (assignments.TryGetValue(stateName, out var assetName) && clips.TryGetValue(assetName, out var clip)) child.state.motion = clip;
+            }
             foreach (var child in machine.stateMachines) AssignLayerClips(child.stateMachine, assignments, clips);
+        }
+        private static AnimatorState FindState(AnimatorStateMachine machine, string name)
+        {
+            foreach (var child in machine.states) if (child.state.name == name) return child.state;
+            return null;
         }
         private static void AddStates(AnimatorStateMachine machine, IEnumerable<string> names, string defaultName)
         {

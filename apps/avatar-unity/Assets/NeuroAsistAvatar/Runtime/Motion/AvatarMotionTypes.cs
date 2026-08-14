@@ -6,6 +6,7 @@ namespace NeuroAsist.Avatar
     public enum AvatarEmotion { Neutral, Happy, Sad, Angry, Surprised, Relaxed, Thinking, Annoyed, Smirk }
     public enum GestureTag { None, Auto, Talk, Greeting, Agreement, Disagreement, Question, Explanation, Thinking, Surprise, Frustration, Farewell, Shrug }
     public enum IdleCategory { Micro, Normal, Long }
+    public enum IdleLookPattern { None, Wander, SideGlance, Thoughtful }
 
     public static class AvatarMotionNames
     {
@@ -59,6 +60,9 @@ namespace NeuroAsist.Avatar
         public string Id = "IdleLookAround";
         public string AnimatorState = "IdleLookAround";
         public IdleCategory Category = IdleCategory.Micro;
+        // Look patterns are deliberately procedural: they preserve the base body's hips and
+        // feet, making them safe to crossfade from any stationary idle on the portrait rig.
+        public IdleLookPattern LookPattern = IdleLookPattern.None;
         [Min(0.05f)] public float DurationSeconds = 2f;
         [Min(0f)] public float CooldownSeconds = 20f;
         [Range(0f, 2f)] public float Speed = 1f;

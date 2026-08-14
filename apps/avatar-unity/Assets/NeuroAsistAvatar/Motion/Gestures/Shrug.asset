@@ -15,7 +15,11 @@ MonoBehaviour:
   Id: ShrugGesture
   Tag: 12
   AnimatorState: Shrug
+  VariantAnimatorStates:
+  - ShrugMirror
+  BlendInSeconds: 0.55
   DurationSeconds: 2
+  BlendOutSeconds: 0.65
   Weight: 1
   Speed: 1
   CooldownSeconds: 8

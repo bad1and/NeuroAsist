@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace NeuroAsist.Avatar
@@ -7,6 +8,7 @@ namespace NeuroAsist.Avatar
     /// <summary>Coordinates body motion only; facial expressions and lip sync remain independent.</summary>
     public sealed class AvatarMotionController : MonoBehaviour
     {
+        private const float MinimumAutomaticAccentSeconds = 1.7f;
         [SerializeField] private AvatarMotionSettings settings;
         [SerializeField] private Animator animator;
         [SerializeField] private Transform avatarRoot;
@@ -15,7 +17,7 @@ namespace NeuroAsist.Avatar
         [SerializeField] private AvatarIdleScheduler idleScheduler;
         [SerializeField] private AvatarGestureController gestureController;
         [SerializeField] private AvatarLookController lookController;
-        [Range(.01f, 1f)] [SerializeField] private float transitionSeconds = .25f;
+        [Range(.25f, 1.5f)] [SerializeField] private float transitionSeconds = .7f;
         [Min(.001f)] [SerializeField] private float rootDriftWarningDistance = .02f;
         private AvatarEmotion emotion = AvatarEmotion.Neutral;
         private MotionProfile profile;
@@ -24,6 +26,15 @@ namespace NeuroAsist.Avatar
         private Coroutine speechLoop;
         private int speechGeneration;
         private bool speaking;
+        private readonly Dictionary<int, SpeechMotionCue> speechCues = new Dictionary<int, SpeechMotionCue>();
+        private readonly Queue<string> recentAutomaticVariants = new Queue<string>();
+        private readonly List<float> automaticAccentTimes = new List<float>();
+        private struct SpeechMotionCue
+        {
+            public float Duration;
+            public GestureTag Requested;
+            public bool Emphasized;
+        }
         public event Action<MotionProfile> ProfileChanged;
         public AvatarEmotion CurrentEmotion => emotion;
         public MotionProfile CurrentProfile => profile;
@@ -40,6 +51,7 @@ namespace NeuroAsist.Avatar
         private void OnEnable()
         {
             if (state != null) state.Changed += OnStateChanged;
+            if (state != null) lookController?.SetPresence(state.Current);
             if (idleScheduler != null) idleScheduler.StartScheduling();
         }
         private void OnDisable()
@@ -78,39 +90,68 @@ namespace NeuroAsist.Avatar
         public void SetEmotion(string value) => SetEmotion(AvatarMotionNames.ParseEmotion(value));
         public void SetEmotion(AvatarEmotion value)
         {
+            var nextProfile = settings != null ? settings.FindProfile(value) : null;
+            if (nextProfile == null && settings != null) nextProfile = settings.DefaultProfile;
+            var changed = emotion != value || profile != nextProfile;
             emotion = value;
-            profile = settings != null ? settings.FindProfile(value) : null;
-            if (profile == null && settings != null) profile = settings.DefaultProfile;
+            profile = nextProfile;
             if (profile == null) return;
             profile.ValidateValues();
             idleScheduler?.SetProfile(profile);
             lookController?.SetProfile(profile);
+            // Stream metadata can repeat the same emotion several times per response.
+            // Restarting an idle on every update is visibly jerky, so only a real profile
+            // change may crossfade the body or start an emotional reaction.
+            if (!changed) return;
             PlayBaseIdle();
             ProfileChanged?.Invoke(profile);
             client?.Send("avatar.motion_profile_changed", new AvatarMotionProfilePayload { profile = profile.ProfileId });
-            var reaction = EmotionReaction(value);
-            if (reaction != GestureTag.None)
-                gestureController?.Trigger(reaction, emotion, speaking, profile.GestureIntensityMultiplier, false);
+            // Emotion changes tune the life layer and gesture selection. They no
+            // longer force a stock reaction (for example, every happy reply used
+            // to wave), which made the avatar easy to predict.
         }
         public void SetSpeaking(bool value)
         {
             if (speaking == value) return;
             speaking = value;
             if (animator != null) animator.SetBool(AvatarMotionNames.IsSpeaking, value);
-            if (value) StartSpeechLoop(); else { StopSpeechLoop(); RestoreRootAfterOneShot(); PlayBaseIdle(); }
+            if (value) StartSpeechLoop(); else { StopSpeechLoop(); speechCues.Clear(); RestoreRootAfterOneShot(); PlayBaseIdle(); }
         }
         public void TriggerGesture(GestureTag tag, float intensity = 1f, bool interrupt = true)
         {
             var multiplier = profile == null ? 1f : profile.GestureIntensityMultiplier;
             gestureController?.Trigger(tag, emotion, speaking, Mathf.Clamp01(intensity) * multiplier, interrupt);
         }
+        public void BeginSpeechMotion() => speechCues.Clear();
+        public void QueueSpeechCue(int sequence, float durationSeconds, AvatarMotionCuePayload cue)
+        {
+            speechCues[sequence] = new SpeechMotionCue
+            {
+                Duration = Mathf.Max(0f, durationSeconds),
+                Requested = AvatarMotionNames.ParseGesture(cue != null ? cue.gesture : "auto"),
+                Emphasized = cue != null && cue.emphasized,
+            };
+        }
+        public void OnSpeechSegmentStarted(int sequence)
+        {
+            if (!speechCues.TryGetValue(sequence, out var cue)) return;
+            speechCues.Remove(sequence);
+            if (!speaking || gestureController == null || gestureController.IsPlaying) return;
+            if (!CanScheduleAutomaticAccent(cue.Duration, cue.Requested, Time.unscaledTime, automaticAccentTimes)) return;
+            var tag = ResolveSpeechGesture(cue);
+            if (tag == GestureTag.None || tag == GestureTag.Auto) return;
+            var intensity = (cue.Emphasized ? .86f : .68f) * (profile == null ? 1f : profile.GestureIntensityMultiplier);
+            if (!gestureController.Trigger(tag, emotion, true, intensity, false, new List<string>(recentAutomaticVariants))) return;
+            RememberAutomaticVariant(gestureController.ActiveVariantId, Time.unscaledTime);
+        }
         public void StopGesture(bool immediate = false) => gestureController?.Stop(immediate);
         public void ResetToNeutral()
         {
-            StopGesture(false); SetSpeaking(false); SetEmotion(AvatarEmotion.Neutral); RestoreRootAfterOneShot();
+            speechCues.Clear(); StopGesture(false); SetSpeaking(false); SetEmotion(AvatarEmotion.Neutral); RestoreRootAfterOneShot();
         }
         private void OnStateChanged(AvatarState next)
         {
+            lookController?.SetPresence(next);
             SetSpeaking(next == AvatarState.Speaking);
             if (next == AvatarState.Thinking) SetEmotion(AvatarEmotion.Thinking);
             if (next == AvatarState.Error || next == AvatarState.Disconnected) { StopGesture(false); SetSpeaking(false); }
@@ -126,9 +167,10 @@ namespace NeuroAsist.Avatar
         private void PlayAlternativeIdle(AlternativeIdleDefinition idle)
         {
             if (animator == null || idle == null || gestureController != null && gestureController.IsPlaying) return;
-            if (idle.Id == "IdleLookAround" && lookController != null)
+            if ((idle.LookPattern != IdleLookPattern.None || idle.Id == "IdleLookAround") && lookController != null)
             {
-                lookController.PlayLookAround(idle.DurationSeconds);
+                var pattern = idle.LookPattern == IdleLookPattern.None ? IdleLookPattern.Wander : idle.LookPattern;
+                lookController.PlayLookAround(idle.DurationSeconds, pattern);
                 return;
             }
             var statePath = AvatarMotionNames.StatePath(AvatarMotionNames.BaseLayer, idle.AnimatorState);
@@ -144,25 +186,46 @@ namespace NeuroAsist.Avatar
         }
         private void StartSpeechLoop()
         {
+            // Body accents are scheduled from AudioSource start events. Keeping a
+            // coroutine here would reintroduce the old 3–8 second metronome.
             StopSpeechLoop();
-            speechLoop = StartCoroutine(AutoGestureLoop(++speechGeneration));
         }
         private void StopSpeechLoop()
         {
             speechGeneration++;
             if (speechLoop != null) { StopCoroutine(speechLoop); speechLoop = null; }
         }
-        private IEnumerator AutoGestureLoop(int token)
+        private GestureTag ResolveSpeechGesture(SpeechMotionCue cue)
         {
-            while (token == speechGeneration && speaking)
+            if (cue.Requested != GestureTag.Auto && cue.Requested != GestureTag.None) return cue.Requested;
+            if (cue.Duration < MinimumAutomaticAccentSeconds) return GestureTag.None;
+            if (emotion == AvatarEmotion.Thinking) return cue.Emphasized ? GestureTag.Question : GestureTag.Thinking;
+            if (emotion == AvatarEmotion.Angry || emotion == AvatarEmotion.Annoyed)
+                return cue.Emphasized ? GestureTag.Frustration : GestureTag.Talk;
+            return cue.Emphasized ? GestureTag.Explanation : GestureTag.Talk;
+        }
+        private void RememberAutomaticVariant(string variant, float now)
+        {
+            if (!string.IsNullOrWhiteSpace(variant))
             {
-                var frequency = profile == null ? 1f : Mathf.Max(.05f, profile.GestureFrequencyMultiplier);
-                var min = settings == null ? 3f : settings.AutoGestureIntervalMinSeconds / frequency;
-                var max = settings == null ? 8f : settings.AutoGestureIntervalMaxSeconds / frequency;
-                yield return new WaitForSeconds(UnityEngine.Random.Range(min, Mathf.Max(min, max)));
-                if (token != speechGeneration || !speaking || gestureController == null || gestureController.IsPlaying) continue;
-                if (UnityEngine.Random.value <= (settings == null ? .45f : settings.AutoGestureProbability)) TriggerGesture(GestureTag.Talk, 1f, false);
+                recentAutomaticVariants.Enqueue(variant);
+                while (recentAutomaticVariants.Count > 3) recentAutomaticVariants.Dequeue();
             }
+            automaticAccentTimes.Add(now);
+            automaticAccentTimes.RemoveAll(value => now - value > 30f);
+        }
+        public static bool CanScheduleAutomaticAccent(float durationSeconds, GestureTag requested, float now, IList<float> previous)
+        {
+            if (requested == GestureTag.Auto && durationSeconds < MinimumAutomaticAccentSeconds) return false;
+            var recent = 0;
+            for (var i = previous.Count - 1; i >= 0; i--)
+            {
+                var age = now - previous[i];
+                if (age > 30f) break;
+                recent++;
+                if (age < 6f) return false;
+            }
+            return recent < 2;
         }
         private void RestoreRootAfterOneShot()
         {
@@ -171,17 +234,6 @@ namespace NeuroAsist.Avatar
             if (drift > rootDriftWarningDistance) Debug.LogWarning("[AvatarMotion] Root motion drift detected; restoring avatar root.", this);
             if (drift > rootDriftWarningDistance) avatarRoot.localPosition = rootLocalPosition;
             if (Quaternion.Angle(avatarRoot.localRotation, rootLocalRotation) > 1f) avatarRoot.localRotation = rootLocalRotation;
-        }
-        private static GestureTag EmotionReaction(AvatarEmotion value)
-        {
-            switch (value)
-            {
-                case AvatarEmotion.Happy: return GestureTag.Greeting;
-                case AvatarEmotion.Thinking: return GestureTag.Thinking;
-                case AvatarEmotion.Surprised: return GestureTag.Surprise;
-                case AvatarEmotion.Sad: return GestureTag.Shrug;
-                default: return GestureTag.None;
-            }
         }
         private void Log(string message) { if (settings != null && settings.DebugLogging) Debug.Log("[AvatarMotion] " + message, this); }
     }

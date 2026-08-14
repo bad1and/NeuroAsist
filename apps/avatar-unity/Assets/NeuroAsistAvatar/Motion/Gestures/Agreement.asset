@@ -15,7 +15,11 @@ MonoBehaviour:
   Id: AgreementGesture
   Tag: 4
   AnimatorState: Agreement
+  VariantAnimatorStates:
+  - AgreementMirror
+  BlendInSeconds: 0.55
   DurationSeconds: 1.5
+  BlendOutSeconds: 0.65
   Weight: 1
   Speed: 1
   CooldownSeconds: 5

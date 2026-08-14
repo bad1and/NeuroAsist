@@ -39,18 +39,11 @@ def make_live_directive_expressive(directive: AvatarDirective, user_text: str) -
             emotion = Emotion.THINKING
         else:
             emotion = Emotion.NEUTRAL
-    gesture = directive.gesture
-    if gesture == "auto":
-        gesture = {
-            Emotion.SMIRK: "shrug",
-            Emotion.HAPPY: "talk",
-            Emotion.SAD: "shrug",
-            Emotion.ANGRY: "frustration",
-            Emotion.ANNOYED: "frustration",
-            Emotion.SURPRISED: "surprise",
-            Emotion.THINKING: "question",
-        }.get(emotion, "talk")
-    return AvatarDirective(emotion, gesture, max(.45, directive.intensity))
+    # Affect remains a useful fallback, but an omitted body gesture must stay
+    # omitted.  The Unity behaviour director can then choose a context-aware,
+    # non-repeating micro action instead of forcing the same Talk clip on every
+    # answer.
+    return AvatarDirective(emotion, directive.gesture, max(.45, directive.intensity))
 
 
 class LiveDirectiveParser:

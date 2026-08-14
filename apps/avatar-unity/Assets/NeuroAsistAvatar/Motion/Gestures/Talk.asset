@@ -15,7 +15,11 @@ MonoBehaviour:
   Id: TalkGesture
   Tag: 2
   AnimatorState: TalkGesture01
+  VariantAnimatorStates:
+  - TalkGesture01Mirror
+  BlendInSeconds: 0.55
   DurationSeconds: 2
+  BlendOutSeconds: 0.65
   Weight: 1
   Speed: 1
   CooldownSeconds: 4

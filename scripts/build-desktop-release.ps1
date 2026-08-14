@@ -8,7 +8,6 @@ $root = Split-Path -Parent $PSScriptRoot
 $python = Join-Path $root ".venv\Scripts\python.exe"
 $desktop = Join-Path $root "apps\desktop"
 $tauri = Join-Path $desktop "src-tauri"
-$binaries = Join-Path $tauri "binaries"
 $output = Join-Path $root "build\core"
 
 function Assert-LastExitCode([string]$Step) {
@@ -37,13 +36,8 @@ if (-not $SkipDependencyInstall) {
     Assert-LastExitCode "Installing desktop dependencies"
 }
 
-$triple = ((rustc -Vv | Select-String '^host:').Line -replace '^host:\s*', '').Trim()
-if (-not $triple) {
-    throw "Could not determine the Rust target triple."
-}
-
-New-Item -ItemType Directory -Force -Path $binaries, $output | Out-Null
-& $python -m PyInstaller --noconfirm --clean --onefile --name neuroasist-core `
+New-Item -ItemType Directory -Force -Path $output | Out-Null
+& $python -m PyInstaller --noconfirm --clean --onedir --name neuroasist-core `
     --paths $root `
     --add-data "$(Join-Path $root 'apps\protocol');apps\protocol" `
     --collect-all silero `
@@ -62,16 +56,20 @@ New-Item -ItemType Directory -Force -Path $binaries, $output | Out-Null
     (Join-Path $root "apps\backend\desktop_entry.py")
 Assert-LastExitCode "Building the Neuro Core sidecar"
 
-$sidecar = Join-Path $binaries "neuroasist-core-$triple.exe"
-Copy-Item -Force (Join-Path $output "neuroasist-core.exe") $sidecar
+$coreResource = Join-Path $output "neuroasist-core"
+$coreExecutable = Join-Path $coreResource "neuroasist-core.exe"
+if (-not (Test-Path -LiteralPath $coreExecutable)) {
+    throw "PyInstaller onedir output is missing the core executable at $coreExecutable"
+}
 
-# externalBin must exist when Tauri parses its config. Keep it release-only so
-# cargo check and ordinary desktop development do not require a binary artifact.
+# Add the complete onedir tree as a Tauri resource only for the release build.
+# The Rust shell launches core/neuroasist-core.exe directly, so Windows does
+# not unpack a 442 MB onefile executable on every cold start.
 $configPath = Join-Path $tauri "tauri.conf.json"
 $originalConfig = Get-Content -Raw -LiteralPath $configPath
 try {
     $config = $originalConfig | ConvertFrom-Json
-    $config.bundle | Add-Member -NotePropertyName externalBin -NotePropertyValue @("binaries/neuroasist-core")
+    $config.bundle.resources | Add-Member -NotePropertyName "../../build/core/neuroasist-core" -NotePropertyValue "core"
     $config | ConvertTo-Json -Depth 20 | Set-Content -Encoding utf8 -LiteralPath $configPath
     npm --prefix $desktop run build
     Assert-LastExitCode "Building the NSIS installer"

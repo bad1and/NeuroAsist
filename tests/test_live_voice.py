@@ -18,6 +18,7 @@ from apps.backend.app.voice.delivery import (
     SpeechPace,
     VoiceDirective,
     clean_voice_directives,
+    make_speech_segment,
 )
 
 
@@ -33,6 +34,10 @@ class StreamingProvider(LLMProvider):
 class FakeVoiceConnection:
     def __init__(self):
         self.segments: list[tuple[dict, bytes, dict]] = []
+        self.events: list[dict] = []
+
+    async def json(self, payload):
+        self.events.append(payload)
 
     async def segment(self, started, audio, finished):
         self.segments.append((started, audio, finished))
@@ -101,12 +106,42 @@ def test_malformed_machine_header_is_not_spoken() -> None:
 
 
 def test_live_directive_fallback_is_visible_and_contextual() -> None:
-    assert make_live_directive_expressive(AvatarDirective(), "Почему опять ошибка?") == AvatarDirective("annoyed", "frustration", 1.0)
-    assert make_live_directive_expressive(AvatarDirective(), "Спасибо, это круто") == AvatarDirective("happy", "talk", 1.0)
-    assert make_live_directive_expressive(AvatarDirective(), "Меня это бесит") == AvatarDirective("annoyed", "frustration", 1.0)
-    assert make_live_directive_expressive(AvatarDirective(), "Как это работает?") == AvatarDirective("thinking", "question", 1.0)
-    assert make_live_directive_expressive(AvatarDirective(), "Сделай заметку") == AvatarDirective("neutral", "talk", 1.0)
-    assert make_live_directive_expressive(AvatarDirective("thinking", "auto", .7), "Почему?") == AvatarDirective("thinking", "question", .7)
+    # Fallback affect is useful, but forcing a body clip on every answer made
+    # Iris mechanically repeat Talk/Frustration. The renderer now plans auto
+    # movement from real audio segments instead.
+    assert make_live_directive_expressive(AvatarDirective(), "Почему опять ошибка?") == AvatarDirective("annoyed", "auto", 1.0)
+    assert make_live_directive_expressive(AvatarDirective(), "Спасибо, это круто") == AvatarDirective("happy", "auto", 1.0)
+    assert make_live_directive_expressive(AvatarDirective(), "Меня это бесит") == AvatarDirective("annoyed", "auto", 1.0)
+    assert make_live_directive_expressive(AvatarDirective(), "Как это работает?") == AvatarDirective("thinking", "auto", 1.0)
+    assert make_live_directive_expressive(AvatarDirective(), "Сделай заметку") == AvatarDirective("neutral", "auto", 1.0)
+    assert make_live_directive_expressive(AvatarDirective("thinking", "auto", .7), "Почему?") == AvatarDirective("thinking", "auto", .7)
+
+
+def test_voice_motion_hint_is_fragment_safe_backward_compatible_and_limited() -> None:
+    parser = LiveVoiceDirectiveParser(max_directives=3, max_motion_directives=2)
+    output = []
+    for delta in (
+        "[[voice pace=normal emphasis=light gesture=que",
+        "stion]]Первое. [[voice pace=normal emphasis=none gesture=agreement]]Второе. ",
+        "[[voice pace=fast emphasis=light gesture=shrug]]Третье.",
+    ):
+        output.extend(parser.feed(delta))
+    output.extend(parser.finish())
+
+    directives = [item for item in output if isinstance(item, VoiceDirective)]
+    assert [item.gesture for item in directives] == ["question", "agreement", "auto"]
+    assert "".join(item for item in output if isinstance(item, str)) == "Первое. Второе. Третье."
+
+
+def test_stream_motion_payload_defaults_and_normalizes_unknown_gesture() -> None:
+    from apps.backend.app.avatar.schemas import StreamSegmentPayload
+
+    payload = StreamSegmentPayload(
+        utterance_id="u", sequence=0, audio_base64="AAAAAAAA", duration_seconds=1.0,
+        motion={"gesture": "not-real", "emphasized": True},
+    )
+    assert payload.motion.gesture == "auto"
+    assert payload.motion.emphasized is True
 
 
 def test_chunker_protects_decimal_and_russian_abbreviation() -> None:
@@ -327,6 +362,67 @@ async def test_stale_generation_cannot_send_late_tts_segment() -> None:
             synth_ms=1,
         )
     assert connection.segments == []
+
+
+@pytest.mark.anyio
+async def test_avatar_motion_hint_does_not_break_live_tts_delivery() -> None:
+    class RecordingAvatarService:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        async def stream_segment(self, **kwargs) -> None:
+            self.calls.append(kwargs)
+
+    avatar = RecordingAvatarService()
+    manager = VoiceSessionManager(MockTTSProvider(), avatar_service=avatar)
+    manager._connections["s"] = FakeVoiceConnection()
+    context = UtteranceContext("s", "u")
+    manager._active["s"] = context
+    segment = make_speech_segment(
+        "Это важная мысль.",
+        directive=VoiceDirective(emphasis=SpeechEmphasis.LIGHT, gesture="question"),
+    )
+
+    await manager._send_tts_part(
+        context,
+        0,
+        (segment, b"audio", "wav", 1.0, 1, 0),
+        queue_depth=0,
+        synth_ms=1,
+    )
+
+    assert avatar.calls[0]["motion"].gesture == "question"
+    assert avatar.calls[0]["motion"].emphasized is True
+
+
+@pytest.mark.anyio
+async def test_tts_failure_is_reported_instead_of_leaving_live_turn_pending() -> None:
+    class FailingProvider:
+        async def stream(self, _request):
+            raise RuntimeError("TTS is unavailable")
+            yield  # pragma: no cover - keeps this an async generator
+
+    class OneSentenceAgent:
+        last_memory_updates = []
+
+        @staticmethod
+        def classify_intent(_text):
+            return "casual_chat"
+
+        async def stream_user_message(self, *_args, **_kwargs):
+            yield "Привет."
+
+    manager = VoiceSessionManager(FailingProvider(), retry_count=0)
+    connection = FakeVoiceConnection()
+    manager._connections["s"] = connection
+    task = await manager.start(
+        session_id="s", utterance_id="u", transcript="Привет", language="ru",
+        voice="xenia", agent=OneSentenceAgent(),
+    )
+
+    await task
+
+    assert any(event["type"] == "voice.error" for event in connection.events)
 
 
 @pytest.mark.anyio

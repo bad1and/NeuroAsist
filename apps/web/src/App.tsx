@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   Brain,
@@ -35,6 +35,7 @@ import {
   getSettings,
   getConversationDebug,
   getStatus,
+  getReadiness,
   getVoiceTtsStatus,
   getModels,
   getPronunciations,
@@ -75,6 +76,7 @@ import type {
   EventLevel,
   PublicSettings,
   ManagedModel,
+  ReadinessResponse,
   StatusResponse,
   TimelineJournalItem,
   TimelineMessage,
@@ -98,11 +100,7 @@ import {
   PcmInputClient,
   type MicrophoneProfile,
 } from "./vad";
-import { JournalPage } from "./journal";
-import { MemoryPage } from "./memory";
-import { StatePage } from "./state";
 import { OverviewPage } from "./overview";
-import { CodingAgentPage } from "./coding";
 import { configureAvatarPlacement, getDesktopRuntime, initialCoreStatus, listenForAvatarVisibility, listenForCoreStatus, restartDesktopCore, setDesktopInterfaceLocale, type CoreStatus } from "./desktop";
 import { StartupScreen } from "./components/StartupScreen";
 import { WindowChrome } from "./components/WindowChrome";
@@ -118,6 +116,17 @@ import {
 } from "./i18n";
 
 type AppView = "overview" | "chat" | "journal" | "memory" | "state" | "coding" | "settings";
+
+const JournalPage = lazy(() => import("./journal").then(({ JournalPage }) => ({ default: JournalPage })));
+const MemoryPage = lazy(() => import("./memory").then(({ MemoryPage }) => ({ default: MemoryPage })));
+const StatePage = lazy(() => import("./state").then(({ StatePage }) => ({ default: StatePage })));
+const CodingAgentPage = lazy(() => import("./coding").then(({ CodingAgentPage }) => ({ default: CodingAgentPage })));
+const LazyChatPage = lazy(() => import("./pages/chat"));
+const LazySettingsPage = lazy(() => import("./pages/settings"));
+
+function LazyPageFallback() {
+  return <div className="panel page-loading" role="status">Загружаю раздел…</div>;
+}
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "iris.sidebar.collapsed";
 const CHAT_ERROR_AUTO_DISMISS_MS = 8_000;
 type SettingsSection =
@@ -352,6 +361,7 @@ export default function App() {
   });
   const menuToggleRef = useRef<HTMLButtonElement>(null);
   const [status, setStatus] = useState<StatusResponse | null>(null);
+  const [readiness, setReadiness] = useState<ReadinessResponse | null>(null);
   const [avatarStatus, setAvatarStatus] = useState<AvatarStatusResponse | null>(null);
   const [avatarOverlay, setAvatarOverlay] = useState<AvatarOverlaySettings | null>(null);
   const [settings, setSettings] = useState<PublicSettings | null>(null);
@@ -368,6 +378,18 @@ export default function App() {
   const setupRequired = Boolean(settings && !settings.api_key_configured && isDesktopManaged());
 
   useInterfaceLocale(interfaceLocale);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      performance.mark("iris:first-ui-paint");
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
+    if (!servicesReady || !status || !settings) return;
+    performance.mark("iris:first-interactive");
+  }, [servicesReady, settings, status]);
 
   useEffect(() => {
     const handleLocaleChange = (event: Event) => {
@@ -439,21 +461,38 @@ export default function App() {
     }
   }, []);
 
+  const refreshReadiness = useCallback(async () => {
+    try {
+      setReadiness(await getReadiness());
+    } catch {
+      // The core status indicator remains authoritative while the readiness
+      // endpoint is unavailable during an older or restarting backend.
+    }
+  }, []);
+
   const refreshOverview = useCallback(async () => {
     const revision = ++overviewRevision.current;
     try {
-      const [nextStatus, nextSettings, nextAvatarStatus, nextAvatarOverlay] = await Promise.all([
+      const [nextStatus, nextSettings] = await Promise.all([
         getStatus(),
         getSettings(),
-        getAvatarStatus().catch(() => null),
-        getAvatarOverlay().catch(() => null),
       ]);
       if (revision !== overviewRevision.current) return;
       setStatus(nextStatus);
       setSettings(nextSettings);
-      setAvatarStatus(nextAvatarStatus);
-      setAvatarOverlay(nextAvatarOverlay);
       setStatusError(null);
+      // Avatar diagnostics are useful after the first paint but do not belong
+      // to the critical request waterfall.
+      window.requestAnimationFrame(() => {
+        void Promise.all([
+          getAvatarStatus().catch(() => null),
+          getAvatarOverlay().catch(() => null),
+        ]).then(([nextAvatarStatus, nextAvatarOverlay]) => {
+          if (revision !== overviewRevision.current) return;
+          setAvatarStatus(nextAvatarStatus);
+          setAvatarOverlay(nextAvatarOverlay);
+        });
+      });
     } catch (error) {
       if (revision !== overviewRevision.current) return;
       setStatusError(error instanceof Error ? error.message : "Сервис недоступен");
@@ -463,12 +502,18 @@ export default function App() {
   useEffect(() => {
     if (!servicesReady) return;
     void refreshOverview();
-    void refreshEvents();
+    void refreshReadiness();
+    const firstFrame = window.requestAnimationFrame(() => { void refreshEvents(); });
     const timer = window.setInterval(() => {
       void refreshOverview();
     }, 10000);
-    return () => window.clearInterval(timer);
-  }, [refreshEvents, refreshOverview, servicesReady]);
+    const readinessTimer = window.setInterval(() => { void refreshReadiness(); }, 1200);
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.clearInterval(timer);
+      window.clearInterval(readinessTimer);
+    };
+  }, [refreshEvents, refreshOverview, refreshReadiness, servicesReady]);
 
   useEffect(() => {
     try {
@@ -533,9 +578,12 @@ export default function App() {
 
   useEffect(() => {
     if (!servicesReady || !settings || setupRequired || sessionId || startingSession) return;
-    void resumeSession().catch((error) => {
-      setStatusError(error instanceof Error ? error.message : "Не удалось восстановить сессию.");
+    const frame = window.requestAnimationFrame(() => {
+      void resumeSession().catch((error) => {
+        setStatusError(error instanceof Error ? error.message : "Не удалось восстановить сессию.");
+      });
     });
+    return () => window.cancelAnimationFrame(frame);
   }, [servicesReady, settings, setupRequired, sessionId, startingSession, resumeSession]);
 
   useEffect(() => {
@@ -577,10 +625,11 @@ export default function App() {
       };
     };
 
-    connect();
+    const firstFrame = window.requestAnimationFrame(connect);
 
     return () => {
       closed = true;
+      window.cancelAnimationFrame(firstFrame);
       window.clearTimeout(reconnectTimer);
       socket?.close();
       setWsState("disconnected");
@@ -643,57 +692,66 @@ export default function App() {
             />
           )}
           <div className="chat-view" hidden={activeView !== "chat"}>
-            <ChatPage
-              key={sessionId ?? "starting"}
-              sessionId={sessionId}
-              sessionStarting={startingSession}
-              isActive={activeView === "chat"}
-              events={events}
-              settings={settings}
-              avatarStatus={avatarStatus}
-              showInAppAvatar={settings?.avatar_placement === "in_app" && (settings.avatar_in_app_visible ?? true)}
-              onRefreshEvents={refreshEvents}
-              onOpenMemory={() => switchView("memory")}
-              onStartNewDialog={startFreshSession}
-            />
+            <Suspense fallback={<LazyPageFallback />}>
+              <LazyChatPage
+                key={sessionId ?? "starting"}
+                sessionId={sessionId}
+                sessionStarting={startingSession}
+                isActive={activeView === "chat"}
+                events={events}
+                settings={settings}
+                readiness={readiness}
+                avatarStatus={avatarStatus}
+                showInAppAvatar={settings?.avatar_placement === "in_app" && (settings.avatar_in_app_visible ?? true)}
+                onRefreshEvents={refreshEvents}
+                onOpenMemory={() => switchView("memory")}
+                onStartNewDialog={startFreshSession}
+              />
+            </Suspense>
           </div>
-          {activeView === "journal" && <JournalPage />}
-          {activeView === "memory" && <MemoryPage />}
-          {activeView === "state" && <StatePage events={events} />}
+          <Suspense fallback={<LazyPageFallback />}>
+            {activeView === "journal" && <JournalPage />}
+            {activeView === "memory" && <MemoryPage />}
+            {activeView === "state" && <StatePage events={events} />}
+          </Suspense>
           {activeView === "coding" && (
-            <CodingAgentPage
-              settings={settings}
-              events={events}
-              sessionId={sessionId}
-              onSettingsChanged={(nextSettings) => {
-                overviewRevision.current += 1;
-                setSettings(nextSettings);
-              }}
-            />
+            <Suspense fallback={<LazyPageFallback />}>
+              <CodingAgentPage
+                settings={settings}
+                events={events}
+                sessionId={sessionId}
+                onSettingsChanged={(nextSettings) => {
+                  overviewRevision.current += 1;
+                  setSettings(nextSettings);
+                }}
+              />
+            </Suspense>
           )}
           {activeView === "settings" && (
-            <SettingsPage
-              settings={settings}
-              avatarStatus={avatarStatus}
-              avatarOverlay={avatarOverlay}
-              events={events}
-              onRefreshEvents={refreshEvents}
-              onRefreshAvatar={refreshOverview}
-              onAvatarOverlayChanged={(nextOverlay) => {
-                overviewRevision.current += 1;
-                setAvatarOverlay(nextOverlay);
-              }}
-              onInterfaceLocaleChange={(locale) => {
-                setInterfaceLocale(locale);
-                setInterfaceLocalePreference(locale);
-              }}
-              onSettingsChanged={(nextSettings) => {
-                overviewRevision.current += 1;
-                setSettings(nextSettings);
-                void refreshOverview();
-                void refreshEvents();
-              }}
-            />
+            <Suspense fallback={<LazyPageFallback />}>
+              <LazySettingsPage
+                settings={settings}
+                avatarStatus={avatarStatus}
+                avatarOverlay={avatarOverlay}
+                events={events}
+                onRefreshEvents={refreshEvents}
+                onRefreshAvatar={refreshOverview}
+                onAvatarOverlayChanged={(nextOverlay) => {
+                  overviewRevision.current += 1;
+                  setAvatarOverlay(nextOverlay);
+                }}
+                onInterfaceLocaleChange={(locale) => {
+                  setInterfaceLocale(locale);
+                  setInterfaceLocalePreference(locale);
+                }}
+                onSettingsChanged={(nextSettings) => {
+                  overviewRevision.current += 1;
+                  setSettings(nextSettings);
+                  void refreshOverview();
+                  void refreshEvents();
+                }}
+              />
+            </Suspense>
           )}
         </main>
       </section>
@@ -822,12 +880,13 @@ function NavigationButton({
   );
 }
 
-function ChatPage({
+export function ChatPage({
   sessionId,
   sessionStarting,
   isActive,
   events,
   settings,
+  readiness,
   avatarStatus,
   showInAppAvatar,
   onRefreshEvents,
@@ -839,6 +898,7 @@ function ChatPage({
   isActive: boolean;
   events: BackendEvent[];
   settings: PublicSettings | null;
+  readiness: ReadinessResponse | null;
   avatarStatus: AvatarStatusResponse | null;
   showInAppAvatar: boolean;
   onRefreshEvents: () => Promise<void>;
@@ -1015,6 +1075,12 @@ function ChatPage({
     typeof navigator !== "undefined"
     && Boolean(navigator.mediaDevices?.getUserMedia)
     && typeof AudioWorkletNode !== "undefined";
+  const liveReady = Boolean(readiness?.live_ready);
+  const liveStatusLabel = readiness?.stt === "failed" || readiness?.tts === "failed"
+    ? "Голос недоступен"
+    : liveReady
+      ? "Голос готов"
+      : "Голос загружается";
   const browserSpeechSupported =
     typeof window !== "undefined" &&
     "speechSynthesis" in window &&
@@ -1564,7 +1630,7 @@ function ChatPage({
   };
 
   const toggleLive = async () => {
-    if (!sessionId) return;
+    if (!sessionId || !liveReady) return;
     if (liveConversation) {
       vadRecorderRef.current?.stop();
       pcmInputRef.current?.close();
@@ -1769,9 +1835,9 @@ function ChatPage({
         <div className="voice-controls">
           <button
             className={liveConversation ? "voice-button recording" : "secondary voice-button"}
-            disabled={!liveVoiceSupported || voiceState === "stopping"}
+            disabled={!liveVoiceSupported || !liveReady || voiceState === "stopping"}
             onClick={() => void toggleLive()}
-            title="Непрерывный live-диалог с автоматическими паузами и перебиваниями"
+            title={liveReady ? "Непрерывный live-диалог с автоматическими паузами и перебиваниями" : liveStatusLabel}
             type="button"
           >
             <Mic size={18} aria-hidden="true" />
@@ -1798,8 +1864,8 @@ function ChatPage({
           >
             Новый диалог
           </button>
-          {(liveConversation || voiceState !== "idle" || !liveVoiceSupported) && <span>
-            {liveVoiceSupported ? conversationStatus : "Live-аудио недоступно"}
+          {(liveConversation || voiceState !== "idle" || !liveVoiceSupported || !liveReady) && <span>
+            {!liveVoiceSupported ? "Live-аудио недоступно" : liveConversation ? conversationStatus : liveStatusLabel}
           </span>}
         </div>
         {import.meta.env.DEV && liveConversation && conversationDebug && (
@@ -1911,7 +1977,7 @@ function EventsPage({
   );
 }
 
-function SettingsPage({
+export function SettingsPage({
   settings,
   avatarStatus,
   avatarOverlay,
