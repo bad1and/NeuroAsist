@@ -4,22 +4,30 @@ namespace NeuroAsist.Avatar
 {
     public sealed class AvatarPerformanceProfile : MonoBehaviour
     {
+        public const int EmbeddedFrameRate = 60;
+        // Neutral #1d2022 is deliberately close to Iris' in-app surface.
+        // The native fallback still uses a colour key, and a neutral matte
+        // prevents the former blue fringe from reading as visual grain.
+        private static readonly Color EmbeddedColorKey = new Color(29f / 255f, 32f / 255f, 34f / 255f, 0f);
+        // Two samples clean up hair and clothing silhouettes at the narrow
+        // in-app size without materially competing with the WebView GPU work.
+        public const int EmbeddedAntiAliasing = 2;
         [SerializeField] private AvatarRuntimeSettings settings;
 
         private void Awake()
         {
-            if (Application.isEditor || settings == null || !settings.ApplyAvatarLowProfile) return;
+            if (Application.isEditor || settings == null) return;
+            var embeddedInIris = IsEmbeddedHost();
+            if (!ShouldApplyPerformanceProfile(embeddedInIris, settings.ApplyAvatarLowProfile)) return;
             QualitySettings.vSyncCount = 0;
-            Application.targetFrameRate = Mathf.Max(15, settings.AvatarFrameRate);
+            Application.targetFrameRate = embeddedInIris ? EmbeddedFrameRate : Mathf.Max(15, settings.AvatarFrameRate);
             // The Iris host owns the native bounds in the embedded mode.
             // Calling SetResolution here happens after the player is ready and
             // would overwrite its chat-slot rectangle with the standalone
             // 1280×720 default (the source of a fullscreen-looking avatar).
-            var embeddedInIris = WindowsDesktopOverlay.IsEmbeddedHost(
-                System.Environment.GetEnvironmentVariable("NEUROASIST_AVATAR_HOST"));
             if (ShouldSetStandaloneResolution(embeddedInIris))
                 Screen.SetResolution(Mathf.Max(640, settings.AvatarWidth), Mathf.Max(360, settings.AvatarHeight), false);
-            QualitySettings.antiAliasing = 0;
+            QualitySettings.antiAliasing = embeddedInIris ? EmbeddedAntiAliasing : 0;
             QualitySettings.shadows = ShadowQuality.Disable;
             QualitySettings.pixelLightCount = 1;
             QualitySettings.realtimeReflectionProbes = false;
@@ -30,9 +38,16 @@ namespace NeuroAsist.Avatar
             if (camera != null)
             {
                 camera.allowHDR = false;
-                camera.allowMSAA = false;
+                camera.allowMSAA = embeddedInIris;
                 camera.farClipPlane = Mathf.Min(camera.farClipPlane, 20f);
                 camera.clearFlags = CameraClearFlags.SolidColor;
+                // InApp uses the same neutral clear colour as Tauri's native
+                // colour key. It has no saturated blue component to leak into
+                // anti-aliased hair or clothing pixels.
+                var background = camera.backgroundColor;
+                camera.backgroundColor = embeddedInIris
+                    ? EmbeddedColorKey
+                    : new Color(background.r, background.g, background.b, 0f);
             }
 
             var keptLight = false;
@@ -42,13 +57,24 @@ namespace NeuroAsist.Avatar
                 light.enabled = false;
             }
             Debug.Log(embeddedInIris
-                ? "[AvatarPerformance] AvatarLow enabled inside Iris; host controls bounds."
+                ? "[AvatarPerformance] Iris embedded profile enabled: 60 FPS, 2x MSAA, host-controlled bounds."
                 : "[AvatarPerformance] AvatarLow enabled: 1280x720 @ 30 FPS", this);
         }
 
         public static bool ShouldSetStandaloneResolution(bool embeddedInIris)
         {
             return !embeddedInIris;
+        }
+
+        public static bool ShouldApplyPerformanceProfile(bool embeddedInIris, bool requestedLowProfile)
+        {
+            return embeddedInIris || requestedLowProfile;
+        }
+
+        public static bool IsEmbeddedHost()
+        {
+            return WindowsDesktopOverlay.IsEmbeddedHost(
+                System.Environment.GetEnvironmentVariable("NEUROASIST_AVATAR_HOST"));
         }
     }
 }

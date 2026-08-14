@@ -4,21 +4,29 @@ use std::{
     net::{TcpListener, TcpStream},
     path::PathBuf,
     process::{Child, Command},
-    sync::{atomic::{AtomicU64, Ordering}, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    },
     thread,
     time::Duration,
 };
 
-use serde::{Deserialize, Serialize};
 use keyring::Entry;
-use tauri_plugin_shell::{process::{CommandChild, CommandEvent}, ShellExt};
+use serde::{Deserialize, Serialize};
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_global_shortcut::ShortcutState;
+use tauri_plugin_shell::{
+    process::{CommandChild, CommandEvent},
+    ShellExt,
+};
 
+#[cfg(windows)]
+use windows::core::BOOL;
 #[cfg(windows)]
 use windows::Win32::{
     Foundation::{COLORREF, HWND, LPARAM, POINT},
@@ -26,14 +34,11 @@ use windows::Win32::{
     UI::WindowsAndMessaging::{
         EnumWindows, GetClassNameW, GetParent, GetWindowLongPtrW, GetWindowThreadProcessId,
         SetLayeredWindowAttributes, SetParent, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-        GWL_EXSTYLE, GWL_STYLE, GWLP_HWNDPARENT, GWLP_USERDATA,
-        HWND_TOP, LWA_COLORKEY, SW_HIDE, SW_SHOWNA, SWP_ASYNCWINDOWPOS, SWP_FRAMECHANGED,
-        SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
-        WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
+        GWLP_HWNDPARENT, GWLP_USERDATA, GWL_EXSTYLE, GWL_STYLE, HWND_TOP, LWA_COLORKEY,
+        SWP_ASYNCWINDOWPOS, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE,
+        SW_SHOWNA, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
     },
 };
-#[cfg(windows)]
-use windows::core::BOOL;
 
 const CORE_STARTUP_ATTEMPTS: u8 = 60;
 const CORE_STARTUP_DELAY: Duration = Duration::from_millis(250);
@@ -49,6 +54,11 @@ const UNITY_GRAPHICS_READY_TIMEOUT: Duration = Duration::from_secs(15);
 const UNITY_WINDOW_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const KEYRING_SERVICE: &str = "NeuroAsist";
 const KEYRING_ACCOUNT: &str = "deepseek_api_key";
+// Matches the embedded Unity camera clear colour (#1d2022). A neutral matte
+// makes the unavoidable colour-key transition much less visible at hair and
+// clothing edges than the previous saturated blue key.
+#[cfg(windows)]
+const EMBEDDED_AVATAR_COLOR_KEY: COLORREF = COLORREF(29 | (32 << 8) | (34 << 16));
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -58,7 +68,9 @@ enum AvatarPlacement {
 }
 
 impl Default for AvatarPlacement {
-    fn default() -> Self { Self::DesktopOverlay }
+    fn default() -> Self {
+        Self::DesktopOverlay
+    }
 }
 
 #[derive(Clone, Deserialize)]
@@ -170,47 +182,83 @@ impl DesktopState {
     }
 
     fn set_core_status(&self, app: &AppHandle, value: &str) {
-        self.runtime.lock().expect("runtime mutex poisoned").core_status = value.into();
+        self.runtime
+            .lock()
+            .expect("runtime mutex poisoned")
+            .core_status = value.into();
         let _ = app.emit("desktop-core-status", value);
     }
 
     fn start_core(&self, app: &AppHandle) -> Result<(), String> {
-        if self.core.lock().map_err(|_| "core mutex poisoned")?.is_some() {
+        if self
+            .core
+            .lock()
+            .map_err(|_| "core mutex poisoned")?
+            .is_some()
+        {
             return Ok(());
         }
         self.set_core_status(app, "starting");
         let generation = self.core_generation.fetch_add(1, Ordering::SeqCst) + 1;
         let runtime = self.runtime();
         let data_root = desktop_data_root(&self.root);
-        std::fs::create_dir_all(&data_root).map_err(|error| format!("Could not create Iris data directory: {error}"))?;
+        std::fs::create_dir_all(&data_root)
+            .map_err(|error| format!("Could not create Iris data directory: {error}"))?;
         let port = runtime.api_base_url.rsplit(':').next().unwrap_or("8000");
         let api_key = read_api_key()?;
         let avatar_enabled = self.avatar_executable(app).is_some() && !self.safe_mode;
         let mut sidecar_events = None;
-        let process = if cfg!(debug_assertions) || env::var_os("NEUROASIST_CORE_EXECUTABLE").is_some() {
-            let mut command = core_command(&self.root)?;
-            configure_core_command(&mut command, &self.root, &data_root, port, &runtime.api_token, self.safe_mode, avatar_enabled, api_key.as_deref());
-            CoreProcess::Native(command.spawn().map_err(|error| format!("Could not start Neuro Core: {error}"))?)
-        } else {
-            let mut command = app.shell().sidecar("neuroasist-core")
-                .map_err(|error| format!("Could not locate bundled Neuro Core: {error}"))?
-                .current_dir(&data_root)
-                .env("NEUROASIST_PORT", port)
-                .env("NEUROASIST_DESKTOP_TOKEN", &runtime.api_token)
-                .env("NEUROASIST_APP_DATA_DIR", &data_root)
-                .env("SQLITE_PATH", data_root.join("data").join("neuroasist.sqlite3"))
-                .env("VOICE_AUDIO_DIR", data_root.join("data").join("audio"))
-                .env("LOG_TO_FILE", "true")
-                .env("LOG_FILE_PATH", data_root.join("logs").join("app.log"))
-                .env("NEUROASIST_SAFE_MODE", if self.safe_mode { "1" } else { "0" });
-            command = command.env("AVATAR_ENABLED", if avatar_enabled { "true" } else { "false" });
-            if let Some(api_key) = api_key.as_deref() {
-                command = command.env("DEEPSEEK_API_KEY", api_key);
-            }
-            let (events, child) = command.spawn().map_err(|error| format!("Could not start bundled Neuro Core: {error}"))?;
-            sidecar_events = Some(events);
-            CoreProcess::Sidecar(child)
-        };
+        let process =
+            if cfg!(debug_assertions) || env::var_os("NEUROASIST_CORE_EXECUTABLE").is_some() {
+                let mut command = core_command(&self.root)?;
+                configure_core_command(
+                    &mut command,
+                    &self.root,
+                    &data_root,
+                    port,
+                    &runtime.api_token,
+                    self.safe_mode,
+                    avatar_enabled,
+                    api_key.as_deref(),
+                );
+                CoreProcess::Native(
+                    command
+                        .spawn()
+                        .map_err(|error| format!("Could not start Neuro Core: {error}"))?,
+                )
+            } else {
+                let mut command = app
+                    .shell()
+                    .sidecar("neuroasist-core")
+                    .map_err(|error| format!("Could not locate bundled Neuro Core: {error}"))?
+                    .current_dir(&data_root)
+                    .env("NEUROASIST_PORT", port)
+                    .env("NEUROASIST_DESKTOP_TOKEN", &runtime.api_token)
+                    .env("NEUROASIST_APP_DATA_DIR", &data_root)
+                    .env(
+                        "SQLITE_PATH",
+                        data_root.join("data").join("neuroasist.sqlite3"),
+                    )
+                    .env("VOICE_AUDIO_DIR", data_root.join("data").join("audio"))
+                    .env("LOG_TO_FILE", "true")
+                    .env("LOG_FILE_PATH", data_root.join("logs").join("app.log"))
+                    .env(
+                        "NEUROASIST_SAFE_MODE",
+                        if self.safe_mode { "1" } else { "0" },
+                    );
+                command = command.env(
+                    "AVATAR_ENABLED",
+                    if avatar_enabled { "true" } else { "false" },
+                );
+                if let Some(api_key) = api_key.as_deref() {
+                    command = command.env("DEEPSEEK_API_KEY", api_key);
+                }
+                let (events, child) = command
+                    .spawn()
+                    .map_err(|error| format!("Could not start bundled Neuro Core: {error}"))?;
+                sidecar_events = Some(events);
+                CoreProcess::Sidecar(child)
+            };
         *self.core.lock().map_err(|_| "core mutex poisoned")? = Some(process);
         if let Some(mut events) = sidecar_events {
             let app = app.clone();
@@ -280,9 +328,15 @@ impl DesktopState {
 
     fn core_exited(&self) -> Result<bool, String> {
         let mut core = self.core.lock().map_err(|_| "core mutex poisoned")?;
-        let Some(child) = core.as_mut() else { return Ok(true) };
+        let Some(child) = core.as_mut() else {
+            return Ok(true);
+        };
         if let CoreProcess::Native(child) = child {
-            if child.try_wait().map_err(|error| error.to_string())?.is_some() {
+            if child
+                .try_wait()
+                .map_err(|error| error.to_string())?
+                .is_some()
+            {
                 *core = None;
                 return Ok(true);
             }
@@ -292,7 +346,10 @@ impl DesktopState {
 
     fn restart_core(&self, app: &AppHandle) -> Result<DesktopRuntime, String> {
         self.stop_core();
-        *self.crash_restarts.lock().map_err(|_| "restart mutex poisoned")? = 0;
+        *self
+            .crash_restarts
+            .lock()
+            .map_err(|_| "restart mutex poisoned")? = 0;
         self.start_core(app)?;
         Ok(self.runtime())
     }
@@ -314,7 +371,9 @@ impl DesktopState {
                     let _ = child.kill();
                     let _ = child.wait();
                 }
-                CoreProcess::Sidecar(child) => { let _ = child.kill(); }
+                CoreProcess::Sidecar(child) => {
+                    let _ = child.kill();
+                }
             }
         }
     }
@@ -324,28 +383,43 @@ impl DesktopState {
             let path = PathBuf::from(path);
             return path.exists().then_some(path);
         }
-        let development = self.root.join("apps").join("avatar-unity").join("Builds").join("NeuroAsistAvatar").join("NeuroAsistAvatar.exe");
+        let development = self
+            .root
+            .join("apps")
+            .join("avatar-unity")
+            .join("Builds")
+            .join("NeuroAsistAvatar")
+            .join("NeuroAsistAvatar.exe");
         if development.exists() {
             return Some(development);
         }
-        app.path().resource_dir().ok()
+        app.path()
+            .resource_dir()
+            .ok()
             .map(|path| path.join("avatar").join("NeuroAsistAvatar.exe"))
             .filter(|path| path.exists())
     }
 
     fn start_avatar(&self, app: &AppHandle, placement: AvatarPlacement) -> Result<bool, String> {
-        let _lifecycle = self.avatar_lifecycle.lock().map_err(|_| "avatar lifecycle mutex poisoned")?;
+        let _lifecycle = self
+            .avatar_lifecycle
+            .lock()
+            .map_err(|_| "avatar lifecycle mutex poisoned")?;
         self.start_avatar_locked(app, placement)
     }
 
-    fn start_avatar_locked(&self, app: &AppHandle, placement: AvatarPlacement) -> Result<bool, String> {
-        // The in-app renderer is a Three.js canvas owned by the WebView.  Do
-        // not start Unity only to obtain a native surface in this mode.
-        if placement == AvatarPlacement::InApp {
-            let _ = app.emit("desktop-avatar-status", "threejs");
-            return Ok(false);
-        }
-        if self.safe_mode || self.avatar.lock().map_err(|_| "avatar mutex poisoned")?.is_some() {
+    fn start_avatar_locked(
+        &self,
+        app: &AppHandle,
+        placement: AvatarPlacement,
+    ) -> Result<bool, String> {
+        if self.safe_mode
+            || self
+                .avatar
+                .lock()
+                .map_err(|_| "avatar mutex poisoned")?
+                .is_some()
+        {
             return Ok(false);
         }
         let Some(path) = self.avatar_executable(app) else {
@@ -360,7 +434,11 @@ impl DesktopState {
             .env("NEUROASIST_BACKEND_TOKEN", &runtime.api_token)
             .env(
                 "NEUROASIST_AVATAR_HOST",
-                if placement == AvatarPlacement::InApp { "embedded" } else { "overlay" },
+                if placement == AvatarPlacement::InApp {
+                    "embedded"
+                } else {
+                    "overlay"
+                },
             );
         if placement == AvatarPlacement::InApp {
             // Colour-key transparency is unsupported by Unity's DXGI flip
@@ -409,14 +487,19 @@ impl DesktopState {
             avatar_overlay_visible_from_settings(&desktop_data_root(&self.root))
         };
         let initial_visible = if placement == AvatarPlacement::InApp {
-            self.in_app_avatar_visible.lock().map_err(|_| "in-app avatar visibility mutex poisoned")?
+            self.in_app_avatar_visible
+                .lock()
+                .map_err(|_| "in-app avatar visibility mutex poisoned")?
                 .as_ref()
                 .map(|request| request.visible)
                 .unwrap_or(persisted_visible)
         } else {
             persisted_visible
         };
-        *self.avatar_visible.lock().map_err(|_| "avatar visibility mutex poisoned")? = initial_visible;
+        *self
+            .avatar_visible
+            .lock()
+            .map_err(|_| "avatar visibility mutex poisoned")? = initial_visible;
         if placement == AvatarPlacement::InApp {
             // Unity takes several seconds to construct its native render
             // window. Attaching it synchronously here blocks Tauri's command
@@ -435,8 +518,12 @@ impl DesktopState {
         thread::spawn(move || {
             let attached = attach_embedded_avatar_window(&app, process_id);
             let state = app.state::<DesktopState>();
-            let Ok(_lifecycle) = state.avatar_lifecycle.lock() else { return };
-            let Ok(mut avatar) = state.avatar.lock() else { return };
+            let Ok(_lifecycle) = state.avatar_lifecycle.lock() else {
+                return;
+            };
+            let Ok(mut avatar) = state.avatar.lock() else {
+                return;
+            };
             let is_current_in_app_player = avatar.as_ref().is_some_and(|process| {
                 process.placement == AvatarPlacement::InApp && process.child.id() == process_id
             });
@@ -467,7 +554,9 @@ impl DesktopState {
     }
 
     fn stop_avatar(&self) {
-        let Ok(_lifecycle) = self.avatar_lifecycle.lock() else { return };
+        let Ok(_lifecycle) = self.avatar_lifecycle.lock() else {
+            return;
+        };
         self.stop_avatar_locked();
     }
 
@@ -481,26 +570,37 @@ impl DesktopState {
 
     fn avatar_host_status(&self) -> Result<AvatarHostStatus, String> {
         let avatar = self.avatar.lock().map_err(|_| "avatar mutex poisoned")?;
-        let visible = *self.avatar_visible.lock().map_err(|_| "avatar visibility mutex poisoned")?;
-        let placement = avatar.as_ref().map(|process| process.placement).unwrap_or_default();
+        let visible = *self
+            .avatar_visible
+            .lock()
+            .map_err(|_| "avatar visibility mutex poisoned")?;
+        let placement = avatar
+            .as_ref()
+            .map(|process| process.placement)
+            .unwrap_or_default();
         Ok(AvatarHostStatus {
             placement,
             running: avatar.is_some(),
-            embedded: avatar.as_ref().is_some_and(|process| process.embedded_window.is_some()),
+            embedded: avatar
+                .as_ref()
+                .is_some_and(|process| process.embedded_window.is_some()),
             visible,
         })
     }
 
-    fn configure_avatar_placement(&self, app: &AppHandle, placement: AvatarPlacement) -> Result<AvatarHostStatus, String> {
-        let _lifecycle = self.avatar_lifecycle.lock().map_err(|_| "avatar lifecycle mutex poisoned")?;
-        if placement == AvatarPlacement::InApp {
-            self.stop_avatar_locked();
-            let visible = avatar_in_app_visible_from_settings(&desktop_data_root(&self.root));
-            *self.avatar_visible.lock().map_err(|_| "avatar visibility mutex poisoned")? = visible;
-            let _ = app.emit("desktop-avatar-status", "threejs");
-            return Ok(AvatarHostStatus { placement, running: false, embedded: false, visible });
-        }
-        let current = self.avatar.lock().map_err(|_| "avatar mutex poisoned")?
+    fn configure_avatar_placement(
+        &self,
+        app: &AppHandle,
+        placement: AvatarPlacement,
+    ) -> Result<AvatarHostStatus, String> {
+        let _lifecycle = self
+            .avatar_lifecycle
+            .lock()
+            .map_err(|_| "avatar lifecycle mutex poisoned")?;
+        let current = self
+            .avatar
+            .lock()
+            .map_err(|_| "avatar mutex poisoned")?
             .as_ref()
             .map(|process| process.placement);
         if current != Some(placement) {
@@ -510,15 +610,25 @@ impl DesktopState {
         self.avatar_host_status()
     }
 
-    fn set_avatar_in_app_bounds(&self, app: &AppHandle, bounds: AvatarInAppBounds) -> Result<(), String> {
-        let _update = self.in_app_avatar_update.lock().map_err(|_| "in-app avatar update mutex poisoned")?;
+    fn set_avatar_in_app_bounds(
+        &self,
+        app: &AppHandle,
+        bounds: AvatarInAppBounds,
+    ) -> Result<(), String> {
+        let _update = self
+            .in_app_avatar_update
+            .lock()
+            .map_err(|_| "in-app avatar update mutex poisoned")?;
         if bounds.width < 1 || bounds.height < 1 {
             return Err("Avatar bounds must be positive".into());
         }
         if !self.accept_in_app_avatar_revision(bounds.revision)? {
             return Ok(());
         }
-        *self.in_app_avatar_bounds.lock().map_err(|_| "avatar bounds mutex poisoned")? = Some(bounds.clone());
+        *self
+            .in_app_avatar_bounds
+            .lock()
+            .map_err(|_| "avatar bounds mutex poisoned")? = Some(bounds.clone());
         self.apply_in_app_avatar_host(app)
     }
 
@@ -526,9 +636,19 @@ impl DesktopState {
     /// Windows is dragging it. Move it natively from the latest DOM rectangle
     /// instead of waiting for React to re-render after a navigation change.
     fn move_in_app_avatar_with_parent(&self, app: &AppHandle) -> Result<(), String> {
-        let _update = self.in_app_avatar_update.lock().map_err(|_| "in-app avatar update mutex poisoned")?;
-        let bounds = self.in_app_avatar_bounds.lock().map_err(|_| "avatar bounds mutex poisoned")?.clone();
-        let embedded_window = self.avatar.lock().map_err(|_| "avatar mutex poisoned")?
+        let _update = self
+            .in_app_avatar_update
+            .lock()
+            .map_err(|_| "in-app avatar update mutex poisoned")?;
+        let bounds = self
+            .in_app_avatar_bounds
+            .lock()
+            .map_err(|_| "avatar bounds mutex poisoned")?
+            .clone();
+        let embedded_window = self
+            .avatar
+            .lock()
+            .map_err(|_| "avatar mutex poisoned")?
             .as_ref()
             .filter(|process| process.placement == AvatarPlacement::InApp)
             .and_then(|process| process.embedded_window);
@@ -540,10 +660,24 @@ impl DesktopState {
     }
 
     fn apply_in_app_avatar_host(&self, app: &AppHandle) -> Result<(), String> {
-        let bounds = self.in_app_avatar_bounds.lock().map_err(|_| "avatar bounds mutex poisoned")?.clone();
-        let fallback_visible = *self.avatar_visible.lock().map_err(|_| "avatar visibility mutex poisoned")?;
-        let visibility = self.in_app_avatar_visible.lock().map_err(|_| "in-app avatar visibility mutex poisoned")?.clone();
-        let requested_visible = visibility.as_ref().map(|request| request.visible).unwrap_or(fallback_visible);
+        let bounds = self
+            .in_app_avatar_bounds
+            .lock()
+            .map_err(|_| "avatar bounds mutex poisoned")?
+            .clone();
+        let fallback_visible = *self
+            .avatar_visible
+            .lock()
+            .map_err(|_| "avatar visibility mutex poisoned")?;
+        let visibility = self
+            .in_app_avatar_visible
+            .lock()
+            .map_err(|_| "in-app avatar visibility mutex poisoned")?
+            .clone();
+        let requested_visible = visibility
+            .as_ref()
+            .map(|request| request.visible)
+            .unwrap_or(fallback_visible);
         // A visible request is valid only together with a geometry request of
         // the same revision (or a newer one). This prevents a popup from
         // briefly reappearing in an old chat rectangle while IPC catches up.
@@ -551,7 +685,10 @@ impl DesktopState {
             (&bounds, &visibility),
             (Some(bounds), Some(visibility)) if bounds.revision >= visibility.revision
         ) || (bounds.is_some() && visibility.is_none());
-        let embedded_window = self.avatar.lock().map_err(|_| "avatar mutex poisoned")?
+        let embedded_window = self
+            .avatar
+            .lock()
+            .map_err(|_| "avatar mutex poisoned")?
             .as_ref()
             .filter(|process| process.placement == AvatarPlacement::InApp)
             .and_then(|process| process.embedded_window);
@@ -572,7 +709,10 @@ impl DesktopState {
         if revision == 0 {
             return Err("Avatar host revision must be positive".into());
         }
-        let mut latest = self.in_app_avatar_revision.lock().map_err(|_| "in-app avatar revision mutex poisoned")?;
+        let mut latest = self
+            .in_app_avatar_revision
+            .lock()
+            .map_err(|_| "in-app avatar revision mutex poisoned")?;
         if revision < *latest {
             return Ok(false);
         }
@@ -580,17 +720,35 @@ impl DesktopState {
         Ok(true)
     }
 
-    fn set_avatar_in_app_visible(&self, app: &AppHandle, visible: bool, revision: u64) -> Result<(), String> {
-        let _update = self.in_app_avatar_update.lock().map_err(|_| "in-app avatar update mutex poisoned")?;
+    fn set_avatar_in_app_visible(
+        &self,
+        app: &AppHandle,
+        visible: bool,
+        revision: u64,
+    ) -> Result<(), String> {
+        let _update = self
+            .in_app_avatar_update
+            .lock()
+            .map_err(|_| "in-app avatar update mutex poisoned")?;
         if !self.accept_in_app_avatar_revision(revision)? {
             return Ok(());
         }
-        *self.in_app_avatar_visible.lock().map_err(|_| "in-app avatar visibility mutex poisoned")? = Some(AvatarInAppVisibility { visible, revision });
-        let in_app_running = self.avatar.lock().map_err(|_| "avatar mutex poisoned")?
+        *self
+            .in_app_avatar_visible
+            .lock()
+            .map_err(|_| "in-app avatar visibility mutex poisoned")? =
+            Some(AvatarInAppVisibility { visible, revision });
+        let in_app_running = self
+            .avatar
+            .lock()
+            .map_err(|_| "avatar mutex poisoned")?
             .as_ref()
             .is_some_and(|process| process.placement == AvatarPlacement::InApp);
         if in_app_running {
-            *self.avatar_visible.lock().map_err(|_| "avatar visibility mutex poisoned")? = visible;
+            *self
+                .avatar_visible
+                .lock()
+                .map_err(|_| "avatar visibility mutex poisoned")? = visible;
         }
         // Calling this command before Unity finishes starting is valid: the
         // requested value remains queued and is applied by start_avatar. Once
@@ -599,7 +757,10 @@ impl DesktopState {
     }
 
     fn toggle_avatar(&self, app: &AppHandle) -> Result<bool, String> {
-        let _lifecycle = self.avatar_lifecycle.lock().map_err(|_| "avatar lifecycle mutex poisoned")?;
+        let _lifecycle = self
+            .avatar_lifecycle
+            .lock()
+            .map_err(|_| "avatar lifecycle mutex poisoned")?;
         let configured_placement = avatar_placement_from_settings(&desktop_data_root(&self.root));
         if configured_placement == AvatarPlacement::InApp {
             let next = !avatar_in_app_visible_from_settings(&desktop_data_root(&self.root));
@@ -607,7 +768,10 @@ impl DesktopState {
             let _ = app.emit("desktop-avatar-visibility", next);
             return Ok(next);
         }
-        let placement = self.avatar.lock().map_err(|_| "avatar mutex poisoned")?
+        let placement = self
+            .avatar
+            .lock()
+            .map_err(|_| "avatar mutex poisoned")?
             .as_ref()
             .map(|process| process.placement);
         let running = placement.is_some();
@@ -624,12 +788,18 @@ impl DesktopState {
                 return Ok(next);
             }
             let next = {
-                let mut visible = self.avatar_visible.lock().map_err(|_| "avatar visibility mutex poisoned")?;
+                let mut visible = self
+                    .avatar_visible
+                    .lock()
+                    .map_err(|_| "avatar visibility mutex poisoned")?;
                 *visible = !*visible;
                 *visible
             };
             avatar_overlay_visibility_request(&self.runtime(), next)?;
-            let _ = app.emit("desktop-avatar-status", if next { "visible" } else { "hidden" });
+            let _ = app.emit(
+                "desktop-avatar-status",
+                if next { "visible" } else { "hidden" },
+            );
             Ok(next)
         } else {
             self.start_avatar_locked(app, configured_placement)
@@ -664,7 +834,8 @@ fn set_interface_locale(app: AppHandle, locale: String) -> Result<(), String> {
     let tray = app
         .tray_by_id("companion")
         .ok_or("Could not find Iris tray icon")?;
-    tray.set_menu(Some(menu)).map_err(|error| error.to_string())?;
+    tray.set_menu(Some(menu))
+        .map_err(|error| error.to_string())?;
     tray.set_tooltip(Some(tray_tooltip(&locale)))
         .map_err(|error| error.to_string())?;
     Ok(())
@@ -676,18 +847,24 @@ fn toggle_avatar(app: AppHandle) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn configure_avatar_placement(app: AppHandle, placement: AvatarPlacement) -> Result<AvatarHostStatus, String> {
-    app.state::<DesktopState>().configure_avatar_placement(&app, placement)
+fn configure_avatar_placement(
+    app: AppHandle,
+    placement: AvatarPlacement,
+) -> Result<AvatarHostStatus, String> {
+    app.state::<DesktopState>()
+        .configure_avatar_placement(&app, placement)
 }
 
 #[tauri::command]
 fn set_avatar_in_app_bounds(app: AppHandle, bounds: AvatarInAppBounds) -> Result<(), String> {
-    app.state::<DesktopState>().set_avatar_in_app_bounds(&app, bounds)
+    app.state::<DesktopState>()
+        .set_avatar_in_app_bounds(&app, bounds)
 }
 
 #[tauri::command]
 fn set_avatar_in_app_visible(app: AppHandle, visible: bool, revision: u64) -> Result<(), String> {
-    app.state::<DesktopState>().set_avatar_in_app_visible(&app, visible, revision)
+    app.state::<DesktopState>()
+        .set_avatar_in_app_visible(&app, visible, revision)
 }
 
 #[tauri::command]
@@ -706,7 +883,9 @@ fn save_api_key(api_key: String, app: AppHandle) -> Result<DesktopRuntime, Strin
     if api_key.is_empty() {
         return Err("API key cannot be empty".into());
     }
-    keyring_entry()?.set_password(api_key).map_err(|error| format!("Could not save API key in Windows Credential Manager: {error}"))?;
+    keyring_entry()?.set_password(api_key).map_err(|error| {
+        format!("Could not save API key in Windows Credential Manager: {error}")
+    })?;
     app.state::<DesktopState>().restart_core(&app)
 }
 
@@ -715,14 +894,20 @@ fn remove_api_key(app: AppHandle) -> Result<DesktopRuntime, String> {
     let entry = keyring_entry()?;
     match entry.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => {}
-        Err(error) => return Err(format!("Could not remove API key from Windows Credential Manager: {error}")),
+        Err(error) => {
+            return Err(format!(
+                "Could not remove API key from Windows Credential Manager: {error}"
+            ))
+        }
     }
     app.state::<DesktopState>().restart_core(&app)
 }
 
 fn main() {
     let app = tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| show_main_window(app)))
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            show_main_window(app)
+        }))
         .plugin(tauri_plugin_shell::init())
         .on_window_event(|window, event| {
             if window.label() != "main" {
@@ -735,7 +920,9 @@ fn main() {
                     // update (no resize or Z-order change), so it does not
                     // compete with Windows' drag loop.
                     let app = window.app_handle();
-                    let _ = app.state::<DesktopState>().move_in_app_avatar_with_parent(app);
+                    let _ = app
+                        .state::<DesktopState>()
+                        .move_in_app_avatar_with_parent(app);
                 }
                 WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
                     // The owned Unity popup moves together with Iris. Calling
@@ -758,7 +945,8 @@ fn main() {
                 // observes code 0 instead of STATUS_CONTROL_C_EXIT.
                 shutdown_handle.state::<DesktopState>().shutdown();
                 shutdown_handle.exit(0);
-            }).map_err(std::io::Error::other)?;
+            })
+            .map_err(std::io::Error::other)?;
             let state = app.state::<DesktopState>();
             create_main_window(&app.handle(), state.runtime())?;
             setup_tray(app)?;
@@ -787,19 +975,34 @@ fn main() {
             )?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![desktop_runtime, restart_core, quit_app, set_interface_locale, toggle_avatar, configure_avatar_placement, set_avatar_in_app_bounds, set_avatar_in_app_visible, api_key_configured, save_api_key, remove_api_key])
+        .invoke_handler(tauri::generate_handler![
+            desktop_runtime,
+            restart_core,
+            quit_app,
+            set_interface_locale,
+            toggle_avatar,
+            configure_avatar_placement,
+            set_avatar_in_app_bounds,
+            set_avatar_in_app_visible,
+            api_key_configured,
+            save_api_key,
+            remove_api_key
+        ])
         .build(tauri::generate_context!())
         .expect("error while building Iris desktop shell");
 
     app.run(|app, event| {
-            if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
-                app.state::<DesktopState>().shutdown();
-            }
-        });
+        if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
+            app.state::<DesktopState>().shutdown();
+        }
+    });
 }
 
 fn create_main_window(app: &AppHandle, runtime: DesktopRuntime) -> tauri::Result<()> {
-    let bootstrap = format!("window.__NEUROASIST_DESKTOP_CONFIG__ = {};", serde_json::to_string(&runtime).expect("desktop config serializes"));
+    let bootstrap = format!(
+        "window.__NEUROASIST_DESKTOP_CONFIG__ = {};",
+        serde_json::to_string(&runtime).expect("desktop config serializes")
+    );
     WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("Iris")
         .decorations(false)
@@ -820,13 +1023,22 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => show_main_window(app),
-            "avatar" => { let _ = app.state::<DesktopState>().toggle_avatar(app); }
+            "avatar" => {
+                let _ = app.state::<DesktopState>().toggle_avatar(app);
+            }
             "safe-mode" => restart_in_safe_mode(app),
             "quit" => app.exit(0),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
-            if matches!(event, TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. }) {
+            if matches!(
+                event,
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                }
+            ) {
                 show_main_window(tray.app_handle());
             }
         })
@@ -842,7 +1054,10 @@ fn show_main_window(app: &AppHandle) {
 }
 
 fn restart_in_safe_mode(app: &AppHandle) {
-    let executable = match env::current_exe() { Ok(path) => path, Err(_) => return };
+    let executable = match env::current_exe() {
+        Ok(path) => path,
+        Err(_) => return,
+    };
     let _ = Command::new(executable).arg("--safe-mode").spawn();
     app.exit(0);
 }
@@ -862,7 +1077,8 @@ fn random_token() -> String {
 }
 
 fn keyring_entry() -> Result<Entry, String> {
-    Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT).map_err(|error| format!("Windows Credential Manager is unavailable: {error}"))
+    Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
+        .map_err(|error| format!("Windows Credential Manager is unavailable: {error}"))
 }
 
 fn desktop_data_root(root: &PathBuf) -> PathBuf {
@@ -885,7 +1101,13 @@ fn avatar_placement_from_settings(data_root: &PathBuf) -> AvatarPlacement {
 fn avatar_placement_from_json(json: &str) -> AvatarPlacement {
     let value = serde_json::from_str::<serde_json::Value>(json)
         .ok()
-        .and_then(|payload| payload.get("settings")?.get("avatar_placement")?.as_str().map(str::to_owned));
+        .and_then(|payload| {
+            payload
+                .get("settings")?
+                .get("avatar_placement")?
+                .as_str()
+                .map(str::to_owned)
+        });
     match value.as_deref() {
         Some("in_app") => AvatarPlacement::InApp,
         _ => AvatarPlacement::DesktopOverlay,
@@ -901,7 +1123,12 @@ fn avatar_overlay_visible_from_settings(data_root: &PathBuf) -> bool {
 fn avatar_overlay_visible_from_json(json: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(json)
         .ok()
-        .and_then(|payload| payload.get("settings")?.get("avatar_overlay_visible")?.as_bool())
+        .and_then(|payload| {
+            payload
+                .get("settings")?
+                .get("avatar_overlay_visible")?
+                .as_bool()
+        })
         .unwrap_or(true)
 }
 
@@ -914,7 +1141,12 @@ fn avatar_in_app_visible_from_settings(data_root: &PathBuf) -> bool {
 fn avatar_in_app_visible_from_json(json: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(json)
         .ok()
-        .and_then(|payload| payload.get("settings")?.get("avatar_in_app_visible")?.as_bool())
+        .and_then(|payload| {
+            payload
+                .get("settings")?
+                .get("avatar_in_app_visible")?
+                .as_bool()
+        })
         .unwrap_or(true)
 }
 
@@ -932,7 +1164,9 @@ fn attach_embedded_avatar_window(app: &AppHandle, process_id: u32) -> Result<usi
             break window;
         }
         if started_at.elapsed() >= UNITY_WINDOW_DISCOVERY_TIMEOUT {
-            return Err("Unity avatar did not create an embeddable window within 30 seconds".into());
+            return Err(
+                "Unity avatar did not create an embeddable window within 30 seconds".into(),
+            );
         }
         thread::sleep(UNITY_WINDOW_POLL_INTERVAL);
     };
@@ -945,31 +1179,46 @@ fn attach_embedded_avatar_window(app: &AppHandle, process_id: u32) -> Result<usi
     wait_for_unity_graphics(window)?;
 
     unsafe {
-        // A layered Direct3D child window cannot reliably apply a colour key on
-        // Windows. Convert it to a popup *before* detaching it: changing the
-        // window relationship in this order follows Win32's child/popup style
-        // transition rules and prevents an invalid intermediate fullscreen
-        // client surface.
+        // A layered Direct3D child window cannot reliably apply a colour key
+        // on Windows. Convert it to a popup before detaching it, following
+        // Win32's child/popup transition rules.
         // Replace the complete overlapped-window style, not only WS_CHILD.
         // Keeping Unity's caption bits was the source of the white native
         // title bar above an otherwise embedded avatar.
         SetWindowLongPtrW(window, GWL_STYLE, WS_POPUP.0 as isize);
-        if GetParent(window).map(|current| !current.0.is_null()).unwrap_or(false) {
-            SetParent(window, None)
-                .map_err(|error| format!("Could not detach Unity avatar window from Iris: {error}"))?;
+        if GetParent(window)
+            .map(|current| !current.0.is_null())
+            .unwrap_or(false)
+        {
+            SetParent(window, None).map_err(|error| {
+                format!("Could not detach Unity avatar window from Iris: {error}")
+            })?;
         }
-        // Keep Unity as an owned popup: it has no Alt+Tab or taskbar presence,
-        // stays within Iris' Z-order, but retains the transparent overlay path.
+        // Keep Unity as an owned popup: it has no Alt+Tab or taskbar presence.
         let extended = GetWindowLongPtrW(window, GWL_EXSTYLE) as u32;
-        let embedded_extended = extended | WS_EX_LAYERED.0 | WS_EX_TRANSPARENT.0 | WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0;
+        let embedded_extended = extended
+            | WS_EX_LAYERED.0
+            | WS_EX_TRANSPARENT.0
+            | WS_EX_TOOLWINDOW.0
+            | WS_EX_NOACTIVATE.0;
         SetWindowLongPtrW(window, GWL_EXSTYLE, embedded_extended as isize);
         SetWindowLongPtrW(window, GWLP_HWNDPARENT, parent.0 as isize);
-        SetLayeredWindowAttributes(window, COLORREF(49 | (77 << 8) | (121 << 16)), 0, LWA_COLORKEY)
-            .map_err(|error| format!("Could not make Unity avatar background transparent: {error}"))?;
-        SetWindowPos(window, Some(HWND_TOP), 0, 0, 1, 1, SWP_NOACTIVATE | SWP_FRAMECHANGED)
-            .map_err(|error| format!("Could not initialize Unity avatar host bounds: {error}"))?;
+        SetLayeredWindowAttributes(window, EMBEDDED_AVATAR_COLOR_KEY, 0, LWA_COLORKEY).map_err(
+            |error| format!("Could not make Unity avatar background transparent: {error}"),
+        )?;
+        SetWindowPos(
+            window,
+            Some(HWND_TOP),
+            0,
+            0,
+            1,
+            1,
+            SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        )
+        .map_err(|error| format!("Could not initialize Unity avatar host bounds: {error}"))?;
         let _ = ShowWindow(window, SW_HIDE);
     }
+
     Ok(window.0 as usize)
 }
 
@@ -989,7 +1238,11 @@ fn wait_for_unity_graphics(window: HWND) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-fn resize_embedded_avatar_window(app: &AppHandle, window: usize, bounds: &AvatarInAppBounds) -> Result<(), String> {
+fn resize_embedded_avatar_window(
+    app: &AppHandle,
+    window: usize,
+    bounds: &AvatarInAppBounds,
+) -> Result<(), String> {
     let parent = app
         .get_webview_window("main")
         .ok_or("Could not find Iris main window")?
@@ -999,7 +1252,10 @@ fn resize_embedded_avatar_window(app: &AppHandle, window: usize, bounds: &Avatar
         // DOM rectangles start at the WebView client origin; owned popups use
         // physical screen coordinates.  ClientToScreen accounts for the title
         // bar, window movement, and Windows DPI scaling.
-        let mut position = POINT { x: bounds.x, y: bounds.y };
+        let mut position = POINT {
+            x: bounds.x,
+            y: bounds.y,
+        };
         ClientToScreen(parent, &mut position)
             .ok()
             .map_err(|error| format!("Could not map avatar host bounds to screen: {error}"))?;
@@ -1011,7 +1267,8 @@ fn resize_embedded_avatar_window(app: &AppHandle, window: usize, bounds: &Avatar
             bounds.width,
             bounds.height,
             SWP_NOACTIVATE | SWP_NOZORDER,
-        ).map_err(|error| format!("Could not resize Unity avatar host: {error}"))?;
+        )
+        .map_err(|error| format!("Could not resize Unity avatar host: {error}"))?;
     }
     Ok(())
 }
@@ -1022,7 +1279,13 @@ fn interface_locale_from_settings(data_root: &PathBuf) -> String {
         .and_then(|json| {
             serde_json::from_str::<serde_json::Value>(&json)
                 .ok()
-                .and_then(|payload| payload.get("settings")?.get("interface_locale")?.as_str().map(str::to_owned))
+                .and_then(|payload| {
+                    payload
+                        .get("settings")?
+                        .get("interface_locale")?
+                        .as_str()
+                        .map(str::to_owned)
+                })
         })
         .filter(|locale| matches!(locale.as_str(), "ru" | "en"))
         .unwrap_or_else(|| "ru".to_owned())
@@ -1030,13 +1293,27 @@ fn interface_locale_from_settings(data_root: &PathBuf) -> String {
 
 fn tray_copy(locale: &str) -> (&'static str, &'static str, &'static str, &'static str) {
     match locale {
-        "en" => ("Show Iris", "Show / hide avatar", "Restart in Safe Mode", "Quit"),
-        _ => ("Показать Iris", "Показать / скрыть аватар", "Перезапустить в безопасном режиме", "Выйти"),
+        "en" => (
+            "Show Iris",
+            "Show / hide avatar",
+            "Restart in Safe Mode",
+            "Quit",
+        ),
+        _ => (
+            "Показать Iris",
+            "Показать / скрыть аватар",
+            "Перезапустить в безопасном режиме",
+            "Выйти",
+        ),
     }
 }
 
 fn tray_tooltip(locale: &str) -> &'static str {
-    if locale == "en" { "Iris companion" } else { "Компаньон Iris" }
+    if locale == "en" {
+        "Iris companion"
+    } else {
+        "Компаньон Iris"
+    }
 }
 
 fn build_tray_menu<R: tauri::Runtime, M: Manager<R>>(
@@ -1048,18 +1325,27 @@ fn build_tray_menu<R: tauri::Runtime, M: Manager<R>>(
     let avatar = MenuItemBuilder::with_id("avatar", avatar_label).build(manager)?;
     let safe_mode = MenuItemBuilder::with_id("safe-mode", safe_mode_label).build(manager)?;
     let quit = MenuItemBuilder::with_id("quit", quit_label).build(manager)?;
-    MenuBuilder::new(manager).items(&[&show, &avatar, &safe_mode, &quit]).build()
+    MenuBuilder::new(manager)
+        .items(&[&show, &avatar, &safe_mode, &quit])
+        .build()
 }
 
 #[cfg(windows)]
-fn move_embedded_avatar_window(app: &AppHandle, window: usize, bounds: &AvatarInAppBounds) -> Result<(), String> {
+fn move_embedded_avatar_window(
+    app: &AppHandle,
+    window: usize,
+    bounds: &AvatarInAppBounds,
+) -> Result<(), String> {
     let parent = app
         .get_webview_window("main")
         .ok_or("Could not find Iris main window")?
         .hwnd()
         .map_err(|error| format!("Could not get Iris native window handle: {error}"))?;
     unsafe {
-        let mut position = POINT { x: bounds.x, y: bounds.y };
+        let mut position = POINT {
+            x: bounds.x,
+            y: bounds.y,
+        };
         ClientToScreen(parent, &mut position)
             .ok()
             .map_err(|error| format!("Could not map avatar move to screen: {error}"))?;
@@ -1071,7 +1357,8 @@ fn move_embedded_avatar_window(app: &AppHandle, window: usize, bounds: &AvatarIn
             0,
             0,
             SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER,
-        ).map_err(|error| format!("Could not move Unity avatar host: {error}"))?;
+        )
+        .map_err(|error| format!("Could not move Unity avatar host: {error}"))?;
     }
     Ok(())
 }
@@ -1104,7 +1391,10 @@ fn unity_window_for_process(process_id: u32) -> Option<HWND> {
         BOOL(1)
     }
 
-    let mut search = Search { process_id, window: None };
+    let mut search = Search {
+        process_id,
+        window: None,
+    };
     unsafe {
         // The player starts as a normal tiny top-level window. Its rendering
         // surface is always a UnityWndClass; helper and splash windows are
@@ -1139,14 +1429,21 @@ mod tests {
             avatar_placement_from_json(r#"{"settings":{"avatar_placement":"desktop_overlay"}}"#),
             AvatarPlacement::DesktopOverlay,
         );
-        assert_eq!(avatar_placement_from_json("not json"), AvatarPlacement::DesktopOverlay);
+        assert_eq!(
+            avatar_placement_from_json("not json"),
+            AvatarPlacement::DesktopOverlay
+        );
     }
 
     #[test]
     fn avatar_visibility_defaults_to_enabled_for_existing_settings() {
-        assert!(!avatar_overlay_visible_from_json(r#"{"settings":{"avatar_overlay_visible":false}}"#));
+        assert!(!avatar_overlay_visible_from_json(
+            r#"{"settings":{"avatar_overlay_visible":false}}"#
+        ));
         assert!(avatar_overlay_visible_from_json(r#"{"settings":{}}"#));
-        assert!(!avatar_in_app_visible_from_json(r#"{"settings":{"avatar_in_app_visible":false}}"#));
+        assert!(!avatar_in_app_visible_from_json(
+            r#"{"settings":{"avatar_in_app_visible":false}}"#
+        ));
         assert!(avatar_in_app_visible_from_json(r#"{"settings":{}}"#));
     }
 
@@ -1165,7 +1462,9 @@ fn read_api_key() -> Result<Option<String>, String> {
     match keyring_entry()?.get_password() {
         Ok(value) if !value.trim().is_empty() => Ok(Some(value)),
         Ok(_) | Err(keyring::Error::NoEntry) => Ok(None),
-        Err(error) => Err(format!("Could not read API key from Windows Credential Manager: {error}")),
+        Err(error) => Err(format!(
+            "Could not read API key from Windows Credential Manager: {error}"
+        )),
     }
 }
 
@@ -1174,7 +1473,11 @@ fn core_command(root: &PathBuf) -> Result<Command, String> {
         return Ok(Command::new(executable));
     }
     let python = root.join(".venv").join("Scripts").join("python.exe");
-    let mut command = Command::new(if python.exists() { python } else { PathBuf::from("python") });
+    let mut command = Command::new(if python.exists() {
+        python
+    } else {
+        PathBuf::from("python")
+    });
     command.args(["-m", "apps.backend.desktop_entry"]);
     Ok(command)
 }
@@ -1194,12 +1497,18 @@ fn configure_core_command(
         .env("NEUROASIST_PORT", port)
         .env("NEUROASIST_DESKTOP_TOKEN", token)
         .env("NEUROASIST_APP_DATA_DIR", data_root)
-        .env("SQLITE_PATH", data_root.join("data").join("neuroasist.sqlite3"))
+        .env(
+            "SQLITE_PATH",
+            data_root.join("data").join("neuroasist.sqlite3"),
+        )
         .env("VOICE_AUDIO_DIR", data_root.join("data").join("audio"))
         .env("LOG_TO_FILE", "true")
         .env("LOG_FILE_PATH", data_root.join("logs").join("app.log"))
         .env("NEUROASIST_SAFE_MODE", if safe_mode { "1" } else { "0" })
-        .env("AVATAR_ENABLED", if avatar_enabled { "true" } else { "false" });
+        .env(
+            "AVATAR_ENABLED",
+            if avatar_enabled { "true" } else { "false" },
+        );
     if let Some(api_key) = api_key {
         command.env("DEEPSEEK_API_KEY", api_key);
     }
@@ -1216,36 +1525,69 @@ fn core_shutdown_request(runtime: &DesktopRuntime) -> Result<(), String> {
 fn core_request(runtime: &DesktopRuntime, method: &str, path: &str) -> Result<(), String> {
     let address = runtime.api_base_url.trim_start_matches("http://");
     let mut stream = TcpStream::connect(address).map_err(|error| error.to_string())?;
-    stream.set_read_timeout(Some(Duration::from_secs(1))).map_err(|error| error.to_string())?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .map_err(|error| error.to_string())?;
     let request = format!("{method} {path} HTTP/1.1\r\nHost: {address}\r\nX-NeuroAsist-Token: {}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n", runtime.api_token);
-    stream.write_all(request.as_bytes()).map_err(|error| error.to_string())?;
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|error| error.to_string())?;
     let mut response = String::new();
-    stream.read_to_string(&mut response).map_err(|error| error.to_string())?;
-    if response.starts_with("HTTP/1.1 2") { Ok(()) } else { Err(response.lines().next().unwrap_or("No HTTP response").into()) }
+    stream
+        .read_to_string(&mut response)
+        .map_err(|error| error.to_string())?;
+    if response.starts_with("HTTP/1.1 2") {
+        Ok(())
+    } else {
+        Err(response.lines().next().unwrap_or("No HTTP response").into())
+    }
 }
 
-fn avatar_overlay_visibility_request(runtime: &DesktopRuntime, visible: bool) -> Result<(), String> {
+fn avatar_overlay_visibility_request(
+    runtime: &DesktopRuntime,
+    visible: bool,
+) -> Result<(), String> {
     let address = runtime.api_base_url.trim_start_matches("http://");
     let mut stream = TcpStream::connect(address).map_err(|error| error.to_string())?;
-    stream.set_read_timeout(Some(Duration::from_secs(1))).map_err(|error| error.to_string())?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .map_err(|error| error.to_string())?;
     let body = format!(r#"{{"visible":{visible}}}"#);
     let request = format!("PUT /avatar/overlay HTTP/1.1\r\nHost: {address}\r\nX-NeuroAsist-Token: {}\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}", runtime.api_token, body.len());
-    stream.write_all(request.as_bytes()).map_err(|error| error.to_string())?;
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|error| error.to_string())?;
     let mut response = String::new();
-    stream.read_to_string(&mut response).map_err(|error| error.to_string())?;
-    if response.starts_with("HTTP/1.1 2") { Ok(()) } else { Err(response.lines().next().unwrap_or("No HTTP response").into()) }
+    stream
+        .read_to_string(&mut response)
+        .map_err(|error| error.to_string())?;
+    if response.starts_with("HTTP/1.1 2") {
+        Ok(())
+    } else {
+        Err(response.lines().next().unwrap_or("No HTTP response").into())
+    }
 }
 
 fn avatar_in_app_visibility_request(runtime: &DesktopRuntime, visible: bool) -> Result<(), String> {
     let address = runtime.api_base_url.trim_start_matches("http://");
     let mut stream = TcpStream::connect(address).map_err(|error| error.to_string())?;
-    stream.set_read_timeout(Some(Duration::from_secs(1))).map_err(|error| error.to_string())?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .map_err(|error| error.to_string())?;
     let body = format!(r#"{{"avatar_in_app_visible":{visible}}}"#);
     let request = format!("PATCH /settings/runtime HTTP/1.1\r\nHost: {address}\r\nX-NeuroAsist-Token: {}\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}", runtime.api_token, body.len());
-    stream.write_all(request.as_bytes()).map_err(|error| error.to_string())?;
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|error| error.to_string())?;
     let mut response = String::new();
-    stream.read_to_string(&mut response).map_err(|error| error.to_string())?;
-    if response.starts_with("HTTP/1.1 2") { Ok(()) } else { Err(response.lines().next().unwrap_or("No HTTP response").into()) }
+    stream
+        .read_to_string(&mut response)
+        .map_err(|error| error.to_string())?;
+    if response.starts_with("HTTP/1.1 2") {
+        Ok(())
+    } else {
+        Err(response.lines().next().unwrap_or("No HTTP response").into())
+    }
 }
 
 // Trigger rebuild

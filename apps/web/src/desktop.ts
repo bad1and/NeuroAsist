@@ -12,6 +12,16 @@ export type DesktopRuntime = {
   coreStatus: CoreStatus;
 };
 
+export type AvatarInAppBounds = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  // Bounds and visibility carry the same monotonic revision so native code
+  // can discard IPC messages that arrive after the chat host unmounts.
+  revision: number;
+};
+
 export type AvatarHostStatus = {
   placement: AvatarPlacement;
   running: boolean;
@@ -70,4 +80,14 @@ export async function setDesktopInterfaceLocale(locale: InterfaceLocale): Promis
 export async function configureAvatarPlacement(placement: AvatarPlacement): Promise<AvatarHostStatus | null> {
   if (!isDesktopApp()) return null;
   return invoke<AvatarHostStatus>("configure_avatar_placement", { placement });
+}
+
+export async function setAvatarInAppBounds(bounds: AvatarInAppBounds): Promise<void> {
+  if (!isDesktopApp()) return;
+  await invoke<void>("set_avatar_in_app_bounds", { bounds });
+}
+
+export async function setAvatarInAppVisible(visible: boolean, revision: number): Promise<void> {
+  if (!isDesktopApp()) return;
+  await invoke<void>("set_avatar_in_app_visible", { visible, revision });
 }
