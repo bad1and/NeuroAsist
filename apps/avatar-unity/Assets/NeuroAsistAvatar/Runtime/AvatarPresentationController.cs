@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace NeuroAsist.Avatar
 {
-    /// <summary>Frames the active avatar as a VTuber-style portrait for the real native host size and enables the high-quality player path.</summary>
+    /// <summary>Frames the active avatar as a VTuber-style portrait for its native host.</summary>
     [DisallowMultipleComponent]
     public sealed class AvatarPresentationController : MonoBehaviour
     {
@@ -77,6 +77,19 @@ namespace NeuroAsist.Avatar
 
         private void ApplyRenderQuality()
         {
+            if (AvatarPerformanceProfile.IsEmbeddedHost())
+            {
+                // The embedded D3D surface shares the GPU with WebView. The
+                // performance profile configured the 60 FPS, low-overhead path.
+                if (avatarCamera != null)
+                {
+                    avatarCamera.allowHDR = false;
+                    avatarCamera.allowMSAA = AvatarPerformanceProfile.EmbeddedAntiAliasing > 1;
+                    avatarCamera.allowDynamicResolution = false;
+                    avatarCamera.clearFlags = CameraClearFlags.SolidColor;
+                }
+                return;
+            }
             if (QualitySettings.names.Length > 0)
                 QualitySettings.SetQualityLevel(QualitySettings.names.Length - 1, true);
             QualitySettings.antiAliasing = 8;

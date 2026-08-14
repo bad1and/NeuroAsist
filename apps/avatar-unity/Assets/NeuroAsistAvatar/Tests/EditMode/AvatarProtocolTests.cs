@@ -14,5 +14,8 @@ namespace NeuroAsist.Avatar.Tests
         [Test] public void BackoffCapsAtFifteenSeconds() { Assert.That(ReconnectBackoff.GetDelay(0), Is.EqualTo(1)); Assert.That(ReconnectBackoff.GetDelay(99), Is.EqualTo(15)); }
         [Test] public void DetectsEmbeddedDesktopHostOnly() { Assert.That(WindowsDesktopOverlay.IsEmbeddedHost("embedded"), Is.True); Assert.That(WindowsDesktopOverlay.IsEmbeddedHost("overlay"), Is.False); Assert.That(WindowsDesktopOverlay.IsEmbeddedHost(null), Is.False); }
         [Test] public void LetsIrisHostControlEmbeddedResolution() { Assert.That(AvatarPerformanceProfile.ShouldSetStandaloneResolution(true), Is.False); Assert.That(AvatarPerformanceProfile.ShouldSetStandaloneResolution(false), Is.True); }
+        [Test] public void EmbeddedProfileTargetsSixtyFramesPerSecond() { Assert.That(AvatarPerformanceProfile.EmbeddedFrameRate, Is.EqualTo(60)); }
+        [Test] public void EmbeddedProfileUsesLightweightEdgeAntiAliasing() { Assert.That(AvatarPerformanceProfile.EmbeddedAntiAliasing, Is.EqualTo(2)); }
+        [Test] public void EmbeddedHostAlwaysSelectsPerformanceProfile() { Assert.That(AvatarPerformanceProfile.ShouldApplyPerformanceProfile(true, false), Is.True); Assert.That(AvatarPerformanceProfile.ShouldApplyPerformanceProfile(false, false), Is.False); }
     }
 }
