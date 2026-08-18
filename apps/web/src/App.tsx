@@ -934,6 +934,7 @@ export function ChatPage({
   const playbackSegmentTextsRef = useRef<string[]>([]);
   const activeVoiceGenerationRef = useRef<number | undefined>(undefined);
   const conversationStatusTimerRef = useRef<number | null>(null);
+  const bargeInTimerRef = useRef<number | null>(null);
   const pendingTextDeltasRef = useRef(new Map<string, string>());
   const pendingTextDeltaTimerRef = useRef<number | null>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -954,11 +955,19 @@ export function ChatPage({
     }
   }, []);
 
+  const cancelPendingBargeIn = useCallback(() => {
+    if (bargeInTimerRef.current !== null) {
+      window.clearTimeout(bargeInTimerRef.current);
+      bargeInTimerRef.current = null;
+    }
+  }, []);
+
   useEffect(() => () => {
     if (conversationStatusTimerRef.current !== null) {
       window.clearTimeout(conversationStatusTimerRef.current);
     }
-  }, []);
+    cancelPendingBargeIn();
+  }, [cancelPendingBargeIn]);
 
   useEffect(() => {
     if (!error) return;
@@ -1632,6 +1641,7 @@ export function ChatPage({
   const toggleLive = async () => {
     if (!sessionId || !liveReady) return;
     if (liveConversation) {
+      cancelPendingBargeIn();
       vadRecorderRef.current?.stop();
       pcmInputRef.current?.close();
       pcmInputRef.current = null;
@@ -1642,6 +1652,7 @@ export function ChatPage({
       updateConversationStatus("Live выключен");
       return;
     }
+    cancelPendingBargeIn();
     vadRecorderRef.current?.stop();
     pcmInputRef.current?.close();
     pcmInputRef.current = null;
@@ -1711,11 +1722,30 @@ export function ChatPage({
       vadRecorderRef.current = recorder;
       const capture = await recorder.start(
         (pcm16) => pcmInputRef.current?.sendPcm(pcm16),
-        (_nextState, event) => {
+        (nextState, event) => {
+          // A transient sound must not interrupt the answer.  Cancel the
+          // pending barge-in as soon as VAD drops out of confirmed speech.
+          if (nextState !== "speech") cancelPendingBargeIn();
           if (event === "speech_started") {
-            interruptAssistantSpeech();
             setVoiceState("recording");
             updateConversationStatus("Слышу вас");
+            const utteranceId = liveSocketRef.current?.activeUtteranceId;
+            if (utteranceId) {
+              const confirmationMs = {
+                // A short, loud cough can pass VAD. Require sustained audio
+                // before interrupting a response, even at high sensitivity.
+                low: 650,
+                balanced: 450,
+                high: 300,
+              }[settings?.live_conversation_interruption_sensitivity ?? "balanced"];
+              bargeInTimerRef.current = window.setTimeout(() => {
+                bargeInTimerRef.current = null;
+                // Do not let a delayed signal cancel a newer response.
+                if (liveSocketRef.current?.activeUtteranceId === utteranceId) {
+                  interruptAssistantSpeech();
+                }
+              }, confirmationMs);
+            }
           } else if (event === "speech_ended") {
             setVoiceState("transcribing");
           }
@@ -1732,6 +1762,7 @@ export function ChatPage({
       setMicrophoneMuted(false);
       updateConversationStatus("Микрофон включён");
     } catch (vadError) {
+      cancelPendingBargeIn();
       vadRecorderRef.current?.stop();
       pcmInputRef.current?.close();
       vadRecorderRef.current = null;
@@ -1745,11 +1776,12 @@ export function ChatPage({
   const toggleMicrophoneMute = useCallback(() => {
     if (!liveConversation || !vadRecorderRef.current) return;
     const nextMuted = !microphoneMuted;
+    if (nextMuted) cancelPendingBargeIn();
     vadRecorderRef.current.setMuted(nextMuted);
     setMicrophoneMuted(nextMuted);
     playMuteTone(nextMuted);
     updateConversationStatus(nextMuted ? "Микрофон выключен" : "Микрофон включён");
-  }, [liveConversation, microphoneMuted, playMuteTone, updateConversationStatus]);
+  }, [cancelPendingBargeIn, liveConversation, microphoneMuted, playMuteTone, updateConversationStatus]);
 
   useEffect(() => {
     const handleMuteHotkey = (event: KeyboardEvent) => {
@@ -1770,6 +1802,7 @@ export function ChatPage({
     try {
       // A new session must not inherit a live microphone stream or an answer
       // that was still playing in the previous dialog.
+      cancelPendingBargeIn();
       vadRecorderRef.current?.stop();
       pcmInputRef.current?.close();
       pcmInputRef.current = null;

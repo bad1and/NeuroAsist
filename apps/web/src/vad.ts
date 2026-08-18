@@ -17,7 +17,7 @@ export const LIVE_MUTE_HOTKEY = "m";
 
 export function microphoneConstraints(profile: CaptureProfile, inputDeviceId = ""): MediaTrackConstraints {
   const processing = {
-    live: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    live: { echoCancellation: true, noiseSuppression: true, autoGainControl: false },
     headset: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
     balanced: { echoCancellation: true, noiseSuppression: false, autoGainControl: false },
     speakers: { echoCancellation: true, noiseSuppression: true, autoGainControl: false },
@@ -35,8 +35,8 @@ export class VoiceActivityGate {
   private since = 0;
 
   constructor(
-    private readonly threshold = 0.012,
-    private readonly candidateMs = 160,
+    private readonly threshold = 0.018,
+    private readonly candidateMs = 120,
     private readonly silenceMs = 700,
   ) {}
 
@@ -92,15 +92,16 @@ class NeuroVadProcessor extends AudioWorkletProcessor {
       } else {
         this.gain += (1 - this.gain) * 0.04;
       }
-      let sum = 0;
       for (let i = 0; i < samples.length; i++) {
         const amplified = Math.max(-1.2, Math.min(1.2, samples[i] * this.gain));
         const value = Math.tanh(amplified * 1.25);
-        sum += value * value;
         pcm[i] = Math.round(value * 32767);
       }
       this.port.postMessage({
-        rms: Math.sqrt(sum / samples.length),
+        // VAD needs the physical microphone level.  The adaptive gain below
+        // improves STT input, but using its amplified value here makes quiet
+        // breaths look like speech and causes accidental barge-ins.
+        rms: inputRms,
         pcm: pcm.buffer,
         sampleRate,
         inputChannels: channels.length,

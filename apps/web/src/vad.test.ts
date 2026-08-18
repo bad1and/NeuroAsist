@@ -28,6 +28,17 @@ describe("VoiceActivityGate", () => {
     expect(gate.snapshot()).toBe("speech");
   });
 
+  it("keeps a quiet breath below the default live speech threshold", () => {
+    const gate = new VoiceActivityGate();
+    gate.start(0);
+    expect(gate.feed(.017, 0)).toBeNull();
+    expect(gate.feed(.017, 200)).toBeNull();
+    expect(gate.snapshot()).toBe("listening");
+
+    expect(gate.feed(.018, 220)).toBeNull();
+    expect(gate.feed(.018, 340)).toBe("speech_started");
+  });
+
   it("maps microphone profiles to explicit browser processing", () => {
     expect(microphoneConstraints("headset")).toMatchObject({
       echoCancellation: false, noiseSuppression: false, autoGainControl: false,
@@ -39,7 +50,7 @@ describe("VoiceActivityGate", () => {
       echoCancellation: true, noiseSuppression: true, autoGainControl: false,
     });
     expect(microphoneConstraints("live")).toMatchObject({
-      echoCancellation: true, noiseSuppression: true, autoGainControl: true,
+      echoCancellation: true, noiseSuppression: true, autoGainControl: false,
     });
     expect(microphoneConstraints("balanced", "usb-microphone")).toMatchObject({
       deviceId: { exact: "usb-microphone" },
