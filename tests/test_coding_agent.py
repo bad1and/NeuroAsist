@@ -6,9 +6,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from apps.backend import main as backend_main
+from apps.backend.app.coding import runner as runner_module
 from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.coding.orchestration import CodingBridge
-from apps.backend.app.coding.runner import DockerSandboxRunner
+from apps.backend.app.coding.runner import DockerAvailability, DockerSandboxRunner
 from apps.backend.app.coding.sandbox import SnapshotLimitError, TaskSandbox
 from apps.backend.app.coding.service import CodingAgentService
 from apps.backend.app.core.config import ROOT_DIR, Settings
@@ -246,6 +247,91 @@ def test_natural_language_request_to_code_agent_is_queued_when_auto_delegate_is_
     assert tasks[0]["objective"] == request
 
 
+def test_task_request_with_a_result_file_is_queued_not_misread_as_status(tmp_path: Path) -> None:
+    class NeverCalledProvider:
+        calls = 0
+
+        async def generate(self, _messages):
+            self.calls += 1
+            raise AssertionError("A concrete Coding Agent task must not be answered by the main model")
+
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = coding_settings(tmp_path, project)
+    store = TimelineStore(settings.database_path)
+    store.init_db()
+    runtime = RuntimeSettings(coding_agent_enabled=True, coding_auto_delegate=True)
+    service = CodingAgentService(settings, runtime, store, lambda *_: None)
+    previous = service.create_task("Старый Python файл")
+    store.update_coding_task(str(previous["id"]), status="applied")
+    provider = NeverCalledProvider()
+    agent = CharacterAgent(provider, TimelineHistoryAdapter(store), history_limit=5, coding_bridge=CodingBridge(service))
+    request = (
+        "Ирис, дай задачу Coding Agent: создай файл numbers.txt, запиши в него числа от 1 до 100, "
+        "затем посчитай сумму и запиши результат в файл sum.txt"
+    )
+
+    result = asyncio.run(agent.handle_user_message("session", request))
+
+    assert "поставлена в очередь" in result["reply"]
+    assert "Активной задачи" not in result["reply"]
+    assert provider.calls == 0
+    assert store.list_coding_tasks()[0]["objective"] == request
+
+
+def test_unspecified_new_task_request_never_claims_it_was_delegated(tmp_path: Path) -> None:
+    class NeverCalledProvider:
+        calls = 0
+
+        async def generate(self, _messages):
+            self.calls += 1
+            raise AssertionError("An incomplete Coding Agent request must receive a factual forced reply")
+
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = coding_settings(tmp_path, project)
+    store = TimelineStore(settings.database_path)
+    store.init_db()
+    service = CodingAgentService(
+        settings, RuntimeSettings(coding_agent_enabled=True, coding_auto_delegate=True), store, lambda *_: None,
+    )
+    provider = NeverCalledProvider()
+    agent = CharacterAgent(provider, TimelineHistoryAdapter(store), history_limit=5, coding_bridge=CodingBridge(service))
+
+    result = asyncio.run(agent.handle_user_message("session", "Так новую задачу дай"))
+
+    assert "Сформулируй задачу целиком" in result["reply"]
+    assert "поставлена в очередь" not in result["reply"]
+    assert provider.calls == 0
+    assert store.list_coding_tasks() == []
+
+
+def test_explicit_status_question_still_reports_the_latest_coding_task(tmp_path: Path) -> None:
+    class NeverCalledProvider:
+        calls = 0
+
+        async def generate(self, _messages):
+            self.calls += 1
+            raise AssertionError("A Coding Agent status request must not be answered by the main model")
+
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = coding_settings(tmp_path, project)
+    store = TimelineStore(settings.database_path)
+    store.init_db()
+    service = CodingAgentService(settings, RuntimeSettings(coding_agent_enabled=True), store, lambda *_: None)
+    previous = service.create_task("Напиши Python файл")
+    store.update_coding_task(str(previous["id"]), status="failed")
+    provider = NeverCalledProvider()
+    agent = CharacterAgent(provider, TimelineHistoryAdapter(store), history_limit=5, coding_bridge=CodingBridge(service))
+
+    result = asyncio.run(agent.handle_user_message("session", "Какой результат последней задачи Coding Agent?"))
+
+    assert "failed" in result["reply"]
+    assert provider.calls == 0
+    assert len(store.list_coding_tasks()) == 1
+
+
 def test_disabled_agent_keeps_follow_up_code_detail_for_a_later_confirmation(tmp_path: Path) -> None:
     class NeverCalledProvider:
         calls = 0
@@ -313,11 +399,13 @@ def test_review_ready_coding_task_notifies_its_source_chat_once(tmp_path: Path) 
     store = TimelineStore(settings.database_path)
     store.init_db()
     events: list[tuple[str, str, str, dict[str, object]]] = []
+    spoken: list[tuple[str, str]] = []
     service = CodingAgentService(
         settings,
         RuntimeSettings(coding_agent_enabled=True),
         store,
         lambda event_type, level, message, metadata: events.append((event_type, level, message, metadata)),
+        notification_speaker=lambda session_id, text: spoken.append((session_id, text)),
     )
     task = service.create_task("Напиши Python файл", session_id="chat-session")
 
@@ -330,6 +418,7 @@ def test_review_ready_coding_task_notifies_its_source_chat_once(tmp_path: Path) 
     assert notifications[0].role == "assistant"
     assert "готов к проверке" in notifications[0].content
     assert "```" not in notifications[0].content
+    assert spoken == [("chat-session", notifications[0].content)]
     assert events == [
         (
             "coding.review_notification",
@@ -352,11 +441,13 @@ def test_failed_coding_task_notifies_its_source_chat_once(tmp_path: Path) -> Non
     store = TimelineStore(settings.database_path)
     store.init_db()
     events: list[tuple[str, str, str, dict[str, object]]] = []
+    spoken: list[tuple[str, str]] = []
     service = CodingAgentService(
         settings,
         RuntimeSettings(coding_agent_enabled=True),
         store,
         lambda event_type, level, message, metadata: events.append((event_type, level, message, metadata)),
+        notification_speaker=lambda session_id, text: spoken.append((session_id, text)),
     )
     task = service.create_task("Проверь Python файл", session_id="chat-session")
 
@@ -369,6 +460,7 @@ def test_failed_coding_task_notifies_its_source_chat_once(tmp_path: Path) -> Non
     assert notifications[0].role == "assistant"
     assert "ошибкой" in notifications[0].content
     assert "```" not in notifications[0].content
+    assert spoken == [("chat-session", notifications[0].content)]
     assert events == [
         (
             "coding.attention_notification",
@@ -447,7 +539,77 @@ def test_docker_availability_accepts_successful_cli_and_image(monkeypatch, tmp_p
 
     monkeypatch.setattr(runner, "_exec", successful_exec)
 
-    assert asyncio.run(runner.availability()) == (True, None)
+    availability = asyncio.run(runner.availability())
+
+    assert availability.cli_available is True
+    assert availability.daemon_available is True
+    assert availability.image_available is True
+    assert availability.sandbox_available is True
+    assert availability.reason is None
+
+
+def test_runner_finds_per_user_docker_desktop_cli_when_path_is_stale(monkeypatch, tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    cli = tmp_path / "Programs" / "DockerDesktop" / "resources" / "bin" / "docker.exe"
+    cli.parent.mkdir(parents=True)
+    cli.touch()
+    runner = DockerSandboxRunner(coding_settings(tmp_path, project))
+
+    monkeypatch.setattr(runner_module.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(runner_module.os, "name", "nt")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+
+    assert runner._docker_executable() == str(cli)
+
+
+def test_docker_availability_distinguishes_running_daemon_from_missing_image(monkeypatch, tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    runner = DockerSandboxRunner(coding_settings(tmp_path, project))
+
+    async def image_missing(argv: list[str], *, timeout: float) -> dict[str, object]:
+        exit_code = 1 if argv[1:3] == ["image", "inspect"] else 0
+        return {"exit_code": exit_code, "stdout": "", "stderr": "", "timed_out": False}
+
+    monkeypatch.setattr(runner, "_exec", image_missing)
+    availability = asyncio.run(runner.availability())
+
+    assert availability.cli_available is True
+    assert availability.daemon_available is True
+    assert availability.image_available is False
+    assert availability.sandbox_available is False
+    assert "is not built" in str(availability.reason)
+
+
+def test_status_rechecks_a_transient_docker_failure_without_manual_refresh(monkeypatch, tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = coding_settings(tmp_path, project)
+    store = TimelineStore(settings.database_path)
+    store.init_db()
+    service = CodingAgentService(settings, RuntimeSettings(coding_agent_enabled=True), store, lambda *_: None)
+    responses = iter([
+        DockerAvailability(True, False, False, settings.coding_docker_image, "Docker daemon is unavailable"),
+        DockerAvailability(True, True, True, settings.coding_docker_image),
+    ])
+    calls = 0
+
+    async def availability() -> DockerAvailability:
+        nonlocal calls
+        calls += 1
+        return next(responses)
+
+    monkeypatch.setattr(service.runner, "availability", availability)
+
+    first = asyncio.run(service.status())
+    second = asyncio.run(service.status())
+
+    assert calls == 2
+    assert first["docker_daemon_available"] is False
+    assert second["docker_daemon_available"] is True
+    assert second["docker_image_available"] is True
+    assert second["available"] is True
 
 
 def test_docker_runner_uses_portable_writable_bind_mount(monkeypatch, tmp_path: Path) -> None:

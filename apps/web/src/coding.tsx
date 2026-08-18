@@ -70,8 +70,8 @@ export function CodingAgentPage({
     void getCodingTask(selectedId).then(setSelected).catch(() => setSelected(null));
   }, [selectedId, tasks]);
   useEffect(() => {
-    if (!tasks.some((task) => ACTIVE_TASKS.has(task.status))) return;
-    const timer = window.setInterval(() => void refresh(), 2500);
+    const hasActiveTask = tasks.some((task) => ACTIVE_TASKS.has(task.status));
+    const timer = window.setInterval(() => void refresh(), hasActiveTask ? 2500 : 5000);
     return () => window.clearInterval(timer);
   }, [tasks, refresh]);
 
@@ -138,7 +138,7 @@ export function CodingAgentPage({
       {error && <div className="notice is-error"><CircleAlert size={17} /> {error}</div>}
       <div className="coding-status-grid">
         <article><span>Агент</span><strong className={status?.enabled ? "is-success" : "is-muted"}>{status?.enabled ? "Включён" : "Выключен"}</strong><small>{status?.configured_enabled ? "Функция доступна" : "Отключён администратором"}</small></article>
-        <article><span>Песочница Docker</span><strong className={status?.available ? "is-success" : "is-danger"}>{status?.available ? "Готова" : "Недоступна"}</strong><small>{status?.availability_reason ?? "Команды выполняются без сети в изолированной рабочей папке"}</small></article>
+        <article><span>Docker</span><strong className={status?.docker_daemon_available ? "is-success" : "is-danger"}>{status?.docker_daemon_available ? "Запущен" : "Недоступен"}</strong><small>{status?.docker_daemon_available ? (status?.docker_image_available ? "Образ песочницы: готов" : "Образ песочницы: не собран") : (status?.availability_reason ?? "Проверяю Docker daemon")}</small></article>
         <article><span>Текущая работа</span><strong>{active ? statusLabel(active.status) : "Нет задачи"}</strong><small>{active ? <span data-i18n-skip>{active.objective.slice(0, 92)}</span> : "Создайте задачу ниже"}</small></article>
       </div>
       {settings && <section className="coding-settings-panel" aria-label="Настройки Coding Agent">

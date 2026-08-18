@@ -304,6 +304,10 @@ export type CodingStatus = {
   configured_enabled: boolean;
   available: boolean;
   availability_reason?: string | null;
+  docker_cli_available: boolean;
+  docker_daemon_available: boolean;
+  docker_image_available: boolean;
+  docker_image_name: string;
   model: string;
   available_models: string[];
   project_root: string;

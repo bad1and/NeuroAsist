@@ -37,7 +37,7 @@ back to host command execution.
 From the repository root, build the locked runtime image:
 
 ```powershell
-docker build -t neuroasist-coding -f apps/backend/docker/coding.Dockerfile .
+docker build -t neuroasist-coding -f apps/backend/docker/coding.Dockerfile apps/backend/docker
 ```
 
 Ensure Docker Desktop is running, then enable **Coding Agent** in the new left

@@ -27,8 +27,10 @@ class CodingBridge:
     )
     _stop_signal = re.compile(r"(?:останови|стоп|отмени|прекрати|cancel|stop)", re.IGNORECASE)
     _status_signal = re.compile(
-        r"(?:статус|что\s+дела|что\s+(?:сделал|выполнил)|прогресс|результат|итог|готово|"
-        r"status|progress|what\s+(?:did|was\s+done)|result|outcome|done)",
+        r"(?:статус|что\s+(?:сейчас\s+)?дела|что\s+(?:сделал|выполнил)|как\s+ид[её]т|прогресс|"
+        r"(?:какой|покажи|где)\s+(?:результат|итог)|(?:результат|итог)\s+(?:задачи|работы|агента)|"
+        r"готово\??|status|progress|what\s+(?:did|was\s+done)|how\s+is\s+it\s+going|"
+        r"(?:show|what(?:'s|\s+is))\s+(?:the\s+)?(?:result|outcome)|(?:result|outcome)\s+of\s+(?:the\s+)?(?:task|work|agent)|done\??)",
         re.IGNORECASE,
     )
     _instruction_signal = re.compile(r"(?:дополн|уточн|также|instead|ещ[её])", re.IGNORECASE)
@@ -41,7 +43,7 @@ class CodingBridge:
         re.IGNORECASE,
     )
     _delegation_request_signal = re.compile(
-        r"(?:хочу|хотел(?:s+бы)?|нужно|надо|давай|мож(?:ешь|но)|смож(?:ешь|ет)|пожалуйста|"
+        r"(?:хочу|хотел(?:\s+бы)?|нужно|надо|давай|мож(?:ешь|но)|смож(?:ешь|ет)|пожалуйста|"
         r"i\s+want|i(?:'d|\s+would)\s+like|can\s+you|could\s+you|please|need).{0,96}"
         r"(?:coding\s*agent|(?:кодинг|кодовый)\s+агент|агент[а-яё]*|agent).{0,96}"
         r"(?:код|накод|файл|тест|программ|python|typescript|javascript|react|backend|frontend|api|bug|баг|ошибк)",
@@ -54,6 +56,12 @@ class CodingBridge:
         r"now|go\s+ahead|do\s+it|yes)(?:$|\b)",
         re.IGNORECASE,
     )
+    _task_follow_up_signal = re.compile(
+        r"(?:^|\b)(?:так|ну|тогда|давай|хорошо|ок(?:ей)?)?[\s,]*"
+        r"(?:(?:новую|ещ[её])\s+)?задач[ау]\s+"
+        r"(?:дай|передай|поставь|запусти)(?:[.!?\s]*$)",
+        re.IGNORECASE,
+    )
     _deferred_ttl_seconds = 10 * 60
 
     def __init__(self, service: CodingAgentService) -> None:
@@ -63,9 +71,6 @@ class CodingBridge:
     def observe_user_message(self, session_id: str, user_text: str, source_message=None) -> str | None:
         if not self.service.enabled:
             tasks = self.service.store.list_coding_tasks(limit=30) if self.service.store is not None else []
-            if self._status_signal.search(user_text) and self._is_coding_task_reference(user_text, has_tasks=bool(tasks)):
-                latest = tasks[0] if tasks else None
-                return self._forced_reply(self._disabled_status_reply(str(latest["status"]) if latest else None, user_text))
             if self._is_coding_delegation_request(user_text) or self._agent_task_signal.search(user_text):
                 self._deferred_objectives[session_id] = (user_text, time.monotonic())
                 return self._forced_reply(self._disabled_reply(user_text))
@@ -78,6 +83,11 @@ class CodingBridge:
                 if self._code_signal.search(user_text):
                     self._deferred_objectives[session_id] = (user_text, time.monotonic())
                 return self._forced_reply(self._disabled_reply(user_text))
+            if self._task_follow_up_signal.search(user_text):
+                return self._forced_reply(self._task_details_reply(user_text))
+            if self._status_signal.search(user_text) and self._is_coding_task_reference(user_text, has_tasks=bool(tasks)):
+                latest = tasks[0] if tasks else None
+                return self._forced_reply(self._disabled_status_reply(str(latest["status"]) if latest else None, user_text))
             return None
         tasks = self.service.store.list_coding_tasks(limit=30) if self.service.store is not None else []
         active = next((item for item in tasks if item["status"] in {"pending", "running", "waiting_for_input"}), None)
@@ -96,14 +106,9 @@ class CodingBridge:
             # authoritative if the current conversation is interrupted.
             asyncio.get_running_loop().create_task(self.service.runner.cancel(str(active["id"])))
             return self._forced_reply(self._cancel_reply(user_text))
-        if self._status_signal.search(user_text) and coding_reference:
-            if active:
-                return self._forced_reply(self._active_status_reply(str(active["status"]), user_text))
-            latest = tasks[0] if tasks else None
-            return self._forced_reply(self._idle_status_reply(str(latest["status"]) if latest else None, user_text))
-        if active and self._instruction_signal.search(user_text) and coding_reference:
-            self.service.add_instruction(str(active["id"]), user_text)
-            return self._forced_reply(self._instruction_reply(user_text))
+        # A concrete delegation can mention its output (for example, "write
+        # the result to sum.txt").  It must win over a status query, otherwise
+        # the task is never persisted and Iris can only report stale status.
         if self.service.runtime_settings.coding_auto_delegate and self._is_coding_delegation_request(user_text):
             task = self.service.create_task(
                 user_text, session_id=session_id, source_message_id=source_message_id,
@@ -115,6 +120,16 @@ class CodingBridge:
             return self._forced_reply(self._queued_reply(task, user_text))
         if self._is_coding_delegation_request(user_text):
             return self._forced_reply(self._auto_delegate_disabled_reply(user_text))
+        if self._task_follow_up_signal.search(user_text):
+            return self._forced_reply(self._task_details_reply(user_text))
+        if self._status_signal.search(user_text) and coding_reference:
+            if active:
+                return self._forced_reply(self._active_status_reply(str(active["status"]), user_text))
+            latest = tasks[0] if tasks else None
+            return self._forced_reply(self._idle_status_reply(str(latest["status"]) if latest else None, user_text))
+        if active and self._instruction_signal.search(user_text) and coding_reference:
+            self.service.add_instruction(str(active["id"]), user_text)
+            return self._forced_reply(self._instruction_reply(user_text))
         return None
 
     def _is_coding_request(self, user_text: str) -> bool:
@@ -241,4 +256,13 @@ class CodingBridge:
         return (
             "Coding Agent включён, но автоделегирование выключено. Включи его в разделе Coding Agent или создай задачу там вручную." if self._uses_russian(user_text)
             else "Coding Agent is enabled, but automatic delegation is off. Enable it in the Coding Agent section or create the task there manually."
+        )
+
+    def _task_details_reply(self, user_text: str) -> str:
+        return (
+            "Сформулируй задачу целиком одним сообщением — что именно нужно создать или изменить. "
+            "Я подтвержу передачу только после того, как задача реально появится в очереди Coding Agent."
+            if self._uses_russian(user_text)
+            else "Please describe the whole task in one message—what exactly should be created or changed. "
+            "I will confirm delegation only after the task is actually in the Coding Agent queue."
         )
