@@ -296,6 +296,26 @@ def create_app() -> FastAPI:
     voice_session_manager.bind_avatar_service(avatar_service)
     speech_orchestrator = SpeechOrchestrator(voice_service, event_bus, settings, avatar_service)
 
+    def speak_coding_notification(session_id: str, text: str) -> None:
+        """Give durable Coding Agent notices the same TTS delivery as chat replies."""
+        if not settings.voice_tts_enabled or not text.strip():
+            return
+        voice = voice_service.resolve_tts_voice(
+            runtime_settings.voice_language,
+            runtime_settings.voice_tts_voice,
+        )
+        speech_orchestrator.enqueue(
+            session_id=session_id,
+            reply=text,
+            emotion="neutral",
+            intent="coding_task_notification",
+            gesture="auto",
+            voice=voice,
+            style=app.state.voice_tts_style,
+        )
+
+    coding_agent_service.bind_notification_speaker(speak_coding_notification)
+
     if conversation_service is not None:
         voice_session_manager.bind_text_completed_handler(
             conversation_service.assistant_text_generated

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +23,21 @@ class CommandResult:
     timed_out: bool = False
 
 
+@dataclass(frozen=True)
+class DockerAvailability:
+    """Independent readiness facts for the Docker-backed task sandbox."""
+
+    cli_available: bool
+    daemon_available: bool
+    image_available: bool
+    image_name: str
+    reason: str | None = None
+
+    @property
+    def sandbox_available(self) -> bool:
+        return self.daemon_available and self.image_available
+
+
 class DockerSandboxRunner:
     """Run only policy-approved commands inside a task-specific Docker container.
 
@@ -37,17 +53,44 @@ class DockerSandboxRunner:
         self.settings = settings
         self._active_containers: dict[str, str] = {}
 
-    async def availability(self) -> tuple[bool, str | None]:
+    async def availability(self) -> DockerAvailability:
+        image_name = self.settings.coding_docker_image
         try:
-            result = await self._exec(["docker", "version", "--format", "{{.Server.Version}}"], timeout=8)
+            result = await self._exec([self._docker_executable(), "version", "--format", "{{.Server.Version}}"], timeout=8)
         except OSError:
-            return False, "Docker CLI is not installed or unavailable"
-        if result["exit_code"] != 0:
-            return False, "Docker daemon is unavailable"
-        image = await self._exec(["docker", "image", "inspect", self.settings.coding_docker_image], timeout=8)
+            return DockerAvailability(False, False, False, image_name, "Docker CLI is not installed or unavailable")
+        if result["timed_out"] or result["exit_code"] != 0:
+            return DockerAvailability(True, False, False, image_name, "Docker daemon is unavailable")
+        try:
+            image = await self._exec([self._docker_executable(), "image", "inspect", image_name], timeout=8)
+        except OSError:
+            return DockerAvailability(True, False, False, image_name, "Docker daemon became unavailable")
+        if image["timed_out"]:
+            return DockerAvailability(True, True, False, image_name, "Docker image check timed out")
         if image["exit_code"] != 0:
-            return False, f"Docker image {self.settings.coding_docker_image} is not built"
-        return True, None
+            return DockerAvailability(True, True, False, image_name, f"Docker image {image_name} is not built")
+        return DockerAvailability(True, True, True, image_name)
+
+    @staticmethod
+    def _docker_executable() -> str:
+        """Find Docker Desktop even when the desktop app inherited an old PATH.
+
+        On Windows a newly installed per-user Docker Desktop keeps its CLI in
+        ``%LOCALAPPDATA%\\Programs\\DockerDesktop``.  A running Iris process
+        does not receive the updated PATH until it is restarted, so relying on
+        ``docker`` alone creates a false "CLI is not installed" diagnostic.
+        """
+        if executable := shutil.which("docker"):
+            return executable
+        if os.name == "nt":
+            candidates = [
+                Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "DockerDesktop" / "resources" / "bin" / "docker.exe",
+                Path(os.environ.get("ProgramFiles", "")) / "Docker" / "Docker" / "resources" / "bin" / "docker.exe",
+            ]
+            for candidate in candidates:
+                if candidate.is_file():
+                    return str(candidate)
+        return "docker"
 
     def validate_argv(self, value: object) -> list[str]:
         if not isinstance(value, list) or not value or not all(isinstance(item, str) for item in value):
@@ -83,7 +126,7 @@ class DockerSandboxRunner:
         # Windows Docker Desktop and Linux Docker Engine.
         mount = f"type=bind,src={workspace.resolve()},dst=/workspace"
         docker_argv = [
-            "docker", "run", "--rm", "--name", container_name,
+            self._docker_executable(), "run", "--rm", "--name", container_name,
             "--network", "none", "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
             "--mount", mount, "--workdir", "/workspace",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
@@ -104,7 +147,7 @@ class DockerSandboxRunner:
         if not container_name:
             return
         with contextlib.suppress(Exception):
-            await self._exec(["docker", "kill", container_name], timeout=8)
+            await self._exec([self._docker_executable(), "kill", container_name], timeout=8)
 
     async def _exec(self, argv: list[str], *, timeout: float) -> dict[str, object]:
         process = await asyncio.create_subprocess_exec(

@@ -76,7 +76,7 @@ CODING_BASE_URL=https://api.deepseek.com
 пересоберёт локальный образ `neuroasist-coding` с тем же стабильным тегом.
 
 ```powershell
-docker build -t neuroasist-coding -f apps/backend/docker/coding.Dockerfile .
+docker build -t neuroasist-coding -f apps/backend/docker/coding.Dockerfile apps/backend/docker
 ```
 
 ## Основные идеи

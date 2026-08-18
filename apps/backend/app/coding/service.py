@@ -4,11 +4,13 @@ import asyncio
 import json
 import logging
 import shutil
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from apps.backend.app.coding.policy import CodingPolicyError
-from apps.backend.app.coding.runner import CommandPolicyError, DockerSandboxRunner
+from apps.backend.app.coding.runner import CommandPolicyError, DockerAvailability, DockerSandboxRunner
 from apps.backend.app.coding.sandbox import SnapshotLimitError, TaskSandbox
 from apps.backend.app.core.config import Settings
 from apps.backend.app.llm.base import ChatMessage, LLMProvider, LLMProviderError
@@ -17,6 +19,8 @@ from apps.backend.app.runtime.settings import RuntimeSettings
 from apps.backend.app.storage.timeline import TimelineStore
 
 logger = logging.getLogger(__name__)
+
+_DOCKER_AVAILABILITY_TTL_SECONDS = 5.0
 
 _SYSTEM_PROMPT = """You are the Coding Agent in NeuroAsist. Work only inside an isolated
 task workspace. It may be an empty new workspace or a copy of explicitly approved files.
@@ -45,6 +49,7 @@ class CodingAgentService:
         store: TimelineStore | None,
         event_publisher,
         llm_provider_factory=None,
+        notification_speaker: Callable[[str, str], None] | None = None,
     ) -> None:
         self.settings = settings
         self.runtime_settings = runtime_settings
@@ -52,8 +57,14 @@ class CodingAgentService:
         self.event_publisher = event_publisher
         self.runner = DockerSandboxRunner(settings)
         self._active_task_id: str | None = None
-        self._availability: tuple[bool, str | None] | None = None
+        self._availability: DockerAvailability | None = None
+        self._availability_checked_at = 0.0
         self._llm_provider_factory = llm_provider_factory or self._provider
+        self._notification_speaker = notification_speaker
+
+    def bind_notification_speaker(self, speaker: Callable[[str, str], None] | None) -> None:
+        """Bind the shared voice path after the application creates it."""
+        self._notification_speaker = speaker
 
     def _provider(self, model: str) -> LLMProvider:
         return DeepSeekProvider(
@@ -69,9 +80,8 @@ class CodingAgentService:
         return bool(self.settings.coding_agent_enabled and self.runtime_settings.coding_agent_enabled)
 
     async def status(self, *, refresh: bool = False) -> dict[str, object]:
-        if refresh or self._availability is None:
-            self._availability = await self.runner.availability()
-        available, reason = self._availability
+        docker = await self._docker_availability(refresh=refresh)
+        available, reason = docker.sandbox_available, docker.reason
         workspace_issue = self._workspace_issue()
         if workspace_issue:
             available, reason = False, workspace_issue
@@ -84,6 +94,10 @@ class CodingAgentService:
             "configured_enabled": self.settings.coding_agent_enabled,
             "available": available,
             "availability_reason": reason,
+            "docker_cli_available": docker.cli_available,
+            "docker_daemon_available": docker.daemon_available,
+            "docker_image_available": docker.image_available,
+            "docker_image_name": docker.image_name,
             "model": self.runtime_settings.coding_model,
             "available_models": ["deepseek-v4-flash", "deepseek-v4-pro"],
             "project_root": str(self._project_root()),
@@ -226,10 +240,9 @@ class CodingAgentService:
     async def _run_task(self, task: dict[str, object]) -> None:
         assert self.store is not None
         task_id = str(task["id"])
-        available, reason = await self.runner.availability()
-        self._availability = (available, reason)
-        if not available:
-            raise RuntimeError(reason or "Docker sandbox is unavailable")
+        docker = await self._docker_availability(refresh=True)
+        if not docker.sandbox_available:
+            raise RuntimeError(docker.reason or "Docker sandbox is unavailable")
         project_root = Path(str(task["project_root"])) if str(task["project_root"]) else None
         sandbox = TaskSandbox(
             self.settings, task_id=task_id, project_root=project_root,
@@ -325,12 +338,31 @@ class CodingAgentService:
                 return
         raise RuntimeError("Coding Agent reached the iteration limit without a reviewable result")
 
-    def _notify_review_ready(self, task: dict[str, object]) -> None:
-        """Append a single, review-only Iris notification to the source chat.
+    async def _docker_availability(self, *, refresh: bool = False) -> DockerAvailability:
+        """Refresh negative states immediately and successful probes at a short TTL.
 
-        This deliberately has no LLM or TTS call: the notification must stay
-        factual, contain no generated code, and never interrupt the user.
-        ``client_message_id`` makes retries and worker recovery safe.
+        Docker Desktop can briefly reject its named pipe while it starts.  A
+        failed probe therefore must never become an indefinitely cached
+        "Docker is unavailable" state in the UI.
+        """
+        now = time.monotonic()
+        stale = now - self._availability_checked_at >= _DOCKER_AVAILABILITY_TTL_SECONDS
+        if (
+            refresh
+            or self._availability is None
+            or not self._availability.sandbox_available
+            or stale
+        ):
+            self._availability = await self.runner.availability()
+            self._availability_checked_at = now
+        return self._availability
+
+    def _notify_review_ready(self, task: dict[str, object]) -> None:
+        """Append and speak a single review-only Iris notification.
+
+        The text is deterministic and contains no generated code.  The durable
+        message is written before TTS is scheduled; ``client_message_id``
+        makes worker recovery safe and prevents duplicate spoken notices.
         """
         if self.store is None:
             return
@@ -346,7 +378,10 @@ class CodingAgentService:
             client_message_id=f"coding-review-ready:{task_id}",
             metadata={"kind": "coding_review_ready", "coding_task_id": task_id},
         )
-        if created and self.event_publisher is not None:
+        if not created:
+            return
+        self._speak_notification(session_id, message.content)
+        if self.event_publisher is not None:
             self.event_publisher(
                 "coding.review_notification",
                 "info",
@@ -375,7 +410,10 @@ class CodingAgentService:
             client_message_id=f"coding-task-failed:{task_id}",
             metadata={"kind": "coding_task_failed", "coding_task_id": task_id},
         )
-        if created and self.event_publisher is not None:
+        if not created:
+            return
+        self._speak_notification(session_id, message.content)
+        if self.event_publisher is not None:
             self.event_publisher(
                 "coding.attention_notification",
                 "warning",
@@ -387,6 +425,17 @@ class CodingAgentService:
                     "notification": message.content,
                 },
             )
+
+    def _speak_notification(self, session_id: str, text: str) -> None:
+        if self._notification_speaker is None:
+            return
+        try:
+            self._notification_speaker(session_id, text)
+        except Exception:
+            # A notification must remain durable even if the optional voice
+            # layer is momentarily unavailable. SpeechOrchestrator itself
+            # handles asynchronous synthesis failures as recoverable events.
+            logger.warning("Could not queue Coding Agent notification for speech", exc_info=True)
 
     @staticmethod
     def _review_ready_notification(task: dict[str, object]) -> str:

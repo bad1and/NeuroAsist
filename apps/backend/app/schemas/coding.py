@@ -57,6 +57,10 @@ class CodingStatusResponse(BaseModel):
     configured_enabled: bool
     available: bool
     availability_reason: str | None = None
+    docker_cli_available: bool = False
+    docker_daemon_available: bool = False
+    docker_image_available: bool = False
+    docker_image_name: str = ""
     model: str
     available_models: list[str]
     project_root: str

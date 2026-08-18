@@ -46,7 +46,7 @@ after changing `apps/backend/docker/coding.Dockerfile`; it rebuilds the local
 `neuroasist-coding` image under the stable tag used by the application.
 
 ```powershell
-docker build -t neuroasist-coding -f apps/backend/docker/coding.Dockerfile .
+docker build -t neuroasist-coding -f apps/backend/docker/coding.Dockerfile apps/backend/docker
 ```
 - Start a **New dialog** from the chat; it clears the current conversation while preserving long-term memory.
 - Temporary chat transport errors now disappear automatically instead of remaining on screen.
