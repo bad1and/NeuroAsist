@@ -580,10 +580,12 @@ def create_app() -> FastAPI:
         max_turn_silence_ms=max_turn_silence_ms,
         barge_in_guard=barge_in_guard_active,
         barge_in_confirmation_ms={
-            "low": 300,
-            "balanced": 180,
-            "high": 60,
-        }.get(runtime_settings.live_conversation_interruption_sensitivity, 180),
+            # A short, loud cough can pass VAD. Require sustained audio
+            # before interrupting a response, even at high sensitivity.
+            "low": 650,
+            "balanced": 450,
+            "high": 300,
+        }.get(runtime_settings.live_conversation_interruption_sensitivity, 450),
         turn_detector=turn_detector,
         event_publisher=event_bus.publish,
     )

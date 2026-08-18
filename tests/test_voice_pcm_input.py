@@ -297,9 +297,12 @@ async def test_short_noise_during_iris_speech_does_not_barge_in(tmp_path: Path) 
         FakeVoiceService(tmp_path),
         on_utterance,
         on_speech_started,
-        vad=SequenceVad([.9, .9, 0, 0]),
+        # A cough can be loud and last hundreds of milliseconds. It must not
+        # cancel the answer unless the signal is sustained long enough to be
+        # a deliberate spoken interruption.
+        vad=VadProvider(),
         barge_in_guard=lambda _session_id: True,
-        barge_in_confirmation_ms=100,
+        barge_in_confirmation_ms=450,
     )
     socket = FakeSocket()
     await manager.register("s", socket, version=3)
@@ -313,7 +316,7 @@ async def test_short_noise_during_iris_speech_does_not_barge_in(tmp_path: Path) 
     session.gate.start_ms = 0
     session.gate.end_ms = 0
     frame = b"\x04\x00" * 160
-    for _ in range(4):
+    for _ in range(27):
         await manager.feed("s", frame)
 
     assert interrupted == []
