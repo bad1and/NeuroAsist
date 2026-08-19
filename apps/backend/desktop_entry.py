@@ -4,6 +4,12 @@ from __future__ import annotations
 
 import os
 
+# TeraTTS loads a bundled RUAccent vocabulary through ``Path.read_text()``.
+# On Windows the interpreter encoding must be selected before importing the
+# backend/model code; changing the environment later is too late.
+os.environ.setdefault("PYTHONUTF8", "1")
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
 import uvicorn
 from fastapi import FastAPI
 

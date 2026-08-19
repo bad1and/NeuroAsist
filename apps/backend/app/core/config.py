@@ -77,35 +77,27 @@ class Settings(BaseSettings):
     voice_preload_stt_model: bool = True
     voice_preload_tts_model: bool = True
     voice_tts_enabled: bool = True
-    voice_tts_provider: str = "silero"
-    voice_silero_model: str = "v5_5_ru"
-    voice_silero_speaker_ru: str = "baya"
-    voice_silero_sample_rate: int = 48000
-    voice_silero_device: str = "cpu"
-    voice_silero_cpu_threads: int = 4
-    voice_silero_warmup: bool = True
-    voice_silero_timeout_seconds: float = 10.0
-    voice_silero_loudness_target_dbfs: float = -18.0
-    voice_silero_peak_ceiling_dbfs: float = -1.0
-    voice_silero_pronunciation_dictionary_path: str | None = None
-    voice_silero_native_english: bool = False
-    voice_silero_english_model: str = "v3_en"
-    voice_silero_english_speaker: str = "en_0"
-    voice_stress_enabled: bool = True
-    voice_stress_cpu_threads: int = 1
+    voice_tts_provider: str = "teratts"
+    voice_teratts_model: str = "TeraSpace/TeraTTSv2"
+    voice_teratts_revision: str = "f05ea799094571a3553904a555df3834fb0b963b"
+    voice_teratts_model_path: str | None = None
+    voice_teratts_cache_dir: str | None = None
+    voice_teratts_voice: str = "ru_f1"
+    voice_teratts_device: str = "cpu"
+    voice_teratts_threads: int = 8
+    voice_teratts_diffusion_model: str = "distilled"
+    voice_teratts_ruaccent_mode: str = "full"
+    voice_teratts_russian_stress: bool = True
+    voice_teratts_chunk_frames: int = 16
+    voice_teratts_seed: int = 1234
+    voice_teratts_warmup: bool = True
+    voice_teratts_timeout_seconds: float = 45.0
+    voice_tts_pronunciation_dictionary_path: str | None = None
     voice_tts_postprocessing_enabled: bool = True
+    voice_tts_loudness_target_dbfs: float = -18.0
+    voice_tts_peak_ceiling_dbfs: float = -1.0
     voice_tts_highpass_cutoff_hz: float = 60.0
-    voice_tts_lowpass_cutoff_hz: float = 12000.0
     voice_tts_adaptive_prosody: bool = True
-    voice_cmudict_enabled: bool = True
-    voice_cmudict_cache_dir: str = ".cache/cmudict"
-    voice_openvoice_enabled: bool = False
-    voice_openvoice_reference_audio: str | None = None
-    voice_openvoice_cache_dir: str = ".cache/openvoice-v2"
-    voice_openvoice_repo_id: str = "myshell-ai/OpenVoiceV2"
-    voice_openvoice_revision: str = "fd981100305a0e4291f93a9ad169c6d9f7bed54a"
-    voice_openvoice_tau: float = 0.3
-    voice_openvoice_cpu_threads: int = 8
     voice_tts_background_timeout_seconds: int = 120
     voice_tts_max_chars: int = 1200
     voice_audio_dir: str = "data/audio"
@@ -195,10 +187,11 @@ class Settings(BaseSettings):
 
     @field_validator("voice_tts_provider", mode="before")
     @classmethod
-    def migrate_legacy_supertonic_provider(cls, value: object) -> str:
-        if str(value or "").lower() == "supertonic":
-            return "silero"
-        return str(value or "silero").lower()
+    def migrate_legacy_tts_provider(cls, value: object) -> str:
+        legacy = str(value or "").lower()
+        if legacy in {"silero", "supertonic", "terattsv2", "tera"}:
+            return "teratts"
+        return legacy or "teratts"
 
     @property
     def llm_api_key(self) -> str | None:
@@ -296,6 +289,20 @@ class Settings(BaseSettings):
         return path if path.is_absolute() else ROOT_DIR / path
 
     @property
+    def voice_teratts_model_directory(self) -> Path | None:
+        if not self.voice_teratts_model_path:
+            return None
+        path = Path(self.voice_teratts_model_path).expanduser()
+        return path if path.is_absolute() else (ROOT_DIR / path).resolve()
+
+    @property
+    def voice_teratts_cache_path(self) -> Path:
+        if self.voice_teratts_cache_dir:
+            path = Path(self.voice_teratts_cache_dir).expanduser()
+            return path if path.is_absolute() else (ROOT_DIR / path).resolve()
+        return self.app_data_path / "models" / "huggingface"
+
+    @property
     def voice_stt_terms_file(self) -> Path:
         if self.voice_stt_terms_path:
             path = Path(self.voice_stt_terms_path).expanduser()
@@ -310,32 +317,15 @@ class Settings(BaseSettings):
         return self.app_data_path / "diagnostics" / "stt-audio"
 
     @property
-    def voice_openvoice_reference_audio_path(self) -> Path | None:
-        if not self.voice_openvoice_reference_audio:
-            return None
-        path = Path(self.voice_openvoice_reference_audio).expanduser()
-        return path if path.is_absolute() else ROOT_DIR / path
-
-    @property
-    def voice_silero_pronunciation_dictionary(self) -> Path:
-        if self.voice_silero_pronunciation_dictionary_path:
-            path = Path(self.voice_silero_pronunciation_dictionary_path).expanduser()
-            return path if path.is_absolute() else ROOT_DIR / path
-        return self.app_data_path / "tts-pronunciations.json"
-
-    @property
     def voice_tts_default_voice(self) -> str:
-        return self.voice_silero_speaker_ru
+        return self.voice_teratts_voice
 
     @property
-    def voice_openvoice_cache_path(self) -> Path:
-        path = Path(self.voice_openvoice_cache_dir).expanduser()
-        return path if path.is_absolute() else ROOT_DIR / path
-
-    @property
-    def voice_cmudict_cache_path(self) -> Path:
-        path = Path(self.voice_cmudict_cache_dir).expanduser()
-        return path if path.is_absolute() else ROOT_DIR / path
+    def voice_tts_pronunciation_dictionary(self) -> Path:
+        if self.voice_tts_pronunciation_dictionary_path:
+            path = Path(self.voice_tts_pronunciation_dictionary_path).expanduser()
+            return path if path.is_absolute() else (ROOT_DIR / path).resolve()
+        return self.app_data_path / "tts-pronunciations.json"
 
     @property
     def cors_origin_list(self) -> list[str]:

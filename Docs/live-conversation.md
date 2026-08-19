@@ -87,7 +87,7 @@ audio fallback. PCM продолжает поступать во время infe
 
 Whisper-compatible `80×800` log-mel frontend реализован локально на NumPy.
 Smart Turn не импортирует `transformers`, поэтому его зависимости не могут
-сломать Chatterbox/Silero TTS. Синтетические fixtures находятся в
+сломать TeraTTSv2. Синтетические fixtures находятся в
 `tests/fixtures/live_audio`; manifest содержит transcript, sample rate,
 ожидаемый endpoint и назначение записи. Перегенерация:
 

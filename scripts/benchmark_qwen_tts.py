@@ -47,7 +47,7 @@ def main() -> int:
     parser.add_argument("--reference-text", required=True)
     parser.add_argument("--output-dir", type=Path, default=Path("data/qwen-tts-gate"))
     parser.add_argument("--corpus", type=Path)
-    parser.add_argument("--silero-p95-ms", type=float, default=226)
+    parser.add_argument("--baseline-p95-ms", type=float, default=226)
     parser.add_argument("--blind-wins", type=int)
     parser.add_argument("--similarity-median", type=float)
     args = parser.parse_args()
@@ -127,7 +127,7 @@ def main() -> int:
         "no_oom": all(item.get("error_type") != "OutOfMemoryError" for item in results),
         "peak_vram_le_5_2_gb": peak_vram <= 5.2,
         "p95_rtf_le_0_5": _percentile(rtfs, 0.95) <= 0.5,
-        "p95_first_segment_delta_le_250_ms": _percentile(latency, 0.95) - args.silero_p95_ms <= 250,
+        "p95_first_segment_delta_le_250_ms": _percentile(latency, 0.95) - args.baseline_p95_ms <= 250,
         "error_rate_lt_1_percent": errors / max(1, len(results)) < 0.01,
     }
     subjective = {

@@ -1509,6 +1509,8 @@ fn configure_core_command(
         .env("NEUROASIST_PORT", port)
         .env("NEUROASIST_DESKTOP_TOKEN", token)
         .env("NEUROASIST_APP_DATA_DIR", data_root)
+        .env("PYTHONUTF8", "1")
+        .env("PYTHONIOENCODING", "utf-8")
         .env(
             "SQLITE_PATH",
             data_root.join("data").join("neuroasist.sqlite3"),

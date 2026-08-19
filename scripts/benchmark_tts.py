@@ -1,4 +1,4 @@
-"""Repeatable Silero TTS benchmark for Russian live-voice phrases."""
+"""Repeatable TeraTTSv2 benchmark for Russian live-voice phrases."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from apps.backend.app.voice.providers import SileroTTSProvider
+from apps.backend.app.voice.teratts_provider import TeraTTSProvider
 
 
 PHRASES = [
@@ -67,8 +67,8 @@ def wav_quality_metrics(path: Path) -> dict[str, float | int]:
     }
 
 
-async def run(device: str, runs: int, output: Path) -> None:
-    provider = SileroTTSProvider(device=device)
+async def run(device: str, runs: int, output: Path, model_path: Path | None = None) -> None:
+    provider = TeraTTSProvider(device=device, warmup=True, model_path=model_path)
     rows: list[dict] = []
     preload_started = time.perf_counter()
     try:
@@ -76,7 +76,7 @@ async def run(device: str, runs: int, output: Path) -> None:
         model_load_ms = int((time.perf_counter() - preload_started) * 1000)
     except Exception as exc:
         payload = {
-            "provider": "silero",
+            "provider": "teratts",
             "device": device,
             "success": False,
             "error_type": type(exc).__name__,
@@ -91,7 +91,7 @@ async def run(device: str, runs: int, output: Path) -> None:
                 path = Path(directory) / f"{run_index}-{index}.wav"
                 started = time.perf_counter()
                 try:
-                    result = await provider.synthesize(phrase, "xenia", path)
+                    result = await provider.synthesize(phrase, "ru_f1", path)
                     elapsed_ms = (time.perf_counter() - started) * 1000
                     audio_ms = (result.audio_duration_seconds or 0.0) * 1000
                     rtf = elapsed_ms / audio_ms if audio_ms else 0.0
@@ -104,17 +104,17 @@ async def run(device: str, runs: int, output: Path) -> None:
                         "inverse_RTF": 1 / rtf if rtf else 0.0,
                         "output_bytes": path.stat().st_size,
                         **wav_quality_metrics(path),
-                        "provider": "silero",
+                        "provider": "teratts",
                         "device": provider.metadata["device"],
-                        "speaker": provider.speaker,
+                        "speaker": "ru_f1",
                         "success": True,
                         "error_type": None,
                     })
                 except Exception as exc:
                     rows.append({
-                        "provider": "silero",
+                        "provider": "teratts",
                         "device": device,
-                        "speaker": provider.speaker,
+                        "speaker": "ru_f1",
                         "success": False,
                         "error_type": type(exc).__name__,
                     })
@@ -123,7 +123,7 @@ async def run(device: str, runs: int, output: Path) -> None:
     good = [row for row in rows if row["success"]]
     failures = len(rows) - len(good)
     summary = {
-        "provider": "silero",
+        "provider": "teratts",
         "device": device,
         "runs": runs,
         "phrases": len(PHRASES),
@@ -137,7 +137,7 @@ async def run(device: str, runs: int, output: Path) -> None:
         "rows": rows,
     }
     output.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"provider=silero device={device} phrases={len(PHRASES)} runs={runs} error_rate={summary['error_rate']:.1%}")
+    print(f"provider=teratts device={device} phrases={len(PHRASES)} runs={runs} error_rate={summary['error_rate']:.1%}")
     print(f"P50 synthesis={summary['p50_synthesis_ms']:.1f}ms P95 synthesis={summary['p95_synthesis_ms']:.1f}ms")
     print(f"P50 RTF={summary['p50_RTF']:.3f} P95 RTF={summary['p95_RTF']:.3f}")
     print(f"json={output}")
@@ -145,10 +145,11 @@ async def run(device: str, runs: int, output: Path) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--provider", choices=("silero",), default="silero")
-    parser.add_argument("--device", choices=("cpu", "cuda", "auto"), default="cpu")
+    parser.add_argument("--provider", choices=("teratts",), default="teratts")
+    parser.add_argument("--device", choices=("cpu", "auto"), default="cpu")
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--output", type=Path, default=Path("data/tts_benchmark.json"))
+    parser.add_argument("--model-path", type=Path, help="Pinned local snapshot for offline/reproducible runs")
     args = parser.parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    asyncio.run(run(args.device, max(1, args.runs), args.output))
+    asyncio.run(run(args.device, max(1, args.runs), args.output, args.model_path))

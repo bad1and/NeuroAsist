@@ -400,9 +400,9 @@ def create_app() -> FastAPI:
         )
         return {"batch": batch_cancelled}
 
-    # Start with a zero-dependency fallback.  Silero and Smart Turn are
-    # replaced atomically by background startup tasks once their optional
-    # runtimes/models are available.
+    # Start with a zero-dependency fallback. Optional VAD and turn-detection
+    # runtimes are replaced atomically by background startup tasks once their
+    # models are available.
     vad_model_path = settings.voice_silero_vad_model or model_manager.path_for("silero-vad")
     vad_provider = VadProvider()
     turn_detector = SmartTurnDetector(None)
@@ -916,11 +916,13 @@ def create_app() -> FastAPI:
         except Exception as exc:
             logger.warning("Voice TTS preload failed", exc_info=True)
             update_readiness("tts", "failed", f"tts: {type(exc).__name__}: {exc}")
+            failed_metadata = dict(getattr(voice_service.tts_provider, "metadata", {}))
+            failed_metadata.update({"error_type": type(exc).__name__, "error_message": str(exc)})
             event_bus.publish(
                 "voice.tts_preload_failed",
                 "warning",
                 "Voice TTS preload failed; browser speech fallback remains available",
-                tts_metadata,
+                failed_metadata,
             )
 
     async def preload_vad() -> None:
@@ -1133,8 +1135,12 @@ def create_app() -> FastAPI:
                 await memory_extraction_worker_task
             except asyncio.CancelledError:
                 pass
+        await voice_session_manager.close()
         await speech_orchestrator.close()
         await avatar_service.close()
+        voice_service_close = getattr(voice_service, "close", None)
+        if voice_service_close is not None:
+            await voice_service_close()
         await close_shared_clients()
 
     @asynccontextmanager

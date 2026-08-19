@@ -1,8 +1,9 @@
-# Qwen3-TTS quality pack
+# Historical Qwen3-TTS quality pack
 
-Qwen is an optional experiment and is not imported, installed, or selected by
-the base NeuroAsist backend. Silero `baya` remains the production provider until
-every objective and subjective gate passes.
+This document describes an isolated, historical Qwen experiment. Qwen is not
+imported, installed, or selected by the base NeuroAsist backend. Production TTS
+is TeraTTSv2 (`TeraSpace/TeraTTSv2`, voice `ru_f1`); Silero remains only the VAD
+provider.
 
 ## Isolated environment
 
@@ -11,11 +12,9 @@ then install `qwen-tts`. Do not install these packages into `.venv`. The worker
 loads revision `c27fe8aa05b732b1376d0f6a1e522fbccb84abbd` with `float16` and
 PyTorch SDPA; FlashAttention and BF16 are intentionally not required.
 
-Prepare the exactly transcribed neutral reference:
-
-```powershell
-.\.venv\Scripts\python.exe scripts\prepare_qwen_voice_reference.py
-```
+The old reference-preparation helper is no longer part of the production tree;
+this historical gate only documents the isolated worker and existing reference
+artifacts.
 
 Run the 100-segment gate using the isolated interpreter:
 
@@ -34,9 +33,11 @@ After the blind 20-pair comparison, repeat with `--blind-wins` and
 Only a passing `gate-report.json` may be turned into a distributable
 voice-quality pack. Its manifest must contain the pinned model revision and the
 SHA-256 of every packaged artifact. Model Manager must verify all hashes before
-launching the hidden worker. A missing or mismatched hash makes the pack
-unhealthy before an utterance begins, so the entire utterance uses Silero.
+launching the hidden worker. A missing or mismatched hash makes the historical
+pack unhealthy before an utterance begins; production remains on the configured
+TeraTTSv2 route.
 
 Once a Qwen utterance has begun, provider and speaker are immutable. A failed
 segment is retried once in the worker; a second failure stops audio while the
-already generated text remains visible. It never switches to Silero mid-reply.
+already generated text remains visible. This historical worker never changes
+the production TeraTTS route.

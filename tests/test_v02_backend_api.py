@@ -135,7 +135,7 @@ def test_runtime_in_app_avatar_visibility_can_be_updated(client: TestClient) -> 
 
 def test_runtime_voice_settings_can_be_updated(client: TestClient) -> None:
     original = client.get("/settings/public").json()
-    target_voice = "baya" if "baya" in original["available_tts_voices"] else original["voice_tts_voice"]
+    target_voice = "ru_f2" if "ru_f2" in original["available_tts_voices"] else original["voice_tts_voice"]
 
     try:
         response = client.patch(

@@ -162,6 +162,15 @@ class VoiceSessionManager:
     def connected(self, session_id: str) -> bool:
         return session_id in self._connections
 
+    async def close(self) -> None:
+        """Cancel active utterances and close live sockets during app shutdown."""
+        for session_id in list(self._active):
+            await self.cancel(session_id, notify=False)
+        for connection in list(self._connections.values()):
+            with contextlib.suppress(Exception):
+                await connection.websocket.close(code=1001)
+        self._connections.clear()
+
     async def start(
         self,
         *,
@@ -978,7 +987,7 @@ class VoiceSessionManager:
     def _wav_duration_seconds(audio: bytes) -> float:
         """Duration from the RIFF header, without decoding the PCM payload.
 
-        The local Silero path yields WAV for every segment, so this replaces a
+        The local TeraTTS path yields WAV for every segment, so this replaces a
         full PyAV decode (~9 ms per 3 s segment) on the critical path. The
         declared frame count is cross-checked against the bytes actually
         present, so a truncated payload still fails validation.
@@ -1125,7 +1134,7 @@ class VoiceSessionManager:
         minimum = max(1, minimum)
         maximum = max(minimum, maximum)
         if mode == "auto":
-            # Silero serialises inference behind its own lock, so extra slots
+            # TeraTTS serialises inference behind its own lock, so extra slots
             # only buy the overlap of one segment's encode with the next
             # render. Stay at the configured floor rather than below it.
             return minimum

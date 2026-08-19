@@ -63,6 +63,8 @@ function Measure-Startup {
         NEUROASIST_PORT = "$port"
         NEUROASIST_DESKTOP_TOKEN = $token
         NEUROASIST_APP_DATA_DIR = $DataRoot
+        PYTHONUTF8 = "1"
+        PYTHONIOENCODING = "utf-8"
         LOG_TO_FILE = "false"
         AVATAR_ENABLED = "false"
     }.GetEnumerator()) {

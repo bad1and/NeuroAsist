@@ -65,7 +65,7 @@ flowchart LR
     A[Microphone or text] --> B[GigaAM v3 STT]
     B --> C[Character Agent]
     C --> D[DeepSeek-compatible LLM]
-    D --> E[Silero v5_5_ru TTS]
+    D --> E[TeraTTSv2 ru_f1]
     E --> F[Voice playback]
 ```
 
@@ -81,7 +81,7 @@ The V0.5 direction is a single continuous desktop companion: one character, one 
 | Audio device selection | ✅ | Choose a microphone and playback device in Voice Settings; selections persist locally |
 | Russian and English interface | ✅ | Switch UI copy, system labels, dates, and the desktop tray in Settings; conversation content and voice behaviour remain unchanged |
 | Local speech-to-text | ✅ | GigaAM v3, `faster-whisper` fallback |
-| Local text-to-speech | ✅ | Silero v5_5_ru, Baya by default |
+| Local text-to-speech | ✅ | TeraTTSv2, ru_f1 by default |
 | Conversation history and journal | ✅ | SQLite timeline, episodes, and summaries |
 | Long-term memory | 🧪 | Automatic post-reply extraction, SQLite provenance/audit, policy controls, and Memory Center |
 | Semantic memory retrieval | 🧪 | Rebuildable ChromaDB index with SQLite FTS fallback |
@@ -125,7 +125,7 @@ The header displays backend status, WebSocket connection state, API-key availabi
 - WebSocket
 - GigaAM v3
 - `faster-whisper` as a multilingual fallback
-- Silero v5_5_ru with Baya, SSML delivery profiles and Russian normalization
+- TeraTTSv2 with ru_f1, native streamed vocoder output, Russian normalization and style-to-speed prosody
 - DeepSeek-compatible LLM API
 
 ### Frontend
@@ -146,7 +146,7 @@ The header displays backend status, WebSocket connection state, API-key availabi
 - Node.js **24+**;
 - FFmpeg and FFprobe available through `PATH`;
 - a DeepSeek API key;
-- internet access for the first GigaAM/Whisper and Silero download;
+- internet access for the first GigaAM/Whisper and TeraTTSv2 download;
 - optional CUDA-capable GPU.
 
 ### 1. Clone the development branch
@@ -163,7 +163,6 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128
-.\scripts\install-openvoice.ps1
 ```
 
 The current lockfile uses the tested CUDA build `torch==2.11.0+cu128`. It requires
@@ -204,23 +203,20 @@ VOICE_STT_MODEL=v3_rnnt
 VOICE_STT_DEVICE=cpu
 
 VOICE_TTS_ENABLED=true
-VOICE_TTS_PROVIDER=silero
+VOICE_TTS_PROVIDER=teratts
 VOICE_PRELOAD_TTS_MODEL=true
-VOICE_SILERO_MODEL=v5_5_ru
-VOICE_SILERO_SPEAKER_RU=baya
-VOICE_SILERO_SAMPLE_RATE=48000
-VOICE_SILERO_DEVICE=cpu
-VOICE_SILERO_NATIVE_ENGLISH=false
-VOICE_STRESS_ENABLED=true
-VOICE_STRESS_CPU_THREADS=1
+VOICE_TERATTS_MODEL=TeraSpace/TeraTTSv2
+VOICE_TERATTS_REVISION=f05ea799094571a3553904a555df3834fb0b963b
+VOICE_TERATTS_VOICE=ru_f1
+VOICE_TERATTS_DEVICE=cpu
+VOICE_TERATTS_THREADS=8
+VOICE_TERATTS_DIFFUSION_MODEL=distilled
+VOICE_TERATTS_RUACCENT_MODE=full
+VOICE_TERATTS_SEED=1234
 VOICE_TTS_POSTPROCESSING_ENABLED=true
 VOICE_TTS_HIGHPASS_CUTOFF_HZ=60
 VOICE_TTS_ADAPTIVE_PROSODY=true
-VOICE_CMUDICT_ENABLED=true
-VOICE_CMUDICT_CACHE_DIR=.cache/cmudict
-VOICE_OPENVOICE_ENABLED=false
-VOICE_OPENVOICE_REFERENCE_AUDIO=
-VOICE_OPENVOICE_CACHE_DIR=.cache/openvoice-v2
+VOICE_TTS_PRONUNCIATION_DICTIONARY_PATH=
 ```
 
 ### Environment variable reference
@@ -258,45 +254,37 @@ VOICE_OPENVOICE_CACHE_DIR=.cache/openvoice-v2
 
 For a Russian voice assistant, the recommended setup is `gigaam` + `v3_rnnt`. It is the most word-accurate mode, but returns lowercase text without punctuation. `v3_e2e_rnnt` produces readable punctuation and normalized numbers with a small accuracy trade-off. On a GTX 1660 SUPER / Ryzen 7 5700X control run (`20` short Golos recordings), `v3_rnnt` reached `1.0% WER` with `0.56 s` median latency on GPU or `0.40 s` on CPU with four threads. `large-v3-turbo` reached `16.2% WER` and `1.26 s`; Whisper `small` reached `32.3% WER` and `1.05 s`. This small run selects the runtime; final quality should be checked on the actual user's recordings.
 
-#### Text-to-speech
+#### Text-to-speech / TeraTTSv2
 
 | Variable | What it controls |
 |---|---|
 | `VOICE_TTS_ENABLED` | Enables backend TTS generation. If disabled or failed, the frontend can fall back to browser SpeechSynthesis. |
-| `VOICE_TTS_PROVIDER` | Backend TTS provider: `silero`; `mock` is only for tests. |
-| `VOICE_PRELOAD_TTS_MODEL` | Loads and warms up the selected TTS model during backend startup. First startup downloads local weights and takes longer. |
-| `VOICE_OPENVOICE_ENABLED` | Applies CPU-only OpenVoice V2 tone conversion after Silero. Keep disabled for minimum latency. |
-| `VOICE_OPENVOICE_REFERENCE_AUDIO` | A clean roughly 5–15 second WAV/MP3 reference. It is read locally once during startup. |
-| `VOICE_OPENVOICE_CACHE_DIR` | Project-local directory for the 131 MB converter checkpoint. |
-| `VOICE_OPENVOICE_TAU` | Conversion variation; the tested default is `0.3`. |
-| `VOICE_OPENVOICE_CPU_THREADS` | CPU threads used by the converter. `8` is recommended for a Ryzen 7 5700X. |
-| `VOICE_SILERO_MODEL` | Silero model name. Current default is `v5_5_ru`. |
-| `VOICE_SILERO_SPEAKER_RU` | Default Russian Silero speaker, `baya` by default. Can be changed at runtime from Settings. |
-| `VOICE_SILERO_SAMPLE_RATE` | WAV sample rate produced by Silero. Default is `48000`; changing it requires backend restart. |
-| `VOICE_SILERO_DEVICE` | Silero device policy: `cpu`, `cuda`, or `auto`. |
-| `VOICE_SILERO_NATIVE_ENGLISH` | Keep `false` when one consistent voice is required. English is then transcribed into Cyrillic and spoken by the same Russian speaker. |
-| `VOICE_CMUDICT_ENABLED` | Uses the official CMU pronunciation dictionary for English-to-Cyrillic transcription. |
-| `VOICE_CMUDICT_CACHE_DIR` | Local cache for the approximately 3.6 MB pronunciation dictionary and its license. |
-| `VOICE_SILERO_CPU_THREADS` | Number of CPU threads used by PyTorch for Silero inference. |
-| `VOICE_SILERO_WARMUP` | Runs a short warmup phrase after loading Silero to reduce first real TTS latency. |
-| `VOICE_SILERO_TIMEOUT_SECONDS` | Timeout for synthesizing one phrase. |
-| `VOICE_SILERO_LOUDNESS_TARGET_DBFS` / `VOICE_SILERO_PEAK_CEILING_DBFS` | Target speech loudness and hard peak ceiling for generated WAV files. |
-| `VOICE_STRESS_ENABLED` | Uses local Silero Stress to add explicit Russian stress before TTS. Loading failures retain v5_5_ru's built-in stress. |
-| `VOICE_STRESS_CPU_THREADS` | Requested CPU thread budget for the local accentor; the packaged model defaults to one thread. |
+| `VOICE_TTS_PROVIDER` | `teratts` in production; `mock` is only for tests. |
+| `VOICE_PRELOAD_TTS_MODEL` | Loads and warms up TeraTTSv2 during backend startup. The first run downloads the pinned Hugging Face snapshot. |
+| `VOICE_TERATTS_MODEL` / `VOICE_TERATTS_REVISION` | Model id and immutable Hub revision. |
+| `VOICE_TERATTS_MODEL_PATH` | Optional local model directory for offline startup. |
+| `VOICE_TERATTS_CACHE_DIR` | Hugging Face cache directory; defaults to the per-user app data directory. |
+| `VOICE_TERATTS_VOICE` | Default voice, `ru_f1`; the runtime selector exposes all voices shipped by TeraTTSv2. |
+| `VOICE_TERATTS_THREADS` | ONNX Runtime CPU thread count; `8` is the tested default. |
+| `VOICE_TERATTS_DIFFUSION_MODEL` | `distilled` for fast production synthesis or `teacher` for research comparison. |
+| `VOICE_TERATTS_RUACCENT_MODE` / `VOICE_TERATTS_RUSSIAN_STRESS` | Russian pronunciation asset mode and optional model stress path. |
+| `VOICE_TERATTS_CHUNK_FRAMES` | Native vocoder chunk size. The current network protocol still emits one complete WAV per logical segment. |
+| `VOICE_TERATTS_SEED` | Deterministic synthesis seed, default `1234`. |
+| `VOICE_TERATTS_WARMUP` / `VOICE_TERATTS_TIMEOUT_SECONDS` | Warmup and per-segment inference timeout. |
 | `VOICE_TTS_POSTPROCESSING_ENABLED` | Enables DC removal, high-pass filtering, anti-click fades, and safe normalization for generated WAV. |
 | `VOICE_TTS_HIGHPASS_CUTOFF_HZ` | Low-frequency rumble cutoff used when TTS post-processing is enabled; `60` is the default. |
-| `VOICE_TTS_ADAPTIVE_PROSODY` | Adds safe semantic clause pauses while keeping Silero's model-native style intensity. Disable for a strict baseline comparison. |
-| `VOICE_SILERO_PRONUNCIATION_DICTIONARY_PATH` | Optional path to a JSON pronunciation dictionary. By default it is created in the app data directory. |
+| `VOICE_TTS_ADAPTIVE_PROSODY` | Keeps semantic pauses in the provider-independent delivery layer. Style/emotion maps to TeraTTS `duration_scale`. |
+| `VOICE_TTS_PRONUNCIATION_DICTIONARY_PATH` | Optional JSON pronunciation dictionary; by default it is created in app data. |
 | `VOICE_TTS_BACKGROUND_TIMEOUT_SECONDS` | Timeout for background batch TTS jobs created by `/voice/chat`. |
 | `VOICE_TTS_TIMEOUT_SECONDS` | General TTS timeout used by voice API flows. |
 | `VOICE_TTS_MAX_CHARS` | Maximum text length accepted for one backend TTS request. |
 | `VOICE_AUDIO_DIR` | Directory where generated audio files are stored. Generated WAV files are cleared at backend startup, then every 20 minutes files older than 2 minutes are removed. |
 
-Silero v5.5 RU is the primary local TTS engine. The default voice is `baya` at
-48 kHz; `xenia` remains available from the voice selector. Text is normalized
-before synthesis, and Silero SSML controls pauses and the active style profile.
-The generated WAV is normalized to the configured loudness target and peak
-ceiling. The editable pronunciation dictionary is created at
+TeraTTSv2 is the primary local TTS engine. The default voice is `ru_f1` and
+output is mono PCM16 WAV at 44.1 kHz. Russian text is normalized into one
+balanced `<ru>...</ru>` span; punctuation remains available to the model for
+intonation. Styles map to `duration_scale` values from `0.88` (energetic) to
+`1.18` (calm). The editable pronunciation dictionary is created at
 `data/tts-pronunciations.json` on its first use.
 
 #### Live voice playback
@@ -407,7 +395,7 @@ flowchart TB
 
     STT[GigaAM v3 or faster-whisper]
     LLM[DeepSeek-compatible API]
-    TTS[Silero v5.5 RU TTS]
+    TTS[TeraTTSv2 ru_f1]
     Audio[WAV audio storage]
     Unity[Unity VRM runtime]
 
@@ -444,7 +432,7 @@ Browser MediaRecorder
   → Character Agent
   → DeepSeek-compatible LLM
   → immediate text response
-  → background Silero synthesis
+  → background TeraTTSv2 synthesis
   → ready WAV audio
 ```
 
@@ -455,7 +443,7 @@ When backend TTS is enabled, typed messages use the live WebSocket stream too: t
 ```text
 LLM text stream
   → safe text chunks
-  → Silero WAV segments
+  → TeraTTSv2 WAV segments at 44.1 kHz
   → voice WebSocket
   → browser playback queue
 ```
@@ -476,7 +464,7 @@ uses the same path before recording begins.
 
 ```text
 Chat or non-live voice response
-  → background Silero synthesis
+  → background TeraTTSv2 synthesis
   → voice.tts_ready
   → complete WAV URL
   → avatar.speak over /ws/avatar
@@ -538,11 +526,10 @@ Build the frontend:
 npm run build
 ```
 
-Benchmark Silero:
+Benchmark TeraTTSv2:
 
 ```powershell
-python scripts/benchmark_tts.py --provider silero --device cpu --runs 5
-python scripts/benchmark_tts.py --provider silero --device cuda --runs 5
+python scripts/benchmark_tts.py --provider teratts --device cpu --runs 5
 ```
 
 The benchmark writes results to `data/tts_benchmark.json` and reports P50/P95 synthesis time and real-time factor.
@@ -562,9 +549,9 @@ subprocesses. Recordings and diagnostic audio are private and ignored by Git.
 
 ## Troubleshooting
 
-### Silero startup stops at `Using cache found ... snakers4_silero-models_master`
+### TeraTTSv2 does not become ready
 
-That line is not the final success message. It only means PyTorch Hub found the Silero repository cache. On a fresh or incomplete setup, PyTorch can still download the actual model checkpoint after that line.
+TeraTTSv2 downloads one pinned Hugging Face snapshot on first use. Keep `PYTHONUTF8=1` and `PYTHONIOENCODING=utf-8` in the Windows launcher environment. For a fully offline install, set `VOICE_TERATTS_MODEL_PATH` to a complete local snapshot.
 
 If `app.log` contains `CERTIFICATE_VERIFY_FAILED` or `certificate has expired`, the model download failed during HTTPS certificate verification. On the affected Windows machine:
 
@@ -572,7 +559,7 @@ If `app.log` contains `CERTIFICATE_VERIFY_FAILED` or `certificate has expired`, 
 # 1. Check Windows date, time, timezone, and run Windows Update for root certificates.
 
 # Optional temporary startup workaround: let the backend start while you fix the
-# first Silero download. TTS will retry lazy loading on first use.
+# first TeraTTSv2 download. TTS will retry lazy loading on first use.
 $env:VOICE_PRELOAD_TTS_MODEL = "false"
 
 # 2. Update certificate-related Python packages inside the project venv.
@@ -581,15 +568,14 @@ $env:VOICE_PRELOAD_TTS_MODEL = "false"
 # 3. Point OpenSSL/Python tools at certifi for the current terminal session.
 $env:SSL_CERT_FILE = (& .\.venv\Scripts\python.exe -c "import certifi; print(certifi.where())")
 
-# 4. Remove possibly incomplete Torch Hub downloads.
-Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\torch\hub\snakers4_silero-models_master" -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\torch\hub\checkpoints" -ErrorAction SilentlyContinue
+# 4. Remove an incomplete Hugging Face snapshot if the log reports corruption.
+# Then restart once with network access, or use VOICE_TERATTS_MODEL_PATH.
 
 # 5. Start the backend again.
 .\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-If the machine has restricted corporate or antivirus HTTPS inspection, allow Python to access GitHub/PyTorch downloads or prepare the Torch cache on another machine and copy `%USERPROFILE%\.cache\torch` to the target user profile.
+If corporate HTTPS inspection blocks the download, prepare the pinned snapshot on another machine and set `VOICE_TERATTS_MODEL_PATH` to its local directory.
 
 ### GigaAM STT
 
@@ -711,4 +697,4 @@ V0.5 progresses only through the milestones in the companion blueprint: freeze, 
 
 Iris is licensed under the [Apache License 2.0](LICENSE).
 
-Third-party models and services may have their own licenses and usage terms. Check the Silero model and configured LLM provider terms before commercial use.
+Third-party models and services may have their own licenses and usage terms. Check the TeraTTSv2 model, Silero VAD model, and configured LLM provider terms before commercial use.

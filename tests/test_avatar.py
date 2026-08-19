@@ -319,7 +319,7 @@ async def test_orchestrator_sends_only_after_ready_wav(tmp_path, monkeypatch) ->
     service = AvatarService(manager, EventBus(), enabled=True, heartbeat_interval_seconds=1, client_timeout_seconds=2)
     orchestrator = SpeechOrchestrator(voice, EventBus(), settings, service)
 
-    job_id = orchestrator.enqueue(session_id="s", reply="Привет", emotion="happy", intent="test", voice="xenia")
+    job_id = orchestrator.enqueue(session_id="s", reply="Привет", emotion="happy", intent="test", voice="ru_f1")
     while voice.get_tts_job(job_id)["status"] == "queued":
         await __import__("asyncio").sleep(0.01)
 
@@ -368,10 +368,10 @@ async def test_orchestrator_cancels_only_batch_speech_for_requested_session(tmp_
     orchestrator = SpeechOrchestrator(voice, EventBus(), settings, AvatarRecorder())
 
     first_job = orchestrator.enqueue(
-        session_id="first", reply="Первый ответ", emotion="neutral", intent="test", voice="xenia",
+        session_id="first", reply="Первый ответ", emotion="neutral", intent="test", voice="ru_f1",
     )
     second_job = orchestrator.enqueue(
-        session_id="second", reply="Второй ответ", emotion="neutral", intent="test", voice="xenia",
+        session_id="second", reply="Второй ответ", emotion="neutral", intent="test", voice="ru_f1",
     )
     await asyncio.wait_for(provider.started.wait(), timeout=1)
 

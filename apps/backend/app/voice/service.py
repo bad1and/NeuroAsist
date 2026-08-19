@@ -22,10 +22,10 @@ from apps.backend.app.voice.providers import (
     MockSTTProvider,
     MockTTSProvider,
     Qwen3ASRProvider,
-    SileroTTSProvider,
     STTProvider,
     TTSProvider,
 )
+from apps.backend.app.voice.teratts_provider import TeraTTSProvider
 from apps.backend.app.voice.lexicon import load_pronunciations, save_pronunciations
 from apps.backend.app.voice.stt_terms import (
     DEFAULT_STT_TERMS,
@@ -154,6 +154,11 @@ class VoiceService:
     async def preload_tts(self) -> None:
         await self._tts_provider.preload()
 
+    async def close(self) -> None:
+        closer = getattr(self._tts_provider, "close", None)
+        if closer is not None:
+            await closer()
+
     def set_tts_job(self, voice_request_id: str, payload: dict[str, Any]) -> None:
         self._tts_jobs[voice_request_id] = {
             "voice_request_id": voice_request_id,
@@ -171,10 +176,10 @@ class VoiceService:
         return dict(job)
 
     def pronunciations(self) -> dict[str, str]:
-        return load_pronunciations(self._settings.voice_silero_pronunciation_dictionary)
+        return load_pronunciations(self._settings.voice_tts_pronunciation_dictionary)
 
     def update_pronunciations(self, entries: dict[str, str]) -> dict[str, str]:
-        pronunciations = save_pronunciations(self._settings.voice_silero_pronunciation_dictionary, entries)
+        pronunciations = save_pronunciations(self._settings.voice_tts_pronunciation_dictionary, entries)
         updater = getattr(self._tts_provider, "set_pronunciations", None)
         if updater is not None:
             updater(pronunciations)
@@ -236,9 +241,7 @@ class VoiceService:
         voices = getattr(self._tts_provider, "available_speakers", None)
         if voices is not None:
             return list(voices)
-        if self._settings.voice_tts_provider == "silero" and self._settings.voice_silero_model == "v5_5_ru":
-            return ["xenia", "baya", "kseniya"]
-        return [self._settings.voice_silero_speaker_ru]
+        return [self._settings.voice_tts_default_voice]
 
     def resolve_audio_path(self, audio_id: str) -> Path:
         if "/" in audio_id or "\\" in audio_id or ".." in audio_id:
@@ -374,35 +377,26 @@ class VoiceService:
     def _build_tts_provider_by_name(provider_name: str, settings: Settings) -> TTSProvider:
         if provider_name == "mock":
             return MockTTSProvider()
-        if provider_name == "silero":
-            return SileroTTSProvider(
-                model=settings.voice_silero_model,
-                speaker=settings.voice_silero_speaker_ru,
-                sample_rate=settings.voice_silero_sample_rate,
-                device=settings.voice_silero_device,
-                cpu_threads=settings.voice_silero_cpu_threads,
-                warmup=settings.voice_silero_warmup,
-                timeout_seconds=settings.voice_silero_timeout_seconds,
-                loudness_target_dbfs=settings.voice_silero_loudness_target_dbfs,
-                peak_ceiling_dbfs=settings.voice_silero_peak_ceiling_dbfs,
-                pronunciation_dictionary_path=settings.voice_silero_pronunciation_dictionary,
-                native_english=settings.voice_silero_native_english,
-                english_model=settings.voice_silero_english_model,
-                english_speaker=settings.voice_silero_english_speaker,
-                stress_enabled=settings.voice_stress_enabled,
-                stress_cpu_threads=settings.voice_stress_cpu_threads,
+        if provider_name == "teratts":
+            return TeraTTSProvider(
+                model_id=settings.voice_teratts_model,
+                revision=settings.voice_teratts_revision,
+                model_path=settings.voice_teratts_model_directory,
+                cache_dir=settings.voice_teratts_cache_path,
+                voice=settings.voice_teratts_voice,
+                device=settings.voice_teratts_device,
+                threads=settings.voice_teratts_threads,
+                diffusion_model=settings.voice_teratts_diffusion_model,
+                ruaccent_mode=settings.voice_teratts_ruaccent_mode,
+                russian_stress=settings.voice_teratts_russian_stress,
+                chunk_frames=settings.voice_teratts_chunk_frames,
+                seed=settings.voice_teratts_seed,
+                warmup=settings.voice_teratts_warmup,
+                timeout_seconds=settings.voice_teratts_timeout_seconds,
                 audio_postprocessing_enabled=settings.voice_tts_postprocessing_enabled,
+                loudness_target_dbfs=settings.voice_tts_loudness_target_dbfs,
+                peak_ceiling_dbfs=settings.voice_tts_peak_ceiling_dbfs,
                 highpass_cutoff_hz=settings.voice_tts_highpass_cutoff_hz,
-                lowpass_cutoff_hz=settings.voice_tts_lowpass_cutoff_hz,
-                adaptive_prosody=settings.voice_tts_adaptive_prosody,
-                cmudict_enabled=settings.voice_cmudict_enabled,
-                cmudict_cache_dir=settings.voice_cmudict_cache_path,
-                openvoice_enabled=settings.voice_openvoice_enabled,
-                openvoice_reference_audio_path=settings.voice_openvoice_reference_audio_path,
-                openvoice_cache_dir=settings.voice_openvoice_cache_path,
-                openvoice_repo_id=settings.voice_openvoice_repo_id,
-                openvoice_revision=settings.voice_openvoice_revision,
-                openvoice_tau=settings.voice_openvoice_tau,
-                openvoice_cpu_threads=settings.voice_openvoice_cpu_threads,
+                pronunciation_dictionary_path=settings.voice_tts_pronunciation_dictionary,
             )
         raise ValueError(f"Unsupported TTS provider: {provider_name}")

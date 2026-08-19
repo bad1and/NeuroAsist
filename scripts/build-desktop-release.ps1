@@ -28,8 +28,6 @@ if (-not $SkipDependencyInstall) {
     Add-Content -Encoding utf8 -LiteralPath $releaseRequirements "pyinstaller==6.21.0"
     & $python -m pip install --requirement $releaseRequirements
     Assert-LastExitCode "Installing release Python dependencies"
-    & (Join-Path $root "scripts\install-openvoice.ps1") -Python $python
-    Assert-LastExitCode "Installing OpenVoice tone converter"
     npm ci --prefix (Join-Path $root "apps\web")
     Assert-LastExitCode "Installing web dependencies"
     npm ci --prefix $desktop
@@ -40,10 +38,12 @@ New-Item -ItemType Directory -Force -Path $output | Out-Null
 & $python -m PyInstaller --noconfirm --clean --onedir --name neuroasist-core `
     --paths $root `
     --add-data "$(Join-Path $root 'apps\protocol');apps\protocol" `
-    --collect-all silero `
     --collect-all silero_vad `
     --collect-all gigaam `
-    --collect-all openvoice `
+    --collect-all transformers `
+    --collect-all huggingface_hub `
+    --collect-all num2words `
+    --hidden-import transformers.dynamic_module_utils `
     --collect-all onnxruntime `
     --collect-all torchaudio `
     --collect-all faster_whisper `
