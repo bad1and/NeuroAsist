@@ -51,6 +51,8 @@ output/live-soak*.json
 output/live-soak*.md
 output/live-soak*.stdout.log
 output/live-soak*.stderr.log
+output/tts-model-comparison/TeraTTSv2/
+output/tts-model-comparison/TeraTTSv2-listening-pack/
 *.cover
 *.py,cover
 .hypothesis/

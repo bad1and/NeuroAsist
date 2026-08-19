@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
@@ -37,8 +37,8 @@ const settings = {
   provider: "deepseek", model: "deepseek-chat", personality: "default", interface_locale: "ru" as const, voice_language: "ru",
   voice_microphone_profile: "balanced", voice_input_device_id: "", voice_output_device_id: "", voice_vad: { configured_provider: "silero", active_provider: "silero", ready: true, fallback: false },
   voice_input_diagnostic_audio_enabled: false,
-  voice_stt_model: "small", voice_tts_enabled: true, avatar_enabled: false, avatar_placement: "desktop_overlay", avatar_in_app_visible: true, voice_tts_voice: "F4",
-  voice_tts_provider: "silero", voice_tts_model: "v5_5_ru", voice_tts_device: "cpu", voice_tts_style: "auto", voice_tts_expression_level: "natural",
+  voice_stt_model: "small", voice_tts_enabled: true, avatar_enabled: false, avatar_placement: "desktop_overlay", avatar_in_app_visible: true, voice_tts_voice: "ru_f1",
+  voice_tts_provider: "teratts", voice_tts_model: "TeraSpace/TeraTTSv2", voice_tts_device: "cpu", voice_tts_style: "auto", voice_tts_expression_level: "natural",
   voice_playback_rate: 1, voice_live_playback_prebuffer_segments: 2, voice_live_playback_prebuffer_ms: 700,
   voice_live_playback_start_lead_ms: 30,
   chat_history_limit: 40, episodes_enabled: true, episode_soft_inactivity_minutes: 30,
@@ -50,7 +50,8 @@ const settings = {
   live_conversation_pause_tolerance: "natural", live_conversation_emotion_expression: "natural",
   live_conversation_mood_recovery: "natural", live_conversation_recent_event_weight: "balanced",
   live_conversation_echo_mode: "auto",
-  api_key_configured: true, available_personalities: ["default"], available_voice_languages: ["ru"], available_tts_voices: ["F4"],
+  api_key_configured: true, available_personalities: ["default"], available_voice_languages: ["ru"],
+  available_tts_voices: ["ru_f1", "ru_f2", "ru_m1", "ru_m5", "eng_f3", "eng_f4_whisper", "eng_f5", "eng_m2_whisper", "eng_m3", "eng_m4"],
 };
 
 class MockWebSocket {
@@ -102,10 +103,10 @@ describe("русский интерфейс", () => {
     fireEvent.click(screen.getByRole("button", { name: "Диалог" }));
     expect(container.querySelector("main.workspace-chat")).toBeInTheDocument();
     expect(container.querySelector(".workspace-chat > .chat-view")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Live" })).toBeInTheDocument();
     expect(container.querySelector(".chat-panel .message-list")).toBeInTheDocument();
     expect(container.querySelector(".chat-panel .chat-composer")).toBeInTheDocument();
     expect(container.querySelector(".chat-composer textarea")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Live" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Свободные руки" })).not.toBeInTheDocument();
   });
 
@@ -113,10 +114,18 @@ describe("русский интерфейс", () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
-    const composer = screen.getByPlaceholderText("Напишите сообщение…");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Новый диалог" })).not.toBeDisabled());
+    const composer = await screen.findByPlaceholderText("Напишите сообщение…");
 
-    expect(fireEvent.keyDown(composer, { key: "Enter" })).toBe(false);
-    expect(fireEvent.keyDown(composer, { key: "Enter", shiftKey: true })).toBe(true);
+    const enterEvent = createEvent.keyDown(composer, { key: "Enter", isComposing: false });
+    fireEvent(composer, enterEvent);
+    expect(enterEvent.defaultPrevented).toBe(true);
+
+    const shiftEnterEvent = createEvent.keyDown(composer, {
+      key: "Enter", shiftKey: true, isComposing: false,
+    });
+    fireEvent(composer, shiftEnterEvent);
+    expect(shiftEnterEvent.defaultPrevented).toBe(false);
   });
 
   it("переключает sidebar в компактный режим без смены активного раздела", async () => {
@@ -354,8 +363,8 @@ describe("русский интерфейс", () => {
     expect(voiceGroup).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(within(navigation).getByRole("button", { name: "Основное" }));
     expect(screen.getByLabelText("Язык голосового ввода")).toBeVisible();
-    expect(screen.getByLabelText("Голос Silero")).toBeVisible();
-    expect(screen.getByText("Silero · CPU · активен")).toBeVisible();
+    expect(screen.getByLabelText("Голос TeraTTSv2")).toBeVisible();
+    expect(screen.getByText("TeraTTSv2 · CPU · активен")).toBeVisible();
     expect(screen.getByLabelText("Участники")).not.toBeVisible();
 
     fireEvent.click(voiceGroup);

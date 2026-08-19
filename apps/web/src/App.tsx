@@ -1633,7 +1633,7 @@ export function ChatPage({
     // Chat uses Enter for the common one-line send action.  Keep multiline
     // prompts available through Shift+Enter and never interrupt IME text
     // composition (important for Russian and other non-Latin input methods).
-    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing === true) return;
     event.preventDefault();
     event.currentTarget.form?.requestSubmit();
   };
@@ -2240,7 +2240,7 @@ export function SettingsPage({
     );
   }
 
-  const ttsProviderLabel = settings.voice_tts_provider === "silero" ? "Silero" : settings.voice_tts_provider;
+  const ttsProviderLabel = settings.voice_tts_provider === "teratts" ? "TeraTTSv2" : settings.voice_tts_provider;
   const ttsRuntimeLabel = [ttsProviderLabel, settings.voice_tts_device?.toUpperCase()]
     .filter(Boolean)
     .join(" · ");

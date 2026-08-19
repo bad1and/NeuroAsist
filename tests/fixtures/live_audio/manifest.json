@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generator": "Silero v5.5 ru/xenia",
+  "generator": "legacy synthetic fixture; production TTS: TeraTTSv2 ru_f1",
   "limitations": "Synthetic speech does not cover room acoustics or microphone AEC.",
   "fixtures": [
     {

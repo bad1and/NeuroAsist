@@ -34,7 +34,7 @@ flowchart LR
     A[Микрофон или текст] --> B[GigaAM v3 STT]
     B --> C[Character Agent]
     C --> D[DeepSeek-совместимая LLM]
-    D --> E[Silero TTS]
+    D --> E[TeraTTSv2 ru_f1]
     E --> F[Воспроизведение голоса]
 ```
 
@@ -48,7 +48,7 @@ flowchart LR
 | Live-диалог | ✅ | Непрерывный PCM16 через AudioWorklet и input WebSocket v3 |
 | Live-ответ голосом | ✅ | Аудиосегменты через WebSocket |
 | Локальное распознавание речи | ✅ | GigaAM v3, `faster-whisper`/Qwen3-ASR optional fallback |
-| Локальная русская озвучка | ✅ | Silero `v5_5_ru` |
+| Локальная русская озвучка | ✅ | TeraTTSv2, `ru_f1` по умолчанию |
 | История диалога и Journal | ✅ | SQLite timeline, episodes и summaries |
 | Долгосрочная память | 🧪 | Канонические записи SQLite, audit trail и Memory Center |
 | Семантический поиск по памяти | 🧪 | Перестраиваемый ChromaDB-индекс с FTS fallback |
@@ -96,7 +96,7 @@ docker build -t neuroasist-coding -f apps/backend/docker/coding.Dockerfile apps/
 - **Journal** — непрерывная timeline и внутренние эпизоды разговора.
 - **Memory** — сохранённые факты, их происхождение, проверка и полный сброс памяти с историей.
 - **Events** — события backend, LLM, STT, TTS и соединений в реальном времени.
-- **Settings** — язык голоса, speaker Silero, скорость воспроизведения, live prebuffer, runtime-настройки и тестовое управление аватаром.
+- **Settings** — язык голоса, голос TeraTTSv2, скорость воспроизведения, live prebuffer, runtime-настройки и тестовое управление аватаром.
 
 В шапке отображаются состояние backend, подключение WebSocket, наличие API-ключа и фиксированная LLM-модель.
 
@@ -111,7 +111,7 @@ docker build -t neuroasist-coding -f apps/backend/docker/coding.Dockerfile apps/
 - WebSocket
 - GigaAM v3
 - `faster-whisper` как мультиязычный fallback
-- Silero TTS
+- TeraTTSv2 через ONNX Runtime
 - DeepSeek-совместимый LLM API
 
 ### Frontend
@@ -132,7 +132,7 @@ docker build -t neuroasist-coding -f apps/backend/docker/coding.Dockerfile apps/
 - Node.js **24+**;
 - FFmpeg и FFprobe доступны через `PATH`;
 - API-ключ DeepSeek;
-- интернет при первой загрузке GigaAM/Whisper и Silero;
+- интернет при первой загрузке GigaAM/Whisper и TeraTTSv2;
 - CUDA-видеокарта необязательна.
 
 ### 1. Клонирование ветки
@@ -159,7 +159,7 @@ python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_
 ```
 
 Если CUDA недоступна, установи совместимую CPU-сборку PyTorch и укажи в `.env`
-`VOICE_STT_DEVICE=cpu` и `VOICE_SILERO_DEVICE=cpu`.
+`VOICE_STT_DEVICE=cpu` и `VOICE_TERATTS_DEVICE=cpu`.
 
 ### 3. Frontend-зависимости
 
@@ -189,16 +189,16 @@ VOICE_STT_MODEL=v3_rnnt
 VOICE_STT_DEVICE=cpu
 
 VOICE_TTS_ENABLED=true
-VOICE_TTS_PROVIDER=silero
+VOICE_TTS_PROVIDER=teratts
 VOICE_PRELOAD_TTS_MODEL=true
-VOICE_SILERO_MODEL=v5_5_ru
-VOICE_SILERO_SPEAKER_RU=baya
-VOICE_SILERO_SAMPLE_RATE=48000
-VOICE_SILERO_DEVICE=cpu
-VOICE_SILERO_CPU_THREADS=4
-VOICE_SILERO_WARMUP=true
-VOICE_STRESS_ENABLED=true
-VOICE_STRESS_CPU_THREADS=1
+VOICE_TERATTS_MODEL=TeraSpace/TeraTTSv2
+VOICE_TERATTS_REVISION=f05ea799094571a3553904a555df3834fb0b963b
+VOICE_TERATTS_VOICE=ru_f1
+VOICE_TERATTS_DEVICE=cpu
+VOICE_TERATTS_THREADS=8
+VOICE_TERATTS_DIFFUSION_MODEL=distilled
+VOICE_TERATTS_RUACCENT_MODE=full
+VOICE_TERATTS_SEED=1234
 VOICE_TTS_POSTPROCESSING_ENABLED=true
 VOICE_TTS_HIGHPASS_CUTOFF_HZ=60
 VOICE_TTS_ADAPTIVE_PROSODY=true
@@ -265,25 +265,26 @@ pip install -U qwen-asr
   --model Qwen/Qwen3-ASR-1.7B
 ```
 
-#### Text-to-speech / Silero
+#### Text-to-speech / TeraTTSv2
 
 | Параметр | За что отвечает |
 |---|---|
 | `VOICE_TTS_ENABLED` | Включает backend-озвучку. Если она выключена или упала, frontend может использовать browser SpeechSynthesis fallback. |
-| `VOICE_TTS_PROVIDER` | Backend TTS-провайдер. Рабочее значение — `silero`; `mock` только для тестов. Edge TTS не поддерживается. |
-| `VOICE_PRELOAD_TTS_MODEL` | Загружает и прогревает Silero при старте backend. Первый запуск может быть дольше. |
-| `VOICE_SILERO_MODEL` | Имя модели Silero. Текущее значение по умолчанию — `v5_5_ru`. |
-| `VOICE_SILERO_SPEAKER_RU` | Русский speaker Silero по умолчанию, например `xenia`. Можно менять в runtime через Settings. |
-| `VOICE_SILERO_SAMPLE_RATE` | Sample rate WAV-файлов Silero. Текущее значение — `48000`; изменение требует перезапуска backend. |
-| `VOICE_SILERO_DEVICE` | Где запускать Silero: `cpu`, `cuda` или `auto`. |
-| `VOICE_SILERO_CPU_THREADS` | Сколько CPU-потоков PyTorch использует для Silero inference. |
-| `VOICE_SILERO_WARMUP` | Запускает короткую warmup-фразу после загрузки Silero, чтобы первый реальный TTS был быстрее. |
-| `VOICE_SILERO_TIMEOUT_SECONDS` | Timeout на синтез одной фразы. |
-| `VOICE_STRESS_ENABLED` | Использует локальный Silero Stress для явной расстановки русских ударений перед TTS. При ошибке загрузки остаётся встроенное автоударение v5_5_ru. |
-| `VOICE_STRESS_CPU_THREADS` | Запрашиваемый лимит CPU-потоков акцентатора; пакетная модель по умолчанию использует один поток. |
+| `VOICE_TTS_PROVIDER` | `teratts` в production; `mock` только для тестов. |
+| `VOICE_PRELOAD_TTS_MODEL` | Загружает и прогревает TeraTTSv2 при старте backend. Первый запуск скачивает pinned snapshot. |
+| `VOICE_TERATTS_MODEL` / `VOICE_TERATTS_REVISION` | Идентификатор модели и закреплённая ревизия Hugging Face. |
+| `VOICE_TERATTS_MODEL_PATH` | Необязательный локальный snapshot для offline-запуска. |
+| `VOICE_TERATTS_CACHE_DIR` | Кэш модели; по умолчанию находится в app data пользователя. |
+| `VOICE_TERATTS_VOICE` | Голос по умолчанию `ru_f1`; selector получает все голоса TeraTTSv2. |
+| `VOICE_TERATTS_THREADS` | Число CPU-потоков ONNX Runtime, по умолчанию `8`. |
+| `VOICE_TERATTS_DIFFUSION_MODEL` | `distilled` для production или `teacher` для сравнения качества. |
+| `VOICE_TERATTS_RUACCENT_MODE` / `VOICE_TERATTS_RUSSIAN_STRESS` | Режим русских pronunciation assets. |
+| `VOICE_TERATTS_CHUNK_FRAMES` | Размер внутреннего vocoder chunk; внешний протокол сохраняет один WAV на сегмент. |
+| `VOICE_TERATTS_SEED` | Детерминированный seed, по умолчанию `1234`. |
 | `VOICE_TTS_POSTPROCESSING_ENABLED` | Включает удаление DC-смещения, high-pass, антищелчковые fades и безопасную нормализацию WAV. |
 | `VOICE_TTS_HIGHPASS_CUTOFF_HZ` | Частота среза низкочастотного гула при включённой постобработке; по умолчанию `60`. |
-| `VOICE_TTS_ADAPTIVE_PROSODY` | Добавляет безопасные смысловые паузы между частями фразы, сохраняя нативную выразительность Silero. Выключите для сравнения с базовым звучанием. |
+| `VOICE_TTS_ADAPTIVE_PROSODY` | Сохраняет смысловые паузы delivery-слоя; стили и эмоции переводятся в TeraTTS `duration_scale`. |
+| `VOICE_TTS_PRONUNCIATION_DICTIONARY_PATH` | Необязательный JSON-словарь произношений. |
 | `VOICE_TTS_BACKGROUND_TIMEOUT_SECONDS` | Timeout фоновых TTS jobs, если они используются внутренним voice pipeline. |
 | `VOICE_TTS_TIMEOUT_SECONDS` | Общий timeout TTS для voice API flow. |
 | `VOICE_TTS_MAX_CHARS` | Максимальная длина текста для одного backend TTS-запроса. |
@@ -401,7 +402,7 @@ flowchart TB
 
     STT[GigaAM v3 или faster-whisper]
     LLM[DeepSeek-совместимый API]
-    TTS[Silero TTS]
+    TTS[TeraTTSv2 ru_f1]
     Audio[WAV audio storage]
     Unity[Unity VRM runtime]
 
@@ -452,7 +453,7 @@ Backend построен как модульный монолит: API routes, a
 ```text
 Поток текста LLM
   → безопасные текстовые сегменты
-  → WAV-сегменты Silero
+  → WAV-сегменты TeraTTSv2 44.1 kHz
   → voice WebSocket
   → очередь воспроизведения в браузере
 ```
@@ -464,7 +465,7 @@ TTS и prebuffer воспроизведения.
 
 ```text
 Текстовый или live-голосовой ответ
-  → фоновая генерация Silero
+  → фоновая генерация TeraTTSv2
   → voice.tts_ready
   → URL полного WAV
   → avatar.speak через /ws/avatar
@@ -526,11 +527,10 @@ npm test --prefix apps/web
 npm run build
 ```
 
-Benchmark Silero:
+Benchmark TeraTTSv2:
 
 ```powershell
-python scripts/benchmark_tts.py --provider silero --device cpu --runs 5
-python scripts/benchmark_tts.py --provider silero --device cuda --runs 5
+python scripts/benchmark_tts.py --provider teratts --device cpu --runs 5
 ```
 
 Benchmark записывает результат в `data/tts_benchmark.json` и выводит P50/P95 задержку синтеза и real-time factor.
@@ -550,16 +550,16 @@ STT-корпус». Guided capture использует тот же `BrowserVadR
 
 ## Устранение проблем
 
-### Silero при запуске останавливается на `Using cache found ... snakers4_silero-models_master`
+### TeraTTSv2 не переходит в ready
 
-Эта строка не означает успешную загрузку модели. Она говорит только о том, что PyTorch Hub нашёл кэш репозитория Silero. При свежей или неполной установке после этого всё равно может докачиваться сам checkpoint модели.
+При первом запуске TeraTTSv2 скачивает один pinned snapshot Hugging Face. На Windows launcher должен передавать `PYTHONUTF8=1` и `PYTHONIOENCODING=utf-8`. Для полностью offline-установки укажи `VOICE_TERATTS_MODEL_PATH` на полный локальный snapshot.
 
 Если в `app.log` есть `CERTIFICATE_VERIFY_FAILED` или `certificate has expired`, скачивание модели упало на HTTPS-проверке сертификата. На проблемной Windows-машине:
 
 ```powershell
 # 1. Проверь дату, время, часовой пояс Windows и установи обновления корневых сертификатов через Windows Update.
 
-# Временный обход для запуска backend, пока чинишь первую загрузку Silero.
+# Временный обход для запуска backend, пока чинишь первую загрузку TeraTTSv2.
 # TTS повторит lazy-load при первом использовании.
 $env:VOICE_PRELOAD_TTS_MODEL = "false"
 
@@ -569,15 +569,13 @@ $env:VOICE_PRELOAD_TTS_MODEL = "false"
 # 3. Укажи OpenSSL/Python использовать certifi в текущей сессии терминала.
 $env:SSL_CERT_FILE = (& .\.venv\Scripts\python.exe -c "import certifi; print(certifi.where())")
 
-# 4. Удали возможный неполный кэш Torch Hub.
-Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\torch\hub\snakers4_silero-models_master" -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\torch\hub\checkpoints" -ErrorAction SilentlyContinue
+# 4. При повреждённом snapshot удали его из Hugging Face cache и повтори запуск.
 
 # 5. Запусти backend снова.
 .\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Если на машине есть корпоративная сеть, антивирус или HTTPS inspection, нужно разрешить Python доступ к GitHub/PyTorch downloads или подготовить Torch cache на другой машине и скопировать `%USERPROFILE%\.cache\torch` в профиль нужного пользователя.
+Если корпоративная сеть блокирует скачивание, подготовь pinned snapshot на другой машине и укажи его через `VOICE_TERATTS_MODEL_PATH`.
 
 ### GigaAM STT
 
@@ -684,4 +682,4 @@ V0.5 выполняется только по milestones из companion blueprin
 
 Iris распространяется по [Apache License 2.0](LICENSE).
 
-У сторонних моделей и сервисов могут быть собственные лицензии и условия использования. Перед коммерческим использованием проверь лицензию выбранной Silero-модели и правила LLM-провайдера.
+У сторонних моделей и сервисов могут быть собственные лицензии и условия использования. Перед коммерческим использованием проверь лицензию TeraTTSv2, Silero VAD и правила LLM-провайдера.

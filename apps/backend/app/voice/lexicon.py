@@ -33,7 +33,7 @@ def normalize_tts_orthography(text: str) -> str:
 
 
 def normalize_pronunciation_target(value: str) -> str:
-    """Accept both ``ка́к-то`` and Silero's ``к+ак-то`` notation."""
+    """Accept combining-acute and legacy ``к+ак-то`` stress notation."""
     normalized = unicodedata.normalize("NFC", value).replace("\u00ad", "")
     output: list[str] = []
     for char in normalized:

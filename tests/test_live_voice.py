@@ -242,7 +242,7 @@ async def test_adaptive_split_retries_unsent_text(monkeypatch) -> None:
     provider = AdaptiveProvider()
     manager = VoiceSessionManager(provider, retry_count=1)
     monkeypatch.setattr(manager, "_validate_audio", lambda *args: 1.0)
-    parts = await manager._synthesize_parts("один два три четыре", "ru", "xenia")
+    parts = await manager._synthesize_parts("один два три четыре", "ru", "ru_f1")
     assert [part[0] for part in parts] == ["один два", "три четыре"]
     assert provider.calls == [
         "один два три четыре", "один два три четыре", "один два", "три четыре"
@@ -339,7 +339,7 @@ async def test_tts_worker_synthesizes_concurrently_but_sends_in_order(monkeypatc
     context = UtteranceContext("s", "u")
     manager._active["s"] = context
     started = time.perf_counter()
-    await manager._tts_worker(context, queue, "ru", "xenia")
+    await manager._tts_worker(context, queue, "ru", "ru_f1")
     elapsed = time.perf_counter() - started
     assert elapsed < 0.14
     assert [audio.decode() for _, audio, _ in connection.segments] == ["slow", "fast"]
@@ -417,7 +417,7 @@ async def test_tts_failure_is_reported_instead_of_leaving_live_turn_pending() ->
     manager._connections["s"] = connection
     task = await manager.start(
         session_id="s", utterance_id="u", transcript="Привет", language="ru",
-        voice="xenia", agent=OneSentenceAgent(),
+        voice="ru_f1", agent=OneSentenceAgent(),
     )
 
     await task
@@ -438,7 +438,7 @@ async def test_safe_segment_words_keeps_successful_sentence_whole(monkeypatch) -
     provider = RecordingProvider()
     manager = VoiceSessionManager(provider, safe_segment_words=2)
     monkeypatch.setattr(manager, "_validate_audio", lambda *args: 1.0)
-    parts = await manager._synthesize_parts("один два три четыре", "ru", "xenia")
+    parts = await manager._synthesize_parts("один два три четыре", "ru", "ru_f1")
     assert [part[0] for part in parts] == ["один два три четыре"]
     assert provider.calls == ["один два три четыре"]
 

@@ -12,7 +12,7 @@ class FailingTTSPreloadVoiceService:
         self.tts_provider = SimpleNamespace(name=settings.voice_tts_provider)
 
     def available_tts_voices(self) -> list[str]:
-        return ["xenia"]
+        return ["ru_f1"]
 
     async def preload_stt(self) -> None:
         return None
@@ -24,7 +24,7 @@ class FailingTTSPreloadVoiceService:
         return 0
 
 
-def test_startup_replaces_persisted_male_voice_with_configured_female(
+def test_startup_replaces_persisted_unknown_voice_with_teratts_default(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -36,8 +36,8 @@ def test_startup_replaces_persisted_male_voice_with_configured_female(
         voice_preload_stt_model=False,
         voice_preload_tts_model=False,
         voice_stt_provider="mock",
-        voice_tts_provider="silero",
-        voice_silero_speaker_ru="xenia",
+        voice_tts_provider="teratts",
+        voice_teratts_voice="ru_f1",
     )
     store = RuntimeSettingsStore(settings.app_data_path / "settings.json")
     store.save(RuntimeSettings(voice_tts_voice="aidar"))
@@ -45,11 +45,11 @@ def test_startup_replaces_persisted_male_voice_with_configured_female(
 
     app = backend_main.create_app()
 
-    assert app.state.runtime_settings.voice_tts_voice == "xenia"
-    assert store.load(RuntimeSettings()).voice_tts_voice == "xenia"
+    assert app.state.runtime_settings.voice_tts_voice == "ru_f1"
+    assert store.load(RuntimeSettings()).voice_tts_voice == "ru_f1"
 
 
-def test_startup_migrates_legacy_supertonic_provider_and_voice_to_baya(
+def test_startup_migrates_legacy_tts_provider_and_voice_to_ru_f1(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -69,8 +69,8 @@ def test_startup_migrates_legacy_supertonic_provider_and_voice_to_baya(
 
     app = backend_main.create_app()
 
-    assert app.state.runtime_settings.voice_tts_voice == "baya"
-    assert store.load(RuntimeSettings()).voice_tts_voice == "baya"
+    assert app.state.runtime_settings.voice_tts_voice == "ru_f1"
+    assert store.load(RuntimeSettings()).voice_tts_voice == "ru_f1"
 
 
 def test_startup_continues_when_tts_preload_fails(
@@ -84,7 +84,7 @@ def test_startup_continues_when_tts_preload_fails(
         voice_preload_stt_model=False,
         voice_preload_tts_model=True,
         voice_tts_enabled=True,
-        voice_tts_provider="silero",
+        voice_tts_provider="teratts",
     )
     monkeypatch.setattr(backend_main, "get_settings", lambda: settings)
     monkeypatch.setattr(backend_main, "VoiceService", FailingTTSPreloadVoiceService)

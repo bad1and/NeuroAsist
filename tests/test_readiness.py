@@ -10,7 +10,7 @@ class FailingTtsService:
         self.tts_provider = SimpleNamespace(name=settings.voice_tts_provider)
 
     def available_tts_voices(self) -> list[str]:
-        return ["xenia"]
+        return ["ru_f1"]
 
     async def preload_tts(self) -> None:
         raise RuntimeError("test tts failure")
