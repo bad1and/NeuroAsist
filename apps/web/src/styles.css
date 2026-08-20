@@ -88,7 +88,7 @@ select { appearance: auto; }
   color: var(--color-text-soft);
   background: transparent;
   text-align: left;
-  transition: background-color 0.16s ease, color 0.16s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.18s ease;
+  transition: background-color 0.16s ease, color 0.16s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
   will-change: transform;
 }
 .navigation-button:hover, .settings-nav-button:hover {
@@ -99,7 +99,7 @@ select { appearance: auto; }
 .navigation-button.is-active, .settings-nav-button.is-active {
   color: var(--color-accent-ink);
   background: var(--color-accent);
-  box-shadow: var(--shadow-accent);
+  box-shadow: none;
   transform: translateX(2px);
 }
 .navigation-button:active:not(:disabled), .settings-nav-button:active:not(:disabled) {
@@ -236,7 +236,7 @@ select { appearance: auto; }
 .voice-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin: 4px 2px 0; padding: 7px 4px 0; border-top: 1px solid var(--color-rule); background: transparent; }
 .voice-button { position: relative; display: inline-flex; align-items: center; gap: 7px; min-height: 32px; padding: 6px 10px; border: 0; border-radius: 8px; color: var(--muted); background: transparent; transition: background-color .16s ease, transform .16s cubic-bezier(0.2, 0.8, 0.2, 1); will-change: transform; }
 .voice-button:hover:not(:disabled) { color: var(--text); background: var(--color-surface-soft); }
-.voice-button.recording { color: var(--color-accent-ink); border-color: var(--accent); background: var(--accent); box-shadow: 0 0 16px -2px var(--color-focus); }
+.voice-button.recording { color: var(--color-accent-ink); border-color: var(--accent); background: var(--accent); }
 .voice-button.muted { color: var(--color-danger-text); background: var(--color-danger-soft); }
 .new-dialog-button { color: var(--subtle); }
 .voice-controls span { margin-left: auto; color: var(--subtle); font-size: 12px; }
@@ -449,8 +449,7 @@ textarea::placeholder {
   transition:
     color 0.16s ease,
     background-color 0.16s ease,
-    transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1),
-    box-shadow 0.18s ease;
+    transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .navigation-button:hover,
@@ -464,7 +463,7 @@ textarea::placeholder {
 .settings-nav-button.is-active {
   color: var(--color-accent-ink);
   background: var(--color-accent);
-  box-shadow: var(--shadow-accent);
+  box-shadow: none;
   transform: translateX(2px);
 }
 
@@ -1819,6 +1818,13 @@ select,
   padding: 16px;
   border-radius: 16px;
   background: var(--color-surface-raised);
+  transition: background-color 0.16s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: transform;
+}
+
+.info-row:hover {
+  background: var(--color-surface-soft);
+  transform: translateX(2px);
 }
 
 .system-stack {
@@ -2099,7 +2105,7 @@ body {
 .settings-nav-button.is-active {
   color: var(--color-accent-ink);
   background: var(--color-accent);
-  box-shadow: var(--shadow-accent);
+  box-shadow: none;
 }
 
 .navigation-button.is-active svg,
@@ -2636,6 +2642,7 @@ body {
   background: transparent;
   text-align: left;
   transition: background-color 0.16s ease, color 0.16s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: transform;
 }
 
 .settings-nav-direct:hover {
@@ -2646,7 +2653,8 @@ body {
 
 .settings-nav-direct.is-active {
   color: var(--color-accent-ink);
-  background: var(--color-accent-soft);
+  background: var(--color-accent);
+  box-shadow: none;
   transform: translateX(2px);
 }
 
@@ -2666,11 +2674,13 @@ body {
   background: transparent;
   text-align: left;
   transition: background-color 0.16s ease, color 0.16s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: transform;
 }
 
 .settings-nav-group-button:hover {
   color: var(--color-text);
   background: var(--color-surface-raised);
+  transform: translateX(2px);
 }
 
 .settings-nav-group.is-active > .settings-nav-group-button {
@@ -2708,7 +2718,8 @@ body {
   color: var(--color-text-soft);
   font-size: 13px;
   white-space: normal;
-  transition: background-color 0.16s ease, color 0.16s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.18s ease;
+  transition: background-color 0.16s ease, color 0.16s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: transform;
 }
 
 .settings-nav-button:hover {
@@ -2720,7 +2731,7 @@ body {
 .settings-nav-button.is-active {
   color: var(--color-accent-ink);
   background: var(--color-accent);
-  box-shadow: var(--shadow-accent);
+  box-shadow: none;
   transform: translateX(2px);
 }
 
@@ -2791,15 +2802,17 @@ body {
   color: var(--color-text);
   background: var(--color-surface-raised);
   cursor: pointer;
-  transition: background-color var(--motion-fast) var(--ease-out), transform var(--motion-fast) var(--ease-out);
+  transition: background-color 0.16s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: transform;
 }
 
 .settings-switch-row:hover {
   background: var(--color-surface-soft);
+  transform: translateX(2px);
 }
 
 .settings-switch-row:active {
-  transform: scale(.99);
+  transform: scale(.98);
 }
 
 .settings-switch-copy {
@@ -2937,12 +2950,19 @@ body {
   border-radius: 13px;
   background: var(--color-surface-raised);
   cursor: pointer;
-  transition: background-color var(--motion-fast) var(--ease-out), box-shadow var(--motion-fast) var(--ease-out);
+  transition: background-color 0.16s ease, box-shadow 0.16s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: transform;
+}
+
+.avatar-placement label:hover {
+  background: var(--color-surface-soft);
+  transform: translateX(2px);
 }
 
 .avatar-placement label:has(input:checked) {
   box-shadow: 0 0 0 2px var(--color-accent-border) inset;
   background: var(--color-accent-soft);
+  transform: translateX(2px);
 }
 
 .avatar-placement label span {
@@ -2980,9 +3000,19 @@ body {
   gap: 10px;
   min-height: 48px;
   padding: 12px 14px;
+  border-radius: 13px;
   color: var(--color-text-soft);
   cursor: pointer;
   list-style: none;
+  transition: background-color 0.16s ease, color 0.16s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: transform;
+}
+
+.avatar-technical summary:hover,
+.avatar-test-disclosure summary:hover {
+  color: var(--color-text);
+  background: var(--color-surface-soft);
+  transform: translateX(2px);
 }
 
 .avatar-technical summary::-webkit-details-marker,
