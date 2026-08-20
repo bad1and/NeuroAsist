@@ -9,7 +9,7 @@ from collections.abc import Callable
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from apps.backend.app.conversation.schemas import EventAppraisal
-from apps.backend.app.llm.base import ChatMessage, LLMProvider
+from apps.backend.app.llm.base import ChatMessage, LLMProvider, llm_call_purpose
 from apps.backend.app.storage.timeline import PRIMARY_RELATIONSHIP_ID, TimelineStore
 
 
@@ -141,19 +141,20 @@ class ReflectionService:
             )
             proposal, errors = self._parse(response.content)
             if proposal is None:
-                repaired = await self._llm_provider.generate_structured(
-                    [
-                        ChatMessage(role="system", content="Исправь заметку по JSON Schema. Верни только JSON."),
-                        ChatMessage(
-                            role="user",
-                            content=(
-                                f"JSON_SCHEMA:\n{json.dumps(schema, ensure_ascii=False)}\n"
-                                f"VALIDATION_ERRORS: {json.dumps(errors)}\nINVALID_JSON:\n{response.content}"
+                with llm_call_purpose("reflection_repair"):
+                    repaired = await self._llm_provider.generate_structured(
+                        [
+                            ChatMessage(role="system", content="Исправь заметку по JSON Schema. Верни только JSON."),
+                            ChatMessage(
+                                role="user",
+                                content=(
+                                    f"JSON_SCHEMA:\n{json.dumps(schema, ensure_ascii=False)}\n"
+                                    f"VALIDATION_ERRORS: {json.dumps(errors)}\nINVALID_JSON:\n{response.content}"
+                                ),
                             ),
-                        ),
-                    ],
-                    temperature=0.0,
-                )
+                        ],
+                        temperature=0.0,
+                    )
                 response = repaired
                 proposal, errors = self._parse(repaired.content)
             if proposal is None:
@@ -193,7 +194,12 @@ class ReflectionService:
                 "reflection_id": reflection_id, "trigger_kind": payload["event_kind"],
             })
         except Exception as exc:
-            await asyncio.to_thread(self._store.fail_summary_job, job_id, type(exc).__name__)
+            await asyncio.to_thread(
+                self._store.fail_summary_job,
+                job_id,
+                type(exc).__name__,
+                max_attempts=2,
+            )
             self._publish("character.reflection.failed", "warning", {
                 "job_id": job_id, "error_codes": ["operational_failure"], "exception_type": type(exc).__name__,
             })

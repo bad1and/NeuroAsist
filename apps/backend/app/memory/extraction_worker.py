@@ -9,7 +9,7 @@ from collections.abc import Callable
 from typing import Any
 
 from pydantic import ValidationError
-from apps.backend.app.llm.base import ChatMessage, LLMProvider
+from apps.backend.app.llm.base import ChatMessage, LLMProvider, llm_call_purpose
 from apps.backend.app.memory.consolidation import (
     CommitmentProposal,
     ConflictProposal,
@@ -124,23 +124,24 @@ class MemoryExtractionWorker:
             response = await self._llm_provider.generate_structured(extraction_messages, temperature=0.0)
             result, errors = self._parse_partial_result(response.content)
             if errors:
-                repair = await self._llm_provider.generate_structured(
-                    [
-                        ChatMessage(
-                            role="system",
-                            content="Исправь ответ по исходной JSON Schema. Верни только исправленный JSON без пояснений.",
-                        ),
-                        ChatMessage(
-                            role="user",
-                            content=(
-                                f"JSON_SCHEMA:\n{json.dumps(schema, ensure_ascii=False)}\n"
-                                f"VALIDATION_ERRORS:\n{json.dumps(errors, ensure_ascii=False)}\n"
-                                f"INVALID_JSON:\n{response.content}"
+                with llm_call_purpose("memory_repair"):
+                    repair = await self._llm_provider.generate_structured(
+                        [
+                            ChatMessage(
+                                role="system",
+                                content="Исправь ответ по исходной JSON Schema. Верни только исправленный JSON без пояснений.",
                             ),
-                        ),
-                    ],
-                    temperature=0.0,
-                )
+                            ChatMessage(
+                                role="user",
+                                content=(
+                                    f"JSON_SCHEMA:\n{json.dumps(schema, ensure_ascii=False)}\n"
+                                    f"VALIDATION_ERRORS:\n{json.dumps(errors, ensure_ascii=False)}\n"
+                                    f"INVALID_JSON:\n{response.content}"
+                                ),
+                            ),
+                        ],
+                        temperature=0.0,
+                    )
                 repaired, repair_errors = self._parse_partial_result(repair.content)
                 if self._proposal_count(repaired) >= self._proposal_count(result):
                     result, errors, response = repaired, repair_errors, repair
@@ -254,7 +255,12 @@ class MemoryExtractionWorker:
             })
         except Exception as exc:
             logger.warning("Background memory consolidation failed: exception_type=%s", type(exc).__name__)
-            await asyncio.to_thread(self._store.fail_summary_job, job_id, str(exc))
+            await asyncio.to_thread(
+                self._store.fail_summary_job,
+                job_id,
+                str(exc),
+                max_attempts=2,
+            )
             self._publish("memory.consolidation_failed", "warning", "Background memory consolidation failed", {"job_id": job_id, "exception_type": type(exc).__name__})
         return True
 

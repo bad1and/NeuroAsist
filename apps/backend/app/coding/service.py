@@ -73,6 +73,7 @@ class CodingAgentService:
             api_key=self.settings.coding_llm_api_key,
             base_url=self.settings.coding_llm_base_url,
             timeout=self.settings.coding_llm_timeout_seconds,
+            purpose="coding",
         )
 
     @property

@@ -189,6 +189,21 @@ def test_handle_user_message_retries_invalid_json_once() -> None:
     ]
 
 
+def test_invalid_json_repair_does_not_trigger_a_third_full_context_call() -> None:
+    provider = SequencedLLMProvider(
+        [
+            "Привет, я не JSON",
+            '{"reply":"Я норм. У тебя как? Босс опять бесит?","emotion":"smirk","intent":"casual_chat"}',
+        ]
+    )
+    agent = CharacterAgent(provider, InMemoryHistory(), history_limit=0)
+
+    result = anyio.run(agent.handle_user_message, "s1", "ирис че как")
+
+    assert provider.calls == 2
+    assert result["reply"] == "У меня всё нормально, я здесь и слушаю. А у тебя как дела?"
+
+
 def test_handle_user_message_does_not_warn_when_repair_succeeds(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

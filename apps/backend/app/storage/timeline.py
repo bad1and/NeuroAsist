@@ -1134,13 +1134,15 @@ class TimelineStore:
                 ),
             )
 
-    def fail_summary_job(self, job_id: str, error: str) -> None:
+    def fail_summary_job(self, job_id: str, error: str, *, max_attempts: int = 3) -> None:
+        """Retry a durable job within an explicit logical-attempt budget."""
+        max_attempts = max(1, int(max_attempts))
         with self._connect() as connection:
             job = connection.execute("SELECT attempts FROM background_jobs WHERE id = ?", (job_id,)).fetchone()
             if job is None:
                 return
             now = datetime.now(UTC)
-            if job["attempts"] < 3:
+            if job["attempts"] < max_attempts:
                 delay_seconds = 2 ** job["attempts"]
                 connection.execute(
                     "UPDATE background_jobs SET status = 'pending', available_at = ?, error_text = ?, updated_at = ?, lease_owner = NULL, lease_until = NULL WHERE id = ?",
