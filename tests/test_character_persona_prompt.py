@@ -1,5 +1,10 @@
 from apps.backend.app.agents.character.persona import get_persona
-from apps.backend.app.agents.character.prompts import character_json_prompt, character_live_prompt
+from apps.backend.app.agents.character.prompts import (
+    character_json_prompt,
+    character_live_prompt,
+    character_state_prompt,
+    character_static_prefix,
+)
 
 
 def test_default_persona_requires_adaptive_conversational_replies() -> None:
@@ -37,3 +42,29 @@ def test_response_persona_is_shared_without_replacing_protocol_rules() -> None:
     assert '"affect"' in json_prompt
     assert "[[avatar emotion=neutral gesture=auto intensity=1.0]]" in live_prompt
     assert "Пиши как в живом разговоре" in live_prompt
+
+
+def test_background_memory_prompt_omits_legacy_memory_protocol() -> None:
+    legacy_prompt = character_json_prompt(include_memory_protocol=True)
+    background_prompt = character_json_prompt(include_memory_protocol=False)
+
+    for field in ("memory_candidates", "memory_decisions"):
+        assert field in legacy_prompt
+        assert field not in background_prompt
+
+
+def test_character_prompts_stay_within_v1_size_budgets() -> None:
+    assert len(character_live_prompt()) <= 5_000
+    assert len(character_json_prompt(include_memory_protocol=False)) <= 6_500
+    assert len(character_json_prompt(include_memory_protocol=True)) <= 6_500
+
+
+def test_static_prefix_is_shared_and_never_contains_dynamic_state() -> None:
+    marker = "DYNAMIC_STATE_MUST_NOT_ENTER_CACHE_PREFIX"
+    prefix = character_static_prefix()
+
+    assert character_json_prompt().startswith(prefix)
+    assert character_live_prompt().startswith(prefix)
+    assert marker not in prefix
+    assert marker in character_state_prompt(marker, live=False)
+    assert marker in character_state_prompt(marker, live=True)

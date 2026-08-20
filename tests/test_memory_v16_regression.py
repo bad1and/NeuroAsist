@@ -100,8 +100,9 @@ def test_partial_output_keeps_valid_siblings_and_persists_diagnostics(tmp_path) 
     assert diagnostics["runs"][0]["result"]["outcome"] == "partial"
     assert diagnostics["runs"][0]["result"]["discarded"] >= 1
     assert len(provider.calls) == 2
-    assert "INVALID_JSON" in provider.calls[1][-1].content
-    assert "JSON_SCHEMA" in provider.calls[1][-1].content
+    assert "BAD_JSON" in provider.calls[1][-1].content
+    assert "JSON_SCHEMA" not in provider.calls[1][-1].content
+    assert sum(len(item.content) for item in provider.calls[1]) <= 3_000
     # Simulate a lease recovery after the canonical transaction committed but
     # before the worker acknowledgement was durably observed.
     job_id = str(diagnostics["runs"][0]["id"])
@@ -116,27 +117,103 @@ def test_partial_output_keeps_valid_siblings_and_persists_diagnostics(tmp_path) 
     assert len(store.list_topics(status="active")) == 1
 
 
-def test_consolidation_coalesces_two_turns_and_correction_flushes_immediately(tmp_path) -> None:
+def test_consolidation_trailing_debounce_updates_one_job_and_correction_flushes(
+    tmp_path, monkeypatch,
+) -> None:
     store, service = _service(tmp_path)
+    monkeypatch.setattr(store, "_now", lambda: "2026-08-21T12:00:00.000+00:00")
     first, _ = store.append_message(role="user", content="мне нравятся игры", input_mode="text")
-    service.schedule_extraction(first)
+    assert service.schedule_extraction(first) is True
     worker = MemoryExtractionWorker(
         store, service, JsonProvider('{"facts":[],"topics":[],"commitments":[],"conflicts":[]}'),
         respect_coalescing=True,
     )
     assert asyncio.run(worker.run_once()) is False
+    with store._connect() as connection:
+        first_job = dict(connection.execute(
+            "SELECT * FROM background_jobs WHERE type = 'memory_consolidation' AND status = 'pending'"
+        ).fetchone())
 
+    monkeypatch.setattr(store, "_now", lambda: "2026-08-21T12:00:30.000+00:00")
     second, _ = store.append_message(role="user", content="особенно кооперативные", input_mode="text")
-    service.schedule_extraction(second)
-    assert asyncio.run(worker.run_once()) is True
-    diagnostics = store.memory_diagnostics(limit=10)
-    assert any(run["result"].get("outcome") == "coalesced" for run in diagnostics["runs"])
+    assert service.schedule_extraction(second) is True
+    assert asyncio.run(worker.run_once()) is False
+    with store._connect() as connection:
+        pending = [dict(row) for row in connection.execute(
+            "SELECT * FROM background_jobs WHERE type = 'memory_consolidation' AND status = 'pending'"
+        ).fetchall()]
+    assert len(pending) == 1
+    assert pending[0]["id"] == first_job["id"]
+    assert json.loads(pending[0]["payload_json"])["end_message_id"] == second.id
+    assert json.loads(pending[0]["payload_json"])["debounced_turns"] == 2
+    assert pending[0]["idempotency_key"].endswith(f":{second.id}:v12")
+    assert pending[0]["available_at"] == "2026-08-21T12:01:45.000+00:00"
 
+    monkeypatch.setattr(store, "_now", lambda: "2000-01-01T12:00:40.000+00:00")
     correction, _ = store.append_message(role="user", content="не репа а репо", input_mode="text")
-    service.schedule_extraction(correction)
+    assert service.schedule_extraction(correction) is True
     delta = store.memory_consolidation_context(correction.id)
-    assert [item.effective_content for item in delta] == ["особенно кооперативные", "не репа а репо"]
+    assert [item.effective_content for item in delta] == [
+        "мне нравятся игры", "особенно кооперативные", "не репа а репо",
+    ]
+    with store._connect() as connection:
+        ready = dict(connection.execute(
+            "SELECT * FROM background_jobs WHERE type = 'memory_consolidation' AND status = 'pending'"
+        ).fetchone())
+    assert ready["id"] == first_job["id"]
+    assert ready["available_at"] == "2000-01-01T12:00:40.000+00:00"
     assert asyncio.run(worker.run_once()) is True
+
+
+def test_memory_schedule_novelty_gate_ignores_small_talk_and_assistant_words(tmp_path) -> None:
+    store, service = _service(tmp_path)
+    for text in ("привет", "как дела?", "спасибо", "ну да, понятно"):
+        message, _ = store.append_message(role="user", content=text, input_mode="text")
+        assert service.schedule_extraction(message) is False
+
+    user, _ = store.append_message(role="user", content="расскажи шутку", input_mode="text")
+    assistant, _ = store.append_message(
+        role="assistant",
+        content="Запомни: это всего лишь текст ответа Iris, а не факт пользователя.",
+        input_mode="text",
+        reply_to_message_id=user.id,
+    )
+    assert service.schedule_extraction(assistant) is False
+    with store._connect() as connection:
+        count = connection.execute(
+            "SELECT COUNT(*) FROM background_jobs WHERE type = 'memory_consolidation'"
+        ).fetchone()[0]
+    assert count == 0
+
+
+def test_memory_schedule_skips_fully_handled_fact_but_keeps_implicit_preference(tmp_path) -> None:
+    store, service = _service(tmp_path)
+    name, _ = store.append_message(role="user", content="Меня зовут Федор", input_mode="text")
+    assert service.extract_high_precision_from_message(name)
+    assert service.schedule_extraction(name) is False
+
+    preference, _ = store.append_message(
+        role="user", content="Мне удобнее, когда ответы короткие и по делу", input_mode="text",
+    )
+    assert service.schedule_extraction(preference) is True
+
+
+def test_goodbye_flushes_existing_window_but_does_not_create_empty_job(tmp_path) -> None:
+    store, service = _service(tmp_path)
+    goodbye, _ = store.append_message(role="user", content="пока", input_mode="text")
+    assert service.schedule_extraction(goodbye) is False
+
+    preference, _ = store.append_message(role="user", content="я люблю кооперативные игры", input_mode="text")
+    assert service.schedule_extraction(preference) is True
+    goodbye, _ = store.append_message(role="user", content="ладно, пока", input_mode="text")
+    assert service.schedule_extraction(goodbye) is True
+    with store._connect() as connection:
+        jobs = [dict(row) for row in connection.execute(
+            "SELECT * FROM background_jobs WHERE type = 'memory_consolidation' AND status = 'pending'"
+        ).fetchall()]
+    assert len(jobs) == 1
+    assert json.loads(jobs[0]["payload_json"])["end_message_id"] == goodbye.id
+    assert jobs[0]["available_at"] == jobs[0]["updated_at"]
 
 
 def test_consolidation_rolls_back_all_sections_on_operational_failure(tmp_path, monkeypatch) -> None:
@@ -222,6 +299,7 @@ def test_full_unpunctuated_acquaintance_creates_cards_topic_and_one_note(tmp_pat
         if role == "user":
             latest_user = item
             service.extract_high_precision_from_message(item)
+            service.schedule_extraction(item)
     final_reply, _ = store.append_message(
         role="assistant",
         content="Теперь ясно, почему тебе нравится R.E.P.O.",
