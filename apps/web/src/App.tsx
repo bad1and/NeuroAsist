@@ -918,7 +918,7 @@ function NavigationButton({
       data-tooltip={compact ? label : undefined}
       title={compact ? label : undefined}
       onClick={(e) => {
-        animateButtonPress(e.currentTarget);
+        animateTabSwitch(e.currentTarget);
         onClick();
       }}
     >
