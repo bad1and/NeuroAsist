@@ -859,6 +859,11 @@ function Sidebar({
         duration: reduced ? 100 : 200,
         delay: reduced ? 0 : stagger(30),
         ease: "outQuad",
+        onComplete: () => {
+          navButtons.forEach((btn) => {
+            (btn as HTMLElement).style.transform = "";
+          });
+        },
       });
     }
   }, []);

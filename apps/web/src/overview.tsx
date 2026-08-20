@@ -67,6 +67,11 @@ export function OverviewPage({
         duration: reduced ? 100 : 320,
         delay: reduced ? 0 : stagger(60, { from: "first" }),
         ease: "outBack(1.3)",
+        onComplete: () => {
+          heroElements.forEach((el) => {
+            (el as HTMLElement).style.transform = "";
+          });
+        },
       });
     }
 
