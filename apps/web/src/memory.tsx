@@ -6,7 +6,7 @@ import {
   getMemoryConflicts, getMemoryDiagnostics, getMemoryTopics,
 } from "./api";
 import type { MemoryAuditItem, MemoryCommitment, MemoryDiagnostics, MemoryItem, MemoryStatus, MemoryTopic } from "./types";
-import { animateButtonPress, animatePageEnter, animateStaggerCards, useAnimeScope } from "./animations";
+import { animateButtonPress, animateCardRemove, animatePageEnter, animateStaggerCards, animateTabSwitch, useAnimeScope } from "./animations";
 
 type MemorySection = "all" | "active" | "topics" | "commitments" | "archive" | "diagnostics";
 
@@ -69,7 +69,7 @@ export function MemoryPage() {
 
   useEffect(() => {
     if (listRef.current) {
-      animateStaggerCards(listRef.current, ".memory-card", 35);
+      animateStaggerCards(listRef.current, ".memory-card", 40);
     }
   }, [section, items, topics, commitments, diagnostics, conflicts]);
 
@@ -101,6 +101,17 @@ export function MemoryPage() {
     try { await run(); await refresh(); } catch (error) { setMessage(error instanceof Error ? error.message : "Не удалось выполнить действие"); }
   };
 
+  const handleForget = async (e: React.MouseEvent<HTMLElement>, id: string) => {
+    const cardEl = (e.currentTarget.closest(".memory-card") as HTMLElement) || null;
+    if (cardEl) {
+      animateCardRemove(cardEl, () => {
+        void action(() => deleteMemory(id));
+      });
+    } else {
+      void action(() => deleteMemory(id));
+    }
+  };
+
   return <section className="panel memory-panel" ref={containerRef}>
     <nav className="settings-navigation memory-navigation" aria-label="Разделы памяти">
       {MEMORY_SECTIONS.map(({ id, label, icon: Icon }) => (
@@ -108,7 +119,7 @@ export function MemoryPage() {
           className={`settings-nav-button${section === id ? " is-active" : ""}`}
           aria-current={section === id ? "page" : undefined}
           key={id}
-          onClick={(e) => { animateButtonPress(e.currentTarget); setSection(id); }}
+          onClick={(e) => { animateTabSwitch(e.currentTarget); setSection(id); }}
         >
           <Icon size={17} aria-hidden="true" />
           {label}
@@ -144,7 +155,7 @@ export function MemoryPage() {
                 <summary className="icon-button" role="button" aria-label="Дополнительные действия"><MoreHorizontal size={17} aria-hidden="true" /></summary>
                 <div>
                   <button type="button" onClick={async () => { const nextAudit = await getMemoryAudit(memory.id); setAudit((current) => ({ ...current, [memory.id]: nextAudit.items })); }}><CircleHelp size={16} aria-hidden="true" />История записи</button>
-                  {memory.status !== "deleted" && <button className="is-danger" type="button" onClick={() => void action(() => deleteMemory(memory.id))}><Trash2 size={16} aria-hidden="true" />Забыть</button>}
+                  {memory.status !== "deleted" && <button className="is-danger" type="button" onClick={(e) => void handleForget(e, memory.id)}><Trash2 size={16} aria-hidden="true" />Забыть</button>}
                 </div>
               </details>
         </div>

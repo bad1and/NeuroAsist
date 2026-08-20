@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { deleteCharacterReflection, getCharacterReflections, getCharacterState, getCharacterStateEvents, getReflectionSettings, resetCharacterState, updateReflectionSettings } from "./api";
 import type { CharacterReflection, CharacterStateEvent, CharacterStateView } from "./types";
 import { interfaceIntlLocale } from "./i18n";
-import { animateButtonPress, animatePageEnter, animateStaggerCards, useAnimeScope } from "./animations";
+import { animateButtonPress, animateCardRemove, animatePageEnter, animateStaggerCards, useAnimeScope } from "./animations";
 
 const labels: Record<string, string> = {
   primary_emotion: "Главная эмоция", expression_strength: "Выразительность", secondary_emotions: "Вторичные эмоции",
@@ -26,7 +26,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
 
   useEffect(() => {
     if (contentRef.current && state) {
-      animateStaggerCards(contentRef.current, ".state-card, .state-list li", 35);
+      animateStaggerCards(contentRef.current, ".state-card, .state-list li", 40);
     }
   }, [state, events, reflections]);
 
@@ -47,7 +47,19 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
     await resetCharacterState(scope); await refresh();
   };
   const toggleReflections = async (enabled: boolean) => { setReflectionEnabled(enabled); try { await updateReflectionSettings({ enabled, min_significance: .55 }); } catch { setReflectionEnabled(!enabled); setError("Не удалось сохранить настройку личных заметок."); } };
-  const removeReflection = async (id: string) => { if (!window.confirm("Удалить эту субъективную заметку Iris?")) return; await deleteCharacterReflection(id); await refresh(); };
+  const removeReflection = async (e: React.MouseEvent<HTMLElement>, id: string) => {
+    if (!window.confirm("Удалить эту субъективную заметку Iris?")) return;
+    const itemEl = e.currentTarget.closest("li") as HTMLElement | null;
+    if (itemEl) {
+      animateCardRemove(itemEl, async () => {
+        await deleteCharacterReflection(id);
+        await refresh();
+      });
+    } else {
+      await deleteCharacterReflection(id);
+      await refresh();
+    }
+  };
   return <section className="state-page" ref={containerRef} aria-label="Состояние Iris">
     <header className="page-header"><div><span className="eyebrow">Внутренняя жизнь</span><h1>Состояние Iris</h1><p>{state ? `Сейчас: ${state.mood.primary_emotion}` : "Загружаем состояние…"}</p></div><button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void refresh(); }}>Обновить</button></header>
     {error && <div className="notice" role="status">{error}</div>}
@@ -57,7 +69,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
         <section className="state-card"><h2>Причины настроения</h2>{state.causes.length ? <ul className="state-list">{state.causes.map((cause, index) => <li key={`${cause.label}-${index}`}><strong>{cause.label}</strong><span>{cause.status}</span></li>)}</ul> : <p>Активных причин сейчас нет.</p>}</section>
         <div className="state-actions"><button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void reset("mood"); }}>Сбросить настроение</button><button className="secondary danger-button" onClick={(e) => { animateButtonPress(e.currentTarget); void reset("relationship"); }}>Сбросить отношения</button></div></>}
       <section className="state-card"><h2>Недавние события</h2>{events.length ? <ul className="state-list">{events.map(event => <li key={event.id}><strong data-i18n-skip>{event.event_kind.split("_").join(" ")}</strong><span>{new Date(event.created_at).toLocaleString(interfaceIntlLocale())}</span></li>)}</ul> : <p>Значимых событий пока нет.</p>}</section>
-      <section className="state-card"><div className="panel-header"><div><h2>Личные заметки Iris</h2><span>Субъективные внутренние заметки Iris, а не факты о вас.</span></div><label className="settings-checkbox"><input type="checkbox" checked={reflectionEnabled} onChange={(event) => void toggleReflections(event.target.checked)}/>Создавать</label></div>{!reflectionEnabled ? <p>Создание новых личных заметок отключено.</p> : reflections.length ? <ul className="state-list">{reflections.map(item => <li key={item.id}><div><strong data-i18n-skip>{item.trigger_label}</strong><span data-i18n-skip>{item.text}</span><small>{item.primary_emotion} · {new Date(item.created_at).toLocaleString(interfaceIntlLocale())}</small></div><button className="text-button" onClick={() => void removeReflection(item.id)}>Удалить</button></li>)}</ul> : <p>Пока нет субъективных заметок Iris.</p>}</section>
+      <section className="state-card"><div className="panel-header"><div><h2>Личные заметки Iris</h2><span>Субъективные внутренние заметки Iris, а не факты о вас.</span></div><label className="settings-checkbox"><input type="checkbox" checked={reflectionEnabled} onChange={(event) => void toggleReflections(event.target.checked)}/>Создавать</label></div>{!reflectionEnabled ? <p>Создание новых личных заметок отключено.</p> : reflections.length ? <ul className="state-list">{reflections.map(item => <li key={item.id}><div><strong data-i18n-skip>{item.trigger_label}</strong><span data-i18n-skip>{item.text}</span><small>{item.primary_emotion} · {new Date(item.created_at).toLocaleString(interfaceIntlLocale())}</small></div><button className="text-button" onClick={(e) => void removeReflection(e, item.id)}>Удалить</button></li>)}</ul> : <p>Пока нет субъективных заметок Iris.</p>}</section>
     </div>
   </section>;
 }

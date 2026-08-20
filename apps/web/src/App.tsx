@@ -118,9 +118,13 @@ import {
   animate,
   animateButtonPress,
   animateLivePulse,
+  animateLiveRadar,
   animateMessageEnter,
+  animateMessagePop,
+  animateNoticeEnter,
   animatePageEnter,
   animateStaggerCards,
+  animateThinkingWave,
   prefersReducedMotion,
   stagger,
   useAnimeScope,
@@ -1536,12 +1540,23 @@ export function ChatPage({
       if (messageElements.length > 0) {
         const newest = messageElements[messageElements.length - 1];
         if (newest) {
-          animateMessageEnter(newest);
+          animateMessagePop(newest);
         }
       }
     }
     lastMessageCountRef.current = messages.length;
   }, [messages]);
+
+  const thinkingRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (loading && thinkingRef.current) {
+      const dots = thinkingRef.current.querySelectorAll<HTMLElement>("span");
+      const anim = animateThinkingWave(dots);
+      return () => {
+        anim?.cancel();
+      };
+    }
+  }, [loading]);
 
   useEffect(() => () => {
     if (scrollTimerRef.current !== null) {
@@ -1896,7 +1911,7 @@ export function ChatPage({
             {message.ttsError && <div className="message-error" data-i18n-skip>{message.ttsError}</div>}
           </article>
         ))}
-        {loading && <div className="assistant-thinking" role="status"><span aria-hidden="true" /><span aria-hidden="true" /><span aria-hidden="true" />Iris печатает</div>}
+        {loading && <div className="assistant-thinking" ref={thinkingRef} role="status"><span aria-hidden="true" /><span aria-hidden="true" /><span aria-hidden="true" />Iris печатает</div>}
       </div>
 
       {error && <div className="error-banner" role="alert"><CircleAlert size={18} aria-hidden="true" />{error}{retryText && <button className="text-button" type="button" onClick={() => { setDraft(retryText); setRetryText(null); }}>Повторить</button>}</div>}
