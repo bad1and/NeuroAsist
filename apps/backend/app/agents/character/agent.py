@@ -12,6 +12,7 @@ from apps.backend.app.agents.character.prompts import (
     CHARACTER_REPAIR_PROMPT,
     character_json_prompt,
     character_live_prompt,
+    character_state_prompt,
 )
 from apps.backend.app.agents.character.persona import get_persona
 from apps.backend.app.agents.character.protocol import classify_intent, deterministic_turn, legacy_result, parse_turn
@@ -198,11 +199,27 @@ class CharacterAgent:
             if built_context and built_context.diagnostics.get("previous_assistant_message_id")
             else None
         )
+        include_memory_protocol = not (
+            self._memory_service is not None
+            and self._memory_service.uses_background_extraction
+        )
         messages = [
-            ChatMessage(role="system", content=character_json_prompt(self._persona, state_context)),
-            *context,
-            ChatMessage(role="user", content=prompt_user_text),
+            ChatMessage(
+                role="system",
+                content=character_json_prompt(
+                    self._persona,
+                    include_memory_protocol=include_memory_protocol,
+                ),
+            ),
         ]
+        if state_context:
+            messages.append(
+                ChatMessage(
+                    role="system",
+                    content=character_state_prompt(state_context, live=False),
+                )
+            )
+        messages.extend((*context, ChatMessage(role="user", content=prompt_user_text)))
         empty_reply = self._empty_model_fallback(prompt_user_text)
 
         llm_response = await self._llm_provider.generate(messages)
@@ -494,12 +511,18 @@ class CharacterAgent:
             if built_context and built_context.diagnostics.get("previous_assistant_message_id")
             else None
         )
-        system_prompt = character_live_prompt(self._persona, state_context)
+        system_prompt = character_live_prompt(self._persona)
         messages = [
             ChatMessage(role="system", content=system_prompt),
-            *context,
-            ChatMessage(role="user", content=prompt_user_text),
         ]
+        if state_context:
+            messages.append(
+                ChatMessage(
+                    role="system",
+                    content=character_state_prompt(state_context, live=True),
+                )
+            )
+        messages.extend((*context, ChatMessage(role="user", content=prompt_user_text)))
         chunks: list[str] = []
         async for delta in self._guarded_live_stream(
             messages,

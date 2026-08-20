@@ -4,6 +4,7 @@ import anyio
 import pytest
 
 from apps.backend.app.agents.character.agent import CharacterAgent
+from apps.backend.app.agents.character.prompts import character_json_prompt
 from apps.backend.app.context.manager import BuiltContext
 from apps.backend.app.llm.base import ChatMessage, LLMResponse
 
@@ -241,6 +242,24 @@ def test_handle_user_message_uses_json_persona_prompt() -> None:
     assert '"intent"' in system_prompt
     assert "Не возвращай JSON" not in system_prompt
     assert "голосовых расшифровках возможны опечатки" in system_prompt
+
+
+def test_handle_user_message_keeps_dynamic_state_out_of_static_cache_prefix() -> None:
+    provider = SequencedLLMProvider(
+        ['{"reply":"Окей","emotion":"neutral","intent":"casual_chat"}']
+    )
+    agent = CharacterAgent(provider, InMemoryHistory(), history_limit=0)
+    marker = "DYNAMIC_STATE_MUST_NOT_ENTER_CACHE_PREFIX"
+
+    async def invoke() -> dict:
+        return await agent.handle_user_message("s1", "Привет", state_context=marker)
+
+    anyio.run(invoke)
+
+    assert provider.messages[0] == ChatMessage(role="system", content=character_json_prompt())
+    assert marker not in provider.messages[0].content
+    assert provider.messages[1].role == "system"
+    assert marker in provider.messages[1].content
 
 
 def test_handle_user_message_retries_unconfirmed_continuity_accusation() -> None:

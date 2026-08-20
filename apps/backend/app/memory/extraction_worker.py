@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -24,41 +25,56 @@ from apps.backend.app.storage.timeline import TimelineStore
 logger = logging.getLogger(__name__)
 
 
-MEMORY_EXTRACTION_PROMPT = """Ты — Archivist, внутренний модуль консолидации памяти AI-компаньона.
-Верни только JSON вида {"facts":[],"topics":[],"commitments":[],"conflicts":[],"decisions":[]}.
-Используй только явные сведения из завершённого прямого диалога. В окне есть user и Iris;
-обе роли допустимы как provenance для общих решений, обещаний и milestones. Не используй
-ambient/incomplete/echo, секреты, догадки или субъективные оценки. Каждый факт содержит kind,
-subject, predicate, value_text, importance, confidence, sensitivity, source_message_ids,
-cardinality (single|multi) и temporal_semantics (atemporal|current|period). Topics имеют
-title, summary_text, optional topic_id, source_message_ids. Commitments имеют kind
-(milestone|promise|decision|open_loop), title, details, status, importance, confidence,
-source_message_ids. Conflicts имеют existing_id, proposed_kind, reason и resolution.
-Не добавляй неизвестные ключи. source_message_ids выбирай только из списка ALLOWED_SOURCE_IDS.
-Факты и темы о пользователе обязаны иметь хотя бы один user source. Реплика Iris сама по себе
-не доказывает ни факт о пользователе, ни её выдуманное текущее занятие/состояние; обещания,
-решения и общие milestones из assistant source оформляй только как commitments.
-Decisions содержат внутренние accept|reject|clarify, reason, optional predicate и
-clarification_id; они не создают память и нужны только для диагностики решения.
-Если сохранять нечего, верни пустые массивы.
-Если Iris задала вопрос, чтобы уточнить факт или получить согласие на чувствительную
-память, не предлагай этот факт до следующего прямого ответа пользователя. Явное «да»,
-«верно» или исправленное значение подтверждает факт; явное отрицание его отклоняет.
-Не создавай факты для ручной проверки: сомнительные малозначимые и временные сведения
-просто пропускай.
-Предпочитай канонические predicates из каталога:
-user.name, assistant.developer, assistant.developer_count, user.likes_category,
-user.likes_game, user.game_detail, user.preference, user.note, user.relationship.friend,
-user.current_mood, user.current_activity, user.current_goal,
-user.prefers_response_length. Не создавай новый topic для одноразовой проверки памяти,
-имени или статуса разработчика; используй существующую игровую тему при наличии.
+MEMORY_EXTRACTION_PROMPT = """Ты — Archivist памяти AI-компаньона. Верни только JSON-объект;
+корневые ключи: facts, topics, commitments, conflicts, decisions. Отсутствующие секции — [].
 
-Короткий корректный пример:
-{"facts":[{"kind":"identity","subject":"user","predicate":"name","value_text":"Федор",
-"importance":0.9,"confidence":0.99,"sensitivity":"normal","source_message_ids":["msg-1"],
-"cardinality":"single","temporal_semantics":"atemporal"}],
-"topics":[{"title":"Игровые предпочтения","summary_text":"Любит шутеры.","source_message_ids":["msg-2"]}],
-"commitments":[],"conflicts":[],"decisions":[]}"""
+Извлекай только новые явные сведения завершённого прямого диалога. Не сохраняй секреты,
+догадки, оценки, ambient/incomplete/echo и малозначимые временные детали. Факт или topic о
+пользователе требует source_message_ids хотя бы одной строки U. Строка I сама не доказывает
+факт о пользователе/текущем состоянии Iris; обещания, решения и milestones Iris — commitment.
+ID источников бери только из квадратных скобок DIALOGUE. Если сохранять нечего — все [].
+Вопрос Iris не подтверждает факт или sensitive-память: жди прямое «да», исправление либо
+значение пользователя; отрицание отклоняет предложение.
+
+Компактный контракт (неизвестные ключи запрещены; поля с default можно опускать):
+facts<=8: {kind,subject="user",predicate,value_text,importance=.6,confidence=.7,
+sensitivity="normal|sensitive",source_message_ids,cardinality="single|multi",
+temporal_semantics="atemporal|current|period"}
+topics<=3: {title,summary_text="",topic_id?,source_message_ids}; переиспользуй релевантный
+topic_id из TOPICS и не создавай topic для проверки имени/памяти/статуса разработчика.
+commitments<=4: {kind="milestone|promise|decision|open_loop",title,details="",
+status="open|completed|cancelled",importance=.6,confidence=.7,source_message_ids}
+conflicts<=4: {existing_id?,proposed_kind,reason,resolution="supersede|review|coexist"}
+decisions<=6: {action="accept|reject|clarify",reason,predicate?,clarification_id?}; диагностика,
+не память. Предпочитай predicates: name, assistant.developer, assistant.developer_count,
+likes_category, likes_game, game_detail, preference, note, relationship.friend, current_mood,
+current_activity, current_goal, prefers_response_length."""
+
+MEMORY_REPAIR_PROMPT = """Исправь JSON без пояснений. Разрешены только корневые массивы
+facts,topics,commitments,conflicts,decisions с лимитами 8/3/4/4/6. Сохрани валидные элементы.
+Используй пути ошибок; удали неизвестные поля и элементы, которые нельзя исправить надёжно."""
+
+# DeepSeek tokenization varies by language. Two Unicode characters per token
+# deliberately overestimates the mixed Russian/JSON payloads observed in local
+# traces. The hard character ceiling covers both system and user content.
+MEMORY_EXTRACTION_INPUT_CHAR_BUDGET = 4_200
+MEMORY_EXTRACTION_ESTIMATED_TOKEN_BUDGET = 2_100
+MEMORY_REPAIR_INPUT_CHAR_BUDGET = 3_000
+_CONTEXT_MESSAGE_LIMIT = 12
+_TOPIC_CANDIDATE_LIMIT = 50
+_TOPIC_SHORTLIST_LIMIT = 5
+_SECTION_LIMITS = {
+    "facts": 8,
+    "topics": 3,
+    "commitments": 4,
+    "conflicts": 4,
+    "decisions": 6,
+}
+_TOPIC_STOP_WORDS = {
+    "это", "как", "что", "для", "или", "мне", "меня", "тебя", "тебе", "очень",
+    "сейчас", "только", "когда", "который", "которая", "есть", "была", "будет",
+    "the", "and", "that", "this", "with", "from", "have", "about",
+}
 
 
 class MemoryExtractionWorker:
@@ -94,7 +110,14 @@ class MemoryExtractionWorker:
                     diagnostics={"pipeline_version": "v12", "error_codes": ["ineligible_source"]},
                 )
                 return True
-            context = await asyncio.to_thread(self._store.memory_consolidation_context, message_id, 40)
+            # The store returns the unprocessed delta plus one prior turn. A
+            # modest row cap protects a first-ever run from replaying a long
+            # episode; the prompt builder applies the stricter character cap.
+            context = await asyncio.to_thread(
+                self._store.memory_consolidation_context,
+                message_id,
+                _CONTEXT_MESSAGE_LIMIT,
+            )
             run_key = str(job.get("idempotency_key") or job_id)
             existing_run = await asyncio.to_thread(self._store.consolidation_run, run_key)
             if existing_run is not None:
@@ -110,36 +133,20 @@ class MemoryExtractionWorker:
                 )
                 return True
             prompt, redacted_secrets = self._format_input(message.effective_content, context)
-            schema = ConsolidationResult.model_json_schema()
             extraction_messages = [
                 ChatMessage(role="system", content=MEMORY_EXTRACTION_PROMPT),
-                ChatMessage(
-                    role="user",
-                    content=(
-                        f"JSON_SCHEMA:\n{json.dumps(schema, ensure_ascii=False)}\n"
-                        f"ALLOWED_SOURCE_IDS: {json.dumps([item.id for item in context])}\n{prompt}"
-                    ),
-                ),
+                ChatMessage(role="user", content=prompt),
             ]
+            self._assert_request_budget(
+                extraction_messages,
+                MEMORY_EXTRACTION_INPUT_CHAR_BUDGET,
+            )
             response = await self._llm_provider.generate_structured(extraction_messages, temperature=0.0)
             result, errors = self._parse_partial_result(response.content)
             if errors:
                 with llm_call_purpose("memory_repair"):
                     repair = await self._llm_provider.generate_structured(
-                        [
-                            ChatMessage(
-                                role="system",
-                                content="Исправь ответ по исходной JSON Schema. Верни только исправленный JSON без пояснений.",
-                            ),
-                            ChatMessage(
-                                role="user",
-                                content=(
-                                    f"JSON_SCHEMA:\n{json.dumps(schema, ensure_ascii=False)}\n"
-                                    f"VALIDATION_ERRORS:\n{json.dumps(errors, ensure_ascii=False)}\n"
-                                    f"INVALID_JSON:\n{response.content}"
-                                ),
-                            ),
-                        ],
+                        self._repair_messages(response.content, errors),
                         temperature=0.0,
                     )
                 repaired, repair_errors = self._parse_partial_result(repair.content)
@@ -160,6 +167,10 @@ class MemoryExtractionWorker:
                 "error_codes": sorted({str(item["code"]) for item in errors}),
                 "section_errors": errors,
                 "redacted_secret_count": int(redacted_secrets),
+                "request_chars": sum(len(item.content) for item in extraction_messages),
+                "request_token_estimate": (
+                    sum(len(item.content) for item in extraction_messages) + 1
+                ) // 2,
             }
             if proposed == 0 and errors:
                 outcome = "invalid_output"
@@ -310,15 +321,15 @@ class MemoryExtractionWorker:
             {"section": "root", "index": -1, "code": "extra_forbidden", "path": f"$.{key}"}
             for key in unknown
         ]
-        limits = {"facts": 30, "topics": 12, "commitments": 20, "conflicts": 20, "decisions": 30}
         for section, model in models.items():
             raw_items = payload.get(section, [])
             if not isinstance(raw_items, list):
                 errors.append({"section": section, "index": -1, "code": "not_array", "path": f"$.{section}"})
                 continue
-            if len(raw_items) > limits[section]:
-                errors.append({"section": section, "index": limits[section], "code": "too_long", "path": f"$.{section}"})
-            for index, item in enumerate(raw_items[:limits[section]]):
+            limit = _SECTION_LIMITS[section]
+            if len(raw_items) > limit:
+                errors.append({"section": section, "index": limit, "code": "too_long", "path": f"$.{section}"})
+            for index, item in enumerate(raw_items[:limit]):
                 try:
                     accepted[section].append(model.model_validate(item))
                 except ValidationError as exc:
@@ -384,41 +395,161 @@ class MemoryExtractionWorker:
 
     def _format_input(self, current_text: str, context) -> tuple[str, bool]:
         redacted = False
-        rendered: list[str] = []
-        user_burst: list[tuple[str, str]] = []
-
-        def flush_user_burst() -> None:
-            if not user_burst:
-                return
-            ids = ",".join(message_id for message_id, _ in user_burst)
-            text = "\n".join(text for _, text in user_burst)
-            rendered.append(f"[{ids}] user-burst: {text}")
-            user_burst.clear()
-
-        for item in context[-20:]:
+        safe_messages: list[tuple[str, str, str]] = []
+        for item in context[-_CONTEXT_MESSAGE_LIMIT:]:
             safe, was_redacted = self._memory_service.sanitize_for_llm_extraction(item.effective_content)
             redacted = redacted or was_redacted
-            if item.role == "user":
-                user_burst.append((item.id, safe))
-            else:
-                flush_user_burst()
-                rendered.append(f"[{item.id}] {item.role}: {safe}")
-        flush_user_burst()
-        if not rendered:
+            if item.role in {"user", "assistant"}:
+                safe_messages.append((item.id, "U" if item.role == "user" else "I", safe))
+        if not safe_messages:
             safe, was_redacted = self._memory_service.sanitize_for_llm_extraction(current_text)
             redacted = redacted or was_redacted
-            rendered.append(f"[unknown] user: {safe}")
-        topics = self._store.list_topics(status="active", limit=50)
+            safe_messages.append(("unknown", "U", safe))
+
+        # Topic reuse should follow the new user delta, not lexical noise from
+        # the overlap turn. The newest eligible user line is the job's source.
+        topic_query = next(
+            (text for _, role, text in reversed(safe_messages) if role == "U"),
+            "",
+        )
+        topics = self._shortlist_topics(topic_query)
         topic_catalog = [
-            {"id": item["id"], "title": item["title"]}
+            {
+                "id": str(item["id"]),
+                "title": self._clip_text(str(item["title"]), 120),
+            }
             for item in topics
         ]
-        return (
-            "Существующие темы (переиспользуй topic_id вместо дубля):\n"
-            + json.dumps(topic_catalog, ensure_ascii=False)
-            + "\nОкно завершённого диалога:\n"
-            + "\n".join(rendered)
-        ), redacted
+        header = (
+            "TOPICS:"
+            + json.dumps(topic_catalog, ensure_ascii=False, separators=(",", ":"))
+            + "\nDIALOGUE oldest->newest (U=user,I=Iris):\n"
+        )
+        dialogue_budget = (
+            MEMORY_EXTRACTION_INPUT_CHAR_BUDGET
+            - len(MEMORY_EXTRACTION_PROMPT)
+            - len(header)
+        )
+        if dialogue_budget < 80:
+            # Topic titles are hints, never more important than source text.
+            topic_catalog = []
+            header = "TOPICS:[]\nDIALOGUE oldest->newest (U=user,I=Iris):\n"
+            dialogue_budget = (
+                MEMORY_EXTRACTION_INPUT_CHAR_BUDGET
+                - len(MEMORY_EXTRACTION_PROMPT)
+                - len(header)
+            )
+        dialogue = self._render_dialogue(safe_messages, dialogue_budget)
+        return header + dialogue, redacted
+
+    def _shortlist_topics(self, query: str) -> list[dict[str, object]]:
+        query_tokens = self._meaningful_tokens(query)
+        if not query_tokens:
+            return []
+        candidates = self._store.list_topics(
+            status="active",
+            limit=_TOPIC_CANDIDATE_LIMIT,
+            include_details=False,
+        )
+        query_stems = {token[:4] for token in query_tokens if len(token) >= 4}
+        ranked: list[tuple[int, int, dict[str, object]]] = []
+        for index, item in enumerate(candidates):
+            topic_text = f"{item.get('title', '')} {item.get('summary_text', '')}"
+            topic_tokens = self._meaningful_tokens(topic_text)
+            exact = len(query_tokens & topic_tokens)
+            topic_stems = {token[:4] for token in topic_tokens if len(token) >= 4}
+            stems = len(query_stems & topic_stems)
+            score = exact * 3 + stems
+            if score:
+                ranked.append((score, -index, item))
+        ranked.sort(key=lambda entry: (entry[0], entry[1]), reverse=True)
+        return [item for _, _, item in ranked[:_TOPIC_SHORTLIST_LIMIT]]
+
+    @staticmethod
+    def _meaningful_tokens(text: str) -> set[str]:
+        return {
+            token
+            for token in re.findall(r"[^\W_]+", text.casefold(), flags=re.UNICODE)
+            if len(token) >= 3 and token not in _TOPIC_STOP_WORDS
+        }
+
+    @classmethod
+    def _render_dialogue(
+        cls,
+        messages: list[tuple[str, str, str]],
+        budget: int,
+    ) -> str:
+        selected = list(messages)
+        while selected:
+            minimum = sum(len(f"[{message_id}] {role}: \n") + 24 for message_id, role, _ in selected)
+            if minimum <= budget or len(selected) == 1:
+                break
+            selected.pop(0)
+        if not selected or budget <= 0:
+            return ""
+
+        prefixes = [f"[{message_id}] {role}: " for message_id, role, _ in selected]
+        content_budget = max(budget - sum(len(prefix) + 1 for prefix in prefixes), 0)
+        rendered: list[str] = []
+        for index, ((_, _, text), prefix) in enumerate(zip(selected, prefixes, strict=True)):
+            remaining_items = len(selected) - index
+            allowance = content_budget // remaining_items if remaining_items else 0
+            clipped = cls._clip_text(text, allowance)
+            content_budget -= len(clipped)
+            rendered.append(prefix + clipped)
+        return "\n".join(rendered)
+
+    @staticmethod
+    def _clip_text(text: str, limit: int) -> str:
+        if limit <= 0:
+            return ""
+        if len(text) <= limit:
+            return text
+        if limit <= 3:
+            return text[:limit]
+        if limit < 24:
+            return text[: limit - 1] + "…"
+        tail = max(8, limit // 3)
+        head = limit - tail - 1
+        return text[:head] + "…" + text[-tail:]
+
+    @classmethod
+    def _repair_messages(
+        cls,
+        invalid_json: str,
+        errors: list[dict[str, object]],
+    ) -> list[ChatMessage]:
+        compact_errors = [
+            {"path": item.get("path"), "code": item.get("code")}
+            for item in errors[:16]
+        ]
+        prefix = (
+            "ERRORS:"
+            + json.dumps(compact_errors, ensure_ascii=False, separators=(",", ":"))
+            + "\nBAD_JSON:\n"
+        )
+        invalid_budget = (
+            MEMORY_REPAIR_INPUT_CHAR_BUDGET
+            - len(MEMORY_REPAIR_PROMPT)
+            - len(prefix)
+        )
+        messages = [
+            ChatMessage(role="system", content=MEMORY_REPAIR_PROMPT),
+            ChatMessage(
+                role="user",
+                content=prefix + cls._clip_text(invalid_json, max(invalid_budget, 0)),
+            ),
+        ]
+        cls._assert_request_budget(messages, MEMORY_REPAIR_INPUT_CHAR_BUDGET)
+        return messages
+
+    @staticmethod
+    def _assert_request_budget(messages: list[ChatMessage], budget: int) -> None:
+        request_chars = sum(len(item.content) for item in messages)
+        if request_chars > budget:
+            raise ValueError(
+                f"Memory LLM input exceeds hard budget: {request_chars}>{budget}"
+            )
 
     def _publish(self, event_type: str, level: str, message: str, details: dict[str, object]) -> None:
         if self._event_publisher is not None:
