@@ -19,7 +19,7 @@ from apps.backend.app.agents.character.voice_input import (
     VoiceInputInterpretation,
     VoiceInputInterpreter,
 )
-from apps.backend.app.llm.base import ChatMessage, LLMProvider
+from apps.backend.app.llm.base import ChatMessage, LLMProvider, llm_call_purpose
 from apps.backend.app.schemas.character import CharacterTurn
 from apps.backend.app.storage.sqlite_history import SQLiteMessageHistory
 
@@ -206,6 +206,7 @@ class CharacterAgent:
         empty_reply = self._empty_model_fallback(prompt_user_text)
 
         llm_response = await self._llm_provider.generate(messages)
+        retry_used = False
         parsed = self._parse_response_result(
             llm_response.content,
             session_id=session_id,
@@ -214,6 +215,7 @@ class CharacterAgent:
             report_invalid=False,
         )
         if not parsed.valid:
+            retry_used = True
             first_invalid = parsed
             logger.info(
                 "Invalid LLM JSON response; retrying with full context: reason=%s raw_length=%s",
@@ -230,7 +232,8 @@ class CharacterAgent:
             # The original full prompt has persona and conversation context.  A
             # standalone repair prompt often caused another empty answer.
             repair_messages = [*messages, ChatMessage(role="system", content=CHARACTER_REPAIR_PROMPT)]
-            repair_response = await self._llm_provider.generate(repair_messages)
+            with llm_call_purpose("chat_json_repair"):
+                repair_response = await self._llm_provider.generate(repair_messages)
             parsed = self._parse_response_result(
                 repair_response.content,
                 session_id=session_id,
@@ -268,7 +271,41 @@ class CharacterAgent:
             parsed.payload["reply"] if parsed.valid else "", previous_assistant_reply, prompt_user_text,
         )
         needs_duplicate_retry = bool(parsed.valid and duplicate["stale"])
-        if needs_continuity_retry or needs_pending_retry or needs_anchor_retry or needs_duplicate_retry or needs_status_grounding_retry:
+        needs_guard_retry = (
+            needs_continuity_retry
+            or needs_pending_retry
+            or needs_anchor_retry
+            or needs_duplicate_retry
+            or needs_status_grounding_retry
+        )
+        if needs_guard_retry and retry_used:
+            # A malformed first answer already consumed the single retry for
+            # this visible turn. Do not amplify one user action into a third
+            # full-context API request; use the same deterministic guard
+            # fallbacks as a rejected retry.
+            parsed = (
+                self._anchor_reply_fallback(required_anchors)
+                if needs_anchor_retry
+                else self._status_reply_fallback()
+                if needs_status_grounding_retry
+                else self._response_target_fallback(response_target_text or "")
+                if needs_pending_retry
+                else self._stale_reply_fallback()
+            )
+            if built_context is not None:
+                built_context.diagnostics["relevance_guard"] = {
+                    "outcome": "fallback",
+                    "reason": "retry_budget_exhausted",
+                    "required_anchors": required_anchors,
+                }
+            self._publish_relevance_guard(
+                "fallback",
+                previous_assistant_id,
+                duplicate,
+                pending_followup,
+                "retry_budget_exhausted",
+            )
+        elif needs_guard_retry:
             if built_context is not None:
                 built_context.diagnostics["relevance_guard"] = {
                     "outcome": "detected",
@@ -282,20 +319,21 @@ class CharacterAgent:
                     "missing_anchor" if needs_anchor_retry else "stale_duplicate" if needs_duplicate_retry else "ungrounded_status" if needs_status_grounding_retry else "continuity",
             )
             try:
-                guarded = await self._llm_provider.generate([
-                    *messages,
-                    ChatMessage(
-                        role="system",
-                        content=self._guard_retry_instruction(
-                            needs_pending_retry,
-                            needs_duplicate_retry,
-                            needs_status_grounding_retry,
-                            required_anchors,
-                            response_target_text,
-                            response_target_anchors,
+                with llm_call_purpose("chat_json_guard_retry"):
+                    guarded = await self._llm_provider.generate([
+                        *messages,
+                        ChatMessage(
+                            role="system",
+                            content=self._guard_retry_instruction(
+                                needs_pending_retry,
+                                needs_duplicate_retry,
+                                needs_status_grounding_retry,
+                                required_anchors,
+                                response_target_text,
+                                response_target_anchors,
+                            ),
                         ),
-                    ),
-                ])
+                    ])
                 repaired = self._parse_response_result(
                     guarded.content, session_id=session_id, user_text=prompt_user_text,
                     empty_fallback_reply=empty_reply, report_invalid=False,
@@ -866,22 +904,23 @@ class CharacterAgent:
     ) -> str:
         """A retry is fully buffered so a second stale answer cannot reach TTS."""
         try:
-            chunks = [
-                delta async for delta in self._llm_provider.stream([
-                    *messages,
-                    ChatMessage(
-                        role="system",
-                        content=self._guard_retry_instruction(
-                            require_pending_response,
-                            True,
-                            self._is_casual_status_check(user_text),
-                            required_anchors,
-                            response_target_text,
-                            response_target_anchors or [],
+            with llm_call_purpose("chat_live_guard_retry"):
+                chunks = [
+                    delta async for delta in self._llm_provider.stream([
+                        *messages,
+                        ChatMessage(
+                            role="system",
+                            content=self._guard_retry_instruction(
+                                require_pending_response,
+                                True,
+                                self._is_casual_status_check(user_text),
+                                required_anchors,
+                                response_target_text,
+                                response_target_anchors or [],
+                            ),
                         ),
-                    ),
-                ])
-            ]
+                    ])
+                ]
         except Exception:
             return self._stale_reply_fallback().payload["reply"]
         reply = "".join(chunks).strip()

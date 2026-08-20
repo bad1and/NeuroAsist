@@ -22,6 +22,7 @@ from apps.backend.app.api.routes.voice import router as voice_router
 from apps.backend.app.api.routes.timeline import router as timeline_router
 from apps.backend.app.api.routes.episodes import router as episodes_router
 from apps.backend.app.api.routes.context_debug import router as context_debug_router
+from apps.backend.app.api.routes.llm_diagnostics import router as llm_diagnostics_router
 from apps.backend.app.api.routes.memory import router as memory_router
 from apps.backend.app.api.routes.models import router as models_router
 from apps.backend.app.api.routes.maintenance import router as maintenance_router
@@ -66,6 +67,7 @@ from apps.backend.app.conversation.state_service import CharacterStateService
 from apps.backend.app.conversation.turn_coordinator import ConversationTurnCoordinator
 from apps.backend.app.conversation.turn import SmartTurnDetector
 from apps.backend.app.llm.providers.deepseek import DeepSeekProvider, close_shared_clients
+from apps.backend.app.llm.telemetry import llm_telemetry
 from apps.backend.app.coding.service import CodingAgentService
 from apps.backend.app.coding.orchestration import CodingBridge
 
@@ -209,7 +211,7 @@ def create_app() -> FastAPI:
     memory_extraction_worker = MemoryExtractionWorker(
         timeline_store,
         memory_service,
-        DeepSeekProvider(settings),
+        DeepSeekProvider(settings, purpose="memory"),
         event_bus.publish,
         reflection_policy=lambda: (
             runtime_settings.reflections_enabled and not runtime_settings.memory_incognito,
@@ -226,7 +228,11 @@ def create_app() -> FastAPI:
         timeline_store, recovery=runtime_settings.live_conversation_mood_recovery,
         reflection_policy=lambda: (runtime_settings.reflections_enabled and not runtime_settings.memory_incognito, runtime_settings.reflection_min_significance),
         event_publisher=event_bus.publish,
-        reflection_llm_provider=DeepSeekProvider(settings) if settings.llm_api_key else None,
+        reflection_llm_provider=(
+            DeepSeekProvider(settings, purpose="reflection")
+            if settings.llm_api_key
+            else None
+        ),
     ) if timeline_store is not None else None
     if memory_service is not None and semantic_init_error:
         memory_service._semantic_degraded_reason = semantic_init_error
@@ -235,7 +241,11 @@ def create_app() -> FastAPI:
         runtime_settings,
         memory_service=memory_service,
         event_publisher=event_bus.publish,
-        llm_provider=DeepSeekProvider(settings) if settings.llm_api_key else None,
+        llm_provider=(
+            DeepSeekProvider(settings, purpose="adjudication")
+            if settings.llm_api_key
+            else None
+        ),
         state_service=character_state_service,
     ) if timeline_store is not None else None
     turn_coordinator = ConversationTurnCoordinator(timeline_store, event_bus.publish) if timeline_store is not None else None
@@ -1192,6 +1202,7 @@ def create_app() -> FastAPI:
     app.state.interrupt_voice_session = interrupt_voice_session
     app.state.avatar_service = avatar_service
     app.state.speech_orchestrator = speech_orchestrator
+    app.state.llm_telemetry = llm_telemetry
     app.include_router(chat_router)
     app.include_router(avatar_router)
     app.include_router(events_router)
@@ -1201,6 +1212,7 @@ def create_app() -> FastAPI:
     app.include_router(timeline_router)
     app.include_router(episodes_router)
     app.include_router(context_debug_router)
+    app.include_router(llm_diagnostics_router)
     app.include_router(memory_router)
     app.include_router(models_router)
     app.include_router(maintenance_router)
