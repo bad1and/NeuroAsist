@@ -13,6 +13,11 @@ export function animatePageEnter(target: HTMLElement | string): Animation | null
     translateY: reduced ? 0 : [10, 0],
     duration: reduced ? ANIMATION_TOKENS.duration.micro : ANIMATION_TOKENS.duration.page,
     ease: ANIMATION_TOKENS.ease.smooth,
+    onComplete: () => {
+      if (typeof target !== "string" && target instanceof HTMLElement) {
+        target.style.transform = "";
+      }
+    },
   });
 }
 
@@ -39,6 +44,13 @@ export function animateStaggerCards(
     duration: reduced ? ANIMATION_TOKENS.duration.micro : ANIMATION_TOKENS.duration.medium,
     delay: reduced ? 0 : stagger(customDelay, { from: "first" }),
     ease: ANIMATION_TOKENS.ease.softSpring,
+    onComplete: () => {
+      if (targets instanceof NodeList) {
+        targets.forEach((el) => {
+          if (el instanceof HTMLElement) el.style.transform = "";
+        });
+      }
+    },
   });
 }
 
@@ -55,6 +67,9 @@ export function animateMessagePop(element: HTMLElement): Animation | null {
     scale: reduced ? 1 : [0.93, 1],
     duration: reduced ? ANIMATION_TOKENS.duration.micro : ANIMATION_TOKENS.duration.standard,
     ease: ANIMATION_TOKENS.ease.bounce,
+    onComplete: () => {
+      if (element instanceof HTMLElement) element.style.transform = "";
+    },
   });
 }
 
@@ -118,6 +133,9 @@ export function animateButtonPress(element: HTMLElement): Animation | null {
     scale: [1, 0.94, 1],
     duration: ANIMATION_TOKENS.duration.standard,
     ease: ANIMATION_TOKENS.ease.spring,
+    onComplete: () => {
+      if (element instanceof HTMLElement) element.style.transform = "";
+    },
   });
 }
 
@@ -131,6 +149,9 @@ export function animateTabSwitch(element: HTMLElement): Animation | null {
     scale: [0.94, 1.04, 1],
     duration: ANIMATION_TOKENS.duration.fast,
     ease: ANIMATION_TOKENS.ease.spring,
+    onComplete: () => {
+      if (element instanceof HTMLElement) element.style.transform = "";
+    },
   });
 }
 
