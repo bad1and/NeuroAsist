@@ -661,6 +661,14 @@ textarea::placeholder {
   border-radius: var(--radius-lg);
   color: var(--color-text);
   background: var(--color-surface);
+  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), border-color 0.2s ease, box-shadow 0.2s ease;
+  will-change: transform, opacity;
+}
+
+.overview-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--color-rule-strong);
+  box-shadow: 0 8px 24px -6px rgba(0, 0, 0, 0.28);
 }
 
 .overview-card-icon {

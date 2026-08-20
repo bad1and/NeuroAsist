@@ -114,6 +114,17 @@ import {
   setInterfaceLocalePreference,
   useInterfaceLocale,
 } from "./i18n";
+import {
+  animate,
+  animateButtonPress,
+  animateLivePulse,
+  animateMessageEnter,
+  animatePageEnter,
+  animateStaggerCards,
+  prefersReducedMotion,
+  stagger,
+  useAnimeScope,
+} from "./animations";
 
 type AppView = "overview" | "chat" | "journal" | "memory" | "state" | "coding" | "settings";
 
@@ -246,11 +257,23 @@ function useRuntimeSettingsAutosave(onSettingsChanged: (settings: PublicSettings
 }
 
 function AutoSaveStatus({ status, onRetry }: { status: AutoSaveStatus; onRetry: () => void }) {
-  if (status === "saving") return <span className="settings-save-status is-saving" role="status">Сохраняем…</span>;
+  const elRef = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    if (elRef.current) {
+      animate(elRef.current, {
+        opacity: [0, 1],
+        translateY: prefersReducedMotion() ? 0 : [-3, 0],
+        duration: 180,
+        ease: "outQuad",
+      });
+    }
+  }, [status]);
+
+  if (status === "saving") return <span ref={elRef} className="settings-save-status is-saving" role="status">Сохраняем…</span>;
   if (status === "error") {
-    return <span className="settings-save-status is-error" role="alert">Не удалось сохранить <button type="button" onClick={onRetry}>Повторить</button></span>;
+    return <span ref={elRef} className="settings-save-status is-error" role="alert">Не удалось сохранить <button type="button" onClick={(e) => { animateButtonPress(e.currentTarget); onRetry(); }}>Повторить</button></span>;
   }
-  if (status === "saved") return <span className="settings-save-status is-saved" role="status">Сохранено</span>;
+  if (status === "saved") return <span ref={elRef} className="settings-save-status is-saved" role="status">Сохранено</span>;
   return null;
 }
 
@@ -821,8 +844,22 @@ function Sidebar({
   onNavigate: (view: AppView) => void;
   onToggleCollapsed: () => void;
 }) {
+  const sidebarRef = useAnimeScope<HTMLElement>((scope, root) => {
+    const reduced = prefersReducedMotion();
+    const navButtons = root.querySelectorAll(".navigation-button");
+    if (navButtons.length) {
+      animate(navButtons, {
+        opacity: [0, 1],
+        translateX: reduced ? 0 : [-6, 0],
+        duration: reduced ? 100 : 200,
+        delay: reduced ? 0 : stagger(30),
+        ease: "outQuad",
+      });
+    }
+  }, []);
+
   return (
-    <aside id="main-sidebar" className={`sidebar${isOpen ? " is-open" : ""}`} aria-label="Основная навигация">
+    <aside id="main-sidebar" ref={sidebarRef} className={`sidebar${isOpen ? " is-open" : ""}`} aria-label="Основная навигация">
       <div className="sidebar-brand" data-tauri-drag-region>
         <img className="brand-logo brand-logo-wordmark" src="/brand/iris-wordmark-light.svg" alt="Iris" />
         <img className="brand-logo brand-logo-mark" src="/brand/iris-mark-light.svg" alt="" aria-hidden="true" />
@@ -842,7 +879,10 @@ function Sidebar({
             aria-label={isCollapsed ? "Развернуть меню" : "Свернуть меню"}
             aria-pressed={isCollapsed}
             title={isCollapsed ? "Развернуть меню" : "Свернуть меню"}
-            onClick={onToggleCollapsed}
+            onClick={(e) => {
+              animateButtonPress(e.currentTarget);
+              onToggleCollapsed();
+            }}
           >
             {isCollapsed ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />}
           </button>
@@ -872,7 +912,10 @@ function NavigationButton({
       aria-current={active ? "page" : undefined}
       data-tooltip={compact ? label : undefined}
       title={compact ? label : undefined}
-      onClick={onClick}
+      onClick={(e) => {
+        animateButtonPress(e.currentTarget);
+        onClick();
+      }}
     >
       <Icon size={19} aria-hidden="true" />
       <span>{label}</span>
@@ -1486,6 +1529,20 @@ export function ChatPage({
     }, 32);
   }, [isActive, messages]);
 
+  const lastMessageCountRef = useRef(0);
+  useEffect(() => {
+    if (messages.length > lastMessageCountRef.current && listRef.current) {
+      const messageElements = listRef.current.querySelectorAll<HTMLElement>(".message");
+      if (messageElements.length > 0) {
+        const newest = messageElements[messageElements.length - 1];
+        if (newest) {
+          animateMessageEnter(newest);
+        }
+      }
+    }
+    lastMessageCountRef.current = messages.length;
+  }, [messages]);
+
   useEffect(() => () => {
     if (scrollTimerRef.current !== null) {
       window.clearTimeout(scrollTimerRef.current);
@@ -1858,6 +1915,7 @@ export function ChatPage({
             className="primary-button send-button"
             type="submit"
             disabled={!sessionId || sessionStarting || loading || draft.trim().length === 0}
+            onClick={(e) => animateButtonPress(e.currentTarget)}
             aria-label={sessionStarting ? "Подготавливаем сессию" : loading ? "Отправка сообщения" : "Отправить сообщение"}
             title={sessionStarting ? "Подготавливаем сессию" : loading ? "Отправка сообщения" : "Отправить сообщение"}
           >
@@ -1869,7 +1927,10 @@ export function ChatPage({
           <button
             className={liveConversation ? "voice-button recording" : "secondary voice-button"}
             disabled={!liveVoiceSupported || !liveReady || voiceState === "stopping"}
-            onClick={() => void toggleLive()}
+            onClick={(e) => {
+              animateButtonPress(e.currentTarget);
+              void toggleLive();
+            }}
             title={liveReady ? "Непрерывный live-диалог с автоматическими паузами и перебиваниями" : liveStatusLabel}
             type="button"
           >
@@ -1881,7 +1942,10 @@ export function ChatPage({
               className={microphoneMuted ? "secondary voice-button muted" : "secondary voice-button"}
               aria-label={microphoneMuted ? "Включить микрофон" : "Выключить микрофон"}
               aria-pressed={microphoneMuted}
-              onClick={toggleMicrophoneMute}
+              onClick={(e) => {
+                animateButtonPress(e.currentTarget);
+                toggleMicrophoneMute();
+              }}
               title={`Микрофон: ${microphoneMuted ? "включить" : "выключить"} · клавиша ${LIVE_MUTE_HOTKEY.toUpperCase()}`}
               type="button"
             >
@@ -1891,7 +1955,10 @@ export function ChatPage({
           <button
             className="secondary voice-button new-dialog-button"
             disabled={!sessionId || sessionStarting || newDialogPending || voiceState === "recording" || voiceState === "transcribing"}
-            onClick={() => setNewDialogConfirmationOpen(true)}
+            onClick={(e) => {
+              animateButtonPress(e.currentTarget);
+              setNewDialogConfirmationOpen(true);
+            }}
             title="Очистить текущий чат и начать новый разговор"
             type="button"
           >
@@ -2295,12 +2362,19 @@ export function SettingsPage({
   );
 
   const activeSettingsMeta = settingsSectionMeta[activeSection];
+  const settingsContentRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (settingsContentRef.current) {
+      animatePageEnter(settingsContentRef.current);
+    }
+  }, [activeSection]);
 
   return (
     <section className="panel settings-panel">
       <SettingsNavigation current={activeSection} onChange={setActiveSection} />
 
-      <div className="settings-content">
+      <div className="settings-content" ref={settingsContentRef}>
         <header className="settings-heading">
           <div className="settings-heading-row">
             <div>
@@ -2918,7 +2992,10 @@ function SettingsNavigation({ current, onChange }: { current: SettingsSection; o
               type="button"
               className={`settings-nav-direct${current === group.directSection ? " is-active" : ""}`}
               aria-current={current === group.directSection ? "page" : undefined}
-              onClick={() => onChange(group.directSection!)}
+              onClick={(e) => {
+                animateButtonPress(e.currentTarget);
+                onChange(group.directSection!);
+              }}
             >
               <group.icon size={17} aria-hidden="true" />
               <span>{group.label}</span>
@@ -2935,7 +3012,8 @@ function SettingsNavigation({ current, onChange }: { current: SettingsSection; o
               className="settings-nav-group-button"
               aria-expanded={isExpanded}
               aria-controls={childrenId}
-              onClick={() => {
+              onClick={(e) => {
+                animateButtonPress(e.currentTarget);
                 setExpanded((value) => ({ ...value, [group.id]: !isExpanded }));
               }}
             >
@@ -2971,7 +3049,10 @@ function SettingsSectionButton({
       type="button"
       className={`settings-nav-button${section === current ? " is-active" : ""}`}
       aria-current={section === current ? "page" : undefined}
-      onClick={() => onClick(section)}
+      onClick={(e) => {
+        animateButtonPress(e.currentTarget);
+        onClick(section);
+      }}
     >
       <span>{label}</span>
     </button>
