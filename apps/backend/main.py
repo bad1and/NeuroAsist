@@ -29,7 +29,7 @@ from apps.backend.app.api.routes.maintenance import router as maintenance_router
 from apps.backend.app.api.routes.conversation import router as conversation_router
 from apps.backend.app.api.routes.coding import router as coding_router
 from apps.backend.app.api.websocket import router as websocket_router
-from apps.backend.app.core.config import ROOT_DIR, get_settings
+from apps.backend.app.core.config import APP_VERSION, ROOT_DIR, get_settings
 from apps.backend.app.core.logging import configure_logging
 from apps.backend.app.events.bus import EventBus
 from apps.backend.app.avatar.connection_manager import AvatarConnectionManager
@@ -147,7 +147,7 @@ def create_app() -> FastAPI:
     if not settings.llm_api_key:
         logger.warning("DeepSeek API key is not configured")
 
-    app = FastAPI(title=settings.app_name, version="0.9.0")
+    app = FastAPI(title=settings.app_name, version=APP_VERSION)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,

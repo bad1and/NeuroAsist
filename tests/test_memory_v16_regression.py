@@ -121,7 +121,10 @@ def test_consolidation_trailing_debounce_updates_one_job_and_correction_flushes(
     tmp_path, monkeypatch,
 ) -> None:
     store, service = _service(tmp_path)
-    monkeypatch.setattr(store, "_now", lambda: "2026-08-21T12:00:00.000+00:00")
+    # Keep the debounced deadline ahead of SQLite's real wall clock. The
+    # worker's availability query intentionally uses the database clock, so a
+    # fixed 2026 timestamp became time-dependent once that date arrived.
+    monkeypatch.setattr(store, "_now", lambda: "2099-08-21T12:00:00.000+00:00")
     first, _ = store.append_message(role="user", content="мне нравятся игры", input_mode="text")
     assert service.schedule_extraction(first) is True
     worker = MemoryExtractionWorker(
@@ -134,7 +137,7 @@ def test_consolidation_trailing_debounce_updates_one_job_and_correction_flushes(
             "SELECT * FROM background_jobs WHERE type = 'memory_consolidation' AND status = 'pending'"
         ).fetchone())
 
-    monkeypatch.setattr(store, "_now", lambda: "2026-08-21T12:00:30.000+00:00")
+    monkeypatch.setattr(store, "_now", lambda: "2099-08-21T12:00:30.000+00:00")
     second, _ = store.append_message(role="user", content="особенно кооперативные", input_mode="text")
     assert service.schedule_extraction(second) is True
     assert asyncio.run(worker.run_once()) is False
@@ -147,7 +150,7 @@ def test_consolidation_trailing_debounce_updates_one_job_and_correction_flushes(
     assert json.loads(pending[0]["payload_json"])["end_message_id"] == second.id
     assert json.loads(pending[0]["payload_json"])["debounced_turns"] == 2
     assert pending[0]["idempotency_key"].endswith(f":{second.id}:v12")
-    assert pending[0]["available_at"] == "2026-08-21T12:01:45.000+00:00"
+    assert pending[0]["available_at"] == "2099-08-21T12:01:45.000+00:00"
 
     monkeypatch.setattr(store, "_now", lambda: "2000-01-01T12:00:40.000+00:00")
     correction, _ = store.append_message(role="user", content="не репа а репо", input_mode="text")
