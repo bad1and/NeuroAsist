@@ -57,6 +57,11 @@ namespace NeuroAsist.Avatar
                     if (overlay != null) overlay.Configure(payload.visible, payload.always_on_top, payload.locked, payload.scale, payload.monitor, payload.x, payload.y, payload.width, payload.height);
                     break;
                 case "avatar.ping": client.SendPong(command.message_id); break;
+                case "avatar.quit":
+                case "avatar.exit":
+                    client.SendAck(command.message_id, true);
+                    Application.Quit();
+                    break;
                 default: client.SendAck(command.message_id, false, "unknown command"); break;
             }
         }
