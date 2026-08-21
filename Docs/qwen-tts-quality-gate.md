@@ -16,6 +16,13 @@ The old reference-preparation helper is no longer part of the production tree;
 this historical gate only documents the isolated worker and existing reference
 artifacts.
 
+> [!WARNING]
+> `data\voice-references\qwen-baya-neutral.wav` is not distributed in this
+> repository. Reproducing the experiment requires a separately obtained,
+> lawfully usable reference WAV and its exact transcript; point
+> `--reference-wav` to that file. The command below preserves the historical
+> filename only as an example.
+
 Run the 100-segment gate using the isolated interpreter:
 
 ```powershell

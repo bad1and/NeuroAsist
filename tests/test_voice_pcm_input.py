@@ -15,9 +15,13 @@ from apps.backend.app.voice.input import (
 class FakeSocket:
     def __init__(self) -> None:
         self.sent: list[dict] = []
+        self.closed: list[int] = []
 
     async def send_json(self, payload: dict) -> None:
         self.sent.append(payload)
+
+    async def close(self, code: int) -> None:
+        self.closed.append(code)
 
 
 class FakeVoiceService:
@@ -193,6 +197,120 @@ async def test_stop_flushes_confirmed_active_utterance_before_returning(tmp_path
 
 
 @pytest.mark.anyio
+async def test_disconnect_cancels_and_awaits_inflight_finalize(tmp_path: Path) -> None:
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def on_utterance(session_id, path, language, connection) -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    manager = VoiceInputSessionManager(FakeVoiceService(tmp_path), on_utterance)
+    socket = FakeSocket()
+    connection = await manager.register("disconnect", socket)
+    session = manager._sessions["disconnect"]
+    session.pending_candidate_id = 1
+    task = manager._start_finalize_task(session, b"\x01\x00" * 160, 1)
+    await started.wait()
+
+    assert await manager.unregister(
+        "disconnect", connection, finalize_active=False,
+    ) is True
+
+    assert cancelled.is_set()
+    assert task.done()
+    assert task.cancelled()
+    assert session.finalize_tasks == set()
+    assert session.endpoint_tasks == set()
+    assert "disconnect" not in manager._sessions
+    assert not any(event["type"] == "voice.input.transcript" for event in socket.sent)
+
+
+@pytest.mark.anyio
+async def test_reconnect_invalidates_stale_completion_before_new_owner(tmp_path: Path) -> None:
+    started = asyncio.Event()
+    cancellation_received = asyncio.Event()
+
+    async def on_utterance(session_id, path, language, connection) -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            # Model a dependency that finishes just as cancellation arrives.
+            # Even if it consumes cancellation, its late event must be gated by
+            # the invalidated lease and never reach either socket owner.
+            cancellation_received.set()
+        await connection.send({
+            "type": "voice.input.transcript",
+            "transcript": "stale",
+        })
+
+    manager = VoiceInputSessionManager(FakeVoiceService(tmp_path), on_utterance)
+    old_socket = FakeSocket()
+    old_connection = await manager.register("reconnect", old_socket)
+    old_session = manager._sessions["reconnect"]
+    old_session.pending_candidate_id = 1
+    old_task = manager._start_finalize_task(
+        old_session, b"\x02\x00" * 160, 1,
+    )
+    await started.wait()
+
+    new_socket = FakeSocket()
+    new_connection = await manager.register("reconnect", new_socket)
+
+    assert cancellation_received.is_set()
+    assert old_task.done()
+    assert manager._sessions["reconnect"].connection is new_connection
+    assert new_connection.replaced_owner is True
+    assert old_connection.lease.active is False
+    assert new_connection.lease.active is True
+    assert not any(event.get("transcript") == "stale" for event in old_socket.sent)
+    assert not any(event.get("transcript") == "stale" for event in new_socket.sent)
+    await new_connection.send({"type": "voice.input.transcript", "transcript": "fresh"})
+    assert new_socket.sent[-1]["transcript"] == "fresh"
+
+
+@pytest.mark.anyio
+async def test_shutdown_cancels_and_awaits_forced_endpoint_task(tmp_path: Path) -> None:
+    handled: list[bytes] = []
+    detector = ControlledTurnDetector([False])
+
+    async def on_utterance(session_id, path, language, connection) -> None:
+        handled.append(path.read_bytes())
+
+    manager = VoiceInputSessionManager(
+        FakeVoiceService(tmp_path),
+        on_utterance,
+        turn_detector=detector,
+        max_turn_silence_ms=10_000,
+    )
+    socket = FakeSocket()
+    await manager.register("shutdown", socket)
+    session = manager._sessions["shutdown"]
+    session.pending_candidate_id = 1
+    finalize = manager._start_finalize_task(
+        session, b"\x03\x00" * 160, 1,
+    )
+    await finalize
+    endpoint = session.endpoint_task
+    assert endpoint is not None and not endpoint.done()
+
+    await manager.close()
+
+    assert endpoint.done()
+    assert endpoint.cancelled()
+    assert session.finalize_tasks == set()
+    assert session.endpoint_tasks == set()
+    assert manager._sessions == {}
+    assert socket.closed == [1001]
+    assert handled == []
+
+
+@pytest.mark.anyio
 async def test_continuation_during_endpoint_inference_keeps_entire_turn(tmp_path: Path) -> None:
     handled: list[bytes] = []
     generation = 0
@@ -315,9 +433,14 @@ async def test_short_noise_during_iris_speech_does_not_barge_in(tmp_path: Path) 
     session = manager._sessions["s"]
     session.gate.start_ms = 0
     session.gate.end_ms = 0
-    frame = b"\x04\x00" * 160
+    # 270 ms above the energy threshold, followed by an endpoint. The old
+    # amplitude (4 / 32768) was below the production threshold and therefore
+    # never represented the loud cough described by this regression.
+    frame = b"\x00\x08" * 160
     for _ in range(27):
         await manager.feed("s", frame)
+    await manager.feed("s", b"\x00\x00" * 160)
+    await manager.feed("s", b"\x00\x00" * 160)
 
     assert interrupted == []
     assert handled == []

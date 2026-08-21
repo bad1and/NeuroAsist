@@ -119,6 +119,30 @@ class MemoryService:
         r"[^.!?\n]{0,160}\b(?:диагноз|аллерг|болез|лекар|симптом|адрес)\w*"
         r"[^.!?\n]*"
     )
+    _EXPLICIT_CORRECTION_CUE = re.compile(
+        r"(?iu)(?:"
+        r"\bне\s+[^.!?\n]{1,120}?\s*,?\s+а\s+[^.!?\n]+"
+        r"|\b(?:на\s+самом\s+деле|теперь\s+я|я\s+больше\s+не)\b"
+        r")"
+    )
+    _EXPLICIT_MEMORY_CUE = re.compile(
+        r"(?iu)\b(?:запомни|сохрани\s+в\s+памяти|не\s+забудь|важно|remember)\b"
+    )
+    _GOODBYE_CUE = re.compile(
+        r"(?iu)^\s*(?:ну\s+|ладно[, ]+)?"
+        r"(?:пока|до\s+свидания|увидимся|goodbye|bye)[.!?\s]*$"
+    )
+    _DURABLE_NOVELTY_CUE = re.compile(
+        r"(?iu)(?:"
+        r"\b(?:меня\s+зовут|мо[её]\s+имя|call\s+me|my\s+name\s+is)\b"
+        r"|\b(?:я\s+(?:люблю|предпочитаю|ненавижу|хочу|планирую|собираюсь|работаю|живу|учусь|занимаюсь)"
+        r"|мне\s+(?:нрав\w*|удобн\w*|нужн\w*|важн\w*)|мой\s+любим\w*|моя\s+(?:текущая\s+)?(?:цель|работа)|у\s+меня)\b"
+        r"|\b(?:напомни|не\s+забудь|обещаю|дедлайн|i\s+(?:like|prefer|want|plan|work|live))\b"
+        r")"
+    )
+    _PENDING_CONTINUATION_CUE = re.compile(
+        r"(?iu)^\s*(?:а\s+)?(?:особенно|также|ещ[её]|например|точнее|конкретно|это)\b"
+    )
 
     def __init__(
         self,
@@ -190,10 +214,82 @@ class MemoryService:
             or not self.is_eligible_automatic_source(message)
         ):
             return False
+        source = self._scheduling_user_source(message)
+        if source is None or not self.is_eligible_automatic_source(source):
+            return False
+        text = source.effective_content.strip()
+        if not text:
+            return False
+        explicit_memory = self._EXPLICIT_MEMORY_CUE.search(text) is not None
+        explicit_correction = self._EXPLICIT_CORRECTION_CUE.search(text) is not None
+
+        # Explicit memory commands and corrections are never suppressed by the
+        # novelty filter.  They also make the durable debounce immediately
+        # claimable; TimelineStore derives that urgency from this user text.
+        if explicit_memory or explicit_correction:
+            return self._store.enqueue_consolidation_job(message.id)
+
+        # A goodbye only flushes an already useful dialogue window.  Starting a
+        # fresh DeepSeek job for a standalone "пока" is pure token overhead.
+        if self._GOODBYE_CUE.fullmatch(text):
+            return self._store.enqueue_consolidation_job(
+                message.id, create_if_missing=False,
+            )
+
+        if self._high_precision_fully_handled(source, text):
+            return False
+
+        has_durable_novelty = bool(
+            self._DURABLE_NOVELTY_CUE.search(text)
+            or self._SENSITIVE_SELF_FACT.search(text)
+            or self._DEVELOPER_FACT.match(text.strip())
+        )
+        if has_durable_novelty:
+            return self._store.enqueue_consolidation_job(message.id)
+
+        # Only a likely continuation reaches SQLite. enqueue_consolidation_job
+        # atomically verifies that a pending debounce window really exists.
+        continues_pending_window = bool(
+            self._PENDING_CONTINUATION_CUE.search(text)
+            and len(re.findall(r"[^\W_]+", text, flags=re.UNICODE)) >= 2
+        )
+        if not continues_pending_window:
+            return False
         # Consolidation is the sole LLM write path.  The old per-message job
         # was left alongside it during the first v11 draft, which doubled API
         # calls and retried the same malformed model output independently.
-        self._store.enqueue_consolidation_job(message.id)
+        return self._store.enqueue_consolidation_job(
+            message.id, create_if_missing=False,
+        )
+
+    def _scheduling_user_source(
+        self, message: StoredTimelineMessage,
+    ) -> StoredTimelineMessage | None:
+        """Resolve the user turn without inspecting generated assistant text."""
+        if message.role == "user":
+            return message
+        if message.role != "assistant" or not message.reply_to_message_id:
+            return None
+        source = self._store.get_message(message.reply_to_message_id)
+        return source if source is not None and source.role == "user" else None
+
+    def _high_precision_fully_handled(
+        self, source: StoredTimelineMessage, text: str,
+    ) -> bool:
+        """Avoid an LLM pass when the narrow deterministic writer already won."""
+        candidates = self._extract_candidates(text)
+        if not candidates or any(
+            str(candidate.get("predicate")) not in {"name", "developers", "likes_category"}
+            for candidate in candidates
+        ):
+            return False
+        if not self._store.message_has_memory_evidence(source.id):
+            return False
+        # A category plus concrete examples still has durable novelty the local
+        # high-precision writer cannot represent as individual games.
+        if any(str(candidate.get("predicate")) == "likes_category" for candidate in candidates):
+            if re.search(r"(?iu)\b(?:например|вроде|такие\s+как)\b", text):
+                return False
         return True
 
     @staticmethod

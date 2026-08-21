@@ -4,682 +4,195 @@
 
 # Iris
 
-### Локальный голосовой AI‑персонаж и будущая neuro‑VTuber платформа
+### Локальный голосовой AI-персонаж для Windows
 
-[![Версия](https://img.shields.io/badge/version-0.9.0--dev-7c3aed?style=flat-square)](https://github.com/bad1and/NeuroAsist)
-[![Python](https://img.shields.io/badge/Python-3.12%2B-3776ab?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
-[![Node.js](https://img.shields.io/badge/Node.js-24%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.116-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Версия](https://img.shields.io/badge/version-1.0.0-7c3aed?style=flat-square)](VERSION)
+[![Python](https://img.shields.io/badge/Python-3.12-3776ab?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-24-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![React](https://img.shields.io/badge/React-19-61dafb?style=flat-square&logo=react&logoColor=111827)](https://react.dev/)
+[![Tauri](https://img.shields.io/badge/Tauri-2-24c8db?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
 [![Лицензия](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE)
 
-[English](README.md) · **Русский** · [Blueprint V0.5](Docs/NeuroAsist_V0.5_Companion_Blueprint.md)
+[English](README.md) · **Русский** · [Документация](Docs/README.md)
 
 </div>
 
 > [!IMPORTANT]
-> **Iris v0.9 — экспериментальная development-ветка локального desktop-приложения.**
-> Tauri запускает React-интерфейс и FastAPI core вместе. Доступны текстовый/голосовой чат, долгосрочная память и опциональный Unity VRM-аватар.
+> Исходный код уже переведён на **Iris 1.0.0**. Локальное приложение функционально; перед публичной публикацией установщик должен пройти отдельный release checklist.
 
-Iris — официальное имя. К ней также можно обращаться: **Ирис**, **Айрис** или **Ириска**.
+Iris — desktop AI-персонаж с локальным распознаванием и синтезом речи, DeepSeek-совместимой моделью диалога, долгосрочной памятью, живым голосовым режимом и опциональным Unity VRM-аватаром. Tauri объединяет React-интерфейс и защищённый FastAPI core в одно приложение.
 
-## О проекте
+## Что работает
 
-Iris — локальная панель и backend для AI‑персонажа, который может услышать пользователя, понять запрос, сформировать ответ и озвучить его.
+| Область | Текущая реализация |
+| --- | --- |
+| Текст и live voice | Потоковые ответы, непрерывный PCM, VAD, Smart Turn, barge-in и очистка задач при reconnect |
+| Локальная речь | GigaAM v3 STT с опциональным fallback; TeraTTSv2 `ru_f1` по умолчанию |
+| Персонаж | Устойчивая личность, эмоции, жесты, delivery metadata, настроение и состояние отношений |
+| Память | Каноническая SQLite, фоновое извлечение, provenance, audit, FTS и опциональный semantic retrieval |
+| Desktop | Tauri 2, tray, single instance, safe mode и защищённый случайный loopback-порт |
+| Аватар | Опциональный Unity VRM renderer, lip sync, жесты, overlay или размещение внутри чата |
+| Coding Agent | Опциональный Docker-only worker: изолированные snapshots, логи, diff и явное review/apply |
+| Диагностика | Runtime events, readiness моделей, token/retry telemetry и backups |
 
-Текущая версия сосредоточена на стабильном голосовом цикле:
+Iris не управляет рабочим столом. Coding Agent работает только в sandbox задачи и не имеет fallback на host shell.
+
+## Схема runtime
 
 ```mermaid
 flowchart LR
-    A[Микрофон или текст] --> B[GigaAM v3 STT]
-    B --> C[Character Agent]
-    C --> D[DeepSeek-совместимая LLM]
-    D --> E[TeraTTSv2 ru_f1]
-    E --> F[Воспроизведение голоса]
+    A[Текст или микрофон] --> B[React / AudioWorklet]
+    B --> C[Защищённый FastAPI core]
+    C --> D[GigaAM STT]
+    C --> E[Character Agent]
+    E --> F[DeepSeek-совместимый API]
+    E --> G[SQLite timeline и память]
+    F --> H[TeraTTSv2]
+    H --> B
+    C --> I[Unity avatar]
 ```
 
-Направление V0.5 — desktop-компаньон с одной активной сессией: при новом запуске или ручном сбросе диалог начинается с чистого листа, а управляемая долгосрочная память сохраняется. Внутри сессии используются episodes и summaries. Это не продукт с вручную созданными чатами. В v09 добавлен отдельный строго ограниченный Coding Agent; он не получает live-доступ к проекту и не управляет рабочим столом.
-
-## Возможности v0.9
-
-| Возможность | Статус | Реализация |
-|---|:---:|---|
-| Текстовый диалог | ✅ | FastAPI chat endpoint |
-| Live-диалог | ✅ | Непрерывный PCM16 через AudioWorklet и input WebSocket v3 |
-| Live-ответ голосом | ✅ | Аудиосегменты через WebSocket |
-| Локальное распознавание речи | ✅ | GigaAM v3, `faster-whisper`/Qwen3-ASR optional fallback |
-| Локальная русская озвучка | ✅ | TeraTTSv2, `ru_f1` по умолчанию |
-| История диалога и Journal | ✅ | SQLite timeline, episodes и summaries |
-| Долгосрочная память | 🧪 | Канонические записи SQLite, audit trail и Memory Center |
-| Семантический поиск по памяти | 🧪 | Перестраиваемый ChromaDB-индекс с FTS fallback |
-| Runtime-события | ✅ | REST и WebSocket |
-| Настройка голоса и runtime | ✅ | Локальная React-панель |
-| Browser speech fallback | ✅ | При ошибке backend TTS |
-| Unity VRM-аватар и lipsync | ✅ | Опциональный WebSocket-клиент с UniVRM/uLipSync |
-| Runtime continuous companion | 🧭 | Реализованы timeline, episodes, summaries, управляемая долгосрочная память и проверенный Tauri shell |
-| Coding Agent | 🧪 | Очередь задач, отдельные рабочие папки Docker, логи/diff и явное ревью; см. [документ v09](Docs/v09-coding-agent.md) |
-| Управление ПК | 🚫 | Вне scope |
-
-### Настройка Coding Agent
-
-Добавьте в `.env` отдельный второй ключ DeepSeek для Coding Agent. Так ключ и
-лимиты coding-задач отделены от основного ключа Iris:
-
-```env
-CODING_AGENT_ENABLED=true
-CODING_API_KEY=ваш_второй_ключ_deepseek
-CODING_BASE_URL=https://api.deepseek.com
-```
-
-Перед первым запуском Coding Agent соберите Docker-образ. Повторите эту же
-команду после изменений в `apps/backend/docker/coding.Dockerfile`: она
-пересоберёт локальный образ `neuroasist-coding` с тем же стабильным тегом.
-
-```powershell
-docker build -t neuroasist-coding -f apps/backend/docker/coding.Dockerfile apps/backend/docker
-```
-
-## Основные идеи
-
-- **Local-first обработка голоса** — STT и TTS работают на компьютере пользователя.
-- **Быстрый текстовый ответ** — текст можно вернуть раньше, чем закончится фоновая генерация TTS.
-- **Устойчивость к ошибкам озвучки** — падение TTS не уничтожает готовый ответ.
-- **Наблюдаемый runtime** — события backend, chat, STT, TTS и WebSocket видны в интерфейсе.
-- **Модульная структура** — LLM, STT, TTS, storage, events и agents разделены по ответственности.
-- **Ограниченный текущий scope** — companion не выполняет команды, не читает файлы и не управляет рабочим столом.
-
-## Интерфейс
-
-В React-панели есть пять основных разделов:
-
-- **Chat** — текстовые сообщения, кнопка `Live`, распознанная фраза, ответ и воспроизведение.
-- **Journal** — непрерывная timeline и внутренние эпизоды разговора.
-- **Memory** — сохранённые факты, их происхождение, проверка и полный сброс памяти с историей.
-- **Events** — события backend, LLM, STT, TTS и соединений в реальном времени.
-- **Settings** — язык голоса, голос TeraTTSv2, скорость воспроизведения, live prebuffer, runtime-настройки и тестовое управление аватаром.
-
-В шапке отображаются состояние backend, подключение WebSocket, наличие API-ключа и фиксированная LLM-модель.
-
-## Технологический стек
-
-### Backend
-
-- Python 3.12+
-- FastAPI
-- Pydantic Settings
-- SQLite
-- WebSocket
-- GigaAM v3
-- `faster-whisper` как мультиязычный fallback
-- TeraTTSv2 через ONNX Runtime
-- DeepSeek-совместимый LLM API
-
-### Frontend
-
-- React 19
-- TypeScript
-- Vite
-- Vitest
-- Browser AudioWorklet + Web Audio API
-- Web Audio API
+Подробнее: [Архитектура](Docs/architecture.md).
 
 ## Быстрый запуск
 
 ### Требования
 
-- основная платформа разработки — Windows 10/11;
-- Python **3.12+**;
-- Node.js **24+**;
-- FFmpeg и FFprobe доступны через `PATH`;
-- API-ключ DeepSeek;
-- интернет при первой загрузке GigaAM/Whisper и TeraTTSv2;
-- CUDA-видеокарта необязательна.
+- Windows 10 или 11;
+- Git;
+- Python 3.12;
+- Node.js 24 и npm 11;
+- FFmpeg и FFprobe в `PATH`;
+- API-ключ DeepSeek-совместимого сервиса;
+- Rust 1.77.2+ и Microsoft C++ Build Tools для разработки Tauri;
+- WebView2 Runtime — обычно уже установлен в актуальных версиях Windows.
 
-### 1. Клонирование ветки
+Опционально:
+
+- Docker Desktop для Coding Agent;
+- Unity 2022.3.62f3 только для пересборки аватара;
+- NVIDIA GPU для ускорения STT. Стандартный TTS-профиль работает на CPU.
+
+### 1. Клонирование и зависимости
 
 ```powershell
-git clone --branch v0.6 --single-branch https://github.com/bad1and/NeuroAsist.git Iris
+git clone https://github.com/bad1and/NeuroAsist.git Iris
 cd Iris
-```
 
-### 2. Python-окружение
-
-```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128
+
+npm ci
+npm ci --prefix apps/web
+npm ci --prefix apps/desktop
 ```
 
-Текущий lockfile использует проверенную CUDA-сборку `torch==2.11.0+cu128`. Нужны
-NVIDIA-видеокарта и совместимый драйвер. Проверка установки:
+Репозиторий фиксирует проверенный граф Python- и JavaScript-зависимостей. Если CUDA недоступна, установите подходящую для компьютера сборку PyTorch и оставьте `VOICE_STT_DEVICE=cpu`.
 
-```powershell
-python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
-```
-
-Если CUDA недоступна, установи совместимую CPU-сборку PyTorch и укажи в `.env`
-`VOICE_STT_DEVICE=cpu` и `VOICE_TERATTS_DEVICE=cpu`.
-
-### 3. Frontend-зависимости
-
-```powershell
-npm install
-npm install --prefix apps/web
-npm install --prefix apps/desktop
-```
-
-### 4. Конфигурация
+### 2. Настройка
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-Минимально нужно указать:
+Для запуска backend в development-режиме укажите минимум:
 
 ```env
 DEEPSEEK_API_KEY=your_deepseek_api_key
 ```
 
-Стандартная голосовая конфигурация:
+При первом запуске Tauri ключ можно сохранить через интерфейс в Windows Credential Manager. Секреты не записываются в runtime settings, backups или Git. Все поддерживаемые статические параметры и безопасные значения по умолчанию описаны в [.env.example](.env.example).
 
-```env
-VOICE_STT_PROVIDER=gigaam
-VOICE_STT_MODEL=v3_rnnt
-VOICE_STT_DEVICE=cpu
-
-VOICE_TTS_ENABLED=true
-VOICE_TTS_PROVIDER=teratts
-VOICE_PRELOAD_TTS_MODEL=true
-VOICE_TERATTS_MODEL=TeraSpace/TeraTTSv2
-VOICE_TERATTS_REVISION=f05ea799094571a3553904a555df3834fb0b963b
-VOICE_TERATTS_VOICE=ru_f1
-VOICE_TERATTS_DEVICE=cpu
-VOICE_TERATTS_THREADS=8
-VOICE_TERATTS_DIFFUSION_MODEL=distilled
-VOICE_TERATTS_RUACCENT_MODE=full
-VOICE_TERATTS_SEED=1234
-VOICE_TTS_POSTPROCESSING_ENABLED=true
-VOICE_TTS_HIGHPASS_CUTOFF_HZ=60
-VOICE_TTS_ADAPTIVE_PROSODY=true
-```
-
-### Справочник параметров окружения
-
-`.env` читается при запуске backend. Если меняешь `.env`, перезапусти backend. Настройки, изменённые через UI, действуют только в текущем runtime и сбрасываются после перезапуска backend.
-
-#### Основной backend
-
-| Параметр | За что отвечает |
-|---|---|
-| `DEEPSEEK_API_KEY` | API-ключ DeepSeek-совместимого сервиса. Нужен для реальных ответов LLM. |
-| `DEEPSEEK_BASE_URL` | Базовый URL DeepSeek-совместимого API. |
-| `DEEPSEEK_MODEL` | Фиксированная LLM-модель для backend routes. UI не меняет её в runtime. |
-| `SQLITE_PATH` | Путь к SQLite-базе с сессиями и историей диалога. |
-| `CHAT_HISTORY_LIMIT` | Сколько последних сообщений передаётся обратно в контекст чата. |
-| `LOG_LEVEL` | Детальность логов backend, например `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
-| `LOG_TO_FILE` | Включает запись логов backend в файл. |
-| `LOG_FILE_PATH` | Путь к файлу логов, если `LOG_TO_FILE=true`. |
-| `CORS_ORIGINS` | Список разрешённых frontend origin через запятую. |
-| `CORS_ORIGIN_REGEX` | Regex для разрешённых локальных development origin. |
-
-#### Speech-to-text
-
-| Параметр | За что отвечает |
-|---|---|
-| `VOICE_STT_PROVIDER` | STT-провайдер: `gigaam` для русского, `faster_whisper` для мультиязычного режима, `qwen3_asr` для optional Qwen3-ASR, `mock` для тестов. |
-| `VOICE_STT_MODEL` | Модель провайдера: `v3_rnnt`/`v3_e2e_rnnt` для GigaAM, `large-v3-turbo` для faster-whisper или `Qwen/Qwen3-ASR-1.7B` для Qwen3-ASR. |
-| `VOICE_STT_FALLBACK_PROVIDER` | Необязательная вторичная локальная модель (`faster_whisper`, `qwen3_asr` или `gigaam`). Загружается только при необходимости. |
-| `VOICE_STT_FALLBACK_MODEL` | Модель вторичного провайдера. Для Qwen по умолчанию используется `Qwen/Qwen3-ASR-1.7B`. |
-| `VOICE_STT_FALLBACK_CONFIDENCE_THRESHOLD` | Порог confidence для запуска secondary STT, по умолчанию `0.60`. |
-| `VOICE_STT_FALLBACK_MIN_RMS` | Нижний порог уровня PCM для low-SNR fallback, по умолчанию `0.008`. |
-| `VOICE_STT_DEVICE` | Где запускать STT: `cpu`, `cuda` или `auto`. |
-| `VOICE_STT_COMPUTE_TYPE` | Тип вычислений только для faster-whisper, например `int8` для CPU или `int8_float16` для CUDA. GigaAM игнорирует параметр. |
-| `VOICE_DEFAULT_LANGUAGE` | Язык по умолчанию для STT и голосового UI, например `ru`. |
-| `VOICE_PRELOAD_STT_MODEL` | Загружает STT-модель при старте backend, а не при первой записи. |
-| `VOICE_STT_TIMEOUT_SECONDS` | Максимальное время на один STT-запрос. |
-| `VOICE_MAX_UPLOAD_MB` | Максимальный размер загружаемого аудио. |
-| `VOICE_MAX_RECORD_SECONDS` | Максимальная длительность принимаемой записи. |
-
-Для русского голосового ассистента базовым кандидатом остаётся `gigaam` +
-`v3_rnnt`: он ориентирован на точное распознавание слов. `v3_e2e_rnnt`
-формирует более читаемый текст с пунктуацией и нормализацией чисел. Текущий
-локальный baseline на 20 коротких записях — около `18.3% WER`; это не release-
-метрика, а точка сравнения для расширенного приватного корпуса. Окончательный
-выбор делается только после одинакового benchmark для GigaAM RNNT/E2E,
-`large-v3-turbo` и optional Qwen3-ASR.
-
-Qwen3-ASR подключается отдельно в чистом окружении:
-
-```powershell
-pip install -U qwen-asr
-```
-
-После установки кандидат можно прогнать так:
-
-```powershell
-.\.venv\Scripts\python.exe scripts\benchmark_stt.py candidate `
-  --manifest Audio\stt-manifest.json `
-  --output output\stt-qwen.json `
-  --provider qwen3_asr `
-  --model Qwen/Qwen3-ASR-1.7B
-```
-
-#### Text-to-speech / TeraTTSv2
-
-| Параметр | За что отвечает |
-|---|---|
-| `VOICE_TTS_ENABLED` | Включает backend-озвучку. Если она выключена или упала, frontend может использовать browser SpeechSynthesis fallback. |
-| `VOICE_TTS_PROVIDER` | `teratts` в production; `mock` только для тестов. |
-| `VOICE_PRELOAD_TTS_MODEL` | Загружает и прогревает TeraTTSv2 при старте backend. Первый запуск скачивает pinned snapshot. |
-| `VOICE_TERATTS_MODEL` / `VOICE_TERATTS_REVISION` | Идентификатор модели и закреплённая ревизия Hugging Face. |
-| `VOICE_TERATTS_MODEL_PATH` | Необязательный локальный snapshot для offline-запуска. |
-| `VOICE_TERATTS_CACHE_DIR` | Кэш модели; по умолчанию находится в app data пользователя. |
-| `VOICE_TERATTS_VOICE` | Голос по умолчанию `ru_f1`; selector получает все голоса TeraTTSv2. |
-| `VOICE_TERATTS_THREADS` | Число CPU-потоков ONNX Runtime, по умолчанию `8`. |
-| `VOICE_TERATTS_DIFFUSION_MODEL` | `distilled` для production или `teacher` для сравнения качества. |
-| `VOICE_TERATTS_RUACCENT_MODE` / `VOICE_TERATTS_RUSSIAN_STRESS` | Режим русских pronunciation assets. |
-| `VOICE_TERATTS_CHUNK_FRAMES` | Размер внутреннего vocoder chunk; внешний протокол сохраняет один WAV на сегмент. |
-| `VOICE_TERATTS_SEED` | Детерминированный seed, по умолчанию `1234`. |
-| `VOICE_TTS_POSTPROCESSING_ENABLED` | Включает удаление DC-смещения, high-pass, антищелчковые fades и безопасную нормализацию WAV. |
-| `VOICE_TTS_HIGHPASS_CUTOFF_HZ` | Частота среза низкочастотного гула при включённой постобработке; по умолчанию `60`. |
-| `VOICE_TTS_ADAPTIVE_PROSODY` | Сохраняет смысловые паузы delivery-слоя; стили и эмоции переводятся в TeraTTS `duration_scale`. |
-| `VOICE_TTS_PRONUNCIATION_DICTIONARY_PATH` | Необязательный JSON-словарь произношений. |
-| `VOICE_TTS_BACKGROUND_TIMEOUT_SECONDS` | Timeout фоновых TTS jobs, если они используются внутренним voice pipeline. |
-| `VOICE_TTS_TIMEOUT_SECONDS` | Общий timeout TTS для voice API flow. |
-| `VOICE_TTS_MAX_CHARS` | Максимальная длина текста для одного backend TTS-запроса. |
-| `VOICE_AUDIO_DIR` | Папка, куда сохраняются сгенерированные аудиофайлы. WAV удаляются при старте backend, затем раз в 20 минут удаляются файлы старше 2 минут. |
-
-#### Live voice playback
-
-| Параметр | За что отвечает |
-|---|---|
-| `VOICE_LIVE_QUEUE_SIZE` | Размер внутренней очереди live-ответа. |
-| `VOICE_LIVE_IDLE_FLUSH_MS` | Задержка перед отправкой последнего неполного live-сегмента. |
-| `VOICE_LIVE_FIRST_IDLE_FLUSH_MS` | Idle-flush первого произносимого фрагмента, по умолчанию `180` мс. |
-| `VOICE_LIVE_NEXT_IDLE_FLUSH_MS` | Idle-flush следующих фрагментов, по умолчанию `350` мс. |
-| `VOICE_LIVE_PLAYBACK_START_LEAD_MS` | Запас планирования browser playback, по умолчанию `30` мс. |
-| `VOICE_LIVE_FIRST_SEGMENT_CHARS` | Целевой размер первого live TTS-сегмента. |
-| `VOICE_LIVE_NEXT_SEGMENT_CHARS` | Целевой размер следующих live TTS-сегментов. |
-| `VOICE_LIVE_MAX_SEGMENT_CHARS` | Жёсткий лимит символов для одного live TTS-сегмента. |
-| `VOICE_LIVE_MAX_SEGMENT_WORDS` | Жёсткий лимит слов для одного live TTS-сегмента. |
-| `VOICE_LIVE_SAFE_SEGMENT_WORDS` | Максимальный размер цельной разговорной мысли перед поиском естественного разреза. Значение `18` по умолчанию уменьшает эффект склейки фрагментов. |
-| `VOICE_LIVE_TTS_RETRY_COUNT` | Сколько раз повторять генерацию упавшего live TTS-сегмента. |
-| `VOICE_LIVE_TTS_CONCURRENCY_MODE` | Режим параллельности live TTS. Значение `1` по умолчанию сохраняет простой и стабильный порядок сегментов. |
-| `VOICE_LIVE_TTS_CONCURRENCY_MIN` | Нижняя граница параллельности live TTS. |
-| `VOICE_LIVE_TTS_CONCURRENCY_MAX` | Верхняя граница параллельности live TTS. |
-| `VOICE_LIVE_PLAYBACK_PREBUFFER_SEGMENTS` | Сколько декодированных live-сегментов буферизовать перед стартом воспроизведения. Можно менять в runtime через Settings. |
-| `VOICE_LIVE_PLAYBACK_PREBUFFER_MS` | Дополнительная задержка live prebuffer в миллисекундах. Можно менять в runtime через Settings. |
-
-#### Распознавание речи и VAD
-
-| Параметр | За что отвечает |
-|---|---|
-| `VOICE_VAD_PROVIDER` | Streaming VAD: локальный `silero` по умолчанию или явный `energy`. |
-| `VOICE_SILERO_VAD_MODEL_PATH` | Необязательный TorchScript override. При ошибке используется модель из `silero-vad==6.2.1`, затем energy fallback. |
-| `VOICE_SILERO_VAD_START_THRESHOLD` / `VOICE_SILERO_VAD_END_THRESHOLD` | Вероятности старта/окончания Silero: `0.55` / `0.35`. |
-| `VOICE_ENERGY_VAD_START_RMS` / `VOICE_ENERGY_VAD_END_RMS` | Пороги RMS только для energy fallback: `0.018` / `0.012`. |
-| `VOICE_VAD_PRE_ROLL_MS` / `VOICE_VAD_POST_ROLL_MS` | Сохраняемый контекст до и после речи: `900` / `180` мс. Значение pre-roll ниже 900 мс безопасно повышается во время запуска. |
-| `VOICE_VAD_END_SILENCE_MS` / `VOICE_VAD_LIVE_END_SILENCE_MS` | Базовый и live endpoint со SmartTurn: `720` / `750` мс. Более короткие значения автоматически поднимаются до безопасного минимума выбранного профиля паузы. |
-| `VOICE_VAD_LIVE_FALLBACK_END_SILENCE_MS` | Осторожный live endpoint без SmartTurn: `1100` мс. |
-| `VOICE_TORCH_CPU_THREADS` / `VOICE_TORCH_INTEROP_THREADS` | Общая настройка PyTorch до загрузки всех голосовых моделей: `4` / `1`. |
-| `VOICE_STT_TERMS_PATH` | Отдельный JSON точных aliases для STT; по умолчанию `stt-terms.json` в приватных app-data. |
-| `VOICE_INPUT_DIAGNOSTIC_AUDIO` | Сохранять canonical WAV и JSON в приватную diagnostic-папку. По умолчанию `false`. |
-
-#### Unity avatar bridge
-
-| Параметр | За что отвечает |
-|---|---|
-| `AVATAR_ENABLED` | Включает отправку команд аватара подключённым Unity-клиентам. По умолчанию выключен, поэтому Unity остаётся опциональным. |
-| `AVATAR_HEARTBEAT_INTERVAL_SECONDS` | Интервал heartbeat-ping от backend к Unity-клиентам. |
-| `AVATAR_CLIENT_TIMEOUT_SECONDS` | Время без heartbeat, после которого Unity-клиент отключается. |
-
-#### Frontend
-
-| Параметр | За что отвечает |
-|---|---|
-| `VITE_API_BASE_URL` | HTTP URL backend, который использует React-приложение. |
-| `VITE_WS_EVENTS_URL` | WebSocket URL backend для событий и live voice. |
-
-### 5. Проверка FFmpeg
-
-```powershell
-ffmpeg -version
-ffprobe -version
-```
-
-Если Windows не видит FFmpeg в текущем терминале:
-
-```powershell
-$env:Path = "<ffmpeg-bin>;$env:Path"
-```
-
-### 6. Запуск desktop-приложения (рекомендуется)
+### 3. Запуск desktop-приложения
 
 ```powershell
 npm --prefix apps/desktop run dev
 ```
 
-Одна команда запускает Vite и локальный FastAPI core; отдельно поднимать backend или открывать браузер не нужно. Параметры сборки аватара описаны в [desktop README](apps/desktop/README.md).
+Tauri сам запускает Vite и FastAPI core. Для корректной остановки используйте **Quit** в tray или `Ctrl+C`.
 
-### 7. Раздельный запуск backend и web UI (опционально)
+### Раздельный browser-режим
+
+Запустите команды в двух окнах PowerShell:
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
-python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+.\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
-
-### 8. Запуск frontend
-
-Открой второй терминал:
 
 ```powershell
 npm --prefix apps/web run dev
 ```
 
-Открыть:
+Интерфейс откроется на `http://127.0.0.1:5173`, OpenAPI — на `http://127.0.0.1:8000/docs`.
 
-- Web UI: `http://127.0.0.1:5173`
-- OpenAPI: `http://127.0.0.1:8000/docs`
-- Health check: `http://127.0.0.1:8000/health`
+## Опциональные компоненты
 
-## Архитектура
+### Coding Agent
 
-```mermaid
-flowchart TB
-    UI[React и TypeScript Web UI]
-
-    subgraph Backend[FastAPI backend]
-        API[REST API]
-        WS[Events, voice и avatar WebSockets]
-        Agent[Character Agent]
-        Runtime[Runtime settings]
-        Events[Event Bus]
-        Voice[Voice Service]
-        Avatar[Avatar Service]
-        History[SQLite history]
-    end
-
-    STT[GigaAM v3 или faster-whisper]
-    LLM[DeepSeek-совместимый API]
-    TTS[TeraTTSv2 ru_f1]
-    Audio[WAV audio storage]
-    Unity[Unity VRM runtime]
-
-    UI <-->|REST| API
-    UI <-->|WebSocket| WS
-    API --> Agent
-    API --> Voice
-    API --> Runtime
-    API --> Avatar
-    Agent --> History
-    Agent --> LLM
-    Agent --> Events
-    Voice --> STT
-    Voice --> TTS
-    TTS --> Audio
-    Audio --> Avatar
-    Avatar <-->|/ws/avatar| Unity
-    Events --> WS
-    TTS --> WS
+```powershell
+docker build -t neuroasist-coding -f apps/backend/docker/coding.Dockerfile apps/backend/docker
 ```
 
-Backend построен как модульный монолит: API routes, agents, voice providers, runtime settings, events и storage работают внутри одного Python-приложения, а веб-интерфейс является отдельным Vite-приложением.
+Запустите Docker Desktop, при необходимости задайте отдельный `CODING_API_KEY`, затем включите агента в соответствующем разделе приложения. Перед передачей файлов проекта прочитайте [модель безопасности Coding Agent](Docs/coding-agent.md).
 
-Так прототип проще запускать, отлаживать и развивать без лишнего инфраструктурного зоопарка.
+### Unity-аватар
 
-## Голосовой pipeline
+Tauri development автоматически находит уже собранный Unity renderer. Пересборка нужна только после изменений в Unity-проекте:
 
-### Live-диалог
+```powershell
+$env:NEUROASIST_UNITY_EDITOR = 'C:\Program Files\Unity\Hub\Editor\2022.3.62f3\Editor\Unity.exe'
+npm --prefix apps/desktop run build:avatar
+```
+
+Подробности: [README Unity-аватара](apps/avatar-unity/README.md).
+
+## Проверка
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+npm --prefix apps/web test
+npm --prefix apps/web run build
+npm --prefix apps/desktop run check
+.\.venv\Scripts\python.exe scripts/check_docs.py
+```
+
+Smoke-тесты, backups, чистый запуск и release build описаны в [эксплуатационном руководстве](Docs/operations.md). Условия публичной версии находятся в [release checklist 1.0](Docs/release-checklist.md).
+
+## Данные и приватность
+
+- Desktop-данные лежат в `%LOCALAPPDATA%\NeuroAsist`, если путь не переопределён через `NEUROASIST_APP_DATA_DIR`.
+- SQLite является источником истины для timeline, episodes, memory, фоновых jobs и задач Coding Agent.
+- Сырой PCM live-микрофона по умолчанию не сохраняется.
+- STT и TTS работают локально; запрос и выбранный компактный контекст уходят в настроенный DeepSeek-совместимый endpoint.
+- Семантический индекс перестраивается из SQLite и не заменяет канонические данные.
+- Coding-контейнеры не имеют сети, live mount проекта и fallback на host shell.
+
+## Структура репозитория
 
 ```text
-Кнопка Live
-  → AudioWorklet PCM16 stream
-  → input WebSocket v3
-  → backend VAD + Smart Turn
-  → GigaAM v3
-  → Character Agent
-  → DeepSeek-совместимая LLM
-  → потоковый live TTS
-  → очередь воспроизведения
+apps/backend/       FastAPI core, character, memory, voice и storage
+apps/web/           React 19 интерфейс
+apps/desktop/       Tauri 2 shell и release metadata
+apps/avatar-unity/  Опциональный Unity VRM renderer
+apps/protocol/      Общие character/avatar контракты
+Docs/               Актуальная архитектура, эксплуатация и release-документы
+scripts/            Build, smoke, benchmark и maintenance-инструменты
+tests/              Backend regression и изолированные эксперименты
 ```
 
-После запуска `Live` пользователь не управляет отдельными репликами: начало и
-конец мысли определяются backend VAD и Smart Turn. При подтверждённом barge-in
-воспроизведение останавливается сразу, а старое поколение ответа блокируется.
+Начните с [индекса документации](Docs/README.md). Старые планы изолированы в [Docs/archive](Docs/archive/README.md) и не являются инструкциями по реализации.
 
-### Live-ответ
+Документы проекта: [Privacy](PRIVACY.md), [Security](SECURITY.md),
+[Changelog](CHANGELOG.md) и [Contributing](CONTRIBUTING.md).
 
-```text
-Поток текста LLM
-  → безопасные текстовые сегменты
-  → WAV-сегменты TeraTTSv2 44.1 kHz
-  → voice WebSocket
-  → очередь воспроизведения в браузере
-```
+## Версии и релизы
 
-Для live-режима настраиваются размер сегментов, лимит очереди, параллельность
-TTS и prebuffer воспроизведения.
+`VERSION` — единый источник версии продукта. `package.json`, Cargo и Tauri содержат обязательные для своих инструментов зеркала; `scripts/check_docs.py` проверяет их синхронность. Политика описана в документе [Versioning](Docs/versioning.md).
 
-### Воспроизведение Unity-аватаром
-
-```text
-Текстовый или live-голосовой ответ
-  → фоновая генерация TeraTTSv2
-  → voice.tts_ready
-  → URL полного WAV
-  → avatar.speak через /ws/avatar
-  → Unity AudioSource, lipsync и VRM-эмоция
-```
-
-Мост аватара остаётся опциональным: недоступный Unity-клиент не задерживает чат или TTS. Исходники renderer лежат в [`apps/avatar-unity`](apps/avatar-unity/README.md); Tauri запускает его с динамическим портом и одноразовым токеном.
-
-В **Настройки → Система → Аватар** можно выбрать размещение. В Windows режим **«Внутри Iris»** показывает Unity как прозрачную нативную поверхность под управлением окна Iris в нижней левой колонке экрана «Диалог»: она повторяет размеры chat-слота с учётом DPI, не появляется в Alt+Tab и не создаёт второго самостоятельного окна приложения. Режим **«Отдельным оверлеем»** сохраняет desktop-companion с click-through, перетаскиванием, масштабом и управлением из трея. В обоих режимах Unity остаётся контролируемым дочерним процессом Tauri, поэтому протокол речи, lipsync, эмоции и жесты не меняются.
-
-## Структура проекта
-
-```text
-Iris/
-├── apps/
-│   ├── backend/
-│   │   ├── main.py
-│   │   └── app/
-│   │       ├── agents/
-│   │       ├── avatar/
-│   │       ├── api/
-│   │       ├── core/
-│   │       ├── events/
-│   │       ├── llm/
-│   │       ├── runtime/
-│   │       ├── schemas/
-│   │       ├── storage/
-│   │       └── voice/
-│   └── web/
-│       └── src/
-├── Docs/
-│   ├── NeuroAsist_V0.5_Companion_Blueprint.md
-│   ├── milestone-0-freeze.md
-│   └── version-manifest-v0.4.1.json
-├── scripts/
-├── tests/
-├── main.py
-├── requirements.txt
-└── package.json
-```
-
-## Команды разработки
-
-Backend-тесты:
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest
-```
-
-Frontend-тесты:
-
-```powershell
-npm test --prefix apps/web
-```
-
-Сборка frontend:
-
-```powershell
-npm run build
-```
-
-Benchmark TeraTTSv2:
-
-```powershell
-python scripts/benchmark_tts.py --provider teratts --device cpu --runs 5
-```
-
-Benchmark записывает результат в `data/tts_benchmark.json` и выводит P50/P95 задержку синтеза и real-time factor.
-
-Для реального STT-корпуса открой «Настройки → Голос → Собрать приватный
-STT-корпус». Guided capture использует тот же `BrowserVadRecorder`, хранит
-записи только в IndexedDB браузера и позволяет выгрузить WAV вместе с manifest.
-
-```powershell
-.\.venv\Scripts\python.exe scripts/benchmark_stt.py baseline --manifest путь\stt-manifest.json --output data\stt-baseline.json --streaming-replay
-.\.venv\Scripts\python.exe scripts/benchmark_stt.py candidate --manifest путь\stt-manifest.json --output data\stt-candidate.json --streaming-replay
-.\.venv\Scripts\python.exe scripts/benchmark_stt.py compare --baseline data\stt-baseline.json --candidate data\stt-candidate.json --output data\stt-compare.json
-```
-
-Режим `threads` сравнивает 1/2/4/8 потоков PyTorch в отдельных subprocess.
-Приватные записи и диагностическое аудио добавлены в `.gitignore`.
-
-## Устранение проблем
-
-### TeraTTSv2 не переходит в ready
-
-При первом запуске TeraTTSv2 скачивает один pinned snapshot Hugging Face. На Windows launcher должен передавать `PYTHONUTF8=1` и `PYTHONIOENCODING=utf-8`. Для полностью offline-установки укажи `VOICE_TERATTS_MODEL_PATH` на полный локальный snapshot.
-
-Если в `app.log` есть `CERTIFICATE_VERIFY_FAILED` или `certificate has expired`, скачивание модели упало на HTTPS-проверке сертификата. На проблемной Windows-машине:
-
-```powershell
-# 1. Проверь дату, время, часовой пояс Windows и установи обновления корневых сертификатов через Windows Update.
-
-# Временный обход для запуска backend, пока чинишь первую загрузку TeraTTSv2.
-# TTS повторит lazy-load при первом использовании.
-$env:VOICE_PRELOAD_TTS_MODEL = "false"
-
-# 2. Обнови certificate-related Python-пакеты внутри venv проекта.
-.\.venv\Scripts\python.exe -m pip install --upgrade pip certifi requests urllib3
-
-# 3. Укажи OpenSSL/Python использовать certifi в текущей сессии терминала.
-$env:SSL_CERT_FILE = (& .\.venv\Scripts\python.exe -c "import certifi; print(certifi.where())")
-
-# 4. При повреждённом snapshot удали его из Hugging Face cache и повтори запуск.
-
-# 5. Запусти backend снова.
-.\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
-```
-
-Если корпоративная сеть блокирует скачивание, подготовь pinned snapshot на другой машине и укажи его через `VOICE_TERATTS_MODEL_PATH`.
-
-### GigaAM STT
-
-При первом запуске GigaAM скачивает checkpoint `v3_rnnt` размером около `426 МБ` в `%USERPROFILE%\.cache\gigaam`. Для русского языка рекомендуется CPU: на Ryzen 7 5700X короткие реплики оказались быстрее, чем на GTX 1660 SUPER, и STT не занимает VRAM. Проверка установленного провайдера:
-
-```powershell
-.\.venv\Scripts\python.exe -c "import asyncio; from apps.backend.app.voice.providers import GigaAMSTTProvider; p=GigaAMSTTProvider('v3_rnnt','cpu'); asyncio.run(p.preload()); print('gigaam ok', p._selected_device)"
-```
-
-`v3_rnnt` предназначен прежде всего для русского. Для английской или смешанной речи переключись на:
-
-```env
-VOICE_STT_PROVIDER=faster_whisper
-VOICE_STT_MODEL=large-v3-turbo
-VOICE_STT_DEVICE=cuda
-VOICE_STT_COMPUTE_TYPE=int8_float16
-```
-
-### faster-whisper уходит на CPU на Windows
-
-Если в логах есть:
-
-```text
-FasterWhisper CUDA runtime failed, retrying on CPU
-```
-
-значит драйвер NVIDIA видит видеокарту, но CTranslate2 не находит CUDA runtime DLL, которые нужны `faster-whisper` (`cuBLAS` и `cuDNN`). Локальный фикс только для этого проекта: скачать CUDA 12 bundle и положить DLL рядом с Python из venv:
-
-```powershell
-# 1. Скачай CUDA 12 cuBLAS/cuDNN bundle. Архив большой.
-New-Item -ItemType Directory -Force -Path .cache\ct2-cuda
-Invoke-WebRequest -Uri "https://github.com/Purfview/whisper-standalone-win/releases/download/libs/cuBLAS.and.cuDNN_CUDA12_win_v3.7z" -OutFile ".cache\ct2-cuda\cuBLAS.and.cuDNN_CUDA12_win_v3.7z"
-
-# 2. Скачай маленький standalone-распаковщик 7-Zip.
-New-Item -ItemType Directory -Force -Path .cache\7zip
-Invoke-WebRequest -Uri "https://www.7-zip.org/a/7za920.zip" -OutFile ".cache\7zip\7za920.zip"
-Expand-Archive -Force ".cache\7zip\7za920.zip" ".cache\7zip"
-
-# 3. Проверь и распакуй CUDA DLL archive.
-.\.cache\7zip\7za.exe t .cache\ct2-cuda\cuBLAS.and.cuDNN_CUDA12_win_v3.7z
-$out = (Resolve-Path .cache\ct2-cuda).Path + "\extracted"
-New-Item -ItemType Directory -Force -Path $out
-.\.cache\7zip\7za.exe x .cache\ct2-cuda\cuBLAS.and.cuDNN_CUDA12_win_v3.7z "-o$out" -y
-
-# 4. Сделай DLL видимыми для venv проекта.
-Copy-Item -Force .cache\ct2-cuda\extracted\*.dll .venv\Scripts\
-
-# 5. Проверь прямую CUDA-загрузку faster-whisper.
-.\.venv\Scripts\python.exe -c "from faster_whisper import WhisperModel; WhisperModel('large-v3-turbo', device='cuda', compute_type='int8_float16'); print('cuda ok')"
-
-# 6. Проверь, что backend provider в auto-режиме выбирает CUDA.
-.\.venv\Scripts\python.exe -c "from apps.backend.app.voice.providers import FasterWhisperSTTProvider; p=FasterWhisperSTTProvider('large-v3-turbo','auto','int8'); p._ensure_model(); print('provider ok', p._selected_device, p._selected_compute_type)"
-```
-
-Ожидаемый результат:
-
-```text
-cuda ok
-provider ok cuda int8_float16
-```
-
-При `VOICE_STT_DEVICE=auto` backend сначала пробует `cuda/int8_float16` и уходит на `cpu/int8` только если CUDA-загрузка не удалась. Чтобы жестко закрепить GPU:
-
-```env
-VOICE_STT_DEVICE=cuda
-VOICE_STT_COMPUTE_TYPE=int8_float16
-```
-
-## Текущие ограничения
-
-Версия до ребрендинга, NeuroAsist v0.4.0, пока не умеет:
-
-- постоянно слушать микрофон;
-- автоматически вести диалог через VAD;
-- прерывать речь персонажа;
-- GPU/frame-time capture для конкретной VRM-модели и при необходимости дополнительное упрощение spring bones/материалов;
-- давать гарантированно качественный семантический retrieval: ChromaDB-индекс находится в development и использует лёгкие hash embeddings;
-- работать с файлами, shell, браузером, экраном или рабочим столом;
-- поддерживать аккаунты, публичный production deployment и multi-user isolation.
-
-### Память V0.6
-
-В текущей development-ветке реализован ChromaDB-индекс поверх канонической SQLite-памяти: релевантные факты добавляются в prompt DeepSeek, а один ответ модели может вернуть кандидаты памяти. Индекс хранится в `data/chroma` и может быть пересобран из SQLite. Настройки и текущие ограничения описаны в [ChromaDB memory](Docs/chroma-memory.md).
-
-## Документация проекта
-
-Направление V0.5 и зафиксированный baseline V0.4.1 описаны в:
-
-- **[Blueprint Continuous Companion V0.5](Docs/NeuroAsist_V0.5_Companion_Blueprint.md)**
-- **[Запись freeze Milestone 0](Docs/milestone-0-freeze.md)**
-- **[Единая timeline Milestone 1](Docs/milestone-1-unified-timeline.md)**
-- **[Episode Manager Milestone 2](Docs/milestone-2-episode-manager.md)**
-- **[Summaries и Context Manager Milestone 3](Docs/milestone-3-context-manager.md)**
-- **[Tauri desktop shell Milestone 4](Docs/milestone-4-desktop-shell.md)**
-- **[Долгосрочная память Milestone 5](Docs/milestone-5-long-term-memory.md)**
-- **[Семантический поиск Milestone 6](Docs/milestone-6-semantic-retrieval.md)**
-- **[Unity avatar renderer](apps/avatar-unity/README.md)**
-
-## Планируемое направление
-
-V0.5 выполняется только по milestones из companion blueprint: freeze, единая timeline, automatic episodes, summaries/context, desktop shell, long-term memory, semantic retrieval, Character Protocol, avatar overlay, live voice, packaging и stabilization. Текущий runtime V0.4 сохраняет совместимость, пока соответствующий milestone не изменит его явно.
+Сборка Windows installer — отдельная release-операция. Перед публикацией используйте [эксплуатационное руководство](Docs/operations.md) и полностью закройте [release checklist](Docs/release-checklist.md).
 
 ## Лицензия
 
-Iris распространяется по [Apache License 2.0](LICENSE).
-
-У сторонних моделей и сервисов могут быть собственные лицензии и условия использования. Перед коммерческим использованием проверь лицензию TeraTTSv2, Silero VAD и правила LLM-провайдера.
+Исходный код распространяется по [Apache 2.0](LICENSE). Для сторонних avatar/motion assets действуют отдельные условия, перечисленные в [THIRD_PARTY_ASSETS.md](THIRD_PARTY_ASSETS.md).

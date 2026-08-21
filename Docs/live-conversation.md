@@ -87,13 +87,11 @@ audio fallback. PCM продолжает поступать во время infe
 
 Whisper-compatible `80×800` log-mel frontend реализован локально на NumPy.
 Smart Turn не импортирует `transformers`, поэтому его зависимости не могут
-сломать TeraTTSv2. Синтетические fixtures находятся в
+сломать TeraTTSv2. Проверенные audio fixtures находятся в
 `tests/fixtures/live_audio`; manifest содержит transcript, sample rate,
-ожидаемый endpoint и назначение записи. Перегенерация:
-
-```powershell
-.\.venv\Scripts\python.exe scripts/generate_live_audio_fixtures.py
-```
+ожидаемый endpoint и назначение записи. Исходной записи/генератора fixtures в
+репозитории нет: заменять эти WAV нужно осознанным real-audio QA с обновлением
+manifest и regression expectations.
 
 ## Observation и память
 
@@ -104,7 +102,8 @@ Smart Turn не импортирует `transformers`, поэтому его з�
 3. speaker/address/EOT/STT/echo provenance записывается в metadata и
    `conversation_observations`;
 4. применяются bounded affect/relationship deltas;
-5. eligible primary-speaker observation планирует memory extraction;
+5. eligible primary-speaker observation проходит novelty/cue gate и при
+   необходимости обновляет один coalesced `memory_consolidation` job;
 6. conversation policy выбирает действие.
 
 `assistant_echo`, `other`, `unknown`, сомнительный STT и incognito не создают
@@ -130,18 +129,21 @@ slow=1.6
 После restart snapshot загружается, к нему применяется offline decay; deferred
 tasks и незавершённые generations не восстанавливаются.
 
-## Schema v6
+## Storage compatibility
 
-Миграция добавляет:
+Live Conversation использует таблицы:
 
 - `character_state_snapshots`;
 - `character_state_events`;
 - `character_participant_states`;
 - `conversation_observations`.
 
-Перед миграцией существующей БД startup создаёт backup. Миграция идемпотентна и
-не меняет существующие memory/timeline rows. Новые таблицы можно оставить на
-месте: «Очистить память» их не удаляет, а «Сбросить данные Iris» удаляет.
+Они были добавлены ранней миграцией Live Conversation; текущий номер SQLite
+schema определяется `LATEST_SCHEMA_VERSION` в `app/storage/timeline.py`, а не
+этим документом. Перед применением новых migrations startup создаёт backup.
+Миграции идемпотентны и сохраняют существующие memory/timeline rows.
+«Очистить память» не удаляет conversation state, а «Сбросить данные Iris»
+очищает весь заявленный companion scope.
 
 ## WebSocket v3
 
@@ -170,14 +172,27 @@ assistant bubble.
 Клиентский input-контракт:
 
 ```text
-voice.input.start { protocol_version: 3, sample_rate, language, capture: "live" }
+voice.input.start {
+  protocol_version: 3,
+  sample_rate,
+  channels: 1,
+  format: "pcm_s16le",
+  language,
+  capture_profile: "live",
+  capture_settings,
+  capture_constraints,
+  supported_constraints
+}
 <непрерывные бинарные PCM16-фреймы>
 voice.input.stop
 ```
 
-Поле `mode` и версии протокола 1/2 отклоняются. `stop` завершает всю live-сессию,
-а не отдельную реплику. При reconnect старое соединение теряет право принимать
-PCM и закрывать сессию; ожидающие фреймы отправляются только новым соединением.
+Поле `mode` и версии протокола 1/2 отклоняются. `stop` — graceful завершение
+текущего input stream: подтверждённые finalize/STT задачи дожидаются окончания,
+и уже начатый ответ не отменяется. Disconnect/reconnect инвалидирует старый
+connection lease, отменяет его pending задачи и уже переданную downstream
+generation. Старое соединение не может отправить результат в новую сессию;
+ожидающие фреймы принимает только новый owner.
 
 Клиент отправляет:
 
