@@ -157,6 +157,21 @@ class LiveConversationService:
             self._sessions[session_id] = session
         return session
 
+    async def ensure_session(self, session_id: str) -> ConversationSession:
+        """Create a session without loading its SQLite state on the event loop."""
+        existing = self._sessions.get(session_id)
+        if existing is not None:
+            return existing
+        candidate = ConversationSession(session_id=session_id)
+        await asyncio.to_thread(self._restore_state, candidate)
+        # Concurrent first events may both restore; only one mutable session is
+        # published and both callers continue with that canonical instance.
+        return self._sessions.setdefault(session_id, candidate)
+
+    def existing_session(self, session_id: str) -> ConversationSession | None:
+        """Return an in-memory session without triggering SQLite restoration."""
+        return self._sessions.get(session_id)
+
     def bind_turn_detector(self, detector) -> None:
         self._turn_detector = detector
 
@@ -170,7 +185,7 @@ class LiveConversationService:
         self._deferred_response_handler = deferred_response
 
     async def speech_started(self, session_id: str, send: EventSender | None = None) -> int:
-        session = self.session(session_id)
+        session = await self.ensure_session(session_id)
         async with session.lock:
             if send is not None:
                 session.event_sender = send
@@ -219,7 +234,8 @@ class LiveConversationService:
                 "discarded_deferred": discarded_deferred,
             }
         for utterance_id, prefix, utterance_generation, status in interrupted:
-            self._commit_assistant(
+            await asyncio.to_thread(
+                self._commit_assistant,
                 session,
                 utterance_id,
                 prefix,
@@ -248,7 +264,7 @@ class LiveConversationService:
         phase: ConversationPhase,
         send: EventSender | None = None,
     ) -> int:
-        session = self.session(session_id)
+        session = await self.ensure_session(session_id)
         async with session.lock:
             session.phase = phase
             generation = session.generation
@@ -271,7 +287,7 @@ class LiveConversationService:
         stt_uncertain: bool = False,
         expected_generation: int | None = None,
     ) -> ObservationResult:
-        session = self.session(session_id)
+        session = await self.ensure_session(session_id)
         transcript = transcript.strip()
         if not transcript:
             raise ValueError("Conversation observation cannot be empty")
@@ -434,7 +450,8 @@ class LiveConversationService:
             }
         message: StoredTimelineMessage | None = None
         if not self._runtime.memory_incognito and not echo:
-            message, _ = self._store.append_message(
+            message = await asyncio.to_thread(
+                self._persist_observation,
                 role="user",
                 content=transcript,
                 corrected_content=corrected_content,
@@ -443,21 +460,15 @@ class LiveConversationService:
                 generation=generation,
                 turn_id=turn_id,
                 language=language,
-                metadata=metadata,
-            )
-            self._store.save_conversation_observation(
-                message_id=message.id,
+                message_metadata=metadata,
                 session_id=session_id,
-                turn_id=turn_id,
-                utterance_id=utterance_id,
-                generation=generation,
                 speaker_role=speaker_role.value,
                 speaker_confidence=speaker_confidence,
                 addressedness=addressedness,
                 addressed_confidence=float(metadata["addressed_confidence"]),
                 end_of_turn_confidence=end_of_turn_confidence,
                 significance=significance,
-                metadata=metadata,
+                observation_metadata=metadata,
             )
 
         cause_message_id = message.id if message is not None else f"ephemeral-{turn_id}"
@@ -697,10 +708,21 @@ class LiveConversationService:
             session.last_human_activity_at = time.monotonic()
 
         if message is not None and not stale:
-            self._store.set_observation_decision(message.id, decision.action.value, decision.reason.value)
+            await asyncio.to_thread(
+                self._store.set_observation_decision,
+                message.id,
+                decision.action.value,
+                decision.reason.value,
+            )
             if state_applied and self._state_service is None:
-                self._persist_state(session, appraisal, relationship_delta)
-            self._schedule_memory(
+                state_payload = self._state_persistence_payload(
+                    session,
+                    appraisal,
+                    relationship_delta,
+                )
+                await asyncio.to_thread(self._persist_state, state_payload)
+            await asyncio.to_thread(
+                self._schedule_memory,
                 message,
                 speaker_role,
                 speaker_confidence,
@@ -708,7 +730,8 @@ class LiveConversationService:
                 decision.reason,
             )
         elif message is not None:
-            self._store.set_observation_decision(
+            await asyncio.to_thread(
+                self._store.set_observation_decision,
                 message.id,
                 ConversationAction.WAIT_MORE.value,
                 DecisionReason.INCOMPLETE_TURN.value,
@@ -810,7 +833,7 @@ class LiveConversationService:
         utterance_id: str | None = None,
         generation: int | None = None,
     ) -> None:
-        session = self.session(session_id)
+        session = await self.ensure_session(session_id)
         async with session.lock:
             expected = session.utterance_generations.get(utterance_id or "")
             if generation is not None and expected is not None and generation != expected:
@@ -836,7 +859,7 @@ class LiveConversationService:
         text = text.strip()
         if not text:
             return
-        session = self.session(session_id)
+        session = await self.ensure_session(session_id)
         async with session.lock:
             if (
                 utterance_id not in session.live_utterance_ids
@@ -853,7 +876,7 @@ class LiveConversationService:
         utterance_id: str | None = None,
         generation: int | None = None,
     ) -> None:
-        session = self.session(session_id)
+        session = await self.ensure_session(session_id)
         async with session.lock:
             if session.playback_segments:
                 segment = session.playback_segments[-1]
@@ -886,7 +909,7 @@ class LiveConversationService:
     async def playback_finished(self, session_id: str, utterance_id: str | None) -> None:
         if not utterance_id:
             return
-        session = self.session(session_id)
+        session = await self.ensure_session(session_id)
         async with session.lock:
             if (
                 utterance_id not in session.live_utterance_ids
@@ -900,7 +923,14 @@ class LiveConversationService:
                 return
             session.committed_assistant_utterances.add(utterance_id)
             generation = session.utterance_generations.get(utterance_id, session.generation)
-        self._commit_assistant(session, utterance_id, prefix, generation, status="completed")
+        await asyncio.to_thread(
+            self._commit_assistant,
+            session,
+            utterance_id,
+            prefix,
+            generation,
+            status="completed",
+        )
 
     async def avatar_playback_finished(self, utterance_id: str) -> None:
         for session in tuple(self._sessions.values()):
@@ -1120,6 +1150,56 @@ class LiveConversationService:
         )
         return min(1.0, spoken / 120.0)
 
+    def _persist_observation(
+        self,
+        *,
+        role: str,
+        content: str,
+        corrected_content: str | None,
+        input_mode: str,
+        utterance_id: str,
+        generation: int,
+        turn_id: str,
+        language: str,
+        message_metadata: dict[str, object],
+        session_id: str,
+        speaker_role: str,
+        speaker_confidence: float,
+        addressedness: float,
+        addressed_confidence: float,
+        end_of_turn_confidence: float,
+        significance: float,
+        observation_metadata: dict[str, object],
+    ) -> StoredTimelineMessage:
+        """Persist the observation records together on an I/O worker thread."""
+        message, _ = self._store.append_message(
+            role=role,
+            content=content,
+            corrected_content=corrected_content,
+            input_mode=input_mode,
+            utterance_id=utterance_id,
+            generation=generation,
+            turn_id=turn_id,
+            language=language,
+            metadata=message_metadata,
+            session_id=session_id,
+        )
+        self._store.save_conversation_observation(
+            message_id=message.id,
+            session_id=session_id,
+            turn_id=turn_id,
+            utterance_id=utterance_id,
+            generation=generation,
+            speaker_role=speaker_role,
+            speaker_confidence=speaker_confidence,
+            addressedness=addressedness,
+            addressed_confidence=addressed_confidence,
+            end_of_turn_confidence=end_of_turn_confidence,
+            significance=significance,
+            metadata=observation_metadata,
+        )
+        return message
+
     def _schedule_memory(
         self,
         message: StoredTimelineMessage,
@@ -1172,36 +1252,63 @@ class LiveConversationService:
         if status == "completed" and self._memory_service is not None:
             self._memory_service.schedule_extraction(assistant)
 
-    def _persist_state(self, session: ConversationSession, appraisal, relationship_delta: dict[str, float]) -> None:
+    @staticmethod
+    def _state_persistence_payload(
+        session: ConversationSession,
+        appraisal,
+        relationship_delta: dict[str, float],
+    ) -> dict[str, object]:
+        """Snapshot mutable session state before yielding to an I/O thread."""
+        participant = session.participants[appraisal.target_participant]
+        return {
+            "affect": dict(session.affect.as_dict()),
+            "participant": {
+                "participant_key": participant.participant_key,
+                "role": participant.role,
+                "facets": {
+                    "familiarity": participant.familiarity,
+                    "trust": participant.trust,
+                    "warmth": participant.warmth,
+                    "tension": participant.tension,
+                    "playfulness": participant.playfulness,
+                },
+                "evidence_count": participant.evidence_count,
+            },
+            "event": {
+                "participant_key": participant.participant_key,
+                "event_kind": appraisal.event_kind,
+                "confidence": appraisal.confidence,
+                "intensity": appraisal.intensity,
+                "cause_message_ids": list(appraisal.cause_message_ids),
+                "delta": {
+                    "emotion_impulses": dict(appraisal.emotion_impulses),
+                    "relationship": dict(relationship_delta),
+                },
+            },
+        }
+
+    def _persist_state(self, payload: dict[str, object]) -> None:
+        participant = dict(payload["participant"])
+        event = dict(payload["event"])
         self._store.save_character_state_snapshot(
             PRIMARY_RELATIONSHIP_ID,
-            session.affect.as_dict(),
+            dict(payload["affect"]),
         )
-        participant = session.participants[appraisal.target_participant]
         self._store.upsert_participant_state(
             relationship_id=PRIMARY_RELATIONSHIP_ID,
-            participant_key=participant.participant_key,
-            role=participant.role,
-            facets={
-                "familiarity": participant.familiarity,
-                "trust": participant.trust,
-                "warmth": participant.warmth,
-                "tension": participant.tension,
-                "playfulness": participant.playfulness,
-            },
-            evidence_count=participant.evidence_count,
+            participant_key=str(participant["participant_key"]),
+            role=str(participant["role"]),
+            facets=dict(participant["facets"]),
+            evidence_count=int(participant["evidence_count"]),
         )
         self._store.append_character_state_event(
             relationship_id=PRIMARY_RELATIONSHIP_ID,
-            participant_key=participant.participant_key,
-            event_kind=appraisal.event_kind,
-            confidence=appraisal.confidence,
-            intensity=appraisal.intensity,
-            cause_message_ids=appraisal.cause_message_ids,
-            delta={
-                "emotion_impulses": appraisal.emotion_impulses,
-                "relationship": relationship_delta,
-            },
+            participant_key=str(event["participant_key"]),
+            event_kind=str(event["event_kind"]),
+            confidence=float(event["confidence"]),
+            intensity=float(event["intensity"]),
+            cause_message_ids=list(event["cause_message_ids"]),
+            delta=dict(event["delta"]),
         )
 
     def _restore_state(self, session: ConversationSession) -> None:

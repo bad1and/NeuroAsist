@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from apps.backend.app.api.routes.chat import router as chat_router
 from apps.backend.app.api.routes.avatar import router as avatar_router
 from apps.backend.app.api.routes.events import router as events_router
-from apps.backend.app.api.routes.settings import router as settings_router
+from apps.backend.app.api.routes.settings import _commit_runtime_settings_patch, router as settings_router
 from apps.backend.app.api.routes.status import router as status_router
 from apps.backend.app.api.routes.voice import router as voice_router
 from apps.backend.app.api.routes.timeline import router as timeline_router
@@ -79,6 +79,60 @@ TTS_AUDIO_RETENTION_SECONDS = 2 * 60
 # The ceiling stays low so a queued job is still picked up promptly.
 IDLE_WORKER_POLL_MIN_SECONDS = 1.0
 IDLE_WORKER_POLL_MAX_SECONDS = 5.0
+WORKER_RESTART_MIN_SECONDS = 1.0
+WORKER_RESTART_MAX_SECONDS = 30.0
+
+
+async def _supervise_worker(
+    name: str,
+    run_forever: Callable[[], Awaitable[None]],
+    publish: Callable[[str, str, str, dict[str, Any]], Any],
+    *,
+    restart_min_seconds: float = WORKER_RESTART_MIN_SECONDS,
+    restart_max_seconds: float = WORKER_RESTART_MAX_SECONDS,
+) -> None:
+    """Restart an unexpected worker exit while preserving task cancellation."""
+    restart_count = 0
+    while True:
+        failure: Exception | None = None
+        try:
+            await run_forever()
+        except asyncio.CancelledError:
+            # Shutdown owns cancellation. Treating it as a crash would revive
+            # the worker while the rest of the application is being closed.
+            raise
+        except Exception as exc:
+            failure = exc
+            logger.exception("Background worker %s crashed; scheduling restart", name)
+        else:
+            logger.warning("Background worker %s stopped unexpectedly; scheduling restart", name)
+
+        restart_count += 1
+        restart_delay = min(
+            restart_min_seconds * (2 ** min(restart_count - 1, 10)),
+            restart_max_seconds,
+        )
+        metadata: dict[str, Any] = {
+            "worker": name,
+            "restart_count": restart_count,
+            "restart_in_seconds": restart_delay,
+        }
+        if failure is not None:
+            metadata.update({
+                "error_type": type(failure).__name__,
+                "error_message": str(failure)[:300],
+            })
+        try:
+            publish(
+                "backend.worker_failed",
+                "error" if failure is not None else "warning",
+                f"Background worker {name} stopped; restart scheduled",
+                metadata,
+            )
+        except Exception:
+            # Diagnostics must not become another way to lose the supervisor.
+            logger.warning("Failed to publish %s worker failure", name, exc_info=True)
+        await asyncio.sleep(restart_delay)
 
 
 def create_app() -> FastAPI:
@@ -276,12 +330,18 @@ def create_app() -> FastAPI:
         tts_concurrency_max=settings.voice_live_tts_concurrency_max,
         event_publisher=event_bus.publish,
     )
-    def persist_avatar_overlay_bounds(overlay: OverlayPayload) -> None:
-        runtime_settings.avatar_overlay_x = overlay.x
-        runtime_settings.avatar_overlay_y = overlay.y
-        runtime_settings.avatar_overlay_width = overlay.width
-        runtime_settings.avatar_overlay_height = overlay.height
-        runtime_settings_store.save(runtime_settings)
+    async def persist_avatar_overlay_bounds(overlay: OverlayPayload) -> None:
+        await asyncio.to_thread(
+            _commit_runtime_settings_patch,
+            runtime_settings_store,
+            runtime_settings,
+            {
+                "avatar_overlay_x": overlay.x,
+                "avatar_overlay_y": overlay.y,
+                "avatar_overlay_width": overlay.width,
+                "avatar_overlay_height": overlay.height,
+            },
+        )
 
     avatar_service = AvatarService(
         AvatarConnectionManager(), event_bus,
@@ -340,14 +400,15 @@ def create_app() -> FastAPI:
             intensity: float,
             generation: int,
         ) -> None:
-            if conversation_service.session(session_id).generation != generation:
+            session = await conversation_service.ensure_session(session_id)
+            if session.generation != generation:
                 return
             await avatar_service.set_emotion(
                 session_id=session_id,
                 emotion=emotion,
                 intensity=intensity,
             )
-            if conversation_service.session(session_id).generation != generation:
+            if session.generation != generation:
                 await avatar_service.stop(session_id=session_id)
 
         async def conversation_deferred_response(
@@ -356,8 +417,9 @@ def create_app() -> FastAPI:
             generation: int,
             utterance_id: str,
         ) -> None:
+            session = await conversation_service.ensure_session(session_id)
             if (
-                conversation_service.session(session_id).generation != generation
+                session.generation != generation
                 or not voice_session_manager.connected(session_id)
             ):
                 return
@@ -372,7 +434,10 @@ def create_app() -> FastAPI:
                 coding_bridge=coding_bridge,
             )
             source_message = (
-                timeline_store.get_message(reaction.source_message_id)
+                await asyncio.to_thread(
+                    timeline_store.get_message,
+                    reaction.source_message_id,
+                )
                 if reaction.source_message_id
                 else None
             )
@@ -488,7 +553,8 @@ def create_app() -> FastAPI:
                 ),
                 stt_uncertain=stt_uncertain,
             )
-            if result.generation != conversation_service.session(session_id).generation:
+            session = await conversation_service.ensure_session(session_id)
+            if result.generation != session.generation:
                 return
             await connection.send({
                 "type": "voice.input.transcript",
@@ -561,9 +627,14 @@ def create_app() -> FastAPI:
         return generation
 
     def barge_in_guard_active(session_id: str) -> bool:
+        session = (
+            conversation_service.existing_session(session_id)
+            if conversation_service is not None
+            else None
+        )
         return bool(
-            conversation_service is not None
-            and conversation_service.session(session_id).phase
+            session is not None
+            and session.phase
             in {ConversationPhase.GENERATING, ConversationPhase.SPEAKING}
         )
 
@@ -1080,11 +1151,30 @@ def create_app() -> FastAPI:
 
         avatar_start_task = asyncio.create_task(start_avatar_after_ui())
         tts_audio_cleanup_task = asyncio.create_task(cleanup_tts_audio_forever())
-        summary_worker_task = asyncio.create_task(summarize_forever())
-        semantic_sync_worker_task = asyncio.create_task(sync_semantic_forever())
-        memory_extraction_worker_task = asyncio.create_task(extract_memory_forever())
-        reflection_worker_task = asyncio.create_task(reflect_forever())
-        coding_worker_task = asyncio.create_task(run_coding_forever())
+        if summary_worker is not None:
+            summary_worker_task = asyncio.create_task(
+                _supervise_worker("episode_summary", summarize_forever, event_bus.publish),
+                name="worker:episode-summary",
+            )
+        if semantic_sync_worker is not None:
+            semantic_sync_worker_task = asyncio.create_task(
+                _supervise_worker("semantic_sync", sync_semantic_forever, event_bus.publish),
+                name="worker:semantic-sync",
+            )
+        if memory_extraction_worker is not None:
+            memory_extraction_worker_task = asyncio.create_task(
+                _supervise_worker("memory_extraction", extract_memory_forever, event_bus.publish),
+                name="worker:memory-extraction",
+            )
+        if character_state_service is not None:
+            reflection_worker_task = asyncio.create_task(
+                _supervise_worker("character_reflection", reflect_forever, event_bus.publish),
+                name="worker:character-reflection",
+            )
+        coding_worker_task = asyncio.create_task(
+            _supervise_worker("coding", run_coding_forever, event_bus.publish),
+            name="worker:coding",
+        )
         # Let zero-cost preload failures/events be observed by the first
         # request without waiting for model downloads or Torch import.
         await asyncio.sleep(0)
@@ -1100,18 +1190,34 @@ def create_app() -> FastAPI:
                         await task
                 except Exception:
                     logger.warning("Deferred startup task ended with an error", exc_info=True)
-        if reflection_worker_task is not None:
-            reflection_worker_task.cancel()
-            try:
-                await reflection_worker_task
-            except asyncio.CancelledError:
-                pass
-        if coding_worker_task is not None:
-            coding_worker_task.cancel()
-            try:
-                await coding_worker_task
-            except asyncio.CancelledError:
-                pass
+        worker_tasks = tuple(
+            task for task in (
+                reflection_worker_task,
+                coding_worker_task,
+                summary_worker_task,
+                semantic_sync_worker_task,
+                memory_extraction_worker_task,
+            )
+            if task is not None
+        )
+        for task in worker_tasks:
+            task.cancel()
+        if worker_tasks:
+            # Await every cancellation before closing worker dependencies. If
+            # shutdown itself is cancelled, gather propagates CancelledError.
+            results = await asyncio.gather(*worker_tasks, return_exceptions=True)
+            for task, result in zip(worker_tasks, results, strict=True):
+                if isinstance(result, BaseException) and not isinstance(
+                    result, asyncio.CancelledError,
+                ):
+                    logger.warning(
+                        "Background worker task %s failed during shutdown",
+                        task.get_name(),
+                        exc_info=(type(result), result, result.__traceback__),
+                    )
+        # Input sessions may still own endpoint/STT callbacks that call into
+        # conversation and voice services. Drain them before those dependencies.
+        await voice_input_session_manager.close()
         if conversation_service is not None:
             await conversation_service.close()
         if timeline_store is not None:
@@ -1125,24 +1231,6 @@ def create_app() -> FastAPI:
             tts_audio_cleanup_task.cancel()
             try:
                 await tts_audio_cleanup_task
-            except asyncio.CancelledError:
-                pass
-        if summary_worker_task is not None:
-            summary_worker_task.cancel()
-            try:
-                await summary_worker_task
-            except asyncio.CancelledError:
-                pass
-        if semantic_sync_worker_task is not None:
-            semantic_sync_worker_task.cancel()
-            try:
-                await semantic_sync_worker_task
-            except asyncio.CancelledError:
-                pass
-        if memory_extraction_worker_task is not None:
-            memory_extraction_worker_task.cancel()
-            try:
-                await memory_extraction_worker_task
             except asyncio.CancelledError:
                 pass
         await voice_session_manager.close()
