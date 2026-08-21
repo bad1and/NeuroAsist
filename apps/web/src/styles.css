@@ -3144,20 +3144,18 @@ body {
   transform: none !important;
 }
 
+.sidebar-footer-row > .navigation-button:hover {
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+}
+
+.sidebar-footer-row > .navigation-button.is-active {
+  color: var(--color-accent-ink);
+  background: var(--color-accent);
+}
+
 .sidebar-footer-row > .navigation-button:active:not(:disabled) {
   transform: scale(0.96) !important;
-}
-
-.sidebar-footer-row > .navigation-button svg {
-  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), color 0.16s ease;
-}
-
-.sidebar-footer-row > .navigation-button:hover svg {
-  transform: rotate(32deg);
-}
-
-.sidebar-footer-row > .navigation-button.is-active svg {
-  transform: rotate(60deg);
 }
 
 .sidebar-collapse-toggle {
@@ -3168,28 +3166,16 @@ body {
   border-radius: 12px;
   color: var(--color-text-soft);
   background: transparent;
-  border: 1px solid transparent;
-  transition: background-color 0.16s ease, color 0.16s ease, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), border-color 0.16s ease;
-  will-change: transform;
+  transition: background-color 0.16s ease, color 0.16s ease, transform 0.12s ease;
 }
 
 .sidebar-collapse-toggle:hover:not(:disabled) {
   color: var(--color-text);
   background: var(--color-surface-raised);
-  border-color: var(--color-rule-strong);
-  transform: scale(1.06);
 }
 
 .sidebar-collapse-toggle:active:not(:disabled) {
-  transform: scale(0.92);
-}
-
-.sidebar-collapse-toggle svg {
-  transition: transform 0.24s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.sidebar-collapse-toggle:hover svg {
-  transform: scale(1.12);
+  transform: scale(0.96);
 }
 
 @media (min-width: 1024px) {
