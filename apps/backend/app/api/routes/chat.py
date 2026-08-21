@@ -3,7 +3,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Request, status
 
-from apps.backend.app.api.routes.conversation import require_active_session
+from apps.backend.app.api.routes.conversation import require_active_session_async
 from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.llm.base import LLMProviderError
 from apps.backend.app.llm.providers.deepseek import DeepSeekProvider
@@ -25,7 +25,7 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
     A connected voice socket is still required because it carries text deltas,
     metadata and audio segments back to the desktop client.
     """
-    require_active_session(request, payload.session_id)
+    await require_active_session_async(request, payload.session_id)
     settings = request.app.state.settings
     if not settings.voice_tts_enabled:
         raise HTTPException(
@@ -73,7 +73,10 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
         source_message = accepted.message
         if not accepted.created:
-            existing = request.app.state.timeline_store.assistant_for_user(source_message.id)
+            existing = await asyncio.to_thread(
+                request.app.state.timeline_store.assistant_for_user,
+                source_message.id,
+            )
             return VoiceLiveResponse(
                 session_id=payload.session_id, utterance_id=utterance_id,
                 voice_request_id=voice_request_id, transcript=payload.message,
@@ -92,16 +95,23 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
     else:
         timeline_store = getattr(request.app.state, "timeline_store", None)
         if timeline_store is not None:
-            source_message, _ = timeline_store.append_message(
-                role="user", content=payload.message, input_mode="text",
-                utterance_id=utterance_id, metadata={"legacy_session_id": payload.session_id},
+            source_message, _ = await asyncio.to_thread(
+                timeline_store.append_message,
+                role="user",
+                content=payload.message,
+                input_mode="text",
+                utterance_id=utterance_id,
+                metadata={"legacy_session_id": payload.session_id},
             )
     async def complete_live_assistant(reply: str) -> None:
         if coordinator is None or lease is None:
             return
         assistant_message = await coordinator.complete_assistant(payload.session_id, lease, reply)
         if request.app.state.memory_service is not None:
-            request.app.state.memory_service.schedule_extraction(assistant_message)
+            await asyncio.to_thread(
+                request.app.state.memory_service.schedule_extraction,
+                assistant_message,
+            )
 
     async def interrupt_live_assistant(prefix: str) -> None:
         if coordinator is not None and lease is not None:
@@ -147,7 +157,7 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
-    require_active_session(request, payload.session_id)
+    await require_active_session_async(request, payload.session_id)
     settings = request.app.state.settings
     history = request.app.state.history
     event_bus = request.app.state.event_bus
@@ -189,7 +199,10 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             except ValueError as exc:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
             if not accepted.created:
-                previous = request.app.state.timeline_store.assistant_for_user(accepted.user_message_id)
+                previous = await asyncio.to_thread(
+                    request.app.state.timeline_store.assistant_for_user,
+                    accepted.user_message_id,
+                )
                 if previous is not None and previous.status == "completed":
                     return ChatResponse(
                         reply=previous.effective_content,
@@ -215,7 +228,10 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             )
             assistant_message = await coordinator.complete_assistant(payload.session_id, lease, result["reply"])
             if request.app.state.memory_service is not None:
-                request.app.state.memory_service.schedule_extraction(assistant_message)
+                await asyncio.to_thread(
+                    request.app.state.memory_service.schedule_extraction,
+                    assistant_message,
+                )
             result.update({
                 "message_id": accepted.user_message_id,
                 "assistant_message_id": assistant_message.id,

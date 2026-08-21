@@ -1,4 +1,5 @@
 import logging
+import threading
 
 import anyio
 import pytest
@@ -127,6 +128,48 @@ class InMemoryHistory:
 
     def save_message(self, session_id: str, role: str, content: str) -> None:
         self.saved.append((session_id, role, content))
+
+
+def test_character_sync_persistence_and_coding_bridge_stay_off_event_loop() -> None:
+    call_threads: list[int] = []
+
+    class RecordingHistory(InMemoryHistory):
+        def get_recent_messages(self, session_id: str, limit: int):
+            call_threads.append(threading.get_ident())
+            return super().get_recent_messages(session_id, limit)
+
+        def save_message(self, session_id: str, role: str, content: str) -> None:
+            call_threads.append(threading.get_ident())
+            super().save_message(session_id, role, content)
+
+    class RecordingCodingBridge:
+        def observe_user_message(self, *_args):
+            call_threads.append(threading.get_ident())
+            return None
+
+        @staticmethod
+        def forced_reply(_coordination):
+            return None
+
+    provider = SequencedLLMProvider(
+        ['{"reply":"Окей","emotion":"neutral","intent":"casual_chat"}']
+    )
+    agent = CharacterAgent(
+        provider,
+        RecordingHistory(),
+        history_limit=5,
+        coding_bridge=RecordingCodingBridge(),
+    )
+
+    async def invoke() -> int:
+        event_loop_thread = threading.get_ident()
+        await agent.handle_user_message("s1", "Привет")
+        return event_loop_thread
+
+    event_loop_thread = anyio.run(invoke)
+
+    assert len(call_threads) >= 4
+    assert all(thread_id != event_loop_thread for thread_id in call_threads)
 
 
 def test_burst_prompt_retries_when_reply_ignores_second_developer_name() -> None:

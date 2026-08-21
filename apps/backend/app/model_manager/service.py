@@ -96,10 +96,24 @@ class ModelManager:
         if model_id not in self._specs:
             raise KeyError(model_id)
         with self._lock:
-            if self._progress.get(model_id, {}).get("status") == "downloading":
-                return self.model_state(model_id)
-            self._progress[model_id] = {"status": "downloading", "downloaded_bytes": 0}
-        threading.Thread(target=self._download, args=(model_id,), daemon=True).start()
+            already_downloading = (
+                self._progress.get(model_id, {}).get("status") == "downloading"
+            )
+            if not already_downloading:
+                self._progress[model_id] = {
+                    "status": "downloading",
+                    "downloaded_bytes": 0,
+                }
+        # model_state() acquires the same lock to snapshot progress. It must
+        # always run after the critical section; the duplicate-install branch
+        # previously called it while holding a non-reentrant Lock and hung the
+        # request forever.
+        if not already_downloading:
+            threading.Thread(
+                target=self._download,
+                args=(model_id,),
+                daemon=True,
+            ).start()
         return self.model_state(model_id)
 
     def remove(self, model_id: str) -> dict[str, object]:

@@ -4,6 +4,7 @@ import sqlite3
 import json
 import os
 import asyncio
+import threading
 import wave
 from pathlib import Path
 from types import SimpleNamespace
@@ -108,6 +109,46 @@ def test_direct_address_bypasses_cooldown() -> None:
         DecisionContext(cooldown_active=True, speech_budget_exceeded=True),
     )
     assert decision.action is ConversationAction.RESPOND
+
+
+@pytest.mark.anyio
+async def test_live_conversation_sqlite_work_stays_off_event_loop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    call_threads: list[int] = []
+    for method_name in (
+        "load_character_state_snapshot",
+        "load_participant_states",
+        "append_message",
+        "save_conversation_observation",
+        "set_observation_decision",
+        "save_character_state_snapshot",
+        "upsert_participant_state",
+        "append_character_state_event",
+    ):
+        original = getattr(store, method_name)
+
+        def record_thread(*args, _original=original, **kwargs):
+            call_threads.append(threading.get_ident())
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(store, method_name, record_thread)
+
+    service = LiveConversationService(store, runtime())
+    event_loop_thread = threading.get_ident()
+
+    result = await service.ingest_observation(
+        session_id="session",
+        transcript="Ирис, как у тебя дела?",
+        language="ru",
+    )
+
+    assert result.message is not None
+    assert len(call_threads) >= 5
+    assert all(thread_id != event_loop_thread for thread_id in call_threads)
 
 
 def test_group_ambient_speech_is_observed() -> None:

@@ -17,9 +17,12 @@ def _desktop_token_is_valid(websocket: WebSocket, token: str | None) -> bool:
     return not expected_token or (token is not None and secrets.compare_digest(token, expected_token))
 
 
-def _session_is_active(websocket: WebSocket, session_id: str) -> bool:
+async def _session_is_active(websocket: WebSocket, session_id: str) -> bool:
     store = getattr(websocket.app.state, "timeline_store", None)
-    return store is None or store.active_session_id() in {None, session_id}
+    if store is None:
+        return True
+    active_session_id = await asyncio.to_thread(store.active_session_id)
+    return active_session_id in {None, session_id}
 
 
 @router.websocket("/ws/avatar")
@@ -62,7 +65,7 @@ async def websocket_avatar(websocket: WebSocket, version: int = 1, token: str | 
 
 @router.websocket("/ws/voice/{session_id}")
 async def websocket_voice(websocket: WebSocket, session_id: str, version: int = 1, token: str | None = None) -> None:
-    if not _desktop_token_is_valid(websocket, token) or not _session_is_active(websocket, session_id):
+    if not _desktop_token_is_valid(websocket, token) or not await _session_is_active(websocket, session_id):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     if version != 1:
@@ -157,12 +160,24 @@ async def websocket_voice(websocket: WebSocket, session_id: str, version: int = 
 
 @router.websocket("/ws/voice-input/{session_id}")
 async def websocket_voice_input(websocket: WebSocket, session_id: str, version: int = 3, token: str | None = None) -> None:
-    if not _desktop_token_is_valid(websocket, token) or not _session_is_active(websocket, session_id) or version != 3:
+    if not _desktop_token_is_valid(websocket, token) or not await _session_is_active(websocket, session_id) or version != 3:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     await websocket.accept()
     manager = websocket.app.state.voice_input_session_manager
     connection = await manager.register(session_id, websocket, version=version)
+    if connection.replaced_owner:
+        # A previous input owner may already have handed its transcript to the
+        # streaming LLM task before reconnect invalidated the STT lease. Cancel
+        # that downstream generation before accepting audio from the new owner.
+        interrupt = getattr(websocket.app.state, "interrupt_voice_session", None)
+        if callable(interrupt):
+            await interrupt(session_id, None)
+        service = getattr(websocket.app.state, "conversation_service", None)
+        if service is not None:
+            await service.close_session(session_id)
+    shutdown_cancelled = False
+    graceful_stop = False
     try:
         while True:
             message = await websocket.receive()
@@ -194,16 +209,35 @@ async def websocket_voice_input(websocket: WebSocket, session_id: str, version: 
                 )
             elif payload.get("type") == "voice.input.stop":
                 await manager.stop(session_id, connection=connection)
+                graceful_stop = True
                 break
+    except asyncio.CancelledError:
+        shutdown_cancelled = True
+        logger.info("Voice input WebSocket closed during backend shutdown")
     except (WebSocketDisconnect, RuntimeError, json.JSONDecodeError, ValueError) as exc:
         if not isinstance(exc, WebSocketDisconnect):
             with contextlib.suppress(Exception):
                 await connection.send({"type": "voice.input.error", "message": str(exc)})
     finally:
-        connection_is_current = await manager.unregister(session_id, connection)
+        unregister = manager.unregister(
+            session_id,
+            connection,
+            finalize_active=False,
+        )
+        if shutdown_cancelled:
+            unregister = asyncio.shield(unregister)
+        connection_is_current = False
+        with contextlib.suppress(asyncio.CancelledError, RuntimeError):
+            connection_is_current = await unregister
         service = getattr(websocket.app.state, "conversation_service", None)
-        if service is not None and connection_is_current:
-            await service.close_session(session_id)
+        if connection_is_current:
+            if not graceful_stop:
+                interrupt = getattr(websocket.app.state, "interrupt_voice_session", None)
+                if callable(interrupt):
+                    with contextlib.suppress(Exception):
+                        await interrupt(session_id, None)
+            if service is not None:
+                await service.close_session(session_id)
 
 
 @router.websocket("/ws/events")

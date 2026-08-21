@@ -1,5 +1,8 @@
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Request, status
 
+from apps.backend.app.api.routes.settings import _commit_runtime_settings_patch
 from apps.backend.app.avatar.schemas import (
     AvatarStatusResponse,
     AvatarOverlayPatch,
@@ -41,13 +44,20 @@ async def avatar_overlay(request: Request) -> OverlayPayload:
 @router.put("/overlay", response_model=OverlayPayload)
 async def update_avatar_overlay(payload: AvatarOverlayPatch, request: Request) -> OverlayPayload:
     runtime_settings = request.app.state.runtime_settings
-    for field, value in payload.model_dump(exclude_none=True).items():
-        setattr(runtime_settings, f"avatar_overlay_{field}", value)
-    overlay = _overlay_from_runtime(runtime_settings)
+    changes = {
+        f"avatar_overlay_{field}": value
+        for field, value in payload.model_dump(exclude_none=True).items()
+    }
     try:
-        request.app.state.runtime_settings_store.save(runtime_settings)
+        await asyncio.to_thread(
+            _commit_runtime_settings_patch,
+            request.app.state.runtime_settings_store,
+            runtime_settings,
+            changes,
+        )
     except OSError as error:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Could not persist avatar overlay settings") from error
+    overlay = _overlay_from_runtime(runtime_settings)
     result = await request.app.state.avatar_service.configure_overlay(overlay)
     request.app.state.event_bus.publish("avatar.overlay_updated", "info", "Avatar overlay settings updated", {**overlay.model_dump(), "sent": result.sent})
     return overlay
