@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from apps.backend.app.agents.character.agent import CharacterAgent
+from apps.backend.app.agents.character.prompts import character_live_prompt
 from apps.backend.app.llm.base import ChatMessage, LLMProvider, LLMResponse
 from apps.backend.app.storage.sqlite_history import SQLiteMessageHistory
 from apps.backend.app.voice.text import TextChunker, TextNormalizer
@@ -488,10 +489,20 @@ async def test_streaming_agent_uses_character_persona_prompt(tmp_path: Path) -> 
     history.init_db()
     agent = CharacterAgent(provider, history, history_limit=10)
 
-    result = [delta async for delta in agent.stream_user_message("s", "Привет")]
+    marker = "DYNAMIC_STATE_MUST_NOT_ENTER_CACHE_PREFIX"
+    result = [
+        delta
+        async for delta in agent.stream_user_message(
+            "s", "Привет", state_context=marker,
+        )
+    ]
 
     assert result == ["Окей."]
     system_prompt = provider.messages[0].content
+    assert provider.messages[0] == ChatMessage(role="system", content=character_live_prompt())
+    assert marker not in system_prompt
+    assert provider.messages[1].role == "system"
+    assert marker in provider.messages[1].content
     assert "Ты — Iris" in system_prompt
     assert "NeuroAsist" not in system_prompt
     assert "дружелюбный персонаж" not in system_prompt

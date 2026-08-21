@@ -152,7 +152,7 @@ export function CodingAgentPage({
   return (
     <section className="coding-page" ref={containerRef} aria-labelledby="coding-agent-title">
       <header className="coding-page-header">
-        <div><span className="eyebrow">v09 · изолированная среда</span><h1 id="coding-agent-title">Coding Agent</h1><p>По умолчанию агент работает в собственной папке задачи. Файлы проекта передаются только как явно указанный контекст и никогда не монтируются в контейнер напрямую.</p></div>
+        <div><span className="eyebrow">v0.9 · изолированная среда</span><h1 id="coding-agent-title">Coding Agent</h1><p>По умолчанию агент работает в собственной папке задачи. Файлы проекта передаются только как явно указанный контекст и никогда не монтируются в контейнер напрямую.</p></div>
         <button className="secondary-button" type="button" onClick={(e) => { animateButtonPress(e.currentTarget); void refresh(true); }} disabled={busy}><RefreshCw size={16} /> Обновить среду</button>
       </header>
       {error && <div className="notice is-error"><CircleAlert size={17} /> {error}</div>}

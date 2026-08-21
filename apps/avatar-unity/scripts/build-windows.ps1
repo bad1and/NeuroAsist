@@ -5,6 +5,12 @@ param(
 $ErrorActionPreference = "Stop"
 $project = Split-Path -Parent $PSScriptRoot
 $logFile = Join-Path $project "Builds\avatar-build.log"
+$root = (Resolve-Path (Join-Path $project "..\..")).Path
+$expectedVersion = (Get-Content -Raw -LiteralPath (Join-Path $root "VERSION")).Trim()
+$playerSettings = Get-Content -Raw -LiteralPath (Join-Path $project "ProjectSettings\ProjectSettings.asset")
+if ($playerSettings -notmatch "(?m)^\s*bundleVersion:\s*$([regex]::Escape($expectedVersion))\s*$") {
+    throw "Unity bundleVersion does not match Iris $expectedVersion. Run scripts/check_docs.py."
+}
 
 function Show-BuildLog {
     if (Test-Path -LiteralPath $logFile) {

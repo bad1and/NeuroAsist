@@ -1,4 +1,8 @@
-# V0.9 Coding Agent
+# Coding Agent
+
+This document describes the Coding Agent shipped with Iris 1.0. It is an
+optional subsystem and remains disabled until its host prerequisites and API
+key are available.
 
 Coding Agent is a separately managed, review-first worker. Iris remains the
 conversation orchestrator: it detects an explicit coding request, creates a
