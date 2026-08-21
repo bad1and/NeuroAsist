@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 
 import type { CoreStatus } from "../desktop";
 import { IrisLoader } from "./IrisLoader";
 import { WindowChrome } from "./WindowChrome";
+import { animate, prefersReducedMotion, useAnimeScope } from "../animations";
 
 const floraAssetsPromise = Promise.all([
   import("../../../../assets/startup-flora-left.webp"),
@@ -29,6 +30,47 @@ export function StartupScreen({
   onRetry: () => void;
 }) {
   const [flora, setFlora] = useState<{ left: string; right: string; leftCompact: string; rightCompact: string } | null>(null);
+  
+  const screenRef = useAnimeScope<HTMLDivElement>((scope, root) => {
+    const reduced = prefersReducedMotion();
+    
+    // Flora entrance
+    const floras = root.querySelectorAll(".startup-flora");
+    if (floras.length) {
+      animate(floras, {
+        opacity: [0, 1],
+        scale: reduced ? 1 : [0.95, 1],
+        duration: reduced ? 150 : 800,
+        ease: "outQuad",
+      });
+    }
+
+    // Main content entrance
+    const content = root.querySelector(".startup-content");
+    if (content) {
+      animate(content, {
+        opacity: [0, 1],
+        translateY: reduced ? 0 : [16, 0],
+        duration: reduced ? 150 : 600,
+        ease: "outQuad",
+      });
+    }
+  }, []);
+
+  const copyRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (copyRef.current) {
+      const reduced = prefersReducedMotion();
+      animate(copyRef.current, {
+        opacity: [0.4, 1],
+        translateY: reduced ? 0 : [4, 0],
+        duration: 220,
+        ease: "outQuad",
+      });
+    }
+  }, [status]);
+
   useEffect(() => {
     let active = true;
     void floraAssetsPromise.then(([left, right, leftCompact, rightCompact]) => {
@@ -45,7 +87,7 @@ export function StartupScreen({
   const copy = STATUS_COPY[status];
   const failed = status === "failed" || status === "crashed";
   return (
-    <div className="startup-screen">
+    <div className="startup-screen" ref={screenRef}>
       <div className="startup-flora startup-flora-left" aria-hidden="true">
         {flora && <picture><source media="(max-width: 700px)" srcSet={flora.leftCompact} /><img src={flora.left} alt="" /></picture>}
       </div>
@@ -57,7 +99,7 @@ export function StartupScreen({
         <div className="startup-mark" aria-hidden="true">
           <IrisLoader size="hero" active={status === "starting" || retrying} />
         </div>
-        <div className="startup-copy">
+        <div className="startup-copy" ref={copyRef}>
           <h1>{copy.title}</h1>
           <p>{copy.detail}</p>
         </div>

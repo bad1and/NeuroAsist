@@ -30,7 +30,7 @@ use windows::Win32::{
     UI::WindowsAndMessaging::{
         EnumWindows, GetClassNameW, GetParent, GetWindowLongPtrW, GetWindowThreadProcessId,
         SetLayeredWindowAttributes, SetParent, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-        GWLP_HWNDPARENT, GWLP_USERDATA, GWL_EXSTYLE, GWL_STYLE, HWND_TOP, LWA_COLORKEY,
+        GWLP_HWNDPARENT, GWL_EXSTYLE, GWL_STYLE, HWND_TOP, LWA_COLORKEY,
         SWP_ASYNCWINDOWPOS, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE,
         SW_SHOWNA, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
     },
@@ -44,8 +44,6 @@ const CORE_STARTUP_DELAY: Duration = Duration::from_millis(250);
 // attach to the chat host.
 #[cfg(windows)]
 const UNITY_WINDOW_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
-#[cfg(windows)]
-const UNITY_GRAPHICS_READY_TIMEOUT: Duration = Duration::from_secs(15);
 #[cfg(windows)]
 const UNITY_WINDOW_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const KEYRING_SERVICE: &str = "NeuroAsist";
@@ -408,6 +406,7 @@ impl DesktopState {
             .current_dir(&self.root)
             .env("NEUROASIST_BACKEND_URL", &runtime.api_base_url)
             .env("NEUROASIST_BACKEND_TOKEN", &runtime.api_token)
+            .env("NEUROASIST_DESKTOP_PID", std::process::id().to_string())
             .env(
                 "NEUROASIST_AVATAR_HOST",
                 if placement == AvatarPlacement::InApp {
@@ -1187,10 +1186,7 @@ fn attach_embedded_avatar_window(app: &AppHandle, process_id: u32) -> Result<usi
         // Unity starts at 1×1. Hide it before the final graphics startup and
         // never expose its standalone player bounds to the desktop.
         let _ = ShowWindow(window, SW_HIDE);
-    }
-    wait_for_unity_graphics(window)?;
 
-    unsafe {
         // A layered Direct3D child window cannot reliably apply a colour key
         // on Windows. Convert it to a popup before detaching it, following
         // Win32's child/popup transition rules.
@@ -1232,21 +1228,6 @@ fn attach_embedded_avatar_window(app: &AppHandle, process_id: u32) -> Result<usi
     }
 
     Ok(window.0 as usize)
-}
-
-#[cfg(windows)]
-fn wait_for_unity_graphics(window: HWND) -> Result<(), String> {
-    let started_at = std::time::Instant::now();
-    loop {
-        let flags = unsafe { GetWindowLongPtrW(window, GWLP_USERDATA) as usize };
-        if flags & 1 == 1 {
-            return Ok(());
-        }
-        if started_at.elapsed() >= UNITY_GRAPHICS_READY_TIMEOUT {
-            return Err("Unity avatar graphics did not initialize within 15 seconds".into());
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
 }
 
 #[cfg(windows)]
