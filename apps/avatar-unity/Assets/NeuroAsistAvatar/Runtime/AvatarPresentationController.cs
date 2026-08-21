@@ -92,13 +92,13 @@ namespace NeuroAsist.Avatar
             }
             if (QualitySettings.names.Length > 0)
                 QualitySettings.SetQualityLevel(QualitySettings.names.Length - 1, true);
-            QualitySettings.antiAliasing = 8;
-            QualitySettings.anisotropicFiltering = AnisotropicFiltering.ForceEnable;
-            QualitySettings.lodBias = Mathf.Max(QualitySettings.lodBias, 2f);
-            QualitySettings.vSyncCount = 1;
+            QualitySettings.antiAliasing = 2;
+            QualitySettings.anisotropicFiltering = AnisotropicFiltering.Enable;
+            QualitySettings.lodBias = 1f;
+            QualitySettings.vSyncCount = 0;
             Application.targetFrameRate = 60;
             if (avatarCamera == null) return;
-            avatarCamera.allowHDR = true;
+            avatarCamera.allowHDR = false;
             avatarCamera.allowMSAA = true;
             avatarCamera.allowDynamicResolution = false;
             avatarCamera.clearFlags = CameraClearFlags.SolidColor;

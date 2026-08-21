@@ -20,9 +20,52 @@ namespace NeuroAsist.Avatar
         private bool manualShutdown;
         public bool IsConnected => socket != null && socket.State == WebSocketState.Open;
 
-        private void Awake() { if (state != null) state.SetClient(this); }
+        private int parentPid = -1;
+        private float nextParentCheckTime;
+
+        private void Awake()
+        {
+            if (state != null) state.SetClient(this);
+            var pidStr = Environment.GetEnvironmentVariable("NEUROASIST_DESKTOP_PID");
+            if (!string.IsNullOrWhiteSpace(pidStr) && int.TryParse(pidStr, out var parsedPid))
+            {
+                parentPid = parsedPid;
+            }
+        }
+
         private void Start() { if (settings == null) { Debug.LogError("[AvatarWS] Missing AvatarRuntimeSettings", this); return; } StartClient(); }
-        private void Update() { while (mainThread.TryDequeue(out var action)) action(); }
+
+        private void Update()
+        {
+            CheckParentProcess();
+            while (mainThread.TryDequeue(out var action))
+            {
+                try { action(); }
+                catch (Exception ex) { Debug.LogError("[AvatarWS] Main thread action error: " + ex, this); }
+            }
+        }
+
+        private void CheckParentProcess()
+        {
+            if (parentPid <= 0) return;
+            if (Time.unscaledTime < nextParentCheckTime) return;
+            nextParentCheckTime = Time.unscaledTime + 1f;
+            try
+            {
+                var parent = System.Diagnostics.Process.GetProcessById(parentPid);
+                if (parent == null || parent.HasExited)
+                {
+                    DebugLog("Parent process exited, shutting down avatar.");
+                    Application.Quit();
+                }
+            }
+            catch
+            {
+                DebugLog("Parent process not found, shutting down avatar.");
+                Application.Quit();
+            }
+        }
+
         private void OnDestroy() { StopClient(); }
         public void StartClient() { if (loop != null && !loop.IsCompleted) return; manualShutdown = false; cancellation = new CancellationTokenSource(); loop = RunAsync(cancellation.Token); }
         public void StopClient() { manualShutdown = true; cancellation?.Cancel(); _ = CloseAsync(); }

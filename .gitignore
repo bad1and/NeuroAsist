@@ -218,3 +218,4 @@ output/qwen-worker-benchmark/
 apps/avatar-unity/*.csproj
 apps/avatar-unity/*.sln
 apps/avatar-unity/.vsconfig
+rules.md
