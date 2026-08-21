@@ -1,23 +1,44 @@
-# Документация Iris
+# Документация Iris 1.0
 
-## Начать отсюда
+Этот каталог разделяет действующие эксплуатационные документы, подробные
+описания подсистем и исторические планы. Документы из `archive/` не являются
+инструкциями для текущей реализации.
 
-- [Milestones 0–11](MILESTONES.md) — единая карта работ и статусы.
-- [V0.5 Companion Blueprint](NeuroAsist_V0.5_Companion_Blueprint.md) — полная целевая архитектура; в самом документе сохранено историческое имя NeuroAsist.
-- [Локальный запуск и отложенные release-задачи](deferred-release-work.md).
-- [ChromaDB memory](chroma-memory.md) — текущий retrieval/index и настройки V0.6.
-- Интерфейс переключается между русским и английским в **Settings → System → Interface**. Эта настройка сохраняется локально и не меняет язык Iris, голосовой ввод или синтез речи.
-- [Milestones 0–11](MILESTONES.md) — в том числе текущий статус Stabilization Gate.
+## Основные документы
 
-## Отчёты о реализации
+- [Архитектура](architecture.md) — владельцы процессов, данные и основные потоки.
+- [Эксплуатация и сборка](operations.md) — development, диагностика, smoke и release build.
+- [Release checklist 1.0](release-checklist.md) — обязательные условия публикации.
+- [Версии](versioning.md) — источник версии, зеркала и порядок подготовки релиза.
+- [HTTP и WebSocket API](api.md) — authentication, route groups и transport versions.
+- [Текущий статус](MILESTONES.md) — что уже реализовано и что остаётся до публичной версии.
+- [Coding Agent](coding-agent.md) — Docker sandbox и границы безопасности.
+- [Live conversation](live-conversation.md) — PCM/VAD/Smart Turn/voice lifecycle.
+- [Memory и semantic retrieval](chroma-memory.md) — каноническая память и перестраиваемый индекс.
+- [Дизайн-система](../design.md) — визуальные токены и правила интерфейса.
+- [Desktop shell](../apps/desktop/README.md) и [Unity avatar](../apps/avatar-unity/README.md).
 
-Часть milestone-отчётов была архивирована вместе с ранними материалами. Актуальная карта статусов находится в [MILESTONES.md](MILESTONES.md); реализацию памяти V0.6 описывает [chroma-memory.md](chroma-memory.md).
+## Специализированные материалы
 
-## Avatar и Unity
+- [Live Voice milestone report](milestone-9-live-voice.md) — подробности barge-in и latency gate.
+- [Qwen3-TTS quality pack](qwen-tts-quality-gate.md) — изолированный исторический эксперимент, не production provider.
+- [Third-party assets](../THIRD_PARTY_ASSETS.md) — происхождение и ограничения сторонних ассетов.
+- [Privacy](../PRIVACY.md), [Security](../SECURITY.md), [Changelog](../CHANGELOG.md) и [Contributing](../CONTRIBUTING.md).
+- `version-manifest-v0.4.1.json` — неизменяемый исторический baseline миграций.
 
-- [Unity source handoff](archive/unity-source.md)
-- [Unity avatar runtime](archive/unity_avatar_runtime_v0.4.md)
+## История
 
-## Исторические материалы
+Старые blueprints и branch-specific задания перенесены в [archive/](archive/README.md).
+Упоминания V0.4–V0.9 внутри архива описывают соответствующий момент истории и
+не должны синхронизироваться с текущей версией продукта.
 
-Исторические blueprint-файлы перенесены в [archive/](archive/). Они сохранены для истории, но не описывают актуальную V0.5 архитектуру.
+## Автоматическая проверка
+
+Из корня репозитория:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/check_docs.py
+```
+
+Проверка требует совпадения version metadata и существования всех локальных
+Markdown-ссылок в поддерживаемой документации.

@@ -68,7 +68,7 @@ beforeEach(() => {
   Object.defineProperty(HTMLElement.prototype, "scrollTo", { configurable: true, value: vi.fn() });
   Object.defineProperty(HTMLDialogElement.prototype, "showModal", { configurable: true, value() { this.setAttribute("open", ""); } });
   Object.defineProperty(HTMLDialogElement.prototype, "close", { configurable: true, value() { this.removeAttribute("open"); this.dispatchEvent(new Event("close")); } });
-  api.getStatus.mockResolvedValue({ app_name: "Iris", backend: "ok", database: "ok", version: "0.6.0", api_key_configured: true, llm_provider: "deepseek", llm_model: "deepseek-chat" });
+  api.getStatus.mockResolvedValue({ app_name: "Iris", backend: "ok", database: "ok", version: "1.0.0", api_key_configured: true, llm_provider: "deepseek", llm_model: "deepseek-chat" });
   api.getSettings.mockResolvedValue(settings);
   api.getAvatarStatus.mockResolvedValue({ enabled: false, protocol_version: 1, broadcast_policy: "", client_count: 0, clients: [], emotion_engine: { mapping_valid: true, current_emotion: "neutral", target_emotion: "neutral", intensity: 0, gesture: "", motion_profile: "", attack_ms: 0, minimum_hold_ms: 0, release_ms: 0, generation: 0, speaking: false } });
   api.getEvents.mockResolvedValue({ events: [] });

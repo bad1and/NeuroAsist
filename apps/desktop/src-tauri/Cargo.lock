@@ -2087,7 +2087,7 @@ dependencies = [
 
 [[package]]
 name = "neuroasist-desktop"
-version = "0.8.0"
+version = "1.0.0"
 dependencies = [
  "ctrlc",
  "getrandom 0.3.4",

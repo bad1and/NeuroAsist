@@ -6,6 +6,7 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT_DIR = Path(__file__).resolve().parents[4]
+APP_VERSION = (ROOT_DIR / "VERSION").read_text(encoding="utf-8").strip()
 
 
 class Settings(BaseSettings):
@@ -160,7 +161,7 @@ class Settings(BaseSettings):
     avatar_emotion_mapping_path: str = "apps/protocol/avatar-emotion-mapping.json"
     avatar_heartbeat_interval_seconds: float = 15.0
     avatar_client_timeout_seconds: float = 45.0
-    # v0.9 Coding Agent. Runtime preferences (enabled/model/workspace profile)
+    # V1.0 Coding Agent. Runtime preferences (enabled/model/workspace profile)
     # live in RuntimeSettings; these values define the non-negotiable host-side
     # security boundary and are intentionally not editable from the WebView.
     # Feature availability can be disabled by an administrator; individual
