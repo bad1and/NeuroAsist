@@ -1,5 +1,6 @@
 import asyncio
 import sqlite3
+import threading
 from pathlib import Path
 
 import pytest
@@ -610,6 +611,122 @@ def test_status_rechecks_a_transient_docker_failure_without_manual_refresh(monke
     assert second["docker_daemon_available"] is True
     assert second["docker_image_available"] is True
     assert second["available"] is True
+
+
+def test_async_coding_paths_keep_store_and_sandbox_work_off_event_loop(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = coding_settings(tmp_path, project)
+    loop_thread = threading.get_ident()
+    boundaries: list[str] = []
+
+    def off_loop(name: str) -> None:
+        assert threading.get_ident() != loop_thread, f"{name} ran on the event loop"
+        boundaries.append(name)
+
+    class BoundaryStore:
+        def list_coding_tasks(self, *, limit: int) -> list[dict[str, object]]:
+            off_loop("status.store")
+            return []
+
+        def claim_coding_task_job(self) -> None:
+            off_loop("run_once.store")
+            return None
+
+        def request_coding_cancel(self, task_id: str) -> dict[str, object]:
+            off_loop("cancel.store")
+            return {"id": task_id, "status": "cancel_requested"}
+
+        def append_coding_event(self, *args, **kwargs) -> None:
+            off_loop("dispatch.store")
+
+    class BoundarySandbox:
+        manifest = {"files": {"note.py": "digest"}}
+        work_root = tmp_path
+
+        def read_text(self, path: str) -> str:
+            off_loop("dispatch.read")
+            return f"read:{path}"
+
+        def write_text(self, path: str, content: str) -> None:
+            off_loop("dispatch.write")
+
+    service = CodingAgentService(
+        settings,
+        RuntimeSettings(coding_agent_enabled=True),
+        BoundaryStore(),  # type: ignore[arg-type]
+        lambda *_: None,
+    )
+
+    async def docker_available() -> DockerAvailability:
+        return DockerAvailability(
+            True,
+            True,
+            True,
+            settings.coding_docker_image,
+        )
+
+    async def cancel_runner(task_id: str) -> None:
+        assert threading.get_ident() == loop_thread
+        boundaries.append("cancel.runner")
+
+    def workspace_issue() -> None:
+        off_loop("status.workspace")
+        return None
+
+    def project_root() -> Path:
+        off_loop("status.project_root")
+        return project
+
+    class PrepareStopped(RuntimeError):
+        pass
+
+    def prepare_sandbox(task: dict[str, object]) -> None:
+        off_loop("run_task.sandbox")
+        raise PrepareStopped
+
+    monkeypatch.setattr(service.runner, "availability", docker_available)
+    monkeypatch.setattr(service.runner, "cancel", cancel_runner)
+    monkeypatch.setattr(service, "_workspace_issue", workspace_issue)
+    monkeypatch.setattr(service, "_project_root", project_root)
+    monkeypatch.setattr(service, "_prepare_sandbox", prepare_sandbox)
+
+    async def scenario() -> None:
+        assert (await service.status())["queued_count"] == 0
+        assert await service.run_once() is False
+        assert (await service.cancel("task-one"))["status"] == "cancel_requested"
+        with pytest.raises(PrepareStopped):
+            await service._run_task({"id": "task-one"})
+        read, _ = await service._dispatch(
+            "task-one",
+            BoundarySandbox(),  # type: ignore[arg-type]
+            {"action": "read_file", "path": "note.py"},
+        )
+        assert read["content"] == "read:note.py"
+        written, _ = await service._dispatch(
+            "task-one",
+            BoundarySandbox(),  # type: ignore[arg-type]
+            {"action": "write_file", "path": "note.py", "content": "x = 1\n"},
+        )
+        assert written["ok"] is True
+
+    asyncio.run(scenario())
+
+    assert set(boundaries) == {
+        "status.store",
+        "status.workspace",
+        "status.project_root",
+        "run_once.store",
+        "cancel.store",
+        "cancel.runner",
+        "run_task.sandbox",
+        "dispatch.read",
+        "dispatch.write",
+        "dispatch.store",
+    }
 
 
 def test_docker_runner_uses_portable_writable_bind_mount(monkeypatch, tmp_path: Path) -> None:

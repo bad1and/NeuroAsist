@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Request, status
 
 from apps.backend.app.api.routes.conversation import require_active_session
@@ -85,7 +87,7 @@ def add_instruction(task_id: str, payload: CodingInstructionCreate, request: Req
 
 @router.post("/tasks/{task_id}/cancel", response_model=CodingTaskResponse)
 async def cancel_task(task_id: str, request: Request) -> CodingTaskResponse:
-    _task_or_404(request, task_id)
+    await asyncio.to_thread(_task_or_404, request, task_id)
     task = await _service(request).cancel(task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Coding task not found")

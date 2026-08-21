@@ -19,6 +19,16 @@ from apps.backend.app.llm.base import ChatMessage
 PRIMARY_RELATIONSHIP_ID = "primary"
 PRIMARY_TIMELINE_ID = "primary-timeline"
 LATEST_SCHEMA_VERSION = 20
+MEMORY_CONSOLIDATION_DEBOUNCE_SECONDS = 75
+
+_MEMORY_IMMEDIATE_CUE = re.compile(
+    r"(?iu)(?:"
+    r"\b(?:запомни|сохрани\s+в\s+памяти|не\s+забудь|важно|remember)\b"
+    r"|\bне\s+[^.!?\n]{1,120}?\s*,?\s+а\s+[^.!?\n]+"
+    r"|\b(?:на\s+самом\s+деле|теперь\s+я|я\s+больше\s+не)\b"
+    r"|^\s*(?:ну\s+|ладно[, ]+)?(?:пока|до\s+свидания|увидимся|goodbye|bye)[.!?\s]*$"
+    r")"
+)
 
 
 @dataclass(frozen=True)
@@ -751,50 +761,147 @@ class TimelineStore:
                 (uuid4().hex, json.dumps({"message_id": message_id, "pipeline_version": "v11"}), f"memory-extract:{message_id}:v11", now, now, now),
             )
 
-    def enqueue_consolidation_job(self, end_message_id: str, *, pipeline_version: str = "v12") -> None:
-        """Coalesce a dialogue window by its relationship, terminal message and pipeline version."""
-        now, key = self._now(), f"consolidation:{PRIMARY_RELATIONSHIP_ID}:{end_message_id}:{pipeline_version}"
-        with self._connect() as connection:
+    def enqueue_consolidation_job(
+        self,
+        end_message_id: str,
+        *,
+        pipeline_version: str = "v12",
+        create_if_missing: bool = True,
+    ) -> bool:
+        """Trailing-debounce one durable consolidation job per episode.
+
+        A newer eligible user turn moves the pending job's terminal message and
+        deadline instead of completing one queue row and creating another.  The
+        final idempotency key still names the exact terminal message processed
+        by ``consolidation_runs``, so crash recovery remains a normal replay of
+        that one logical window.
+
+        Immediate flushes are derived exclusively from the user turn.  The
+        assistant reply is often the terminal message passed by the caller, but
+        its generated text must never make an expensive background call urgent.
+        """
+        now = self._now()
+        now_dt = datetime.fromisoformat(now.replace("Z", "+00:00"))
+        key = f"consolidation:{PRIMARY_RELATIONSHIP_ID}:{end_message_id}:{pipeline_version}"
+        with self._immediate_connect() as connection:
             source = connection.execute(
-                "SELECT episode_id, COALESCE(corrected_content, content) AS content FROM conversation_messages WHERE id = ?",
+                """SELECT id, episode_id, role, turn_id, reply_to_message_id,
+                          COALESCE(corrected_content, content) AS content
+                   FROM conversation_messages WHERE id = ?""",
                 (end_message_id,),
             ).fetchone()
-            text = str(source["content"] if source else "").casefold()
-            immediate = bool(
-                re.search(r"\b(?:запомни|remember|важно|до свидания|пока)\b", text)
-                or re.search(r"\bне\s+[\w.ё-]+\s*,?\s+а\s+[\w.ё-]+\b", text)
-            )
-            pending = connection.execute(
-                """SELECT j.id FROM background_jobs j
-                   JOIN conversation_messages m
+            if source is None:
+                return False
+            user_source = source if source["role"] == "user" else None
+            if user_source is None and source["reply_to_message_id"]:
+                user_source = connection.execute(
+                    """SELECT id, episode_id, role, turn_id, reply_to_message_id,
+                              COALESCE(corrected_content, content) AS content
+                       FROM conversation_messages WHERE id = ? AND role = 'user'""",
+                    (source["reply_to_message_id"],),
+                ).fetchone()
+            if user_source is None and source["turn_id"]:
+                user_source = connection.execute(
+                    """SELECT id, episode_id, role, turn_id, reply_to_message_id,
+                              COALESCE(corrected_content, content) AS content
+                       FROM conversation_messages
+                       WHERE turn_id = ? AND role = 'user'
+                       ORDER BY sequence_no LIMIT 1""",
+                    (source["turn_id"],),
+                ).fetchone()
+
+            episode_id = source["episode_id"]
+            if episode_id is None and user_source is not None:
+                episode_id = user_source["episode_id"]
+            user_text = str(user_source["content"] if user_source is not None else "")
+            immediate = bool(_MEMORY_IMMEDIATE_CUE.search(user_text))
+            pending_rows = connection.execute(
+                """SELECT j.* FROM background_jobs j
+                   LEFT JOIN conversation_messages m
                      ON m.id = json_extract(j.payload_json, '$.end_message_id')
                    WHERE j.type = 'memory_consolidation' AND j.status = 'pending'
-                     AND m.episode_id IS ? AND j.idempotency_key != ?
-                   ORDER BY j.created_at""",
-                (source["episode_id"] if source else None, key),
+                     AND (
+                       (json_extract(j.payload_json, '$.relationship_id') = ?
+                        AND json_extract(j.payload_json, '$.episode_id') IS ?)
+                       OR (json_extract(j.payload_json, '$.relationship_id') IS NULL
+                           AND m.episode_id IS ?)
+                     )
+                   ORDER BY j.created_at, j.id""",
+                (PRIMARY_RELATIONSHIP_ID, episode_id, episode_id),
             ).fetchall()
-            if pending:
-                immediate = True
-                result = json.dumps({"outcome": "coalesced", "superseded_by": end_message_id})
-                diagnostics = json.dumps({"pipeline_version": pipeline_version, "error_codes": []})
-                connection.executemany(
-                    """UPDATE background_jobs
-                       SET status = 'completed', result_json = ?, diagnostics_json = ?,
-                           completed_at = ?, updated_at = ?
-                       WHERE id = ?""",
-                    [(result, diagnostics, now, now, str(row["id"])) for row in pending],
-                )
+            pending = pending_rows[0] if pending_rows else None
+            if pending is None and not create_if_missing:
+                return False
+
+            existing_key = connection.execute(
+                "SELECT id, status FROM background_jobs WHERE type = 'memory_consolidation' AND idempotency_key = ?",
+                (key,),
+            ).fetchone()
+            if existing_key is not None and (pending is None or existing_key["id"] != pending["id"]):
+                # This exact terminal window was already queued or processed.
+                return False
+
+            previous_payload = json.loads(str(pending["payload_json"] or "{}")) if pending else {}
+            payload = {
+                "end_message_id": end_message_id,
+                "user_message_id": str(user_source["id"]) if user_source is not None else None,
+                "relationship_id": PRIMARY_RELATIONSHIP_ID,
+                "episode_id": episode_id,
+                "pipeline_version": pipeline_version,
+                "first_message_id": previous_payload.get("first_message_id", end_message_id),
+                "debounced_turns": int(previous_payload.get("debounced_turns", 0)) + 1,
+            }
             available_at = (
                 now
                 if immediate
-                else (datetime.now(UTC) + timedelta(seconds=15)).isoformat(timespec="milliseconds")
+                else (now_dt + timedelta(seconds=MEMORY_CONSOLIDATION_DEBOUNCE_SECONDS)).isoformat(timespec="milliseconds")
             )
-            connection.execute(
-                """INSERT INTO background_jobs (id, type, status, payload_json, idempotency_key, available_at, created_at, updated_at)
-                   VALUES (?, 'memory_consolidation', 'pending', ?, ?, ?, ?, ?)
+            if pending is not None:
+                connection.execute(
+                    """UPDATE background_jobs
+                       SET payload_json = ?, idempotency_key = ?, available_at = ?,
+                           attempts = 0, updated_at = ?, error_text = NULL,
+                           result_json = NULL, diagnostics_json = NULL, completed_at = NULL,
+                           lease_owner = NULL, lease_until = NULL
+                       WHERE id = ? AND status = 'pending'""",
+                    (json.dumps(payload), key, available_at, now, str(pending["id"])),
+                )
+                # Old development builds could leave more than one pending row
+                # for an episode.  Keep the oldest row as the durable debounce
+                # owner and retire only those legacy duplicates.
+                if len(pending_rows) > 1:
+                    result = json.dumps({"outcome": "coalesced_legacy_duplicate", "superseded_by": end_message_id})
+                    diagnostics = json.dumps({"pipeline_version": pipeline_version, "error_codes": []})
+                    connection.executemany(
+                        """UPDATE background_jobs
+                           SET status = 'completed', result_json = ?, diagnostics_json = ?,
+                               completed_at = ?, updated_at = ?, lease_owner = NULL, lease_until = NULL
+                           WHERE id = ? AND status = 'pending'""",
+                        [
+                            (result, diagnostics, now, now, str(row["id"]))
+                            for row in pending_rows[1:]
+                        ],
+                    )
+                return True
+
+            inserted = connection.execute(
+                """INSERT INTO background_jobs (
+                       id, type, status, payload_json, idempotency_key,
+                       available_at, created_at, updated_at
+                   ) VALUES (?, 'memory_consolidation', 'pending', ?, ?, ?, ?, ?)
                    ON CONFLICT(type, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING""",
-                (uuid4().hex, json.dumps({"end_message_id": end_message_id, "pipeline_version": pipeline_version}), key, available_at, now, now),
-            )
+                (uuid4().hex, json.dumps(payload), key, available_at, now, now),
+            ).rowcount
+            return bool(inserted)
+
+    def message_has_memory_evidence(self, message_id: str) -> bool:
+        """Check whether deterministic extraction already covered a source turn."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM memory_evidence WHERE message_id = ? LIMIT 1",
+                (message_id,),
+            ).fetchone()
+        return row is not None
 
     def enqueue_reflection_job(
         self,
@@ -1134,13 +1241,15 @@ class TimelineStore:
                 ),
             )
 
-    def fail_summary_job(self, job_id: str, error: str) -> None:
+    def fail_summary_job(self, job_id: str, error: str, *, max_attempts: int = 3) -> None:
+        """Retry a durable job within an explicit logical-attempt budget."""
+        max_attempts = max(1, int(max_attempts))
         with self._connect() as connection:
             job = connection.execute("SELECT attempts FROM background_jobs WHERE id = ?", (job_id,)).fetchone()
             if job is None:
                 return
             now = datetime.now(UTC)
-            if job["attempts"] < 3:
+            if job["attempts"] < max_attempts:
                 delay_seconds = 2 ** job["attempts"]
                 connection.execute(
                     "UPDATE background_jobs SET status = 'pending', available_at = ?, error_text = ?, updated_at = ?, lease_owner = NULL, lease_until = NULL WHERE id = ?",

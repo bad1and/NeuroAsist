@@ -321,17 +321,33 @@ class VadGate:
 
 
 @dataclass
+class _InputConnectionLease:
+    active: bool = True
+
+
+@dataclass
 class InputConnection:
     websocket: WebSocket
     version: int = 3
     generation: int = 0
+    replaced_owner: bool = False
     # Captured at the candidate endpoint for end-to-end latency diagnostics.
     pipeline_started_at: float = 0.0
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    lease: _InputConnectionLease = field(default_factory=_InputConnectionLease)
 
     async def send(self, payload: dict) -> None:
+        if not self.lease.active:
+            return
         async with self.lock:
+            # The connection can be invalidated while a stale producer waits
+            # for an in-flight WebSocket send to release the lock.
+            if not self.lease.active:
+                return
             await self.websocket.send_json(payload)
+
+    def invalidate(self) -> None:
+        self.lease.active = False
 
 
 @dataclass
@@ -362,6 +378,8 @@ class InputSession:
     speech_confirmation_samples: int = 0
     finalizing: bool = False
     finalize_tasks: set[asyncio.Task] = field(default_factory=set)
+    endpoint_tasks: set[asyncio.Task] = field(default_factory=set)
+    closed: bool = False
 
 
 UtteranceHandler = Callable[[str, Pcm16Audio, str, InputConnection], Awaitable[None]]
@@ -451,13 +469,18 @@ class VoiceInputSessionManager:
 
     async def register(self, session_id: str, websocket: WebSocket, *, version: int = 3) -> InputConnection:
         previous = self._sessions.get(session_id)
+        replaced_owner = previous is not None
         if previous is not None:
             # A reconnect replaces the old owner atomically. Do not let a
             # stale socket finalize audio after the new socket has started.
             await self.unregister(session_id, previous.connection, finalize_active=False)
             with contextlib.suppress(Exception):
                 await previous.connection.websocket.close(code=1012)
-        connection = InputConnection(websocket, version=version)
+        connection = InputConnection(
+            websocket,
+            version=version,
+            replaced_owner=replaced_owner,
+        )
         self._sessions[session_id] = InputSession(session_id, connection)
         return connection
 
@@ -466,16 +489,27 @@ class VoiceInputSessionManager:
         session_id: str,
         connection: InputConnection,
         *,
-        finalize_active: bool = True,
+        finalize_active: bool = False,
     ) -> bool:
         session = self._sessions.get(session_id)
         if session is None or session.connection is not connection:
             return False
-        await self.stop(session_id, finalize_active=finalize_active)
+        if finalize_active:
+            await self.stop(
+                session_id,
+                connection=connection,
+                finalize_active=True,
+            )
+        # Invalidate ownership before delivering cancellation. A coroutine
+        # that catches CancelledError still cannot publish through the old
+        # socket while reconnect waits for it to finish.
+        session.closed = True
+        session.connection.invalidate()
         self._sessions.pop(session_id, None)
-        if session.endpoint_task is not None:
-            session.endpoint_task.cancel()
-        session.endpoint_task = None
+        await self._settle_session_tasks(session, cancel=True)
+        session.utterance = None
+        session.pending_turn.clear()
+        session.pending_candidate_id = None
         if session.vad_stream is not None:
             session.vad_stream.reset()
         session.vad_stream = None
@@ -485,7 +519,20 @@ class VoiceInputSessionManager:
     async def close_session(self, session_id: str, connection: InputConnection | None = None) -> None:
         session = self._sessions.get(session_id)
         if session is not None and (connection is None or session.connection is connection):
-            await self.unregister(session_id, session.connection)
+            await self.unregister(session_id, session.connection, finalize_active=False)
+
+    async def close(self) -> None:
+        """Cancel and await all per-session work during application shutdown."""
+        sessions = tuple(self._sessions.values())
+        for session in sessions:
+            removed = await self.unregister(
+                session.session_id,
+                session.connection,
+                finalize_active=False,
+            )
+            if removed:
+                with contextlib.suppress(Exception):
+                    await session.connection.websocket.close(code=1001)
 
     async def stop(
         self,
@@ -514,6 +561,16 @@ class VoiceInputSessionManager:
             # An explicit stop must not close the WebSocket before the final
             # confirmed utterance has been flushed through STT.
             await asyncio.gather(finalize_task, return_exceptions=True)
+        if finalize_active:
+            # A natural endpoint may already be in semantic detection or STT.
+            # Explicit stop promises that confirmed work is flushed before the
+            # route unregisters the socket.
+            await self._settle_session_tasks(session, cancel=False)
+        else:
+            await self._settle_session_tasks(session, cancel=True)
+            session.utterance = None
+            session.pending_turn.clear()
+            session.pending_candidate_id = None
         if session.vad_stream is not None:
             session.vad_stream.reset()
 
@@ -531,6 +588,11 @@ class VoiceInputSessionManager:
         capture_supported_constraints: dict | None = None,
     ) -> None:
         session = self._sessions[session_id]
+        if session.closed or not session.connection.lease.active:
+            return
+        # Reconfiguring capture is a new lifecycle within the same socket.
+        # Drain old asynchronous endpoint/STT work before resetting its state.
+        await self._settle_session_tasks(session, cancel=True)
         if not 8_000 <= sample_rate <= 96_000 or channels != 1:
             raise ValueError("PCM input requires mono audio between 8 and 96 kHz")
         if audio_format != CANONICAL_FORMAT:
@@ -569,9 +631,7 @@ class VoiceInputSessionManager:
         session.speech_confirmed = False
         session.speech_confirmation_due_at = 0.0
         session.speech_confirmation_samples = 0
-        if session.endpoint_task is not None:
-            session.endpoint_task.cancel()
-            session.endpoint_task = None
+        session.endpoint_task = None
         session.finalizing = False
         vad_status = self._session_vad_status(session)
         await session.connection.send({
@@ -735,8 +795,11 @@ class VoiceInputSessionManager:
         if session.speech_confirmed or session.utterance is None:
             return
         if session.endpoint_task is not None:
-            session.endpoint_task.cancel()
-            session.endpoint_task = None
+            endpoint_task = session.endpoint_task
+            endpoint_task.cancel()
+            await asyncio.gather(endpoint_task, return_exceptions=True)
+            if session.endpoint_task is endpoint_task:
+                session.endpoint_task = None
         session.pending_turn.clear()
         session.pending_candidate_id = None
         if self._on_speech_started is not None:
@@ -824,6 +887,36 @@ class VoiceInputSessionManager:
         task.add_done_callback(session.finalize_tasks.discard)
         return task
 
+    async def _settle_session_tasks(
+        self,
+        session: InputSession,
+        *,
+        cancel: bool,
+    ) -> None:
+        """Cancel/drain every task owned by a session, including replacements."""
+        current = asyncio.current_task()
+        while True:
+            tracked = session.finalize_tasks | session.endpoint_tasks
+            tasks = {
+                task for task in tracked
+                if task is not current and not task.done()
+            }
+            session.finalize_tasks.difference_update(
+                task for task in session.finalize_tasks if task.done()
+            )
+            session.endpoint_tasks.difference_update(
+                task for task in session.endpoint_tasks if task.done()
+            )
+            if not tasks:
+                break
+            if cancel:
+                for task in tasks:
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+        if session.endpoint_task is not None and session.endpoint_task.done():
+            session.endpoint_task = None
+        session.finalizing = False
+
     def _append_ring(self, session: InputSession, pcm16: bytes) -> None:
         max_bytes = int(session.sample_rate * 2 * self._pre_roll_ms / 1000)
         if max_bytes <= 0:
@@ -858,8 +951,10 @@ class VoiceInputSessionManager:
             session.connection.websocket,
             version=session.connection.version,
             generation=generation,
+            replaced_owner=session.connection.replaced_owner,
             pipeline_started_at=time.perf_counter(),
             lock=session.connection.lock,
+            lease=session.connection.lease,
         )
         try:
             if self._turn_detector is not None:
@@ -910,7 +1005,10 @@ class VoiceInputSessionManager:
         candidate_id: int,
     ) -> bool:
         return (
-            generation == session.connection.generation
+            not session.closed
+            and session.connection.lease.active
+            and self._sessions.get(session.session_id) is session
+            and generation == session.connection.generation
             and session.pending_candidate_id == candidate_id
         )
 
@@ -923,6 +1021,8 @@ class VoiceInputSessionManager:
         candidate_id: int,
         boundary_at: float,
     ) -> None:
+        if not self._candidate_is_current(session, generation, candidate_id):
+            return
         if session.endpoint_task is not None:
             session.endpoint_task.cancel()
         elapsed = max(0.0, time.monotonic() - boundary_at)
@@ -939,6 +1039,7 @@ class VoiceInputSessionManager:
             name=f"voice-endpoint-{session.session_id}-{generation}",
         )
         session.endpoint_task = task
+        session.endpoint_tasks.add(task)
         task.add_done_callback(
             lambda completed: self._clear_endpoint_task(session, completed)
         )
@@ -978,6 +1079,7 @@ class VoiceInputSessionManager:
 
     @staticmethod
     def _clear_endpoint_task(session: InputSession, task: asyncio.Task) -> None:
+        session.endpoint_tasks.discard(task)
         if session.endpoint_task is task:
             session.endpoint_task = None
 
@@ -987,6 +1089,8 @@ class VoiceInputSessionManager:
         pcm16: bytes,
         connection: InputConnection,
     ) -> None:
+        if session.closed or self._sessions.get(session.session_id) is not session:
+            return
         if hasattr(self._voice_service, "transcribe_pcm16"):
             await self._on_utterance(
                 session.session_id,

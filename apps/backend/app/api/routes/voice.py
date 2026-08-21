@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import FileResponse
 
-from apps.backend.app.api.routes.conversation import require_active_session
+from apps.backend.app.api.routes.conversation import require_active_session_async
 from apps.backend.app.schemas.voice import VoiceInterruptRequest, VoiceTTSStatusResponse
 
 router = APIRouter()
@@ -10,7 +10,7 @@ router = APIRouter()
 @router.post("/voice/interrupt")
 async def interrupt_voice(payload: VoiceInterruptRequest, request: Request) -> dict[str, object]:
     """Stop all current speech for a session as soon as user speech begins."""
-    require_active_session(request, payload.session_id)
+    await require_active_session_async(request, payload.session_id)
     interrupt = getattr(request.app.state, "interrupt_voice_session", None)
     if callable(interrupt):
         cancelled = await interrupt(payload.session_id, payload.utterance_id)

@@ -66,3 +66,87 @@ def test_voice_input_rejects_legacy_mode_field(client: TestClient) -> None:
         error = socket.receive_json()
         assert error["type"] == "voice.input.error"
         assert "mode" in error["message"]
+
+
+def test_voice_input_disconnect_interrupts_downstream_generation(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str | None]] = []
+
+    async def interrupt(session_id: str, utterance_id: str | None) -> dict[str, int]:
+        calls.append((session_id, utterance_id))
+        return {"batch": 0}
+
+    monkeypatch.setattr(app.state, "interrupt_voice_session", interrupt)
+
+    with client.websocket_connect("/ws/voice-input/disconnect-lifecycle?version=3") as socket:
+        socket.send_json({
+            "type": "voice.input.start",
+            "protocol_version": 3,
+            "sample_rate": 16000,
+            "channels": 1,
+            "format": "pcm_s16le",
+            "language": "ru",
+        })
+        assert socket.receive_json()["type"] == "voice.input.ready"
+
+    assert calls == [("disconnect-lifecycle", None)]
+
+
+def test_voice_input_graceful_stop_keeps_completed_turn_alive(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str | None]] = []
+
+    async def interrupt(session_id: str, utterance_id: str | None) -> dict[str, int]:
+        calls.append((session_id, utterance_id))
+        return {"batch": 0}
+
+    monkeypatch.setattr(app.state, "interrupt_voice_session", interrupt)
+
+    with client.websocket_connect("/ws/voice-input/graceful-lifecycle?version=3") as socket:
+        socket.send_json({
+            "type": "voice.input.start",
+            "protocol_version": 3,
+            "sample_rate": 16000,
+            "channels": 1,
+            "format": "pcm_s16le",
+            "language": "ru",
+        })
+        assert socket.receive_json()["type"] == "voice.input.ready"
+        socket.send_json({"type": "voice.input.stop"})
+
+    assert calls == []
+
+
+def test_voice_input_reconnect_interrupts_previous_owner_generation(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str | None]] = []
+
+    async def interrupt(session_id: str, utterance_id: str | None) -> dict[str, int]:
+        calls.append((session_id, utterance_id))
+        return {"batch": 0}
+
+    monkeypatch.setattr(app.state, "interrupt_voice_session", interrupt)
+    start = {
+        "type": "voice.input.start",
+        "protocol_version": 3,
+        "sample_rate": 16000,
+        "channels": 1,
+        "format": "pcm_s16le",
+        "language": "ru",
+    }
+
+    with client.websocket_connect("/ws/voice-input/reconnect-lifecycle?version=3") as first:
+        first.send_json(start)
+        assert first.receive_json()["type"] == "voice.input.ready"
+        with client.websocket_connect("/ws/voice-input/reconnect-lifecycle?version=3") as second:
+            second.send_json(start)
+            assert second.receive_json()["type"] == "voice.input.ready"
+            second.send_json({"type": "voice.input.stop"})
+
+    assert calls == [("reconnect-lifecycle", None)]

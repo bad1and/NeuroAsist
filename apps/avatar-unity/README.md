@@ -2,6 +2,10 @@
 
 The standalone Windows renderer uses the `Liqu.vrm` character and connects to the desktop core through the Avatar WebSocket v2 protocol.
 
+Its release metadata mirrors Iris `1.0.0`: product `Iris Avatar`, company
+`NeuroAsist`, and application identifier `com.neuroasist.avatar`. The root
+documentation check prevents version drift.
+
 Build it with Unity 2022.3.62f3:
 
 ```powershell
