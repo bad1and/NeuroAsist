@@ -4,8 +4,6 @@ import asyncio
 import json
 import logging
 
-from pydantic import ValidationError
-
 from apps.backend.app.conversation.schemas import (
     ConversationAdjudicationV1,
     ConversationDecision,
@@ -29,10 +27,6 @@ relevant_opening, emotional_event, cooldown, speech_budget, echo, low_confidence
 "emotion_impulses":{},"relationship_impulses":{},"cause_message_ids":[]}}
 Не возвращай скрытые рассуждения. Все числа должны находиться в диапазонах схемы."""
 
-_REPAIR_PROMPT = """Исправь предыдущий ответ: верни только один валидный JSON указанной схемы.
-Не добавляй пояснений и не меняй cause_message_ids."""
-
-
 class StructuredConversationAdjudicator:
     def __init__(
         self,
@@ -43,7 +37,9 @@ class StructuredConversationAdjudicator:
     ) -> None:
         self._provider = provider
         self._first_timeout = first_timeout
-        self._repair_timeout = repair_timeout
+        # Kept in the public signature for callers from older releases; repair
+        # requests are intentionally disabled to enforce one adjudication call.
+        _ = repair_timeout
 
     @property
     def available(self) -> bool:
@@ -76,18 +72,14 @@ class StructuredConversationAdjudicator:
         try:
             result = await self._call(messages, self._first_timeout)
             return result.decision, self._with_cause(result.appraisal, cause_message_id), "llm"
-        except (TimeoutError, ValueError, ValidationError, TypeError) as first_error:
-            logger.info("Conversation adjudication failed; attempting repair: %s", type(first_error).__name__)
-        try:
-            result = await self._call(
-                [*messages, ChatMessage(role="system", content=_REPAIR_PROMPT)],
-                self._repair_timeout,
-            )
-            return result.decision, self._with_cause(result.appraisal, cause_message_id), "llm_repair"
-        except (TimeoutError, ValueError, ValidationError, TypeError, Exception) as repair_error:
+        except Exception as error:
+            # Adjudication is optional and already has a deterministic result.
+            # A second full-context request after a short timeout used to
+            # double API usage while almost never completing within its even
+            # shorter repair timeout.
             logger.info(
-                "Conversation adjudication repair failed; using deterministic fallback: %s",
-                type(repair_error).__name__,
+                "Conversation adjudication failed; using deterministic fallback: %s",
+                type(error).__name__,
             )
             return fallback_decision, fallback_appraisal, "deterministic_fallback"
 

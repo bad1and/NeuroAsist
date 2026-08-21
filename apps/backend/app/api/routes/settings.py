@@ -1,3 +1,5 @@
+import asyncio
+from dataclasses import replace
 from pathlib import Path
 import re
 
@@ -13,6 +15,19 @@ from apps.backend.app.schemas.settings import (
 )
 
 router = APIRouter()
+
+
+def _commit_runtime_settings_patch(
+    runtime_settings_store,
+    live_runtime_settings,
+    changes: dict[str, object],
+):
+    """Persist and publish a validated settings patch on an I/O thread."""
+    with runtime_settings_store.transaction():
+        committed_settings = replace(live_runtime_settings, **changes)
+        runtime_settings_store.save(committed_settings)
+        vars(live_runtime_settings).update(vars(committed_settings))
+        return committed_settings
 AVAILABLE_PERSONALITIES = ["default"]
 AVAILABLE_INTERFACE_LOCALES = {"ru", "en"}
 AVAILABLE_VOICE_LANGUAGES = ["auto", "ru", "en"]
@@ -136,7 +151,11 @@ async def patch_runtime_settings(
     payload: RuntimeSettingsPatch,
     request: Request,
 ) -> PublicSettingsResponse:
-    runtime_settings = request.app.state.runtime_settings
+    live_runtime_settings = request.app.state.runtime_settings
+    runtime_snapshot = replace(live_runtime_settings)
+    # Validate and normalize an isolated candidate. No request error may leak
+    # a partially applied field into the shared runtime object.
+    runtime_settings = replace(runtime_snapshot)
     settings = request.app.state.settings
     event_bus = request.app.state.event_bus
 
@@ -276,13 +295,27 @@ async def patch_runtime_settings(
             )
         setattr(runtime_settings, field_name, value)
 
+    changes = {
+        key: value
+        for key, value in vars(runtime_settings).items()
+        if value != getattr(runtime_snapshot, key)
+    }
+    runtime_settings_store = request.app.state.runtime_settings_store
     try:
-        request.app.state.runtime_settings_store.save(runtime_settings)
+        # Rebase, persist and publish under the store lock without blocking the
+        # request event loop on filesystem flush/fsync/replace.
+        committed_settings = await asyncio.to_thread(
+            _commit_runtime_settings_patch,
+            runtime_settings_store,
+            live_runtime_settings,
+            changes,
+        )
     except OSError as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Could not persist settings",
         ) from error
+    runtime_settings = committed_settings
 
     # A selected output is rendered by the WebView because it can target a
     # concrete Windows device. Unity keeps decoding the same stream for lip

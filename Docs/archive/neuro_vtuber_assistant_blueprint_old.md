@@ -3,7 +3,7 @@
 **Назначение файла:** это самодостаточный проектный blueprint, который можно загрузить в новый чат и продолжить разработку без потери контекста.
 
 > [!NOTE]
-> Это исходная версия blueprint. Актуальный статус реализации ведётся в [Blueprint v1.1](neuro_vtuber_assistant_blueprint_v1.1.md); на v0.4 реализован optional Unity VRM avatar bridge с protocol v1, полным WAV playback и lipsync.
+> Это исходная версия blueprint. Следующая архивная редакция находится в [Blueprint v1.1](neuro_vtuber_assistant_blueprint_v1.1_old.md); на v0.4 был реализован optional Unity VRM avatar bridge с protocol v1, полным WAV playback и lipsync.
 
 ## Контекст проекта и вводные
 
@@ -1267,7 +1267,7 @@ Character Agent пользователю:
 
 Backend генерирует полный Silero WAV, публикует `voice.tts_ready`, после чего рассылает `avatar.speak` всем подключённым Unity-клиентам. Команда содержит URL WAV, текст, эмоцию, intent и `utterance_id`; Unity воспроизводит WAV через `AudioSource` и использует uLipSync с amplitude fallback в expression `aa`.
 
-Bridge опционален (`AVATAR_ENABLED=false` по умолчанию): отсутствие или ошибка Unity не влияет на chat/TTS. Есть heartbeat, client status (`GET /avatar/status`) и REST-тесты речи/эмоции/остановки. В Unity пока не поддерживаются live WAV-сегменты, phoneme timestamps, gestures, eye tracking и speaker ownership. См. [актуальный Blueprint v1.1](neuro_vtuber_assistant_blueprint_v1.1.md) и [Unity runtime v0.4](unity_avatar_runtime_v0.4.md).
+Bridge опционален (`AVATAR_ENABLED=false` по умолчанию): отсутствие или ошибка Unity не влияет на chat/TTS. Есть heartbeat, client status (`GET /avatar/status`) и REST-тесты речи/эмоции/остановки. В Unity пока не поддерживаются live WAV-сегменты, phoneme timestamps, gestures, eye tracking и speaker ownership. См. [архивный Blueprint v1.1](neuro_vtuber_assistant_blueprint_v1.1_old.md) и [Unity runtime v0.4](unity_avatar_runtime_v0.4.md).
 
 ## v0.5 — Dev Agent + sandbox project folder
 

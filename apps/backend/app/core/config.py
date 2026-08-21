@@ -6,6 +6,7 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT_DIR = Path(__file__).resolve().parents[4]
+APP_VERSION = (ROOT_DIR / "VERSION").read_text(encoding="utf-8").strip()
 
 
 class Settings(BaseSettings):
@@ -21,6 +22,18 @@ class Settings(BaseSettings):
     legacy_api_key: str | None = Field(default=None, validation_alias="API_KEY")
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-flash"
+    # Explicit output budgets for each LLM purpose. DeepSeek V4 supports very
+    # large completions, so relying on the provider default makes a malformed
+    # or runaway response unnecessarily expensive. Non-coding thinking is
+    # disabled in the provider independently of these caps.
+    llm_chat_json_max_tokens: int = Field(default=900, ge=64, le=16_384)
+    llm_chat_live_max_tokens: int = Field(default=500, ge=64, le=16_384)
+    llm_memory_max_tokens: int = Field(default=1_000, ge=64, le=16_384)
+    llm_reflection_max_tokens: int = Field(default=300, ge=64, le=8_192)
+    llm_adjudication_max_tokens: int = Field(default=350, ge=64, le=8_192)
+    # Coding uses a separate profile and may opt into model reasoning. It still
+    # needs a finite ceiling when the dedicated key falls back to the main key.
+    llm_coding_max_tokens: int = Field(default=8_192, ge=256, le=65_536)
     sqlite_path: str = "data/neuroasist.sqlite3"
     app_data_dir: str | None = Field(default=None, validation_alias="NEUROASIST_APP_DATA_DIR")
     backup_retention_days: int = 30
@@ -148,7 +161,7 @@ class Settings(BaseSettings):
     avatar_emotion_mapping_path: str = "apps/protocol/avatar-emotion-mapping.json"
     avatar_heartbeat_interval_seconds: float = 15.0
     avatar_client_timeout_seconds: float = 45.0
-    # v0.9 Coding Agent. Runtime preferences (enabled/model/workspace profile)
+    # V1.0 Coding Agent. Runtime preferences (enabled/model/workspace profile)
     # live in RuntimeSettings; these values define the non-negotiable host-side
     # security boundary and are intentionally not editable from the WebView.
     # Feature availability can be disabled by an administrator; individual

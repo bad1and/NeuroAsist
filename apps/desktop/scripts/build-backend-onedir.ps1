@@ -11,6 +11,7 @@ Set-Location $repositoryRoot
 
 if (-not (Test-Path -LiteralPath $Python)) { $Python = "python" }
 & $Python -m PyInstaller --noconfirm --clean --onedir --name neuroasist-core --distpath $Output `
+    --add-data "$(Join-Path $repositoryRoot 'VERSION');." `
     --collect-all transformers `
     --collect-all huggingface_hub `
     --collect-all num2words `

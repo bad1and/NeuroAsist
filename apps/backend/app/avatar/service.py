@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import inspect
 import logging
 from typing import Any
 from collections.abc import Awaitable, Callable
@@ -44,7 +45,7 @@ class AvatarService:
         emotion_engine: EmotionEngine | None = None,
         overlay: OverlayPayload | None = None,
         audio_muted: bool = False,
-        on_overlay_bounds_changed: Callable[[OverlayPayload], None] | None = None,
+        on_overlay_bounds_changed: Callable[[OverlayPayload], Awaitable[None] | None] | None = None,
     ) -> None:
         self.manager = manager
         self.event_bus = event_bus
@@ -311,7 +312,9 @@ class AvatarService:
         elif envelope.type == "avatar.overlay.bounds_changed":
             self.overlay = self.overlay.model_copy(update=payload.model_dump())
             if self.on_overlay_bounds_changed is not None:
-                self.on_overlay_bounds_changed(self.overlay)
+                persisted = self.on_overlay_bounds_changed(self.overlay)
+                if inspect.isawaitable(persisted):
+                    await persisted
             self.event_bus.publish("avatar.overlay_bounds_changed", "info", "Avatar overlay position updated", {"client_id": client_id, **payload.model_dump(mode="json")})
 
     async def _broadcast(

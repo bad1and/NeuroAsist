@@ -143,7 +143,7 @@ select { appearance: auto; }
 .workspace-chat .chat-panel { overflow: visible; border: 0; border-radius: 0; background: transparent; }
 .workspace-chat .chat-panel > .panel-header { min-height: 42px; padding: 0 0 8px; border: 0; }
 
-/* V0.9 Coding Agent: a review-first operational console, not an editor. */
+/* V1.0 Coding Agent: a review-first operational console, not an editor. */
 .coding-page { display: grid; gap: 18px; padding: 10px 0 28px; }
 .coding-page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
 .coding-page-header h1 { margin: 4px 0 6px; font-size: 28px; letter-spacing: -.04em; }

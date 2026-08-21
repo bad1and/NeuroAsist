@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from fastapi import APIRouter, HTTPException, Request, status
 
+from apps.backend.app.api.routes.settings import _commit_runtime_settings_patch
 from apps.backend.app.schemas.character_state import CharacterStatePublicView, EmotionCausePublicView, MoodPublicView, ReflectionPublicView, ReflectionSettingsView, RelationshipProfilePublicView
 
 router = APIRouter(prefix="/conversation", tags=["conversation"])
@@ -125,9 +126,20 @@ def reset_character_relationship(request: Request) -> dict[str, object]:
 @router.patch("/state/reflections/settings", response_model=ReflectionSettingsView)
 def patch_reflection_settings(payload: ReflectionSettingsView, request: Request) -> ReflectionSettingsView:
     runtime = request.app.state.runtime_settings
-    runtime.reflections_enabled = payload.enabled
-    runtime.reflection_min_significance = payload.min_significance
-    request.app.state.runtime_settings_store.save(runtime)
+    try:
+        _commit_runtime_settings_patch(
+            request.app.state.runtime_settings_store,
+            runtime,
+            {
+                "reflections_enabled": payload.enabled,
+                "reflection_min_significance": payload.min_significance,
+            },
+        )
+    except OSError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not persist reflection settings",
+        ) from error
     return payload
 
 
@@ -146,6 +158,16 @@ def require_active_session(request: Request, session_id: str) -> None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Session is no longer active")
 
 
+async def require_active_session_async(request: Request, session_id: str) -> None:
+    """Async-route variant that keeps the SQLite lookup off the event loop."""
+    store = getattr(request.app.state, "timeline_store", None)
+    if store is None:
+        return
+    active_session_id = await asyncio.to_thread(store.active_session_id)
+    if active_session_id is not None and session_id != active_session_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Session is no longer active")
+
+
 @router.post("/session")
 async def open_session(request: Request) -> dict[str, object]:
     """Resume the active browser session without treating a reload as reset."""
@@ -160,7 +182,7 @@ async def reset_session(request: Request) -> dict[str, object]:
     store = getattr(request.app.state, "timeline_store", None)
     if store is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Timeline V2 is disabled")
-    previous_session_id = store.active_session_id()
+    previous_session_id = await asyncio.to_thread(store.active_session_id)
     if previous_session_id:
         coordinator = getattr(request.app.state, "turn_coordinator", None)
         if coordinator is not None:

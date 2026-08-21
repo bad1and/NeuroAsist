@@ -1,4 +1,4 @@
-"""HTTP contracts for the V0.9 isolated Coding Agent."""
+"""HTTP contracts for the V1.0 isolated Coding Agent."""
 
 from __future__ import annotations
 

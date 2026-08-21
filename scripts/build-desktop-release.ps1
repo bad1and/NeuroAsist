@@ -20,8 +20,12 @@ if (-not (Test-Path -LiteralPath $python)) {
     throw "Python virtual environment not found at $python"
 }
 
+& $python (Join-Path $root "scripts\check_docs.py")
+Assert-LastExitCode "Validating release metadata and documentation"
+
 if (-not $SkipDependencyInstall) {
-    # requirements.txt is UTF-16 in the existing repository. pip expects UTF-8.
+    # Keep the generated release requirements separate so PyInstaller remains
+    # a build-only dependency and the pinned runtime file stays unchanged.
     $releaseRequirements = Join-Path $root "build\requirements-release.txt"
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $releaseRequirements) | Out-Null
     Get-Content -LiteralPath (Join-Path $root "requirements.txt") | Set-Content -Encoding utf8 -LiteralPath $releaseRequirements
@@ -37,6 +41,7 @@ if (-not $SkipDependencyInstall) {
 New-Item -ItemType Directory -Force -Path $output | Out-Null
 & $python -m PyInstaller --noconfirm --clean --onedir --name neuroasist-core `
     --paths $root `
+    --add-data "$(Join-Path $root 'VERSION');." `
     --add-data "$(Join-Path $root 'apps\protocol');apps\protocol" `
     --collect-all silero_vad `
     --collect-all gigaam `

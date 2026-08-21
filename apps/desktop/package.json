@@ -1,7 +1,11 @@
 {
   "name": "neuroasist-desktop",
-  "version": "0.8.0",
+  "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": "24.x",
+    "npm": "11.x"
+  },
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",

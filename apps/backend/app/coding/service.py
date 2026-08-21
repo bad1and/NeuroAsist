@@ -73,6 +73,7 @@ class CodingAgentService:
             api_key=self.settings.coding_llm_api_key,
             base_url=self.settings.coding_llm_base_url,
             timeout=self.settings.coding_llm_timeout_seconds,
+            purpose="coding",
         )
 
     @property
@@ -82,13 +83,18 @@ class CodingAgentService:
     async def status(self, *, refresh: bool = False) -> dict[str, object]:
         docker = await self._docker_availability(refresh=refresh)
         available, reason = docker.sandbox_available, docker.reason
-        workspace_issue = self._workspace_issue()
+        workspace_issue = await asyncio.to_thread(self._workspace_issue)
         if workspace_issue:
             available, reason = False, workspace_issue
         elif not self.settings.coding_llm_api_key:
             available, reason = False, "Coding API key is not configured"
-        tasks = self.store.list_coding_tasks(limit=100) if self.store is not None else []
+        tasks = (
+            await asyncio.to_thread(self.store.list_coding_tasks, limit=100)
+            if self.store is not None
+            else []
+        )
         active = next((item for item in tasks if item["status"] == "running"), None)
+        project_root = await asyncio.to_thread(self._project_root)
         return {
             "enabled": self.enabled,
             "configured_enabled": self.settings.coding_agent_enabled,
@@ -100,7 +106,7 @@ class CodingAgentService:
             "docker_image_name": docker.image_name,
             "model": self.runtime_settings.coding_model,
             "available_models": ["deepseek-v4-flash", "deepseek-v4-pro"],
-            "project_root": str(self._project_root()),
+            "project_root": str(project_root),
             "allowed_project_roots": [str(item) for item in self.settings.coding_allowed_project_paths],
             "workspace_name": self.runtime_settings.coding_workspace_name,
             "workspace_root": str(self.settings.coding_workspace_path),
@@ -139,40 +145,77 @@ class CodingAgentService:
     async def run_once(self) -> bool:
         if self.store is None or not self.enabled or self._active_task_id is not None:
             return False
-        job = self.store.claim_coding_task_job()
+        job = await asyncio.to_thread(self.store.claim_coding_task_job)
         if job is None:
             return False
         payload = self._load_json(job.get("payload_json"))
         task_id = str(payload.get("task_id", ""))
-        task = self.store.get_coding_task(task_id)
+        task = await asyncio.to_thread(self.store.get_coding_task, task_id)
         if task is None:
-            self.store.finish_background_job(str(job["id"]), result={"outcome": "missing_task"}, diagnostics={})
+            await asyncio.to_thread(
+                self.store.finish_background_job,
+                str(job["id"]),
+                result={"outcome": "missing_task"},
+                diagnostics={},
+            )
             return True
         if task["status"] in {"cancelled", "applied", "failed", "conflicted"}:
             if task["status"] == "failed":
                 # Recover a notification if a process stopped after persisting
                 # the failure but before Iris could update the chat.
-                self._notify_task_failed(task)
-            self.store.finish_background_job(str(job["id"]), result={"outcome": str(task["status"])}, diagnostics={})
+                await self._notify_task_failed_async(task)
+            await asyncio.to_thread(
+                self.store.finish_background_job,
+                str(job["id"]),
+                result={"outcome": str(task["status"])},
+                diagnostics={},
+            )
             return True
         if task["status"] == "review_ready":
             # A process can stop after the durable task update but before its
             # chat notification.  The notification is idempotent, so recover
             # it when the queued job is observed again.
-            self._notify_review_ready(task)
-            self.store.finish_background_job(str(job["id"]), result={"outcome": "review_ready"}, diagnostics={})
+            await self._notify_review_ready_async(task)
+            await asyncio.to_thread(
+                self.store.finish_background_job,
+                str(job["id"]),
+                result={"outcome": "review_ready"},
+                diagnostics={},
+            )
             return True
         self._active_task_id = task_id
         try:
             await self._run_task(task)
-            self.store.finish_background_job(str(job["id"]), result={"outcome": "processed"}, diagnostics={})
+            await asyncio.to_thread(
+                self.store.finish_background_job,
+                str(job["id"]),
+                result={"outcome": "processed"},
+                diagnostics={},
+            )
         except Exception as error:
             logger.exception("Coding task failed: %s", task_id)
-            self.store.update_coding_task(task_id, status="failed", error=f"{type(error).__name__}: {error}")
-            self.store.append_coding_event(task_id, "task.failed", "error", "Coding task failed", {"error": str(error)[:1000]})
-            self._notify_task_failed(task)
-            self.store.finish_background_job(
-                str(job["id"]), result={"outcome": "failed"}, diagnostics={}, status="failed", error=str(error),
+            await asyncio.to_thread(
+                self.store.update_coding_task,
+                task_id,
+                status="failed",
+                error=f"{type(error).__name__}: {error}",
+            )
+            await asyncio.to_thread(
+                self.store.append_coding_event,
+                task_id,
+                "task.failed",
+                "error",
+                "Coding task failed",
+                {"error": str(error)[:1000]},
+            )
+            await self._notify_task_failed_async(task)
+            await asyncio.to_thread(
+                self.store.finish_background_job,
+                str(job["id"]),
+                result={"outcome": "failed"},
+                diagnostics={},
+                status="failed",
+                error=str(error),
             )
         finally:
             self._active_task_id = None
@@ -181,7 +224,7 @@ class CodingAgentService:
     async def cancel(self, task_id: str) -> dict[str, object] | None:
         if self.store is None:
             return None
-        task = self.store.request_coding_cancel(task_id)
+        task = await asyncio.to_thread(self.store.request_coding_cancel, task_id)
         await self.runner.cancel(task_id)
         return task
 
@@ -243,49 +286,39 @@ class CodingAgentService:
         docker = await self._docker_availability(refresh=True)
         if not docker.sandbox_available:
             raise RuntimeError(docker.reason or "Docker sandbox is unavailable")
-        project_root = Path(str(task["project_root"])) if str(task["project_root"]) else None
-        sandbox = TaskSandbox(
-            self.settings, task_id=task_id, project_root=project_root,
-            workspace_name=str(task["workspace_name"]),
-        )
-        existing_manifest = task.get("base_manifest")
-        # An empty ``files`` manifest is valid for a standalone task.  It must
-        # still be reused on retry, otherwise a cancelled task that already
-        # created files would be recreated and lose its isolated work.
-        reused_workspace = (
-            sandbox.base.exists()
-            and isinstance(existing_manifest, dict)
-            and isinstance(existing_manifest.get("files"), dict)
-            and "version" in existing_manifest
+        sandbox, manifest, reused_workspace = await asyncio.to_thread(
+            self._prepare_sandbox,
+            task,
         )
         if reused_workspace:
-            # Retrying a failed/cancelled task keeps its isolated work intact;
-            # it never reaches back into the live source project.
-            sandbox.open_existing(existing_manifest)
-            manifest = sandbox.manifest
-            self.store.append_coding_event(task_id, "workspace.reused", "info", "Resuming existing isolated workspace")
-        else:
-            try:
-                manifest = (
-                    sandbox.create_snapshot(list(task["context_files"]))
-                    if project_root is not None
-                    else sandbox.create_empty_workspace()
-                )
-            except Exception:
-                # A malformed selection can leave only a partial task copy.
-                # It contains no live source and may be safely removed so a
-                # corrected retry is possible.
-                if sandbox.base.exists():
-                    shutil.rmtree(sandbox.base, ignore_errors=True)
-                raise
-        self.store.update_coding_task(task_id, status="running", workspace_path=str(sandbox.base), base_manifest=manifest)
+            await asyncio.to_thread(
+                self.store.append_coding_event,
+                task_id,
+                "workspace.reused",
+                "info",
+                "Resuming existing isolated workspace",
+            )
+        await asyncio.to_thread(
+            self.store.update_coding_task,
+            task_id,
+            status="running",
+            workspace_path=str(sandbox.base),
+            base_manifest=manifest,
+        )
         if not reused_workspace:
-            self.store.append_coding_event(
+            await asyncio.to_thread(
+                self.store.append_coding_event,
                 task_id,
                 "workspace.created",
                 "info",
-                "Created isolated source snapshot" if project_root is not None else "Created standalone task workspace",
-                {"files": len(manifest["files"]), "path": str(sandbox.base), "standalone": project_root is None},
+                "Created isolated source snapshot"
+                if sandbox.project_root is not None
+                else "Created standalone task workspace",
+                {
+                    "files": len(manifest["files"]),
+                    "path": str(sandbox.base),
+                    "standalone": sandbox.project_root is None,
+                },
             )
         messages = [
             ChatMessage(role="system", content=_SYSTEM_PROMPT),
@@ -294,49 +327,158 @@ class CodingAgentService:
         provider = self._llm_provider_factory(str(task["model"]))
         successful_command = False
         for iteration in range(1, self.settings.coding_max_iterations + 1):
-            if self.store.coding_task_cancel_requested(task_id):
-                self.store.update_coding_task(task_id, status="cancelled")
-                self.store.append_coding_event(task_id, "task.cancelled", "warning", "Coding task cancelled")
+            cancel_requested = await asyncio.to_thread(
+                self.store.coding_task_cancel_requested,
+                task_id,
+            )
+            if cancel_requested:
+                await asyncio.to_thread(
+                    self.store.update_coding_task,
+                    task_id,
+                    status="cancelled",
+                )
+                await asyncio.to_thread(
+                    self.store.append_coding_event,
+                    task_id,
+                    "task.cancelled",
+                    "warning",
+                    "Coding task cancelled",
+                )
                 return
-            instructions = self.store.consume_coding_instructions(task_id)
+            instructions = await asyncio.to_thread(
+                self.store.consume_coding_instructions,
+                task_id,
+            )
             if instructions:
                 messages.append(ChatMessage(role="user", content="Additional user instruction(s):\n" + "\n".join(instructions)))
-            self.store.append_coding_event(task_id, "agent.thinking", "info", f"Planning step {iteration}")
+            await asyncio.to_thread(
+                self.store.append_coding_event,
+                task_id,
+                "agent.thinking",
+                "info",
+                f"Planning step {iteration}",
+            )
             try:
                 answer = await provider.generate_structured(messages, temperature=0.1)
                 action = self._parse_action(answer.content)
             except (LLMProviderError, ValueError, json.JSONDecodeError) as error:
                 messages.append(ChatMessage(role="user", content=f"The previous response was invalid ({error}). Return one valid action JSON."))
-                self.store.append_coding_event(task_id, "agent.invalid_response", "warning", "Invalid model action; retrying", {"error": str(error)[:500]})
+                await asyncio.to_thread(
+                    self.store.append_coding_event,
+                    task_id,
+                    "agent.invalid_response",
+                    "warning",
+                    "Invalid model action; retrying",
+                    {"error": str(error)[:500]},
+                )
                 continue
             tool_result, terminal = await self._dispatch(task_id, sandbox, action)
             if action.get("action") == "run_command" and bool(tool_result.get("ok")):
                 successful_command = True
-            if terminal == "review_ready" and sandbox.changed_files() and not successful_command:
+            changed_files = (
+                await asyncio.to_thread(sandbox.changed_files)
+                if terminal == "review_ready"
+                else []
+            )
+            if terminal == "review_ready" and changed_files and not successful_command:
                 tool_result = {
                     "ok": False,
                     "error": "Changed code requires at least one successful sandbox verification command before finish.",
                 }
                 terminal = None
-                self.store.append_coding_event(
-                    task_id, "verification.required", "warning",
+                await asyncio.to_thread(
+                    self.store.append_coding_event,
+                    task_id,
+                    "verification.required",
+                    "warning",
                     "Finish blocked until a sandbox verification command succeeds",
                 )
             messages.append(ChatMessage(role="assistant", content=json.dumps(action, ensure_ascii=False)))
             messages.append(ChatMessage(role="user", content="Tool result:\n" + json.dumps(tool_result, ensure_ascii=False)[: self.settings.coding_max_output_bytes]))
             if terminal == "review_ready":
-                patch = sandbox.diff_text(self.settings.coding_max_patch_bytes)
+                patch = await asyncio.to_thread(
+                    sandbox.diff_text,
+                    self.settings.coding_max_patch_bytes,
+                )
                 result = dict(tool_result.get("result") or {})
-                result["changed_files"] = [item.__dict__ for item in sandbox.changed_files()]
-                self.store.update_coding_task(task_id, status="review_ready", result=result, patch_text=patch)
-                self.store.append_coding_event(task_id, "task.review_ready", "info", "Changes are ready for review", {"changed_files": result["changed_files"], "tests": result.get("tests")})
-                self._notify_review_ready(task)
+                result["changed_files"] = [item.__dict__ for item in changed_files]
+                await asyncio.to_thread(
+                    self.store.update_coding_task,
+                    task_id,
+                    status="review_ready",
+                    result=result,
+                    patch_text=patch,
+                )
+                await asyncio.to_thread(
+                    self.store.append_coding_event,
+                    task_id,
+                    "task.review_ready",
+                    "info",
+                    "Changes are ready for review",
+                    {
+                        "changed_files": result["changed_files"],
+                        "tests": result.get("tests"),
+                    },
+                )
+                await self._notify_review_ready_async(task)
                 return
             if terminal == "waiting_for_input":
-                self.store.update_coding_task(task_id, status="waiting_for_input", result=tool_result)
-                self.store.append_coding_event(task_id, "task.waiting_for_input", "warning", "Coding Agent needs a user decision", tool_result)
+                await asyncio.to_thread(
+                    self.store.update_coding_task,
+                    task_id,
+                    status="waiting_for_input",
+                    result=tool_result,
+                )
+                await asyncio.to_thread(
+                    self.store.append_coding_event,
+                    task_id,
+                    "task.waiting_for_input",
+                    "warning",
+                    "Coding Agent needs a user decision",
+                    tool_result,
+                )
                 return
         raise RuntimeError("Coding Agent reached the iteration limit without a reviewable result")
+
+    def _prepare_sandbox(
+        self,
+        task: dict[str, object],
+    ) -> tuple[TaskSandbox, dict[str, object], bool]:
+        """Create or reopen the workspace entirely outside the event loop."""
+        task_id = str(task["id"])
+        project_root = Path(str(task["project_root"])) if str(task["project_root"]) else None
+        sandbox = TaskSandbox(
+            self.settings,
+            task_id=task_id,
+            project_root=project_root,
+            workspace_name=str(task["workspace_name"]),
+        )
+        existing_manifest = task.get("base_manifest")
+        # An empty ``files`` manifest is valid for a standalone task. It must
+        # still be reused on retry, otherwise existing isolated work is lost.
+        reused_workspace = (
+            sandbox.base.exists()
+            and isinstance(existing_manifest, dict)
+            and isinstance(existing_manifest.get("files"), dict)
+            and "version" in existing_manifest
+        )
+        if reused_workspace:
+            # Retrying never reaches back into the live source project.
+            sandbox.open_existing(existing_manifest)
+            return sandbox, sandbox.manifest, True
+        try:
+            manifest = (
+                sandbox.create_snapshot(list(task["context_files"]))
+                if project_root is not None
+                else sandbox.create_empty_workspace()
+            )
+        except Exception:
+            # A malformed selection can leave only a partial task copy. It
+            # contains no live source and may be safely removed before retry.
+            if sandbox.base.exists():
+                shutil.rmtree(sandbox.base, ignore_errors=True)
+            raise
+        return sandbox, manifest, False
 
     async def _docker_availability(self, *, refresh: bool = False) -> DockerAvailability:
         """Refresh negative states immediately and successful probes at a short TTL.
@@ -364,12 +506,29 @@ class CodingAgentService:
         message is written before TTS is scheduled; ``client_message_id``
         makes worker recovery safe and prevents duplicate spoken notices.
         """
+        self._deliver_review_ready_notification(
+            self._persist_review_ready_notification(task),
+        )
+
+    async def _notify_review_ready_async(self, task: dict[str, object]) -> None:
+        persisted = await asyncio.to_thread(
+            self._persist_review_ready_notification,
+            task,
+        )
+        # SpeechOrchestrator.enqueue creates an asyncio task, so delivery must
+        # remain on the event-loop thread after the durable append completes.
+        self._deliver_review_ready_notification(persisted)
+
+    def _persist_review_ready_notification(
+        self,
+        task: dict[str, object],
+    ) -> tuple[str, str, Any, bool] | None:
         if self.store is None:
-            return
+            return None
         session_id = str(task.get("session_id") or "").strip()
         task_id = str(task.get("id") or "").strip()
         if not session_id or not task_id:
-            return
+            return None
         message, created = self.store.append_message(
             role="assistant",
             content=self._review_ready_notification(task),
@@ -378,6 +537,15 @@ class CodingAgentService:
             client_message_id=f"coding-review-ready:{task_id}",
             metadata={"kind": "coding_review_ready", "coding_task_id": task_id},
         )
+        return task_id, session_id, message, created
+
+    def _deliver_review_ready_notification(
+        self,
+        persisted: tuple[str, str, Any, bool] | None,
+    ) -> None:
+        if persisted is None:
+            return
+        task_id, session_id, message, created = persisted
         if not created:
             return
         self._speak_notification(session_id, message.content)
@@ -396,12 +564,27 @@ class CodingAgentService:
 
     def _notify_task_failed(self, task: dict[str, object]) -> None:
         """Tell the originating chat about a durable task failure once."""
+        self._deliver_task_failed_notification(
+            self._persist_task_failed_notification(task),
+        )
+
+    async def _notify_task_failed_async(self, task: dict[str, object]) -> None:
+        persisted = await asyncio.to_thread(
+            self._persist_task_failed_notification,
+            task,
+        )
+        self._deliver_task_failed_notification(persisted)
+
+    def _persist_task_failed_notification(
+        self,
+        task: dict[str, object],
+    ) -> tuple[str, str, Any, bool] | None:
         if self.store is None:
-            return
+            return None
         session_id = str(task.get("session_id") or "").strip()
         task_id = str(task.get("id") or "").strip()
         if not session_id or not task_id:
-            return
+            return None
         message, created = self.store.append_message(
             role="assistant",
             content=self._failed_task_notification(task),
@@ -410,6 +593,15 @@ class CodingAgentService:
             client_message_id=f"coding-task-failed:{task_id}",
             metadata={"kind": "coding_task_failed", "coding_task_id": task_id},
         )
+        return task_id, session_id, message, created
+
+    def _deliver_task_failed_notification(
+        self,
+        persisted: tuple[str, str, Any, bool] | None,
+    ) -> None:
+        if persisted is None:
+            return
+        task_id, session_id, message, created = persisted
         if not created:
             return
         self._speak_notification(session_id, message.content)
@@ -476,18 +668,33 @@ class CodingAgentService:
                 return {"ok": True, "files": files[: self.settings.coding_max_files]}, None
             if name == "read_file":
                 path = str(action.get("path", ""))
-                return {"ok": True, "path": path, "content": sandbox.read_text(path)}, None
+                content = await asyncio.to_thread(sandbox.read_text, path)
+                return {"ok": True, "path": path, "content": content}, None
             if name == "write_file":
                 path, content = str(action.get("path", "")), action.get("content")
                 if not isinstance(content, str):
                     raise CodingPolicyError("write_file.content must be a string")
-                sandbox.write_text(path, content)
-                self.store.append_coding_event(task_id, "file.written", "info", "File edited in isolated workspace", {"path": path, "bytes": len(content.encode("utf-8"))})
+                await asyncio.to_thread(sandbox.write_text, path, content)
+                await asyncio.to_thread(
+                    self.store.append_coding_event,
+                    task_id,
+                    "file.written",
+                    "info",
+                    "File edited in isolated workspace",
+                    {"path": path, "bytes": len(content.encode("utf-8"))},
+                )
                 return {"ok": True, "path": path, "message": "File written"}, None
             if name == "delete_file":
                 path = str(action.get("path", ""))
-                sandbox.delete_file(path)
-                self.store.append_coding_event(task_id, "file.deleted", "warning", "File deleted in isolated workspace", {"path": path})
+                await asyncio.to_thread(sandbox.delete_file, path)
+                await asyncio.to_thread(
+                    self.store.append_coding_event,
+                    task_id,
+                    "file.deleted",
+                    "warning",
+                    "File deleted in isolated workspace",
+                    {"path": path},
+                )
                 return {"ok": True, "path": path, "message": "File deleted"}, None
             if name == "run_command":
                 result = await self.runner.run(task_id, sandbox.work_root, action.get("argv"))
@@ -496,7 +703,14 @@ class CodingAgentService:
                     "command": result.command, "exit_code": result.exit_code,
                     "stdout": result.stdout, "stderr": result.stderr, "timed_out": result.timed_out,
                 }
-                self.store.append_coding_event(task_id, "command.completed", "info" if details["ok"] else "error", "Sandbox command completed", details)
+                await asyncio.to_thread(
+                    self.store.append_coding_event,
+                    task_id,
+                    "command.completed",
+                    "info" if details["ok"] else "error",
+                    "Sandbox command completed",
+                    details,
+                )
                 return details, None
             if name == "finish":
                 result = {"summary": str(action.get("summary", ""))[:4000], "tests": str(action.get("tests", ""))[:4000]}
@@ -505,7 +719,14 @@ class CodingAgentService:
                 return {"ok": True, "question": str(action.get("question", ""))[:2000]}, "waiting_for_input"
             raise ValueError("Unknown coding action")
         except (CodingPolicyError, CommandPolicyError, OSError) as error:
-            self.store.append_coding_event(task_id, "tool.rejected", "warning", "Coding tool action was rejected", {"action": name, "error": str(error)[:1000]})
+            await asyncio.to_thread(
+                self.store.append_coding_event,
+                task_id,
+                "tool.rejected",
+                "warning",
+                "Coding tool action was rejected",
+                {"action": name, "error": str(error)[:1000]},
+            )
             return {"ok": False, "error": str(error)}, None
 
     def _task_prompt(self, task: dict[str, object], sandbox: TaskSandbox) -> str:

@@ -584,7 +584,7 @@ const RU_TO_EN: readonly TranslationPair[] = [
   // Coding Agent uses the same DOM localization path as the rest of the
   // desktop UI.  Task objectives, model output, paths and JSON command logs
   // intentionally remain data in their original language.
-  ["v09 · изолированная среда", "v09 · isolated environment"],
+  ["v1.0 · изолированная среда", "v1.0 · isolated environment"],
   ["По умолчанию агент работает в собственной папке задачи. Файлы проекта передаются только как явно указанный контекст и никогда не монтируются в контейнер напрямую.", "By default, the agent works in its own task folder. Project files are provided only as explicitly selected context and are never mounted into the container directly."],
   ["Обновить среду", "Refresh environment"],
   ["Агент", "Agent"],

@@ -12,6 +12,7 @@ from apps.backend.app.agents.character.prompts import (
     CHARACTER_REPAIR_PROMPT,
     character_json_prompt,
     character_live_prompt,
+    character_state_prompt,
 )
 from apps.backend.app.agents.character.persona import get_persona
 from apps.backend.app.agents.character.protocol import classify_intent, deterministic_turn, legacy_result, parse_turn
@@ -19,7 +20,7 @@ from apps.backend.app.agents.character.voice_input import (
     VoiceInputInterpretation,
     VoiceInputInterpreter,
 )
-from apps.backend.app.llm.base import ChatMessage, LLMProvider
+from apps.backend.app.llm.base import ChatMessage, LLMProvider, llm_call_purpose
 from apps.backend.app.schemas.character import CharacterTurn
 from apps.backend.app.storage.sqlite_history import SQLiteMessageHistory
 
@@ -162,7 +163,12 @@ class CharacterAgent:
             else effective_text
         )
         coding_context = (
-            self._coding_bridge.observe_user_message(session_id, effective_text, self._last_user_message)
+            await asyncio.to_thread(
+                self._coding_bridge.observe_user_message,
+                session_id,
+                effective_text,
+                self._last_user_message,
+            )
             if self._coding_bridge is not None
             else None
         )
@@ -172,8 +178,12 @@ class CharacterAgent:
             else None
         )
         if forced_coding_reply is not None:
-            return self._complete_forced_reply(
-                session_id, forced_coding_reply, prompt_user_text, input_mode,
+            return await asyncio.to_thread(
+                self._complete_forced_reply,
+                session_id,
+                forced_coding_reply,
+                prompt_user_text,
+                input_mode,
                 persist_reply=persist_reply, persist_reply_callback=persist_reply_callback,
             )
         if coding_context:
@@ -184,7 +194,15 @@ class CharacterAgent:
                 "outcome": "not_required",
                 "required_anchors": required_anchors,
             }
-        context = built_context.messages if built_context is not None else self._history.get_recent_messages(session_id, limit=self._history_limit)
+        context = (
+            built_context.messages
+            if built_context is not None
+            else await asyncio.to_thread(
+                self._history.get_recent_messages,
+                session_id,
+                limit=self._history_limit,
+            )
+        )
         pending_followup = bool(built_context and built_context.diagnostics.get("pending_direct_message_count"))
         response_target_text = built_context.response_target_text if built_context is not None else None
         response_target_anchors = (
@@ -198,14 +216,31 @@ class CharacterAgent:
             if built_context and built_context.diagnostics.get("previous_assistant_message_id")
             else None
         )
+        include_memory_protocol = not (
+            self._memory_service is not None
+            and self._memory_service.uses_background_extraction
+        )
         messages = [
-            ChatMessage(role="system", content=character_json_prompt(self._persona, state_context)),
-            *context,
-            ChatMessage(role="user", content=prompt_user_text),
+            ChatMessage(
+                role="system",
+                content=character_json_prompt(
+                    self._persona,
+                    include_memory_protocol=include_memory_protocol,
+                ),
+            ),
         ]
+        if state_context:
+            messages.append(
+                ChatMessage(
+                    role="system",
+                    content=character_state_prompt(state_context, live=False),
+                )
+            )
+        messages.extend((*context, ChatMessage(role="user", content=prompt_user_text)))
         empty_reply = self._empty_model_fallback(prompt_user_text)
 
         llm_response = await self._llm_provider.generate(messages)
+        retry_used = False
         parsed = self._parse_response_result(
             llm_response.content,
             session_id=session_id,
@@ -214,6 +249,7 @@ class CharacterAgent:
             report_invalid=False,
         )
         if not parsed.valid:
+            retry_used = True
             first_invalid = parsed
             logger.info(
                 "Invalid LLM JSON response; retrying with full context: reason=%s raw_length=%s",
@@ -230,7 +266,8 @@ class CharacterAgent:
             # The original full prompt has persona and conversation context.  A
             # standalone repair prompt often caused another empty answer.
             repair_messages = [*messages, ChatMessage(role="system", content=CHARACTER_REPAIR_PROMPT)]
-            repair_response = await self._llm_provider.generate(repair_messages)
+            with llm_call_purpose("chat_json_repair"):
+                repair_response = await self._llm_provider.generate(repair_messages)
             parsed = self._parse_response_result(
                 repair_response.content,
                 session_id=session_id,
@@ -268,7 +305,41 @@ class CharacterAgent:
             parsed.payload["reply"] if parsed.valid else "", previous_assistant_reply, prompt_user_text,
         )
         needs_duplicate_retry = bool(parsed.valid and duplicate["stale"])
-        if needs_continuity_retry or needs_pending_retry or needs_anchor_retry or needs_duplicate_retry or needs_status_grounding_retry:
+        needs_guard_retry = (
+            needs_continuity_retry
+            or needs_pending_retry
+            or needs_anchor_retry
+            or needs_duplicate_retry
+            or needs_status_grounding_retry
+        )
+        if needs_guard_retry and retry_used:
+            # A malformed first answer already consumed the single retry for
+            # this visible turn. Do not amplify one user action into a third
+            # full-context API request; use the same deterministic guard
+            # fallbacks as a rejected retry.
+            parsed = (
+                self._anchor_reply_fallback(required_anchors)
+                if needs_anchor_retry
+                else self._status_reply_fallback()
+                if needs_status_grounding_retry
+                else self._response_target_fallback(response_target_text or "")
+                if needs_pending_retry
+                else self._stale_reply_fallback()
+            )
+            if built_context is not None:
+                built_context.diagnostics["relevance_guard"] = {
+                    "outcome": "fallback",
+                    "reason": "retry_budget_exhausted",
+                    "required_anchors": required_anchors,
+                }
+            self._publish_relevance_guard(
+                "fallback",
+                previous_assistant_id,
+                duplicate,
+                pending_followup,
+                "retry_budget_exhausted",
+            )
+        elif needs_guard_retry:
             if built_context is not None:
                 built_context.diagnostics["relevance_guard"] = {
                     "outcome": "detected",
@@ -282,20 +353,21 @@ class CharacterAgent:
                     "missing_anchor" if needs_anchor_retry else "stale_duplicate" if needs_duplicate_retry else "ungrounded_status" if needs_status_grounding_retry else "continuity",
             )
             try:
-                guarded = await self._llm_provider.generate([
-                    *messages,
-                    ChatMessage(
-                        role="system",
-                        content=self._guard_retry_instruction(
-                            needs_pending_retry,
-                            needs_duplicate_retry,
-                            needs_status_grounding_retry,
-                            required_anchors,
-                            response_target_text,
-                            response_target_anchors,
+                with llm_call_purpose("chat_json_guard_retry"):
+                    guarded = await self._llm_provider.generate([
+                        *messages,
+                        ChatMessage(
+                            role="system",
+                            content=self._guard_retry_instruction(
+                                needs_pending_retry,
+                                needs_duplicate_retry,
+                                needs_status_grounding_retry,
+                                required_anchors,
+                                response_target_text,
+                                response_target_anchors,
+                            ),
                         ),
-                    ),
-                ])
+                    ])
                 repaired = self._parse_response_result(
                     guarded.content, session_id=session_id, user_text=prompt_user_text,
                     empty_fallback_reply=empty_reply, report_invalid=False,
@@ -341,53 +413,14 @@ class CharacterAgent:
         if parsed.turn is not None and state_behavior is not None and state_behavior.expression_strength != "muted":
             parsed = self._arbitrate_presentation(parsed, state_behavior)
 
-        # The modern path deliberately has one writer: the background extractor.
-        # Keeping Character Protocol candidates on that path as well prevents a
-        # normal text turn from being saved twice by two independent DeepSeek calls.
-        if (
-            parsed.valid
-            and parsed.turn is not None
-            and self._memory_service is not None
-            and self._memory_service.llm_extraction_enabled
-            and not self._memory_service.uses_background_extraction
-        ):
-            created = self._memory_service.apply_llm_candidates(parsed.turn.memory_candidates, self._last_user_message)
-            # DeepSeek can legitimately omit optional metadata. Preserve explicit
-            # "remember this" commands with the deterministic, policy-controlled
-            # fallback without making a second model request.
-            if not created and not parsed.turn.memory_candidates:
-                created = self._memory_service.extract_from_message(self._last_user_message)
-            self.last_memory_updates.extend(self._memory_service.memory_update(memory) for memory in created)
-        elif (
-            not parsed.valid
-            and self._memory_service is not None
-            and self._memory_service.llm_extraction_enabled
-            and not self._memory_service.uses_background_extraction
-        ):
-            created = self._memory_service.extract_from_message(self._last_user_message)
-            self.last_memory_updates.extend(self._memory_service.memory_update(memory) for memory in created)
-
-        # A user-visible fallback is still an assistant turn.  Persist it and
-        # schedule extraction so a malformed visible reply never drops a useful
-        # user fact such as a current goal.
-        if persist_reply_callback is not None:
-            assistant_message = persist_reply_callback(parsed.payload["reply"])
-        elif self._should_persist_timeline() and persist_reply:
-            assistant_message = self._save_message(
-                session_id, "assistant", parsed.payload["reply"], input_mode,
-                turn_id=self._active_turn_id, reply_to_message_id=getattr(self._last_user_message, "id", None),
-            )
-        else:
-            assistant_message = None
-        if self._memory_service is not None:
-            if self._memory_service.uses_background_extraction:
-                created = self._memory_service.extract_high_precision_from_message(self._last_user_message)
-                self.last_memory_updates.extend(self._memory_service.memory_update(memory) for memory in created)
-            self._memory_service.schedule_extraction(assistant_message)
-
-        self.last_turn = parsed.turn
-
-        return parsed.payload
+        return await asyncio.to_thread(
+            self._finalize_model_reply,
+            parsed,
+            session_id,
+            input_mode,
+            persist_reply=persist_reply,
+            persist_reply_callback=persist_reply_callback,
+        )
 
     async def stream_user_message(
         self, session_id: str, user_text: str,
@@ -416,7 +449,12 @@ class CharacterAgent:
             else effective_text
         )
         coding_context = (
-            self._coding_bridge.observe_user_message(session_id, effective_text, self._last_user_message)
+            await asyncio.to_thread(
+                self._coding_bridge.observe_user_message,
+                session_id,
+                effective_text,
+                self._last_user_message,
+            )
             if self._coding_bridge is not None
             else None
         )
@@ -429,8 +467,13 @@ class CharacterAgent:
             reply = stored_reply_transform(forced_coding_reply) if stored_reply_transform is not None else forced_coding_reply
             if persist_reply is None:
                 persist_reply = source_message is None
-            result = self._complete_forced_reply(
-                session_id, reply, prompt_user_text, input_mode, persist_reply=persist_reply,
+            result = await asyncio.to_thread(
+                self._complete_forced_reply,
+                session_id,
+                reply,
+                prompt_user_text,
+                input_mode,
+                persist_reply=persist_reply,
             )
             yield str(result["reply"])
             return
@@ -442,7 +485,15 @@ class CharacterAgent:
                 "outcome": "not_required",
                 "required_anchors": required_anchors,
             }
-        context = built_context.messages if built_context is not None else self._history.get_recent_messages(session_id, limit=self._history_limit)
+        context = (
+            built_context.messages
+            if built_context is not None
+            else await asyncio.to_thread(
+                self._history.get_recent_messages,
+                session_id,
+                limit=self._history_limit,
+            )
+        )
         pending_followup = bool(built_context and built_context.diagnostics.get("pending_direct_message_count"))
         response_target_text = built_context.response_target_text if built_context is not None else None
         response_target_anchors = (
@@ -456,12 +507,18 @@ class CharacterAgent:
             if built_context and built_context.diagnostics.get("previous_assistant_message_id")
             else None
         )
-        system_prompt = character_live_prompt(self._persona, state_context)
+        system_prompt = character_live_prompt(self._persona)
         messages = [
             ChatMessage(role="system", content=system_prompt),
-            *context,
-            ChatMessage(role="user", content=prompt_user_text),
         ]
+        if state_context:
+            messages.append(
+                ChatMessage(
+                    role="system",
+                    content=character_state_prompt(state_context, live=True),
+                )
+            )
+        messages.extend((*context, ChatMessage(role="user", content=prompt_user_text)))
         chunks: list[str] = []
         async for delta in self._guarded_live_stream(
             messages,
@@ -486,30 +543,120 @@ class CharacterAgent:
             yield reply
         if persist_reply is None:
             persist_reply = source_message is None
+        await asyncio.to_thread(
+            self._finalize_stream_reply,
+            session_id,
+            reply,
+            input_mode,
+            persist_reply=persist_reply,
+            schedule_memory=schedule_memory,
+        )
+
+    def _finalize_model_reply(
+        self,
+        parsed: _ParseResult,
+        session_id: str,
+        input_mode: str,
+        *,
+        persist_reply: bool,
+        persist_reply_callback: Callable[[str], Any] | None,
+    ) -> dict[str, Any]:
+        """Commit a batch reply and memory effects on an I/O worker thread."""
+        # The modern path deliberately has one writer: the background extractor.
+        if (
+            parsed.valid
+            and parsed.turn is not None
+            and self._memory_service is not None
+            and self._memory_service.llm_extraction_enabled
+            and not self._memory_service.uses_background_extraction
+        ):
+            created = self._memory_service.apply_llm_candidates(
+                parsed.turn.memory_candidates,
+                self._last_user_message,
+            )
+            if not created and not parsed.turn.memory_candidates:
+                created = self._memory_service.extract_from_message(self._last_user_message)
+            self.last_memory_updates.extend(
+                self._memory_service.memory_update(memory) for memory in created
+            )
+        elif (
+            not parsed.valid
+            and self._memory_service is not None
+            and self._memory_service.llm_extraction_enabled
+            and not self._memory_service.uses_background_extraction
+        ):
+            created = self._memory_service.extract_from_message(self._last_user_message)
+            self.last_memory_updates.extend(
+                self._memory_service.memory_update(memory) for memory in created
+            )
+
+        # A visible fallback remains a durable assistant turn and memory anchor.
+        if persist_reply_callback is not None:
+            assistant_message = persist_reply_callback(parsed.payload["reply"])
+        elif self._should_persist_timeline() and persist_reply:
+            assistant_message = self._save_message(
+                session_id,
+                "assistant",
+                parsed.payload["reply"],
+                input_mode,
+                turn_id=self._active_turn_id,
+                reply_to_message_id=getattr(self._last_user_message, "id", None),
+            )
+        else:
+            assistant_message = None
+        if self._memory_service is not None:
+            if self._memory_service.uses_background_extraction:
+                created = self._memory_service.extract_high_precision_from_message(
+                    self._last_user_message
+                )
+                self.last_memory_updates.extend(
+                    self._memory_service.memory_update(memory) for memory in created
+                )
+            self._memory_service.schedule_extraction(assistant_message)
+        self.last_turn = parsed.turn
+        return parsed.payload
+
+    def _finalize_stream_reply(
+        self,
+        session_id: str,
+        reply: str,
+        input_mode: str,
+        *,
+        persist_reply: bool,
+        schedule_memory: bool,
+    ) -> None:
+        """Commit a streamed reply and memory effects on an I/O worker thread."""
         if self._should_persist_timeline() and persist_reply:
             assistant_message = self._save_message(
-                session_id, "assistant", reply, input_mode,
-                turn_id=self._active_turn_id, reply_to_message_id=getattr(self._last_user_message, "id", None),
+                session_id,
+                "assistant",
+                reply,
+                input_mode,
+                turn_id=self._active_turn_id,
+                reply_to_message_id=getattr(self._last_user_message, "id", None),
             )
         else:
             assistant_message = None
         if self._memory_service is not None and schedule_memory:
             if self._memory_service.uses_background_extraction:
-                created = self._memory_service.extract_high_precision_from_message(self._last_user_message)
-                self.last_memory_updates.extend(self._memory_service.memory_update(memory) for memory in created)
+                created = self._memory_service.extract_high_precision_from_message(
+                    self._last_user_message
+                )
+                self.last_memory_updates.extend(
+                    self._memory_service.memory_update(memory) for memory in created
+                )
             self._memory_service.schedule_extraction(assistant_message)
         if (
             schedule_memory
-            and
-            self._memory_service is not None
+            and self._memory_service is not None
             and self._memory_service.llm_extraction_enabled
             and not self._memory_service.uses_background_extraction
         ):
-            # Live mode streams plain speech rather than the JSON character
-            # protocol. Preserve explicit memory commands after a completed
-            # turn without adding a second DeepSeek request.
+            # Live mode streams plain speech rather than Character Protocol JSON.
             created = self._memory_service.extract_from_message(self._last_user_message)
-            self.last_memory_updates.extend(self._memory_service.memory_update(memory) for memory in created)
+            self.last_memory_updates.extend(
+                self._memory_service.memory_update(memory) for memory in created
+            )
 
     def _persist_user_message(self, session_id: str, user_text: str, input_mode: str, interpreted) -> list[dict[str, str]]:
         user_message = self._save_message(session_id, "user", user_text, input_mode)
@@ -866,22 +1013,23 @@ class CharacterAgent:
     ) -> str:
         """A retry is fully buffered so a second stale answer cannot reach TTS."""
         try:
-            chunks = [
-                delta async for delta in self._llm_provider.stream([
-                    *messages,
-                    ChatMessage(
-                        role="system",
-                        content=self._guard_retry_instruction(
-                            require_pending_response,
-                            True,
-                            self._is_casual_status_check(user_text),
-                            required_anchors,
-                            response_target_text,
-                            response_target_anchors or [],
+            with llm_call_purpose("chat_live_guard_retry"):
+                chunks = [
+                    delta async for delta in self._llm_provider.stream([
+                        *messages,
+                        ChatMessage(
+                            role="system",
+                            content=self._guard_retry_instruction(
+                                require_pending_response,
+                                True,
+                                self._is_casual_status_check(user_text),
+                                required_anchors,
+                                response_target_text,
+                                response_target_anchors or [],
+                            ),
                         ),
-                    ),
-                ])
-            ]
+                    ])
+                ]
         except Exception:
             return self._stale_reply_fallback().payload["reply"]
         reply = "".join(chunks).strip()
