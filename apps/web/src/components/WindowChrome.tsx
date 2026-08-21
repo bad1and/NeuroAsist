@@ -3,6 +3,7 @@ import { Copy, Menu, Minus, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { isDesktopApp, quitDesktopApp } from "../desktop";
+import { animateButtonPress } from "../animations";
 
 export function WindowChrome({
   title,
@@ -54,7 +55,10 @@ export function WindowChrome({
             ref={navigationButtonRef}
             className="icon-button menu-toggle"
             type="button"
-            onClick={onOpenNavigation}
+            onClick={(e) => {
+              animateButtonPress(e.currentTarget);
+              onOpenNavigation();
+            }}
             aria-label={navigationOpen ? "Закрыть меню" : "Открыть меню"}
             aria-expanded={navigationOpen}
             aria-controls="main-sidebar"
@@ -68,11 +72,11 @@ export function WindowChrome({
       <div className="window-chrome-actions">
         {desktop && (
           <div className="window-controls" aria-label="Управление окном">
-            <button onClick={() => void getCurrentWindow().minimize()} aria-label="Свернуть окно"><Minus size={14} /></button>
-            <button onClick={() => void toggleMaximize()} aria-label={maximized ? "Восстановить окно" : "Развернуть окно"}>
+            <button onClick={(e) => { animateButtonPress(e.currentTarget); void getCurrentWindow().minimize(); }} aria-label="Свернуть окно"><Minus size={14} /></button>
+            <button onClick={(e) => { animateButtonPress(e.currentTarget); void toggleMaximize(); }} aria-label={maximized ? "Восстановить окно" : "Развернуть окно"}>
               {maximized ? <Copy size={12} /> : <Square size={12} />}
             </button>
-            <button className="window-close" onClick={() => void quitDesktopApp()} aria-label="Закрыть Iris"><X size={15} /></button>
+            <button className="window-close" onClick={(e) => { animateButtonPress(e.currentTarget); void quitDesktopApp(); }} aria-label="Закрыть Iris"><X size={15} /></button>
           </div>
         )}
       </div>

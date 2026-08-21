@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 using UnityEngine;
 
 namespace NeuroAsist.Avatar
@@ -16,6 +17,8 @@ namespace NeuroAsist.Avatar
         private Rect lastBounds;
         private float nextBoundsReportAt;
         private bool embeddedInIris;
+        private bool initialized;
+        private bool currentClickThrough;
 
         private const int GWL_STYLE = -16;
         private const int GWL_EXSTYLE = -20;
@@ -29,6 +32,8 @@ namespace NeuroAsist.Avatar
         private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
         private static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
 
+        private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
         private void Awake()
         {
             if (Application.isEditor || Application.platform != RuntimePlatform.WindowsPlayer) return;
@@ -37,18 +42,15 @@ namespace NeuroAsist.Avatar
             // is unreliable while a player starts hidden or loses activation to
             // Iris, so this component must not alter native styles at all.
             if (embeddedInIris) return;
-            handle = GetActiveWindow();
-            if (handle == IntPtr.Zero) return;
-            if (client == null) client = GetComponent<AvatarWebSocketClient>();
-            SetWindowLong(handle, GWL_STYLE, WS_POPUP);
-            ApplyWindowFlags();
-            SetVisible(visible);
+            InitializeWindow();
         }
 
         private void Update()
         {
             if (embeddedInIris) return;
-            if (Application.platform != RuntimePlatform.WindowsPlayer || handle == IntPtr.Zero) return;
+            if (Application.platform != RuntimePlatform.WindowsPlayer) return;
+            if (!initialized) InitializeWindow();
+            if (handle == IntPtr.Zero) return;
             // Holding Ctrl+Alt temporarily makes the overlay interactive for drag/repositioning.
             var dragMode = (GetAsyncKeyState(0x11) & 0x8000) != 0 && (GetAsyncKeyState(0x12) & 0x8000) != 0;
             SetClickThrough(locked && !dragMode);
@@ -63,10 +65,51 @@ namespace NeuroAsist.Avatar
             locked = nextLocked;
             scale = Mathf.Clamp(nextScale, .5f, 2f);
             transform.localScale = Vector3.one * scale;
-            if (embeddedInIris || handle == IntPtr.Zero) return;
+            if (embeddedInIris) return;
+            if (!initialized) InitializeWindow();
+            if (handle == IntPtr.Zero) return;
             ApplyWindowFlags();
             if (width > 0 && height > 0) SetWindowPos(handle, alwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST, Mathf.RoundToInt(x), Mathf.RoundToInt(y), Mathf.RoundToInt(width), Mathf.RoundToInt(height), SWP_NOACTIVATE);
             SetVisible(visible);
+        }
+
+        private bool EnsureHandle()
+        {
+            if (handle != IntPtr.Zero) return true;
+            handle = GetActiveWindow();
+            if (handle != IntPtr.Zero) return true;
+
+            var currentPid = GetCurrentProcessId();
+            var candidate = IntPtr.Zero;
+            var sb = new StringBuilder(128);
+            EnumWindows((hWnd, lParam) =>
+            {
+                GetWindowThreadProcessId(hWnd, out var pid);
+                if (pid == currentPid)
+                {
+                    sb.Clear();
+                    GetClassName(hWnd, sb, sb.Capacity);
+                    if (sb.ToString().Contains("UnityWndClass"))
+                    {
+                        candidate = hWnd;
+                        return false;
+                    }
+                }
+                return true;
+            }, IntPtr.Zero);
+
+            handle = candidate;
+            return handle != IntPtr.Zero;
+        }
+
+        private void InitializeWindow()
+        {
+            if (initialized || !EnsureHandle()) return;
+            if (client == null) client = GetComponent<AvatarWebSocketClient>();
+            SetWindowLong(handle, GWL_STYLE, WS_POPUP);
+            ApplyWindowFlags();
+            SetVisible(visible);
+            initialized = true;
         }
 
         private void ApplyWindowFlags()
@@ -76,6 +119,7 @@ namespace NeuroAsist.Avatar
             // Matches the canonical scene camera background (49, 77, 121). Windows removes that
             // colour from the layered window; if the call fails, the player remains borderless.
             SetLayeredWindowAttributes(handle, (uint)(49 | (77 << 8) | (121 << 16)), 0, LWA_COLORKEY);
+            currentClickThrough = false;
             SetClickThrough(locked);
             SetWindowPos(handle, alwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         }
@@ -88,6 +132,8 @@ namespace NeuroAsist.Avatar
         private void SetClickThrough(bool enabled)
         {
             if (handle == IntPtr.Zero) return;
+            if (currentClickThrough == enabled && initialized) return;
+            currentClickThrough = enabled;
             var style = GetWindowLong(handle, GWL_EXSTYLE) | WS_EX_LAYERED;
             SetWindowLong(handle, GWL_EXSTYLE, enabled ? style | WS_EX_TRANSPARENT : style & ~WS_EX_TRANSPARENT);
         }
@@ -116,6 +162,10 @@ namespace NeuroAsist.Avatar
         [DllImport("user32.dll")] private static extern bool ReleaseCapture();
         [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hWnd, out NativeRect rect);
+        [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+        [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)] private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+        [DllImport("kernel32.dll")] private static extern uint GetCurrentProcessId();
         [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int left; public int top; public int right; public int bottom; }
     }
 }

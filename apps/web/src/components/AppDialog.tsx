@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
+import { animateModalEnter } from "../animations";
 
 export function AppDialog({
   open,
@@ -19,8 +20,13 @@ export function AppDialog({
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
-    if (!open && dialog.open) dialog.close();
+    if (open && !dialog.open) {
+      dialog.showModal();
+      animateModalEnter(dialog);
+    }
+    if (!open && dialog.open) {
+      dialog.close();
+    }
   }, [open]);
 
   return (

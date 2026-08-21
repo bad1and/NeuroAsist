@@ -1,10 +1,11 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { History, RefreshCw, Search, Trash2 } from "lucide-react";
 
 import { deleteTimelineRange, getTimelineJournal, searchTimeline } from "./api";
 import type { TimelineJournalItem, TimelineMessage } from "./types";
 import { AppDialog } from "./components/AppDialog";
 import { interfaceIntlLocale } from "./i18n";
+import { animateButtonPress, animatePageEnter, animateStaggerCards, useAnimeScope } from "./animations";
 
 function formatDate(value: string): string {
   const date = new Date(value);
@@ -28,6 +29,19 @@ export function JournalPage() {
   const [pendingDelete, setPendingDelete] = useState<TimelineJournalItem | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  const containerRef = useAnimeScope<HTMLElement>((scope, root) => {
+    animatePageEnter(root);
+  }, []);
+
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (listRef.current) {
+      const selector = results ? ".message" : ".history-card";
+      animateStaggerCards(listRef.current, selector, 40);
+    }
+  }, [items, results]);
+
   const refresh = async () => {
     try {
       setItems((await getTimelineJournal()).items);
@@ -50,21 +64,21 @@ export function JournalPage() {
     }
   };
 
-  return <section className="panel history-panel">
+  return <section className="panel history-panel" ref={containerRef}>
     <form className="search-form" onSubmit={onSearch}>
       <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по истории" aria-label="Поиск по истории" />
       {results && <button className="secondary" type="button" onClick={() => { setQuery(""); setResults(null); }}>Сбросить</button>}
-      <button className="icon-button" type="button" onClick={() => void refresh()} aria-label="Обновить историю" title="Обновить историю"><RefreshCw size={17} /></button>
+      <button className="icon-button" type="button" onClick={(e) => { animateButtonPress(e.currentTarget); void refresh(); }} aria-label="Обновить историю" title="Обновить историю"><RefreshCw size={17} /></button>
       <button className="icon-button search-submit" type="submit" aria-label="Найти в истории" title="Найти в истории"><Search size={18} /></button>
     </form>
     {error && <p className="error-text" role="alert">{error}</p>}
-    {results && <div className="history-list search-results">
+    {results && <div className="history-list search-results" ref={listRef}>
       {results.length ? results.map((message) => <article className={`message ${message.role === "user" ? "user" : "assistant"}`} key={message.id}><div className="message-role">{message.role === "user" ? "Вы" : "Iris"}</div><p data-i18n-skip>{message.content}</p></article>) : <EmptyHistory text="Ничего не найдено" />}
     </div>}
-    {!results && <div className="history-list">
+    {!results && <div className="history-list" ref={listRef}>
       {items.length ? items.map((item) => <article className="history-card" key={item.id ?? item.day}>
         <div><strong>{item.title || formatDate(item.day)}</strong><p>{item.message_count} {item.message_count === 1 ? "сообщение" : "сообщений"} · последняя активность в {formatTime(item.last_activity_at)}</p></div>
-        <button className="icon-button danger-button" title="Удалить историю до этой даты" aria-label={`Удалить историю до ${formatDate(item.day)}`} onClick={() => setPendingDelete(item)}><Trash2 size={17} /></button>
+        <button className="icon-button danger-button" title="Удалить историю до этой даты" aria-label={`Удалить историю до ${formatDate(item.day)}`} onClick={(e) => { animateButtonPress(e.currentTarget); setPendingDelete(item); }}><Trash2 size={17} /></button>
       </article>) : <EmptyHistory text="История пока пуста" />}
     </div>}
     <AppDialog

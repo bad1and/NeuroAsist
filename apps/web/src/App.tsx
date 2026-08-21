@@ -114,6 +114,22 @@ import {
   setInterfaceLocalePreference,
   useInterfaceLocale,
 } from "./i18n";
+import {
+  animate,
+  animateButtonPress,
+  animateLivePulse,
+  animateLiveRadar,
+  animateMessageEnter,
+  animateMessagePop,
+  animateNoticeEnter,
+  animatePageEnter,
+  animateStaggerCards,
+  animateTabSwitch,
+  animateThinkingWave,
+  prefersReducedMotion,
+  stagger,
+  useAnimeScope,
+} from "./animations";
 
 type AppView = "overview" | "chat" | "journal" | "memory" | "state" | "coding" | "settings";
 
@@ -246,11 +262,23 @@ function useRuntimeSettingsAutosave(onSettingsChanged: (settings: PublicSettings
 }
 
 function AutoSaveStatus({ status, onRetry }: { status: AutoSaveStatus; onRetry: () => void }) {
-  if (status === "saving") return <span className="settings-save-status is-saving" role="status">Сохраняем…</span>;
+  const elRef = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    if (elRef.current) {
+      animate(elRef.current, {
+        opacity: [0, 1],
+        translateY: prefersReducedMotion() ? 0 : [-3, 0],
+        duration: 180,
+        ease: "outQuad",
+      });
+    }
+  }, [status]);
+
+  if (status === "saving") return <span ref={elRef} className="settings-save-status is-saving" role="status">Сохраняем…</span>;
   if (status === "error") {
-    return <span className="settings-save-status is-error" role="alert">Не удалось сохранить <button type="button" onClick={onRetry}>Повторить</button></span>;
+    return <span ref={elRef} className="settings-save-status is-error" role="alert">Не удалось сохранить <button type="button" onClick={(e) => { animateButtonPress(e.currentTarget); onRetry(); }}>Повторить</button></span>;
   }
-  if (status === "saved") return <span className="settings-save-status is-saved" role="status">Сохранено</span>;
+  if (status === "saved") return <span ref={elRef} className="settings-save-status is-saved" role="status">Сохранено</span>;
   return null;
 }
 
@@ -821,8 +849,27 @@ function Sidebar({
   onNavigate: (view: AppView) => void;
   onToggleCollapsed: () => void;
 }) {
+  const sidebarRef = useAnimeScope<HTMLElement>((scope, root) => {
+    const reduced = prefersReducedMotion();
+    const navButtons = root.querySelectorAll(".navigation-button");
+    if (navButtons.length) {
+      animate(navButtons, {
+        opacity: [0, 1],
+        translateX: reduced ? 0 : [-6, 0],
+        duration: reduced ? 100 : 200,
+        delay: reduced ? 0 : stagger(30),
+        ease: "outQuad",
+        onComplete: () => {
+          navButtons.forEach((btn) => {
+            (btn as HTMLElement).style.transform = "";
+          });
+        },
+      });
+    }
+  }, []);
+
   return (
-    <aside id="main-sidebar" className={`sidebar${isOpen ? " is-open" : ""}`} aria-label="Основная навигация">
+    <aside id="main-sidebar" ref={sidebarRef} className={`sidebar${isOpen ? " is-open" : ""}`} aria-label="Основная навигация">
       <div className="sidebar-brand" data-tauri-drag-region>
         <img className="brand-logo brand-logo-wordmark" src="/brand/iris-wordmark-light.svg" alt="Iris" />
         <img className="brand-logo brand-logo-mark" src="/brand/iris-mark-light.svg" alt="" aria-hidden="true" />
@@ -842,7 +889,10 @@ function Sidebar({
             aria-label={isCollapsed ? "Развернуть меню" : "Свернуть меню"}
             aria-pressed={isCollapsed}
             title={isCollapsed ? "Развернуть меню" : "Свернуть меню"}
-            onClick={onToggleCollapsed}
+            onClick={(e) => {
+              animateButtonPress(e.currentTarget);
+              onToggleCollapsed();
+            }}
           >
             {isCollapsed ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />}
           </button>
@@ -872,7 +922,10 @@ function NavigationButton({
       aria-current={active ? "page" : undefined}
       data-tooltip={compact ? label : undefined}
       title={compact ? label : undefined}
-      onClick={onClick}
+      onClick={(e) => {
+        animateTabSwitch(e.currentTarget);
+        onClick();
+      }}
     >
       <Icon size={19} aria-hidden="true" />
       <span>{label}</span>
@@ -1486,6 +1539,31 @@ export function ChatPage({
     }, 32);
   }, [isActive, messages]);
 
+  const lastMessageCountRef = useRef(0);
+  useEffect(() => {
+    if (messages.length > lastMessageCountRef.current && listRef.current) {
+      const messageElements = listRef.current.querySelectorAll<HTMLElement>(".message");
+      if (messageElements.length > 0) {
+        const newest = messageElements[messageElements.length - 1];
+        if (newest) {
+          animateMessagePop(newest);
+        }
+      }
+    }
+    lastMessageCountRef.current = messages.length;
+  }, [messages]);
+
+  const thinkingRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (loading && thinkingRef.current) {
+      const dots = thinkingRef.current.querySelectorAll<HTMLElement>("span");
+      const anim = animateThinkingWave(dots);
+      return () => {
+        anim?.cancel();
+      };
+    }
+  }, [loading]);
+
   useEffect(() => () => {
     if (scrollTimerRef.current !== null) {
       window.clearTimeout(scrollTimerRef.current);
@@ -1839,7 +1917,7 @@ export function ChatPage({
             {message.ttsError && <div className="message-error" data-i18n-skip>{message.ttsError}</div>}
           </article>
         ))}
-        {loading && <div className="assistant-thinking" role="status"><span aria-hidden="true" /><span aria-hidden="true" /><span aria-hidden="true" />Iris печатает</div>}
+        {loading && <div className="assistant-thinking" ref={thinkingRef} role="status"><span aria-hidden="true" /><span aria-hidden="true" /><span aria-hidden="true" />Iris печатает</div>}
       </div>
 
       {error && <div className="error-banner" role="alert"><CircleAlert size={18} aria-hidden="true" />{error}{retryText && <button className="text-button" type="button" onClick={() => { setDraft(retryText); setRetryText(null); }}>Повторить</button>}</div>}
@@ -1858,6 +1936,7 @@ export function ChatPage({
             className="primary-button send-button"
             type="submit"
             disabled={!sessionId || sessionStarting || loading || draft.trim().length === 0}
+            onClick={(e) => animateButtonPress(e.currentTarget)}
             aria-label={sessionStarting ? "Подготавливаем сессию" : loading ? "Отправка сообщения" : "Отправить сообщение"}
             title={sessionStarting ? "Подготавливаем сессию" : loading ? "Отправка сообщения" : "Отправить сообщение"}
           >
@@ -1869,7 +1948,10 @@ export function ChatPage({
           <button
             className={liveConversation ? "voice-button recording" : "secondary voice-button"}
             disabled={!liveVoiceSupported || !liveReady || voiceState === "stopping"}
-            onClick={() => void toggleLive()}
+            onClick={(e) => {
+              animateButtonPress(e.currentTarget);
+              void toggleLive();
+            }}
             title={liveReady ? "Непрерывный live-диалог с автоматическими паузами и перебиваниями" : liveStatusLabel}
             type="button"
           >
@@ -1881,7 +1963,10 @@ export function ChatPage({
               className={microphoneMuted ? "secondary voice-button muted" : "secondary voice-button"}
               aria-label={microphoneMuted ? "Включить микрофон" : "Выключить микрофон"}
               aria-pressed={microphoneMuted}
-              onClick={toggleMicrophoneMute}
+              onClick={(e) => {
+                animateButtonPress(e.currentTarget);
+                toggleMicrophoneMute();
+              }}
               title={`Микрофон: ${microphoneMuted ? "включить" : "выключить"} · клавиша ${LIVE_MUTE_HOTKEY.toUpperCase()}`}
               type="button"
             >
@@ -1891,7 +1976,10 @@ export function ChatPage({
           <button
             className="secondary voice-button new-dialog-button"
             disabled={!sessionId || sessionStarting || newDialogPending || voiceState === "recording" || voiceState === "transcribing"}
-            onClick={() => setNewDialogConfirmationOpen(true)}
+            onClick={(e) => {
+              animateButtonPress(e.currentTarget);
+              setNewDialogConfirmationOpen(true);
+            }}
             title="Очистить текущий чат и начать новый разговор"
             type="button"
           >
@@ -1958,13 +2046,21 @@ function EventsPage({
     [events, levelFilter],
   );
 
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (listRef.current && filteredEvents.length > 0) {
+      animateStaggerCards(listRef.current, ".event-row", 30);
+    }
+  }, [filteredEvents, levelFilter]);
+
   return (
     <section className="panel events-panel">
-      {compact ? <div className="events-toolbar"><button className="icon-button" onClick={() => void onRefreshEvents()} aria-label="Обновить журнал событий" title="Обновить журнал событий">
+      {compact ? <div className="events-toolbar"><button className="icon-button" onClick={(e) => { animateButtonPress(e.currentTarget); void onRefreshEvents(); }} aria-label="Обновить журнал событий" title="Обновить журнал событий">
           <RefreshCw size={16} />
         </button></div> : <div className="panel-header">
         <div><h2>Журнал системы</h2><span>Технические события и диагностика</span></div>
-        <button className="secondary" onClick={() => void onRefreshEvents()}>
+        <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void onRefreshEvents(); }}>
           <RefreshCw size={16} aria-hidden="true" />
           Обновить
         </button>
@@ -1978,7 +2074,10 @@ function EventsPage({
             <button
               key={level}
               className={levelFilter === level ? "active" : ""}
-              onClick={() => setLevelFilter(level)}
+              onClick={(e) => {
+                animateTabSwitch(e.currentTarget);
+                setLevelFilter(level);
+              }}
             >
               {labels[level]}
             </button>
@@ -1987,7 +2086,7 @@ function EventsPage({
         )}
       </div>
 
-      <div className="event-list">
+      <div className="event-list" ref={listRef}>
         {filteredEvents.length === 0 && (
           <div className="empty-state"><Archive size={28} aria-hidden="true" /><strong>Событий нет</strong><span>Для этого фильтра пока ничего не найдено.</span></div>
         )}
@@ -2295,12 +2394,24 @@ export function SettingsPage({
   );
 
   const activeSettingsMeta = settingsSectionMeta[activeSection];
+  const settingsContentRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (settingsContentRef.current) {
+      animatePageEnter(settingsContentRef.current);
+      animateStaggerCards(
+        settingsContentRef.current,
+        "fieldset:not([hidden]), .settings-group:not([hidden]), .settings-grid > *, .system-card, .avatar-placement, .avatar-summary-grid, .avatar-options > *",
+        30,
+      );
+    }
+  }, [activeSection]);
 
   return (
     <section className="panel settings-panel">
       <SettingsNavigation current={activeSection} onChange={setActiveSection} />
 
-      <div className="settings-content">
+      <div className="settings-content" ref={settingsContentRef}>
         <header className="settings-heading">
           <div className="settings-heading-row">
             <div>
@@ -2918,7 +3029,10 @@ function SettingsNavigation({ current, onChange }: { current: SettingsSection; o
               type="button"
               className={`settings-nav-direct${current === group.directSection ? " is-active" : ""}`}
               aria-current={current === group.directSection ? "page" : undefined}
-              onClick={() => onChange(group.directSection!)}
+              onClick={(e) => {
+                animateButtonPress(e.currentTarget);
+                onChange(group.directSection!);
+              }}
             >
               <group.icon size={17} aria-hidden="true" />
               <span>{group.label}</span>
@@ -2935,7 +3049,8 @@ function SettingsNavigation({ current, onChange }: { current: SettingsSection; o
               className="settings-nav-group-button"
               aria-expanded={isExpanded}
               aria-controls={childrenId}
-              onClick={() => {
+              onClick={(e) => {
+                animateButtonPress(e.currentTarget);
                 setExpanded((value) => ({ ...value, [group.id]: !isExpanded }));
               }}
             >
@@ -2971,7 +3086,10 @@ function SettingsSectionButton({
       type="button"
       className={`settings-nav-button${section === current ? " is-active" : ""}`}
       aria-current={section === current ? "page" : undefined}
-      onClick={() => onClick(section)}
+      onClick={(e) => {
+        animateTabSwitch(e.currentTarget);
+        onClick(section);
+      }}
     >
       <span>{label}</span>
     </button>
@@ -2981,6 +3099,7 @@ function SettingsSectionButton({
 function ModelManager() {
   const [models, setModels] = useState<ManagedModel[]>([]);
   const [message, setMessage] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -2995,6 +3114,12 @@ function ModelManager() {
     const timer = window.setInterval(() => void refresh(), 1000);
     return () => window.clearInterval(timer);
   }, [refresh]);
+
+  useEffect(() => {
+    if (listRef.current && models.length > 0) {
+      animateStaggerCards(listRef.current, ".settings-group", 40);
+    }
+  }, [models.length]);
 
   const install = async (modelId: string) => {
     setMessage(null);
@@ -3017,8 +3142,8 @@ function ModelManager() {
   };
 
   return (
-    <section className="system-card" aria-label="Управление моделями">
-      <div className="panel-header"><div><h2>Модели</h2><span>Хранятся вне папки приложения</span></div><button className="secondary" onClick={() => void refresh()}><RefreshCw size={16} aria-hidden="true" />Обновить</button></div>
+    <section className="system-card" aria-label="Управление моделями" ref={listRef}>
+      <div className="panel-header"><div><h2>Модели</h2><span>Хранятся вне папки приложения</span></div><button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void refresh(); }}><RefreshCw size={16} aria-hidden="true" />Обновить</button></div>
       {models.map((model) => {
         const percent = model.total_bytes > 0 ? Math.min(100, Math.round((model.downloaded_bytes / model.total_bytes) * 100)) : 0;
         return <div className="settings-group" key={model.id}>
@@ -3027,8 +3152,8 @@ function ModelManager() {
           {model.status === "failed" && <span className="notice">{model.error}</span>}
           {model.status === "downloading" && <progress value={percent} max="100">{percent}%</progress>}
           <div className="model-actions">
-            {!model.installed && <button className="primary-button" onClick={() => void install(model.id)} disabled={model.status === "downloading"}>{model.status === "failed" ? "Повторить загрузку" : "Скачать"}</button>}
-            {model.installed && <button className="secondary" onClick={() => void remove(model.id)}>Удалить</button>}
+            {!model.installed && <button className="primary-button" onClick={(e) => { animateButtonPress(e.currentTarget); void install(model.id); }} disabled={model.status === "downloading"}>{model.status === "failed" ? "Повторить загрузку" : "Скачать"}</button>}
+            {model.installed && <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void remove(model.id); }}>Удалить</button>}
           </div>
           {model.restart_required && model.installed && <small>Перезапустите Iris, чтобы использовать модель.</small>}
         </div>;
@@ -3042,6 +3167,8 @@ function BackupControls() {
   const [backups, setBackups] = useState<Array<{ name: string; size_bytes: number; created_at: string }>>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+
   const refresh = useCallback(async () => {
     try {
       setBackups(await getBackups());
@@ -3050,6 +3177,13 @@ function BackupControls() {
     }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
+
+  useEffect(() => {
+    if (listRef.current && backups.length > 0) {
+      animateStaggerCards(listRef.current, ".info-row", 35);
+    }
+  }, [backups.length]);
+
   const create = async () => {
     setBusy(true);
     setMessage(null);
@@ -3065,8 +3199,8 @@ function BackupControls() {
   };
   return (
     <section className="system-card" aria-label="Резервные копии">
-      <div className="panel-header"><div><h2>Резервные копии</h2><span>Память и настройки, срок хранения — 30 дней</span></div><button className="primary-button" onClick={() => void create()} disabled={busy}>{busy ? "Создаём…" : "Создать копию"}</button></div>
-      {backups.length ? <div className="settings-grid">{backups.slice(0, 3).map((backup) => <InfoRow key={backup.name} label={backup.name} value={`${Math.ceil(backup.size_bytes / 1024)} КБ · ${formatTime(backup.created_at)}`} />)}</div> : <span className="card-empty">Резервных копий пока нет.</span>}
+      <div className="panel-header"><div><h2>Резервные копии</h2><span>Память и настройки, срок хранения — 30 дней</span></div><button className="primary-button" onClick={(e) => { animateButtonPress(e.currentTarget); void create(); }} disabled={busy}>{busy ? "Создаём…" : "Создать копию"}</button></div>
+      {backups.length ? <div className="settings-grid" ref={listRef}>{backups.slice(0, 3).map((backup) => <InfoRow key={backup.name} label={backup.name} value={`${Math.ceil(backup.size_bytes / 1024)} КБ · ${formatTime(backup.created_at)}`} />)}</div> : <span className="card-empty">Резервных копий пока нет.</span>}
       <small>Удаление Iris не удаляет эти данные из профиля Windows.</small>
       {message && <div className="notice">{message}</div>}
     </section>
@@ -3101,9 +3235,9 @@ function SystemMaintenance() {
   return <section className="system-card maintenance-card" aria-label="Обслуживание данных">
     <div className="panel-header"><div><h2>Обслуживание данных</h2><span>Необратимые действия вынесены отдельно</span></div><Database size={20} aria-hidden="true" /></div>
     <div className="maintenance-actions">
-      <button className="secondary" disabled={busy} onClick={() => setPendingAction({ title: "Перестроить индекс памяти?", description: "Сами записи останутся на месте. Iris заново подготовит их для поиска.", action: reindexMemories, success: "Индекс памяти перестроен." })}>Перестроить индекс памяти</button>
-      <button className="secondary danger-button" disabled={busy} onClick={() => setPendingAction({ title: "Очистить долгосрочную память?", description: "История диалогов сохранится, но восстановить записи памяти будет нельзя.", action: clearMemories, success: "Долгосрочная память очищена." })}>Очистить память</button>
-      <button className="danger-button" disabled={busy} onClick={() => setPendingAction({ title: "Сбросить все данные Iris?", description: "История, сводки и долгосрочная память будут удалены без возможности восстановления.", action: resetAllCompanionData, success: "Все данные помощника удалены." })}>Сбросить все данные</button>
+      <button className="secondary" disabled={busy} onClick={(e) => { animateButtonPress(e.currentTarget); setPendingAction({ title: "Перестроить индекс памяти?", description: "Сами записи останутся на месте. Iris заново подготовит их для поиска.", action: reindexMemories, success: "Индекс памяти перестроен." }); }}>Перестроить индекс памяти</button>
+      <button className="secondary danger-button" disabled={busy} onClick={(e) => { animateButtonPress(e.currentTarget); setPendingAction({ title: "Очистить долгосрочную память?", description: "История диалогов сохранится, но восстановить записи памяти будет нельзя.", action: clearMemories, success: "Долгосрочная память очищена." }); }}>Очистить память</button>
+      <button className="danger-button" disabled={busy} onClick={(e) => { animateButtonPress(e.currentTarget); setPendingAction({ title: "Сбросить все данные Iris?", description: "История, сводки и долгосрочная память будут удалены без возможности восстановления.", action: resetAllCompanionData, success: "Все данные помощника удалены." }); }}>Сбросить все данные</button>
     </div>
     {message && <div className="notice" role="status">{message}</div>}
     <AppDialog open={Boolean(pendingAction)} title={pendingAction?.title ?? ""} description={pendingAction?.description} onClose={() => !busy && setPendingAction(null)}>
@@ -3290,10 +3424,10 @@ function AvatarControls({
         </label>
         </div>
       <div className="avatar-test-actions">
-        <button className="primary-button" onClick={() => void run(() => sendAvatarTestPhrase({ text: phrase, emotion }), "Тестовая фраза отправлена.")} disabled={!enabled || busy || !phrase.trim()}>Отправить фразу</button>
-        <button className="secondary" onClick={() => void run(() => sendAvatarTestEmotion({ emotion, intensity: 1 }), "Эмоция отправлена.")} disabled={!enabled || busy}>Отправить эмоцию</button>
-        <button className="secondary" onClick={() => void run(() => sendAvatarTestGesture({ gesture, intensity: motionIntensity, interrupt: true }), "Тестовый жест отправлен.")} disabled={!enabled || busy}>Отправить жест</button>
-        <button className="secondary" onClick={() => void run(stopAvatar, "Движение сброшено.")} disabled={!enabled || busy}>Сбросить движение</button>
+        <button className="primary-button" onClick={(e) => { animateButtonPress(e.currentTarget); void run(() => sendAvatarTestPhrase({ text: phrase, emotion }), "Тестовая фраза отправлена."); }} disabled={!enabled || busy || !phrase.trim()}>Отправить фразу</button>
+        <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void run(() => sendAvatarTestEmotion({ emotion, intensity: 1 }), "Эмоция отправлена."); }} disabled={!enabled || busy}>Отправить эмоцию</button>
+        <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void run(() => sendAvatarTestGesture({ gesture, intensity: motionIntensity, interrupt: true }), "Тестовый жест отправлен."); }} disabled={!enabled || busy}>Отправить жест</button>
+        <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void run(stopAvatar, "Движение сброшено."); }} disabled={!enabled || busy}>Сбросить движение</button>
         </div>
       </details>
       {message && <div className="notice" role="status">{message}</div>}
