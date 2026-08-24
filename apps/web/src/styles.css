@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Shantell+Sans:ital,wght@0,300..800;1,300..800&display=swap');
+
 :root {
   color: var(--color-text);
   background: var(--color-base-deep);
@@ -432,8 +434,9 @@ select { appearance: auto; }
   justify-content: flex-end;
   min-width: 0;
   min-height: 0;
-  max-width: 849px;
-  width: 100%;
+  width: 829px;
+  max-width: 829px;
+  align-self: center;
   margin-inline: auto;
 }
 
@@ -442,15 +445,19 @@ select { appearance: auto; }
   flex: 1 1 auto;
   flex-direction: column;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 28px;
   min-height: 0;
-  overflow-y: auto;
-  padding: 16px 24px 20px;
+  max-height: 560px;
+  overflow-y: hidden;
+  padding: 30px 0 120px 0;
   background: transparent;
-  max-width: 480px;
+  width: 380px;
+  max-width: calc(100% - 40px);
   margin-left: auto;
-  margin-right: 0;
-  width: 100%;
+  margin-right: 24px;
+  box-sizing: border-box;
+  mask-image: linear-gradient(to bottom, transparent 0px, transparent 60px, rgba(0, 0, 0, 0.08) 110px, rgba(0, 0, 0, 0.5) 170px, black 230px, black 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0px, transparent 60px, rgba(0, 0, 0, 0.08) 110px, rgba(0, 0, 0, 0.5) 170px, black 230px, black 100%);
 }
 
 .message {
@@ -462,34 +469,58 @@ select { appearance: auto; }
   background: transparent;
 }
 
-.message.user {
-  color: #796c9c;
-  font-size: 18px;
-  font-weight: 600;
-  opacity: 0.85;
-  margin-bottom: 4px;
-}
-
 .message.assistant {
   color: #ffffff;
+  font-family: var(--font-subtitles, "Shantell Sans", cursive, sans-serif);
+  font-size: clamp(24px, 2.3vw, 28px);
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  animation: message-slide-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transition: transform 0.45s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.45s ease;
+  will-change: transform, opacity;
 }
 
-.message.assistant.is-past {
-  opacity: 0.4;
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 1.35;
-  margin-bottom: 6px;
+@keyframes message-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(22px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .message.assistant.is-latest {
   opacity: 1;
-  font-size: clamp(24px, 2.5vw, 32px);
-  font-weight: 700;
-  line-height: 1.3;
-  letter-spacing: -0.01em;
   color: #ffffff;
-  margin-bottom: 20px;
+  font-size: clamp(24px, 2.3vw, 28px);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.message.assistant.is-previous {
+  opacity: 0.38;
+  color: #ffffff;
+  font-size: clamp(24px, 2.3vw, 28px);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.message.assistant.is-older {
+  opacity: 0.12;
+  color: #ffffff;
+  font-size: clamp(24px, 2.3vw, 28px);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.message.assistant.is-past {
+  color: #ffffff;
+  font-size: clamp(24px, 2.3vw, 28px);
+  font-weight: 700;
+  line-height: 1.35;
 }
 
 .message-role {
@@ -500,28 +531,18 @@ select { appearance: auto; }
   margin: 0;
   line-height: inherit;
   white-space: pre-wrap;
-  font-family: var(--font-ui);
+  font-family: inherit;
 }
 
 .message-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 6px;
-}
-
-.message-meta span {
-  padding: 2px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
-  font-size: 11px;
+  display: none;
 }
 
 .message-error {
   margin-top: 6px;
   color: #f87171;
-  font-size: 13px;
+  font-size: 14px;
+  font-family: var(--font-ui);
 }
 
 .assistant-thinking,
@@ -529,11 +550,13 @@ select { appearance: auto; }
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: rgba(215, 215, 215, 0.7);
-  font-size: 20px;
-  font-weight: 600;
-  margin-bottom: 16px;
+  color: rgba(215, 215, 215, 0.45);
+  font-size: 16px;
+  font-weight: 500;
+  margin-top: 4px;
+  margin-bottom: 8px;
   font-family: var(--font-ui);
+  animation: message-slide-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .assistant-thinking span {
@@ -548,7 +571,8 @@ select { appearance: auto; }
 .chat-composer-container {
   flex: 0 0 auto;
   width: 829px;
-  max-width: calc(100% - 20px);
+  max-width: 829px;
+  align-self: center;
   margin-inline: auto;
   position: relative;
 }
