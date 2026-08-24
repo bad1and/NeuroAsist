@@ -55,7 +55,7 @@ namespace NeuroAsist.Avatar
             // a full-body doll; VTubers instead keep attention on face and upper torso.
             var portraitHeight = bounds.size.y * portraitHeightFraction;
             var halfHeight = portraitHeight * .5f * framingPadding;
-            var portraitWidth = portraitHeight * Mathf.Max(.72f, aspect) * .9f;
+            var portraitWidth = Mathf.Max(bounds.size.x * .92f, portraitHeight * Mathf.Max(.72f, aspect) * .9f);
             var halfWidth = portraitWidth * .5f * framingPadding;
             var distance = Mathf.Max(
                 halfHeight / Mathf.Tan(verticalFovRadians * .5f),
