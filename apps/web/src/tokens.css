@@ -54,6 +54,7 @@
   --shadow-dialog: 0 24px 80px oklch(7% 0.004 265 / 0.56);
 
   --font-ui: "Onest Variable", "Segoe UI Variable", "Segoe UI", sans-serif;
+  --font-subtitles: "Shantell Sans", cursive, sans-serif;
   --font-mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
   --radius-sm: 12px;
   --radius-md: 18px;
