@@ -6,9 +6,12 @@ import {
   CircleAlert,
   Code2,
   Database,
+  Headphones,
   History,
   LayoutDashboard,
+  LogOut,
   MessageCircle,
+  MessageSquarePlus,
   Mic,
   MicOff,
   MonitorCog,
@@ -19,8 +22,30 @@ import {
   Settings,
   SlidersHorizontal,
   Volume2,
+  VolumeX,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import {
+  FigmaStartFlowerIcon,
+  FigmaMicIcon,
+  FigmaHeadphonesIcon,
+  FigmaSettingsIcon,
+  FigmaExitIcon,
+  FigmaNewChatIcon,
+  FigmaSquareButtonBg,
+  FigmaFinishButtonBg,
+  FigmaNewChatButtonBg,
+  FigmaDockBg,
+  FigmaDualMediaButtonBg,
+  FigmaStartButtonBg,
+  FigmaInputPlateFullBg,
+} from "./FigmaIcons";
+
+function IrisPetalsIcon({ size = 20, className = "" }: { size?: number; className?: string }) {
+  return (
+    <FigmaStartFlowerIcon width={size} height={size} className={className} />
+  );
+}
 
 import {
   getAvatarStatus,
@@ -722,7 +747,6 @@ export default function App() {
           <div className="chat-view" hidden={activeView !== "chat"}>
             <Suspense fallback={<LazyPageFallback />}>
               <LazyChatPage
-                key={sessionId ?? "starting"}
                 sessionId={sessionId}
                 sessionStarting={startingSession}
                 isActive={activeView === "chat"}
@@ -733,6 +757,7 @@ export default function App() {
                 showInAppAvatar={settings?.avatar_placement === "in_app" && (settings.avatar_in_app_visible ?? true)}
                 onRefreshEvents={refreshEvents}
                 onOpenMemory={() => switchView("memory")}
+                onOpenSettings={() => switchView("settings")}
                 onStartNewDialog={startFreshSession}
               />
             </Suspense>
@@ -944,6 +969,7 @@ export function ChatPage({
   showInAppAvatar,
   onRefreshEvents,
   onOpenMemory,
+  onOpenSettings,
   onStartNewDialog,
 }: {
   sessionId: string | null;
@@ -956,11 +982,14 @@ export function ChatPage({
   showInAppAvatar: boolean;
   onRefreshEvents: () => Promise<void>;
   onOpenMemory: () => void;
+  onOpenSettings?: () => void;
   onStartNewDialog: () => Promise<void>;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
+  const [isStarted, setIsStarted] = useState(false);
+  const [soundMuted, setSoundMuted] = useState(false);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [retryText, setRetryText] = useState<string | null>(null);
@@ -1238,6 +1267,7 @@ export function ChatPage({
 
   const playAudioUrl = useCallback(
     async (audioUrl: string): Promise<boolean> => {
+      if (soundMuted) return false;
       stopVoicePlayback();
       const audio = new Audio(audioUrl);
       audio.playbackRate = 1;
@@ -1264,12 +1294,12 @@ export function ChatPage({
         return false;
       }
     },
-    [selectedOutputDeviceId, settings?.voice_playback_rate, stopVoicePlayback],
+    [selectedOutputDeviceId, settings?.voice_playback_rate, soundMuted, stopVoicePlayback],
   );
 
   const speakTextInBrowser = useCallback(
     (text: string): boolean => {
-      if (!browserSpeechSupported) {
+      if (soundMuted || !browserSpeechSupported) {
         return false;
       }
       stopVoicePlayback();
@@ -1279,8 +1309,19 @@ export function ChatPage({
       window.speechSynthesis.speak(utterance);
       return true;
     },
-    [browserSpeechSupported, settings?.voice_language, settings?.voice_playback_rate, stopVoicePlayback],
+    [browserSpeechSupported, settings?.voice_language, settings?.voice_playback_rate, soundMuted, stopVoicePlayback],
   );
+
+  const toggleSoundMute = useCallback(() => {
+    setSoundMuted((current) => {
+      const next = !current;
+      if (next) {
+        stopVoicePlayback();
+        interruptAssistantSpeech();
+      }
+      return next;
+    });
+  }, [interruptAssistantSpeech, stopVoicePlayback]);
 
   const ensureLivePlayer = useCallback(() => {
     if (!livePlayerRef.current) {
@@ -1873,6 +1914,30 @@ export function ChatPage({
     return () => window.removeEventListener("keydown", handleMuteHotkey);
   }, [liveConversation, toggleMicrophoneMute]);
 
+  const isDialogActive = isStarted || messages.length > 0 || liveConversation;
+
+  const handleStart = async (event?: React.MouseEvent<HTMLElement>) => {
+    if (event) animateButtonPress(event.currentTarget);
+    setIsStarted(true);
+    if (liveReady && liveVoiceSupported && !liveConversation) {
+      await toggleLive();
+    }
+  };
+
+  const handleFinish = () => {
+    cancelPendingBargeIn();
+    vadRecorderRef.current?.stop();
+    pcmInputRef.current?.close();
+    pcmInputRef.current = null;
+    vadRecorderRef.current = null;
+    setLiveConversation(false);
+    setMicrophoneMuted(false);
+    interruptAssistantSpeech();
+    stopVoicePlayback();
+    setVoiceState("idle");
+    setIsStarted(false);
+  };
+
   const startNewDialog = async () => {
     if (!sessionId || newDialogPending) return;
     setNewDialogPending(true);
@@ -1889,6 +1954,8 @@ export function ChatPage({
       setMicrophoneMuted(false);
       interruptAssistantSpeech();
       await onStartNewDialog();
+      setMessages([]);
+      setIsStarted(false);
       setNewDialogConfirmationOpen(false);
     } catch (newDialogError) {
       setError(newDialogError instanceof Error ? newDialogError.message : "Не удалось начать новый диалог.");
@@ -1897,112 +1964,268 @@ export function ChatPage({
     }
   };
 
+  const statusBadge = useMemo(() => {
+    if (!isDialogActive) {
+      return { text: "Ирис ждёт вас)", dotClass: "purple" };
+    }
+    if (voiceState === "speaking") {
+      return { text: "Ирис говорит", dotClass: "green" };
+    }
+    if (voiceState === "thinking" || loading) {
+      return { text: "Ирис думает", dotClass: "amber" };
+    }
+    if (voiceState === "recording") {
+      return { text: "Ирис слушает", dotClass: "green" };
+    }
+    if (voiceState === "transcribing") {
+      return { text: "Ирис распознаёт", dotClass: "amber" };
+    }
+    const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+    if (lastAssistant?.emotion === "joy" || liveMetadataRef.current.emotion === "joy") {
+      return { text: "Ирис радуется", dotClass: "green" };
+    }
+    return { text: "Ирис радуется", dotClass: "green" };
+  }, [isDialogActive, loading, messages, voiceState]);
+
+  let lastAssistantIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "assistant") {
+      lastAssistantIndex = i;
+      break;
+    }
+  }
+
+  if (!isDialogActive) {
+    return (
+      <section className={`panel chat-panel is-idle${showInAppAvatar && isActive ? " has-in-app-avatar" : ""}`}>
+        <div className="chat-status-pill">
+          <span>{statusBadge.text}</span>
+          <span className={`status-pill-dot ${statusBadge.dotClass}`} />
+        </div>
+        <div className="chat-idle-stage">
+          {showInAppAvatar && isActive && <InAppAvatarHost />}
+          <div className="chat-start-banner">
+            <svg className="banner-bg-svg" width="829" height="121" viewBox="0 0 829 121" fill="none" preserveAspectRatio="none">
+              <defs>
+                <clipPath id="banner-squircle-clip">
+                  <path d="M0 60.5C0 31.8824 0 17.5736 8.7868 8.7868C17.5736 0 31.7157 0 60 0H769C797.284 0 811.426 0 820.213 8.7868C829 17.5736 829 31.8824 829 60.5C829 89.1176 829 103.426 820.213 112.213C811.426 121 797.284 121 769 121H60C31.7157 121 17.5736 121 8.7868 112.213C0 103.426 0 89.1176 0 60.5Z" />
+                </clipPath>
+              </defs>
+              <image href="/figma/До активации диалога/baner.png" width="829" height="121" preserveAspectRatio="xMidYMid slice" clipPath="url(#banner-squircle-clip)" />
+            </svg>
+            <button
+              className="chat-start-button"
+              type="button"
+              onClick={handleStart}
+              title="Начать"
+              aria-label="Начать"
+            >
+              <FigmaStartButtonBg className="btn-shape-bg" preserveAspectRatio="none" />
+              <span className="btn-content">
+                <IrisPetalsIcon size={28} />
+                <span>НАЧАТЬ</span>
+              </span>
+            </button>
+          </div>
+        </div>
+        <AppDialog
+          open={newDialogConfirmationOpen}
+          title="Начать новый диалог?"
+          description="Все сообщения и сводки текущего диалога будут удалены без возможности восстановления. Долгосрочная память Iris останется."
+          onClose={() => !newDialogPending && setNewDialogConfirmationOpen(false)}
+        >
+          <div className="dialog-actions">
+            <button className="secondary" type="button" disabled={newDialogPending} onClick={() => setNewDialogConfirmationOpen(false)}>
+              Отмена
+            </button>
+            <button className="danger-button" type="button" disabled={newDialogPending} onClick={() => void startNewDialog()}>
+              {newDialogPending ? "Создаю…" : "Начать новый диалог"}
+            </button>
+          </div>
+        </AppDialog>
+      </section>
+    );
+  }
+
   return (
-    <section className={`panel chat-panel${showInAppAvatar && isActive ? " has-in-app-avatar" : ""}`}>
+    <section className={`panel chat-panel is-active${showInAppAvatar && isActive ? " has-in-app-avatar" : ""}`}>
+      <div className="chat-status-pill">
+        <span>{statusBadge.text}</span>
+        <span className={`status-pill-dot ${statusBadge.dotClass}`} />
+      </div>
       {showInAppAvatar && isActive && <InAppAvatarHost />}
       <div className="chat-content">
-      {memoryNotice && <div className="notice" role="status">{memoryNotice}<button className="text-button" onClick={onOpenMemory}>Открыть память</button></div>}
-      <div className="message-list" ref={listRef}>
-        {messages.length === 0 && (
-          <div className="empty-state">
-            <MessageCircle size={28} aria-hidden="true" />
-            <strong>Начните разговор</strong>
-            <span>Напишите сообщение или запишите голосовое.</span>
+        {memoryNotice && (
+          <div className="notice" role="status">
+            {memoryNotice}
+            <button className="text-button" onClick={onOpenMemory}>Открыть память</button>
           </div>
         )}
-        {messages.map((message) => (
-          <article className={`message ${message.role}`} key={message.id}>
-            <div className="message-role">{message.role === "user" ? message.speakerLabel ?? "Вы" : "Iris"}</div>
-            <p data-i18n-skip>{message.content}</p>
-            {message.ttsError && <div className="message-error" data-i18n-skip>{message.ttsError}</div>}
-          </article>
-        ))}
-        {loading && <div className="assistant-thinking" ref={thinkingRef} role="status"><span aria-hidden="true" /><span aria-hidden="true" /><span aria-hidden="true" />Iris печатает</div>}
-      </div>
-
-      {error && <div className="error-banner" role="alert"><CircleAlert size={18} aria-hidden="true" />{error}{retryText && <button className="text-button" type="button" onClick={() => { setDraft(retryText); setRetryText(null); }}>Повторить</button>}</div>}
-
-      <div className="chat-composer">
-        <form className="chat-form" onSubmit={onSubmit}>
-          <textarea
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={submitOnEnter}
-            placeholder="Напишите сообщение…"
-            rows={2}
-            title="Enter — отправить сообщение; Shift+Enter — новая строка"
-          />
-          <button
-            className="primary-button send-button"
-            type="submit"
-            disabled={!sessionId || sessionStarting || loading || draft.trim().length === 0}
-            onClick={(e) => animateButtonPress(e.currentTarget)}
-            aria-label={sessionStarting ? "Подготавливаем сессию" : loading ? "Отправка сообщения" : "Отправить сообщение"}
-            title={sessionStarting ? "Подготавливаем сессию" : loading ? "Отправка сообщения" : "Отправить сообщение"}
-          >
-            <SendHorizontal size={18} aria-hidden="true" />
-          </button>
-        </form>
-
-        <div className="voice-controls">
-          <button
-            className={liveConversation ? "voice-button recording" : "secondary voice-button"}
-            disabled={!liveVoiceSupported || !liveReady || voiceState === "stopping"}
-            onClick={(e) => {
-              animateButtonPress(e.currentTarget);
-              void toggleLive();
-            }}
-            title={liveReady ? "Непрерывный live-диалог с автоматическими паузами и перебиваниями" : liveStatusLabel}
-            type="button"
-          >
-            <Mic size={18} aria-hidden="true" />
-            {liveConversation ? "Live: вкл." : "Live"}
-          </button>
-          {liveConversation && (
-            <button
-              className={microphoneMuted ? "secondary voice-button muted" : "secondary voice-button"}
-              aria-label={microphoneMuted ? "Включить микрофон" : "Выключить микрофон"}
-              aria-pressed={microphoneMuted}
-              onClick={(e) => {
-                animateButtonPress(e.currentTarget);
-                toggleMicrophoneMute();
-              }}
-              title={`Микрофон: ${microphoneMuted ? "включить" : "выключить"} · клавиша ${LIVE_MUTE_HOTKEY.toUpperCase()}`}
-              type="button"
-            >
-              {microphoneMuted ? <MicOff size={18} aria-hidden="true" /> : <Mic size={18} aria-hidden="true" />}
-            </button>
+        <div className="message-list" ref={listRef}>
+          {messages.map((message, index) => {
+            const isLatest = message.role === "assistant" && index === lastAssistantIndex;
+            return (
+              <article
+                className={`message ${message.role}${message.role === "assistant" ? (isLatest ? " is-latest" : " is-past") : ""}`}
+                key={message.id}
+              >
+                <div className="message-role">{message.role === "user" ? message.speakerLabel ?? "Вы" : "Iris"}</div>
+                <p data-i18n-skip>{message.content}</p>
+                {message.ttsError && <div className="message-error" data-i18n-skip>{message.ttsError}</div>}
+              </article>
+            );
+          })}
+          {loading && (
+            <div className="assistant-thinking" ref={thinkingRef} role="status">
+              <span aria-hidden="true" /><span aria-hidden="true" /><span aria-hidden="true" />
+              Думаю . . .
+            </div>
           )}
-          <button
-            className="secondary voice-button new-dialog-button"
-            disabled={!sessionId || sessionStarting || newDialogPending || voiceState === "recording" || voiceState === "transcribing"}
-            onClick={(e) => {
-              animateButtonPress(e.currentTarget);
-              setNewDialogConfirmationOpen(true);
-            }}
-            title="Очистить текущий чат и начать новый разговор"
-            type="button"
-          >
-            Новый диалог
-          </button>
-          {(liveConversation || voiceState !== "idle" || !liveVoiceSupported || !liveReady) && <span>
-            {!liveVoiceSupported ? "Live-аудио недоступно" : liveConversation ? conversationStatus : liveStatusLabel}
-          </span>}
+          {!loading && voiceState === "recording" && (
+            <div className="chat-subtitle-status">Слушаю . . .</div>
+          )}
+          {!loading && voiceState === "transcribing" && (
+            <div className="chat-subtitle-status">Распознаю . . .</div>
+          )}
         </div>
-        {import.meta.env.DEV && liveConversation && conversationDebug && (
-          <details className="conversation-debug">
-            <summary>Диагностика живого разговора</summary>
-            <dl>
-              <div><dt>Phase / generation</dt><dd>{conversationDebug.phase} / {conversationDebug.generation}</dd></div>
-              <div><dt>Decision</dt><dd>{conversationDebug.last_decision?.action ?? "—"} · {conversationDebug.last_decision?.reason ?? "—"} · {conversationDebug.last_decision_source ?? "—"}</dd></div>
-              <div><dt>Speaker</dt><dd>{conversationDebug.last_speaker_estimate?.role ?? "—"} ({conversationDebug.last_speaker_estimate?.confidence?.toFixed(2) ?? "—"})</dd></div>
-              <div><dt>Detector</dt><dd>{conversationDebug.turn_detector?.provider ?? "—"}{conversationDebug.turn_detector?.fallback ? " · fallback" : ""}</dd></div>
-              <div><dt>Budget</dt><dd>{Math.round((conversationDebug.speech_budget?.iris_share_2m ?? 0) * 100)}% · {conversationDebug.speech_budget?.initiative_count_10m ?? 0}/2</dd></div>
-              <div><dt>Deferred / tasks</dt><dd>{conversationDebug.deferred_reactions?.length ?? 0} / {conversationDebug.active_tasks?.length ?? 0}</dd></div>
-            </dl>
-          </details>
+
+        {error && (
+          <div className="error-banner" role="alert">
+            <CircleAlert size={18} aria-hidden="true" />
+            {error}
+            {retryText && (
+              <button className="text-button" type="button" onClick={() => { setDraft(retryText); setRetryText(null); }}>
+                Повторить
+              </button>
+            )}
+          </div>
         )}
-      </div>
+
+        <div className="chat-composer-container">
+          <form className="chat-form" onSubmit={onSubmit}>
+            <div className="chat-composer">
+              <FigmaInputPlateFullBg className="chat-composer-bg" preserveAspectRatio="none" />
+              <div className="chat-composer-inner">
+                <textarea
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={submitOnEnter}
+                  placeholder="Ввод сообщения..."
+                  rows={1}
+                  title="Enter — отправить сообщение; Shift+Enter — новая строка"
+                />
+                <button
+                  className="primary-button send-button"
+                  type="submit"
+                  disabled={!sessionId || sessionStarting || loading || draft.trim().length === 0}
+                  onClick={(e) => animateButtonPress(e.currentTarget)}
+                  aria-label={sessionStarting ? "Подготавливаем сессию" : loading ? "Отправка сообщения" : "Отправить сообщение"}
+                  title={sessionStarting ? "Подготавливаем сессию" : loading ? "Отправка сообщения" : "Отправить сообщение"}
+                >
+                  <SendHorizontal size={18} aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+
+            <div className="chat-dock-toolbar voice-controls">
+              <FigmaDockBg className="dock-bg-svg" preserveAspectRatio="none" />
+              <div className="dock-left-actions">
+                <div className="dock-dual-pill">
+                  <FigmaDualMediaButtonBg className="dual-pill-bg" preserveAspectRatio="none" />
+                  <button
+                    className={`dock-dual-btn voice-button ${liveConversation ? "recording" : ""}`}
+                    disabled={!liveVoiceSupported || !liveReady || voiceState === "stopping"}
+                    onClick={(e) => {
+                      animateButtonPress(e.currentTarget);
+                      void toggleLive();
+                    }}
+                    title={liveReady ? "Live" : liveStatusLabel}
+                    aria-label="Live"
+                    type="button"
+                  >
+                    <FigmaMicIcon width={24} height={26} />
+                  </button>
+                  <button
+                    className={`dock-dual-btn ${soundMuted ? "is-muted" : ""}`}
+                    onClick={(e) => {
+                      animateButtonPress(e.currentTarget);
+                      toggleSoundMute();
+                    }}
+                    title={soundMuted ? "Звук выключен" : "Звук включён"}
+                    aria-label={soundMuted ? "Звук выключен" : "Звук включён"}
+                    type="button"
+                  >
+                    <FigmaHeadphonesIcon width={26} height={25} />
+                  </button>
+                </div>
+
+                <button
+                  className="dock-icon-btn"
+                  onClick={(e) => {
+                    animateButtonPress(e.currentTarget);
+                    onOpenSettings?.();
+                  }}
+                  title="Настройки"
+                  aria-label="Параметры"
+                  type="button"
+                >
+                  <FigmaSquareButtonBg className="btn-shape-bg" preserveAspectRatio="none" />
+                  <span className="btn-content"><FigmaSettingsIcon width={26} height={26} /></span>
+                </button>
+              </div>
+
+              <button
+                className="dock-finish-btn"
+                type="button"
+                onClick={(e) => {
+                  animateButtonPress(e.currentTarget);
+                  handleFinish();
+                }}
+                title="Завершить"
+                aria-label="Завершить"
+              >
+                <FigmaFinishButtonBg className="btn-shape-bg" preserveAspectRatio="none" />
+                <span className="btn-content">
+                  <FigmaExitIcon />
+                  <span>Завершить</span>
+                </span>
+              </button>
+
+              <button
+                className="dock-new-dialog-btn new-dialog-button"
+                disabled={!sessionId || sessionStarting || newDialogPending || voiceState === "recording" || voiceState === "transcribing"}
+                onClick={(e) => {
+                  animateButtonPress(e.currentTarget);
+                  setNewDialogConfirmationOpen(true);
+                }}
+                title="Новый диалог"
+                aria-label="Новый диалог"
+                type="button"
+              >
+                <FigmaNewChatButtonBg className="btn-shape-bg" preserveAspectRatio="none" />
+                <span className="btn-content">
+                  <FigmaNewChatIcon />
+                  <span>Новый диалог</span>
+                </span>
+              </button>
+            </div>
+          </form>
+        </div>
+
+          {import.meta.env.DEV && liveConversation && conversationDebug && (
+            <details className="conversation-debug">
+              <summary>Диагностика живого разговора</summary>
+              <dl>
+                <div><dt>Phase / generation</dt><dd>{conversationDebug.phase} / {conversationDebug.generation}</dd></div>
+                <div><dt>Decision</dt><dd>{conversationDebug.last_decision?.action ?? "—"} · {conversationDebug.last_decision?.reason ?? "—"} · {conversationDebug.last_decision_source ?? "—"}</dd></div>
+                <div><dt>Speaker</dt><dd>{conversationDebug.last_speaker_estimate?.role ?? "—"} ({conversationDebug.last_speaker_estimate?.confidence?.toFixed(2) ?? "—"})</dd></div>
+                <div><dt>Detector</dt><dd>{conversationDebug.turn_detector?.provider ?? "—"}{conversationDebug.turn_detector?.fallback ? " · fallback" : ""}</dd></div>
+                <div><dt>Budget</dt><dd>{Math.round((conversationDebug.speech_budget?.iris_share_2m ?? 0) * 100)}% · {conversationDebug.speech_budget?.initiative_count_10m ?? 0}/2</dd></div>
+                <div><dt>Deferred / tasks</dt><dd>{conversationDebug.deferred_reactions?.length ?? 0} / {conversationDebug.active_tasks?.length ?? 0}</dd></div>
+              </dl>
+            </details>
+          )}
+        </div>
       <AppDialog
         open={newDialogConfirmationOpen}
         title="Начать новый диалог?"
@@ -2018,7 +2241,6 @@ export function ChatPage({
           </button>
         </div>
       </AppDialog>
-      </div>
     </section>
   );
 }
