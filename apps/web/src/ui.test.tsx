@@ -103,6 +103,8 @@ describe("русский интерфейс", () => {
     fireEvent.click(screen.getByRole("button", { name: "Диалог" }));
     expect(container.querySelector("main.workspace-chat")).toBeInTheDocument();
     expect(container.querySelector(".workspace-chat > .chat-view")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Начать" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Начать" }));
     expect(await screen.findByRole("button", { name: "Live" })).toBeInTheDocument();
     expect(container.querySelector(".chat-panel .message-list")).toBeInTheDocument();
     expect(container.querySelector(".chat-panel .chat-composer")).toBeInTheDocument();
@@ -114,8 +116,9 @@ describe("русский интерфейс", () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Начать" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Новый диалог" })).not.toBeDisabled());
-    const composer = await screen.findByPlaceholderText("Напишите сообщение…");
+    const composer = await screen.findByPlaceholderText("Ввод сообщения...");
 
     const enterEvent = createEvent.keyDown(composer, { key: "Enter", isComposing: false });
     fireEvent(composer, enterEvent);
@@ -269,7 +272,8 @@ describe("русский интерфейс", () => {
     expect(await screen.findByText("Идеи интерфейса")).toBeInTheDocument();
     expect(screen.getByText("Iris самостоятельно поддерживает актуальность фактов.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Начать диалог/ }));
-    expect(screen.getByPlaceholderText("Напишите сообщение…")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Начать" }));
+    expect(await screen.findByPlaceholderText("Ввод сообщения...")).toBeInTheDocument();
   });
 
   it("открывает системный подраздел без отдельного пункта событий", async () => {
@@ -325,6 +329,8 @@ describe("русский интерфейс", () => {
     expect(screen.getByText(/28 messages/)).toBeInTheDocument();
 
     fireEvent.click(within(applicationNavigation).getByRole("button", { name: "Chat" }));
+    expect(await screen.findByRole("button", { name: "Start" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
     expect(await screen.findByRole("button", { name: "New chat" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
@@ -551,6 +557,7 @@ describe("русский интерфейс", () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Начать" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Новый диалог" })).not.toBeDisabled());
     fireEvent.click(screen.getByRole("button", { name: "Новый диалог" }));
     expect(await screen.findByRole("heading", { name: "Начать новый диалог?" })).toBeInTheDocument();
