@@ -987,6 +987,7 @@ export function ChatPage({
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
+  const [liveSttTranscript, setLiveSttTranscript] = useState("");
   const [loading, setLoading] = useState(false);
   const [isStarted, setIsStarted] = useState(false);
   const [soundMuted, setSoundMuted] = useState(false);
@@ -1392,6 +1393,7 @@ export function ChatPage({
     if (!liveSocketRef.current) {
       const onEvent = (event: VoiceServerEvent) => {
         if (event.type === "voice.utterance.started") {
+          setLiveSttTranscript("");
           playbackSegmentTextsRef.current = [];
           activeVoiceGenerationRef.current = event.generation;
           playbackCoordinatorRef.current.acquire(
@@ -1782,6 +1784,7 @@ export function ChatPage({
       await ensureLiveVoice();
       const input = new PcmInputClient(voiceInputWebSocketUrl(sessionId, 3), (event) => {
         if (event.type === "voice.input.transcript" && event.transcript) {
+          setLiveSttTranscript(event.transcript);
           setMessages((current) => [...current, {
             id: crypto.randomUUID(),
             role: "user",
@@ -1793,6 +1796,7 @@ export function ChatPage({
             updateConversationStatus("Iris отвечает");
           }
         } else if (event.type === "voice.input.speech_started") {
+          setLiveSttTranscript("");
           updateConversationStatus("Слышу вас");
         } else if (event.type === "voice.input.finalizing") {
           updateConversationStatus("Распознаю");
@@ -2062,14 +2066,16 @@ export function ChatPage({
           </div>
         )}
         <div className="message-list" ref={listRef}>
-          {messages.map((message, index) => {
-            const isLatest = message.role === "assistant" && index === lastAssistantIndex;
+          {messages.filter((message) => message.role === "assistant").map((message, index, assistantMessages) => {
+            const diffFromLatest = assistantMessages.length - 1 - index;
+            const isLatest = diffFromLatest === 0;
+            const isPrevious = diffFromLatest === 1;
+            const tierClass = isLatest ? "is-latest" : isPrevious ? "is-previous is-past" : "is-older is-past";
             return (
               <article
-                className={`message ${message.role}${message.role === "assistant" ? (isLatest ? " is-latest" : " is-past") : ""}`}
+                className={`message assistant ${tierClass}`}
                 key={message.id}
               >
-                <div className="message-role">{message.role === "user" ? message.speakerLabel ?? "Вы" : "Iris"}</div>
                 <p data-i18n-skip>{message.content}</p>
                 {message.ttsError && <div className="message-error" data-i18n-skip>{message.ttsError}</div>}
               </article>
@@ -2077,7 +2083,6 @@ export function ChatPage({
           })}
           {loading && (
             <div className="assistant-thinking" ref={thinkingRef} role="status">
-              <span aria-hidden="true" /><span aria-hidden="true" /><span aria-hidden="true" />
               Думаю . . .
             </div>
           )}
@@ -2107,17 +2112,18 @@ export function ChatPage({
               <FigmaInputPlateFullBg className="chat-composer-bg" preserveAspectRatio="none" />
               <div className="chat-composer-inner">
                 <textarea
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
+                  value={liveSttTranscript || draft}
+                  onChange={(event) => !liveSttTranscript && setDraft(event.target.value)}
                   onKeyDown={submitOnEnter}
-                  placeholder="Ввод сообщения..."
+                  placeholder={liveSttTranscript ? "" : "Ввод сообщения..."}
                   rows={1}
+                  readOnly={Boolean(liveSttTranscript)}
                   title="Enter — отправить сообщение; Shift+Enter — новая строка"
                 />
                 <button
                   className="primary-button send-button"
                   type="submit"
-                  disabled={!sessionId || sessionStarting || loading || draft.trim().length === 0}
+                  disabled={!sessionId || sessionStarting || loading || (!draft.trim().length && !liveSttTranscript.trim().length)}
                   onClick={(e) => animateButtonPress(e.currentTarget)}
                   aria-label={sessionStarting ? "Подготавливаем сессию" : loading ? "Отправка сообщения" : "Отправить сообщение"}
                   title={sessionStarting ? "Подготавливаем сессию" : loading ? "Отправка сообщения" : "Отправить сообщение"}

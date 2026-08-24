@@ -223,7 +223,7 @@ describe("русский интерфейс", () => {
 
   it("сохраняет открытый чат при переходе между разделами", async () => {
     api.getTimelineMessages.mockResolvedValue({
-      items: [{ id: "saved-message", role: "user", content: "Не теряй меня", metadata: {} }],
+      items: [{ id: "saved-message", role: "assistant", content: "Не теряй меня", metadata: {} }],
       next_offset: null,
     });
     render(<App />);
