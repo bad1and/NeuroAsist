@@ -7,7 +7,7 @@ Iris — спокойное графитовое рабочее простран
 ## Цвет
 
 - Основа: нейтральный графит `oklch(22% 0.008 265)`.
-- Фирменный акцент: `#826AD9`.
+- Фирменный акцент: `#695B86`.
 - Основной текст: `#ECEEF3`.
 - Ошибка, предупреждение и успех имеют отдельные семантические токены и никогда не передаются только цветом.
 - Акцент применяется к текущему разделу, главному действию и фокусу. Большие поверхности не заливаются акцентом.
@@ -65,9 +65,9 @@ Iris — спокойное графитовое рабочее простран
   --color-rule: oklch(48% 0.012 265 / 0.34);
   --color-text: oklch(95% 0.006 265);
   --color-text-soft: oklch(80% 0.01 265);
-  --color-accent: oklch(61% 0.15 289);
+  --color-accent: oklch(50.2% 0.069 298.9);
   --color-accent-ink: oklch(98% 0.008 265);
-  --color-focus: oklch(82% 0.13 289);
+  --color-focus: oklch(76% 0.069 298.9);
   --font-ui: "Onest Variable", "Segoe UI Variable", sans-serif;
   --font-mono: "Cascadia Mono", Consolas, monospace;
   --spacing-3xs: 0.25rem;
@@ -94,9 +94,9 @@ Iris — спокойное графитовое рабочее простран
     "surface-raised": { "$value": "oklch(30% 0.01 265)", "$type": "color" },
     "text": { "$value": "oklch(95% 0.006 265)", "$type": "color" },
     "text-soft": { "$value": "oklch(80% 0.01 265)", "$type": "color" },
-    "accent": { "$value": "oklch(61% 0.15 289)", "$type": "color" },
+    "accent": { "$value": "oklch(50.2% 0.069 298.9)", "$type": "color" },
     "accent-ink": { "$value": "oklch(98% 0.008 265)", "$type": "color" },
-    "focus": { "$value": "oklch(82% 0.13 289)", "$type": "color" }
+    "focus": { "$value": "oklch(76% 0.069 298.9)", "$type": "color" }
   },
   "font": {
     "ui": { "$value": "Onest Variable, Segoe UI Variable, sans-serif", "$type": "fontFamily" },
@@ -127,19 +127,19 @@ Iris — спокойное графитовое рабочее простран
   --card-foreground: 95% 0.006 265;
   --popover: 30% 0.01 265;
   --popover-foreground: 95% 0.006 265;
-  --primary: 61% 0.15 289;
+  --primary: 50.2% 0.069 298.9;
   --primary-foreground: 98% 0.008 265;
   --secondary: 34% 0.011 265;
   --secondary-foreground: 95% 0.006 265;
   --muted: 34% 0.011 265;
   --muted-foreground: 80% 0.01 265;
-  --accent: 61% 0.15 289;
+  --accent: 50.2% 0.069 298.9;
   --accent-foreground: 98% 0.008 265;
   --destructive: 69% 0.17 25;
   --destructive-foreground: 98% 0.008 265;
   --border: 48% 0.012 265;
   --input: 62% 0.012 265;
-  --ring: 82% 0.13 289;
+  --ring: 76% 0.069 298.9;
   --radius: 0.625rem;
 }
 ```
