@@ -2139,13 +2139,21 @@ export function ChatPage({
                 <div className="dock-dual-pill">
                   <FigmaDualMediaButtonBg className="dual-pill-bg" preserveAspectRatio="none" />
                   <button
-                    className={`dock-dual-btn voice-button ${liveConversation ? "recording" : ""}`}
+                    className={`dock-dual-btn ${microphoneMuted ? "is-muted" : ""}`}
                     disabled={!liveVoiceSupported || !liveReady || voiceState === "stopping"}
                     onClick={(e) => {
                       animateButtonPress(e.currentTarget);
-                      void toggleLive();
+                      if (!liveConversation) {
+                        void toggleLive();
+                      } else {
+                        toggleMicrophoneMute();
+                      }
                     }}
-                    title={liveReady ? "Live" : liveStatusLabel}
+                    title={
+                      microphoneMuted
+                        ? "Микрофон выключен (нажмите, чтобы включить)"
+                        : "Микрофон включён (нажмите, чтобы выключить)"
+                    }
                     aria-label="Live"
                     type="button"
                   >
@@ -2157,7 +2165,7 @@ export function ChatPage({
                       animateButtonPress(e.currentTarget);
                       toggleSoundMute();
                     }}
-                    title={soundMuted ? "Звук выключен" : "Звук включён"}
+                    title={soundMuted ? "Звук выключен (нажмите, чтобы включить)" : "Звук включён (нажмите, чтобы выключить)"}
                     aria-label={soundMuted ? "Звук выключен" : "Звук включён"}
                     type="button"
                   >

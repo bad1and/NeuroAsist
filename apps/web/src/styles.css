@@ -382,11 +382,10 @@ select { appearance: auto; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   filter: drop-shadow(0 4px 16px rgba(0, 0, 0, 0.25));
   cursor: pointer;
-  transition: transform 0.15s ease, filter 0.15s ease;
+  user-select: none;
+  transition: filter 0.15s ease;
 }
 
 .chat-start-button .btn-shape-bg {
@@ -395,21 +394,20 @@ select { appearance: auto; }
   width: 100%;
   height: 100%;
   pointer-events: none;
-  color: rgba(215, 215, 215, 0.1);
+  color: rgba(255, 255, 255, 0.1);
   transition: color 0.15s ease;
 }
 
 .chat-start-button:hover:not(:disabled) .btn-shape-bg {
-  color: rgba(215, 215, 215, 0.2);
+  color: rgba(255, 255, 255, 0.2);
 }
 
 .chat-start-button:hover:not(:disabled) {
-  transform: translateY(-1px) scale(1.02);
   filter: drop-shadow(0 6px 20px rgba(0, 0, 0, 0.35));
 }
 
 .chat-start-button:active:not(:disabled) {
-  transform: translateY(1px) scale(0.98);
+  transform: scale(0.98);
 }
 
 .chat-start-button .btn-content {
@@ -423,6 +421,11 @@ select { appearance: auto; }
   font-size: 20px;
   font-weight: 700;
   letter-spacing: 0.05em;
+  transition: color 0.15s ease;
+}
+
+.chat-start-button:hover:not(:disabled) .btn-content {
+  color: #FFFFFF;
 }
 
 .chat-content {
@@ -669,13 +672,13 @@ select { appearance: auto; }
   margin: 0;
   width: 24px;
   height: 24px;
-  transition: transform 0.15s ease, opacity 0.15s ease;
+  transition: opacity 0.15s ease, color 0.15s ease;
   opacity: 0.7;
 }
 
 .chat-composer-inner .send-button:hover:not(:disabled) {
   opacity: 1;
-  transform: scale(1.1);
+  color: #FFFFFF;
 }
 
 .chat-dock-toolbar {
@@ -720,6 +723,7 @@ select { appearance: auto; }
   min-width: 132px;
   min-height: 66px;
   filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.25));
+  user-select: none;
 }
 
 .dual-pill-bg {
@@ -738,33 +742,42 @@ select { appearance: auto; }
   height: 66px;
   background: transparent;
   border: none;
+  outline: none;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: #D7D7D7;
   cursor: pointer;
-  border-radius: 20px;
-  transition: background-color 0.15s ease, transform 0.15s ease, color 0.15s ease;
+  border-radius: 28px;
+  user-select: none;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .dock-dual-btn:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.08);
+  color: #FFFFFF;
 }
 
-.dock-dual-btn:active:not(:disabled) {
-  transform: scale(0.96);
+.dock-dual-btn:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
 }
 
 .dock-dual-btn.recording,
 .dock-dual-btn.is-active {
-  background: #6F865B;
-  color: #ffffff;
+  background: transparent;
+  color: #D7D7D7;
 }
 
 .dock-dual-btn.is-muted {
-  background: rgba(239, 68, 68, 0.25);
-  color: #f87171;
+  background: transparent;
+  color: #EF4444;
+}
+
+.dock-dual-btn.is-muted:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.12);
+  color: #F87171;
 }
 
 .dock-icon-btn {
@@ -775,13 +788,15 @@ select { appearance: auto; }
   min-height: 66px;
   background: transparent;
   border: none;
+  outline: none;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.25));
-  transition: transform 0.15s ease, filter 0.15s ease;
+  user-select: none;
+  transition: filter 0.15s ease;
 }
 
 .dock-icon-btn .btn-shape-bg {
@@ -796,14 +811,6 @@ select { appearance: auto; }
 
 .dock-icon-btn:hover:not(:disabled) .btn-shape-bg {
   color: #363940;
-}
-
-.dock-icon-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-}
-
-.dock-icon-btn:active:not(:disabled) {
-  transform: translateY(1px);
 }
 
 .dock-icon-btn.recording .btn-shape-bg,
@@ -824,13 +831,15 @@ select { appearance: auto; }
   min-height: 81px;
   background: transparent;
   border: none;
+  outline: none;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.25));
-  transition: transform 0.15s ease;
+  user-select: none;
+  transition: filter 0.15s ease;
 }
 
 .dock-finish-btn .btn-shape-bg {
@@ -847,14 +856,6 @@ select { appearance: auto; }
   color: #986768;
 }
 
-.dock-finish-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-}
-
-.dock-finish-btn:active:not(:disabled) {
-  transform: translateY(1px);
-}
-
 .dock-new-dialog-btn {
   position: relative;
   z-index: 1;
@@ -864,13 +865,15 @@ select { appearance: auto; }
   min-height: 66px;
   background: transparent;
   border: none;
+  outline: none;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.25));
-  transition: transform 0.15s ease;
+  user-select: none;
+  transition: filter 0.15s ease;
 }
 
 .dock-new-dialog-btn .btn-shape-bg {
@@ -885,14 +888,6 @@ select { appearance: auto; }
 
 .dock-new-dialog-btn:hover:not(:disabled) .btn-shape-bg {
   color: #363940;
-}
-
-.dock-new-dialog-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-}
-
-.dock-new-dialog-btn:active:not(:disabled) {
-  transform: translateY(1px);
 }
 
 .btn-content {
@@ -1926,7 +1921,6 @@ textarea::placeholder {
 
   .primary-button:hover:not(:disabled) {
     background: var(--color-accent-hover);
-    transform: translateY(-1px);
   }
 
   .secondary:hover:not(:disabled),
