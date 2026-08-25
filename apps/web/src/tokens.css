@@ -12,12 +12,12 @@
   --color-text: oklch(95% 0.006 265);
   --color-text-soft: oklch(80% 0.01 265);
   --color-text-muted: oklch(69% 0.012 265);
-  --color-accent: oklch(61% 0.15 289);
-  --color-accent-hover: oklch(66% 0.15 289);
-  --color-accent-visual: oklch(70% 0.13 300);
-  --color-accent-soft: oklch(61% 0.15 289 / 0.17);
+  --color-accent: oklch(50.2% 0.069 298.9);
+  --color-accent-hover: oklch(55.2% 0.069 298.9);
+  --color-accent-visual: oklch(58% 0.065 298.9);
+  --color-accent-soft: oklch(50.2% 0.069 298.9 / 0.17);
   --color-accent-ink: oklch(98% 0.008 265);
-  --color-focus: oklch(82% 0.13 289);
+  --color-focus: oklch(76% 0.069 298.9);
   --color-success: oklch(73% 0.13 155);
   --color-warning: oklch(80% 0.13 85);
   --color-danger: oklch(69% 0.17 25);
@@ -32,11 +32,11 @@
   --color-sidebar: oklch(18.5% 0.007 265);
   --color-chrome: oklch(22% 0.008 265 / 0.96);
   --color-backdrop: oklch(8% 0.005 265 / 0.72);
-  --color-accent-border: oklch(61% 0.15 289 / 0.38);
-  --color-accent-orbit: oklch(61% 0.15 289 / 0.22);
-  --color-accent-bloom: oklch(61% 0.15 289 / 0.12);
-  --color-accent-glow: oklch(61% 0.15 289 / 0.14);
-  --color-accent-glow-soft: oklch(61% 0.15 289 / 0.08);
+  --color-accent-border: oklch(50.2% 0.069 298.9 / 0.38);
+  --color-accent-orbit: oklch(50.2% 0.069 298.9 / 0.22);
+  --color-accent-bloom: oklch(50.2% 0.069 298.9 / 0.12);
+  --color-accent-glow: oklch(50.2% 0.069 298.9 / 0.14);
+  --color-accent-glow-soft: oklch(50.2% 0.069 298.9 / 0.08);
   --color-shadow: oklch(7% 0.004 265 / 0.38);
   --shadow-surface:
     0 1px 0 oklch(100% 0 0 / 0.035) inset,
@@ -49,7 +49,7 @@
   --shadow-row:
     0 1px 0 oklch(100% 0 0 / 0.025) inset,
     0 3px 10px oklch(7% 0.004 265 / 0.16);
-  --shadow-accent: 0 10px 28px oklch(38% 0.13 289 / 0.32);
+  --shadow-accent: 0 10px 28px oklch(35% 0.069 298.9 / 0.32);
   --shadow-startup: 0 28px 80px oklch(7% 0.004 265 / 0.42);
   --shadow-dialog: 0 24px 80px oklch(7% 0.004 265 / 0.56);
 
