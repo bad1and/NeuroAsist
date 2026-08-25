@@ -131,6 +131,19 @@ describe("русский интерфейс", () => {
     expect(shiftEnterEvent.defaultPrevented).toBe(false);
   });
 
+  it("позволяет свободно вводить текст в поле сообщения и обновляет значение", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Начать" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Новый диалог" })).not.toBeDisabled());
+    const composer = await screen.findByPlaceholderText("Ввод сообщения...");
+
+    fireEvent.focus(composer);
+    fireEvent.change(composer, { target: { value: "Привет, Iris!" } });
+    expect(composer).toHaveValue("Привет, Iris!");
+  });
+
   it("переключает sidebar в компактный режим без смены активного раздела", async () => {
     const { container } = render(<App />);
 

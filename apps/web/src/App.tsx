@@ -1018,11 +1018,34 @@ export function ChatPage({
   const activeVoiceGenerationRef = useRef<number | undefined>(undefined);
   const conversationStatusTimerRef = useRef<number | null>(null);
   const bargeInTimerRef = useRef<number | null>(null);
+  const sttClearTimerRef = useRef<number | null>(null);
   const pendingTextDeltasRef = useRef(new Map<string, string>());
   const pendingTextDeltaTimerRef = useRef<number | null>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
   const handledCodingReviewEventIdsRef = useRef<Set<string>>(new Set());
   messagesRef.current = messages;
+
+  const clearLiveSttTranscript = useCallback(() => {
+    if (sttClearTimerRef.current !== null) {
+      window.clearTimeout(sttClearTimerRef.current);
+      sttClearTimerRef.current = null;
+    }
+    setLiveSttTranscript("");
+  }, []);
+
+  const updateLiveSttTranscript = useCallback((text: string, autoClearMs = 5000) => {
+    if (sttClearTimerRef.current !== null) {
+      window.clearTimeout(sttClearTimerRef.current);
+      sttClearTimerRef.current = null;
+    }
+    setLiveSttTranscript(text);
+    if (text && autoClearMs > 0) {
+      sttClearTimerRef.current = window.setTimeout(() => {
+        sttClearTimerRef.current = null;
+        setLiveSttTranscript("");
+      }, autoClearMs);
+    }
+  }, []);
 
   const updateConversationStatus = useCallback((status: string, resetAfterMs?: number) => {
     if (conversationStatusTimerRef.current !== null) {
@@ -1048,6 +1071,9 @@ export function ChatPage({
   useEffect(() => () => {
     if (conversationStatusTimerRef.current !== null) {
       window.clearTimeout(conversationStatusTimerRef.current);
+    }
+    if (sttClearTimerRef.current !== null) {
+      window.clearTimeout(sttClearTimerRef.current);
     }
     cancelPendingBargeIn();
   }, [cancelPendingBargeIn]);
@@ -1328,11 +1354,13 @@ export function ChatPage({
     if (!livePlayerRef.current) {
       livePlayerRef.current = new TTSStreamPlayer(
         () => {
+          clearLiveSttTranscript();
           liveAudioStartedRef.current = true;
           liveSocketRef.current?.send("playback.started");
           setVoiceState("speaking");
         },
         () => {
+          clearLiveSttTranscript();
           liveSocketRef.current?.send("playback.finished");
           playbackSegmentTextsRef.current = [];
           playbackCoordinatorRef.current.release(playbackCoordinatorRef.current.snapshot());
@@ -1341,6 +1369,7 @@ export function ChatPage({
           setVoiceState("idle");
         },
         (playerError) => {
+          clearLiveSttTranscript();
           livePlayerRef.current?.stop();
           playbackCoordinatorRef.current.cancel();
           liveSocketRef.current?.cancel();
@@ -1381,10 +1410,11 @@ export function ChatPage({
     });
     return livePlayerRef.current;
   }, [
+    clearLiveSttTranscript,
+    selectedOutputDeviceId,
     settings?.voice_live_playback_prebuffer_ms,
     settings?.voice_live_playback_prebuffer_segments,
     settings?.voice_live_playback_start_lead_ms,
-    selectedOutputDeviceId,
   ]);
 
   const ensureLiveVoice = useCallback(async () => {
@@ -1393,7 +1423,7 @@ export function ChatPage({
     if (!liveSocketRef.current) {
       const onEvent = (event: VoiceServerEvent) => {
         if (event.type === "voice.utterance.started") {
-          setLiveSttTranscript("");
+          clearLiveSttTranscript();
           playbackSegmentTextsRef.current = [];
           activeVoiceGenerationRef.current = event.generation;
           playbackCoordinatorRef.current.acquire(
@@ -1404,6 +1434,7 @@ export function ChatPage({
           livePlayerRef.current?.begin(event.utterance_id);
           setVoiceState("thinking");
         } else if (event.type === "voice.metadata") {
+          clearLiveSttTranscript();
           liveMetadataRef.current = {
             emotion: event.emotion ?? "neutral",
             intent: event.intent ?? "unknown",
@@ -1414,11 +1445,14 @@ export function ChatPage({
               : message,
           ));
         } else if (event.type === "voice.text.delta" && event.delta) {
+          clearLiveSttTranscript();
           queueTextDelta(event.utterance_id, event.delta);
         } else if (event.type === "voice.text.completed") {
+          clearLiveSttTranscript();
           flushPendingTextDeltas();
           showMemoryUpdates(event.memory_updates);
         } else if (event.type === "tts.segment.started") {
+          clearLiveSttTranscript();
           latestPlaybackSegmentRef.current = event.text ?? "";
           if (event.text) playbackSegmentTextsRef.current.push(event.text);
           liveSocketRef.current?.send("playback.segment.started", {
@@ -1427,6 +1461,7 @@ export function ChatPage({
           });
           setVoiceState("speaking");
         } else if (event.type === "voice.utterance.finished") {
+          clearLiveSttTranscript();
           if (avatarOwnsAudioRef.current) {
             playbackCoordinatorRef.current.release(playbackCoordinatorRef.current.snapshot());
             liveSocketRef.current?.clearActive();
@@ -1436,6 +1471,7 @@ export function ChatPage({
             livePlayerRef.current?.finish(event.utterance_id);
           }
         } else if (event.type === "voice.utterance.cancelled") {
+          clearLiveSttTranscript();
           flushPendingTextDeltas();
           livePlayerRef.current?.stop();
           stopVoicePlayback();
@@ -1444,6 +1480,7 @@ export function ChatPage({
           setLoading(false);
           setVoiceState("idle");
         } else if (event.type === "voice.error") {
+          clearLiveSttTranscript();
           flushPendingTextDeltas();
           livePlayerRef.current?.stop();
           playbackCoordinatorRef.current.cancel();
@@ -1477,7 +1514,7 @@ export function ChatPage({
     }
     await player.unlock();
     await liveSocketRef.current.connect();
-  }, [ensureLivePlayer, flushPendingTextDeltas, queueTextDelta, sessionId, showMemoryUpdates, speakTextInBrowser, stopVoicePlayback]);
+  }, [clearLiveSttTranscript, ensureLivePlayer, flushPendingTextDeltas, queueTextDelta, sessionId, showMemoryUpdates, speakTextInBrowser, stopVoicePlayback]);
 
   useEffect(() => () => {
     livePlayerRef.current?.stop();
@@ -1678,6 +1715,7 @@ export function ChatPage({
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
+    clearLiveSttTranscript();
     const text = draft.trim();
     if (!text || !sessionId) {
       return;
@@ -1784,7 +1822,7 @@ export function ChatPage({
       await ensureLiveVoice();
       const input = new PcmInputClient(voiceInputWebSocketUrl(sessionId, 3), (event) => {
         if (event.type === "voice.input.transcript" && event.transcript) {
-          setLiveSttTranscript(event.transcript);
+          updateLiveSttTranscript(event.transcript, event.observation_only ? 3000 : 5000);
           setMessages((current) => [...current, {
             id: crypto.randomUUID(),
             role: "user",
@@ -1796,7 +1834,7 @@ export function ChatPage({
             updateConversationStatus("Iris отвечает");
           }
         } else if (event.type === "voice.input.speech_started") {
-          setLiveSttTranscript("");
+          clearLiveSttTranscript();
           updateConversationStatus("Слышу вас");
         } else if (event.type === "voice.input.finalizing") {
           updateConversationStatus("Распознаю");
@@ -1805,6 +1843,9 @@ export function ChatPage({
         } else if (event.type === "conversation.turn_completed") {
           updateConversationStatus("Распознаю");
         } else if (event.type === "conversation.phase" && event.phase) {
+          if (event.phase === "speaking" || event.phase === "generating" || event.phase === "listening") {
+            clearLiveSttTranscript();
+          }
           const labels: Record<string, string> = {
             listening: "Микрофон включён",
             endpoint_pending: "Жду продолжения",
@@ -1821,22 +1862,31 @@ export function ChatPage({
               ? "Неизвестный голос"
               : "Вы";
         } else if (event.type === "conversation.decision") {
+          if (event.action !== "respond" && event.action !== "backchannel") {
+            clearLiveSttTranscript();
+          }
           updateConversationStatus(event.action === "respond" || event.action === "backchannel"
             ? "Iris отвечает"
             : "Iris решила промолчать");
         } else if (event.type === "conversation.silent") {
+          clearLiveSttTranscript();
           updateConversationStatus("Iris решила промолчать", 1800);
         } else if (event.type === "conversation.echo_rejected") {
+          clearLiveSttTranscript();
           updateConversationStatus("Микрофон включён");
         } else if (event.type === "conversation.noise_ignored") {
+          clearLiveSttTranscript();
           updateConversationStatus("Короткий шум пропущен", 900);
         } else if (event.type === "conversation.reaction") {
           updateConversationStatus(event.initiative ? "Iris вступает в разговор" : "Iris реагирует");
         } else if (event.type === "conversation.deferred") {
+          clearLiveSttTranscript();
           updateConversationStatus("Iris подождёт подходящую паузу");
         } else if (event.type === "conversation.cancelled") {
+          clearLiveSttTranscript();
           updateConversationStatus("Микрофон включён");
         } else if (event.type === "voice.input.error") {
+          clearLiveSttTranscript();
           setError(event.message ?? "Не удалось обработать голосовой ввод");
         }
       });
@@ -1922,6 +1972,7 @@ export function ChatPage({
 
   const handleStart = async (event?: React.MouseEvent<HTMLElement>) => {
     if (event) animateButtonPress(event.currentTarget);
+    clearLiveSttTranscript();
     setIsStarted(true);
     if (liveReady && liveVoiceSupported && !liveConversation) {
       await toggleLive();
@@ -1929,6 +1980,7 @@ export function ChatPage({
   };
 
   const handleFinish = () => {
+    clearLiveSttTranscript();
     cancelPendingBargeIn();
     vadRecorderRef.current?.stop();
     pcmInputRef.current?.close();
@@ -1946,6 +1998,7 @@ export function ChatPage({
     if (!sessionId || newDialogPending) return;
     setNewDialogPending(true);
     setError(null);
+    clearLiveSttTranscript();
     try {
       // A new session must not inherit a live microphone stream or an answer
       // that was still playing in the previous dialog.
@@ -2113,17 +2166,30 @@ export function ChatPage({
               <div className="chat-composer-inner">
                 <textarea
                   value={liveSttTranscript || draft}
-                  onChange={(event) => !liveSttTranscript && setDraft(event.target.value)}
-                  onKeyDown={submitOnEnter}
+                  onFocus={() => {
+                    if (liveSttTranscript) clearLiveSttTranscript();
+                  }}
+                  onClick={() => {
+                    if (liveSttTranscript) clearLiveSttTranscript();
+                  }}
+                  onChange={(event) => {
+                    if (liveSttTranscript) clearLiveSttTranscript();
+                    setDraft(event.target.value);
+                  }}
+                  onKeyDown={(event) => {
+                    if (liveSttTranscript && event.key !== "Enter") {
+                      clearLiveSttTranscript();
+                    }
+                    submitOnEnter(event);
+                  }}
                   placeholder={liveSttTranscript ? "" : "Ввод сообщения..."}
                   rows={1}
-                  readOnly={Boolean(liveSttTranscript)}
                   title="Enter — отправить сообщение; Shift+Enter — новая строка"
                 />
                 <button
                   className="primary-button send-button"
                   type="submit"
-                  disabled={!sessionId || sessionStarting || loading || (!draft.trim().length && !liveSttTranscript.trim().length)}
+                  disabled={!sessionId || sessionStarting || loading || !draft.trim().length}
                   onClick={(e) => animateButtonPress(e.currentTarget)}
                   aria-label={sessionStarting ? "Подготавливаем сессию" : loading ? "Отправка сообщения" : "Отправить сообщение"}
                   title={sessionStarting ? "Подготавливаем сессию" : loading ? "Отправка сообщения" : "Отправить сообщение"}
