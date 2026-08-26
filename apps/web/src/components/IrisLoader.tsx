@@ -102,7 +102,6 @@ export function IrisLoader({
       aria-hidden={label ? undefined : true}
     >
       <div className="iris-loader-media">
-        <span className="iris-loader-fallback" aria-hidden="true" />
         <div ref={containerRef} className="iris-loader-canvas" aria-hidden="true" />
       </div>
     </div>
