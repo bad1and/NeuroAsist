@@ -1728,35 +1728,19 @@ textarea::placeholder {
   height: 100%;
 }
 
-.iris-loader-fallback {
-  position: absolute;
-  inset: 23%;
-  border: 3px solid color-mix(in srgb, var(--color-accent) 24%, transparent);
-  border-top-color: var(--color-accent);
-  border-radius: 50%;
-  animation: iris-loader-spin 900ms linear infinite;
-}
-
 .iris-loader-canvas {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  transition: opacity 180ms cubic-bezier(.2, 0, 0, 1);
-}
-
-.iris-loader-canvas {
   overflow: hidden;
+  transition: opacity 180ms cubic-bezier(.2, 0, 0, 1);
 }
 
 .iris-loader-canvas svg {
   display: block;
   width: 100% !important;
   height: 100% !important;
-}
-
-@keyframes iris-loader-spin {
-  to { transform: rotate(360deg); }
 }
 
 .startup-copy h1 {
