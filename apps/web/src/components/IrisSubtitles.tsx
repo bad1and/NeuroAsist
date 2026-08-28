@@ -10,9 +10,13 @@ export function splitIntoSubtitleCues(text: string, maxChars = 80): string[] {
   if (!text || !text.trim()) return [];
   const normalized = text.trim();
 
-  // 1. Split into paragraphs/lines first (always respect explicit line breaks)
-  const rawParagraphs = normalized.split(/\n+/);
   const cues: string[] = [];
+  const rawParagraphs = normalized.split(/\n+/);
+
+  const hasSegmenter = typeof Intl !== "undefined" && "Segmenter" in Intl;
+  const sentenceSegmenter = hasSegmenter
+    ? new Intl.Segmenter("ru", { granularity: "sentence" })
+    : null;
 
   for (const para of rawParagraphs) {
     const p = para.trim();
@@ -23,15 +27,20 @@ export function splitIntoSubtitleCues(text: string, maxChars = 80): string[] {
       continue;
     }
 
-    const sentenceRegex = /[^.!?…]+(?:[.!?…]+(?:\s+|$)|$)/g;
-    const rawSentences = p.match(sentenceRegex) || [p];
+    let sentences: string[] = [];
+    if (sentenceSegmenter) {
+      sentences = Array.from(sentenceSegmenter.segment(p))
+        .map((s) => s.segment.trim())
+        .filter(Boolean);
+    } else {
+      sentences = (p.match(/[^.!?…]+(?:[.!?…]+(?:\s+|$)|$)/g) || [p])
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
 
     let currentChunk = "";
 
-    for (const rawSentence of rawSentences) {
-      const sentence = rawSentence.trim();
-      if (!sentence) continue;
-
+    for (const sentence of sentences) {
       if (sentence.length <= maxChars) {
         if (!currentChunk) {
           currentChunk = sentence;
@@ -49,13 +58,11 @@ export function splitIntoSubtitleCues(text: string, maxChars = 80): string[] {
         currentChunk = "";
       }
 
-      const clauseRegex = /[^,;:—–]+(?:[,;:—–]+(?:\s+|$)|$)/g;
-      const rawClauses = sentence.match(clauseRegex) || [sentence];
+      const clauses = (sentence.match(/[^,;:—–]+(?:[,;:—–]+(?:\s+|$)|$)/g) || [sentence])
+        .map((c) => c.trim())
+        .filter(Boolean);
 
-      for (const rawClause of rawClauses) {
-        const clause = rawClause.trim();
-        if (!clause) continue;
-
+      for (const clause of clauses) {
         if (clause.length <= maxChars) {
           if (!currentChunk) {
             currentChunk = clause;
@@ -65,24 +72,22 @@ export function splitIntoSubtitleCues(text: string, maxChars = 80): string[] {
             cues.push(currentChunk);
             currentChunk = clause;
           }
-          continue;
-        }
-
-        if (currentChunk) {
-          cues.push(currentChunk);
-          currentChunk = "";
-        }
-
-        const words = clause.split(/\s+/);
-        for (const word of words) {
-          if (!word) continue;
-          if (!currentChunk) {
-            currentChunk = word;
-          } else if (currentChunk.length + 1 + word.length <= maxChars) {
-            currentChunk += " " + word;
-          } else {
+        } else {
+          if (currentChunk) {
             cues.push(currentChunk);
-            currentChunk = word;
+            currentChunk = "";
+          }
+          const words = clause.split(/\s+/);
+          for (const word of words) {
+            if (!word) continue;
+            if (!currentChunk) {
+              currentChunk = word;
+            } else if (currentChunk.length + 1 + word.length <= maxChars) {
+              currentChunk += " " + word;
+            } else {
+              cues.push(currentChunk);
+              currentChunk = word;
+            }
           }
         }
       }
@@ -90,11 +95,10 @@ export function splitIntoSubtitleCues(text: string, maxChars = 80): string[] {
 
     if (currentChunk) {
       cues.push(currentChunk);
-      currentChunk = "";
     }
   }
 
-  return cues.filter((cue) => cue.trim().length > 0);
+  return cues;
 }
 
 export interface IrisSubtitlesProps {
@@ -208,9 +212,16 @@ export function IrisSubtitles({
 
     if (activeCueIndex < targetCueIndex && activeCueIndex < cues.length - 1) {
       const currentCue = cues[activeCueIndex] || "";
-      // Calculate comfortable reading time: ~60ms per character.
-      // Clamped between 1.2s and 4s so it doesn't rush or stall.
-      const delayMs = Math.max(1200, Math.min(4000, currentCue.length * 60));
+      // Calculate comfortable reading time.
+      // Base time per cue + ~50ms per character. Bonus time if it ends with punctuation.
+      const hasPunctuation = /[.,:!?…]$/.test(currentCue.trim());
+      const punctuationBonus = hasPunctuation ? 400 : 0;
+      const baseDelay = 500;
+      const charDelay = currentCue.length * 50;
+      
+      const calculatedDelayMs = baseDelay + charDelay + punctuationBonus;
+      // Clamped to at least 1.2s, without a hard upper limit so long cues aren't rushed.
+      const delayMs = Math.max(1200, calculatedDelayMs);
 
       const timer = setTimeout(() => {
         setActiveCueIndex(prev => prev + 1);
@@ -228,13 +239,18 @@ export function IrisSubtitles({
       if (!activeAudio.duration || isNaN(activeAudio.duration) || activeAudio.duration <= 0) return;
       const progress = Math.min(1, Math.max(0, activeAudio.currentTime / activeAudio.duration));
 
-      const totalChars = cues.reduce((sum, c) => sum + c.length, 0);
+      const getCueWeight = (cue: string) => {
+        const hasPunctuation = /[.,:!?…]$/.test(cue.trim());
+        return cue.length + (hasPunctuation ? 8 : 0);
+      };
+
+      const totalWeight = cues.reduce((sum, c) => sum + getCueWeight(c), 0);
       let cumulative = 0;
       let target = cues.length - 1;
 
       for (let i = 0; i < cues.length; i++) {
-        cumulative += cues[i].length;
-        if (progress <= cumulative / totalChars) {
+        cumulative += getCueWeight(cues[i]);
+        if (progress <= cumulative / totalWeight) {
           target = i;
           break;
         }
