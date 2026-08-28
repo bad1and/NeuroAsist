@@ -6,7 +6,7 @@ import { animateThinkingWave } from "../animations/transitions";
  * Splits text into readable subtitle cues (1-2 sentences / max ~75-85 characters),
  * cleanly splitting on newlines, sentence boundaries, punctuation pauses, or word boundaries.
  */
-export function splitIntoSubtitleCues(text: string, maxChars = 80): string[] {
+export function splitIntoSubtitleCues(text: string, maxChars = 45): string[] {
   if (!text || !text.trim()) return [];
   const normalized = text.trim();
 
@@ -286,12 +286,35 @@ export function IrisSubtitles({
 
   if (cues.length > 0) {
     const startIdx = Math.max(0, effectiveIndex - MAX_VISIBLE_CUES + 1);
+    
+    // Pad with empty cues so we ALWAYS render exactly MAX_VISIBLE_CUES elements
+    const actualCuesCount = effectiveIndex - startIdx + 1;
+    const missingCount = MAX_VISIBLE_CUES - actualCuesCount;
+    
+    for (let i = 0; i < missingCount; i++) {
+      visibleCues.push({
+        text: "\u00A0",
+        index: -100 - i,
+        key: `empty-${messageId}-${i}`,
+        age: MAX_VISIBLE_CUES - 1 - i,
+      });
+    }
+
     for (let i = startIdx; i <= effectiveIndex && i < cues.length; i++) {
       visibleCues.push({
         text: cues[i],
         index: i,
         key: `cue-${messageId}-${i}`,
         age: effectiveIndex - i,
+      });
+    }
+  } else {
+    for (let i = 0; i < MAX_VISIBLE_CUES; i++) {
+      visibleCues.push({
+        text: "\u00A0",
+        index: -100 - i,
+        key: `empty-no-cues-${i}`,
+        age: MAX_VISIBLE_CUES - 1 - i,
       });
     }
   }
