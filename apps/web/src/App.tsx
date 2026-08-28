@@ -109,6 +109,7 @@ import type {
   MemoryUpdate,
   ConversationDebug,
   InterfaceLocale,
+  VoiceState,
 } from "./types";
 import type { VoiceServerEvent } from "./types";
 import { PlaybackCoordinator, TTSStreamPlayer, VoiceSocketClient } from "./voice-live";
@@ -132,6 +133,7 @@ import { WindowChrome } from "./components/WindowChrome";
 import { AppDialog } from "./components/AppDialog";
 import { GuidedSttCapture } from "./stt-capture";
 import { InAppAvatarHost } from "./components/InAppAvatarHost";
+import { IrisSubtitles } from "./components/IrisSubtitles";
 import {
   initialInterfaceLocale,
   interfaceIntlLocale,
@@ -202,7 +204,6 @@ type LiveConversationSettings = Pick<
 >;
 type WsState = "connected" | "disconnected" | "reconnecting";
 type LevelFilter = "all" | EventLevel;
-type VoiceState = "idle" | "recording" | "transcribing" | "thinking" | "speaking" | "stopping" | "error";
 
 const AVATAR_EMOTION_LABELS: Record<string, string> = {
   neutral: "Нейтральная", happy: "Радость", sad: "Грусть", angry: "Злость",
@@ -997,6 +998,8 @@ export function ChatPage({
   const [memoryNotice, setMemoryNotice] = useState<string | null>(null);
   const [liveConversation, setLiveConversation] = useState(false);
   const [microphoneMuted, setMicrophoneMuted] = useState(false);
+  const [activeAudioElement, setActiveAudioElement] = useState<HTMLAudioElement | null>(null);
+  const [livePlaybackSegment, setLivePlaybackSegment] = useState("");
   const [conversationStatus, setConversationStatus] = useState("Микрофон включён");
   const [conversationDebug, setConversationDebug] = useState<ConversationDebug | null>(null);
   const [newDialogConfirmationOpen, setNewDialogConfirmationOpen] = useState(false);
@@ -1250,6 +1253,7 @@ export function ChatPage({
       activeAudio.currentTime = 0;
     }
     activeAudioRef.current = except ?? null;
+    setActiveAudioElement(except ?? null);
   }, []);
 
   const interruptAssistantSpeech = useCallback(() => {
@@ -1299,24 +1303,31 @@ export function ChatPage({
       const audio = new Audio(audioUrl);
       audio.playbackRate = 1;
       activeAudioRef.current = audio;
+      setActiveAudioElement(audio);
       audio.onended = () => {
         if (activeAudioRef.current === audio) {
           activeAudioRef.current = null;
+          setActiveAudioElement(null);
+          setVoiceState("idle");
         }
       };
       audio.onerror = () => {
         if (activeAudioRef.current === audio) {
           activeAudioRef.current = null;
+          setActiveAudioElement(null);
+          setVoiceState("idle");
         }
       };
 
       try {
         await setAudioElementOutput(audio, selectedOutputDeviceId);
         await audio.play();
+        setVoiceState("speaking");
         return true;
       } catch {
         if (activeAudioRef.current === audio) {
           activeAudioRef.current = null;
+          setActiveAudioElement(null);
         }
         return false;
       }
@@ -1333,6 +1344,9 @@ export function ChatPage({
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = settings?.voice_language === "en" ? "en-US" : "ru-RU";
       utterance.rate = settings?.voice_playback_rate ?? 1;
+      utterance.onstart = () => { setVoiceState("speaking"); };
+      utterance.onend = () => { setVoiceState("idle"); };
+      utterance.onerror = () => { setVoiceState("idle"); };
       window.speechSynthesis.speak(utterance);
       return true;
     },
@@ -1361,6 +1375,7 @@ export function ChatPage({
         },
         () => {
           clearLiveSttTranscript();
+          setLivePlaybackSegment("");
           liveSocketRef.current?.send("playback.finished");
           playbackSegmentTextsRef.current = [];
           playbackCoordinatorRef.current.release(playbackCoordinatorRef.current.snapshot());
@@ -1370,6 +1385,7 @@ export function ChatPage({
         },
         (playerError) => {
           clearLiveSttTranscript();
+          setLivePlaybackSegment("");
           livePlayerRef.current?.stop();
           playbackCoordinatorRef.current.cancel();
           liveSocketRef.current?.cancel();
@@ -1398,6 +1414,9 @@ export function ChatPage({
             segment_id: segmentId,
             decode_ms: decodeMs,
           });
+        },
+        (text) => {
+          setLivePlaybackSegment(text);
         },
       );
     }
@@ -1454,6 +1473,9 @@ export function ChatPage({
         } else if (event.type === "tts.segment.started") {
           clearLiveSttTranscript();
           latestPlaybackSegmentRef.current = event.text ?? "";
+          if (avatarOwnsAudioRef.current) {
+            setLivePlaybackSegment(event.text ?? "");
+          }
           if (event.text) playbackSegmentTextsRef.current.push(event.text);
           liveSocketRef.current?.send("playback.segment.started", {
             text: event.text ?? "",
@@ -1462,6 +1484,7 @@ export function ChatPage({
           setVoiceState("speaking");
         } else if (event.type === "voice.utterance.finished") {
           clearLiveSttTranscript();
+          setLivePlaybackSegment("");
           if (avatarOwnsAudioRef.current) {
             playbackCoordinatorRef.current.release(playbackCoordinatorRef.current.snapshot());
             liveSocketRef.current?.clearActive();
@@ -1472,6 +1495,7 @@ export function ChatPage({
           }
         } else if (event.type === "voice.utterance.cancelled") {
           clearLiveSttTranscript();
+          setLivePlaybackSegment("");
           flushPendingTextDeltas();
           livePlayerRef.current?.stop();
           stopVoicePlayback();
@@ -2118,34 +2142,15 @@ export function ChatPage({
             <button className="text-button" onClick={onOpenMemory}>Открыть память</button>
           </div>
         )}
-        <div className="message-list" ref={listRef}>
-          {messages.filter((message) => message.role === "assistant").map((message, index, assistantMessages) => {
-            const diffFromLatest = assistantMessages.length - 1 - index;
-            const isLatest = diffFromLatest === 0;
-            const isPrevious = diffFromLatest === 1;
-            const tierClass = isLatest ? "is-latest" : isPrevious ? "is-previous is-past" : "is-older is-past";
-            return (
-              <article
-                className={`message assistant ${tierClass}`}
-                key={message.id}
-              >
-                <p data-i18n-skip>{message.content}</p>
-                {message.ttsError && <div className="message-error" data-i18n-skip>{message.ttsError}</div>}
-              </article>
-            );
-          })}
-          {loading && (
-            <div className="assistant-thinking" ref={thinkingRef} role="status">
-              Думаю . . .
-            </div>
-          )}
-          {!loading && voiceState === "recording" && (
-            <div className="chat-subtitle-status">Слушаю . . .</div>
-          )}
-          {!loading && voiceState === "transcribing" && (
-            <div className="chat-subtitle-status">Распознаю . . .</div>
-          )}
-        </div>
+        <IrisSubtitles
+          messages={messages}
+          loading={loading}
+          voiceState={voiceState}
+          activeAudio={activeAudioElement}
+          livePlaybackSegment={livePlaybackSegment}
+          containerRef={listRef}
+          onOpenMemory={onOpenMemory}
+        />
 
         {error && (
           <div className="error-banner" role="alert">

@@ -538,3 +538,5 @@ export type MemoryDiagnostics = {
     }>;
   };
 };
+
+export type VoiceState = "idle" | "recording" | "transcribing" | "thinking" | "speaking" | "stopping" | "error";
