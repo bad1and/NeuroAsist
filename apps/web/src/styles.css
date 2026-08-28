@@ -500,6 +500,10 @@ select { appearance: auto; }
 
 .message.assistant.subtitle-cue {
   animation: subtitle-slide-in 0.38s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  min-height: calc(1.35em * 2);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
 }
 
 @keyframes subtitle-slide-in {
@@ -523,14 +527,14 @@ select { appearance: auto; }
 .message.assistant.is-previous,
 .message.assistant.is-fading-cue {
   animation: none;
-  opacity: 0.09;
+  opacity: 0.15;
   color: #ffffff;
   font-size: clamp(24px, 2.5vw, 28px);
   text-shadow: none;
   transform: translateY(0);
   transition: opacity 0.5s ease, transform 0.5s ease, text-shadow 0.5s ease;
-  -webkit-mask-image: linear-gradient(to bottom, transparent 35%, black 100%);
-  mask-image: linear-gradient(to bottom, transparent 35%, black 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 90%);
+  mask-image: linear-gradient(to bottom, transparent 0%, black 90%);
 }
 
 .message.assistant.is-older {
