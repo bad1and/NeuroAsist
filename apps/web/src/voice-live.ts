@@ -83,6 +83,7 @@ export class TTSStreamPlayer {
     private readonly onUnderrun: (gapMs: number) => void = () => undefined,
     private readonly onSegmentFinished: (text: string) => void = () => undefined,
     private readonly onDecoded: (segmentId: number, decodeMs: number) => void = () => undefined,
+    private readonly onSegmentStarted: (text: string) => void = () => undefined,
   ) {
     this.prebufferSegments = Math.max(1, options.prebufferSegments ?? 1);
     this.prebufferMs = Math.max(0, options.prebufferMs ?? 0);
@@ -280,6 +281,14 @@ export class TTSStreamPlayer {
       this.maybeFinished();
     };
     source.start(startAt);
+    const gen = this.generation;
+    const utterance = this.activeUtteranceId;
+    const segmentStartDelay = Math.max(0, (startAt - context.currentTime) * 1000);
+    globalThis.setTimeout(() => {
+      if (this.generation === gen && this.activeUtteranceId === utterance) {
+        this.onSegmentStarted(text);
+      }
+    }, segmentStartDelay);
     if (!this.started) {
       this.started = true;
       globalThis.setTimeout(this.onStarted, Math.max(0, (startAt - context.currentTime) * 1000));

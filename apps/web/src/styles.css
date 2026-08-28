@@ -448,19 +448,29 @@ select { appearance: auto; }
   flex: 1 1 auto;
   flex-direction: column;
   justify-content: flex-end;
-  gap: 28px;
-  min-height: 0;
-  max-height: 560px;
-  overflow-y: hidden;
-  padding: 30px 0 120px 0;
+  gap: 12px;
+  min-height: 100px;
+  max-height: 180px;
+  overflow: hidden;
+  padding: 10px 0 20px 0;
   background: transparent;
-  width: 380px;
+  width: 440px;
   max-width: calc(100% - 40px);
   margin-left: auto;
-  margin-right: 24px;
+  margin-right: 14px;
   box-sizing: border-box;
-  mask-image: linear-gradient(to bottom, transparent 0px, transparent 60px, rgba(0, 0, 0, 0.08) 110px, rgba(0, 0, 0, 0.5) 170px, black 230px, black 100%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0px, transparent 60px, rgba(0, 0, 0, 0.08) 110px, rgba(0, 0, 0, 0.5) 170px, black 230px, black 100%);
+}
+
+.subtitles-viewport {
+  position: relative;
+  width: 100%;
+  min-height: 80px;
+  max-height: 280px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  overflow: hidden;
+  gap: 4px;
 }
 
 .message {
@@ -475,19 +485,22 @@ select { appearance: auto; }
 .message.assistant {
   color: #ffffff;
   font-family: var(--font-subtitles, "Shantell Sans", cursive, sans-serif);
-  font-size: clamp(24px, 2.3vw, 28px);
+  font-size: clamp(22px, 2.2vw, 26px);
   font-weight: 700;
   line-height: 1.35;
   letter-spacing: -0.01em;
-  animation: message-slide-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  transition: transform 0.45s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.45s ease;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.75), 0 1px 3px rgba(0, 0, 0, 0.9);
   will-change: transform, opacity;
 }
 
-@keyframes message-slide-up {
+.message.assistant.subtitle-cue {
+  animation: subtitle-slide-in 0.38s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes subtitle-slide-in {
   from {
     opacity: 0;
-    transform: translateY(22px);
+    transform: translateY(18px);
   }
   to {
     opacity: 1;
@@ -495,35 +508,31 @@ select { appearance: auto; }
   }
 }
 
-.message.assistant.is-latest {
+.message.assistant.is-latest,
+.message.assistant.is-active-cue {
   opacity: 1;
   color: #ffffff;
-  font-size: clamp(24px, 2.3vw, 28px);
-  font-weight: 700;
-  line-height: 1.35;
+  transition: opacity 0.4s ease, transform 0.4s ease, font-size 0.4s ease;
 }
 
-.message.assistant.is-previous {
-  opacity: 0.38;
+.message.assistant.is-previous,
+.message.assistant.is-fading-cue {
+  opacity: 0.34;
   color: #ffffff;
-  font-size: clamp(24px, 2.3vw, 28px);
-  font-weight: 700;
-  line-height: 1.35;
+  font-size: clamp(18px, 1.8vw, 22px);
+  transform: translateY(0);
+  transition: opacity 0.4s ease, transform 0.4s ease, font-size 0.4s ease;
 }
 
 .message.assistant.is-older {
   opacity: 0.12;
   color: #ffffff;
-  font-size: clamp(24px, 2.3vw, 28px);
-  font-weight: 700;
-  line-height: 1.35;
+  font-size: clamp(16px, 1.5vw, 20px);
+  transition: opacity 0.4s ease, transform 0.4s ease, font-size 0.4s ease;
 }
 
 .message.assistant.is-past {
   color: #ffffff;
-  font-size: clamp(24px, 2.3vw, 28px);
-  font-weight: 700;
-  line-height: 1.35;
 }
 
 .message-role {
