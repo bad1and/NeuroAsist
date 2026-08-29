@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Download, FileJson, LoaderCircle, Mic, ShieldCheck, Square } from "lucide-react";
+import {
+  IconInterfaceSecurityShield4,
+  IconInterfaceSpirals,
+  IconInterfaceTimeStopWatchCircle,
+  IconInterfaceDownloadBox1,
+  IconInterfaceFavoriteLike1,
+} from "./CustomIcons";
+import { FigmaMicIcon } from "./FigmaIcons";
 
 import { BrowserVadRecorder, type CaptureMetadata, type MicrophoneProfile } from "./vad";
 
@@ -246,7 +253,7 @@ export function GuidedSttCapture({
       <header className="stt-capture-header">
         <div>
           <h3 id="stt-capture-title">Приватный корпус речи</h3>
-          <p><ShieldCheck size={16} aria-hidden="true" /> Записи остаются только на этом устройстве.</p>
+          <p><IconInterfaceSecurityShield4 size={16} aria-hidden="true" /> Записи остаются только на этом устройстве.</p>
         </div>
         <strong className="stt-capture-count" aria-label={`Сохранено сценариев: ${completedCount} из ${SCENARIOS.length}`}>
           {completedCount}<span>/{SCENARIOS.length}</span>
@@ -286,23 +293,23 @@ export function GuidedSttCapture({
         {busy
           ? (
             <button className="primary-button" type="button" disabled>
-              <LoaderCircle className="stt-capture-spinner" size={20} aria-hidden="true" />
+              <IconInterfaceSpirals className="stt-capture-spinner is-spinning" size={20} aria-hidden="true" />
               {recording ? "Сохраняю…" : "Подключаю микрофон…"}
             </button>
           )
           : !recording
           ? (
             <button className="primary-button" type="button" onClick={() => void start()}>
-              <Mic size={20} aria-hidden="true" /> Начать запись
+              <FigmaMicIcon width={20} height={20} aria-hidden="true" /> Начать запись
             </button>
           )
           : (
             <button className="danger-button" type="button" onClick={() => void stop()}>
-              <Square size={16} aria-hidden="true" /> Остановить и сохранить
+              <IconInterfaceTimeStopWatchCircle size={16} aria-hidden="true" /> Остановить и сохранить
             </button>
           )}
         <button className="secondary" type="button" onClick={exportManifest} disabled={!captures.length}>
-          <FileJson size={20} aria-hidden="true" /> Скачать manifest
+          <IconInterfaceDownloadBox1 size={20} aria-hidden="true" /> Скачать manifest
         </button>
       </div>
 
@@ -335,9 +342,9 @@ export function GuidedSttCapture({
                     onClick={() => download(capture.audio, `${capture.id}.wav`)}
                     aria-label={`Скачать WAV: ${title}`}
                   >
-                    <Check size={16} aria-hidden="true" />
+                    <IconInterfaceFavoriteLike1 size={16} aria-hidden="true" />
                     <span>{title}</span>
-                    <Download size={16} aria-hidden="true" />
+                    <IconInterfaceDownloadBox1 size={16} aria-hidden="true" />
                   </button>
                 </li>
               );

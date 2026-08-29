@@ -1,30 +1,22 @@
-import { FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Archive,
-  Brain,
-  ChevronDown,
-  CircleAlert,
-  Code2,
-  Database,
-  Headphones,
-  History,
-  LayoutDashboard,
-  LogOut,
-  MessageCircle,
-  MessageSquarePlus,
-  Mic,
-  MicOff,
-  MonitorCog,
-  PanelLeftClose,
-  PanelLeftOpen,
-  RefreshCw,
-  SendHorizontal,
-  Settings,
-  SlidersHorizontal,
-  Volume2,
-  VolumeX,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+  IconInterfaceHome2,
+  IconMailChatBubbleTextSquare,
+  IconInterfaceTimeStopWatchCircle,
+  IconComputerRobotCyborg1,
+  IconInterfacePageControllerSettings,
+  IconProgrammingScript2,
+  IconInterfaceSettingPieChartCogSettingGraphCog,
+  IconEntertainmentVolumeLevelHigh,
+  IconComputerScreenCurve,
+  IconInterfaceCursorArrow2,
+  IconInterfaceContentArchive,
+  IconInterfaceAlertAlarmBell2,
+  IconComputerDatabase,
+  IconInterfaceSpirals,
+  IconInterfaceUserQueenCrown,
+} from "./CustomIcons";
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, SendHorizontal } from "lucide-react";
 import {
   FigmaStartFlowerIcon,
   FigmaMicIcon,
@@ -853,13 +845,13 @@ function SetupWizard({ onComplete }: { onComplete: () => Promise<void> }) {
   );
 }
 
-const MAIN_NAVIGATION: Array<{ id: Exclude<AppView, "settings">; label: string; icon: LucideIcon }> = [
-  { id: "overview", label: "Обзор", icon: LayoutDashboard },
-  { id: "chat", label: "Диалог", icon: MessageCircle },
-  { id: "journal", label: "История", icon: History },
-  { id: "memory", label: "Память", icon: Brain },
-  { id: "state", label: "Состояние", icon: SlidersHorizontal },
-  { id: "coding", label: "Coding Agent", icon: Code2 },
+const MAIN_NAVIGATION: Array<{ id: Exclude<AppView, "settings">; label: string; icon: any }> = [
+  { id: "overview", label: "Обзор", icon: IconInterfaceHome2 },
+  { id: "chat", label: "Диалог", icon: IconMailChatBubbleTextSquare },
+  { id: "journal", label: "История", icon: IconInterfaceTimeStopWatchCircle },
+  { id: "memory", label: "Память", icon: IconComputerRobotCyborg1 },
+  { id: "state", label: "Состояние", icon: IconInterfacePageControllerSettings },
+  { id: "coding", label: "Coding Agent", icon: IconProgrammingScript2 },
 ];
 
 function Sidebar({
@@ -908,7 +900,7 @@ function Sidebar({
       </nav>
       <div className="sidebar-footer">
         <div className="sidebar-footer-row">
-          <NavigationButton icon={Settings} label="Настройки" active={activeView === "settings"} compact={isCollapsed} onClick={() => onNavigate("settings")} />
+          <NavigationButton icon={FigmaSettingsIcon} label="Настройки" active={activeView === "settings"} compact={isCollapsed} iconSize={24} onClick={() => onNavigate("settings")} />
           <button
             className="icon-button sidebar-collapse-toggle"
             type="button"
@@ -920,7 +912,7 @@ function Sidebar({
               onToggleCollapsed();
             }}
           >
-            {isCollapsed ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />}
+            {isCollapsed ? <IconInterfaceCursorArrow2 size={19} aria-hidden="true" /> : <IconInterfaceCursorArrow2 size={19} aria-hidden="true" />}
           </button>
         </div>
       </div>
@@ -933,12 +925,14 @@ function NavigationButton({
   label,
   active,
   compact = false,
+  iconSize = 21,
   onClick,
 }: {
-  icon: LucideIcon;
+  icon: any;
   label: string;
   active: boolean;
   compact?: boolean;
+  iconSize?: number;
   onClick: () => void;
 }) {
   return (
@@ -953,7 +947,7 @@ function NavigationButton({
         onClick();
       }}
     >
-      <Icon size={19} aria-hidden="true" />
+      <Icon size={iconSize} aria-hidden="true" />
       <span>{label}</span>
     </button>
   );
@@ -2154,7 +2148,7 @@ export function ChatPage({
 
         {error && (
           <div className="error-banner" role="alert">
-            <CircleAlert size={18} aria-hidden="true" />
+            <IconInterfaceAlertAlarmBell2 size={18} aria-hidden="true" />
             {error}
             {retryText && (
               <button className="text-button" type="button" onClick={() => { setDraft(retryText); setRetryText(null); }}>
@@ -2364,11 +2358,11 @@ function EventsPage({
   return (
     <section className="panel events-panel">
       {compact ? <div className="events-toolbar"><button className="icon-button" onClick={(e) => { animateButtonPress(e.currentTarget); void onRefreshEvents(); }} aria-label="Обновить журнал событий" title="Обновить журнал событий">
-          <RefreshCw size={16} />
+          <IconInterfaceSpirals size={16} />
         </button></div> : <div className="panel-header">
         <div><h2>Журнал системы</h2><span>Технические события и диагностика</span></div>
         <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void onRefreshEvents(); }}>
-          <RefreshCw size={16} aria-hidden="true" />
+          <IconInterfaceSpirals size={16} aria-hidden="true" />
           Обновить
         </button>
       </div>}
@@ -2395,7 +2389,7 @@ function EventsPage({
 
       <div className="event-list" ref={listRef}>
         {filteredEvents.length === 0 && (
-          <div className="empty-state"><Archive size={28} aria-hidden="true" /><strong>Событий нет</strong><span>Для этого фильтра пока ничего не найдено.</span></div>
+          <div className="empty-state"><IconInterfaceContentArchive size={28} aria-hidden="true" /><strong>Событий нет</strong><span>Для этого фильтра пока ничего не найдено.</span></div>
         )}
         {filteredEvents
           .slice()
@@ -2641,7 +2635,7 @@ export function SettingsPage({
   if (!settings) {
     return (
       <section className="panel">
-        <div className="empty-state"><CircleAlert size={28} aria-hidden="true" /><strong>Настройки недоступны</strong><span>Подключитесь к сервису и попробуйте ещё раз.</span></div>
+        <div className="empty-state"><IconInterfaceAlertAlarmBell2 size={28} aria-hidden="true" /><strong>Настройки недоступны</strong><span>Подключитесь к сервису и попробуйте ещё раз.</span></div>
       </section>
     );
   }
@@ -3264,27 +3258,27 @@ export function SettingsPage({
 const SETTINGS_NAVIGATION: Array<{
   id: string;
   label: string;
-  icon: LucideIcon;
+  icon: any;
   directSection?: SettingsSection;
   items: Array<{ section: SettingsSection; label: string }>;
 }> = [
   {
     id: "behavior",
     label: "Поведение",
-    icon: SlidersHorizontal,
+    icon: IconInterfacePageControllerSettings,
     items: [{ section: "conversation", label: "Живой разговор" }],
   },
   {
     id: "avatar",
     label: "Аватар",
-    icon: Settings,
+    icon: IconInterfaceUserQueenCrown,
     directSection: "avatar",
     items: [],
   },
   {
     id: "voice",
     label: "Голос",
-    icon: Volume2,
+    icon: IconEntertainmentVolumeLevelHigh,
     items: [
       { section: "voice", label: "Основное" },
       { section: "voice-devices", label: "Устройства" },
@@ -3295,14 +3289,14 @@ const SETTINGS_NAVIGATION: Array<{
   {
     id: "memory",
     label: "Память",
-    icon: Brain,
+    icon: IconComputerRobotCyborg1,
     directSection: "memory",
     items: [],
   },
   {
     id: "system",
     label: "Система",
-    icon: MonitorCog,
+    icon: IconComputerScreenCurve,
     items: [
       { section: "system-interface", label: "Интерфейс" },
       { section: "system-overview", label: "Обзор" },
@@ -3341,7 +3335,7 @@ function SettingsNavigation({ current, onChange }: { current: SettingsSection; o
                 onChange(group.directSection!);
               }}
             >
-              <group.icon size={17} aria-hidden="true" />
+              <group.icon size={20} aria-hidden="true" />
               <span>{group.label}</span>
             </button>
           );
@@ -3361,7 +3355,7 @@ function SettingsNavigation({ current, onChange }: { current: SettingsSection; o
                 setExpanded((value) => ({ ...value, [group.id]: !isExpanded }));
               }}
             >
-              <group.icon size={17} aria-hidden="true" />
+              <group.icon size={20} aria-hidden="true" />
               <span>{group.label}</span>
               <ChevronDown className="settings-nav-chevron" size={15} aria-hidden="true" />
             </button>
@@ -3450,7 +3444,7 @@ function ModelManager() {
 
   return (
     <section className="system-card" aria-label="Управление моделями" ref={listRef}>
-      <div className="panel-header"><div><h2>Модели</h2><span>Хранятся вне папки приложения</span></div><button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void refresh(); }}><RefreshCw size={16} aria-hidden="true" />Обновить</button></div>
+      <div className="panel-header"><div><h2>Модели</h2><span>Хранятся вне папки приложения</span></div><button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void refresh(); }}><IconInterfaceSpirals size={16} aria-hidden="true" />Обновить</button></div>
       {models.map((model) => {
         const percent = model.total_bytes > 0 ? Math.min(100, Math.round((model.downloaded_bytes / model.total_bytes) * 100)) : 0;
         return <div className="settings-group" key={model.id}>
@@ -3540,7 +3534,7 @@ function SystemMaintenance() {
   };
 
   return <section className="system-card maintenance-card" aria-label="Обслуживание данных">
-    <div className="panel-header"><div><h2>Обслуживание данных</h2><span>Необратимые действия вынесены отдельно</span></div><Database size={20} aria-hidden="true" /></div>
+    <div className="panel-header"><div><h2>Обслуживание данных</h2><span>Необратимые действия вынесены отдельно</span></div><IconComputerDatabase size={20} aria-hidden="true" /></div>
     <div className="maintenance-actions">
       <button className="secondary" disabled={busy} onClick={(e) => { animateButtonPress(e.currentTarget); setPendingAction({ title: "Перестроить индекс памяти?", description: "Сами записи останутся на месте. Iris заново подготовит их для поиска.", action: reindexMemories, success: "Индекс памяти перестроен." }); }}>Перестроить индекс памяти</button>
       <button className="secondary danger-button" disabled={busy} onClick={(e) => { animateButtonPress(e.currentTarget); setPendingAction({ title: "Очистить долгосрочную память?", description: "История диалогов сохранится, но восстановить записи памяти будет нельзя.", action: clearMemories, success: "Долгосрочная память очищена." }); }}>Очистить память</button>
@@ -3662,7 +3656,7 @@ function AvatarControls({
     <section className="avatar-controls" aria-label="Управление аватаром">
       <div className="avatar-toolbar">
         <span>{enabled ? `${avatarStatus?.client_count ?? 0} подключено` : "Интеграция отключена"}</span>
-        <button className="icon-button" onClick={() => void onRefresh()} disabled={busy} aria-label="Обновить статус аватара" title="Обновить статус аватара"><RefreshCw size={16} /></button>
+        <button className="icon-button" onClick={() => void onRefresh()} disabled={busy} aria-label="Обновить статус аватара" title="Обновить статус аватара"><IconInterfaceSpirals size={16} /></button>
       </div>
       <fieldset className="avatar-placement" disabled={busy}>
         <legend>Где показывать аватар</legend>

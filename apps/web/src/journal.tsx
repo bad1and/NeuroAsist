@@ -1,5 +1,10 @@
+import {
+  IconInterfaceTimeStopWatchCircle,
+  IconInterfaceSpirals,
+  IconInterfaceSearch,
+  IconInterfaceDeleteBin3,
+} from "./CustomIcons";
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { History, RefreshCw, Search, Trash2 } from "lucide-react";
 
 import { deleteTimelineRange, getTimelineJournal, searchTimeline } from "./api";
 import type { TimelineJournalItem, TimelineMessage } from "./types";
@@ -68,8 +73,8 @@ export function JournalPage() {
     <form className="search-form" onSubmit={onSearch}>
       <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по истории" aria-label="Поиск по истории" />
       {results && <button className="secondary" type="button" onClick={() => { setQuery(""); setResults(null); }}>Сбросить</button>}
-      <button className="icon-button" type="button" onClick={(e) => { animateButtonPress(e.currentTarget); void refresh(); }} aria-label="Обновить историю" title="Обновить историю"><RefreshCw size={17} /></button>
-      <button className="icon-button search-submit" type="submit" aria-label="Найти в истории" title="Найти в истории"><Search size={18} /></button>
+      <button className="icon-button" type="button" onClick={(e) => { animateButtonPress(e.currentTarget); void refresh(); }} aria-label="Обновить историю" title="Обновить историю"><IconInterfaceSpirals size={17} /></button>
+      <button className="icon-button search-submit" type="submit" aria-label="Найти в истории" title="Найти в истории"><IconInterfaceSearch size={18} /></button>
     </form>
     {error && <p className="error-text" role="alert">{error}</p>}
     {results && <div className="history-list search-results" ref={listRef}>
@@ -78,7 +83,7 @@ export function JournalPage() {
     {!results && <div className="history-list" ref={listRef}>
       {items.length ? items.map((item) => <article className="history-card" key={item.id ?? item.day}>
         <div><strong>{item.title || formatDate(item.day)}</strong><p>{item.message_count} {item.message_count === 1 ? "сообщение" : "сообщений"} · последняя активность в {formatTime(item.last_activity_at)}</p></div>
-        <button className="icon-button danger-button" title="Удалить историю до этой даты" aria-label={`Удалить историю до ${formatDate(item.day)}`} onClick={(e) => { animateButtonPress(e.currentTarget); setPendingDelete(item); }}><Trash2 size={17} /></button>
+        <button className="icon-button danger-button" title="Удалить историю до этой даты" aria-label={`Удалить историю до ${formatDate(item.day)}`} onClick={(e) => { animateButtonPress(e.currentTarget); setPendingDelete(item); }}><IconInterfaceDeleteBin3 size={17} /></button>
       </article>) : <EmptyHistory text="История пока пуста" />}
     </div>}
     <AppDialog
@@ -106,5 +111,5 @@ export function JournalPage() {
 }
 
 function EmptyHistory({ text }: { text: string }) {
-  return <div className="empty-state"><History size={28} aria-hidden="true" /><strong>{text}</strong><span>Здесь появятся прошлые разговоры.</span></div>;
+  return <div className="empty-state"><IconInterfaceTimeStopWatchCircle size={28} aria-hidden="true" /><strong>{text}</strong><span>Здесь появятся прошлые разговоры.</span></div>;
 }
