@@ -13,9 +13,11 @@ export function splitIntoSubtitleCues(text: string, maxChars = 45): string[] {
   const cues: string[] = [];
   const rawParagraphs = normalized.split(/\n+/);
 
-  const hasSegmenter = typeof Intl !== "undefined" && "Segmenter" in Intl;
-  const sentenceSegmenter = hasSegmenter
-    ? new Intl.Segmenter("ru", { granularity: "sentence" })
+  const intlWithSegmenter = typeof Intl !== "undefined" && "Segmenter" in Intl
+    ? (Intl as unknown as { Segmenter: new (locale: string, options?: { granularity: "sentence" | "word" | "grapheme" }) => { segment: (input: string) => Iterable<{ segment: string }> } })
+    : null;
+  const sentenceSegmenter = intlWithSegmenter
+    ? new intlWithSegmenter.Segmenter("ru", { granularity: "sentence" })
     : null;
 
   for (const para of rawParagraphs) {
