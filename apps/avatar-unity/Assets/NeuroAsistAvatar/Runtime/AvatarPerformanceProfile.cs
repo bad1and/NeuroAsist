@@ -11,7 +11,7 @@ namespace NeuroAsist.Avatar
         private static readonly Color EmbeddedColorKey = new Color(29f / 255f, 32f / 255f, 34f / 255f, 0f);
         // Two samples clean up hair and clothing silhouettes at the narrow
         // in-app size without materially competing with the WebView GPU work.
-        public const int EmbeddedAntiAliasing = 2;
+        public const int EmbeddedAntiAliasing = 4;
         [SerializeField] private AvatarRuntimeSettings settings;
 
         private void Awake()
@@ -27,18 +27,18 @@ namespace NeuroAsist.Avatar
             // 1280×720 default (the source of a fullscreen-looking avatar).
             if (ShouldSetStandaloneResolution(embeddedInIris))
                 Screen.SetResolution(Mathf.Max(640, settings.AvatarWidth), Mathf.Max(360, settings.AvatarHeight), false);
-            QualitySettings.antiAliasing = embeddedInIris ? EmbeddedAntiAliasing : 0;
-            QualitySettings.shadows = ShadowQuality.Disable;
-            QualitySettings.pixelLightCount = 1;
+            QualitySettings.antiAliasing = embeddedInIris ? EmbeddedAntiAliasing : 4;
+            QualitySettings.shadows = ShadowQuality.All; // Enable shadows for MToon
+            QualitySettings.pixelLightCount = 2;
             QualitySettings.realtimeReflectionProbes = false;
-            QualitySettings.anisotropicFiltering = AnisotropicFiltering.Disable;
-            QualitySettings.lodBias = .5f;
+            QualitySettings.anisotropicFiltering = AnisotropicFiltering.Enable;
+            QualitySettings.lodBias = 1.0f;
 
             var camera = Camera.main;
             if (camera != null)
             {
-                camera.allowHDR = false;
-                camera.allowMSAA = embeddedInIris;
+                camera.allowHDR = true;
+                camera.allowMSAA = true;
                 camera.farClipPlane = Mathf.Min(camera.farClipPlane, 20f);
                 camera.clearFlags = CameraClearFlags.SolidColor;
                 // InApp uses the same neutral clear colour as Tauri's native
@@ -53,11 +53,15 @@ namespace NeuroAsist.Avatar
             var keptLight = false;
             foreach (var light in FindObjectsByType<Light>(FindObjectsSortMode.None))
             {
-                if (!keptLight && light.type == LightType.Directional) { keptLight = true; light.shadows = LightShadows.None; continue; }
+                if (!keptLight && light.type == LightType.Directional) { 
+                    keptLight = true; 
+                    light.shadows = LightShadows.Soft; // Enable soft shadows for the main directional light
+                    continue; 
+                }
                 light.enabled = false;
             }
             Debug.Log(embeddedInIris
-                ? "[AvatarPerformance] Iris embedded profile enabled: 60 FPS, 2x MSAA, host-controlled bounds."
+                ? "[AvatarPerformance] Iris embedded profile enabled: 60 FPS, 4x MSAA, Shadows Enabled, host-controlled bounds."
                 : "[AvatarPerformance] AvatarLow enabled: 1280x720 @ 30 FPS", this);
         }
 

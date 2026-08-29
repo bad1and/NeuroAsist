@@ -302,7 +302,7 @@ Transform:
   m_GameObject: {fileID: 963194225}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 1, z: 0, w: 0}
-  m_LocalPosition: {x: -0.46580142, y: 1.1302416, z: -0.14211679}
+  m_LocalPosition: {x: -0.46580142, y: 1.1898866, z: -0.3309878}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -547,8 +547,8 @@ MonoBehaviour:
   avatar: {fileID: 1949565771}
   verticalFieldOfView: 30
   framingPadding: 1.12
-  portraitHeightFraction: 0.48
-  portraitCenterFromTop: 0.52
+  portraitHeightFraction: 0.42
+  portraitCenterFromTop: 0.5
 --- !u!114 &975465930
 MonoBehaviour:
   m_ObjectHideFlags: 0
