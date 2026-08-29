@@ -1,3 +1,4 @@
+import { CustomSelect } from "./components/CustomSelect";
 import {
   IconProgrammingScript2,
   IconInterfaceSpirals,
@@ -173,8 +174,8 @@ export function CodingAgentPage({
       </div>
       {settings && <section className="coding-settings-panel" aria-label="Настройки Coding Agent">
         <label className="settings-switch-row"><span><strong>Включить Coding Agent</strong><small>Основной агент сможет передавать ему coding-задачи.</small></span><input type="checkbox" checked={settings.coding_agent_enabled} disabled={busy || !settings.coding_api_key_configured} onChange={(event) => void changeSettings({ coding_agent_enabled: event.target.checked })} /></label>
-        <label>Модель<select value={settings.coding_model} disabled={busy} onChange={(event) => void changeSettings({ coding_model: event.target.value as PublicSettings["coding_model"] })}>{settings.coding_available_models.map((model) => <option key={model} value={model}>{model}</option>)}</select></label>
-        <label>Проект для контекста<select value={settings.coding_project_root} disabled={busy} onChange={(event) => void changeSettings({ coding_project_root: event.target.value })}>{settings.coding_allowed_project_roots.map((root) => <option key={root} value={root}>{root}</option>)}</select></label>
+        <label>Модель<CustomSelect value={settings.coding_model} disabled={busy} onChange={(event) => void changeSettings({ coding_model: event.target.value as PublicSettings["coding_model"] })}>{settings.coding_available_models.map((model) => <option key={model} value={model}>{model}</option>)}</CustomSelect></label>
+        <label>Проект для контекста<CustomSelect value={settings.coding_project_root} disabled={busy} onChange={(event) => void changeSettings({ coding_project_root: event.target.value })}>{settings.coding_allowed_project_roots.map((root) => <option key={root} value={root}>{root}</option>)}</CustomSelect></label>
         <label>Имя workspace<input value={workspaceName} disabled={busy} maxLength={80} onBlur={(event) => { if (event.target.value && event.target.value !== settings.coding_workspace_name) void changeSettings({ coding_workspace_name: event.target.value }); }} onChange={(event) => setWorkspaceName(event.target.value)} /></label>
         <label className="settings-switch-row"><span><strong>Автоделегирование</strong><small>Основной агент ставит явно сформулированные coding-запросы в очередь.</small></span><input type="checkbox" checked={settings.coding_auto_delegate} disabled={busy || !settings.coding_agent_enabled} onChange={(event) => void changeSettings({ coding_auto_delegate: event.target.checked })} /></label>
       </section>}

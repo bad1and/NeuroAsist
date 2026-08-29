@@ -1,3 +1,4 @@
+import { CustomSelect } from "./components/CustomSelect";
 import {
   IconInterfaceHome2,
   IconMailChatBubbleTextSquare,
@@ -2743,7 +2744,7 @@ export function SettingsPage({
             <legend>Интерфейс</legend>
             <label>
               Язык приложения
-              <select
+              <CustomSelect
                 value={interfaceLocale}
                 onChange={(event) => {
                   const nextValue = event.target.value as InterfaceLocale;
@@ -2761,7 +2762,7 @@ export function SettingsPage({
               >
                 <option value="ru">Русский</option>
                 <option value="en">Английский</option>
-              </select>
+              </CustomSelect>
               <small>Выберите язык кнопок, меню и системных подсказок.</small>
             </label>
           </fieldset>
@@ -2794,7 +2795,7 @@ export function SettingsPage({
           <legend>Основное</legend>
           <label>
             Язык голосового ввода
-            <select
+            <CustomSelect
               value={voiceLanguage}
               onChange={(event) => {
                 const nextValue = event.target.value;
@@ -2808,7 +2809,7 @@ export function SettingsPage({
                   {availableLanguage === "ru" ? "Русский" : availableLanguage === "en" ? "Английский" : availableLanguage}
                 </option>
               ))}
-            </select>
+            </CustomSelect>
           </label>
         </fieldset>
 
@@ -2816,7 +2817,7 @@ export function SettingsPage({
           <legend>Устройства</legend>
           <label>
             Профиль микрофона
-            <select
+            <CustomSelect
               value={voiceMicrophoneProfile}
               onChange={(event) => {
                 const nextValue = event.target.value as MicrophoneProfile;
@@ -2828,13 +2829,13 @@ export function SettingsPage({
               <option value="balanced">Сбалансированный — рекомендуется</option>
               <option value="headset">Гарнитура</option>
               <option value="speakers">Колонки</option>
-            </select>
+            </CustomSelect>
             <small>Управляет эхоподавлением и шумоподавлением браузера для записи и живого режима.</small>
           </label>
 
           <label>
             Источник входа (микрофон)
-            <select
+            <CustomSelect
               value={voiceInputDeviceId}
               onChange={(event) => {
                 const nextValue = event.target.value;
@@ -2850,13 +2851,13 @@ export function SettingsPage({
                   {device.label}
                 </option>
               ))}
-            </select>
+            </CustomSelect>
             <small>Используется для единственного голосового режима Live.</small>
           </label>
 
           <label>
             Источник вывода (наушники или колонки)
-            <select
+            <CustomSelect
               value={voiceOutputDeviceId}
               onChange={(event) => {
                 const nextValue = event.target.value;
@@ -2872,7 +2873,7 @@ export function SettingsPage({
                   {device.label}
                 </option>
               ))}
-            </select>
+            </CustomSelect>
             <small>
               {audioDevices.canSelectOutput
                 ? "Выбранное устройство используется для синтезированных аудиофайлов и воспроизведения сообщений; запасной системный голос браузера следует настройке Windows."
@@ -2898,7 +2899,7 @@ export function SettingsPage({
           <legend>Синтез речи</legend>
           <label>
             Голос {ttsProviderLabel}
-            <select
+            <CustomSelect
               value={voiceTtsVoice}
               onChange={(event) => {
                 const nextValue = event.target.value;
@@ -2912,7 +2913,7 @@ export function SettingsPage({
                   {availableVoice}
                 </option>
               ))}
-            </select>
+            </CustomSelect>
           </label>
 
           <label>
@@ -2934,24 +2935,24 @@ export function SettingsPage({
 
           <label>
             Подача голоса
-            <select value={voiceTtsStyle} onChange={(event) => void changeVoiceStyle(event.target.value)} disabled={saving}>
+            <CustomSelect value={voiceTtsStyle} onChange={(event) => void changeVoiceStyle(event.target.value)} disabled={saving}>
               <option value="auto">Авто — по эмоции нейросети</option>
               <option value="calm">Спокойно</option>
               <option value="normal">Обычно</option>
               <option value="energetic">Энергично</option>
               <option value="thoughtful">Задумчиво</option>
               <option value="assertive">Напористо</option>
-            </select>
+            </CustomSelect>
             <small>Действует до перезапуска приложения.</small>
           </label>
 
           <label>
             Выразительность
-            <select value={voiceExpressionLevel} onChange={(event) => void changeVoiceExpression(event.target.value)} disabled={saving}>
+            <CustomSelect value={voiceExpressionLevel} onChange={(event) => void changeVoiceExpression(event.target.value)} disabled={saving}>
               <option value="minimal">Минимальная — почти нейтрально</option>
               <option value="natural">Естественная — рекомендовано</option>
               <option value="noticeable">Заметная — сильнее эмоции</option>
-            </select>
+            </CustomSelect>
             <small>Усиливает или смягчает выбранную подачу; обычный профиль не меняется.</small>
           </label>
 
@@ -3074,7 +3075,7 @@ export function SettingsPage({
 
           <label>
             Участники
-            <select
+            <CustomSelect
               value={liveSettings.live_conversation_participant_mode}
               onChange={(event) => updateLiveSetting(
                 "live_conversation_participant_mode",
@@ -3083,12 +3084,12 @@ export function SettingsPage({
             >
               <option value="one_to_one">Один на один</option>
               <option value="group">Несколько собеседников</option>
-            </select>
+            </CustomSelect>
           </label>
 
           <label>
             Охотность вступать
-            <select
+            <CustomSelect
               value={liveSettings.live_conversation_engagement}
               onChange={(event) => updateLiveSetting(
                 "live_conversation_engagement",
@@ -3098,12 +3099,12 @@ export function SettingsPage({
               <option value="low">Сдержанная</option>
               <option value="balanced">Сбалансированная</option>
               <option value="high">Разговорчивая</option>
-            </select>
+            </CustomSelect>
           </label>
 
           <label>
             Инициативность
-            <select
+            <CustomSelect
               value={liveSettings.live_conversation_initiative}
               onChange={(event) => updateLiveSetting(
                 "live_conversation_initiative",
@@ -3113,12 +3114,12 @@ export function SettingsPage({
               <option value="off">Выключена</option>
               <option value="rare">Редкая</option>
               <option value="balanced">Сбалансированная</option>
-            </select>
+            </CustomSelect>
           </label>
 
           <label>
             Прямое обращение
-            <select
+            <CustomSelect
               value={liveSettings.live_conversation_address_strictness}
               onChange={(event) => updateLiveSetting(
                 "live_conversation_address_strictness",
@@ -3128,12 +3129,12 @@ export function SettingsPage({
               <option value="relaxed">Свободное</option>
               <option value="balanced">Сбалансированное</option>
               <option value="strict">Строгое</option>
-            </select>
+            </CustomSelect>
           </label>
 
           <label>
             Чувствительность к перебиванию
-            <select
+            <CustomSelect
               value={liveSettings.live_conversation_interruption_sensitivity}
               onChange={(event) => updateLiveSetting(
                 "live_conversation_interruption_sensitivity",
@@ -3143,12 +3144,12 @@ export function SettingsPage({
               <option value="low">Низкая</option>
               <option value="balanced">Сбалансированная</option>
               <option value="high">Высокая</option>
-            </select>
+            </CustomSelect>
           </label>
 
           <label>
             Терпимость к паузам
-            <select
+            <CustomSelect
               value={liveSettings.live_conversation_pause_tolerance}
               onChange={(event) => updateLiveSetting(
                 "live_conversation_pause_tolerance",
@@ -3158,12 +3159,12 @@ export function SettingsPage({
               <option value="short">Короткая</option>
               <option value="natural">Естественная</option>
               <option value="patient">Терпеливая</option>
-            </select>
+            </CustomSelect>
           </label>
 
           <label>
             Выраженность эмоций
-            <select
+            <CustomSelect
               value={liveSettings.live_conversation_emotion_expression}
               onChange={(event) => updateLiveSetting(
                 "live_conversation_emotion_expression",
@@ -3173,12 +3174,12 @@ export function SettingsPage({
               <option value="subtle">Тонкая</option>
               <option value="natural">Естественная</option>
               <option value="strong">Яркая</option>
-            </select>
+            </CustomSelect>
           </label>
 
           <label>
             Восстановление настроения
-            <select
+            <CustomSelect
               value={liveSettings.live_conversation_mood_recovery}
               onChange={(event) => updateLiveSetting(
                 "live_conversation_mood_recovery",
@@ -3188,12 +3189,12 @@ export function SettingsPage({
               <option value="slow">Медленное</option>
               <option value="natural">Естественное</option>
               <option value="fast">Быстрое</option>
-            </select>
+            </CustomSelect>
           </label>
 
           <label>
             Влияние недавних событий
-            <select
+            <CustomSelect
               value={liveSettings.live_conversation_recent_event_weight}
               onChange={(event) => updateLiveSetting(
                 "live_conversation_recent_event_weight",
@@ -3203,12 +3204,12 @@ export function SettingsPage({
               <option value="light">Слабое</option>
               <option value="balanced">Сбалансированное</option>
               <option value="strong">Сильное</option>
-            </select>
+            </CustomSelect>
           </label>
 
           <label>
             Защита от собственного голоса
-            <select
+            <CustomSelect
               value={liveSettings.live_conversation_echo_mode}
               onChange={(event) => updateLiveSetting(
                 "live_conversation_echo_mode",
@@ -3217,7 +3218,7 @@ export function SettingsPage({
             >
               <option value="auto">Автоматически</option>
               <option value="half_duplex">Не слушать во время ответа</option>
-            </select>
+            </CustomSelect>
           </label>
         </fieldset>
 
@@ -3225,7 +3226,7 @@ export function SettingsPage({
           <legend>Память</legend>
           <label>
             Режим сохранения
-            <select
+            <CustomSelect
               value={memoryMode}
               onChange={(event) => {
                 const nextValue = event.target.value;
@@ -3237,7 +3238,7 @@ export function SettingsPage({
               <option value="off">Не сохранять</option>
               <option value="balanced">Умный — только важные устойчивые факты</option>
               <option value="automatic">Автоматический — все обычные факты</option>
-            </select>
+            </CustomSelect>
           </label>
           <SettingsSwitch
             checked={memoryIncognito}
@@ -3712,15 +3713,15 @@ function AvatarControls({
         </label>
         <label>
           Эмоция
-          <select value={emotion} onChange={(event) => setEmotion(event.target.value)} disabled={!enabled || busy}>
+          <CustomSelect value={emotion} onChange={(event) => setEmotion(event.target.value)} disabled={!enabled || busy}>
             {Object.entries(AVATAR_EMOTION_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select>
+          </CustomSelect>
         </label>
         <label>
           Тестовый жест
-          <select value={gesture} onChange={(event) => setGesture(event.target.value)} disabled={!enabled || busy}>
+          <CustomSelect value={gesture} onChange={(event) => setGesture(event.target.value)} disabled={!enabled || busy}>
             {Object.entries(AVATAR_GESTURE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select>
+          </CustomSelect>
         </label>
         <label>
           Интенсивность движения {motionIntensity.toFixed(1)}

@@ -1,3 +1,4 @@
+import { CustomSelect } from "./components/CustomSelect";
 import { useEffect, useRef, useState } from "react";
 import {
   IconInterfaceSecurityShield4,
@@ -274,13 +275,13 @@ export function GuidedSttCapture({
       <div className="stt-capture-editor">
         <label>
           Сценарий {scenarioIndex + 1} из {SCENARIOS.length}
-          <select value={scenarioIndex} onChange={(event) => selectScenario(Number(event.target.value))} disabled={recording || busy}>
+          <CustomSelect value={scenarioIndex} onChange={(event) => selectScenario(Number(event.target.value))} disabled={recording || busy}>
             {SCENARIOS.map((item, index) => (
               <option key={item.id} value={index}>
                 {index + 1}. {item.title}{completedScenarioIds.has(item.id) ? " — записано" : ""}
               </option>
             ))}
-          </select>
+          </CustomSelect>
         </label>
         <label>
           Эталонный текст
