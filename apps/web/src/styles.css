@@ -1564,7 +1564,7 @@ textarea::placeholder {
   display: grid;
   width: 180px;
   padding: 8px;
-  border: 1px solid var(--color-rule-strong);
+  border: none;
   border-radius: var(--radius-sm);
   color: var(--color-text);
   background: var(--color-surface-raised);
@@ -2653,7 +2653,7 @@ select,
   display: grid;
   width: 170px;
   padding: 6px;
-  border: 1px solid var(--color-rule-strong);
+  border: none;
   border-radius: 12px;
   color: var(--color-text);
   background: var(--color-surface-raised);

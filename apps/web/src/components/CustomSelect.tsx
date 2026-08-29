@@ -9,9 +9,11 @@ interface CustomSelectProps {
   children: ReactNode;
   className?: string;
   id?: string;
+  prefixIcon?: ReactNode;
+  style?: React.CSSProperties;
 }
 
-export function CustomSelect({ value, onChange, disabled, children, className = "", id }: CustomSelectProps) {
+export function CustomSelect({ value, onChange, disabled, children, className = "", id, prefixIcon, style }: CustomSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -52,16 +54,18 @@ export function CustomSelect({ value, onChange, disabled, children, className = 
 
   return (
     <div 
-      className={`custom-select-container ${disabled ? "disabled" : ""} ${className}`} 
+      className={`custom-select-container ${disabled ? "disabled" : ""} ${isOpen ? "open" : ""} ${className}`} 
       ref={containerRef}
-      id={id}
+      style={style}
     >
       <button
         type="button"
+        id={id}
         className="custom-select-trigger"
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
       >
+        {prefixIcon && <span className="custom-select-prefix">{prefixIcon}</span>}
         <span className="custom-select-value">{selectedOption ? selectedOption.label : ""}</span>
         <ChevronDown size={16} className="custom-select-icon" />
       </button>
