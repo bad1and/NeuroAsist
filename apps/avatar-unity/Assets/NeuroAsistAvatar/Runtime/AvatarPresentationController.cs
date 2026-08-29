@@ -55,7 +55,7 @@ namespace NeuroAsist.Avatar
             // a full-body doll; VTubers instead keep attention on face and upper torso.
             var portraitHeight = bounds.size.y * portraitHeightFraction;
             var halfHeight = portraitHeight * .5f * framingPadding;
-            var portraitWidth = Mathf.Max(bounds.size.x * .92f, portraitHeight * Mathf.Max(.72f, aspect) * .9f);
+            var portraitWidth = portraitHeight * aspect;
             var halfWidth = portraitWidth * .5f * framingPadding;
             var distance = Mathf.Max(
                 halfHeight / Mathf.Tan(verticalFovRadians * .5f),
@@ -83,7 +83,7 @@ namespace NeuroAsist.Avatar
                 // performance profile configured the 60 FPS, low-overhead path.
                 if (avatarCamera != null)
                 {
-                    avatarCamera.allowHDR = false;
+                    avatarCamera.allowHDR = true; // Enabled for better MToon bloom/shading
                     avatarCamera.allowMSAA = AvatarPerformanceProfile.EmbeddedAntiAliasing > 1;
                     avatarCamera.allowDynamicResolution = false;
                     avatarCamera.clearFlags = CameraClearFlags.SolidColor;
@@ -92,13 +92,14 @@ namespace NeuroAsist.Avatar
             }
             if (QualitySettings.names.Length > 0)
                 QualitySettings.SetQualityLevel(QualitySettings.names.Length - 1, true);
-            QualitySettings.antiAliasing = 2;
+            QualitySettings.antiAliasing = 4; // Improved from 2
+            QualitySettings.shadows = ShadowQuality.All; // Added for MToon lighting
             QualitySettings.anisotropicFiltering = AnisotropicFiltering.Enable;
             QualitySettings.lodBias = 1f;
             QualitySettings.vSyncCount = 0;
             Application.targetFrameRate = 60;
             if (avatarCamera == null) return;
-            avatarCamera.allowHDR = false;
+            avatarCamera.allowHDR = true; // Enabled for better MToon bloom/shading
             avatarCamera.allowMSAA = true;
             avatarCamera.allowDynamicResolution = false;
             avatarCamera.clearFlags = CameraClearFlags.SolidColor;

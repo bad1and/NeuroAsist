@@ -257,7 +257,7 @@ select { appearance: auto; }
   left: 50%;
   transform: translateX(-50%);
   bottom: 121px;
-  width: clamp(360px, 40vw, 480px);
+  width: clamp(460px, 50vw, 600px);
   height: calc(100% - 141px);
   max-height: 500px;
   min-height: 300px;
@@ -282,9 +282,9 @@ select { appearance: auto; }
 
 .chat-panel.is-active.has-in-app-avatar .in-app-avatar-stage {
   position: absolute;
-  left: clamp(-10px, 0vw, 6px);
+  left: clamp(-80px, -4vw, -50px);
   bottom: 145px;
-  width: clamp(360px, 38vw, 460px);
+  width: clamp(460px, 50vw, 600px);
   height: calc(100% - 160px);
   max-height: 520px;
   min-height: 340px;
@@ -2073,9 +2073,9 @@ textarea::placeholder {
 
 .chat-panel.is-active.has-in-app-avatar .in-app-avatar-stage {
   position: absolute;
-  left: clamp(-10px, 0vw, 6px);
+  left: clamp(-80px, -4vw, -50px);
   bottom: 145px;
-  width: clamp(360px, 38vw, 460px);
+  width: clamp(460px, 50vw, 600px);
   height: calc(100% - 160px);
   max-height: 520px;
 }
