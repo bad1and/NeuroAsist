@@ -288,6 +288,9 @@ function AutoSaveStatus({ status, onRetry }: { status: AutoSaveStatus; onRetry: 
         translateY: prefersReducedMotion() ? 0 : [-3, 0],
         duration: 180,
         ease: "outQuad",
+        onComplete: () => {
+          if (elRef.current) elRef.current.style.transform = "";
+        },
       });
     }
   }, [status]);

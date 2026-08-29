@@ -14,7 +14,11 @@ export function animatePageEnter(target: HTMLElement | string): Animation | null
     duration: reduced ? ANIMATION_TOKENS.duration.micro : ANIMATION_TOKENS.duration.page,
     ease: ANIMATION_TOKENS.ease.smooth,
     onComplete: () => {
-      if (typeof target !== "string" && target instanceof HTMLElement) {
+      if (typeof target === "string") {
+        document.querySelectorAll(target).forEach((el) => {
+          if (el instanceof HTMLElement) el.style.transform = "";
+        });
+      } else if (target instanceof HTMLElement) {
         target.style.transform = "";
       }
     },
@@ -45,8 +49,12 @@ export function animateStaggerCards(
     delay: reduced ? 0 : stagger(customDelay, { from: "first" }),
     ease: ANIMATION_TOKENS.ease.softSpring,
     onComplete: () => {
-      if (targets instanceof NodeList) {
-        targets.forEach((el) => {
+      if (typeof targets === "string") {
+        document.querySelectorAll(targets).forEach((el) => {
+          if (el instanceof HTMLElement) el.style.transform = "";
+        });
+      } else if (targets && "forEach" in targets) {
+        (targets as NodeListOf<HTMLElement>).forEach((el) => {
           if (el instanceof HTMLElement) el.style.transform = "";
         });
       }
@@ -120,6 +128,9 @@ export function animateModalEnter(dialog: HTMLElement): Animation | null {
     translateY: reduced ? 0 : [10, 0],
     duration: reduced ? ANIMATION_TOKENS.duration.micro : ANIMATION_TOKENS.duration.medium,
     ease: ANIMATION_TOKENS.ease.bounce,
+    onComplete: () => {
+      if (dialog instanceof HTMLElement) dialog.style.transform = "";
+    },
   });
 }
 
@@ -168,6 +179,9 @@ export function animateNoticeEnter(element: HTMLElement): Animation | null {
     scale: reduced ? 1 : [0.98, 1],
     duration: reduced ? ANIMATION_TOKENS.duration.micro : ANIMATION_TOKENS.duration.fast,
     ease: ANIMATION_TOKENS.ease.softSpring,
+    onComplete: () => {
+      if (element instanceof HTMLElement) element.style.transform = "";
+    },
   });
 }
 

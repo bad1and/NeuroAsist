@@ -53,6 +53,9 @@ export function StartupScreen({
         translateY: reduced ? 0 : [16, 0],
         duration: reduced ? 150 : 600,
         ease: "outQuad",
+        onComplete: () => {
+          (content as HTMLElement).style.transform = "";
+        },
       });
     }
   }, []);
@@ -67,6 +70,9 @@ export function StartupScreen({
         translateY: reduced ? 0 : [4, 0],
         duration: 220,
         ease: "outQuad",
+        onComplete: () => {
+          if (copyRef.current) copyRef.current.style.transform = "";
+        },
       });
     }
   }, [status]);
