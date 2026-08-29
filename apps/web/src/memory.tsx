@@ -1,5 +1,18 @@
-import { useEffect, useRef, useState } from "react";
-import { Archive, Brain, CheckCircle2, CircleHelp, ListChecks, MoreHorizontal, Pin, Search, Tag, Trash2 } from "lucide-react";
+import {
+  IconComputerRobotCyborg1,
+  IconInterfaceFavoriteLike1,
+  IconMoneyCashierTag,
+  IconInterfaceCalendarMark,
+  IconInterfaceContentArchive,
+  IconInterfaceSettingGaugeDashboard1,
+  IconInterfaceBookmark,
+  IconInterfaceSearch,
+  IconInterfaceDeleteBin3,
+  IconInterfaceSpirals,
+  IconInterfaceAlertAlarmBell2,
+  type CustomIconProps,
+} from "./CustomIcons";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 
 import {
   deleteMemory, getMemories, getMemoryAudit, getMemoryCommitments,
@@ -14,13 +27,13 @@ const STATUS_LABELS: Record<MemoryStatus | "all", string> = {
   all: "Все", active: "Сохранённые", superseded: "Заменённые", deleted: "Удалённые", rejected: "Отклонённые", expired: "Истёкшие",
 };
 
-const MEMORY_SECTIONS: Array<{ id: MemorySection; label: string; icon: typeof Brain }> = [
-  { id: "all", label: "Текущие", icon: Brain },
-  { id: "active", label: "Сохранённые", icon: CheckCircle2 },
-  { id: "topics", label: "Темы", icon: Tag },
-  { id: "commitments", label: "Планы и обещания", icon: ListChecks },
-  { id: "archive", label: "Архив", icon: Archive },
-  { id: "diagnostics", label: "Диагностика", icon: CircleHelp },
+const MEMORY_SECTIONS: Array<{ id: MemorySection; label: string; icon: ComponentType<CustomIconProps> }> = [
+  { id: "all", label: "Текущие", icon: IconComputerRobotCyborg1 },
+  { id: "active", label: "Сохранённые", icon: IconInterfaceFavoriteLike1 },
+  { id: "topics", label: "Темы", icon: IconMoneyCashierTag },
+  { id: "commitments", label: "Планы и обещания", icon: IconInterfaceCalendarMark },
+  { id: "archive", label: "Архив", icon: IconInterfaceContentArchive },
+  { id: "diagnostics", label: "Диагностика", icon: IconInterfaceSettingGaugeDashboard1 },
 ];
 
 const MEMORY_LABELS: Record<string, string> = {
@@ -130,13 +143,13 @@ export function MemoryPage() {
       <div className="memory-toolbar-actions">
         <form className="search-form compact" onSubmit={(event) => { event.preventDefault(); void refresh(); }}>
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по памяти" aria-label="Поиск по памяти" />
-          <button className="icon-button search-submit" type="submit" aria-label="Найти в памяти" title="Найти в памяти"><Search size={17} /></button>
+          <button className="icon-button search-submit" type="submit" aria-label="Найти в памяти" title="Найти в памяти"><IconInterfaceSearch size={17} /></button>
         </form>
       </div>
     </div>
     {message && <p className="error-text" role="alert">{message}</p>}
     <div className="memory-list" ref={listRef}>
-      {section === "topics" && topics.map((topic) => <article className="memory-card" key={topic.id}><div className="memory-card-main"><div className="memory-card-heading"><span className="memory-status active">{topic.status}</span>{topic.user_locked && <Pin size={14} />}</div><strong data-i18n-skip>{topic.title}</strong><p data-i18n-skip>{topic.summary_text || "Краткое описание ещё не сформировано."}</p><small>Связи: {topic.links.length} · доказательства: {topic.evidence.length}</small></div></article>)}
+      {section === "topics" && topics.map((topic) => <article className="memory-card" key={topic.id}><div className="memory-card-main"><div className="memory-card-heading"><span className="memory-status active">{topic.status}</span>{topic.user_locked && <IconInterfaceBookmark size={14} />}</div><strong data-i18n-skip>{topic.title}</strong><p data-i18n-skip>{topic.summary_text || "Краткое описание ещё не сформировано."}</p><small>Связи: {topic.links.length} · доказательства: {topic.evidence.length}</small></div></article>)}
       {section === "commitments" && commitments.map((commitment) => <article className="memory-card" key={commitment.id}><div className="memory-card-main"><div className="memory-card-heading"><span className={`memory-status ${commitment.status === "open" ? "active" : "deleted"}`}>{commitment.status}</span></div><strong data-i18n-skip>{commitment.title}</strong><p data-i18n-skip>{commitment.details}</p><small>{commitment.kind} · уверенность: {Math.round(commitment.confidence * 100)}%</small></div></article>)}
       {section === "diagnostics" && <>
         {diagnostics.integrity && <article className="memory-card"><div className="memory-card-main"><div className="memory-card-heading"><span className={`memory-status ${diagnostics.integrity.state === "healthy" ? "active" : "deleted"}`}>{diagnostics.integrity.state}</span></div><strong>Целостность памяти</strong><p>Активные конфликты: {diagnostics.integrity.active_conflicts} · без канонического слота: {diagnostics.integrity.noncanonical_active} · без источников: {diagnostics.integrity.provenance_missing}</p><small>Рассинхронизация источников: {diagnostics.integrity.source_count_mismatches} · кандидаты: {diagnostics.integrity.candidate_count ?? 0} · ограничения: {diagnostics.integrity.guards_installed ? "включены" : "не установлены"}</small></div></article>}
@@ -145,22 +158,22 @@ export function MemoryPage() {
         {diagnostics.repair && <article className="memory-card"><div className="memory-card-main"><div className="memory-card-heading"><span className="memory-status active">{diagnostics.repair.status}</span></div><strong>Автопочинка памяти</strong><p>Канонизировано: {Number(diagnostics.repair.result.canonicalized ?? 0)} · устранено дублей: {Number(diagnostics.repair.result.duplicates_superseded ?? diagnostics.repair.result.topics_merged ?? 0)} · перенесено доказательств: {Number(diagnostics.repair.result.evidence_copied ?? 0)}</p><small>{diagnostics.repair.repair_key}</small></div></article>}
         {diagnostics.runs.map((run) => <article className="memory-card" key={run.id}><div className="memory-card-main"><div className="memory-card-heading"><span className={`memory-status ${run.result.outcome === "applied" ? "active" : "deleted"}`}>{run.result.outcome ?? run.status}</span></div><strong>Консолидация памяти</strong><p>Предложено: {run.result.proposed ?? 0} · сохранено: {run.result.saved ?? 0} · отклонено: {run.result.discarded ?? 0}</p><small>{run.diagnostics.error_codes?.length ? `Причина: ${run.diagnostics.error_codes.join(", ")}` : "Ошибок нет"} · {run.diagnostics.model ?? "локальный путь"}</small></div></article>)}
         {conflicts.map((conflict) => <article className="memory-card" key={conflict.id}><div className="memory-card-main"><strong>Конфликт: {conflict.status}</strong><p>{conflict.reason}</p></div></article>)}
-        {!diagnostics.runs.length && !conflicts.length && <div className="empty-state"><CircleHelp size={28} /><strong>Диагностических записей пока нет</strong><span>Здесь появятся результаты фоновой консолидации и понятные причины нулевой записи.</span></div>}
+        {!diagnostics.runs.length && !conflicts.length && <div className="empty-state"><IconInterfaceAlertAlarmBell2 size={28} /><strong>Диагностических записей пока нет</strong><span>Здесь появятся результаты фоновой консолидации и понятные причины нулевой записи.</span></div>}
       </>}
       {!(["topics", "commitments", "diagnostics"] as MemorySection[]).includes(section) && <>
       {items.length ? items.map((memory) => <article className="memory-card" key={memory.id}>
-        <div className="memory-card-main"><div className="memory-card-heading"><span className={`memory-status ${memory.status}`}>{STATUS_LABELS[memory.status]}</span>{memory.user_locked && <Pin size={14} aria-label="Закреплённая запись" />}</div><strong>{memoryLabel(memory)}</strong><p data-i18n-skip>{memory.value_text}</p>{section === "archive" && memory.replacement && <p className="memory-replacement"><span>Заменено на: </span><span data-i18n-skip>{memory.replacement.value_text}</span></p>}<small>{(memory.source_count ?? memory.source_message_ids.length) ? `Источник: ${memory.source_count ?? memory.source_message_ids.length} сообщ.` : "Источник не указан"} · {section === "archive" ? "использовалось до замены" : "использовано"}: {memory.access_count}</small></div>
+        <div className="memory-card-main"><div className="memory-card-heading"><span className={`memory-status ${memory.status}`}>{STATUS_LABELS[memory.status]}</span>{memory.user_locked && <IconInterfaceBookmark size={14} aria-label="Закреплённая запись" />}</div><strong>{memoryLabel(memory)}</strong><p data-i18n-skip>{memory.value_text}</p>{section === "archive" && memory.replacement && <p className="memory-replacement"><span>Заменено на: </span><span data-i18n-skip>{memory.replacement.value_text}</span></p>}<small>{(memory.source_count ?? memory.source_message_ids.length) ? `Источник: ${memory.source_count ?? memory.source_message_ids.length} сообщ.` : "Источник не указан"} · {section === "archive" ? "использовалось до замены" : "использовано"}: {memory.access_count}</small></div>
         <div className="memory-actions">
           <details className="memory-action-menu">
-                <summary className="icon-button" role="button" aria-label="Дополнительные действия"><MoreHorizontal size={17} aria-hidden="true" /></summary>
+                <summary className="icon-button" role="button" aria-label="Дополнительные действия"><IconInterfaceSpirals size={17} aria-hidden="true" /></summary>
                 <div>
-                  <button type="button" onClick={async () => { const nextAudit = await getMemoryAudit(memory.id); setAudit((current) => ({ ...current, [memory.id]: nextAudit.items })); }}><CircleHelp size={16} aria-hidden="true" />История записи</button>
-                  {memory.status !== "deleted" && <button className="is-danger" type="button" onClick={(e) => void handleForget(e, memory.id)}><Trash2 size={16} aria-hidden="true" />Забыть</button>}
+                  <button type="button" onClick={async () => { const nextAudit = await getMemoryAudit(memory.id); setAudit((current) => ({ ...current, [memory.id]: nextAudit.items })); }}><IconInterfaceAlertAlarmBell2 size={16} aria-hidden="true" />История записи</button>
+                  {memory.status !== "deleted" && <button className="is-danger" type="button" onClick={(e) => void handleForget(e, memory.id)}><IconInterfaceDeleteBin3 size={16} aria-hidden="true" />Забыть</button>}
                 </div>
               </details>
         </div>
         {audit[memory.id] && <details className="memory-audit" open><summary>История записи</summary><p>{audit[memory.id].map((item) => `${item.action} (${item.actor})`).join(" → ")}</p></details>}
-      </article>) : <div className="empty-state"><Brain size={28} aria-hidden="true" /><strong>Записей пока нет</strong><span>Помощник предложит факты для сохранения после разговора.</span></div>}
+      </article>) : <div className="empty-state"><IconComputerRobotCyborg1 size={28} aria-hidden="true" /><strong>Записей пока нет</strong><span>Помощник предложит факты для сохранения после разговора.</span></div>}
       </>}
     </div>
   </section>;

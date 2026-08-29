@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { IconInterfaceSpirals } from "../CustomIcons";
 
 import type { CoreStatus } from "../desktop";
 import { IrisLoader } from "./IrisLoader";
@@ -105,7 +105,7 @@ export function StartupScreen({
         </div>
         {failed && (
           <button className="primary-button" type="button" onClick={onRetry} disabled={retrying}>
-            <RefreshCw size={17} className={retrying ? "is-spinning" : ""} aria-hidden="true" />
+            <IconInterfaceSpirals size={17} className={retrying ? "is-spinning" : ""} aria-hidden="true" />
             {retrying ? "Перезапускаю…" : "Попробовать снова"}
           </button>
         )}

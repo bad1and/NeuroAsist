@@ -1,5 +1,10 @@
+import {
+  IconComputerRobotCyborg1,
+  IconMailChatBubbleTextSquare,
+  IconInterfaceSpirals,
+  IconInterfaceCursorArrow2,
+} from "./CustomIcons";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Brain, MessageCircle, Orbit, RefreshCw, Sparkles } from "lucide-react";
 
 import { getMemories, getTimelineJournal } from "./api";
 import type { AvatarStatusResponse, MemoryItem, StatusResponse, TimelineJournalItem } from "./types";
@@ -135,7 +140,7 @@ export function OverviewPage({
           <h2>О чём поговорим?</h2>
           <span>Iris рядом, когда хочется обсудить идею, разобрать задачу или просто выговориться.</span>
           <button className="primary-button overview-cta" onClick={handleCtaClick}>
-            Начать диалог <ArrowRight size={18} aria-hidden="true" />
+            Начать диалог <IconInterfaceCursorArrow2 size={18} aria-hidden="true" />
           </button>
         </div>
         <figure className="overview-visual" aria-hidden="true">
@@ -148,19 +153,19 @@ export function OverviewPage({
 
       <div className={`overview-grid${loading ? " is-loading" : ""}`} ref={gridRef} aria-busy={loading}>
         <article className="overview-card">
-          <div className="overview-card-icon"><MessageCircle size={20} /></div>
+          <div className="overview-card-icon"><IconMailChatBubbleTextSquare size={20} /></div>
           <div>
             <span>Последний разговор</span>
             <h3 data-i18n-skip={latest?.title && latest.title !== "Разговор с Iris" ? "" : undefined}>{latest?.title || (latest ? "Разговор с Iris" : "История пока пуста")}</h3>
             <p>{latest ? `${latest.message_count} сообщ. · ${formatRelative(latest.last_activity_at)}` : "Начни диалог — он появится здесь."}</p>
           </div>
           <button className="card-link" onClick={(e) => { animateButtonPress(e.currentTarget); if (latest) onOpenHistory(); else onOpenChat(); }}>
-            {latest ? "Открыть историю" : "Начать разговор"}<ArrowRight size={15} />
+            {latest ? "Открыть историю" : "Начать разговор"}<IconInterfaceCursorArrow2 size={15} />
           </button>
         </article>
 
         <article className="overview-card">
-          <div className="overview-card-icon"><Brain size={20} /></div>
+          <div className="overview-card-icon"><IconComputerRobotCyborg1 size={20} /></div>
           <div>
             <span>Память</span>
             <h3>
@@ -175,24 +180,24 @@ export function OverviewPage({
             <p>Iris самостоятельно поддерживает актуальность фактов.</p>
           </div>
           <button className="card-link" onClick={(e) => { animateButtonPress(e.currentTarget); onOpenMemory(); }}>
-            Открыть память<ArrowRight size={15} />
+            Открыть память<IconInterfaceCursorArrow2 size={15} />
           </button>
         </article>
 
         <article className="overview-card">
-          <div className="overview-card-icon"><Orbit size={20} /></div>
+          <div className="overview-card-icon"><IconInterfaceSpirals size={20} /></div>
           <div>
             <span>Система</span>
             <h3>{backendReady ? `${status?.llm_provider} · ${status?.llm_model}` : "Backend недоступен"}</h3>
             <p>{avatarStatus?.enabled ? (avatarConnected ? `Аватар подключён: ${avatarStatus.client_count}` : "Аватар ожидает подключения") : "Аватар отключён"}</p>
           </div>
           <button className="card-link" onClick={(e) => { animateButtonPress(e.currentTarget); onOpenSettings(); }}>
-            Диагностика<ArrowRight size={15} />
+            Диагностика<IconInterfaceCursorArrow2 size={15} />
           </button>
         </article>
       </div>
 
-      {loading && <span className="overview-loading"><RefreshCw size={16} className="is-spinning" />Обновляю реальные данные</span>}
+      {loading && <span className="overview-loading"><IconInterfaceSpirals size={16} className="is-spinning" />Обновляю реальные данные</span>}
     </section>
   );
 }
