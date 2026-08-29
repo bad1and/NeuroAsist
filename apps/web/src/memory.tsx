@@ -21,6 +21,7 @@ import {
   IconMoneyCashierTag,
   type CustomIconProps,
 } from "./CustomIcons";
+import { CustomSelect } from "./components/CustomSelect";
 import { useEffect, useRef, useState, type ComponentType } from "react";
 
 import {
@@ -368,53 +369,17 @@ export function MemoryPage() {
               </button>
             </form>
           </div>
-          <details className="memory-action-menu">
-            <summary
-              className="icon-button"
-              role="button"
-              aria-label="Сортировка"
-              title="Сортировка"
-              style={{ width: "auto", padding: "0 12px", gap: "6px" }}
-            >
-              <IconInterfaceTextFormattingFilter1 size={17} aria-hidden="true" />
-              <span style={{ fontSize: "13px", fontWeight: 500, whiteSpace: "nowrap" }}>
-                {sortOrder === "date-desc" && "Сначала новые"}
-                {sortOrder === "date-asc" && "Сначала старые"}
-                {sortOrder === "alpha-asc" && "От А до Я"}
-                {sortOrder === "alpha-desc" && "От Я до А"}
-              </span>
-            </summary>
-            <div>
-              <button
-                type="button"
-                className={sortOrder === "date-desc" ? "is-active" : ""}
-                onClick={() => setSortOrder("date-desc")}
-              >
-                {sortOrder === "date-desc" ? "✓ " : ""}Сначала новые
-              </button>
-              <button
-                type="button"
-                className={sortOrder === "date-asc" ? "is-active" : ""}
-                onClick={() => setSortOrder("date-asc")}
-              >
-                {sortOrder === "date-asc" ? "✓ " : ""}Сначала старые
-              </button>
-              <button
-                type="button"
-                className={sortOrder === "alpha-asc" ? "is-active" : ""}
-                onClick={() => setSortOrder("alpha-asc")}
-              >
-                {sortOrder === "alpha-asc" ? "✓ " : ""}От А до Я
-              </button>
-              <button
-                type="button"
-                className={sortOrder === "alpha-desc" ? "is-active" : ""}
-                onClick={() => setSortOrder("alpha-desc")}
-              >
-                {sortOrder === "alpha-desc" ? "✓ " : ""}От Я до А
-              </button>
-            </div>
-          </details>
+          <CustomSelect
+            value={sortOrder}
+            onChange={(event) => setSortOrder(event.target.value as any)}
+            prefixIcon={<IconInterfaceTextFormattingFilter1 size={17} aria-hidden="true" />}
+            style={{ width: "auto" }}
+          >
+            <option value="date-desc">Сначала новые</option>
+            <option value="date-asc">Сначала старые</option>
+            <option value="alpha-asc">От А до Я</option>
+            <option value="alpha-desc">От Я до А</option>
+          </CustomSelect>
         </header>
 
         {message && (

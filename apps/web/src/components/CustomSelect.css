@@ -5,17 +5,18 @@
   font: inherit;
 }
 
+/* 1. Trigger (подложка, светлее) */
 .custom-select-trigger {
   display: flex;
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  min-height: 44px; /* matches native select */
-  padding: 0;
+  min-height: 38px;
+  padding: 8px 12px;
   border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--color-text);
+  border-radius: 9px;
+  background: var(--surface-raised, #242526);
+  color: var(--text, #f0f0f0);
   cursor: pointer;
   text-align: left;
   gap: 8px;
@@ -23,9 +24,17 @@
   transition: background 0.2s ease;
 }
 
+.custom-select-trigger:hover:not(:disabled) {
+  background: var(--color-surface-soft, var(--surface-soft, #2c2d2e));
+}
+
 .custom-select-trigger:focus-visible {
-  outline: 2px solid var(--color-focus);
+  outline: 2px solid var(--color-focus, #8a2be2);
   outline-offset: 2px;
+}
+
+.custom-select-container.open .custom-select-icon {
+  transform: rotate(180deg);
 }
 
 .custom-select-container.disabled .custom-select-trigger {
@@ -33,42 +42,79 @@
   cursor: not-allowed;
 }
 
-.custom-select-icon {
-  color: var(--color-text-soft);
+.custom-select-prefix {
+  display: flex;
+  align-items: center;
   flex-shrink: 0;
+  color: var(--color-text-soft, #a0a0a0);
 }
 
+.custom-select-value {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.custom-select-icon {
+  color: var(--color-text-soft, #a0a0a0);
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+/* 2. Dropdown Menu (плоский, простой, без прозрачности, без обводки) */
 .custom-select-dropdown {
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
   width: 100%;
+  min-width: max-content;
   max-height: 250px;
   overflow-y: auto;
-  background: var(--color-surface-raised, #242526);
-  border: none;
-  border-radius: 8px;
-  z-index: 999;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  background: var(--surface, #1e1f20); /* Flat, simple background */
+  border: none !important; /* без обводки */
+  border-radius: 9px;
+  z-index: 1000;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.custom-select-dropdown::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-select-dropdown::-webkit-scrollbar-thumb {
+  background: var(--border-strong, #3e4042);
+  border-radius: 3px;
 }
 
 .custom-select-option {
-  padding: 10px 12px;
+  padding: 8px 10px;
   cursor: pointer;
-  color: var(--color-text);
+  color: var(--text, #f0f0f0);
+  border-radius: 6px;
   transition: background 0.15s ease, color 0.15s ease;
+  font-size: 13px;
 }
 
 .custom-select-option:hover {
-  background: var(--color-surface, rgba(255, 255, 255, 0.15));
+  background: var(--color-surface-soft, var(--surface-soft, #2c2d2e)); /* Solid, lighter color */
 }
 
 .custom-select-option.selected {
-  background: var(--color-surface, rgba(255, 255, 255, 0.15));
-  color: var(--color-text);
+  background: var(--surface-raised, #242526);
+  color: var(--color-focus, #a78bfa); /* Distinct text color for selected */
+  font-weight: 500;
+}
+
+.custom-select-option.selected::before {
+  content: "✓ ";
 }
 
 .custom-select-option.disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  background: var(--surface, #1e1f20);
 }
