@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@fontsource-variable/onest": "^5.3.0",
+    "@paper-design/shaders-react": "^0.0.80",
     "@tauri-apps/api": "^2.11.1",
     "animejs": "^4.5.0",
     "lottie-web": "^5.13.0",
