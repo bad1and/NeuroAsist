@@ -131,6 +131,7 @@ class VoiceSessionManager:
         )
         self._tts_semaphore = asyncio.Semaphore(self._tts_concurrency)
         self._connections: dict[str, VoiceConnection] = {}
+        self._connection_events: dict[str, asyncio.Event] = {}
         self._active: dict[str, UtteranceContext] = {}
         self._avatar_service = avatar_service
         self._event_publisher = event_publisher
@@ -152,15 +153,28 @@ class VoiceSessionManager:
                 await previous.websocket.close(code=1000)
         connection = VoiceConnection(websocket)
         self._connections[session_id] = connection
+        self._connection_events.setdefault(session_id, asyncio.Event()).set()
         return connection
 
     async def unregister(self, session_id: str, connection: VoiceConnection) -> None:
         if self._connections.get(session_id) is connection:
             self._connections.pop(session_id, None)
+            self._connection_events.setdefault(session_id, asyncio.Event()).clear()
             await self.cancel(session_id, notify=False)
 
     def connected(self, session_id: str) -> bool:
         return session_id in self._connections
+
+    async def wait_for_connection(self, session_id: str, timeout: float = 2.0) -> bool:
+        """Allow the output socket a short window to recover after a reset."""
+        if self.connected(session_id):
+            return True
+        connected_event = self._connection_events.setdefault(session_id, asyncio.Event())
+        try:
+            await asyncio.wait_for(connected_event.wait(), timeout=max(0.0, timeout))
+        except TimeoutError:
+            return self.connected(session_id)
+        return self.connected(session_id)
 
     async def close(self) -> None:
         """Cancel active utterances and close live sockets during app shutdown."""
@@ -170,6 +184,7 @@ class VoiceSessionManager:
             with contextlib.suppress(Exception):
                 await connection.websocket.close(code=1001)
         self._connections.clear()
+        self._connection_events.clear()
 
     async def start(
         self,

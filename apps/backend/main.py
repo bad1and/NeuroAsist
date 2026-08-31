@@ -514,8 +514,12 @@ def create_app() -> FastAPI:
                 await connection.send({"type": "voice.input.error", "message": "Could not transcribe speech"})
             await avatar_service.set_presence(session_id=session_id, state="listening")
             return
-        if not voice_session_manager.connected(session_id):
-            await connection.send({"type": "voice.input.error", "message": "Live output WebSocket is not connected"})
+        if not await voice_session_manager.wait_for_connection(session_id, timeout=2.0):
+            await connection.send({
+                "type": "voice.input.error",
+                "message": "Голосовой канал восстанавливается. Повторите фразу через несколько секунд.",
+            })
+            await avatar_service.set_presence(session_id=session_id, state="listening")
             return
         agent = CharacterAgent(
             llm_provider=DeepSeekProvider(settings), history=history, history_limit=settings.chat_history_limit,

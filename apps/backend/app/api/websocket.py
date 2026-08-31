@@ -148,8 +148,14 @@ async def websocket_voice(websocket: WebSocket, session_id: str, version: int = 
     except asyncio.CancelledError:
         shutdown_cancelled = True
         logger.info("Voice WebSocket closed during backend shutdown")
-    except (WebSocketDisconnect, RuntimeError):
-        pass
+    except WebSocketDisconnect as exc:
+        logger.info(
+            "Live output WebSocket disconnected: session_id=%s code=%s",
+            session_id,
+            exc.code,
+        )
+    except RuntimeError as exc:
+        logger.warning("Live output WebSocket failed: session_id=%s error=%s", session_id, exc)
     finally:
         unregister = manager.unregister(session_id, connection)
         if shutdown_cancelled:

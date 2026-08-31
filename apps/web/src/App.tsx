@@ -1009,6 +1009,7 @@ export function ChatPage({
   const handledVoiceEventIdsRef = useRef<Set<string>>(new Set());
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
   const liveSocketRef = useRef<VoiceSocketClient | null>(null);
+  const liveSocketSessionIdRef = useRef<string | null>(null);
   const livePlayerRef = useRef<TTSStreamPlayer | null>(null);
   const vadRecorderRef = useRef<BrowserVadRecorder | null>(null);
   const pcmInputRef = useRef<PcmInputClient | null>(null);
@@ -1445,6 +1446,14 @@ export function ChatPage({
   const ensureLiveVoice = useCallback(async () => {
     if (!sessionId) throw new Error("Сессия ещё создаётся");
     const player = ensureLivePlayer();
+    // A conversation reset gives the microphone a new session URL. Reusing an
+    // output socket from the previous session leaves STT working but gives the
+    // backend no matching channel on which to stream its answer.
+    if (liveSocketSessionIdRef.current !== sessionId) {
+      liveSocketRef.current?.close();
+      liveSocketRef.current = null;
+      liveSocketSessionIdRef.current = null;
+    }
     if (!liveSocketRef.current) {
       const onEvent = (event: VoiceServerEvent) => {
         if (event.type === "voice.utterance.started") {
@@ -1541,6 +1550,7 @@ export function ChatPage({
           }
         },
       );
+      liveSocketSessionIdRef.current = sessionId;
     }
     await player.unlock();
     await liveSocketRef.current.connect();
@@ -1549,6 +1559,8 @@ export function ChatPage({
   useEffect(() => () => {
     livePlayerRef.current?.stop();
     liveSocketRef.current?.close();
+    liveSocketRef.current = null;
+    liveSocketSessionIdRef.current = null;
     vadRecorderRef.current?.stop();
     pcmInputRef.current?.close();
     if (pendingTextDeltaTimerRef.current !== null) {

@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { PlaybackCoordinator, TTSStreamPlayer } from "./voice-live";
+import { PlaybackCoordinator, TTSStreamPlayer, VoiceSocketClient } from "./voice-live";
 
 describe("PlaybackCoordinator", () => {
   it("gives exactly one owner a generation-scoped lease", () => {
@@ -252,5 +252,101 @@ describe("TTSStreamPlayer", () => {
     await expect(pending).rejects.toThrow("bad mp3");
     await tick();
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: "bad mp3" }));
+  });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+describe("VoiceSocketClient", () => {
+  it("reconnects the output socket after an unexpected close", async () => {
+    vi.useFakeTimers();
+
+    class FakeSocket {
+      static sockets: FakeSocket[] = [];
+      readyState = 0;
+      binaryType = "";
+      sent: unknown[] = [];
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+
+      constructor(_url: string) {
+        FakeSocket.sockets.push(this);
+      }
+
+      send(value: unknown) {
+        this.sent.push(value);
+      }
+
+      open() {
+        this.readyState = 1;
+        this.onopen?.();
+      }
+
+      close() {
+        this.readyState = 3;
+        this.onclose?.();
+      }
+    }
+
+    Object.assign(FakeSocket, { OPEN: 1 });
+    vi.stubGlobal("WebSocket", FakeSocket);
+
+    const client = new VoiceSocketClient("ws://voice", () => undefined, () => undefined);
+    const firstConnect = client.connect();
+    FakeSocket.sockets[0].open();
+    await firstConnect;
+
+    FakeSocket.sockets[0].close();
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(FakeSocket.sockets).toHaveLength(2);
+    FakeSocket.sockets[1].open();
+    await Promise.resolve();
+    expect(client.send("playback.started")).toBe(true);
+    client.close();
+  });
+
+  it("does not reconnect after an intentional close", async () => {
+    vi.useFakeTimers();
+
+    class FakeSocket {
+      static sockets: FakeSocket[] = [];
+      readyState = 0;
+      binaryType = "";
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+
+      constructor(_url: string) {
+        FakeSocket.sockets.push(this);
+      }
+
+      send() {}
+
+      close() {
+        this.readyState = 3;
+        this.onclose?.();
+      }
+    }
+
+    Object.assign(FakeSocket, { OPEN: 1 });
+    vi.stubGlobal("WebSocket", FakeSocket);
+
+    const client = new VoiceSocketClient("ws://voice", () => undefined, () => undefined);
+    const connecting = client.connect();
+    const socket = FakeSocket.sockets[0];
+    socket.readyState = 1;
+    socket.onopen?.();
+    await connecting;
+
+    client.close();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(FakeSocket.sockets).toHaveLength(1);
   });
 });
