@@ -1,0 +1,70 @@
+name: Build Windows release candidate
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # This runner intentionally owns the licensed Unity editor and (optionally)
+    # the release signing certificate.  The avatar build is not stored in git.
+    runs-on: [self-hosted, Windows, iris-release]
+    environment:
+      name: release-candidate
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify tag and release metadata
+        shell: pwsh
+        run: |
+          $version = (Get-Content -Raw VERSION).Trim()
+          if ("${{ github.ref_type }}" -eq "tag" -and "${{ github.ref_name }}" -ne "v$version") {
+            throw "Tag ${{ github.ref_name }} does not match VERSION $version."
+          }
+          python scripts/check_docs.py
+      - name: Create isolated build environment
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip
+      - name: Build Unity avatar resource
+        shell: pwsh
+        run: |
+          npm ci --prefix apps/desktop
+          npm --prefix apps/desktop run build:avatar
+      - name: Build, smoke, sign and attest candidate
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+          WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
+        run: |
+          $arguments = @("-RequireCleanWorktree", "-ArtifactDirectory", "artifacts")
+          if ($env:WINDOWS_CERTIFICATE_THUMBPRINT) {
+            $arguments += @("-SigningCertificateThumbprint", $env:WINDOWS_CERTIFICATE_THUMBPRINT)
+            if ($env:WINDOWS_TIMESTAMP_URL) { $arguments += @("-TimestampUrl", $env:WINDOWS_TIMESTAMP_URL) }
+          }
+          & .\scripts\build-desktop-release.ps1 @arguments
+      - name: Upload release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: iris-${{ github.ref_name }}-windows-release-candidate
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90

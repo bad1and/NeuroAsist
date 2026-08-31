@@ -20,6 +20,8 @@ stable releases.
   queue, logs, diff, conflict detection and explicit review/apply.
 - Purpose-level LLM token limits, retry budgets and content-free usage/cache/
   reasoning telemetry.
+- GitHub regression CI, weekly one-hour synthetic lifecycle soak and a protected
+  Windows release-candidate workflow with SHA-256 manifest generation.
 
 ### Changed
 
@@ -31,6 +33,10 @@ stable releases.
 - Blocking SQLite/filesystem operations were removed from interactive async
   hot paths.
 - Product metadata and public documentation now use `1.0.0` consistently.
+- Desktop packaging token-smokes the PyInstaller sidecar and scans package
+  staging resources for private runtime files before NSIS packaging.
+- The NSIS candidate keeps the CPU PyTorch runtime used by the default voice
+  profile; CUDA distribution requires a separately qualified GPU add-on.
 
 ### Fixed
 

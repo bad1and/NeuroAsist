@@ -124,6 +124,16 @@ for release-to-release comparison.
 This exercises conversation state and cancellation without a microphone. It
 does not replace a real-audio soak with reconnect, barge-in and Unity playback.
 
+The one-hour synthetic release profile has an explicit RSS-growth threshold and
+is uploaded by the weekly `Synthetic lifecycle soak` GitHub workflow:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\live_conversation_soak.py --release --output artifacts\live-soak.json
+```
+
+Use `--full` only for a four-hour extended synthetic rehearsal. Neither profile
+replaces the documented real microphone and avatar soak.
+
 ## Coding Agent runtime
 
 Build the no-network sandbox image whenever its Dockerfile changes:
@@ -157,18 +167,24 @@ PyInstaller/build dependencies available through the script.
 ```
 
 The script builds the PyInstaller `--onedir` core, temporarily adds it to Tauri
-resources, builds NSIS and restores `tauri.conf.json` in `finally`. Installer
-output:
+resources, builds NSIS, token-smokes the packaged sidecar, scans package staging
+trees for private runtime files, emits a SHA-256 manifest and restores
+`tauri.conf.json` in `finally`. Candidate output defaults to:
 
 ```text
-apps\desktop\src-tauri\target\release\bundle\nsis\
+artifacts\
 ```
 
 For repeated builds after dependencies are already installed:
 
 ```powershell
-.\scripts\build-desktop-release.ps1 -SkipDependencyInstall
+.\scripts\build-desktop-release.ps1 -SkipDependencyInstall -ArtifactDirectory artifacts
 ```
+
+`-ReuseCore` is only for retrying the Tauri/NSIS stage after a successful core
+build from the **same** checkout. It still removes CUDA-only DLLs from that
+generated sidecar, because the 1.0 candidate is CPU-base. Do not use it after a
+source, dependency or `VERSION` change.
 
 Smoke a standalone packaged core when an executable has been produced:
 
@@ -178,7 +194,9 @@ Smoke a standalone packaged core when an executable has been produced:
 
 Do not publish merely because the build succeeds. Complete every required item
 in [Release checklist 1.0](release-checklist.md), including clean-VM install,
-upgrade, uninstall, backup recovery, real voice soak and license review.
+upgrade, uninstall, backup recovery, real voice soak and license review. The
+[release runbook](release-runbook.md) describes the protected self-hosted
+Windows candidate workflow and signing evidence.
 
 ## Failure handling
 

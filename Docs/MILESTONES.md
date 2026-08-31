@@ -17,7 +17,7 @@
 | Settings и models | готово | Atomic runtime settings, Credential Manager, Model Manager | Recovery и filesystem failure checks |
 | Coding Agent | готово, optional | Docker sandbox, durable queue, diff/review/apply | Security matrix и Docker availability UX |
 | LLM cost controls | готово, measurement gate | Thinking policy, max tokens, retry budget, usage telemetry | 30-minute cost baseline и alert thresholds |
-| Public release | не одобрен | Version metadata и документация 1.0 | Все пункты release checklist |
+| Public release | не одобрен, CI подготовлен | Version metadata, docs, CI/candidate artifact pipeline | Все пункты release checklist и evidence на конкретном commit |
 
 ## Завершённые stabilization-пакеты
 
@@ -60,7 +60,7 @@
 3. hour-long real voice/avatar soak с reconnect и barge-in;
 4. memory/persona quality corpus и 30-minute LLM cost baseline;
 5. artifact license/privacy/security audit;
-6. автоматический CI/release pipeline и подписанные checksums.
+6. прогон CI/release candidate pipeline на защищённом runner и подписанные checksums.
 
 До закрытия этих пунктов `1.0.0` означает целевую версию исходного дерева и
 internal release candidate, а не разрешение публиковать stable installer.

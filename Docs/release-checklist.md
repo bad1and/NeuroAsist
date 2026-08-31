@@ -23,6 +23,8 @@
 - [ ] Desktop core smoke подтверждает token auth и graceful shutdown.
 - [ ] Packaged core smoke проходит на собранном sidecar.
 - [ ] Privacy/static scan не находит ключи, `.env`, пользовательскую БД или diagnostic audio в artifact.
+- [ ] GitHub `CI` и `Documentation` прошли на release commit; ссылка на runs приложена.
+- [ ] `Synthetic lifecycle soak` приложил успешный одночасовой report с RSS threshold.
 
 Команды находятся в [operations.md](operations.md).
 
@@ -47,7 +49,7 @@
 
 ## 5. Voice и avatar soak
 
-- [ ] Не менее одного часа реального live voice без worker death, stale reply или неконтролируемого роста памяти.
+- [ ] Не менее одного часа реального live voice без worker death, stale reply или неконтролируемого роста памяти. Synthetic CI soak не заменяет этот пункт.
 - [ ] Disconnect/reconnect во время STT, LLM и TTS не публикует старый результат в новую сессию.
 - [ ] Graceful stop допроводит подтверждённую реплику; forced disconnect её отменяет.
 - [ ] Barge-in не останавливает чужую/новую generation.
@@ -78,6 +80,7 @@
 - [ ] Safe Mode доступен при сломанном Unity/model preload.
 - [ ] Model downloads показывают размер, progress, checksum, retry и удаление.
 - [ ] Offline-поведение после предварительной загрузки понятно и проверено.
+- [ ] Candidate не заявляет CUDA acceleration, если не поставлен и не проверен отдельный GPU runtime/add-on.
 - [ ] Upgrade с предыдущей сборки сохраняет данные и не оставляет два autorun/single-instance registration.
 - [ ] Uninstall удаляет binaries и managed processes без orphan files вне выбранных user data.
 
@@ -96,6 +99,7 @@
 - [ ] Все обязательные пункты выше закрыты доказательствами.
 - [ ] Известные ограничения перечислены в release notes.
 - [ ] SHA-256 installer artifact опубликован вместе с версией и commit SHA.
+- [ ] Manifest candidate artifact фиксирует SHA-256, commit, pre-NSIS privacy scan и signing status.
 - [ ] Есть rollback artifact/procedure.
 - [ ] Release owner явно одобрил публикацию.
 
