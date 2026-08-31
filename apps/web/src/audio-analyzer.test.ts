@@ -33,19 +33,31 @@ describe("mood-visuals", () => {
     expect(getMoodVisuals("злость").labelRu).toBe("Злость");
     expect(getMoodVisuals("страх").labelRu).toBe("Страх");
     expect(getMoodVisuals("удивление").labelRu).toBe("Удивление");
+    expect(getMoodVisuals("обида").labelRu).toBe("Обида");
+    expect(getMoodVisuals("усталость").labelRu).toBe("Усталость");
+    expect(getMoodVisuals("концентрация").labelRu).toBe("Концентрация");
+    expect(getMoodVisuals("благодарность").labelRu).toBe("Благодарность");
+    expect(getMoodVisuals("сонливость").labelRu).toBe("Сонливость");
   });
 
   it("returns correct strength labels", () => {
     expect(getStrengthLabel("high")).toBe("Ярко выражено");
     expect(getStrengthLabel("low")).toBe("Слабо выражено");
+    expect(getStrengthLabel("subtle")).toBe("Сдержанное");
     expect(getStrengthLabel("unknown")).toBe("Умеренно");
   });
 
   it("contains all expected protocol emotions in MOOD_MAP", () => {
-    const keys = ["neutral", "happy", "sad", "angry", "annoyed", "smirk", "thinking", "surprised", "embarrassed", "concerned"];
+    const keys = [
+      "neutral", "happy", "sad", "angry", "annoyed", "smirk",
+      "thinking", "surprised", "embarrassed", "concerned",
+      "hurt", "fatigue", "focused", "grateful", "sleepy", "affection", "curiosity"
+    ];
     for (const key of keys) {
       expect(MOOD_MAP[key]).toBeDefined();
       expect(MOOD_MAP[key].colors).toHaveLength(3);
+      expect(MOOD_MAP[key].speed).toBeGreaterThan(0);
+      expect(MOOD_MAP[key].warp).toBeGreaterThan(0);
     }
   });
 });

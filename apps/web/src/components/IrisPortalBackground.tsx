@@ -26,15 +26,69 @@ function hexToRgb(hex: string): [number, number, number] {
     const b = parseInt(clean.substring(4, 6), 16) / 255;
     return [r, g, b];
   }
-  return [0.75, 0.52, 0.98]; // Default lilac
+  return [0.77, 0.71, 0.99]; // Default soft iris lavender
+}
+
+function srgbToLinear(c: number): number {
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+function linearToSrgb(c: number): number {
+  const clamped = Math.max(0, Math.min(1, c));
+  return clamped <= 0.0031308 ? clamped * 12.92 : 1.055 * Math.pow(clamped, 1 / 2.4) - 0.055;
+}
+
+// Convert sRGB [0..1] to Oklab [L, a, b]
+function rgbToOklab(r: number, g: number, b: number): [number, number, number] {
+  const lr = srgbToLinear(r);
+  const lg = srgbToLinear(g);
+  const lb = srgbToLinear(b);
+
+  const l_ = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
+  const m_ = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
+  const s_ = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
+
+  const L = 0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_;
+  const a = 1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_;
+  const b_val = 0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_;
+
+  return [L, a, b_val];
+}
+
+// Convert Oklab [L, a, b] to sRGB [0..1]
+function oklabToRgb(L: number, a: number, b: number): [number, number, number] {
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = L - 0.0894841775 * a - 1.2914855480 * b;
+
+  const l = l_ * l_ * l_;
+  const m = m_ * m_ * m_;
+  const s = s_ * s_ * s_;
+
+  const lr = +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
+  const lg = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
+  const lb = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
+
+  return [linearToSrgb(lr), linearToSrgb(lg), linearToSrgb(lb)];
+}
+
+function lerpOklab(
+  c1: [number, number, number],
+  c2: [number, number, number],
+  t: number
+): [number, number, number] {
+  if (t <= 0) return c1;
+  if (t >= 1) return c2;
+  const lab1 = rgbToOklab(c1[0], c1[1], c1[2]);
+  const lab2 = rgbToOklab(c2[0], c2[1], c2[2]);
+  const L = lab1[0] + (lab2[0] - lab1[0]) * t;
+  const a = lab1[1] + (lab2[1] - lab1[1]) * t;
+  const b = lab1[2] + (lab2[2] - lab1[2]) * t;
+  return oklabToRgb(L, a, b);
 }
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
-}
-
-function lerp3(a: [number, number, number], b: [number, number, number], t: number): [number, number, number] {
-  return [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
 }
 
 const VERTEX_SHADER_SOURCE = `
@@ -113,27 +167,27 @@ void main() {
     float d2 = sdArc(st, center, dynRadius + 0.055 + u_audioMid * 0.03, 0.06 + u_audioMid * 0.02, dynWarp * 1.35);
 
     float distToCenter = length(st - center);
-    float wash = smoothstep(dynRadius * 2.2, 0.0, distToCenter) * 0.20;
-
-    // Thinking ripple pulsation
-    float thinkingPulse = 0.0;
-    if (u_statusMode > 1.5 && u_statusMode < 2.5) {
-        float ringWave = sin(distToCenter * 18.0 - u_time * 4.5);
-        thinkingPulse = smoothstep(0.72, 1.0, ringWave) * 0.18;
-    }
+    float wash = smoothstep(dynRadius * 2.2, 0.0, distToCenter) * 0.22;
 
     // Glow distributions
     float coreGlow = exp(-d1 * (26.0 - u_audioHigh * 7.0));
     float fringeGlow = exp(-d2 * 8.8);
 
-    vec3 finalColor = vec3(0.0);
-    finalColor += u_colorCore * (coreGlow * (1.30 + u_audioHigh * 0.65));
-    finalColor += u_colorFringe * (fringeGlow * (1.10 + u_audioMid * 0.45));
-    finalColor += u_colorAccent * ((wash + thinkingPulse) * (0.85 + u_audioLevel * 0.5));
-    finalColor += u_colorFringe * wash * (sin(u_time * 0.65) * 0.25 + 0.75);
+    // Subtle multi-spectral dispersion along the organic arc
+    float angle = atan(st.y - center.y, st.x - center.x);
+    float spectralMod = sin(angle * 3.0 + u_time * 0.5) * 0.12 + 0.88;
+    
+    // Iris signature violet undertone for brand harmony
+    vec3 irisBaseViolet = vec3(0.412, 0.357, 0.525);
 
-    float alpha = clamp((coreGlow * 1.5 + fringeGlow * 0.95 + wash * 0.75 + thinkingPulse), 0.0, 1.0);
-    vec3 toneMapped = vec3(1.0) - exp(-finalColor * (1.6 * dynIntensity));
+    vec3 finalColor = vec3(0.0);
+    finalColor += u_colorCore * (coreGlow * (1.35 + u_audioHigh * 0.65));
+    finalColor += mix(u_colorFringe, u_colorCore, 0.25 * spectralMod) * (fringeGlow * (1.15 + u_audioMid * 0.45));
+    finalColor += u_colorAccent * (wash * (0.85 + u_audioLevel * 0.5));
+    finalColor += mix(u_colorFringe, irisBaseViolet, 0.20) * wash * (sin(u_time * 0.65) * 0.20 + 0.80);
+
+    float alpha = clamp((coreGlow * 1.55 + fringeGlow * 0.95 + wash * 0.80), 0.0, 1.0);
+    vec3 toneMapped = vec3(1.0) - exp(-finalColor * (1.65 * dynIntensity));
 
     gl_FragColor = vec4(toneMapped, alpha * 0.95);
 }
@@ -325,10 +379,10 @@ export function IrisPortalBackground({
         targetIntensity = 1.25;
       } else if (state.voiceState === "thinking" || state.voiceState === "transcribing" || state.loading) {
         targetStatus = 2.0;
-        targetRadius = 0.50;
-        targetSpeed *= 2.2;
-        targetWarp *= 1.3;
-        targetIntensity = 1.35;
+        targetRadius = 0.54;
+        targetSpeed *= 1.05;
+        targetWarp = currentVisuals.warp;
+        targetIntensity = 1.10;
       } else if (state.voiceState === "recording") {
         targetStatus = 1.0;
         targetRadius = 0.48;
@@ -339,8 +393,9 @@ export function IrisPortalBackground({
         targetRadius = 0.52;
         targetSpeed = 1.6;
         targetIntensity = 1.4;
-        targetCore = [1.0, 0.35, 0.35];
-        targetFringe = [0.85, 0.15, 0.15];
+        targetCore = [0.98, 0.38, 0.42]; // Rose crimson
+        targetFringe = [0.86, 0.14, 0.28]; // Ruby
+        targetAccent = [0.42, 0.08, 0.38]; // Deep plum violet
       } else if (!state.isDialogActive) {
         targetStatus = 0.0;
         targetRadius = 0.52;
@@ -359,18 +414,27 @@ export function IrisPortalBackground({
         targetCenterY = 0.95;
       }
 
-      // Smooth interpolation (lerp)
-      const lerpFactor = Math.min(1.0, dt * 4.5);
-      currCore = lerp3(currCore, targetCore, lerpFactor);
-      currFringe = lerp3(currFringe, targetFringe, lerpFactor);
-      currAccent = lerp3(currAccent, targetAccent, lerpFactor);
-      currWarp = lerp(currWarp, targetWarp, lerpFactor);
-      currSpeed = lerp(currSpeed, targetSpeed, lerpFactor);
-      currRadius = lerp(currRadius, targetRadius, lerpFactor);
-      currIntensity = lerp(currIntensity, targetIntensity, lerpFactor);
-      currStatusMode = lerp(currStatusMode, targetStatus, lerpFactor);
-      currCenterX = lerp(currCenterX, targetCenterX, lerpFactor);
-      currCenterY = lerp(currCenterY, targetCenterY, lerpFactor);
+      // Multi-stage / phase-staggered color transition in OKLab space:
+      // 1. Fringe/Halo wave reacts first with brisk speed (creates outer emotional propagation)
+      const fringeFactor = Math.min(1.0, dt * 5.4);
+      currFringe = lerpOklab(currFringe, targetFringe, fringeFactor);
+
+      // 2. Core filament follows closely to crystallize the focal emotion
+      const coreFactor = Math.min(1.0, dt * 3.8);
+      currCore = lerpOklab(currCore, targetCore, coreFactor);
+
+      // 3. Ambient atmospheric wash follows with soft, deep inertia
+      const accentFactor = Math.min(1.0, dt * 2.4);
+      currAccent = lerpOklab(currAccent, targetAccent, accentFactor);
+
+      const dynamicFactor = Math.min(1.0, dt * 4.2);
+      currWarp = lerp(currWarp, targetWarp, dynamicFactor);
+      currSpeed = lerp(currSpeed, targetSpeed, dynamicFactor);
+      currRadius = lerp(currRadius, targetRadius, dynamicFactor);
+      currIntensity = lerp(currIntensity, targetIntensity, dynamicFactor);
+      currStatusMode = lerp(currStatusMode, targetStatus, dynamicFactor);
+      currCenterX = lerp(currCenterX, targetCenterX, dynamicFactor);
+      currCenterY = lerp(currCenterY, targetCenterY, dynamicFactor);
 
       // Mouse smooth tracking
       currMouseX = lerp(currMouseX, targetMouseX, Math.min(1.0, dt * 6.0));
@@ -424,3 +488,4 @@ export function IrisPortalBackground({
     </div>
   );
 }
+
