@@ -45,5 +45,29 @@ describe("IrisPortalBackground", () => {
     );
 
     expect(container.querySelector(".iris-portal-canvas")).toBeInTheDocument();
+
+    rerender(
+      <IrisPortalBackground
+        emotion="hurt"
+        voiceState="error"
+        loading={false}
+        isDialogActive={true}
+        showInAppAvatar={true}
+      />
+    );
+
+    expect(container.querySelector(".iris-portal-canvas")).toBeInTheDocument();
+
+    rerender(
+      <IrisPortalBackground
+        emotion="focused"
+        voiceState="idle"
+        loading={false}
+        isDialogActive={false}
+        showInAppAvatar={false}
+      />
+    );
+
+    expect(container.querySelector(".iris-portal-canvas")).toBeInTheDocument();
   });
 });
