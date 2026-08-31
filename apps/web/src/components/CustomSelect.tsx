@@ -58,9 +58,25 @@ export function CustomSelect({ value, onChange, disabled, children, className = 
       ref={containerRef}
       style={style}
     >
+      <select
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+        id={id}
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          opacity: 0.001,
+          cursor: "pointer",
+          zIndex: 1,
+        }}
+      >
+        {children}
+      </select>
       <button
         type="button"
-        id={id}
         className="custom-select-trigger"
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}

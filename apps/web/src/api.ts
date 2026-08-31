@@ -312,9 +312,19 @@ export function createBackup(): Promise<{ name: string; size_bytes: number; crea
 export function getTimelineMessages(
   limit = 50,
   sessionId?: string,
+  episodeId?: string,
 ): Promise<{ items: TimelineMessage[]; next_offset: number | null }> {
-  const session = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : "";
-  return requestJson(`/timeline/messages?limit=${limit}${session}`);
+  const params = new URLSearchParams();
+  params.set("limit", String(limit));
+  if (sessionId) params.set("session_id", sessionId);
+  if (episodeId) params.set("episode_id", episodeId);
+  return requestJson(`/timeline/messages?${params.toString()}`);
+}
+
+export function closeCurrentEpisode(): Promise<{ episode: TimelineJournalItem } | null> {
+  return requestJson<{ episode: TimelineJournalItem }>("/episodes/current/close", {
+    method: "POST",
+  }).catch(() => null);
 }
 
 export function getTimelineJournal(): Promise<{ items: TimelineJournalItem[] }> {

@@ -126,8 +126,8 @@ select { appearance: auto; }
 .navigation-scrim { display: none; }
 
 .workspace { width: min(100%, 1180px); min-height: 0; flex: 1 1 auto; margin: 0 auto; padding: 12px 24px 16px; overflow-x: hidden; overflow-y: auto; scrollbar-width: none; }
-.workspace::-webkit-scrollbar, .message-list::-webkit-scrollbar, .search-results::-webkit-scrollbar, .event-list::-webkit-scrollbar, .event-row pre::-webkit-scrollbar { display: none; }
-.message-list, .search-results, .event-list, .event-row pre { scrollbar-width: none; }
+.workspace::-webkit-scrollbar, .message-list::-webkit-scrollbar, .search-results::-webkit-scrollbar, .event-list::-webkit-scrollbar, .event-row pre::-webkit-scrollbar, .history-list::-webkit-scrollbar, .journal-messages-container::-webkit-scrollbar, .journal-sidebar::-webkit-scrollbar { display: none; }
+.message-list, .search-results, .event-list, .event-row pre, .history-list, .journal-messages-container, .journal-sidebar { scrollbar-width: none; }
 .workspace-chat { display: flex; overflow: hidden; }
 .panel, .system-card { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
 .panel { min-height: 0; }
@@ -142,7 +142,6 @@ select { appearance: auto; }
 .workspace-journal > .panel > .panel-header, .workspace-memory > .panel > .panel-header, .workspace-settings > .panel > .panel-header { min-height: 48px; padding: 0 0 10px; border: 0; }
 .workspace-journal .search-form, .workspace-memory .memory-toolbar, .workspace-settings .settings-navigation { padding-left: 0; padding-right: 0; background: transparent; }
 .workspace-journal .history-list, .workspace-memory .memory-list { padding-left: 0; padding-right: 0; }
-.workspace-journal .history-card { background: transparent; }
 .workspace-settings .settings-group, .workspace-settings .info-row { background: transparent; }
 .workspace-chat .chat-panel { overflow: visible; border: 0; border-radius: 0; background: transparent; }
 .workspace-chat .chat-panel > .panel-header { min-height: 42px; padding: 0 0 8px; border: 0; }
@@ -230,6 +229,36 @@ select { appearance: auto; }
   background: transparent;
 }
 
+.iris-portal-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.iris-portal-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+  opacity: 0.95;
+  mix-blend-mode: screen;
+  filter: drop-shadow(0 0 40px rgba(124, 58, 237, 0.22));
+  transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+:root[data-theme="light"] .iris-portal-canvas,
+:root[data-scheme="light"] .iris-portal-canvas {
+  opacity: 0.75;
+  mix-blend-mode: multiply;
+}
+
 .chat-panel.is-idle {
   position: relative;
   display: flex !important;
@@ -285,9 +314,9 @@ select { appearance: auto; }
 .chat-panel.is-active.has-in-app-avatar .in-app-avatar-stage {
   position: absolute;
   left: clamp(-80px, -4vw, -50px);
-  bottom: 145px;
+  bottom: 141px;
   width: clamp(460px, 50vw, 600px);
-  height: calc(100% - 160px);
+  height: calc(100% - 156px);
   max-height: 520px;
   min-height: 340px;
   display: flex;
@@ -795,12 +824,12 @@ select { appearance: auto; }
 
 .dock-dual-btn.is-muted {
   background: transparent;
-  color: #EF4444;
+  color: #865B5C;
 }
 
 .dock-dual-btn.is-muted:hover:not(:disabled) {
-  background: rgba(239, 68, 68, 0.12);
-  color: #F87171;
+  background: rgba(134, 91, 92, 0.15);
+  color: #986768;
 }
 
 .dock-icon-btn {
@@ -842,7 +871,7 @@ select { appearance: auto; }
 }
 
 .dock-icon-btn.is-muted .btn-shape-bg {
-  color: rgba(239, 68, 68, 0.35);
+  color: #865B5C;
 }
 
 .dock-finish-btn {
@@ -961,8 +990,764 @@ select { appearance: auto; }
 .search-submit:hover:not(:disabled) { color: var(--color-text); background: var(--color-accent-soft); }
 .history-list, .memory-list { display: grid; gap: 8px; padding: 12px 16px 16px; }
 .history-card, .memory-card { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-raised); }
-.history-card strong, .memory-card strong { display: block; color: var(--text); }.history-card p, .memory-card p { margin: 6px 0; color: var(--muted); font-size: 13px; }.history-card p { color: var(--subtle); }
-.search-results { max-height: min(58dvh, 650px); overflow: auto; background: var(--surface-muted); }.search-results .message { max-width: 90%; }
+.search-results {
+  max-height: min(58dvh, 650px);
+  overflow: auto;
+  background: var(--surface-muted);
+}
+.search-results .message {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.4;
+  text-shadow: none;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 6px;
+}
+.search-results .message.user {
+  background: var(--accent-soft, rgba(99, 102, 241, 0.14));
+  border: 1px solid var(--color-accent-border, rgba(99, 102, 241, 0.3));
+  color: var(--color-text);
+}
+.search-results .message.assistant {
+  background: var(--color-surface-raised, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border);
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-weight: 400;
+  font-size: 13px;
+  letter-spacing: normal;
+  text-shadow: none;
+}
+.search-results .message.system {
+  background: var(--surface-muted);
+  border: 1px dashed var(--border);
+  color: var(--muted);
+  font-size: 12px;
+}
+.search-results .message-role {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 3px;
+}
+.search-results .message-time {
+  display: block;
+  font-size: 10px;
+  color: var(--subtle);
+  margin-top: 3px;
+  text-align: right;
+}
+
+/* ==========================================================================
+   Journal / History - Modern Iris Desktop Layout & Theme
+   ========================================================================== */
+
+.workspace-journal {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.workspace-journal .history-panel,
+.journal-panel {
+  display: grid;
+  grid-template-columns: 330px minmax(0, 1fr);
+  gap: clamp(20px, 2.5vw, 36px);
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 560px;
+  height: 100%;
+  border: 0;
+  background: transparent;
+}
+
+.journal-layout {
+  display: contents;
+}
+
+/* Sidebar & Navigation */
+.journal-sidebar.settings-navigation {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px 10px;
+  border: 0;
+  border-radius: 20px;
+  background: var(--color-surface);
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 560px;
+  overflow: hidden;
+}
+
+.journal-sidebar-header {
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.journal-search-form.compact {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 38px;
+  padding: 0 4px 0 10px;
+  border-radius: 14px;
+  background: var(--color-surface-raised);
+  border: 0;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.journal-search-form.compact .journal-search-lead-icon {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+  opacity: 0.85;
+  margin-right: 2px;
+}
+
+.journal-search-form.compact input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  outline: none;
+}
+
+.journal-search-form.compact input::placeholder {
+  color: var(--color-text-muted);
+  opacity: 0.8;
+}
+
+.journal-search-form.compact .search-clear-btn {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--color-surface-soft);
+  color: var(--color-text-muted);
+  font-size: 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--motion-fast) ease;
+}
+
+.journal-search-form.compact .search-clear-btn:hover {
+  color: var(--color-text);
+  background: var(--color-rule-strong);
+}
+
+.journal-search-form.compact .icon-button,
+.journal-search-form.compact .reset-search-button {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.16s ease;
+}
+
+.journal-search-form.compact .icon-button:hover,
+.journal-search-form.compact .reset-search-button:hover {
+  color: var(--color-text);
+  background: var(--color-surface-soft);
+}
+
+.journal-search-form.compact .reset-search-button {
+  flex: 0 0 auto;
+  width: auto;
+  padding: 0 8px;
+  font-size: 11.5px;
+  font-weight: 500;
+  background: var(--color-surface-soft);
+}
+
+/* History Episodes List */
+.journal-sidebar .history-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  padding: 8px 0 0;
+  gap: 6px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.journal-sidebar .history-list::-webkit-scrollbar {
+  display: none;
+}
+
+.journal-search-summary {
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  padding: 4px 4px;
+}
+
+.history-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 4px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.history-group-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  padding: 4px 4px 2px;
+}
+
+.history-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.history-card.settings-nav-direct {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 52px;
+  width: 100%;
+  margin: 0 !important;
+  margin-inline-start: 0 !important;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 14px;
+  color: var(--color-text-soft);
+  background: var(--color-surface-raised);
+  cursor: pointer;
+  text-align: left;
+  box-sizing: border-box;
+  transform: none !important;
+  transition: background-color 0.16s ease, color 0.16s ease;
+}
+
+.history-card.settings-nav-direct::before {
+  display: none;
+}
+
+.history-card.settings-nav-direct:hover {
+  color: var(--color-text);
+  background: var(--color-surface-soft);
+  transform: none !important;
+}
+
+.history-card.settings-nav-direct.is-active,
+.history-card.settings-nav-direct.is-selected {
+  color: var(--color-accent-ink) !important;
+  background: var(--color-accent) !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.history-card-icon {
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--color-surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-accent-visual);
+  transition: all var(--motion-fast) ease;
+}
+
+.history-card.settings-nav-direct:hover .history-card-icon {
+  background: var(--color-surface-raised);
+}
+
+.history-card.settings-nav-direct.is-active .history-card-icon,
+.history-card.settings-nav-direct.is-selected .history-card-icon {
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--color-accent-ink);
+}
+
+.history-card-info {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.history-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.history-card-title-row strong {
+  color: var(--color-text);
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.history-card.settings-nav-direct.is-active .history-card-title-row strong,
+.history-card.settings-nav-direct.is-selected .history-card-title-row strong {
+  color: var(--color-accent-ink) !important;
+}
+
+.history-card-info p {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-card.settings-nav-direct.is-active .history-card-info p,
+.history-card.settings-nav-direct.is-selected .history-card-info p {
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+.history-card-delete {
+  opacity: 0;
+  pointer-events: none;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 0;
+  transition: opacity var(--motion-fast) ease, color var(--motion-fast) ease, background-color var(--motion-fast) ease;
+}
+
+.history-card.settings-nav-direct:hover .history-card-delete,
+.history-card.settings-nav-direct:focus-within .history-card-delete {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.history-card-delete:hover {
+  color: var(--color-danger-text);
+  background: var(--color-danger-soft);
+}
+
+.history-card.settings-nav-direct.is-active .history-card-delete:hover,
+.history-card.settings-nav-direct.is-selected .history-card-delete:hover {
+  color: #fff;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+/* Badges */
+.journal-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  background: var(--color-surface-soft);
+  white-space: nowrap;
+}
+
+.journal-badge.active {
+  color: var(--color-success-text);
+  background: var(--color-success-soft);
+}
+
+.history-card.settings-nav-direct.is-active .journal-badge.active,
+.history-card.settings-nav-direct.is-selected .journal-badge.active {
+  color: #fff;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.journal-pulse-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-success);
+  box-shadow: 0 0 6px var(--color-success);
+  animation: journal-dot-pulse 1.8s infinite ease-in-out;
+}
+
+@keyframes journal-dot-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(1.4);
+  }
+}
+
+/* Journal Right Content Viewer */
+.journal-content.settings-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 560px;
+  overflow: hidden;
+  background: var(--color-surface);
+  border: 0;
+  border-radius: var(--radius-lg);
+  padding: clamp(22px, 2.5vw, 32px);
+  box-sizing: border-box;
+}
+
+.journal-content-header.settings-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-block-end: 20px;
+  padding-bottom: 0;
+  border: 0;
+  border-bottom: 0;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+
+.journal-content-header-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.journal-content-header-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.journal-content-header-info h2 {
+  margin: 0;
+  font-size: clamp(20px, 2.4vw, 28px);
+  font-weight: 680;
+  letter-spacing: -0.035em;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.journal-content-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+}
+
+.journal-content-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.journal-continue-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 16px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
+  border: 0;
+  cursor: pointer;
+  box-shadow: var(--shadow-accent);
+  transition: all var(--motion-fast) ease;
+}
+
+.journal-continue-btn:hover {
+  background: var(--color-accent-hover);
+  transform: translateY(-1px);
+}
+
+.journal-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  border: 0;
+  background: var(--color-surface-raised);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--motion-fast) ease;
+}
+
+.journal-delete-btn:hover {
+  color: var(--color-danger-text);
+  background: var(--color-danger-soft);
+}
+
+.journal-back-button {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-accent-visual);
+  background: var(--color-surface-raised);
+  border: 0;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) ease, transform var(--motion-fast) ease;
+}
+
+.journal-back-button:hover {
+  background: var(--color-surface-soft);
+  color: var(--color-text);
+}
+
+/* Messages container & list */
+.journal-messages-container {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  padding: 12px 4px 12px 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.journal-messages-container::-webkit-scrollbar {
+  display: none;
+}
+
+.journal-message-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 860px;
+}
+
+.journal-content .message {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 18px;
+  border-radius: 16px;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.55;
+  text-shadow: none;
+  max-width: 82%;
+  width: fit-content;
+  box-sizing: border-box;
+  position: relative;
+  word-break: break-word;
+  border: 0;
+  box-shadow: var(--shadow-row);
+}
+
+.journal-content .message.user {
+  align-self: flex-end;
+  background: var(--color-accent-soft);
+  color: var(--color-text);
+  border-bottom-right-radius: 4px;
+}
+
+.journal-content .message.user .message-role {
+  color: var(--color-accent-visual);
+}
+
+.journal-content .message.assistant {
+  align-self: flex-start;
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-weight: 400;
+  border-bottom-left-radius: 4px;
+}
+
+.journal-content .message.assistant .message-role {
+  color: var(--color-text-muted);
+}
+
+.journal-content .message.system {
+  align-self: center;
+  background: var(--color-surface-soft);
+  color: var(--color-text-muted);
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 6px 16px;
+  max-width: 85%;
+  text-align: center;
+}
+
+.journal-content .message-role {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-bottom: 4px;
+}
+
+.journal-content .message p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.journal-content .message-time {
+  display: block;
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+  margin-top: 6px;
+  text-align: right;
+  opacity: 0.85;
+}
+
+/* Empty states & Placeholder */
+.journal-placeholder {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 24px;
+  text-align: center;
+  max-width: 480px;
+  margin: auto;
+}
+
+.journal-placeholder-icon {
+  width: 60px;
+  height: 60px;
+  border-radius: 18px;
+  background: var(--color-surface-raised);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-accent-visual);
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-row);
+}
+
+.journal-placeholder strong {
+  font-size: 17px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  color: var(--color-text);
+  margin: 0 0 8px;
+}
+
+.journal-placeholder span {
+  font-size: 13.5px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.journal-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  color: var(--color-text-muted);
+  gap: 12px;
+}
+
+.journal-loading .assistant-thinking {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.journal-loading .assistant-thinking span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-accent-visual);
+}
+
+@media (max-width: 768px) {
+  .journal-panel {
+    grid-template-columns: 1fr;
+  }
+  .journal-layout.has-selected .journal-sidebar {
+    display: none;
+  }
+  .journal-layout:not(.has-selected) .journal-content {
+    display: none;
+  }
+  .journal-back-button {
+    display: inline-flex;
+  }
+  .journal-content .message {
+    max-width: 92%;
+  }
+}
 
 .memory-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
 .memory-toolbar-actions { display: flex; align-items: center; gap: 8px; min-width: min(100%, 480px); }
@@ -1509,19 +2294,7 @@ textarea::placeholder {
 
 .history-card {
   position: relative;
-  margin-inline-start: 18px;
-}
-
-.history-card::before {
-  position: absolute;
-  inset-inline-start: -19px;
-  top: 21px;
-  width: 7px;
-  height: 7px;
-  border: 3px solid var(--color-base);
-  border-radius: 50%;
-  background: var(--color-accent);
-  content: "";
+  margin-inline-start: 0;
 }
 
 .memory-status {
@@ -2045,15 +2818,26 @@ textarea::placeholder {
   }
 }
 
-/* Embedded Unity avatar: let the chat use the available desktop width so the
-   native surface scales with Iris instead of remaining a narrow fixed column. */
-.workspace-chat {
-  width: min(100%, 1560px);
+/* Embedded Unity avatar & Full-bleed dialog workspace: let the chat use the full available width and height
+   aligning seamlessly with the window titlebar and side navigation without awkward gaps. */
+.app-shell > .app-content > .workspace.workspace-chat,
+.workspace.workspace-chat {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  margin: 0;
+  padding: 0 !important;
+  overflow: hidden;
 }
 
 .workspace-chat .chat-panel {
   width: 100%;
+  height: 100%;
   max-width: none;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  padding: 0 0 20px;
 }
 
 /* ChatPage is kept mounted while switching views so the current dialog is not
@@ -2065,6 +2849,7 @@ textarea::placeholder {
   flex: 1 1 auto;
   min-width: 0;
   width: 100%;
+  height: 100%;
 }
 
 .workspace-chat > .chat-view > .chat-panel {
@@ -2073,10 +2858,10 @@ textarea::placeholder {
 
 .chat-panel.is-active.has-in-app-avatar .in-app-avatar-stage {
   position: absolute;
-  left: clamp(-80px, -4vw, -50px);
-  bottom: 145px;
+  left: clamp(-30px, -1.5vw, -10px);
+  bottom: 141px;
   width: clamp(460px, 50vw, 600px);
-  height: calc(100% - 160px);
+  height: calc(100% - 156px);
   max-height: 520px;
 }
 

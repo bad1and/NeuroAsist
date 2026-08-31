@@ -132,9 +132,45 @@ def test_session_reset_erases_dialog_but_preserves_memory_and_rejects_old_sessio
 
     assert second != first
     assert store.get_recent_messages(str(second), 10) == []
+    # History must be preserved and accessible by episode_id
+    assert [m.id for m in store.list_messages(10, episode_id=message.episode_id)[0]] == [message.id]
     assert store.get_memory(str(memory["id"])) is not None
     with pytest.raises(ValueError, match="no longer active"):
         store.accept_user_turn(session_key=str(first), content="устаревшая сессия", input_mode="text")
+
+
+def test_finish_dialog_persists_messages_and_closed_episode_in_journal(monkeypatch, tmp_path: Path) -> None:
+    client, _ = make_client(monkeypatch, tmp_path)
+    with client:
+        session = client.post("/conversation/session").json()["session_id"]
+        # User message
+        client.post("/timeline/messages", json={"role": "user", "content": "Привет, Iris", "session_id": session, "input_mode": "text"})
+        # Assistant reply
+        client.post("/timeline/messages", json={"role": "assistant", "content": "Привет! Чем могу помочь?", "session_id": session, "input_mode": "text"})
+
+        # Finish dialog by calling close episode
+        closed_res = client.post("/episodes/current/close")
+        assert closed_res.status_code == 200
+        closed_ep = closed_res.json()["episode"]
+        assert closed_ep["status"] == "closed"
+        assert closed_ep["message_count"] == 2
+        assert closed_ep["ended_at"] is not None
+
+        # Reset session (as done on finish)
+        reset_res = client.post("/conversation/session/reset")
+        assert reset_res.status_code == 200
+
+        # Verify journal has the closed episode
+        journal = client.get("/timeline/journal").json()["items"]
+        assert len(journal) >= 1
+        journal_ep = next(item for item in journal if item["id"] == closed_ep["id"])
+        assert journal_ep["status"] == "closed"
+        assert journal_ep["message_count"] == 2
+
+        # Verify messages for the closed episode are preserved and returned
+        messages = client.get(f"/timeline/messages?episode_id={closed_ep['id']}").json()["items"]
+        assert len(messages) == 2
+        assert [m["content"] for m in messages] == ["Привет, Iris", "Привет! Чем могу помочь?"]
 
 
 def test_session_reset_endpoint_issues_new_id_and_rejects_stale_requests(monkeypatch, tmp_path: Path) -> None:

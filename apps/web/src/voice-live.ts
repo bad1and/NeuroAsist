@@ -1,5 +1,6 @@
 import type { VoiceServerEvent } from "./types";
 import { setAudioContextOutput } from "./audio-devices";
+import { audioAnalyzer } from "./audio-analyzer";
 
 export type TTSStreamPlayerOptions = {
   prebufferSegments?: number;
@@ -271,6 +272,12 @@ export class TTSStreamPlayer {
     source.buffer = buffer;
     source.playbackRate.value = 1;
     source.connect(context.destination);
+    try {
+      const analyser = audioAnalyzer.getOrCreateAnalyser(context);
+      if (analyser) source.connect(analyser);
+    } catch {
+      // Analyzer connection must never fail speech playback
+    }
     const startAt = Math.max(context.currentTime + this.startLeadMs / 1000, this.scheduledUntil);
     this.scheduledUntil = startAt + buffer.duration;
     this.sources.add(source);

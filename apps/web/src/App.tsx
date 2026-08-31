@@ -47,6 +47,7 @@ import {
   createBackup,
   getBackups,
   getEvents,
+  closeCurrentEpisode,
   getTimelineJournal,
   getTimelineMessages,
   getConversationSession,
@@ -126,7 +127,9 @@ import { WindowChrome } from "./components/WindowChrome";
 import { AppDialog } from "./components/AppDialog";
 import { GuidedSttCapture } from "./stt-capture";
 import { InAppAvatarHost } from "./components/InAppAvatarHost";
+import { IrisPortalBackground } from "./components/IrisPortalBackground";
 import { IrisSubtitles } from "./components/IrisSubtitles";
+import { audioAnalyzer } from "./audio-analyzer";
 import {
   initialInterfaceLocale,
   interfaceIntlLocale,
@@ -157,8 +160,8 @@ const JournalPage = lazy(() => import("./journal").then(({ JournalPage }) => ({ 
 const MemoryPage = lazy(() => import("./memory").then(({ MemoryPage }) => ({ default: MemoryPage })));
 const StatePage = lazy(() => import("./state").then(({ StatePage }) => ({ default: StatePage })));
 const CodingAgentPage = lazy(() => import("./coding").then(({ CodingAgentPage }) => ({ default: CodingAgentPage })));
-const LazyChatPage = lazy(() => import("./pages/chat"));
-const LazySettingsPage = lazy(() => import("./pages/settings"));
+const LazyChatPage = lazy(() => Promise.resolve({ default: ChatPage }));
+const LazySettingsPage = lazy(() => Promise.resolve({ default: SettingsPage }));
 
 function LazyPageFallback() {
   return <div className="panel page-loading" role="status">Загружаю раздел…</div>;
@@ -760,7 +763,7 @@ export default function App() {
             </Suspense>
           </div>
           <Suspense fallback={<LazyPageFallback />}>
-            {activeView === "journal" && <JournalPage />}
+            {activeView === "journal" && <JournalPage onOpenChat={() => switchView("chat")} />}
             {activeView === "memory" && <MemoryPage />}
             {activeView === "state" && <StatePage events={events} />}
           </Suspense>
@@ -1319,6 +1322,11 @@ export function ChatPage({
 
       try {
         await setAudioElementOutput(audio, selectedOutputDeviceId);
+        try {
+          audioAnalyzer.attachAudioElement(audio);
+        } catch {
+          // Analyzer connection optional
+        }
         await audio.play();
         setVoiceState("speaking");
         return true;
@@ -2001,7 +2009,7 @@ export function ChatPage({
     }
   };
 
-  const handleFinish = () => {
+  const handleFinish = async () => {
     clearLiveSttTranscript();
     cancelPendingBargeIn();
     vadRecorderRef.current?.stop();
@@ -2013,6 +2021,13 @@ export function ChatPage({
     interruptAssistantSpeech();
     stopVoicePlayback();
     setVoiceState("idle");
+    try {
+      await closeCurrentEpisode();
+      await onStartNewDialog();
+    } catch {
+      // Ignore if session reset fails
+    }
+    setMessages([]);
     setIsStarted(false);
   };
 
@@ -2066,6 +2081,20 @@ export function ChatPage({
     return { text: "Ирис радуется", dotClass: "green" };
   }, [isDialogActive, loading, messages, voiceState]);
 
+  const currentEmotion = useMemo(() => {
+    if (liveMetadataRef.current.emotion && liveMetadataRef.current.emotion !== "neutral") {
+      return liveMetadataRef.current.emotion;
+    }
+    const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+    if (lastAssistant?.emotion) {
+      return lastAssistant.emotion;
+    }
+    if (avatarStatus?.emotion_engine?.current_emotion) {
+      return avatarStatus.emotion_engine.current_emotion;
+    }
+    return "neutral";
+  }, [avatarStatus?.emotion_engine?.current_emotion, messages]);
+
   let lastAssistantIndex = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role === "assistant") {
@@ -2077,6 +2106,13 @@ export function ChatPage({
   if (!isDialogActive) {
     return (
       <section className={`panel chat-panel is-idle${showInAppAvatar && isActive ? " has-in-app-avatar" : ""}`}>
+        <IrisPortalBackground
+          emotion={currentEmotion}
+          voiceState={voiceState}
+          loading={loading}
+          isDialogActive={false}
+          showInAppAvatar={showInAppAvatar && isActive}
+        />
         <div className="chat-status-pill">
           <span>{statusBadge.text}</span>
           <span className={`status-pill-dot ${statusBadge.dotClass}`} />
@@ -2110,7 +2146,7 @@ export function ChatPage({
         <AppDialog
           open={newDialogConfirmationOpen}
           title="Начать новый диалог?"
-          description="Все сообщения и сводки текущего диалога будут удалены без возможности восстановления. Долгосрочная память Iris останется."
+          description="Текущий диалог будет завершён и сохранён в истории. Начнётся новый разговор с Iris."
           onClose={() => !newDialogPending && setNewDialogConfirmationOpen(false)}
         >
           <div className="dialog-actions">
@@ -2128,6 +2164,13 @@ export function ChatPage({
 
   return (
     <section className={`panel chat-panel is-active${showInAppAvatar && isActive ? " has-in-app-avatar" : ""}`}>
+      <IrisPortalBackground
+        emotion={currentEmotion}
+        voiceState={voiceState}
+        loading={loading}
+        isDialogActive={true}
+        showInAppAvatar={showInAppAvatar && isActive}
+      />
       <div className="chat-status-pill">
         <span>{statusBadge.text}</span>
         <span className={`status-pill-dot ${statusBadge.dotClass}`} />
@@ -2312,7 +2355,7 @@ export function ChatPage({
       <AppDialog
         open={newDialogConfirmationOpen}
         title="Начать новый диалог?"
-        description="Все сообщения и сводки текущего диалога будут удалены без возможности восстановления. Долгосрочная память Iris останется."
+        description="Текущий диалог будет завершён и сохранён в истории. Начнётся новый разговор с Iris."
         onClose={() => !newDialogPending && setNewDialogConfirmationOpen(false)}
       >
         <div className="dialog-actions">
