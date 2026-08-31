@@ -1,0 +1,42 @@
+name: Synthetic lifecycle soak
+
+on:
+  schedule:
+    - cron: "17 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: synthetic-soak-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-duration-soak:
+    name: One-hour conversation lifecycle soak
+    runs-on: ubuntu-latest
+    timeout-minutes: 95
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install locked Python runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Run synthetic release soak
+        run: python scripts/live_conversation_soak.py --release --output artifacts/live-soak.json
+      - name: Upload soak evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-live-soak-${{ github.run_id }}
+          path: |
+            artifacts/live-soak.json
+            artifacts/live-soak.md
+          if-no-files-found: warn
+          retention-days: 30

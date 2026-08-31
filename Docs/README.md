@@ -9,6 +9,7 @@
 - [Архитектура](architecture.md) — владельцы процессов, данные и основные потоки.
 - [Эксплуатация и сборка](operations.md) — development, диагностика, smoke и release build.
 - [Release checklist 1.0](release-checklist.md) — обязательные условия публикации.
+- [Release runbook](release-runbook.md) — CI, Windows candidate artifact и ручные evidence gates.
 - [Версии](versioning.md) — источник версии, зеркала и порядок подготовки релиза.
 - [HTTP и WebSocket API](api.md) — authentication, route groups и transport versions.
 - [Текущий статус](MILESTONES.md) — что уже реализовано и что остаётся до публичной версии.

@@ -112,10 +112,40 @@ def main() -> None:
     parser.add_argument("--duration", type=float, default=900)
     parser.add_argument("--cycles", type=int, default=100)
     parser.add_argument("--output", type=Path, default=Path("output/live-soak.json"))
-    parser.add_argument("--full", action="store_true", help="Run the four-hour release soak")
+    parser.add_argument(
+        "--release",
+        action="store_true",
+        help="Run the one-hour synthetic release soak (480 lifecycle cycles)",
+    )
+    parser.add_argument("--full", action="store_true", help="Run the four-hour extended synthetic soak")
+    parser.add_argument(
+        "--max-rss-delta-mib",
+        type=float,
+        default=None,
+        help="Fail if the process RSS grows by more than this value",
+    )
     args = parser.parse_args()
-    duration = 14_400 if args.full else args.duration
-    report = asyncio.run(run(duration, args.cycles))
+    if args.release and args.full:
+        parser.error("--release and --full are mutually exclusive")
+    if args.release:
+        duration, cycles = 3_600, 480
+        max_rss_delta_mib = 512.0 if args.max_rss_delta_mib is None else args.max_rss_delta_mib
+    elif args.full:
+        duration, cycles = 14_400, args.cycles
+        max_rss_delta_mib = args.max_rss_delta_mib
+    else:
+        duration, cycles = args.duration, args.cycles
+        max_rss_delta_mib = args.max_rss_delta_mib
+    if duration <= 0 or cycles <= 0:
+        parser.error("--duration and --cycles must be positive")
+
+    report = asyncio.run(run(duration, cycles))
+    if max_rss_delta_mib is not None:
+        report["max_rss_delta_mib"] = max_rss_delta_mib
+        report["rss_delta_mib"] = round(int(report["rss_delta_bytes"]) / (1024 * 1024), 3)
+        report["passed"] = bool(
+            report["passed"] and report["rss_delta_mib"] <= max_rss_delta_mib
+        )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     args.output.with_suffix(".md").write_text(markdown(report), encoding="utf-8")
