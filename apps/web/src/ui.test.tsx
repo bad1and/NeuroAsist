@@ -361,9 +361,10 @@ describe("русский интерфейс", () => {
 
   it("показывает только выбранный раздел настроек", async () => {
     const { container } = render(<App />);
+    expect(await screen.findByRole("button", { name: "Диалог" })).toBeInTheDocument();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
-    const navigation = screen.getByRole("navigation", { name: "Разделы настроек" });
+    fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
+    const navigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
     expect(within(navigation).queryByText("Настройки")).not.toBeInTheDocument();
     expect(screen.queryByText("Настройки Iris")).not.toBeInTheDocument();
     expect(screen.queryByText("Готово к изменениям")).not.toBeInTheDocument();
@@ -394,9 +395,10 @@ describe("русский интерфейс", () => {
 
   it("открывает одиночные разделы напрямую и сохраняет доступную навигацию групп", async () => {
     render(<App />);
+    expect(await screen.findByRole("button", { name: "Диалог" })).toBeInTheDocument();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
-    const navigation = screen.getByRole("navigation", { name: "Разделы настроек" });
+    fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
+    const navigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
     const behavior = within(navigation).getByRole("button", { name: "Поведение" });
     expect(behavior).toHaveAttribute("aria-expanded", "true");
     expect(behavior).toHaveAttribute("aria-controls", "settings-nav-children-behavior");
@@ -418,9 +420,10 @@ describe("русский интерфейс", () => {
 
   it("автосохраняет отдельное поле и откатывает его при ошибке", async () => {
     render(<App />);
+    expect(await screen.findByRole("button", { name: "Диалог" })).toBeInTheDocument();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
-    const memoryButtons = screen.getAllByRole("button", { name: "Память" });
+    fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
+    const memoryButtons = await screen.findAllByRole("button", { name: "Память" });
     fireEvent.click(memoryButtons[memoryButtons.length - 1]);
     const mode = screen.getByLabelText("Режим сохранения");
     fireEvent.change(mode, { target: { value: "off" } });
@@ -439,9 +442,10 @@ describe("русский интерфейс", () => {
 
   it("откладывает сохранение скорости до окончания debounce", async () => {
     render(<App />);
+    expect(await screen.findByRole("button", { name: "Диалог" })).toBeInTheDocument();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
-    const settingsNavigation = screen.getByRole("navigation", { name: "Разделы настроек" });
+    fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
+    const settingsNavigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
     const voiceGroup = within(settingsNavigation).getByRole("button", { name: "Голос" });
     fireEvent.click(voiceGroup);
     fireEvent.click(voiceGroup);
@@ -456,9 +460,10 @@ describe("русский интерфейс", () => {
     const savedSettings = { ...settings, live_conversation_participant_mode: "group" as const };
     api.updateRuntimeSettings.mockResolvedValue(savedSettings);
     const { container } = render(<App />);
+    expect(await screen.findByRole("button", { name: "Диалог" })).toBeInTheDocument();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
-    fireEvent.click(screen.getByRole("button", { name: "Живой разговор" }));
+    fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Живой разговор" }));
     const participantMode = await screen.findByLabelText("Участники");
     fireEvent.change(participantMode, { target: { value: "group" } });
 
@@ -494,8 +499,9 @@ describe("русский интерфейс", () => {
 
     try {
       render(<App />);
-      fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
-      const settingsNavigation = screen.getByRole("navigation", { name: "Разделы настроек" });
+      expect(await screen.findByRole("button", { name: "Диалог" })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
+      const settingsNavigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
       const voiceGroup = within(settingsNavigation).getByRole("button", { name: "Голос" });
       fireEvent.click(voiceGroup);
       fireEvent.click(voiceGroup);
@@ -574,7 +580,7 @@ describe("русский интерфейс", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Новый диалог" })).not.toBeDisabled());
     fireEvent.click(screen.getByRole("button", { name: "Новый диалог" }));
     expect(await screen.findByRole("heading", { name: "Начать новый диалог?" })).toBeInTheDocument();
-    expect(screen.getByText(/Долгосрочная память Iris останется/)).toBeInTheDocument();
+    expect(screen.getByText(/Текущий диалог будет завершён и сохранён в истории/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Начать новый диалог" }));
 
     await waitFor(() => expect(api.resetConversationSession).toHaveBeenCalledTimes(1));
@@ -614,5 +620,188 @@ describe("русский интерфейс", () => {
     fireEvent.click(screen.getByRole("button", { name: "Удалить историю" }));
 
     await waitFor(() => expect(api.deleteTimelineRange).toHaveBeenCalledWith("2026-07-27T23:59:59.999Z"));
+  });
+
+  it("отображает двухпанельный интерфейс истории и загружает сообщения выбранного диалога", async () => {
+    api.getTimelineJournal.mockResolvedValue({
+      items: [
+        { id: "ep-1", day: "2026-08-10", message_count: 2, started_at: "2026-08-10T12:00:00Z", last_activity_at: "2026-08-10T12:10:00Z", title: "Обсуждение планов", ended_at: "2026-08-10T12:15:00Z" },
+        { id: "ep-2", day: "2026-08-11", message_count: 3, started_at: "2026-08-11T15:00:00Z", last_activity_at: "2026-08-11T15:30:00Z", title: "Текущий диалог", ended_at: null },
+      ],
+    });
+    api.getTimelineMessages.mockResolvedValue({
+      items: [
+        { id: "m-1", role: "user", content: "Привет, как дела?", original_content: "Привет, как дела?", status: "done", input_mode: "text", created_at: "2026-08-10T12:00:00Z" },
+        { id: "m-2", role: "assistant", content: "Привет! Всё отлично, готова помочь.", original_content: "Привет! Всё отлично, готова помочь.", status: "done", input_mode: "text", created_at: "2026-08-10T12:01:00Z" },
+      ],
+      next_offset: null,
+    });
+
+    const { container } = render(<JournalPage />);
+
+    // Layout elements
+    expect(container.querySelector(".journal-layout")).toBeInTheDocument();
+    expect(container.querySelector(".journal-sidebar")).toBeInTheDocument();
+    expect(container.querySelector(".journal-content")).toBeInTheDocument();
+
+    // Episodes in sidebar
+    expect(await screen.findByText("Обсуждение планов")).toBeInTheDocument();
+    expect(screen.getByText("Текущий диалог")).toBeInTheDocument();
+
+    // Active episode has "Текущий" badge
+    const activeBadge = screen.getByTitle("Текущий диалог");
+    expect(activeBadge).toBeInTheDocument();
+    expect(activeBadge.querySelector(".journal-pulse-dot")).toBeInTheDocument();
+
+    // Placeholder before selection
+    expect(screen.getByText("Выберите диалог для просмотра")).toBeInTheDocument();
+
+    // Select episode
+    fireEvent.click(screen.getByText("Обсуждение планов"));
+
+    // Fetches messages with episode.id
+    await waitFor(() => expect(api.getTimelineMessages).toHaveBeenCalledWith(200, undefined, "ep-1"));
+
+    // Messages displayed with roles and content
+    expect(await screen.findByText("Привет, как дела?")).toBeInTheDocument();
+    expect(screen.getByText("Привет! Всё отлично, готова помочь.")).toBeInTheDocument();
+    expect(screen.getByText("Вы")).toBeInTheDocument();
+    expect(screen.getByText("Iris")).toBeInTheDocument();
+
+    // Back button returns to list
+    const backButton = screen.getByRole("button", { name: "Назад к списку" });
+    expect(backButton).toBeInTheDocument();
+    fireEvent.click(backButton);
+
+    expect(await screen.findByText("Выберите диалог для просмотра")).toBeInTheDocument();
+  });
+
+  it("выполняет поиск по истории и сбрасывает результаты", async () => {
+    api.getTimelineJournal.mockResolvedValue({ items: [] });
+    api.searchTimeline.mockResolvedValue({
+      items: [
+        { id: "s-1", role: "assistant", content: "Найденный ответ про погоду", original_content: "Найденный ответ про погоду", status: "done", input_mode: "text", created_at: "2026-08-10T10:00:00Z" },
+      ],
+    });
+
+    render(<JournalPage />);
+
+    const searchInput = screen.getByPlaceholderText("Поиск по истории");
+    fireEvent.change(searchInput, { target: { value: "погода" } });
+    fireEvent.click(screen.getByRole("button", { name: "Найти в истории" }));
+
+    await waitFor(() => expect(api.searchTimeline).toHaveBeenCalledWith("погода"));
+    expect(await screen.findByText("Найденный ответ про погоду")).toBeInTheDocument();
+
+    const resetButton = screen.getByRole("button", { name: "Сбросить" });
+    fireEvent.click(resetButton);
+
+    expect(screen.queryByText("Найденный ответ про погоду")).not.toBeInTheDocument();
+    expect(screen.getByText("История пока пуста")).toBeInTheDocument();
+  });
+
+  it("предотвращает race conditions при быстром переключении между диалогами", async () => {
+    let resolveFirst!: (value: { items: any[]; next_offset: null }) => void;
+    const firstPromise = new Promise<{ items: any[]; next_offset: null }>((resolve) => {
+      resolveFirst = resolve;
+    });
+
+    api.getTimelineJournal.mockResolvedValue({
+      items: [
+        { id: "ep-slow", day: "2026-08-10", message_count: 1, started_at: "2026-08-10T12:00:00Z", last_activity_at: "2026-08-10T12:10:00Z", title: "Медленный диалог", ended_at: "2026-08-10T12:15:00Z" },
+        { id: "ep-fast", day: "2026-08-11", message_count: 1, started_at: "2026-08-11T15:00:00Z", last_activity_at: "2026-08-11T15:30:00Z", title: "Быстрый диалог", ended_at: null },
+      ],
+    });
+
+    api.getTimelineMessages.mockImplementation((limit, sessionId, episodeId) => {
+      if (episodeId === "ep-slow" || sessionId === "ep-slow") {
+        return firstPromise;
+      }
+      return Promise.resolve({
+        items: [
+          { id: "m-fast", role: "assistant", content: "Ответ из быстрого диалога", original_content: "Ответ из быстрого диалога", status: "done", input_mode: "text", created_at: "2026-08-11T15:00:00Z" },
+        ],
+        next_offset: null,
+      });
+    });
+
+    render(<JournalPage />);
+
+    // Click slow first
+    fireEvent.click(await screen.findByText("Медленный диалог"));
+    // Immediately click fast
+    fireEvent.click(screen.getByText("Быстрый диалог"));
+
+    // Fast resolves first
+    expect(await screen.findByText("Ответ из быстрого диалога")).toBeInTheDocument();
+
+    // Now slow resolves late
+    resolveFirst({
+      items: [
+        { id: "m-slow", role: "assistant", content: "Устаревший ответ из медленного диалога", original_content: "Устаревший ответ из медленного диалога", status: "done", input_mode: "text", created_at: "2026-08-10T12:00:00Z" },
+      ],
+      next_offset: null,
+    });
+
+    // Ensure the fast dialog content remains and slow was NOT rendered
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText("Устаревший ответ из медленного диалога")).not.toBeInTheDocument();
+    expect(screen.getByText("Ответ из быстрого диалога")).toBeInTheDocument();
+  });
+
+  it("отображает состояние ошибки и пустое состояние сообщений", async () => {
+    api.getTimelineJournal.mockResolvedValue({
+      items: [
+        { id: "ep-error", day: "2026-08-10", message_count: 0, started_at: "2026-08-10T12:00:00Z", last_activity_at: "2026-08-10T12:10:00Z", title: "Ошибочный диалог", ended_at: "2026-08-10T12:15:00Z" },
+        { id: "ep-empty", day: "2026-08-11", message_count: 0, started_at: "2026-08-11T15:00:00Z", last_activity_at: "2026-08-11T15:30:00Z", title: "Пустой диалог", ended_at: "2026-08-11T15:30:00Z" },
+      ],
+    });
+
+    api.getTimelineMessages.mockImplementation((limit, sessionId, episodeId) => {
+      if (episodeId === "ep-error" || sessionId === "ep-error") {
+        return Promise.reject(new Error("Сетевая ошибка при загрузке"));
+      }
+      return Promise.resolve({ items: [], next_offset: null });
+    });
+
+    render(<JournalPage />);
+
+    // Click error episode
+    fireEvent.click(await screen.findByText("Ошибочный диалог"));
+    expect(await screen.findByText("Сетевая ошибка при загрузке")).toBeInTheDocument();
+
+    // Click empty episode via keyboard
+    const emptyCard = screen.getByText("Пустой диалог").closest("article")!;
+    fireEvent.keyDown(emptyCard, { key: "Enter" });
+
+    expect(await screen.findByText("В этом диалоге нет сообщений")).toBeInTheDocument();
+    expect(screen.queryByText("Сетевая ошибка при загрузке")).not.toBeInTheDocument();
+  });
+
+  it("корректно отображает различные роли сообщений, включая системные события", async () => {
+    api.getTimelineJournal.mockResolvedValue({
+      items: [
+        { id: "ep-roles", day: "2026-08-12", message_count: 3, started_at: "2026-08-12T10:00:00Z", last_activity_at: "2026-08-12T10:05:00Z", title: "Диалог с событиями", ended_at: null },
+      ],
+    });
+    api.getTimelineMessages.mockResolvedValue({
+      items: [
+        { id: "m-user", role: "user", content: "Пользовательский ввод", original_content: "Пользовательский ввод", status: "done", input_mode: "text", created_at: "2026-08-12T10:00:00Z" },
+        { id: "m-assistant", role: "assistant", content: "Ответ ассистента", original_content: "Ответ ассистента", status: "done", input_mode: "text", created_at: "2026-08-12T10:01:00Z" },
+        { id: "m-sys", role: "system_event", content: "Сессия восстановлена", original_content: "Сессия восстановлена", status: "done", input_mode: "system", created_at: "2026-08-12T10:02:00Z" },
+      ],
+      next_offset: null,
+    });
+
+    render(<JournalPage />);
+
+    fireEvent.click(await screen.findByText("Диалог с событиями"));
+
+    expect(await screen.findByText("Пользовательский ввод")).toBeInTheDocument();
+    expect(screen.getByText("Ответ ассистента")).toBeInTheDocument();
+    expect(screen.getByText("Сессия восстановлена")).toBeInTheDocument();
+    expect(screen.getByText("Вы")).toBeInTheDocument();
+    expect(screen.getByText("Iris")).toBeInTheDocument();
+    expect(screen.getByText("Событие")).toBeInTheDocument();
   });
 });

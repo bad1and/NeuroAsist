@@ -24,8 +24,11 @@ def get_messages(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     session_id: str | None = Query(default=None, min_length=1, max_length=128),
+    episode_id: str | None = Query(default=None, min_length=1, max_length=128),
 ) -> dict[str, object]:
-    messages, next_offset = _store(request).list_messages(limit, offset, session_id)
+    messages, next_offset = _store(request).list_messages(
+        limit, offset, session_id=session_id, episode_id=episode_id
+    )
     return {"items": [message.as_dict() for message in messages], "next_offset": next_offset}
 
 

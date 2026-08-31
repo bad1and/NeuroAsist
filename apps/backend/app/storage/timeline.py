@@ -510,19 +510,27 @@ class TimelineStore:
         limit: int,
         offset: int = 0,
         session_id: str | None = None,
+        episode_id: str | None = None,
     ) -> tuple[list[StoredTimelineMessage], int | None]:
         with self._connect() as connection:
-            if session_id is None:
+            if episode_id is not None:
                 rows = connection.execute(
-                    "SELECT * FROM conversation_messages WHERE timeline_id = ? ORDER BY sequence_no DESC LIMIT ? OFFSET ?",
-                    (PRIMARY_TIMELINE_ID, limit + 1, offset),
+                    """SELECT * FROM conversation_messages
+                       WHERE timeline_id = ? AND episode_id = ?
+                       ORDER BY sequence_no DESC LIMIT ? OFFSET ?""",
+                    (PRIMARY_TIMELINE_ID, episode_id, limit + 1, offset),
+                ).fetchall()
+            elif session_id is not None:
+                rows = connection.execute(
+                    """SELECT * FROM conversation_messages
+                       WHERE timeline_id = ? AND (session_id = ? OR episode_id = ?)
+                       ORDER BY sequence_no DESC LIMIT ? OFFSET ?""",
+                    (PRIMARY_TIMELINE_ID, session_id, session_id, limit + 1, offset),
                 ).fetchall()
             else:
                 rows = connection.execute(
-                    """SELECT * FROM conversation_messages
-                       WHERE timeline_id = ? AND session_id = ?
-                       ORDER BY sequence_no DESC LIMIT ? OFFSET ?""",
-                    (PRIMARY_TIMELINE_ID, session_id, limit + 1, offset),
+                    "SELECT * FROM conversation_messages WHERE timeline_id = ? ORDER BY sequence_no DESC LIMIT ? OFFSET ?",
+                    (PRIMARY_TIMELINE_ID, limit + 1, offset),
                 ).fetchall()
         next_offset = offset + limit if len(rows) > limit else None
         return [self._row_to_message(row) for row in reversed(rows[:limit])], next_offset
@@ -699,7 +707,7 @@ class TimelineStore:
                 return None
             self._close_episode(connection, episode, reason, now or self._now())
             row = connection.execute("SELECT * FROM conversation_episodes WHERE id = ?", (episode["id"],)).fetchone()
-            return dict(row)
+            return dict(row) if row is not None else None
 
     def recover_active_episode(self, now: str | None = None) -> dict[str, object] | None:
         """Close only stale active episodes; a restart never creates an empty one."""
@@ -714,7 +722,7 @@ class TimelineStore:
             if gap >= self._episode_policy.hard_inactivity_seconds:
                 self._close_episode(connection, episode, "application_restart", current_time)
                 row = connection.execute("SELECT * FROM conversation_episodes WHERE id = ?", (episode["id"],)).fetchone()
-                return dict(row)
+                return dict(row) if row is not None else None
         return None
 
     def claim_summary_job(self) -> dict[str, object] | None:
@@ -2327,38 +2335,26 @@ class TimelineStore:
             return {"messages": int(messages), "memories": int(memories), "episodes": int(episodes)}
 
     def reset_session(self) -> dict[str, object]:
-        """Delete every durable conversation artifact while preserving long-term memory."""
+        """Close the active episode and issue a fresh active session without deleting history."""
         with self._immediate_connect() as connection:
+            now = self._now()
+            episode = self._current_episode_row(connection)
+            if episode is not None:
+                self._close_episode(connection, episode, "new_dialog", now)
+            connection.execute("DELETE FROM conversation_turn_state WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,))
+            session_id = uuid4().hex
+            connection.execute(
+                """UPDATE conversation_timelines
+                   SET current_episode_id = NULL, active_session_id = ?, updated_at = ?
+                   WHERE id = ?""",
+                (session_id, now, PRIMARY_TIMELINE_ID),
+            )
             messages = int(connection.execute(
                 "SELECT COUNT(*) FROM conversation_messages WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,)
             ).fetchone()[0])
             episodes = int(connection.execute(
                 "SELECT COUNT(*) FROM conversation_episodes WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,)
             ).fetchone()[0])
-            existing_tables = {str(row[0]) for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            )}
-            for table in (
-                "conversation_observations", "character_state_events", "character_participant_states",
-                "character_state_snapshots", "timeline_message_fts", "episode_summary_fts",
-                "episode_checkpoints", "episode_summaries", "consolidation_runs", "background_jobs",
-            ):
-                if table in existing_tables:
-                    connection.execute(f"DELETE FROM {table}")
-            if "semantic_vectors" in existing_tables:
-                connection.execute("DELETE FROM semantic_vectors WHERE namespace = 'episode_summary'")
-            if "semantic_index_state" in existing_tables:
-                connection.execute("DELETE FROM semantic_index_state WHERE namespace = 'episode_summary'")
-            connection.execute("DELETE FROM conversation_turn_state WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,))
-            connection.execute("DELETE FROM conversation_messages WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,))
-            connection.execute("DELETE FROM conversation_episodes WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,))
-            session_id = uuid4().hex
-            connection.execute(
-                """UPDATE conversation_timelines
-                   SET current_episode_id = NULL, latest_message_id = NULL, active_session_id = ?, updated_at = ?
-                   WHERE id = ?""",
-                (session_id, self._now(), PRIMARY_TIMELINE_ID),
-            )
         return {"session_id": session_id, "messages": messages, "episodes": episodes}
 
     def ensure_active_session(self) -> dict[str, object]:
@@ -3036,6 +3032,35 @@ class TimelineStore:
         self._assign_unassigned_messages_to_import_episode(connection)
 
     def _assign_unassigned_messages_to_import_episode(self, connection: sqlite3.Connection) -> None:
+        orphaned_episodes = connection.execute(
+            """
+            SELECT DISTINCT episode_id FROM conversation_messages
+            WHERE timeline_id = ? AND episode_id IS NOT NULL
+              AND episode_id NOT IN (SELECT id FROM conversation_episodes WHERE timeline_id = ?)
+            """,
+            (PRIMARY_TIMELINE_ID, PRIMARY_TIMELINE_ID),
+        ).fetchall()
+        for row in orphaned_episodes:
+            ep_id = row["episode_id"]
+            stats = connection.execute(
+                """
+                SELECT COUNT(*) AS count, COALESCE(SUM((length(content) + 3) / 4), 0) AS tokens,
+                       MIN(created_at) AS started_at, MAX(created_at) AS last_activity_at
+                FROM conversation_messages WHERE episode_id = ?
+                """,
+                (ep_id,),
+            ).fetchone()
+            if stats and stats["count"] > 0:
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO conversation_episodes (
+                        id, timeline_id, status, started_at, last_activity_at, ended_at,
+                        boundary_reason, message_count, token_estimate
+                    ) VALUES (?, ?, 'closed', ?, ?, ?, 'recovery', ?, ?)
+                    """,
+                    (ep_id, PRIMARY_TIMELINE_ID, stats["started_at"], stats["last_activity_at"], stats["last_activity_at"], stats["count"], stats["tokens"]),
+                )
+
         unassigned = connection.execute(
             "SELECT id, created_at FROM conversation_messages WHERE timeline_id = ? AND episode_id IS NULL ORDER BY created_at, id",
             (PRIMARY_TIMELINE_ID,),
@@ -3988,26 +4013,28 @@ class TimelineStore:
         return episode_id
 
     def _close_episode(self, connection: sqlite3.Connection, episode: sqlite3.Row, reason: str, now: str) -> None:
-        if episode["message_count"] == 0:
-            connection.execute("DELETE FROM conversation_episodes WHERE id = ?", (episode["id"],))
-        else:
+        episode_id = episode["id"]
+        self._recalculate_episode(connection, episode_id)
+        row = connection.execute("SELECT * FROM conversation_episodes WHERE id = ?", (episode_id,)).fetchone()
+        if row is not None:
+            last_activity = row["last_activity_at"] or now
             connection.execute(
                 """
                 UPDATE conversation_episodes
                 SET status = 'closed', ended_at = ?, last_activity_at = ?, boundary_reason = ?
                 WHERE id = ?
                 """,
-                (now, episode["last_activity_at"], reason, episode["id"]),
+                (now, last_activity, reason, episode_id),
             )
             connection.execute(
                 "INSERT INTO background_jobs (id, type, status, payload_json, available_at, created_at, updated_at) VALUES (?, 'episode_summary', 'pending', ?, ?, ?, ?)",
-                (uuid4().hex, json.dumps({"episode_id": episode["id"]}), now, now, now),
+                (uuid4().hex, json.dumps({"episode_id": episode_id}), now, now, now),
             )
         connection.execute(
             "UPDATE conversation_timelines SET current_episode_id = NULL, updated_at = ? WHERE id = ?",
             (now, PRIMARY_TIMELINE_ID),
         )
-        self._publish_episode("episode.closed", "info", "Conversation episode closed", episode["id"], reason)
+        self._publish_episode("episode.closed", "info", "Conversation episode closed", episode_id, reason)
 
     def _touch_episode(self, connection: sqlite3.Connection, episode_id: str, content: str, now: str) -> None:
         connection.execute(

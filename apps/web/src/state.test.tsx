@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({ getCharacterState: vi.fn(), getCharacterStateEvents: vi.fn(), getCharacterReflections: vi.fn(), getReflectionSettings: vi.fn(), resetCharacterState: vi.fn(), updateReflectionSettings: vi.fn(), deleteCharacterReflection: vi.fn() }));
 vi.mock("./api", () => api);
+vi.mock("@paper-design/shaders-react", () => ({ Metaballs: () => <div data-testid="metaballs" /> }));
 import { StatePage } from "./state";
 
 beforeEach(() => {
@@ -17,12 +18,12 @@ afterEach(() => vi.clearAllMocks());
 describe("StatePage", () => {
   it("shows human-readable state, scoped reset, and reflection toggle", async () => {
     render(<StatePage />);
-    expect(await screen.findByRole("heading", { name: "Состояние Iris" })).toBeInTheDocument();
-    expect(screen.getByText("Причины настроения")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Состояние ИИ" })).toBeInTheDocument();
+    expect(screen.getByText("Причины:")).toBeInTheDocument();
     expect(screen.getAllByText("insult").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "Сбросить настроение" }));
     await waitFor(() => expect(api.resetCharacterState).toHaveBeenCalledWith("mood"));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Создавать" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Личные заметки" }));
     await waitFor(() => expect(api.updateReflectionSettings).toHaveBeenCalled());
   });
 });
