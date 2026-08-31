@@ -44,6 +44,22 @@ class FakeVoiceConnection:
         self.segments.append((started, audio, finished))
 
 
+class FakeVoiceWebSocket:
+    async def close(self, *_args, **_kwargs) -> None:
+        return None
+
+
+@pytest.mark.anyio
+async def test_live_output_waits_for_a_reconnecting_socket() -> None:
+    manager = VoiceSessionManager(MockTTSProvider())
+    waiting = asyncio.create_task(manager.wait_for_connection("reconnect", timeout=0.1))
+
+    await asyncio.sleep(0)
+    await manager.register("reconnect", FakeVoiceWebSocket())
+
+    assert await waiting is True
+
+
 def test_normalizer_keeps_ui_independent_tts_copy() -> None:
     source = "**Ответ** `value` https://example.com\n```python\nsecret()\n```"
     assert TextNormalizer().normalize(source) == "Ответ value ссылка"

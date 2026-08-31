@@ -308,6 +308,9 @@ export class VoiceSocketClient {
   private socket: WebSocket | null = null;
   private connecting: Promise<void> | null = null;
   private pendingSegment: VoiceServerEvent | null = null;
+  private reconnectTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
+  private reconnectAttempt = 0;
+  private manuallyClosed = true;
   activeUtteranceId: string | null = null;
 
   constructor(
@@ -317,18 +320,33 @@ export class VoiceSocketClient {
   ) {}
 
   async connect(): Promise<void> {
+    this.manuallyClosed = false;
     if (this.socket?.readyState === WebSocket.OPEN) return;
     if (this.connecting) return this.connecting;
-    this.socket = new WebSocket(this.url);
-    this.socket.binaryType = "arraybuffer";
-    this.connecting = new Promise<void>((resolve, reject) => {
-      const socket = this.socket!;
+    if (this.reconnectTimer !== null) {
+      globalThis.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.connecting = this.openSocket();
+    try {
+      await this.connecting;
+    } finally {
+      this.connecting = null;
+    }
+  }
+
+  private async openSocket(): Promise<void> {
+    const socket = new WebSocket(this.url);
+    this.socket = socket;
+    socket.binaryType = "arraybuffer";
+    await new Promise<void>((resolve, reject) => {
       let opened = false;
       const fail = () => {
         if (!opened) reject(new Error(`Live voice connection failed: ${this.url}`));
       };
       socket.onopen = () => {
         opened = true;
+        this.reconnectAttempt = 0;
         resolve();
       };
       socket.onerror = () => {
@@ -337,8 +355,13 @@ export class VoiceSocketClient {
       };
       socket.onclose = () => {
         this.pendingSegment = null;
-        if (this.socket === socket) this.socket = null;
+        const isCurrent = this.socket === socket;
+        if (isCurrent) this.socket = null;
         fail();
+        // The microphone WebSocket already reconnects itself. Keep the output
+        // socket in the same lifecycle, otherwise STT can succeed while the
+        // backend has nowhere to stream the response after a transient reset.
+        if (opened && isCurrent && !this.manuallyClosed) this.scheduleReconnect();
       };
       socket.onmessage = (message) => {
         if (message.data instanceof ArrayBuffer) {
@@ -359,10 +382,17 @@ export class VoiceSocketClient {
         if (event.type === "tts.segment.started") this.pendingSegment = event;
         this.onEvent(event);
       };
-    }).finally(() => {
-      this.connecting = null;
     });
-    return this.connecting;
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer !== null || this.manuallyClosed) return;
+    const delay = Math.min(2000, 250 * (2 ** this.reconnectAttempt));
+    this.reconnectAttempt = Math.min(this.reconnectAttempt + 1, 4);
+    this.reconnectTimer = globalThis.setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.connect().catch(() => undefined);
+    }, delay);
   }
 
   activate(utteranceId: string): void {
@@ -384,8 +414,14 @@ export class VoiceSocketClient {
 
   cancel(): boolean { return this.send("voice.cancel"); }
   close(): void {
+    this.manuallyClosed = true;
+    if (this.reconnectTimer !== null) {
+      globalThis.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.socket?.close();
     this.socket = null;
     this.connecting = null;
+    this.pendingSegment = null;
   }
 }
