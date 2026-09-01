@@ -27,9 +27,9 @@
   justify-content: space-between;
   width: 100%;
   min-height: 38px;
-  padding: 8px 14px;
+  padding: 8px 12px;
   border: none;
-  border-radius: 12px;
+  border-radius: 10px;
   background: var(--color-surface-raised, #242526);
   color: var(--color-text, #f0f0f0);
   cursor: pointer;
@@ -94,7 +94,7 @@
   overscroll-behavior: contain;
   background: var(--color-surface-raised, #242526);
   border: none !important;
-  border-radius: 12px;
+  border-radius: 10px;
   z-index: 1000;
   box-shadow: 0 14px 36px -4px rgba(0, 0, 0, 0.55), 0 4px 14px rgba(0, 0, 0, 0.35);
   padding: 5px;

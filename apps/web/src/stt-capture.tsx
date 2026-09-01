@@ -8,6 +8,7 @@ import {
   IconInterfaceFavoriteLike1,
 } from "./CustomIcons";
 import { FigmaMicIcon } from "./FigmaIcons";
+import { notify } from "./notifications";
 
 import { BrowserVadRecorder, type CaptureMetadata, type MicrophoneProfile } from "./vad";
 
@@ -151,10 +152,19 @@ export function GuidedSttCapture({
   const completedCount = completedScenarioIds.size;
   const progress = Math.min(100, (completedCount / SCENARIOS.length) * 100);
 
+  const postCaptureMessage = (msg: CaptureMessage) => {
+    setMessage(msg);
+    if (msg.tone === "error") {
+      notify.error("Запись речи", msg.text);
+    } else if (msg.tone === "success") {
+      notify.success("Запись речи", msg.text);
+    }
+  };
+
   useEffect(() => {
     void listCaptures()
       .then(setCaptures)
-      .catch(() => setMessage({ text: "Локальное хранилище записей недоступно.", tone: "error" }));
+      .catch(() => postCaptureMessage({ text: "Локальное хранилище записей недоступно.", tone: "error" }));
     return () => recorder.current?.stop();
   }, []);
 
@@ -180,7 +190,7 @@ export function GuidedSttCapture({
       setRecording(true);
     } catch (error) {
       nextRecorder.stop();
-      setMessage({
+      postCaptureMessage({
         text: error instanceof Error ? error.message : "Не удалось начать запись.",
         tone: "error",
       });
@@ -196,7 +206,7 @@ export function GuidedSttCapture({
     setRecording(false);
     const captureMetadata = metadata.current;
     if (!captureMetadata || chunks.current.length === 0) {
-      setMessage({ text: "Запись пуста. Попробуйте записать сценарий ещё раз.", tone: "error" });
+      postCaptureMessage({ text: "Запись пуста. Попробуйте записать сценарий ещё раз.", tone: "error" });
       setBusy(false);
       return;
     }
@@ -216,10 +226,10 @@ export function GuidedSttCapture({
       await saveCapture(capture);
       const next = await listCaptures();
       setCaptures(next);
-      setMessage({ text: "Запись сохранена локально на этом устройстве.", tone: "success" });
+      postCaptureMessage({ text: "Запись сохранена локально на этом устройстве.", tone: "success" });
       if (scenarioIndex < SCENARIOS.length - 1) selectScenario(scenarioIndex + 1);
     } catch (error) {
-      setMessage({
+      postCaptureMessage({
         text: error instanceof Error ? error.message : "Не удалось сохранить запись локально.",
         tone: "error",
       });
@@ -330,7 +340,11 @@ export function GuidedSttCapture({
           <span>{captures.length} WAV</span>
         </div>
         {captures.length === 0 ? (
-          <p className="stt-capture-empty">Здесь появятся записи, которые можно скачать по одной.</p>
+          <div className="empty-state compact">
+            <IconInterfaceDownloadBox1 size={24} aria-hidden="true" />
+            <strong>Записей пока нет</strong>
+            <span>Здесь появятся аудиозаписи, которые можно скачать по одной.</span>
+          </div>
         ) : (
           <ul className="stt-capture-files">
             {captures.map((capture) => {

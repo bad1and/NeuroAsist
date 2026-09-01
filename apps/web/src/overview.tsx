@@ -8,6 +8,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { getMemories, getTimelineJournal } from "./api";
 import type { AvatarStatusResponse, MemoryItem, StatusResponse, TimelineJournalItem } from "./types";
+import { IrisLoader } from "./components/IrisLoader";
+import { notify } from "./notifications";
 import { interfaceIntlLocale } from "./i18n";
 import {
   animate,
@@ -112,7 +114,9 @@ export function OverviewPage({
       setMemories(memory.items);
       setError(null);
     } catch (cause) {
-      setError(cause instanceof TypeError ? "Не удалось обновить обзор. Проверь подключение к Iris." : cause instanceof Error ? cause.message : "Данные обзора недоступны");
+      const msg = cause instanceof TypeError ? "Не удалось обновить обзор. Проверь подключение к Iris." : cause instanceof Error ? cause.message : "Данные обзора недоступны";
+      setError(msg);
+      notify.error("Обзор", msg);
     } finally {
       setLoading(false);
     }
@@ -197,7 +201,12 @@ export function OverviewPage({
         </article>
       </div>
 
-      {loading && <span className="overview-loading"><IconInterfaceSpirals size={16} className="is-spinning" />Обновляю реальные данные</span>}
+      {loading && (
+        <span className="overview-loading" style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+          <IrisLoader size="compact" active />
+          <span>Обновляю данные…</span>
+        </span>
+      )}
     </section>
   );
 }

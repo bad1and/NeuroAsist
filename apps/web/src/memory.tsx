@@ -22,6 +22,8 @@ import {
   type CustomIconProps,
 } from "./CustomIcons";
 import { CustomSelect } from "./components/CustomSelect";
+import { AppDialog } from "./components/AppDialog";
+import { MoreHorizontal, X } from "lucide-react";
 import { useEffect, useRef, useState, type ComponentType } from "react";
 
 import {
@@ -177,6 +179,7 @@ export function MemoryPage() {
   const [sortOrder, setSortOrder] = useState<"date-desc" | "date-asc" | "alpha-asc" | "alpha-desc">("date-desc");
   const [audit, setAudit] = useState<Record<string, MemoryAuditItem[]>>({});
   const [message, setMessage] = useState<string | null>(null);
+  const [pendingDeleteMemory, setPendingDeleteMemory] = useState<MemoryItem | null>(null);
 
   const containerRef = useAnimeScope<HTMLElement>((scope, root) => {
     animatePageEnter(root);
@@ -350,7 +353,7 @@ export function MemoryPage() {
                   }}
                   aria-label="Очистить"
                 >
-                  ✕
+                  <X size={12} aria-hidden="true" />
                 </button>
               )}
               <button
@@ -707,8 +710,8 @@ export function MemoryPage() {
 
                       <div className="memory-actions">
                         <details className="memory-action-menu">
-                          <summary className="icon-button" role="button" aria-label="Дополнительные действия">
-                            <IconInterfaceSpirals size={17} aria-hidden="true" />
+                          <summary className="icon-button" role="button" aria-label="Дополнительные действия" title="Действия">
+                            <MoreHorizontal size={18} aria-hidden="true" />
                           </summary>
                           <div>
                             <button
@@ -725,7 +728,10 @@ export function MemoryPage() {
                               <button
                                 className="is-danger"
                                 type="button"
-                                onClick={(e) => void handleForget(e, memory.id)}
+                                onClick={(e) => {
+                                  e.currentTarget.closest("details")?.removeAttribute("open");
+                                  setPendingDeleteMemory(memory);
+                                }}
                               >
                                 <IconInterfaceDeleteBin3 size={16} aria-hidden="true" />
                                 Забыть
@@ -755,6 +761,31 @@ export function MemoryPage() {
           )}
         </div>
       </div>
+
+      <AppDialog
+        open={Boolean(pendingDeleteMemory)}
+        title="Забыть эту запись?"
+        description={`Iris удалит информацию: «${pendingDeleteMemory ? memoryLabel(pendingDeleteMemory) : ""}». Это действие изменит контекст будущих ответов помощника.`}
+        onClose={() => setPendingDeleteMemory(null)}
+      >
+        <div className="dialog-actions">
+          <button className="secondary" type="button" onClick={() => setPendingDeleteMemory(null)}>
+            Отмена
+          </button>
+          <button
+            className="danger-button"
+            type="button"
+            onClick={() => {
+              if (!pendingDeleteMemory) return;
+              const memId = pendingDeleteMemory.id;
+              setPendingDeleteMemory(null);
+              void action(() => deleteMemory(memId), "Запись удалена из памяти.");
+            }}
+          >
+            Забыть запись
+          </button>
+        </div>
+      </AppDialog>
     </section>
   );
 }

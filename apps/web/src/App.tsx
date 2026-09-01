@@ -125,6 +125,8 @@ import { configureAvatarPlacement, getDesktopRuntime, initialCoreStatus, listenF
 import { StartupScreen } from "./components/StartupScreen";
 import { WindowChrome } from "./components/WindowChrome";
 import { AppDialog } from "./components/AppDialog";
+import { AppSwitch } from "./components/AppSwitch";
+import { InfoRow } from "./components/InfoRow";
 import { GuidedSttCapture } from "./stt-capture";
 import { InAppAvatarHost } from "./components/InAppAvatarHost";
 import { IrisPortalBackground } from "./components/IrisPortalBackground";
@@ -309,37 +311,7 @@ function AutoSaveStatus({ status, onRetry }: { status: AutoSaveStatus; onRetry: 
   return null;
 }
 
-function SettingsSwitch({
-  checked,
-  label,
-  description,
-  disabled,
-  onChange,
-}: {
-  checked: boolean;
-  label: string;
-  description?: string;
-  disabled?: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <label className="settings-switch-row">
-      <span className="settings-switch-copy">
-        <strong>{label}</strong>
-        {description && <small>{description}</small>}
-      </span>
-      <input
-        className="settings-switch-input"
-        type="checkbox"
-        role="switch"
-        checked={checked}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-      <span className="settings-switch" aria-hidden="true"><span /></span>
-    </label>
-  );
-}
+const SettingsSwitch = AppSwitch;
 
 function dedupeEvents(events: BackendEvent[]): BackendEvent[] {
   const map = new Map<string, BackendEvent>();
@@ -2508,7 +2480,7 @@ function EventsPage({
             return (
             <button
               key={level}
-              className={levelFilter === level ? "active" : ""}
+              className={levelFilter === level ? "is-active" : ""}
               onClick={(e) => {
                 animateTabSwitch(e.currentTarget);
                 setLevelFilter(level);
@@ -3635,7 +3607,19 @@ function BackupControls() {
   return (
     <section className="system-card" aria-label="Резервные копии">
       <div className="panel-header"><div><h2>Резервные копии</h2><span>Память и настройки, срок хранения — 30 дней</span></div><button className="primary-button" onClick={(e) => { animateButtonPress(e.currentTarget); void create(); }} disabled={busy}>{busy ? "Создаём…" : "Создать копию"}</button></div>
-      {backups.length ? <div className="settings-grid" ref={listRef}>{backups.slice(0, 3).map((backup) => <InfoRow key={backup.name} label={backup.name} value={`${Math.ceil(backup.size_bytes / 1024)} КБ · ${formatTime(backup.created_at)}`} />)}</div> : <span className="card-empty">Резервных копий пока нет.</span>}
+      {backups.length ? (
+        <div className="settings-grid" ref={listRef}>
+          {backups.slice(0, 3).map((backup) => (
+            <InfoRow key={backup.name} label={backup.name} value={`${Math.ceil(backup.size_bytes / 1024)} КБ · ${formatTime(backup.created_at)}`} />
+          ))}
+        </div>
+      ) : (
+        <div className="empty-state compact">
+          <IconInterfaceContentArchive size={24} aria-hidden="true" />
+          <strong>Резервных копий пока нет</strong>
+          <span>Создайте копию для сохранения памяти и настроек.</span>
+        </div>
+      )}
       <small>Удаление Iris не удаляет эти данные из профиля Windows.</small>
       {message && <div className="notice">{message}</div>}
     </section>
@@ -3867,14 +3851,5 @@ function AvatarControls({
       </details>
       {message && <div className="notice" role="status">{message}</div>}
     </section>
-  );
-}
-
-function InfoRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="info-row">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
   );
 }

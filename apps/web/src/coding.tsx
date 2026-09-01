@@ -1,4 +1,8 @@
 import { CustomSelect } from "./components/CustomSelect";
+import { AppSwitch } from "./components/AppSwitch";
+import { InfoRow } from "./components/InfoRow";
+import { ChevronLeft, X } from "lucide-react";
+import { notify } from "./notifications";
 import {
   IconProgrammingScript2,
   IconInterfaceSpirals,
@@ -88,46 +92,8 @@ function formatDockerAvailabilityReason(reason?: string | null): string {
   return reason;
 }
 
-function CodingSwitch({
-  checked,
-  label,
-  description,
-  disabled,
-  onChange,
-}: {
-  checked: boolean;
-  label: string;
-  description?: string;
-  disabled?: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <label className={`settings-switch-row coding-switch-row${disabled ? " is-disabled" : ""}`}>
-      <div className="settings-switch-copy">
-        <strong>{label}</strong>
-        {description && <small>{description}</small>}
-      </div>
-      <div className="custom-checkbox-wrapper">
-        <input
-          type="checkbox"
-          checked={checked}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.checked)}
-        />
-        <span className="checkbox-indicator" />
-      </div>
-    </label>
-  );
-}
-
-function InfoCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="info-row">
-      <span>{label}</span>
-      <strong title={value}>{value}</strong>
-    </div>
-  );
-}
+const CodingSwitch = AppSwitch;
+const InfoCard = InfoRow;
 
 export function CodingAgentPage({
   settings,
@@ -288,7 +254,9 @@ export function CodingAgentPage({
       setActiveSection("tasks");
       await refresh();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Не удалось поставить задачу в очередь.");
+      const msg = cause instanceof Error ? cause.message : "Не удалось поставить задачу в очередь.";
+      setError(msg);
+      notify.error("Coding Agent", msg);
     } finally {
       setBusy(false);
     }
@@ -302,7 +270,9 @@ export function CodingAgentPage({
       setSelectedId(task.id);
       await refresh();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Операция не выполнена.");
+      const msg = cause instanceof Error ? cause.message : "Операция не выполнена.";
+      setError(msg);
+      notify.error("Coding Agent", msg);
     } finally {
       setBusy(false);
     }
@@ -332,8 +302,11 @@ export function CodingAgentPage({
       setSelectedId(null);
       setSelected(null);
       await refresh();
+      notify.success("Coding Agent", "Список задач очищен.");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Не удалось очистить список задач.");
+      const msg = cause instanceof Error ? cause.message : "Не удалось очистить список задач.";
+      setError(msg);
+      notify.error("Coding Agent", msg);
     } finally {
       setBusy(false);
     }
@@ -378,26 +351,14 @@ export function CodingAgentPage({
                 <div className="coding-detail-nav">
                   <button
                     type="button"
-                    className="secondary-button coding-back-button"
+                    className="secondary coding-back-button"
                     onClick={(e) => {
                       animateButtonPress(e.currentTarget);
                       setSelectedId(null);
                       setSelected(null);
                     }}
                   >
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <path d="M19 12H5M12 19l-7-7 7-7" />
-                    </svg>
+                    <ChevronLeft size={16} aria-hidden="true" />
                     <span>Назад к списку задач</span>
                   </button>
 
@@ -417,7 +378,7 @@ export function CodingAgentPage({
                     )}
                     {["failed", "cancelled", "waiting_for_input", "conflicted"].includes(selected.status) && (
                       <button
-                        className="secondary-button"
+                        className="secondary"
                         type="button"
                         disabled={busy}
                         onClick={(e) => {
@@ -565,7 +526,7 @@ export function CodingAgentPage({
                         disabled={busy || !ACTIVE_TASKS.has(selected.status)}
                       />
                       <button
-                        className="secondary-button"
+                        className="secondary"
                         type="submit"
                         disabled={busy || !ACTIVE_TASKS.has(selected.status) || !instruction.trim()}
                       >
@@ -599,7 +560,7 @@ export function CodingAgentPage({
                       <IconInterfaceCursorArrow2 size={16} /> Новая задача
                     </button>
                     <button
-                      className="secondary-button"
+                      className="secondary"
                       type="button"
                       disabled={busy || tasks.length === 0 || Boolean(active)}
                       onClick={(e) => {
@@ -610,24 +571,17 @@ export function CodingAgentPage({
                     >
                       <IconInterfaceDeleteBin3 size={15} /> Очистить
                     </button>
-                    <button
-                      className="icon-button"
-                      type="button"
-                      disabled={busy}
-                      onClick={(e) => {
-                        animateButtonPress(e.currentTarget);
-                        void refresh();
-                      }}
-                      title="Обновить"
-                    >
-                      <IconInterfaceSpirals size={16} className={busy ? "is-spinning" : ""} />
-                    </button>
                   </div>
                 </header>
 
                 <div className="coding-toolbar">
-                  <div className="coding-search-form compact">
-                    <IconInterfaceSearch size={15} className="coding-search-lead-icon" aria-hidden="true" />
+                  <form
+                    className="search-form compact coding-search-form"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void refresh();
+                    }}
+                  >
                     <input
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
@@ -640,11 +594,32 @@ export function CodingAgentPage({
                         type="button"
                         onClick={() => setSearchQuery("")}
                         aria-label="Очистить поиск"
+                        title="Очистить поиск"
                       >
-                        ✕
+                        <X size={12} aria-hidden="true" />
                       </button>
                     )}
-                  </div>
+                    <button
+                      className="icon-button"
+                      type="button"
+                      onClick={(e) => {
+                        animateButtonPress(e.currentTarget);
+                        void refresh();
+                      }}
+                      title="Обновить задачи"
+                      aria-label="Обновить задачи"
+                    >
+                      <IconInterfaceSpirals size={16} className={busy ? "is-spinning" : ""} />
+                    </button>
+                    <button
+                      className="icon-button search-submit"
+                      type="submit"
+                      title="Найти задачи"
+                      aria-label="Найти задачи"
+                    >
+                      <IconInterfaceSearch size={16} />
+                    </button>
+                  </form>
 
                   <div className="coding-filters" role="tablist" aria-label="Фильтр статусов">
                     {(
@@ -760,7 +735,7 @@ export function CodingAgentPage({
                 </div>
                 <button
                   type="button"
-                  className="secondary-button"
+                  className="secondary"
                   style={{ minHeight: "32px", padding: "4px 10px", fontSize: "12px", alignSelf: "center" }}
                   onClick={(e) => {
                     animateButtonPress(e.currentTarget);
@@ -848,7 +823,7 @@ export function CodingAgentPage({
                   <IconInterfaceCursorArrow2 size={16} /> Передать агенту
                 </button>
                 <button
-                  className="secondary-button"
+                  className="secondary"
                   type="button"
                   onClick={(e) => {
                     animateButtonPress(e.currentTarget);
@@ -876,7 +851,7 @@ export function CodingAgentPage({
                 <p>Диагностика контейнеризации, образа песочницы и изоляции рабочих папок.</p>
               </div>
               <button
-                className="secondary-button"
+                className="secondary"
                 type="button"
                 onClick={(e) => {
                   animateButtonPress(e.currentTarget);
