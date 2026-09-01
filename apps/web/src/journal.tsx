@@ -12,6 +12,8 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { deleteTimelineRange, getTimelineJournal, getTimelineMessages, searchTimeline } from "./api";
 import type { TimelineJournalItem, TimelineMessage } from "./types";
 import { AppDialog } from "./components/AppDialog";
+import { ChevronLeft, X } from "lucide-react";
+import { notify } from "./notifications";
 import { interfaceIntlLocale } from "./i18n";
 import { animateButtonPress, animatePageEnter, animateStaggerCards, useAnimeScope } from "./animations";
 
@@ -140,7 +142,9 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
       }
     } catch (cause) {
       if (activeRequestIdRef.current === requestId) {
-        setMessagesError(cause instanceof Error ? cause.message : "Не удалось загрузить сообщения");
+        const msg = cause instanceof Error ? cause.message : "Не удалось загрузить сообщения";
+        setMessagesError(msg);
+        notify.error("Журнал", msg);
       }
     } finally {
       if (activeRequestIdRef.current === requestId) {
@@ -168,7 +172,9 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
       setResults(response.items);
       setError(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Не удалось выполнить поиск");
+      const msg = cause instanceof Error ? cause.message : "Не удалось выполнить поиск";
+      setError(msg);
+      notify.error("Журнал", msg);
     }
   };
 
@@ -238,7 +244,6 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
         <aside className="journal-sidebar settings-navigation" aria-label="Список диалогов">
           <div className="journal-sidebar-header">
             <form className="search-form compact journal-search-form" onSubmit={onSearch}>
-              <IconInterfaceSearch size={15} className="journal-search-lead-icon" aria-hidden="true" />
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -253,7 +258,7 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
                   aria-label="Очистить поле поиска"
                   title="Очистить"
                 >
-                  ✕
+                  <X size={12} aria-hidden="true" />
                 </button>
               )}
               {results && (
@@ -335,25 +340,13 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
               <header className="journal-content-header settings-heading memory-heading">
                 <div className="journal-content-header-main">
                   <button
-                    className="journal-back-button text-button"
+                    className="journal-back-button secondary"
                     type="button"
                     onClick={onBack}
                     aria-label="Назад к списку"
                   >
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <path d="M19 12H5M12 19l-7-7 7-7" />
-                    </svg>
-                    <span>Назад</span>
+                    <ChevronLeft size={16} aria-hidden="true" />
+                    <span>Назад к списку</span>
                   </button>
                   <div className="journal-content-header-info">
                     <h2>{selectedEpisode.title || formatDate(selectedEpisode.day)}</h2>
@@ -391,7 +384,7 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
                     </button>
                   )}
                   <button
-                    className="secondary journal-delete-btn"
+                    className="secondary"
                     type="button"
                     title="Удалить историю до этой даты"
                     aria-label={`Удалить историю до ${formatDate(selectedEpisode.day)}`}
