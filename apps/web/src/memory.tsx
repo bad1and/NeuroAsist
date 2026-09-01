@@ -53,6 +53,7 @@ import {
   animateTabSwitch,
   useAnimeScope,
 } from "./animations";
+import { currentInterfaceLocale, interfaceIntlLocale } from "./i18n";
 
 type MemorySection = "all" | "active" | "topics" | "commitments" | "archive" | "diagnostics";
 
@@ -149,21 +150,23 @@ function formatMemoryDate(dateString?: string | null, id?: string | null) {
   yesterday.setDate(yesterday.getDate() - 1);
   const isYesterday = date.getDate() === yesterday.getDate() && date.getMonth() === yesterday.getMonth() && date.getFullYear() === yesterday.getFullYear();
 
-  const timeStr = date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  const locale = currentInterfaceLocale();
+  const timeStr = date.toLocaleTimeString(interfaceIntlLocale(), { hour: "2-digit", minute: "2-digit" });
   
   if (isToday) {
-    return `Сегодня, ${timeStr}`;
+    return locale === "en" ? `Today, ${timeStr}` : `Сегодня, ${timeStr}`;
   }
   if (isYesterday) {
-    return `Вчера, ${timeStr}`;
+    return locale === "en" ? `Yesterday, ${timeStr}` : `Вчера, ${timeStr}`;
   }
   
   const isSameYear = date.getFullYear() === now.getFullYear();
-  const dateStr = date.toLocaleDateString("ru-RU", {
+  let dateStr = date.toLocaleDateString(interfaceIntlLocale(), {
     day: "numeric",
     month: "short",
     ...(isSameYear ? {} : { year: "numeric" })
-  }).replace(" г.", "");
+  });
+  if (locale === "ru") dateStr = dateStr.replace(" г.", "");
   
   return `${dateStr}, ${timeStr}`;
 }
