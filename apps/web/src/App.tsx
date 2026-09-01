@@ -1,4 +1,5 @@
 import { CustomSelect } from "./components/CustomSelect";
+import { useDockScale } from "./components/useDockScale";
 import {
   IconInterfaceHome2,
   IconMailChatBubbleTextSquare,
@@ -981,6 +982,8 @@ export function ChatPage({
   const [newDialogConfirmationOpen, setNewDialogConfirmationOpen] = useState(false);
   const [newDialogPending, setNewDialogPending] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const chatPanelRef = useRef<HTMLElement | null>(null);
+  const dockScale = useDockScale(chatPanelRef);
   const handledVoiceEventIdsRef = useRef<Set<string>>(new Set());
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
   const liveSocketRef = useRef<VoiceSocketClient | null>(null);
@@ -2164,7 +2167,11 @@ export function ChatPage({
 
   if (!isDialogActive) {
     return (
-      <section className={`panel chat-panel is-idle${showInAppAvatar && isActive ? " has-in-app-avatar" : ""}`}>
+      <section
+        ref={chatPanelRef}
+        className={`panel chat-panel is-idle${showInAppAvatar && isActive ? " has-in-app-avatar" : ""}`}
+        style={{ "--dock-scale": dockScale } as React.CSSProperties}
+      >
         <IrisPortalBackground
           emotion={currentEmotion}
           voiceState={voiceState}
@@ -2179,27 +2186,29 @@ export function ChatPage({
         <div className="chat-idle-stage">
           {showInAppAvatar && isActive && <InAppAvatarHost />}
           <div className="chat-start-banner">
-            <svg className="banner-bg-svg" width="829" height="121" viewBox="0 0 829 121" fill="none" preserveAspectRatio="none">
-              <defs>
-                <clipPath id="banner-squircle-clip">
-                  <path d="M0 60.5C0 31.8824 0 17.5736 8.7868 8.7868C17.5736 0 31.7157 0 60 0H769C797.284 0 811.426 0 820.213 8.7868C829 17.5736 829 31.8824 829 60.5C829 89.1176 829 103.426 820.213 112.213C811.426 121 797.284 121 769 121H60C31.7157 121 17.5736 121 8.7868 112.213C0 103.426 0 89.1176 0 60.5Z" />
-                </clipPath>
-              </defs>
-              <image href="/figma/До активации диалога/baner.png" width="829" height="121" preserveAspectRatio="xMidYMid slice" clipPath="url(#banner-squircle-clip)" />
-            </svg>
-            <button
-              className="chat-start-button"
-              type="button"
-              onClick={handleStart}
-              title="Начать"
-              aria-label="Начать"
-            >
-              <FigmaStartButtonBg className="btn-shape-bg" preserveAspectRatio="none" />
-              <span className="btn-content">
-                <IrisPetalsIcon size={28} />
-                <span>НАЧАТЬ</span>
-              </span>
-            </button>
+            <div className="chat-start-banner-inner">
+              <svg className="banner-bg-svg" width="829" height="121" viewBox="0 0 829 121" fill="none" preserveAspectRatio="none">
+                <defs>
+                  <clipPath id="banner-squircle-clip">
+                    <path d="M0 60.5C0 31.8824 0 17.5736 8.7868 8.7868C17.5736 0 31.7157 0 60 0H769C797.284 0 811.426 0 820.213 8.7868C829 17.5736 829 31.8824 829 60.5C829 89.1176 829 103.426 820.213 112.213C811.426 121 797.284 121 769 121H60C31.7157 121 17.5736 121 8.7868 112.213C0 103.426 0 89.1176 0 60.5Z" />
+                  </clipPath>
+                </defs>
+                <image href="/figma/До активации диалога/baner.png" width="829" height="121" preserveAspectRatio="xMidYMid slice" clipPath="url(#banner-squircle-clip)" />
+              </svg>
+              <button
+                className="chat-start-button"
+                type="button"
+                onClick={handleStart}
+                title="Начать"
+                aria-label="Начать"
+              >
+                <FigmaStartButtonBg className="btn-shape-bg" preserveAspectRatio="none" />
+                <span className="btn-content">
+                  <IrisPetalsIcon size={28} />
+                  <span>НАЧАТЬ</span>
+                </span>
+              </button>
+            </div>
           </div>
         </div>
         <AppDialog
@@ -2222,7 +2231,11 @@ export function ChatPage({
   }
 
   return (
-    <section className={`panel chat-panel is-active${showInAppAvatar && isActive ? " has-in-app-avatar" : ""}`}>
+    <section
+      ref={chatPanelRef}
+      className={`panel chat-panel is-active${showInAppAvatar && isActive ? " has-in-app-avatar" : ""}`}
+      style={{ "--dock-scale": dockScale } as React.CSSProperties}
+    >
       <IrisPortalBackground
         emotion={currentEmotion}
         voiceState={voiceState}
