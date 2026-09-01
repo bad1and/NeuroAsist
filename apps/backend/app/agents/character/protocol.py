@@ -59,7 +59,13 @@ def classify_intent(user_text: str) -> Intent:
 
 def parse_turn(payload: dict[str, Any], *, user_text: str = "") -> tuple[CharacterTurn, bool, str | None]:
     """Parse v3 natively and v1/v2 through a lossless compatibility adapter."""
-    if "affect" in payload or "delivery" in payload or "memory_candidates" in payload or isinstance(payload.get("gesture"), dict):
+    if (
+        "affect" in payload
+        or "delivery" in payload
+        or "memory_candidates" in payload
+        or "coding_delegation" in payload
+        or isinstance(payload.get("gesture"), dict)
+    ):
         try:
             return CharacterTurn.model_validate(payload), True, None
         except ValidationError as exc:

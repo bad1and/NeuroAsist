@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from apps.backend.app.agents.character.prompts import (
     CHARACTER_REPAIR_PROMPT,
+    character_coding_routing_prompt,
     character_json_prompt,
     character_live_prompt,
     character_state_prompt,
@@ -25,6 +26,12 @@ from apps.backend.app.schemas.character import CharacterTurn
 from apps.backend.app.storage.sqlite_history import SQLiteMessageHistory
 
 logger = logging.getLogger(__name__)
+
+_LIVE_CODING_DELEGATION_RE = re.compile(
+    r"^\[\[coding_delegate\s+confidence=(?P<confidence>0(?:\.\d+)?|1(?:\.0+)?)\s*\]\]\s*",
+    re.IGNORECASE,
+)
+_LIVE_CODING_DELEGATION_PREFIX = "[[coding_delegate"
 
 if TYPE_CHECKING:
     from apps.backend.app.conversation.behavior import BehaviorGuide
@@ -188,6 +195,7 @@ class CharacterAgent:
             )
         if coding_context:
             state_context = "\n\n".join(part for part in (state_context, f"CODING AGENT COORDINATION:\n{coding_context}") if part)
+        model_routing_candidate = await self._should_request_model_delegation(effective_text)
         required_anchors = self._required_response_anchors(prompt_user_text)
         if built_context is not None:
             built_context.diagnostics["relevance_guard"] = {
@@ -229,6 +237,10 @@ class CharacterAgent:
                 ),
             ),
         ]
+        if model_routing_candidate:
+            messages.append(
+                ChatMessage(role="system", content=character_coding_routing_prompt(live=False))
+            )
         if state_context:
             messages.append(
                 ChatMessage(
@@ -410,6 +422,23 @@ class CharacterAgent:
                     built_context.diagnostics["relevance_guard"]["outcome"] = "fallback"
                 self._publish_relevance_guard("fallback", previous_assistant_id, duplicate, pending_followup, "retry_rejected")
 
+        model_coding_reply = await self._accept_model_coding_delegation(
+            parsed,
+            session_id=session_id,
+            user_text=effective_text,
+            routing_candidate=model_routing_candidate,
+        )
+        if model_coding_reply is not None:
+            return await asyncio.to_thread(
+                self._complete_forced_reply,
+                session_id,
+                model_coding_reply,
+                prompt_user_text,
+                input_mode,
+                persist_reply=persist_reply,
+                persist_reply_callback=persist_reply_callback,
+            )
+
         if parsed.turn is not None and state_behavior is not None and state_behavior.expression_strength != "muted":
             parsed = self._arbitrate_presentation(parsed, state_behavior)
 
@@ -479,6 +508,7 @@ class CharacterAgent:
             return
         if coding_context:
             state_context = "\n\n".join(part for part in (state_context, f"CODING AGENT COORDINATION:\n{coding_context}") if part)
+        model_routing_candidate = await self._should_request_model_delegation(effective_text)
         required_anchors = self._required_response_anchors(prompt_user_text)
         if built_context is not None:
             built_context.diagnostics["relevance_guard"] = {
@@ -511,6 +541,10 @@ class CharacterAgent:
         messages = [
             ChatMessage(role="system", content=system_prompt),
         ]
+        if model_routing_candidate:
+            messages.append(
+                ChatMessage(role="system", content=character_coding_routing_prompt(live=True))
+            )
         if state_context:
             messages.append(
                 ChatMessage(
@@ -520,6 +554,8 @@ class CharacterAgent:
             )
         messages.extend((*context, ChatMessage(role="user", content=prompt_user_text)))
         chunks: list[str] = []
+        route_buffer = ""
+        route_checked = not model_routing_candidate
         async for delta in self._guarded_live_stream(
             messages,
             require_pending_response=pending_followup,
@@ -533,8 +569,45 @@ class CharacterAgent:
         ):
             if not delta:
                 continue
+            if not route_checked:
+                route_buffer += delta
+                route_checked, confidence, delta = self._extract_live_coding_delegation(route_buffer)
+                if not route_checked:
+                    continue
+                route_buffer = ""
+                if confidence is not None:
+                    model_coding_reply = await self._accept_model_coding_delegation(
+                        None,
+                        session_id=session_id,
+                        user_text=effective_text,
+                        routing_candidate=True,
+                        confidence=confidence,
+                    )
+                    if model_coding_reply is not None:
+                        reply = (
+                            stored_reply_transform(model_coding_reply)
+                            if stored_reply_transform is not None
+                            else model_coding_reply
+                        )
+                        if persist_reply is None:
+                            persist_reply = source_message is None
+                        result = await asyncio.to_thread(
+                            self._complete_forced_reply,
+                            session_id,
+                            reply,
+                            prompt_user_text,
+                            input_mode,
+                            persist_reply=persist_reply,
+                        )
+                        yield str(result["reply"])
+                        return
             chunks.append(delta)
             yield delta
+        if not route_checked and route_buffer:
+            _, _, remainder = self._extract_live_coding_delegation(route_buffer, final=True)
+            if remainder:
+                chunks.append(remainder)
+                yield remainder
         reply = "".join(chunks).strip()
         if stored_reply_transform is not None:
             reply = stored_reply_transform(reply)
@@ -657,6 +730,69 @@ class CharacterAgent:
             self.last_memory_updates.extend(
                 self._memory_service.memory_update(memory) for memory in created
             )
+
+    async def _accept_model_coding_delegation(
+        self,
+        parsed: _ParseResult | None,
+        *,
+        session_id: str,
+        user_text: str,
+        routing_candidate: bool,
+        confidence: float | None = None,
+    ) -> str | None:
+        """Validate an optional same-turn routing cue without another LLM call."""
+        if not routing_candidate or self._coding_bridge is None:
+            return None
+        cue_confidence = confidence
+        if cue_confidence is None and parsed is not None and parsed.turn is not None:
+            cue = parsed.turn.coding_delegation
+            cue_confidence = cue.confidence if cue is not None else None
+        if cue_confidence is None:
+            return None
+        return await asyncio.to_thread(
+            self._coding_bridge.accept_model_delegation,
+            session_id,
+            user_text,
+            cue_confidence,
+            self._last_user_message,
+        )
+
+    async def _should_request_model_delegation(self, user_text: str) -> bool:
+        """Ask the optional bridge off-loop whether one response needs routing."""
+        if self._coding_bridge is None:
+            return False
+        checker = getattr(self._coding_bridge, "should_request_model_delegation", None)
+        if not callable(checker):
+            return False
+        return bool(await asyncio.to_thread(checker, user_text))
+
+    @staticmethod
+    def _extract_live_coding_delegation(
+        value: str,
+        *,
+        final: bool = False,
+    ) -> tuple[bool, float | None, str]:
+        """Remove the optional leading live routing directive before UI/TTS.
+
+        ``False`` means an incomplete prefix is still being buffered.  A
+        malformed completed directive is discarded rather than being read aloud
+        as an internal instruction.
+        """
+        candidate = value.lstrip()
+        lowered = candidate.lower()
+        if _LIVE_CODING_DELEGATION_PREFIX.startswith(lowered):
+            return (True, None, "") if final else (False, None, "")
+        if not lowered.startswith(_LIVE_CODING_DELEGATION_PREFIX):
+            return True, None, value
+        match = _LIVE_CODING_DELEGATION_RE.match(candidate)
+        if match is not None:
+            return True, float(match.group("confidence")), candidate[match.end() :]
+        closing = candidate.find("]]")
+        if closing < 0 and not final and len(candidate) < 128:
+            return False, None, ""
+        if closing >= 0:
+            return True, None, candidate[closing + 2 :].lstrip()
+        return True, None, ""
 
     def _persist_user_message(self, session_id: str, user_text: str, input_mode: str, interpreted) -> list[dict[str, str]]:
         user_message = self._save_message(session_id, "user", user_text, input_mode)
