@@ -22,6 +22,7 @@ describe("StatePage", () => {
     expect(screen.getByText("Причины:")).toBeInTheDocument();
     expect(screen.getAllByText("insult").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "Сбросить настроение" }));
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить" }));
     await waitFor(() => expect(api.resetCharacterState).toHaveBeenCalledWith("mood"));
     fireEvent.click(screen.getByRole("checkbox", { name: "Личные заметки" }));
     await waitFor(() => expect(api.updateReflectionSettings).toHaveBeenCalled());

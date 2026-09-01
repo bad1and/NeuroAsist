@@ -6,6 +6,7 @@ import { animateButtonPress, animateCardRemove, animatePageEnter, animateStagger
 import { Metaballs } from '@paper-design/shaders-react';
 import { getMoodVisuals, getStrengthLabel } from './mood-visuals';
 import { IconInterfaceSettingGaugeDashboard1, IconInterfaceCalendarMark, IconInterfaceEditMagicWand } from "./CustomIcons";
+import { AppDialog } from "./components/AppDialog";
 
 const labels: Record<string, string> = {
   primary_emotion: "Главная эмоция", expression_strength: "Выразительность", secondary_emotions: "Вторичные эмоции",
@@ -43,6 +44,16 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
   const [reflections, setReflections] = useState<CharacterReflection[]>([]);
   const [reflectionEnabled, setReflectionEnabled] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pendingReset, setPendingReset] = useState<{
+    scope: "mood" | "relationship";
+    title: string;
+    description: string;
+  } | null>(null);
+  const [pendingDeleteReflection, setPendingDeleteReflection] = useState<{
+    id: string;
+    el?: HTMLElement | null;
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const containerRef = useAnimeScope<HTMLElement>((scope, root) => {
     animatePageEnter(root);
@@ -81,26 +92,11 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
     if (latest.startsWith("character.state.") || latest.startsWith("character.reflection.")) void refresh();
   }, [liveEvents, refresh]);
 
-  const reset = async (scope: "mood" | "relationship") => {
-    const message = scope === "mood" ? "Сбросить настроение Iris? Отношения и память останутся." : "Сбросить отношения Iris? Факты и личные заметки останутся.";
-    if (!window.confirm(message)) return;
-    await resetCharacterState(scope); await refresh();
-  };
-
   const toggleReflections = async (enabled: boolean) => { setReflectionEnabled(enabled); try { await updateReflectionSettings({ enabled, min_significance: .55 }); } catch { setReflectionEnabled(!enabled); setError("Не удалось сохранить настройку личных заметок."); } };
 
-  const removeReflection = async (e: React.MouseEvent<HTMLElement>, id: string) => {
-    if (!window.confirm("Удалить эту субъективную заметку Iris?")) return;
+  const handleRemoveReflectionClick = (e: React.MouseEvent<HTMLElement>, id: string) => {
     const itemEl = e.currentTarget.closest(".state-timeline-item") as HTMLElement | null;
-    if (itemEl) {
-      animateCardRemove(itemEl, async () => {
-        await deleteCharacterReflection(id);
-        await refresh();
-      });
-    } else {
-      await deleteCharacterReflection(id);
-      await refresh();
-    }
+    setPendingDeleteReflection({ id, el: itemEl });
   };
 
   const relationshipKeys = ["familiarity_label", "trust_label", "warmth_label", "tension_label", "playfulness_label"];
@@ -114,18 +110,13 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
         <aside className="state-sidebar">
           {state ? (
             <>
-              <div className="state-hero-card mood-card" style={{ padding: '24px', position: 'relative', overflow: 'hidden' }}>
-                <div className="mood-visual" style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-                  <div className="mood-metaball-container" style={{ width: 80, height: 80, flexShrink: 0, position: 'relative' }}>
+              <div className="state-hero-card mood-card">
+                <div className="mood-visual">
+                  <div className="mood-metaball-container">
                     {(() => {
                       const visuals = getMoodVisuals(state.mood.primary_emotion);
                       return (
-                        <div style={{ 
-                          position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%) scale(0.22)', 
-                          width: 1280, height: 720,
-                          pointerEvents: 'none',
-                          mixBlendMode: 'screen'
-                        }}>
+                        <div className="mood-metaball-canvas">
                           <Metaballs
                             width={1280}
                             height={720}
@@ -140,9 +131,9 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
                       );
                     })()}
                   </div>
-                  <div className="mood-info" style={{ zIndex: 1 }}>
-                    <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 600 }}>{getMoodVisuals(state.mood.primary_emotion).labelRu}</h2>
-                    <span className="mood-strength" style={{ color: 'var(--color-text-muted, #888)', fontSize: '14px', marginTop: '4px', display: 'inline-block' }}>{getStrengthLabel(state.mood.expression_strength)}</span>
+                  <div className="mood-info">
+                    <h2>{getMoodVisuals(state.mood.primary_emotion).labelRu}</h2>
+                    <span className="mood-strength">{getStrengthLabel(state.mood.expression_strength)}</span>
                   </div>
                 </div>
                 {state.causes.length > 0 && (
@@ -178,8 +169,36 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
               </div>
 
               <div className="state-sidebar-actions">
-                <button onClick={(e) => { animateButtonPress(e.currentTarget); void reset("mood"); }}>Сбросить настроение</button>
-                <button className="is-danger" onClick={(e) => { animateButtonPress(e.currentTarget); void reset("relationship"); }}>Сбросить отношения</button>
+                <button
+                  className="state-action-mood"
+                  type="button"
+                  disabled={busy}
+                  onClick={(e) => {
+                    animateButtonPress(e.currentTarget);
+                    setPendingReset({
+                      scope: "mood",
+                      title: "Сбросить настроение?",
+                      description: "Сбросить настроение Iris? Отношения и память останутся.",
+                    });
+                  }}
+                >
+                  Сбросить настроение
+                </button>
+                <button
+                  className="state-action-relationship"
+                  type="button"
+                  disabled={busy}
+                  onClick={(e) => {
+                    animateButtonPress(e.currentTarget);
+                    setPendingReset({
+                      scope: "relationship",
+                      title: "Сбросить отношения?",
+                      description: "Сбросить отношения Iris? Факты и личные заметки останутся.",
+                    });
+                  }}
+                >
+                  Сбросить отношения
+                </button>
               </div>
             </>
           ) : (
@@ -241,7 +260,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
                         <p data-i18n-skip>{r.text}</p>
                         <div className="timeline-footer">
                           <span className="reflection-emotion">{r.primary_emotion}</span>
-                          <button className="text-button" onClick={(e) => void removeReflection(e, r.id)}>Удалить</button>
+                          <button className="text-button" onClick={(e) => handleRemoveReflectionClick(e, r.id)}>Удалить</button>
                         </div>
                       </div>
                     </article>
@@ -252,6 +271,86 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
           </div>
         </main>
       </div>
+
+      <AppDialog
+        open={Boolean(pendingReset)}
+        title={pendingReset?.title ?? ""}
+        description={pendingReset?.description}
+        onClose={() => !busy && setPendingReset(null)}
+      >
+        <div className="dialog-actions">
+          <button
+            className="secondary"
+            type="button"
+            disabled={busy}
+            onClick={() => setPendingReset(null)}
+          >
+            Отмена
+          </button>
+          <button
+            className="danger-button"
+            type="button"
+            disabled={busy}
+            onClick={async () => {
+              if (!pendingReset) return;
+              setBusy(true);
+              try {
+                await resetCharacterState(pendingReset.scope);
+                await refresh();
+              } finally {
+                setBusy(false);
+                setPendingReset(null);
+              }
+            }}
+          >
+            {busy ? "Сбрасываю…" : "Сбросить"}
+          </button>
+        </div>
+      </AppDialog>
+
+      <AppDialog
+        open={Boolean(pendingDeleteReflection)}
+        title="Удалить заметку?"
+        description="Удалить эту субъективную заметку Iris без возможности восстановления?"
+        onClose={() => !busy && setPendingDeleteReflection(null)}
+      >
+        <div className="dialog-actions">
+          <button
+            className="secondary"
+            type="button"
+            disabled={busy}
+            onClick={() => setPendingDeleteReflection(null)}
+          >
+            Отмена
+          </button>
+          <button
+            className="danger-button"
+            type="button"
+            disabled={busy}
+            onClick={async () => {
+              if (!pendingDeleteReflection) return;
+              setBusy(true);
+              const { id, el } = pendingDeleteReflection;
+              try {
+                if (el) {
+                  animateCardRemove(el, async () => {
+                    await deleteCharacterReflection(id);
+                    await refresh();
+                  });
+                } else {
+                  await deleteCharacterReflection(id);
+                  await refresh();
+                }
+              } finally {
+                setBusy(false);
+                setPendingDeleteReflection(null);
+              }
+            }}
+          >
+            {busy ? "Удаляю…" : "Удалить"}
+          </button>
+        </div>
+      </AppDialog>
     </section>
   );
 }
