@@ -7,6 +7,7 @@ import { Metaballs } from '@paper-design/shaders-react';
 import { getMoodVisuals, getStrengthLabel } from './mood-visuals';
 import { IconInterfaceSettingGaugeDashboard1, IconInterfaceCalendarMark, IconInterfaceEditMagicWand } from "./CustomIcons";
 import { AppDialog } from "./components/AppDialog";
+import { notify } from "./notifications";
 
 const labels: Record<string, string> = {
   primary_emotion: "Главная эмоция", expression_strength: "Выразительность", secondary_emotions: "Вторичные эмоции",
@@ -92,7 +93,17 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
     if (latest.startsWith("character.state.") || latest.startsWith("character.reflection.")) void refresh();
   }, [liveEvents, refresh]);
 
-  const toggleReflections = async (enabled: boolean) => { setReflectionEnabled(enabled); try { await updateReflectionSettings({ enabled, min_significance: .55 }); } catch { setReflectionEnabled(!enabled); setError("Не удалось сохранить настройку личных заметок."); } };
+  const toggleReflections = async (enabled: boolean) => {
+    setReflectionEnabled(enabled);
+    try {
+      await updateReflectionSettings({ enabled, min_significance: 0.55 });
+      notify.success("Состояние", enabled ? "Личные заметки включены." : "Личные заметки выключены.");
+    } catch {
+      setReflectionEnabled(!enabled);
+      setError("Не удалось сохранить настройку личных заметок.");
+      notify.error("Состояние", "Не удалось сохранить настройку личных заметок.");
+    }
+  };
 
   const handleRemoveReflectionClick = (e: React.MouseEvent<HTMLElement>, id: string) => {
     const itemEl = e.currentTarget.closest(".state-timeline-item") as HTMLElement | null;
@@ -297,6 +308,9 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
               try {
                 await resetCharacterState(pendingReset.scope);
                 await refresh();
+                notify.success("Состояние", "Состояние успешно сброшено.");
+              } catch (e) {
+                notify.error("Состояние", e instanceof Error ? e.message : "Не удалось сбросить состояние.");
               } finally {
                 setBusy(false);
                 setPendingReset(null);
@@ -336,11 +350,15 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
                   animateCardRemove(el, async () => {
                     await deleteCharacterReflection(id);
                     await refresh();
+                    notify.info("Состояние", "Заметка удалена.");
                   });
                 } else {
                   await deleteCharacterReflection(id);
                   await refresh();
+                  notify.info("Состояние", "Заметка удалена.");
                 }
+              } catch (e) {
+                notify.error("Состояние", e instanceof Error ? e.message : "Не удалось удалить заметку.");
               } finally {
                 setBusy(false);
                 setPendingDeleteReflection(null);
