@@ -144,6 +144,25 @@ describe("русский интерфейс", () => {
     expect(composer).toHaveValue("Привет, Iris!");
   });
 
+  it("поддерживает многострочный ввод и содержит элемент регулировки высоты", async () => {
+    const { container } = render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Начать" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Новый диалог" })).not.toBeDisabled());
+    const composer = await screen.findByPlaceholderText("Ввод сообщения...");
+    const resizer = container.querySelector(".chat-composer-resizer");
+    expect(resizer).toBeInTheDocument();
+
+    // Вводим многострочный текст (3 строки)
+    fireEvent.change(composer, { target: { value: "Первая строка\nВторая строка\nТретья строка" } });
+    expect(composer).toHaveValue("Первая строка\nВторая строка\nТретья строка");
+
+    // Проверяем наличие SVG фона с классом chat-composer-bg
+    const plate = container.querySelector(".chat-composer-bg");
+    expect(plate).toBeInTheDocument();
+  });
+
   it("озвучивает готовое уведомление Coding Agent через фоновой TTS-запрос", async () => {
     const play = vi.fn(async () => undefined);
     const previousAudio = globalThis.Audio;

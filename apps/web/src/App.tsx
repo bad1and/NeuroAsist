@@ -17,7 +17,7 @@ import {
   IconInterfaceSpirals,
   IconInterfaceUserQueenCrown,
 } from "./CustomIcons";
-import { FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, SendHorizontal } from "lucide-react";
 import {
   FigmaStartFlowerIcon,
@@ -966,6 +966,12 @@ export function ChatPage({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [liveSttTranscript, setLiveSttTranscript] = useState("");
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [composerExtraHeight, setComposerExtraHeight] = useState(0);
+  const [manualComposerExtraHeight, setManualComposerExtraHeight] = useState<number | null>(null);
+  const [isResizingComposer, setIsResizingComposer] = useState(false);
+  const composerResizeStartYRef = useRef<number>(0);
+  const composerResizeStartHeightRef = useRef<number>(0);
   const [loading, setLoading] = useState(false);
   const [isStarted, setIsStarted] = useState(false);
   const [soundMuted, setSoundMuted] = useState(false);
@@ -1030,6 +1036,61 @@ export function ChatPage({
       }, autoClearMs);
     }
   }, []);
+
+  const adjustComposerHeight = useCallback(() => {
+    const textarea = composerTextareaRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = "auto";
+    const scrollHeight = textarea.scrollHeight;
+
+    const autoHeight = Math.min(Math.max(scrollHeight, 24), 144);
+    const textExtra = Math.max(0, autoHeight - 24);
+
+    const targetExtra = manualComposerExtraHeight !== null
+      ? Math.max(manualComposerExtraHeight, textExtra)
+      : textExtra;
+
+    const targetTextareaHeight = 24 + targetExtra;
+    textarea.style.height = `${targetTextareaHeight}px`;
+
+    if (scrollHeight > targetTextareaHeight) {
+      textarea.classList.add("has-scroll");
+    } else {
+      textarea.classList.remove("has-scroll");
+    }
+
+    setComposerExtraHeight(targetExtra);
+  }, [manualComposerExtraHeight]);
+
+  useLayoutEffect(() => {
+    adjustComposerHeight();
+  }, [draft, liveSttTranscript, adjustComposerHeight]);
+
+  const onComposerResizeStart = (e: React.PointerEvent) => {
+    e.preventDefault();
+    setIsResizingComposer(true);
+    composerResizeStartYRef.current = e.clientY;
+    composerResizeStartHeightRef.current = composerExtraHeight;
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const scale = Number(dockScale) || 1;
+      const deltaY = (composerResizeStartYRef.current - moveEvent.clientY) / scale;
+      const newExtra = Math.max(0, Math.min(composerResizeStartHeightRef.current + deltaY, 200));
+      setManualComposerExtraHeight(newExtra);
+    };
+
+    const onPointerUp = () => {
+      setIsResizingComposer(false);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+  };
 
   const updateConversationStatus = useCallback((status: string, resetAfterMs?: number) => {
     if (conversationStatusTimerRef.current !== null) {
@@ -1820,6 +1881,12 @@ export function ChatPage({
     };
     setMessages((current) => [...current, userMessage]);
     setDraft("");
+    setManualComposerExtraHeight(null);
+    setComposerExtraHeight(0);
+    if (composerTextareaRef.current) {
+      composerTextareaRef.current.style.height = "24px";
+      composerTextareaRef.current.classList.remove("has-scroll");
+    }
     setLoading(true);
     setError(null);
     setRetryText(null);
@@ -2277,12 +2344,27 @@ export function ChatPage({
           </div>
         )}
 
-        <div className="chat-composer-container">
+        <div
+          className="chat-composer-container"
+          style={{ "--composer-extra-height": `${composerExtraHeight}px` } as React.CSSProperties}
+        >
           <form className="chat-form" onSubmit={onSubmit}>
-            <div className="chat-composer">
-              <FigmaInputPlateFullBg className="chat-composer-bg" preserveAspectRatio="none" />
+            <div className={`chat-composer ${isResizingComposer ? "is-resizing" : ""}`}>
+              <div
+                className="chat-composer-resizer"
+                onPointerDown={onComposerResizeStart}
+                onDoubleClick={() => setManualComposerExtraHeight(null)}
+                title="Потяните вверх для изменения размера (двойной клик для сброса)"
+                aria-hidden="true"
+              />
+              <FigmaInputPlateFullBg
+                className="chat-composer-bg"
+                preserveAspectRatio="none"
+                extraHeight={composerExtraHeight}
+              />
               <div className="chat-composer-inner">
                 <textarea
+                  ref={composerTextareaRef}
                   value={liveSttTranscript || draft}
                   onFocus={() => {
                     if (liveSttTranscript) clearLiveSttTranscript();
@@ -2305,7 +2387,7 @@ export function ChatPage({
                   title="Enter — отправить сообщение; Shift+Enter — новая строка"
                 />
                 <button
-                  className="primary-button send-button"
+                  className="send-button"
                   type="submit"
                   disabled={!sessionId || sessionStarting || loading || !draft.trim().length}
                   onClick={(e) => animateButtonPress(e.currentTarget)}
