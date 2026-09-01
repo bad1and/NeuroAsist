@@ -8,11 +8,13 @@ import wave
 from dataclasses import dataclass, field
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from fastapi import WebSocket
 
 from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.agents.character.protocol import metadata_frame
+from apps.backend.app.schemas.character import Emotion, Gesture, Intent
 from apps.backend.app.voice.providers import (
     TTSProvider,
     TTSRequest,
@@ -232,6 +234,62 @@ class VoiceSessionManager:
         )
         return context.task
 
+    def enqueue_reply(
+        self,
+        *,
+        session_id: str,
+        reply: str,
+        language: str,
+        voice: str,
+        style_override: str | VoiceStyle = VoiceStyle.AUTO,
+        playback_rate: float = 1.0,
+        intent: str = "casual_chat",
+        emotion: str = "neutral",
+        gesture: str = "auto",
+        gesture_intensity: float = 1.0,
+    ) -> str | None:
+        """Send a known Iris reply through the normal live-output protocol.
+
+        This is intentionally separate from ``start``: a durable system
+        notification must not call an LLM, create another chat-history entry,
+        or invoke the conversation state machine.  The browser still receives
+        exactly the events used for an ordinary streamed DeepSeek reply.
+        """
+        text = reply.strip()
+        if not text or not self.connected(session_id):
+            return None
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.warning(
+                "Cannot enqueue live reply without a running event loop: session_id=%s",
+                session_id,
+            )
+            return None
+
+        utterance_id = uuid4().hex
+        context = UtteranceContext(
+            session_id=session_id,
+            utterance_id=utterance_id,
+            voice_style=coerce_voice_style(style_override),
+            base_pace=self._pace_for_style(style_override),
+            playback_rate=max(MIN_SPEECH_TEMPO, min(MAX_SPEECH_TEMPO, float(playback_rate))),
+        )
+        context.task = loop.create_task(
+            self._run_known_reply(
+                context,
+                text,
+                language,
+                voice,
+                intent=intent,
+                emotion=emotion,
+                gesture=gesture,
+                gesture_intensity=gesture_intensity,
+            ),
+            name=f"voice-{utterance_id}",
+        )
+        return utterance_id
+
     async def cancel(self, session_id: str, utterance_id: str | None = None, notify: bool = True) -> None:
         context = self._active.get(session_id)
         if context is None or (utterance_id and context.utterance_id != utterance_id):
@@ -249,6 +307,151 @@ class VoiceSessionManager:
                 await context.task
         if self._active.get(session_id) is context:
             self._active.pop(session_id, None)
+
+    async def _run_known_reply(
+        self,
+        context: UtteranceContext,
+        reply: str,
+        language: str,
+        voice: str,
+        *,
+        intent: str,
+        emotion: str,
+        gesture: str,
+        gesture_intensity: float,
+    ) -> None:
+        """Stream a deterministic reply with the same websocket envelope as LLM output."""
+        queue: asyncio.Queue[SpeechSegment | None] = asyncio.Queue(self._queue_size)
+        worker: asyncio.Task | None = None
+        try:
+            # Match a normal incoming turn: the new response interrupts any
+            # old voice, then becomes the sole active utterance for the session.
+            await self.cancel(context.session_id)
+            if not self.connected(context.session_id):
+                return
+            self._active[context.session_id] = context
+            worker = asyncio.create_task(self._tts_worker(context, queue, language, voice))
+
+            await self._send(context, "voice.utterance.started")
+            normalized_intent = Intent(intent).value
+            directive = AvatarDirective(
+                emotion=Emotion(emotion),
+                gesture=Gesture(gesture).value,
+                intensity=gesture_intensity,
+            )
+            frame = metadata_frame(
+                intent=normalized_intent,
+                emotion=directive.emotion.value,
+                gesture=directive.gesture,
+                intensity=directive.intensity,
+            )
+            if self._avatar_service is not None:
+                if not self._is_active(context):
+                    raise asyncio.CancelledError
+                await self._avatar_service.stream_start(
+                    session_id=context.session_id,
+                    utterance_id=context.utterance_id,
+                    intent=normalized_intent,
+                )
+                await self._avatar_service.stream_metadata(
+                    session_id=context.session_id,
+                    utterance_id=context.utterance_id,
+                    emotion=directive.emotion,
+                    gesture=directive.gesture,
+                    gesture_intensity=directive.intensity,
+                )
+                if not self._is_active(context):
+                    await self._avatar_service.stop(
+                        session_id=context.session_id,
+                        utterance_id=context.utterance_id,
+                    )
+                    raise asyncio.CancelledError
+            await self._send(
+                context,
+                "voice.metadata",
+                metadata=frame,
+                emotion=directive.emotion,
+                gesture=directive.gesture,
+                gesture_intensity=directive.intensity,
+                intent=normalized_intent,
+            )
+
+            # A single delta is deliberate: it retains the ordinary live
+            # channel while keeping the already-durable Coding Agent notice
+            # from appearing twice in the chat when Events and WebSocket race.
+            await self._send(context, "voice.text.delta", delta=reply)
+            normalizer = TextNormalizer()
+            chunker = TextChunker(**self._chunker_options)
+            sequence = 0
+            for raw_segment in [*chunker.feed(reply), *chunker.flush()]:
+                text = normalizer.normalize(raw_segment)
+                if not text:
+                    continue
+                segment = make_speech_segment(
+                    text,
+                    sequence=sequence,
+                    base_pace=context.base_pace,
+                    forced_clause_split=text.rstrip().endswith((",", ";", ":")),
+                )
+                segment = SpeechSegment(
+                    text=segment.text,
+                    pace=segment.pace,
+                    tempo=max(
+                        MIN_SPEECH_TEMPO,
+                        min(MAX_SPEECH_TEMPO, segment.tempo * context.playback_rate),
+                    ),
+                    emphasis=segment.emphasis,
+                    pause_before_ms=segment.pause_before_ms,
+                    pause_after_ms=segment.pause_after_ms,
+                    sequence=segment.sequence,
+                    motion_gesture=segment.motion_gesture,
+                )
+                if sequence == 0:
+                    self._publish_latency(
+                        context,
+                        "voice.first_speakable_segment",
+                        first_speakable_segment_ms=int(
+                            (time.perf_counter() - context.started_at) * 1000
+                        ),
+                        text_length=len(segment.text),
+                    )
+                await self._enqueue_tts_segment(queue, worker, segment)
+                sequence += 1
+            await self._send(
+                context,
+                "voice.text.completed",
+                reply=reply,
+                memory_updates=[],
+            )
+            context.text_completed = True
+            await self._enqueue(queue, worker, None)
+            await worker
+            await self._send(context, "voice.utterance.finished")
+            if self._avatar_service is not None and self._is_active(context):
+                await self._avatar_service.stream_end(
+                    session_id=context.session_id,
+                    utterance_id=context.utterance_id,
+                )
+        except asyncio.CancelledError:
+            if worker is not None:
+                worker.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await worker
+            raise
+        except Exception as exc:
+            if worker is not None:
+                worker.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await worker
+            await self._send(
+                context,
+                "voice.error",
+                code="provider_unavailable",
+                message=str(exc),
+            )
+        finally:
+            if self._active.get(context.session_id) is context:
+                self._active.pop(context.session_id, None)
 
     async def _run(
         self,

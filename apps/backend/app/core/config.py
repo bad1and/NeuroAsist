@@ -170,7 +170,7 @@ class Settings(BaseSettings):
     coding_base_url: str | None = None
     # A stable image name lets every project release use the same local coding
     # runtime. Operators may still override it when they maintain their own.
-    coding_docker_image: str = "neuroasist-coding"
+    coding_docker_image: str = "neuroasist-coding:latest"
     # Optional operator-selected parent directory for task-private workspaces.
     # The portable default is a sibling of this checkout, never below it.
     coding_workspace_root: str | None = None

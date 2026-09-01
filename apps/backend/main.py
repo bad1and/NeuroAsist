@@ -68,7 +68,7 @@ from apps.backend.app.conversation.turn_coordinator import ConversationTurnCoord
 from apps.backend.app.conversation.turn import SmartTurnDetector
 from apps.backend.app.llm.providers.deepseek import DeepSeekProvider, close_shared_clients
 from apps.backend.app.llm.telemetry import llm_telemetry
-from apps.backend.app.coding.service import CodingAgentService
+from apps.backend.app.coding.service import CodingAgentService, NotificationSpeechDelivery
 from apps.backend.app.coding.orchestration import CodingBridge
 
 logger = logging.getLogger(__name__)
@@ -366,15 +366,28 @@ def create_app() -> FastAPI:
     voice_session_manager.bind_avatar_service(avatar_service)
     speech_orchestrator = SpeechOrchestrator(voice_service, event_bus, settings, avatar_service)
 
-    def speak_coding_notification(session_id: str, text: str) -> None:
-        """Give durable Coding Agent notices the same TTS delivery as chat replies."""
+    def speak_coding_notification(session_id: str, text: str) -> NotificationSpeechDelivery | None:
+        """Deliver Coding Agent notices through normal Iris live output first."""
         if not settings.voice_tts_enabled or not text.strip():
-            return
+            return None
         voice = voice_service.resolve_tts_voice(
             runtime_settings.voice_language,
             runtime_settings.voice_tts_voice,
         )
-        speech_orchestrator.enqueue(
+        utterance_id = voice_session_manager.enqueue_reply(
+            session_id=session_id,
+            reply=text,
+            language=runtime_settings.voice_language,
+            voice=voice,
+            style_override=app.state.voice_tts_style,
+            playback_rate=runtime_settings.voice_playback_rate,
+        )
+        if utterance_id is not None:
+            return NotificationSpeechDelivery("live", utterance_id)
+
+        # A task can finish while its chat is closed or reconnecting. In that
+        # case retain the existing batch path instead of dropping the notice.
+        request_id = speech_orchestrator.enqueue(
             session_id=session_id,
             reply=text,
             emotion="neutral",
@@ -383,6 +396,7 @@ def create_app() -> FastAPI:
             voice=voice,
             style=app.state.voice_tts_style,
         )
+        return NotificationSpeechDelivery("batch", request_id)
 
     coding_agent_service.bind_notification_speaker(speak_coding_notification)
 

@@ -1028,6 +1028,7 @@ export function ChatPage({
   const pendingTextDeltaTimerRef = useRef<number | null>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
   const handledCodingReviewEventIdsRef = useRef<Set<string>>(new Set());
+  const handledCodingSpeechRequestIdsRef = useRef<Set<string>>(new Set());
   messagesRef.current = messages;
 
   const clearLiveSttTranscript = useCallback(() => {
@@ -1125,7 +1126,10 @@ export function ChatPage({
           continue;
         }
         next = next.map((message, messageIndex) => messageIndex === index
-          ? { ...message, content: message.content + delta }
+          // Coding Agent notifications are already present as durable chat
+          // messages when their live reply starts. Their single live delta is
+          // intentionally the complete text, so do not render it twice.
+          ? { ...message, content: message.content === delta ? message.content : message.content + delta }
           : message);
       }
       return next;
@@ -1167,10 +1171,25 @@ export function ChatPage({
       if (getStringMetadata(event, "session_id") !== sessionId) continue;
       const messageId = getStringMetadata(event, "message_id");
       const content = getStringMetadata(event, "notification");
+      const voiceUtteranceId = getStringMetadata(event, "voice_utterance_id");
+      const voiceRequestId = getStringMetadata(event, "voice_request_id");
       if (!messageId || !content) continue;
-      setMessages((current) => current.some((message) => message.id === messageId)
-        ? current
-        : [...current, { id: messageId, role: "assistant", content }]);
+      setMessages((current) => {
+        if (
+          current.some((message) => message.id === messageId)
+          || (voiceUtteranceId && current.some((message) => message.utteranceId === voiceUtteranceId))
+        ) {
+          return current;
+        }
+        return [...current, {
+          id: messageId,
+          role: "assistant",
+          content,
+          utteranceId: voiceUtteranceId ?? undefined,
+          voiceRequestId: voiceRequestId ?? undefined,
+          ttsStatus: voiceRequestId ? "queued" : undefined,
+        }];
+      });
     }
   }, [events, sessionId]);
 
@@ -1633,18 +1652,43 @@ export function ChatPage({
   );
 
   const pollVoiceTtsStatus = useCallback(
-    async (voiceRequestId: string) => {
+    async (voiceRequestId: string): Promise<VoiceTtsStatusResponse | null> => {
       const started = Date.now();
       while (Date.now() - started < 30000) {
         const status = await syncVoiceTtsStatus(voiceRequestId);
         if (status?.status === "ready" || status?.status === "failed") {
-          return;
+          return status;
         }
         await new Promise((resolve) => window.setTimeout(resolve, 500));
       }
+      return null;
     },
     [syncVoiceTtsStatus],
   );
+
+  useEffect(() => {
+    if (!sessionId) return;
+    for (const event of events) {
+      if (event.type !== "coding.review_notification" && event.type !== "coding.attention_notification") {
+        continue;
+      }
+      const voiceRequestId = getStringMetadata(event, "voice_request_id");
+      const content = getStringMetadata(event, "notification");
+      if (!voiceRequestId || !content || handledCodingSpeechRequestIdsRef.current.has(voiceRequestId)) {
+        continue;
+      }
+      handledCodingSpeechRequestIdsRef.current.add(voiceRequestId);
+      void pollVoiceTtsStatus(voiceRequestId).then((status) => {
+        if (status?.status === "ready" && status.audio_url) {
+          if (!avatarOwnsAudio) {
+            void playAudioUrl(resolveApiUrl(status.audio_url));
+          }
+        } else if (status?.status === "failed" && browserSpeechSupported) {
+          speakTextInBrowser(content);
+        }
+      });
+    }
+  }, [avatarOwnsAudio, browserSpeechSupported, events, playAudioUrl, pollVoiceTtsStatus, sessionId, speakTextInBrowser]);
 
   const scrollTimerRef = useRef<number | null>(null);
   useEffect(() => {
@@ -1706,6 +1750,7 @@ export function ChatPage({
       if (!voiceRequestId) {
         continue;
       }
+      const isCodingNotificationSpeech = handledCodingSpeechRequestIdsRef.current.has(voiceRequestId);
 
       if (event.type === "voice.tts_ready") {
         const audioUrl = getStringMetadata(event, "audio_url");
@@ -1725,7 +1770,7 @@ export function ChatPage({
               : message,
           ),
         );
-        if (!avatarOwnsAudio) {
+        if (!avatarOwnsAudio && !isCodingNotificationSpeech) {
           void playAudioUrl(resolvedAudioUrl);
         }
       } else {
@@ -1733,7 +1778,9 @@ export function ChatPage({
           (message) => message.voiceRequestId === voiceRequestId,
         );
         const fallbackAlreadyStarted = fallbackMessage?.ttsStatus === "browser_fallback";
-        const fallbackStarted = browserSpeechSupported && fallbackAlreadyStarted
+        const fallbackStarted = isCodingNotificationSpeech
+          ? false
+          : browserSpeechSupported && fallbackAlreadyStarted
           ? true
           : browserSpeechSupported && fallbackMessage
             ? speakTextInBrowser(fallbackMessage.content)

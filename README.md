@@ -132,7 +132,7 @@ Open `http://127.0.0.1:5173`. API documentation is at `http://127.0.0.1:8000/doc
 ### Coding Agent
 
 ```powershell
-docker build -t neuroasist-coding -f apps/backend/docker/coding.Dockerfile apps/backend/docker
+docker build -t neuroasist-coding:latest -f apps/backend/docker/coding.Dockerfile apps/backend/docker
 ```
 
 Start Docker Desktop, configure `CODING_API_KEY` if a separate key is desired, then enable the agent in its application section. Read the [Coding Agent safety model](Docs/coding-agent.md) before allowing project context.

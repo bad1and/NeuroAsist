@@ -54,7 +54,7 @@ class DockerSandboxRunner:
         self._active_containers: dict[str, str] = {}
 
     async def availability(self) -> DockerAvailability:
-        image_name = self.settings.coding_docker_image
+        image_name = self._image_reference(self.settings.coding_docker_image)
         try:
             result = await self._exec([self._docker_executable(), "version", "--format", "{{.Server.Version}}"], timeout=8)
         except OSError:
@@ -92,6 +92,21 @@ class DockerSandboxRunner:
                     return str(candidate)
         return "docker"
 
+    @staticmethod
+    def _image_reference(image_name: str) -> str:
+        """Use Docker's explicit ``latest`` tag for untagged local images.
+
+        Docker's CLI normally implies this tag, but recent Docker Desktop
+        builds can list ``name:latest`` while rejecting ``image inspect name``.
+        Keeping the reference explicit makes the availability probe identical
+        to the sandbox container invocation.
+        """
+        reference = image_name.strip()
+        if not reference or "@" in reference:
+            return reference
+        final_component = reference.rsplit("/", 1)[-1]
+        return reference if ":" in final_component else f"{reference}:latest"
+
     def validate_argv(self, value: object) -> list[str]:
         if not isinstance(value, list) or not value or not all(isinstance(item, str) for item in value):
             raise CommandPolicyError("A command must be a non-empty argv list")
@@ -115,6 +130,7 @@ class DockerSandboxRunner:
 
     async def run(self, task_id: str, workspace: Path, argv: object) -> CommandResult:
         command = self.validate_argv(argv)
+        image_name = self._image_reference(self.settings.coding_docker_image)
         container_name = f"neuroasist-coding-{task_id[:24]}"
         self._active_containers[task_id] = container_name
         # Docker requires an absolute host source path. Workspace is created
@@ -133,7 +149,7 @@ class DockerSandboxRunner:
             "--pids-limit", str(self.settings.coding_pids_limit),
             "--memory", f"{self.settings.coding_memory_mb}m",
             "--cpus", str(self.settings.coding_cpus),
-            "--user", "10001:10001", self.settings.coding_docker_image,
+            "--user", "10001:10001", image_name,
             *command,
         ]
         try:

@@ -18,11 +18,12 @@ class CodingBridge:
     _code_signal = re.compile(
         r"(?:coding\s*agent|агент[ау]?\s+код|код(?:е|овый|инг)?|программ|"
         r"репозитор|файл(?:ы|а)?|тест(?:ы|ировать)?|bug|баг|ошибк|"
-        r"python|typescript|javascript|react|backend|frontend|api|refactor|рефактор)",
+        r"python|(?:питон|пайтон)[а-яё]*|typescript|javascript|react|backend|frontend|api|refactor|рефактор)",
         re.IGNORECASE,
     )
     _action_signal = re.compile(
         r"(?:сделай|дай|передай|поручи|попроси|реализуй|исправь|измени|добавь|создай|напиши|проверь|запусти|"
+        r"накод[а-яё]*|накот[а-яё]*|сгенер[а-яё]*|"
         r"give|delegate|fix|implement|change|add|create|write|test|run)", re.IGNORECASE,
     )
     _stop_signal = re.compile(r"(?:останови|стоп|отмени|прекрати|cancel|stop)", re.IGNORECASE)
@@ -35,7 +36,7 @@ class CodingBridge:
     )
     _instruction_signal = re.compile(r"(?:дополн|уточн|также|instead|ещ[её])", re.IGNORECASE)
     _agent_task_signal = re.compile(
-        r"(?:coding\s*agent|(?:кодинг|кодовый)\s+агент|"
+        r"(?:coding\s*agent|(?:кодинг|кодовый)\s+агент?|"
         r"(?:задач|код|файл|тест|переда|запуст|созда|напиш|смож|мож|сдела|выполн|результат|итог|готов).{0,64}\bагент[а-яё]*\b|"
         r"\bагент[а-яё]*\b.{0,64}(?:задач|код|файл|тест|переда|запуст|созда|напиш|сдела|выполн|результат|итог|готов)|"
         r"(?:task|code|file|test|delegat|run|creat|writ|did|complet|result|done).{0,64}\bagent\b|"
@@ -43,10 +44,11 @@ class CodingBridge:
         re.IGNORECASE,
     )
     _delegation_request_signal = re.compile(
-        r"(?:хочу|хотел(?:\s+бы)?|нужно|надо|давай|мож(?:ешь|но)|смож(?:ешь|ет)|пожалуйста|"
+        r"(?:хочу|хотел(?:\s+бы)?|нужно|надо|давай|пусть|пускай|мож(?:ешь|но)|смож(?:ешь|ет)|пожалуйста|"
         r"i\s+want|i(?:'d|\s+would)\s+like|can\s+you|could\s+you|please|need).{0,96}"
-        r"(?:coding\s*agent|(?:кодинг|кодовый)\s+агент|агент[а-яё]*|agent).{0,96}"
-        r"(?:код|накод|файл|тест|программ|python|typescript|javascript|react|backend|frontend|api|bug|баг|ошибк)",
+        r"(?:coding\s*agent|(?:кодинг|кодовый)\s+агент?|агент[а-яё]*|agent).{0,96}"
+        r"(?:код|накод|накот|файл|тест|программ|скрипт|функци|сортир|"
+        r"бабл\s*[- ]?\s*сорт|python|(?:питон|пайтон)[а-яё]*|typescript|javascript|react|backend|frontend|api|bug|баг|ошибк)",
         re.IGNORECASE,
     )
     _forced_reply_prefix = "CODING_AGENT_FORCED_REPLY:"

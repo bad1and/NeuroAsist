@@ -144,6 +144,83 @@ describe("русский интерфейс", () => {
     expect(composer).toHaveValue("Привет, Iris!");
   });
 
+  it("озвучивает готовое уведомление Coding Agent через фоновой TTS-запрос", async () => {
+    const play = vi.fn(async () => undefined);
+    const previousAudio = globalThis.Audio;
+
+    class TestAudio {
+      playbackRate = 1;
+      onended: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+
+      constructor(_url: string) {}
+
+      pause() {}
+
+      play() {
+        return play();
+      }
+    }
+
+    vi.stubGlobal("Audio", TestAudio);
+    api.getEvents.mockResolvedValue({
+      events: [{
+        id: "coding-review-event",
+        type: "coding.review_notification",
+        level: "info",
+        message: "Coding Agent task is ready for review",
+        created_at: "2026-09-01T00:00:00Z",
+        metadata: {
+          session_id: "test-session",
+          message_id: "coding-review-message",
+          notification: "Coding Agent закончил задачу.",
+          voice_request_id: "coding-review-voice",
+        },
+      }],
+    });
+    api.getVoiceTtsStatus.mockResolvedValue({
+      voice_request_id: "coding-review-voice",
+      status: "ready",
+      audio_url: "/voice/audio/coding-review.wav",
+    });
+
+    try {
+      render(<App />);
+      fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Начать" }));
+
+      await waitFor(() => expect(api.getVoiceTtsStatus).toHaveBeenCalledWith("coding-review-voice"));
+      await waitFor(() => expect(play).toHaveBeenCalledOnce());
+    } finally {
+      vi.stubGlobal("Audio", previousAudio);
+    }
+  });
+
+  it("принимает уведомление Coding Agent как обычный live-ответ Iris", async () => {
+    api.getEvents.mockResolvedValue({
+      events: [{
+        id: "coding-live-review-event",
+        type: "coding.review_notification",
+        level: "info",
+        message: "Coding Agent task is ready for review",
+        created_at: "2026-09-01T00:00:00Z",
+        metadata: {
+          session_id: "test-session",
+          message_id: "coding-live-review-message",
+          notification: "Coding Agent закончил задачу.",
+          voice_utterance_id: "coding-live-utterance",
+        },
+      }],
+    });
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Начать" }));
+
+    await waitFor(() => expect(api.getEvents).toHaveBeenCalled());
+    expect(api.getVoiceTtsStatus).not.toHaveBeenCalled();
+  });
+
   it("переключает sidebar в компактный режим без смены активного раздела", async () => {
     const { container } = render(<App />);
 
