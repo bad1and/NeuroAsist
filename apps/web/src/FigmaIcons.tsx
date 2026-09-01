@@ -103,11 +103,29 @@ export function FigmaStartButtonBg(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-export function FigmaInputPlateFullBg(props: SVGProps<SVGSVGElement>) {
+export interface FigmaInputPlateFullBgProps extends SVGProps<SVGSVGElement> {
+  extraHeight?: number;
+}
+
+export function FigmaInputPlateFullBg({
+  extraHeight = 0,
+  ...props
+}: FigmaInputPlateFullBgProps) {
+  const h = Math.max(0, extraHeight);
+  const pathD = `M392.75 ${73.5 + h}H839V70C839 41.7157 839 27.5736 830.213 18.7868C821.426 10 807.284 10 779 10H456.25C454.625 10 453.813 10 453.126 10.0315C437.637 10.7416 425.242 23.1374 424.531 38.626C424.5 39.3127 424.5 40.1251 424.5 41.75${h > 0 ? `V${41.75 + h}` : ""}C424.5 ${43.3749 + h} 424.5 ${44.1873 + h} 424.469 ${44.874 + h}C423.758 ${60.3626 + h} 411.363 ${72.7584 + h} 395.874 ${73.4685 + h}C395.187 ${73.5 + h} 394.375 ${73.5 + h} 392.75 ${73.5 + h}Z`;
+  const tailD = `M779 ${73 + h}H839C839 ${73 + h} 839 ${109.873 + h} 839 ${133.5 + h}L830.213 ${81.7868 + h}L779 ${73 + h}Z`;
+
   return (
-    <svg width="447" height="124" viewBox="392.75 10 446.25 123.5" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
-      <path d="M392.75 73.5H839V70C839 41.7157 839 27.5736 830.213 18.7868C821.426 10 807.284 10 779 10H456.25C454.625 10 453.813 10 453.126 10.0315C437.637 10.7416 425.242 23.1374 424.531 38.626C424.5 39.3127 424.5 40.1251 424.5 41.75C424.5 43.3749 424.5 44.1873 424.469 44.874C423.758 60.3626 411.363 72.7584 395.874 73.4685C395.187 73.5 394.375 73.5 392.75 73.5Z" fill="#695B86" />
-      <path d="M779 73H839C839 73 839 109.873 839 133.5L830.213 81.7868L779 73Z" fill="#695B86" />
+    <svg
+      width="447"
+      height={124 + h}
+      viewBox={`392.75 10 446.25 ${123.5 + h}`}
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <path d={pathD} fill="#695B86" />
+      <path d={tailD} fill="#695B86" />
     </svg>
   );
 }
