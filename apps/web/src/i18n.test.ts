@@ -36,6 +36,15 @@ describe("interface translations", () => {
     expect(translateInterfaceText("Обновить среду", "en")).toBe("Refresh environment");
     expect(translateInterfaceText("Logs, commands, and errors", "ru")).toBe("Логи, команды и ошибки");
     expect(translateInterfaceText("Planning step 3", "ru")).toBe("Шаг планирования 3");
+    expect(translateInterfaceText("Задачи кодинг-агента", "en")).toBe("Coding Agent tasks");
+    expect(translateInterfaceText("Песочница и окружение Docker", "en")).toBe("Docker sandbox and environment");
+    expect(translateInterfaceText("Параметры кодинг-агента", "en")).toBe("Coding Agent settings");
+    expect(translateInterfaceText("Сначала новые", "en")).toBe("Newest first");
+    expect(translateInterfaceText("Целостность", "en")).toBe("Integrity");
+    expect(translateInterfaceText("Живая история", "en")).toBe("Live history");
+    expect(translateInterfaceText("Сегодня в 11:53 PM", "en")).toBe("Today at 11:53 PM");
+    expect(translateInterfaceText("Docker daemon готов к запуску контейнеров", "en"))
+      .toBe("Docker daemon is ready to start containers");
   });
 
   it("restores the original Russian grammatical form after switching back", () => {

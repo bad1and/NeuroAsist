@@ -64,6 +64,20 @@ class CodingBridge:
         r"(?:дай|передай|поставь|запусти)(?:[.!?\s]*$)",
         re.IGNORECASE,
     )
+    # This broad prefilter is intentionally much smaller than a dictionary of
+    # word forms.  It only decides whether to append a compact routing hint to
+    # the existing DeepSeek request; it never creates a task by itself.
+    _model_routing_target_signal = re.compile(
+        r"(?:алгоритм|сортир|калькулятор|парсер|скрипт|функци|"
+        r"сайт|лендинг|приложен|интерфейс|экран|форм[ауе]|кнопк|"
+        r"бот|плагин|виджет|таблиц[ауе]|баз[ауе]\s+данных|"
+        r"c\+\+|c#|java|kotlin|swift|go|rust|php|sql|html|css|"
+        r"typescript|javascript|python|питон|пайтон|"
+        r"algorithm|sort|calculator|parser|script|function|"
+        r"website|landing|application|interface|screen|form|button|bot|plugin|widget|database)",
+        re.IGNORECASE,
+    )
+    _model_delegation_confidence = 0.90
     _deferred_ttl_seconds = 10 * 60
 
     def __init__(self, service: CodingAgentService) -> None:
@@ -143,6 +157,54 @@ class CodingBridge:
             self._is_coding_request(user_text)
             or self._delegation_request_signal.search(user_text)
         )
+
+    def should_request_model_delegation(self, user_text: str) -> bool:
+        """Whether the existing Character request should carry a routing hint.
+
+        Explicit Coding Agent wording is handled before an LLM call.  This
+        fallback is only for ambiguous, action-oriented software requests such
+        as "сделай калькулятор", which avoids a separate classifier request.
+        """
+        return bool(
+            self.service.enabled
+            and self.service.runtime_settings.coding_auto_delegate
+            and not self._is_coding_delegation_request(user_text)
+            and self._action_signal.search(user_text)
+            and self._model_routing_target_signal.search(user_text)
+        )
+
+    def accept_model_delegation(
+        self,
+        session_id: str,
+        user_text: str,
+        confidence: object,
+        source_message=None,
+    ) -> str | None:
+        """Create a task only after a same-turn model cue passes all gates."""
+        if not self.should_request_model_delegation(user_text):
+            return None
+        if isinstance(confidence, bool):
+            return None
+        try:
+            score = float(confidence)
+        except (TypeError, ValueError):
+            return None
+        if not self._model_delegation_confidence <= score <= 1.0:
+            return None
+        source_message_id = getattr(source_message, "id", None)
+        task = self.service.create_task(
+            user_text,
+            session_id=session_id,
+            source_message_id=source_message_id,
+        )
+        if self.service.event_publisher is not None:
+            self.service.event_publisher(
+                "coding.model_route",
+                "info",
+                "Coding task routed by same-turn model cue",
+                {"session_id": session_id, "confidence": score, "task_id": task["id"]},
+            )
+        return self._forced_reply(self._queued_reply(task, user_text))
 
     def _is_coding_task_reference(self, user_text: str, *, has_tasks: bool) -> bool:
         """Recognise task control/status language without treating a generic agent as coding.

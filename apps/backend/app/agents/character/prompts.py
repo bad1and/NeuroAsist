@@ -46,6 +46,29 @@ segment начинается с 1, speed 0.70..1.30 важнее pace, emphasis 
 """
 
 
+CODING_ROUTING_JSON_RULES = """
+Служебная подсказка маршрутизации. Она нужна только backend и не видна человеку.
+Если пользователь просит создать, изменить, исправить, запустить или проверить
+конкретный программный результат, который разумно передать Coding Agent, добавь
+в корень JSON только поле "coding_delegation": {"confidence": 0.90..1.00}.
+Во всех остальных случаях не добавляй это поле: вопрос об объяснении кода,
+совет, обсуждение идеи или неясная просьба не являются делегированием.
+Не утверждай в reply, что задача уже передана: backend сам проверит решение.
+"""
+
+
+CODING_ROUTING_LIVE_RULES = """
+Служебная подсказка маршрутизации. Только если пользователь просит создать,
+изменить, исправить, запустить или проверить конкретный программный результат,
+который разумно передать Coding Agent, начни ответ строго с
+[[coding_delegate confidence=0.90]] (укажи уверенность 0.90..1.00), а затем
+обычный avatar-заголовок. Иначе не пиши эту метку. Метка не является текстом
+реплики и не должна упоминаться. Не говори, что задача передана: backend сам
+проверит решение. Вопросы об объяснении кода, советы и неясные просьбы не
+делегируй.
+"""
+
+
 LEGACY_MEMORY_PROTOCOL = """
 Добавь в корень JSON поля "memory_candidates": [] и "memory_decisions": [].
 memory_candidates — максимум 3 самодостаточных факта только из слов пользователя:
@@ -106,6 +129,11 @@ def character_json_prompt(
 
 def character_live_prompt(persona: PersonaConfig | None = None) -> str:
     return f"{character_static_prefix(persona)}\n\n{LIVE_PROTOCOL_RULES}"
+
+
+def character_coding_routing_prompt(*, live: bool) -> str:
+    """Return the tiny optional routing rule only for technical candidates."""
+    return CODING_ROUTING_LIVE_RULES if live else CODING_ROUTING_JSON_RULES
 
 
 def character_state_prompt(state_context: str, *, live: bool) -> str:

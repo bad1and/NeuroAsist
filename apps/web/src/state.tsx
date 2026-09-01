@@ -29,10 +29,13 @@ function formatTimelineDate(dateStr: string) {
   
   const time = date.toLocaleTimeString(interfaceIntlLocale(), { hour: '2-digit', minute: '2-digit' });
   
-  if (isToday) return `Сегодня в ${time}`;
-  if (isYesterday) return `Вчера в ${time}`;
+  if (isToday) return interfaceIntlLocale() === "en-US" ? `Today at ${time}` : `Сегодня в ${time}`;
+  if (isYesterday) return interfaceIntlLocale() === "en-US" ? `Yesterday at ${time}` : `Вчера в ${time}`;
   
-  return date.toLocaleDateString(interfaceIntlLocale(), { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).replace(',', ' в');
+  const locale = interfaceIntlLocale();
+  return date
+    .toLocaleDateString(locale, { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
+    .replace(',', locale === "en-US" ? ' at' : ' в');
 }
 
 type TimelineItem =
