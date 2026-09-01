@@ -9,3 +9,20 @@ if (typeof HTMLCanvasElement !== "undefined") {
     value: vi.fn(() => null),
   });
 }
+
+if (typeof HTMLDialogElement !== "undefined") {
+  Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
+    configurable: true,
+    value() {
+      this.setAttribute("open", "");
+    },
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, "close", {
+    configurable: true,
+    value() {
+      this.removeAttribute("open");
+      this.dispatchEvent(new Event("close"));
+    },
+  });
+}
+
