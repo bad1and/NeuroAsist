@@ -297,6 +297,146 @@ def test_spoken_code_request_is_queued_from_live_voice_without_model_reply(tmp_p
     assert tasks[0]["objective"] == request
 
 
+def test_same_character_response_can_route_an_ambiguous_software_task_once(tmp_path: Path) -> None:
+    class ModelRouteProvider:
+        calls = 0
+        messages = []
+
+        async def generate(self, messages):
+            self.calls += 1
+            self.messages = messages
+            return LLMResponse(
+                content=(
+                    '{"protocol_version":3,"reply":"Сейчас передам задачу.",'
+                    '"intent":"task_request","affect":{"emotion":"neutral"},'
+                    '"gesture":{"name":"auto"},"delivery":{},'
+                    '"coding_delegation":{"confidence":0.96}}'
+                ),
+                model="test",
+            )
+
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = coding_settings(tmp_path, project)
+    store = TimelineStore(settings.database_path)
+    store.init_db()
+    service = CodingAgentService(
+        settings, RuntimeSettings(coding_agent_enabled=True, coding_auto_delegate=True), store, lambda *_: None,
+    )
+    provider = ModelRouteProvider()
+    agent = CharacterAgent(provider, TimelineHistoryAdapter(store), history_limit=5, coding_bridge=CodingBridge(service))
+    request = "Сделай калькулятор для списка покупок на Java"
+
+    result = asyncio.run(agent.handle_user_message("session", request))
+
+    assert "поставлена в очередь" in result["reply"]
+    assert provider.calls == 1
+    assert sum("coding_delegation" in item.content for item in provider.messages) == 1
+    tasks = store.list_coding_tasks()
+    assert len(tasks) == 1
+    assert tasks[0]["objective"] == request
+
+
+def test_low_confidence_same_turn_routing_cue_never_creates_a_task(tmp_path: Path) -> None:
+    class LowConfidenceProvider:
+        calls = 0
+
+        async def generate(self, _messages):
+            self.calls += 1
+            return LLMResponse(
+                content=(
+                    '{"protocol_version":3,"reply":"Могу объяснить, как это устроено.",'
+                    '"intent":"question","affect":{"emotion":"thinking"},'
+                    '"gesture":{"name":"question"},"delivery":{},'
+                    '"coding_delegation":{"confidence":0.89}}'
+                ),
+                model="test",
+            )
+
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = coding_settings(tmp_path, project)
+    store = TimelineStore(settings.database_path)
+    store.init_db()
+    service = CodingAgentService(
+        settings, RuntimeSettings(coding_agent_enabled=True, coding_auto_delegate=True), store, lambda *_: None,
+    )
+    provider = LowConfidenceProvider()
+    agent = CharacterAgent(provider, TimelineHistoryAdapter(store), history_limit=5, coding_bridge=CodingBridge(service))
+
+    result = asyncio.run(agent.handle_user_message("session", "Сделай калькулятор для списка покупок"))
+
+    assert result["reply"] == "Могу объяснить, как это устроено."
+    assert provider.calls == 1
+    assert store.list_coding_tasks() == []
+
+
+def test_same_live_stream_routes_ambiguous_software_task_without_a_second_model_call(tmp_path: Path) -> None:
+    class LiveModelRouteProvider:
+        calls = 0
+
+        async def stream(self, _messages):
+            self.calls += 1
+            yield "[[coding_delegate confidence=0."
+            yield "96]]\n[[avatar emotion=neutral gesture=auto intensity=1.0]]\nСделаю."
+
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = coding_settings(tmp_path, project)
+    store = TimelineStore(settings.database_path)
+    store.init_db()
+    service = CodingAgentService(
+        settings, RuntimeSettings(coding_agent_enabled=True, coding_auto_delegate=True), store, lambda *_: None,
+    )
+    provider = LiveModelRouteProvider()
+    agent = CharacterAgent(provider, TimelineHistoryAdapter(store), history_limit=5, coding_bridge=CodingBridge(service))
+    request = "Сделай калькулятор для списка покупок"
+
+    async def collect_reply() -> str:
+        chunks = [
+            chunk async for chunk in agent.stream_user_message("voice-session", request, input_mode="voice")
+        ]
+        return "".join(chunks)
+
+    reply = asyncio.run(collect_reply())
+
+    assert "поставлена в очередь" in reply
+    assert "coding_delegate" not in reply
+    assert provider.calls == 1
+    assert len(store.list_coding_tasks()) == 1
+
+
+def test_ordinary_chat_does_not_receive_the_model_routing_prompt(tmp_path: Path) -> None:
+    class OrdinaryProvider:
+        calls = 0
+        messages = []
+
+        async def generate(self, messages):
+            self.calls += 1
+            self.messages = messages
+            return LLMResponse(
+                content='{"reply":"Привет!","emotion":"happy","intent":"casual_chat"}',
+                model="test",
+            )
+
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = coding_settings(tmp_path, project)
+    store = TimelineStore(settings.database_path)
+    store.init_db()
+    service = CodingAgentService(
+        settings, RuntimeSettings(coding_agent_enabled=True, coding_auto_delegate=True), store, lambda *_: None,
+    )
+    provider = OrdinaryProvider()
+    agent = CharacterAgent(provider, TimelineHistoryAdapter(store), history_limit=5, coding_bridge=CodingBridge(service))
+
+    result = asyncio.run(agent.handle_user_message("session", "Расскажи короткий анекдот"))
+
+    assert result["reply"] == "Привет!"
+    assert provider.calls == 1
+    assert not any("coding_delegation" in item.content for item in provider.messages)
+
+
 def test_task_request_with_a_result_file_is_queued_not_misread_as_status(tmp_path: Path) -> None:
     class NeverCalledProvider:
         calls = 0

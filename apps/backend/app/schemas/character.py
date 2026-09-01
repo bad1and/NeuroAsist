@@ -121,6 +121,19 @@ class MemoryDecisionCue(ProtocolModel):
     clarification_id: str | None = Field(default=None, max_length=64)
 
 
+class CodingDelegationCue(BaseModel):
+    """Untrusted, optional routing hint from the *same* Character response.
+
+    It is deliberately tolerant of unknown model fields.  The CodingBridge
+    validates the confidence and the original user request before it can create
+    a durable task; this cue is never visible to the user or sent to tools.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
 class CharacterTurn(ProtocolModel):
     """Canonical visible reply plus non-visible character metadata."""
 
@@ -133,6 +146,7 @@ class CharacterTurn(ProtocolModel):
     continuity: ContinuityCue | None = None
     memory_candidates: list[MemoryCandidate] = Field(default_factory=list, max_length=3)
     memory_decisions: list[MemoryDecisionCue] = Field(default_factory=list, max_length=3)
+    coding_delegation: CodingDelegationCue | None = None
 
     @field_validator("reply")
     @classmethod
@@ -146,7 +160,7 @@ class CharacterTurn(ProtocolModel):
         """Return avatar metadata only; memory proposals are private to the backend."""
         return self.model_dump(
             mode="json",
-            exclude={"reply", "memory_candidates", "memory_decisions"},
+            exclude={"reply", "memory_candidates", "memory_decisions", "coding_delegation"},
         )
 
 
