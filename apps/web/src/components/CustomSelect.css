@@ -5,27 +5,48 @@
   font: inherit;
 }
 
-/* 1. Trigger (подложка, светлее) */
+/* Hidden native select for accessibility & automated tests */
+.custom-select-native-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* 1. Trigger button (скругление 12px, цвет кнопки-подложки) */
 .custom-select-trigger {
   display: flex;
   align-items: center;
   justify-content: space-between;
   width: 100%;
   min-height: 38px;
-  padding: 8px 12px;
+  padding: 8px 14px;
   border: none;
-  border-radius: 9px;
-  background: var(--surface-raised, #242526);
-  color: var(--text, #f0f0f0);
+  border-radius: 12px;
+  background: var(--color-surface-raised, #242526);
+  color: var(--color-text, #f0f0f0);
   cursor: pointer;
   text-align: left;
-  gap: 8px;
+  gap: 10px;
   font: inherit;
-  transition: background 0.2s ease;
+  font-size: 13.5px;
+  transition: background-color 0.18s ease, transform 0.12s ease;
+  box-sizing: border-box;
 }
 
 .custom-select-trigger:hover:not(:disabled) {
-  background: var(--color-surface-soft, var(--surface-soft, #2c2d2e));
+  background: var(--color-surface-soft, #2c2d2e);
+}
+
+.custom-select-trigger:active:not(:disabled) {
+  transform: scale(0.99);
 }
 
 .custom-select-trigger:focus-visible {
@@ -59,62 +80,120 @@
 .custom-select-icon {
   color: var(--color-text-soft, #a0a0a0);
   flex-shrink: 0;
-  transition: transform 0.2s ease;
+  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-/* 2. Dropdown Menu (плоский, простой, без прозрачности, без обводки) */
+/* 2. Floating Dropdown Menu (безрамочный, цвет в тон кнопки, скругление 12px, глубокая тень) */
 .custom-select-dropdown {
   position: absolute;
-  top: calc(100% + 4px);
   left: 0;
+  right: 0;
   width: 100%;
-  min-width: max-content;
-  max-height: 250px;
+  max-height: 240px;
   overflow-y: auto;
-  background: var(--surface, #1e1f20); /* Flat, simple background */
-  border: none !important; /* без обводки */
-  border-radius: 9px;
+  overscroll-behavior: contain;
+  background: var(--color-surface-raised, #242526);
+  border: none !important;
+  border-radius: 12px;
   z-index: 1000;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
-  padding: 6px;
+  box-shadow: 0 14px 36px -4px rgba(0, 0, 0, 0.55), 0 4px 14px rgba(0, 0, 0, 0.35);
+  padding: 5px;
   display: flex;
   flex-direction: column;
   gap: 2px;
+  box-sizing: border-box;
 }
 
+.custom-select-dropdown.placement-bottom {
+  top: calc(100% + 6px);
+  animation: customSelectFadeSlideDown 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.custom-select-dropdown.placement-top {
+  bottom: calc(100% + 6px);
+  animation: customSelectFadeSlideUp 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes customSelectFadeSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes customSelectFadeSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Slim Styled Scrollbar */
 .custom-select-dropdown::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
+}
+.custom-select-dropdown::-webkit-scrollbar-track {
+  background: transparent;
 }
 .custom-select-dropdown::-webkit-scrollbar-thumb {
-  background: var(--border-strong, #3e4042);
-  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 4px;
+}
+.custom-select-dropdown::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
 }
 
+/* 3. Options (скругление 8px, спокойный hover и выделение плашкой без галочек) */
 .custom-select-option {
-  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
   cursor: pointer;
-  color: var(--text, #f0f0f0);
-  border-radius: 6px;
-  transition: background 0.15s ease, color 0.15s ease;
-  font-size: 13px;
+  color: var(--color-text, #f0f0f0);
+  border-radius: 8px;
+  transition: background-color 0.14s ease, color 0.14s ease;
+  font-size: 13.5px;
+  line-height: 1.4;
+  user-select: none;
 }
 
-.custom-select-option:hover {
-  background: var(--color-surface-soft, var(--surface-soft, #2c2d2e)); /* Solid, lighter color */
+.custom-select-option-label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+.custom-select-option:hover,
+.custom-select-option.highlighted {
+  background: var(--color-surface-soft, rgba(255, 255, 255, 0.05));
+  color: var(--color-text, #ffffff);
+}
+
+/* Выбранный пункт — спокойная мягкая плашка без кричащих цветов и без галочек */
 .custom-select-option.selected {
-  background: var(--surface-raised, #242526);
-  color: var(--color-focus, #a78bfa); /* Distinct text color for selected */
+  background: var(--color-surface-soft, rgba(255, 255, 255, 0.09));
+  color: var(--color-text, #ffffff);
   font-weight: 500;
 }
 
-.custom-select-option.selected::before {
-  content: "✓ ";
+.custom-select-option.selected.highlighted,
+.custom-select-option.selected:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--color-text, #ffffff);
 }
 
 .custom-select-option.disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
-  background: var(--surface, #1e1f20);
+  background: transparent;
 }
+

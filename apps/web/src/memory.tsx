@@ -42,6 +42,7 @@ import type {
   MemoryStatus,
   MemoryTopic,
 } from "./types";
+import { notify } from "./notifications";
 import {
   animateButtonPress,
   animateCardRemove,
@@ -236,12 +237,17 @@ export function MemoryPage() {
     void refresh();
   }, [section]);
 
-  const action = async (run: () => Promise<unknown>) => {
+  const action = async (run: () => Promise<unknown>, successMsg?: string) => {
     try {
       await run();
       await refresh();
+      if (successMsg) {
+        notify.success("Память", successMsg);
+      }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Не удалось выполнить действие");
+      const err = error instanceof Error ? error.message : "Не удалось выполнить действие";
+      setMessage(err);
+      notify.error("Память", err);
     }
   };
 
@@ -249,10 +255,10 @@ export function MemoryPage() {
     const cardEl = (e.currentTarget.closest(".memory-card") as HTMLElement) || null;
     if (cardEl) {
       animateCardRemove(cardEl, () => {
-        void action(() => deleteMemory(id));
+        void action(() => deleteMemory(id), "Запись удалена из памяти.");
       });
     } else {
-      void action(() => deleteMemory(id));
+      void action(() => deleteMemory(id), "Запись удалена из памяти.");
     }
   };
 
@@ -468,7 +474,7 @@ export function MemoryPage() {
                         <button
                           className="secondary memory-close-btn"
                           type="button"
-                          onClick={() => void action(() => closeMemoryCommitment(commitment.id))}
+                          onClick={() => void action(() => closeMemoryCommitment(commitment.id), "Обязательство закрыто.")}
                           title="Отметить выполненным"
                         >
                           Завершить

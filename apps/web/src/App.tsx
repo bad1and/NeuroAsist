@@ -129,6 +129,8 @@ import { GuidedSttCapture } from "./stt-capture";
 import { InAppAvatarHost } from "./components/InAppAvatarHost";
 import { IrisPortalBackground } from "./components/IrisPortalBackground";
 import { IrisSubtitles } from "./components/IrisSubtitles";
+import { NotificationHost } from "./components/NotificationHost";
+import { notify } from "./notifications";
 import { audioAnalyzer } from "./audio-analyzer";
 import {
   initialInterfaceLocale,
@@ -807,6 +809,7 @@ export default function App() {
             </Suspense>
           )}
         </main>
+        <NotificationHost onNavigate={(view) => switchView(view as AppView)} />
       </section>
     </div>
   );
@@ -1087,6 +1090,21 @@ export function ChatPage({
   useEffect(() => {
     if (!error) return;
 
+    notify.error("Диалог", error, {
+      actions: retryText
+        ? [
+            {
+              label: "Повторить",
+              onClick: () => {
+                setDraft(retryText);
+                setRetryText(null);
+              },
+              variant: "primary",
+            },
+          ]
+        : undefined,
+    });
+
     const visibleError = error;
     const visibleRetryText = retryText;
     const dismissTimer = window.setTimeout(() => {
@@ -1103,7 +1121,17 @@ export function ChatPage({
     const update = updates && updates.length ? updates[updates.length - 1] : undefined;
     if (!update || update.action !== "saved") return;
     setMemoryNotice(`Сохранено в памяти: ${update.predicate}.`);
-  }, []);
+    notify.info("Память", `Сохранено в памяти: ${update.predicate}.`, {
+      navigateView: "memory",
+      actions: [
+        {
+          label: "Открыть память",
+          onClick: onOpenMemory,
+          variant: "primary",
+        },
+      ],
+    });
+  }, [onOpenMemory]);
 
   const flushPendingTextDeltas = useCallback(() => {
     pendingTextDeltaTimerRef.current = null;
