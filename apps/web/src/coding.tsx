@@ -60,7 +60,7 @@ function formatTaskTime(value?: string | null): string {
   const now = new Date();
   const isToday = date.toDateString() === now.toDateString();
   const time = date.toLocaleTimeString(interfaceIntlLocale(), { hour: "2-digit", minute: "2-digit" });
-  if (isToday) return `Сегодня, ${time}`;
+  if (isToday) return currentInterfaceLocale() === "en" ? `Today, ${time}` : `Сегодня, ${time}`;
   return date.toLocaleDateString(interfaceIntlLocale(), {
     day: "numeric",
     month: "short",
@@ -717,8 +717,12 @@ export function CodingAgentPage({
                         <strong data-i18n-skip>{task.objective}</strong>
                         <div className="coding-task-card-meta">
                           <span>{task.model}</span>
-                          <span data-i18n-skip>
-                            {task.project_root ? task.project_root.split(/[\\/]/).pop() : "песочница"}
+                          <span>
+                            {task.project_root ? (
+                              <span data-i18n-skip>{task.project_root.split(/[\\/]/).pop()}</span>
+                            ) : (
+                              "песочница"
+                            )}
                           </span>
                         </div>
                       </button>
@@ -907,7 +911,7 @@ export function CodingAgentPage({
                     {status?.enabled ? "Включён" : "Отключён"}
                   </span>
                 </div>
-                <h3 data-i18n-skip>{status?.enabled ? "Включён" : "Отключён"}</h3>
+                <h3>{status?.enabled ? "Включён" : "Отключён"}</h3>
                 <p>{status?.configured_enabled ? "Функция доступна в ядре Iris" : "Отключён администратором"}</p>
               </article>
 
@@ -923,8 +927,8 @@ export function CodingAgentPage({
                     {status?.docker_daemon_available ? "Запущен" : "Недоступен"}
                   </span>
                 </div>
-                <h3 data-i18n-skip>{status?.docker_daemon_available ? "Запущен" : "Недоступен"}</h3>
-                <p data-i18n-skip>{formatDockerAvailabilityReason(status?.availability_reason)}</p>
+                <h3>{status?.docker_daemon_available ? "Запущен" : "Недоступен"}</h3>
+                <p>{formatDockerAvailabilityReason(status?.availability_reason)}</p>
               </article>
 
               <article className="coding-env-card">
@@ -939,7 +943,7 @@ export function CodingAgentPage({
                     {status?.docker_image_available ? "Собран" : "Не собран"}
                   </span>
                 </div>
-                <h3 data-i18n-skip>{status?.docker_image_available ? "Образ готов" : "Образ не собран"}</h3>
+                <h3>{status?.docker_image_available ? "Образ готов" : "Образ не собран"}</h3>
                 <p data-i18n-skip>{status?.docker_image_name || "neuroasist-sandbox"}</p>
               </article>
 
@@ -955,7 +959,7 @@ export function CodingAgentPage({
                     {active ? "В работе" : "Свободен"}
                   </span>
                 </div>
-                <h3 data-i18n-skip>{active ? statusLabel(active.status) : "Свободен"}</h3>
+                <h3>{active ? statusLabel(active.status) : "Свободен"}</h3>
                 <p>
                   {active ? (
                     <span data-i18n-skip>{active.objective.slice(0, 60)}…</span>
