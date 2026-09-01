@@ -5,7 +5,7 @@ import { interfaceIntlLocale } from "./i18n";
 import { animateButtonPress, animateCardRemove, animatePageEnter, animateStaggerCards, useAnimeScope } from "./animations";
 import { Metaballs } from '@paper-design/shaders-react';
 import { getMoodVisuals, getStrengthLabel } from './mood-visuals';
-import { IconInterfaceSpirals, IconInterfaceSettingGaugeDashboard1, IconInterfaceCalendarMark, IconInterfaceEditMagicWand } from "./CustomIcons";
+import { IconInterfaceSettingGaugeDashboard1, IconInterfaceCalendarMark, IconInterfaceEditMagicWand } from "./CustomIcons";
 
 const labels: Record<string, string> = {
   primary_emotion: "Главная эмоция", expression_strength: "Выразительность", secondary_emotions: "Вторичные эмоции",
@@ -107,16 +107,6 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
 
   return (
     <section className="state-dashboard" ref={containerRef} aria-label="Состояние Iris">
-      <header className="state-dashboard-header">
-        <div>
-          <span className="eyebrow">Внутренняя жизнь</span>
-          <h1>Состояние ИИ</h1>
-        </div>
-        <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void refresh(); }}>
-          <IconInterfaceSpirals size={16} /> Обновить
-        </button>
-      </header>
-
       {error && <div className="notice" role="status">{error}</div>}
       {state?.incognito && <div className="notice">Режим инкогнито: новое состояние и личные заметки не сохраняются.</div>}
 

@@ -18,7 +18,7 @@ afterEach(() => vi.clearAllMocks());
 describe("StatePage", () => {
   it("shows human-readable state, scoped reset, and reflection toggle", async () => {
     render(<StatePage />);
-    expect(await screen.findByRole("heading", { name: "Состояние ИИ" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Живая история" })).toBeInTheDocument();
     expect(screen.getByText("Причины:")).toBeInTheDocument();
     expect(screen.getAllByText("insult").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "Сбросить настроение" }));
