@@ -132,7 +132,7 @@ npm --prefix apps/web run dev
 ### Coding Agent
 
 ```powershell
-docker build -t neuroasist-coding -f apps/backend/docker/coding.Dockerfile apps/backend/docker
+docker build -t neuroasist-coding:latest -f apps/backend/docker/coding.Dockerfile apps/backend/docker
 ```
 
 Запустите Docker Desktop, при необходимости задайте отдельный `CODING_API_KEY`, затем включите агента в соответствующем разделе приложения. Перед передачей файлов проекта прочитайте [модель безопасности Coding Agent](Docs/coding-agent.md).

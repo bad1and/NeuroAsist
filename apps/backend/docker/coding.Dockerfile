@@ -1,5 +1,5 @@
 # Build once on the host; Coding Agent never installs dependencies at runtime.
-# docker build -t neuroasist-coding -f apps/backend/docker/coding.Dockerfile .
+# docker build -t neuroasist-coding:latest -f apps/backend/docker/coding.Dockerfile .
 FROM node:22-bookworm-slim
 
 RUN apt-get update \

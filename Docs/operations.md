@@ -139,7 +139,7 @@ replaces the documented real microphone and avatar soak.
 Build the no-network sandbox image whenever its Dockerfile changes:
 
 ```powershell
-docker build -t neuroasist-coding -f apps/backend/docker/coding.Dockerfile apps/backend/docker
+docker build -t neuroasist-coding:latest -f apps/backend/docker/coding.Dockerfile apps/backend/docker
 ```
 
 Confirm Docker Desktop is running and open `/coding/status` or the Coding Agent

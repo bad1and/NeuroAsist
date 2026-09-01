@@ -12,7 +12,7 @@ from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.coding.orchestration import CodingBridge
 from apps.backend.app.coding.runner import DockerAvailability, DockerSandboxRunner
 from apps.backend.app.coding.sandbox import SnapshotLimitError, TaskSandbox
-from apps.backend.app.coding.service import CodingAgentService
+from apps.backend.app.coding.service import CodingAgentService, NotificationSpeechDelivery
 from apps.backend.app.core.config import ROOT_DIR, Settings
 from apps.backend.app.llm.base import LLMResponse
 from apps.backend.app.runtime.settings import RuntimeSettings
@@ -34,7 +34,7 @@ def coding_settings(tmp_path: Path, project: Path) -> Settings:
 def test_coding_defaults_are_portable_between_project_locations() -> None:
     settings = Settings(_env_file=None)
 
-    assert settings.coding_docker_image == "neuroasist-coding"
+    assert settings.coding_docker_image == "neuroasist-coding:latest"
     assert settings.coding_workspace_path == (ROOT_DIR.parent / "CodingAgentWorkspace")
 
 
@@ -219,7 +219,18 @@ def test_enabled_coding_request_is_queued_without_main_model_generating_code(tmp
     assert len(store.list_coding_tasks()) == 1
 
 
-def test_natural_language_request_to_code_agent_is_queued_when_auto_delegate_is_enabled(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "user_request",
+    [
+        "Ирис я хочу чтобы кодинг аген накодил какой нибудь простой сортировщик на питоне",
+        "Ирис я хочу чтобы агент накотил мне простую сортировку например бабл сорт на питоне",
+        "Ирис, пусть кодинг агент сгенерит на пайтоне функцию сортировки вставками",
+        "Ирис, я хочу, чтобы агент накодил мне питоновский файл с простой пузырьковой сортировкой",
+    ],
+)
+def test_spoken_natural_language_request_to_code_agent_is_queued_without_model_reply(
+    tmp_path: Path, user_request: str,
+) -> None:
     class NeverCalledProvider:
         calls = 0
 
@@ -236,12 +247,50 @@ def test_natural_language_request_to_code_agent_is_queued_when_auto_delegate_is_
     service = CodingAgentService(settings, runtime, store, lambda *_: None)
     provider = NeverCalledProvider()
     agent = CharacterAgent(provider, TimelineHistoryAdapter(store), history_limit=5, coding_bridge=CodingBridge(service))
-    request = "Ирис, я хочу, чтобы агент накодил мне питоновский файл с простой пузырьковой сортировкой"
-
-    result = asyncio.run(agent.handle_user_message("session", request))
+    result = asyncio.run(agent.handle_user_message("session", user_request))
 
     assert "поставлена в очередь" in result["reply"]
     assert "автоделегирование выключено" not in result["reply"]
+    assert provider.calls == 0
+    tasks = store.list_coding_tasks()
+    assert len(tasks) == 1
+    assert tasks[0]["objective"] == user_request
+
+
+def test_spoken_code_request_is_queued_from_live_voice_without_model_reply(tmp_path: Path) -> None:
+    class NeverCalledProvider:
+        calls = 0
+
+        async def generate(self, _messages):
+            self.calls += 1
+            raise AssertionError("A Coding Agent delegation must not be answered by the main model")
+
+        async def stream(self, _messages):
+            self.calls += 1
+            raise AssertionError("A Coding Agent delegation must not be streamed by the main model")
+            yield ""
+
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = coding_settings(tmp_path, project)
+    store = TimelineStore(settings.database_path)
+    store.init_db()
+    service = CodingAgentService(
+        settings, RuntimeSettings(coding_agent_enabled=True, coding_auto_delegate=True), store, lambda *_: None,
+    )
+    provider = NeverCalledProvider()
+    agent = CharacterAgent(provider, TimelineHistoryAdapter(store), history_limit=5, coding_bridge=CodingBridge(service))
+    request = "Ирис я хочу чтобы агент накотил мне простую сортировку например бабл сорт на питоне"
+
+    async def collect_reply() -> str:
+        chunks = [
+            chunk async for chunk in agent.stream_user_message("voice-session", request, input_mode="voice")
+        ]
+        return "".join(chunks)
+
+    reply = asyncio.run(collect_reply())
+
+    assert "поставлена в очередь" in reply
     assert provider.calls == 0
     tasks = store.list_coding_tasks()
     assert len(tasks) == 1
@@ -401,12 +450,17 @@ def test_review_ready_coding_task_notifies_its_source_chat_once(tmp_path: Path) 
     store.init_db()
     events: list[tuple[str, str, str, dict[str, object]]] = []
     spoken: list[tuple[str, str]] = []
+
+    def speak(session_id: str, text: str) -> str:
+        spoken.append((session_id, text))
+        return "review-voice-request"
+
     service = CodingAgentService(
         settings,
         RuntimeSettings(coding_agent_enabled=True),
         store,
         lambda event_type, level, message, metadata: events.append((event_type, level, message, metadata)),
-        notification_speaker=lambda session_id, text: spoken.append((session_id, text)),
+        notification_speaker=speak,
     )
     task = service.create_task("Напиши Python файл", session_id="chat-session")
 
@@ -430,6 +484,7 @@ def test_review_ready_coding_task_notifies_its_source_chat_once(tmp_path: Path) 
                 "session_id": "chat-session",
                 "message_id": notifications[0].id,
                 "notification": notifications[0].content,
+                "voice_request_id": "review-voice-request",
             },
         )
     ]
@@ -443,12 +498,17 @@ def test_failed_coding_task_notifies_its_source_chat_once(tmp_path: Path) -> Non
     store.init_db()
     events: list[tuple[str, str, str, dict[str, object]]] = []
     spoken: list[tuple[str, str]] = []
+
+    def speak(session_id: str, text: str) -> str:
+        spoken.append((session_id, text))
+        return "failure-voice-request"
+
     service = CodingAgentService(
         settings,
         RuntimeSettings(coding_agent_enabled=True),
         store,
         lambda event_type, level, message, metadata: events.append((event_type, level, message, metadata)),
-        notification_speaker=lambda session_id, text: spoken.append((session_id, text)),
+        notification_speaker=speak,
     )
     task = service.create_task("Проверь Python файл", session_id="chat-session")
 
@@ -472,9 +532,34 @@ def test_failed_coding_task_notifies_its_source_chat_once(tmp_path: Path) -> Non
                 "session_id": "chat-session",
                 "message_id": notifications[0].id,
                 "notification": notifications[0].content,
+                "voice_request_id": "failure-voice-request",
             },
         )
     ]
+
+
+def test_coding_notification_marks_live_voice_utterance_instead_of_batch_tts(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = coding_settings(tmp_path, project)
+    store = TimelineStore(settings.database_path)
+    store.init_db()
+    events: list[tuple[str, str, str, dict[str, object]]] = []
+
+    service = CodingAgentService(
+        settings,
+        RuntimeSettings(coding_agent_enabled=True),
+        store,
+        lambda event_type, level, message, metadata: events.append((event_type, level, message, metadata)),
+        notification_speaker=lambda *_: NotificationSpeechDelivery("live", "live-utterance"),
+    )
+    task = service.create_task("Напиши Python файл", session_id="chat-session")
+
+    service._notify_review_ready(task)
+
+    assert events[0][0] == "coding.review_notification"
+    assert events[0][3]["voice_utterance_id"] == "live-utterance"
+    assert "voice_request_id" not in events[0][3]
 
 
 def test_coding_settings_and_task_api_contract(monkeypatch, tmp_path: Path) -> None:
@@ -535,7 +620,10 @@ def test_docker_availability_accepts_successful_cli_and_image(monkeypatch, tmp_p
     project.mkdir()
     runner = DockerSandboxRunner(coding_settings(tmp_path, project))
 
+    commands: list[list[str]] = []
+
     async def successful_exec(argv: list[str], *, timeout: float) -> dict[str, object]:
+        commands.append(argv)
         return {"exit_code": 0, "stdout": "ok", "stderr": "", "timed_out": False}
 
     monkeypatch.setattr(runner, "_exec", successful_exec)
@@ -547,6 +635,19 @@ def test_docker_availability_accepts_successful_cli_and_image(monkeypatch, tmp_p
     assert availability.image_available is True
     assert availability.sandbox_available is True
     assert availability.reason is None
+    assert commands[1][-1] == "neuroasist-coding:latest"
+
+
+def test_docker_runner_adds_latest_to_an_untagged_image_name(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    settings = coding_settings(tmp_path, project).model_copy(update={"coding_docker_image": "local/coding-runtime"})
+    runner = DockerSandboxRunner(settings)
+
+    assert runner._image_reference(settings.coding_docker_image) == "local/coding-runtime:latest"
+    assert runner._image_reference("registry.local:5000/coding-runtime") == "registry.local:5000/coding-runtime:latest"
+    assert runner._image_reference("registry.local/coding-runtime:v1") == "registry.local/coding-runtime:v1"
+    assert runner._image_reference("registry.local/coding-runtime@sha256:deadbeef") == "registry.local/coding-runtime@sha256:deadbeef"
 
 
 def test_runner_finds_per_user_docker_desktop_cli_when_path_is_stale(monkeypatch, tmp_path: Path) -> None:

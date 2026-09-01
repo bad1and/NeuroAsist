@@ -60,6 +60,38 @@ async def test_live_output_waits_for_a_reconnecting_socket() -> None:
     assert await waiting is True
 
 
+@pytest.mark.anyio
+async def test_known_reply_uses_the_regular_live_websocket_protocol() -> None:
+    manager = VoiceSessionManager(MockTTSProvider())
+    connection = FakeVoiceConnection()
+    manager._connections["coding-session"] = connection
+
+    utterance_id = manager.enqueue_reply(
+        session_id="coding-session",
+        reply="Coding Agent закончил задачу. Результат готов к проверке.",
+        language="ru",
+        voice="ru_f1",
+    )
+
+    assert utterance_id is not None
+    for _ in range(100):
+        if any(event["type"] == "voice.utterance.finished" for event in connection.events):
+            break
+        await asyncio.sleep(0.01)
+
+    assert [event["type"] for event in connection.events] == [
+        "voice.utterance.started",
+        "voice.metadata",
+        "voice.text.delta",
+        "voice.text.completed",
+        "voice.utterance.finished",
+    ]
+    assert connection.events[2]["delta"] == "Coding Agent закончил задачу. Результат готов к проверке."
+    assert connection.events[3]["reply"] == connection.events[2]["delta"]
+    assert connection.segments
+    assert connection.segments[0][0]["utterance_id"] == utterance_id
+
+
 def test_normalizer_keeps_ui_independent_tts_copy() -> None:
     source = "**Ответ** `value` https://example.com\n```python\nsecret()\n```"
     assert TextNormalizer().normalize(source) == "Ответ value ссылка"

@@ -6,8 +6,9 @@ import logging
 import shutil
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from apps.backend.app.coding.policy import CodingPolicyError
 from apps.backend.app.coding.runner import CommandPolicyError, DockerAvailability, DockerSandboxRunner
@@ -39,6 +40,14 @@ packages, access network, use a shell, or ask for access outside the workspace.
 Prefer small edits and run relevant checks before finish."""
 
 
+@dataclass(frozen=True)
+class NotificationSpeechDelivery:
+    """Where a durable Coding Agent notice was sent for voice playback."""
+
+    channel: Literal["live", "batch"]
+    request_id: str
+
+
 class CodingAgentService:
     """Durable, review-first coding loop built from intentionally narrow tools."""
 
@@ -49,7 +58,7 @@ class CodingAgentService:
         store: TimelineStore | None,
         event_publisher,
         llm_provider_factory=None,
-        notification_speaker: Callable[[str, str], None] | None = None,
+        notification_speaker: Callable[[str, str], NotificationSpeechDelivery | str | None] | None = None,
     ) -> None:
         self.settings = settings
         self.runtime_settings = runtime_settings
@@ -62,7 +71,10 @@ class CodingAgentService:
         self._llm_provider_factory = llm_provider_factory or self._provider
         self._notification_speaker = notification_speaker
 
-    def bind_notification_speaker(self, speaker: Callable[[str, str], None] | None) -> None:
+    def bind_notification_speaker(
+        self,
+        speaker: Callable[[str, str], NotificationSpeechDelivery | str | None] | None,
+    ) -> None:
         """Bind the shared voice path after the application creates it."""
         self._notification_speaker = speaker
 
@@ -515,8 +527,8 @@ class CodingAgentService:
             self._persist_review_ready_notification,
             task,
         )
-        # SpeechOrchestrator.enqueue creates an asyncio task, so delivery must
-        # remain on the event-loop thread after the durable append completes.
+        # Live output schedules its stream on the application event loop, so
+        # delivery must remain there after the durable append completes.
         self._deliver_review_ready_notification(persisted)
 
     def _persist_review_ready_notification(
@@ -548,18 +560,20 @@ class CodingAgentService:
         task_id, session_id, message, created = persisted
         if not created:
             return
-        self._speak_notification(session_id, message.content)
+        speech_delivery = self._speak_notification(session_id, message.content)
         if self.event_publisher is not None:
+            metadata: dict[str, object] = {
+                "task_id": task_id,
+                "session_id": session_id,
+                "message_id": message.id,
+                "notification": message.content,
+            }
+            self._add_speech_delivery_metadata(metadata, speech_delivery)
             self.event_publisher(
                 "coding.review_notification",
                 "info",
                 "Coding Agent task is ready for review",
-                {
-                    "task_id": task_id,
-                    "session_id": session_id,
-                    "message_id": message.id,
-                    "notification": message.content,
-                },
+                metadata,
             )
 
     def _notify_task_failed(self, task: dict[str, object]) -> None:
@@ -604,30 +618,56 @@ class CodingAgentService:
         task_id, session_id, message, created = persisted
         if not created:
             return
-        self._speak_notification(session_id, message.content)
+        speech_delivery = self._speak_notification(session_id, message.content)
         if self.event_publisher is not None:
+            metadata: dict[str, object] = {
+                "task_id": task_id,
+                "session_id": session_id,
+                "message_id": message.id,
+                "notification": message.content,
+            }
+            self._add_speech_delivery_metadata(metadata, speech_delivery)
             self.event_publisher(
                 "coding.attention_notification",
                 "warning",
                 "Coding Agent task failed and needs attention",
-                {
-                    "task_id": task_id,
-                    "session_id": session_id,
-                    "message_id": message.id,
-                    "notification": message.content,
-                },
+                metadata,
             )
 
-    def _speak_notification(self, session_id: str, text: str) -> None:
-        if self._notification_speaker is None:
+    @staticmethod
+    def _add_speech_delivery_metadata(
+        metadata: dict[str, object],
+        delivery: NotificationSpeechDelivery | None,
+    ) -> None:
+        if delivery is None:
             return
+        key = "voice_utterance_id" if delivery.channel == "live" else "voice_request_id"
+        metadata[key] = delivery.request_id
+
+    def _speak_notification(
+        self,
+        session_id: str,
+        text: str,
+    ) -> NotificationSpeechDelivery | None:
+        if self._notification_speaker is None:
+            return None
         try:
-            self._notification_speaker(session_id, text)
+            delivery = self._notification_speaker(session_id, text)
+            if isinstance(delivery, NotificationSpeechDelivery):
+                if delivery.request_id.strip():
+                    return delivery
+                return None
+            # String callbacks are retained for integrations built before live
+            # notification streaming existed; they use the batch TTS route.
+            if isinstance(delivery, str) and delivery.strip():
+                return NotificationSpeechDelivery("batch", delivery.strip())
+            return None
         except Exception:
             # A notification must remain durable even if the optional voice
             # layer is momentarily unavailable. SpeechOrchestrator itself
             # handles asynchronous synthesis failures as recoverable events.
             logger.warning("Could not queue Coding Agent notification for speech", exc_info=True)
+            return None
 
     @staticmethod
     def _review_ready_notification(task: dict[str, object]) -> str:
