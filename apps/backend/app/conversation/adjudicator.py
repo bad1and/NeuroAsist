@@ -18,14 +18,23 @@ _SYSTEM_PROMPT = """Ты классификатор живого разгово�
 Разрешённые действия: wait_more, observe, avatar_reaction, backchannel, respond, defer.
 Причины: incomplete_turn, direct_address, invited, ambient_speech, self_talk, other_person,
 relevant_opening, emotional_event, cooldown, speech_budget, echo, low_confidence.
+
+ВАЖНО: Не ставь neutral для emotion_impulses, если в сообщении есть какой-то эмоциональный заряд.
+Мат, оскорбления → hurt, irritation, anger. Похвала, благодарность → joy. Смех (хаха, лол, ору) → playfulness.
+Грусть, жалобы → sadness, anxiety. Удивление → interest. Разочарование → irritation.
+event_kind: support, apology, insult, teasing, praise, disagreement, rejection, promise_made,
+broken_promise, fulfilled_promise, vulnerability, affection, user_frustration,
+iris_mistake_corrected, shared_success, important_negative_event, important_news, neutral.
+
 Схема верхнего уровня:
-{"version":1,"decision":{"version":1,"action":"observe","reason":"ambient_speech",
-"confidence":0.8,"addressedness":0.1,"relevance":0.3,"significance":0.2,
-"reaction_emotion":"neutral","defer_for_ms":null,"expires_in_ms":null},
-"appraisal":{"version":1,"event_kind":"neutral","target_participant":"primary",
-"confidence":0.7,"intensity":0.1,"valence":0.0,"arousal":0.0,
-"emotion_impulses":{},"relationship_impulses":{},"cause_message_ids":[]}}
+{"version":1,"decision":{"version":1,"action":"respond","reason":"direct_address",
+"confidence":0.9,"addressedness":0.95,"relevance":0.7,"significance":0.5,
+"reaction_emotion":"happy","defer_for_ms":null,"expires_in_ms":null},
+"appraisal":{"version":1,"event_kind":"praise","target_participant":"primary",
+"confidence":0.85,"intensity":0.6,"valence":0.5,"arousal":0.4,
+"emotion_impulses":{"joy":0.5},"relationship_impulses":{"warmth":0.2},"cause_message_ids":[]}}
 Не возвращай скрытые рассуждения. Все числа должны находиться в диапазонах схемы."""
+
 
 class StructuredConversationAdjudicator:
     def __init__(

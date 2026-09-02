@@ -45,9 +45,9 @@ class StateToBehaviorRenderer:
     """No LLM is involved: presentation is a projection of stored state."""
 
     def render(self, affect: AffectState, relationship: ParticipantState, *, task_like: bool = False) -> BehaviorGuide:
-        emotion = affect.primary_emotion or self._emotion(affect)
+        emotion = affect.primary_emotion if affect.primary_emotion != "neutral" else self._emotion(affect)
         strength = max(getattr(affect, emotion, 0.0), affect.psychological_tension)
-        expression = "strong" if strength >= .72 else "noticeable" if strength >= .45 else "subtle" if strength >= .22 else "muted"
+        expression = "strong" if strength >= .50 else "noticeable" if strength >= .25 else "subtle" if strength >= .08 else "muted"
         negative = emotion in {"anger", "hurt", "irritation", "sadness", "anxiety"}
         closeness = "distant" if relationship.tension >= .65 else "reserved" if negative or relationship.tension >= .35 else "personal" if relationship.warmth >= .7 else "warm" if relationship.warmth >= .35 else "normal"
         humor = "avoid" if negative and strength >= .35 else "restrained" if negative else "playful" if affect.playfulness >= .42 else "normal"
@@ -56,19 +56,19 @@ class StateToBehaviorRenderer:
         if task_like:
             length = "expansive_if_needed"
         labels = {
-            "anger": "Сохраняй спокойную твёрдость и ясную границу, без нападок.",
-            "hurt": "Будь заметно сдержаннее и честнее о дистанции, без театральности.",
-            "irritation": "Отвечай чуть суше, но по существу и без грубости.",
-            "sadness": "Говори мягче и спокойнее, не перекладывая эмоцию на пользователя.",
-            "anxiety": "Будь внимательной и собранной; не нагнетай.",
-            "joy": "Разрешена тёплая, живая радость без чрезмерного восторга.",
-            "playfulness": "Разрешён лёгкий уместный юмор.",
-            "embarrassment": "Коротко признай свою неловкость и сфокусируйся на исправлении.",
-            "interest": "Проявляй живое внимание и помогай развивать тему.",
+            "anger": "Вспышка возмущения: покажи твердые границы, не сглаживай углы, выражай несогласие честно и прямо.",
+            "hurt": "Обида или дистанция: будь честнее и сдержаннее, покажи, что тебе неприятно, без наигранной драмы.",
+            "irritation": "Тебя что-то задело или раздражает: отвечай с характером, прямо и с лёгкой колкостью, без лицемерия.",
+            "sadness": "Задумчивое или уязвимое настроение: говори мягче, спокойнее и глубже, без фальшивого позитива.",
+            "anxiety": "Внутренняя настороженность: будь внимательной, собранной и чуткой к происходящему.",
+            "joy": "Приподнятый, искренний настрой: делись живой радостью, теплом и настоящими эмоциями без натянутых рамок.",
+            "playfulness": "Озорной, дерзкий настрой: подкалывай, используй иронию и сарказм, будь спонтанной и непредсказуемой.",
+            "embarrassment": "Смущение или неловкость: признай промах с самоиронией и продолжай разговор.",
+            "interest": "Живой азарт и любопытство: копай вглубь, задавай неожиданные вопросы и развивай мысль.",
         }
         causes = "Не используй старую обиду как упрёк." if not affect.active_cause_labels else f"Учитывай нерешённую причину: {affect.active_cause_labels[0]}; не дави ею на пользователя."
         return BehaviorGuide(
-            dominant_mood_instruction=labels.get(emotion, "Сохраняй естественный нейтральный тон."),
+            dominant_mood_instruction=labels.get(emotion, "Сохраняй живой естественный тон с собственным характером."),
             expression_strength=expression,
             response_length_bias=length,
             humor_policy=humor,
@@ -89,5 +89,10 @@ class StateToBehaviorRenderer:
 
     @staticmethod
     def _emotion(state: AffectState) -> str:
-        values = {name: getattr(state, name) for name in ("joy", "interest", "sadness", "hurt", "irritation", "anger", "anxiety", "embarrassment", "playfulness")}
-        return max(values, key=values.get)
+        values = {name: getattr(state, name, 0.0) for name in ("joy", "interest", "sadness", "hurt", "irritation", "anger", "anxiety", "embarrassment", "playfulness")}
+        if values.get("interest", 0.0) <= 0.25:
+            values["interest"] = 0.0
+        if values.get("playfulness", 0.0) <= 0.15:
+            values["playfulness"] = 0.0
+        winner = max(values, key=values.get)
+        return winner if values[winner] > 0.0 else "neutral"

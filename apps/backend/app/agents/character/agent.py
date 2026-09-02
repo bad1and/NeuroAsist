@@ -932,14 +932,43 @@ class CharacterAgent:
 
     @staticmethod
     def _arbitrate_presentation(parsed: _ParseResult, guide: "BehaviorGuide") -> _ParseResult:
-        """Canonical state wins over optional model metadata; visible text is untouched."""
+        """LLM-first strategy: LLM emotion and gesture are primary and authoritative.
+
+        Background state acts as a context baseline only when the LLM leaves its emotion neutral.
+        """
         from apps.backend.app.schemas.character import AffectCue, DeliveryCue, Emotion, Gesture, GestureCue
         assert parsed.turn is not None
-        gesture_name = next((name for name in guide.allowed_gestures if name in Gesture._value2member_map_), "auto")
+        llm_emotion = parsed.turn.affect.emotion if parsed.turn.affect is not None else Emotion.NEUTRAL
+        llm_intensity = parsed.turn.affect.intensity if parsed.turn.affect is not None else None
+
+        # Primary authority: The LLM model understands context, nuance, sarcasm, and character intent.
+        if llm_emotion != Emotion.NEUTRAL:
+            final_emotion = llm_emotion
+            final_intensity = max(0.2, llm_intensity if llm_intensity is not None else 0.7)
+        elif guide.avatar_emotion != "neutral":
+            final_emotion = Emotion(guide.avatar_emotion)
+            final_intensity = guide.avatar_intensity
+        else:
+            final_emotion = Emotion.NEUTRAL
+            final_intensity = guide.avatar_intensity
+
+        # Gesture preservation: if the model explicitly chose a gesture (other than auto/none),
+        # respect the model's acting choice.
+        llm_gesture = parsed.turn.gesture.name if parsed.turn.gesture is not None else Gesture.AUTO
+        if llm_gesture not in {Gesture.AUTO, Gesture.NONE} and llm_gesture in Gesture:
+            final_gesture = llm_gesture
+        else:
+            gesture_name = next((name for name in guide.allowed_gestures if name in Gesture._value2member_map_), "auto")
+            final_gesture = Gesture(gesture_name)
+
+        delivery_pace = parsed.turn.delivery.pace if parsed.turn.delivery is not None and parsed.turn.delivery.pace != "normal" else guide.tts_pace
+        delivery_emphasis = parsed.turn.delivery.emphasis if parsed.turn.delivery is not None and parsed.turn.delivery.emphasis > 0.0 else guide.tts_emphasis
+        overrides = parsed.turn.delivery.overrides if parsed.turn.delivery is not None else []
+
         turn = parsed.turn.model_copy(update={
-            "affect": AffectCue(emotion=Emotion(guide.avatar_emotion), intensity=guide.avatar_intensity),
-            "gesture": GestureCue(name=Gesture(gesture_name), intensity=guide.avatar_intensity),
-            "delivery": DeliveryCue(pace=guide.tts_pace, emphasis=guide.tts_emphasis),
+            "affect": AffectCue(emotion=final_emotion, intensity=final_intensity),
+            "gesture": GestureCue(name=final_gesture, intensity=final_intensity),
+            "delivery": DeliveryCue(pace=delivery_pace, emphasis=delivery_emphasis, overrides=overrides),
         })
         return _ParseResult(legacy_result(turn), valid=parsed.valid, reason=parsed.reason, turn=turn)
 
