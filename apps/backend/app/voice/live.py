@@ -499,17 +499,17 @@ class VoiceSessionManager:
                 return
             directive_sent = True
             if presentation_cue is not None and presentation_cue.expression_strength != "muted":
-                from apps.backend.app.schemas.character import Emotion
+                default_gesture = presentation_cue.allowed_gestures[0] if presentation_cue.allowed_gestures else "auto"
                 # LLM-first: when the model specified a non-neutral emotion, preserve it as authoritative.
                 if directive.emotion != Emotion.NEUTRAL:
-                    gesture = directive.gesture if directive.gesture not in {"auto", "none"} else presentation_cue.allowed_gestures[0]
+                    gesture = directive.gesture if directive.gesture not in {"auto", "none"} else default_gesture
                     directive = AvatarDirective(
                         emotion=directive.emotion,
                         gesture=gesture,
                         intensity=max(0.3, directive.intensity),
                     )
                 elif presentation_cue.avatar_emotion != "neutral":
-                    gesture = directive.gesture if directive.gesture not in {"auto", "none"} else presentation_cue.allowed_gestures[0]
+                    gesture = directive.gesture if directive.gesture not in {"auto", "none"} else default_gesture
                     directive = AvatarDirective(
                         emotion=Emotion(presentation_cue.avatar_emotion),
                         gesture=gesture,
@@ -538,7 +538,7 @@ class VoiceSessionManager:
                 await self._avatar_service.stream_metadata(
                     session_id=context.session_id,
                     utterance_id=context.utterance_id,
-                    emotion=directive.emotion,
+                    emotion=directive.emotion.value,
                     gesture=directive.gesture,
                     gesture_intensity=directive.intensity,
                 )
@@ -705,7 +705,7 @@ class VoiceSessionManager:
                 context,
                 "voice.text.completed",
                 reply=completed_reply,
-                memory_updates=agent.last_memory_updates,
+                memory_updates=getattr(agent, "last_memory_updates", ()),
             )
             context.text_completed = True
             await self._enqueue(queue, worker, None)
