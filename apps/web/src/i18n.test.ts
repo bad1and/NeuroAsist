@@ -39,6 +39,11 @@ describe("interface translations", () => {
     expect(translateInterfaceText("Задачи кодинг-агента", "en")).toBe("Coding Agent tasks");
     expect(translateInterfaceText("Песочница и окружение Docker", "en")).toBe("Docker sandbox and environment");
     expect(translateInterfaceText("Параметры кодинг-агента", "en")).toBe("Coding Agent settings");
+    expect(translateInterfaceText("Режим разработчика", "en")).toBe("Developer mode");
+    expect(translateInterfaceText(
+      "Разблокирует расширенные настройки голоса, таймингов живого разговора, отладки аватара и прямого управления данными.",
+      "en",
+    )).toBe("Unlocks advanced settings for voice, live-conversation timing, avatar debugging, and direct data control.");
     expect(translateInterfaceText("Сначала новые", "en")).toBe("Newest first");
     expect(translateInterfaceText("Целостность", "en")).toBe("Integrity");
     expect(translateInterfaceText("Живая история", "en")).toBe("Live history");
