@@ -63,6 +63,8 @@ const RU_TO_EN: readonly TranslationPair[] = [
   ["Русский", "Russian"],
   ["Английский", "English"],
   ["Выберите язык кнопок, меню и системных подсказок.", "Choose the language for buttons, menus, and system hints."],
+  ["Режим разработчика", "Developer mode"],
+  ["Разблокирует расширенные настройки голоса, таймингов живого разговора, отладки аватара и прямого управления данными.", "Unlocks advanced settings for voice, live-conversation timing, avatar debugging, and direct data control."],
   ["Общие настройки интерфейса.", "General interface settings."],
   ["Интерфейс", "Interface"],
   ["Основная навигация", "Main navigation"],
