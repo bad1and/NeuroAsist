@@ -218,3 +218,27 @@ def test_replace_failure_preserves_old_file_and_cleans_unique_temp(monkeypatch, 
 
     assert path.read_bytes() == before
     assert not list(tmp_path.glob(".settings.json.*.tmp"))
+
+
+def test_developer_mode_enabled_patches_and_persists(monkeypatch, tmp_path) -> None:
+    path = tmp_path / "settings.json"
+    store = RuntimeSettingsStore(path)
+    runtime = RuntimeSettings(developer_mode_enabled=False)
+    store.save(runtime)
+    request = _request(runtime, store, tmp_path)
+    monkeypatch.setattr(
+        settings_route,
+        "get_public_settings",
+        lambda req: SimpleNamespace(developer_mode_enabled=req.app.state.runtime_settings.developer_mode_enabled),
+    )
+
+    response = asyncio.run(settings_route.patch_runtime_settings(
+        RuntimeSettingsPatch(developer_mode_enabled=True),
+        request,
+    ))
+
+    assert response.developer_mode_enabled is True
+    assert runtime.developer_mode_enabled is True
+    persisted = store.load(RuntimeSettings())
+    assert persisted.developer_mode_enabled is True
+

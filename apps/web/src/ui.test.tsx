@@ -34,6 +34,7 @@ import { JournalPage } from "./journal";
 import { MemoryPage } from "./memory";
 
 const settings = {
+  developer_mode_enabled: false,
   provider: "deepseek", model: "deepseek-chat", personality: "default", interface_locale: "ru" as const, voice_language: "ru",
   voice_microphone_profile: "balanced", voice_input_device_id: "", voice_output_device_id: "", voice_vad: { configured_provider: "silero", active_provider: "silero", ready: true, fallback: false },
   voice_input_diagnostic_audio_enabled: false,
@@ -568,6 +569,71 @@ describe("русский интерфейс", () => {
     ));
     await waitFor(() => expect(participantMode).toHaveValue("group"));
     expect(container.querySelector(".settings-panel")).toBeInTheDocument();
+  });
+
+  it("блокирует настройки разработчика по умолчанию и делает вкладки полупрозрачными", async () => {
+    render(<App />);
+    expect(await screen.findByRole("button", { name: "Диалог" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
+    const settingsNavigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
+    const voiceGroup = within(settingsNavigation).getByRole("button", { name: "Голос" });
+    fireEvent.click(voiceGroup);
+    fireEvent.click(voiceGroup);
+    fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Основное" }));
+
+    const recognitionBtn = within(settingsNavigation).getByRole("button", { name: "Распознавание" });
+    expect(recognitionBtn).toHaveClass("is-dev-dimmed");
+    expect(within(settingsNavigation).getByRole("button", { name: "Основное" })).not.toHaveClass("is-dev-dimmed");
+
+    expect(screen.getByLabelText("Голос TeraTTSv2")).toBeDisabled();
+    expect(screen.getByRole("slider", { name: /Скорость воспроизведения/ })).toBeDisabled();
+    expect(screen.getByLabelText(/Подача голоса/)).toBeDisabled();
+    expect(screen.getByLabelText(/Выразительность/)).toBeDisabled();
+
+    fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Живой разговор" }));
+    expect(screen.getByLabelText("Участники")).not.toBeDisabled();
+    expect(screen.getByLabelText("Охотность вступать")).not.toBeDisabled();
+    expect(screen.getByLabelText("Инициативность")).not.toBeDisabled();
+    expect(screen.getByLabelText("Прямое обращение")).toBeDisabled();
+    expect(screen.getByLabelText("Чувствительность к перебиванию")).toBeDisabled();
+    expect(screen.getByLabelText("Терпимость к паузам")).toBeDisabled();
+    expect(screen.getByText("Тонкие параметры и тайминги")).toBeInTheDocument();
+  });
+
+  it("включает режим разработчика через Интерфейс и разблокирует расширенные настройки", async () => {
+    render(<App />);
+    expect(await screen.findByRole("button", { name: "Диалог" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
+    const settingsNavigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
+    fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Система" }));
+    fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Интерфейс" }));
+
+    const devSwitch = await screen.findByRole("switch", { name: /Режим разработчика/ });
+    expect(devSwitch).not.toBeChecked();
+
+    const enabledSettings = { ...settings, developer_mode_enabled: true };
+    api.updateRuntimeSettings.mockResolvedValueOnce(enabledSettings);
+
+    fireEvent.click(devSwitch);
+    await waitFor(() => expect(api.updateRuntimeSettings).toHaveBeenCalledWith({ developer_mode_enabled: true }));
+  });
+
+  it("переходит в раздел Интерфейс по клику на Dev-бейдж", async () => {
+    render(<App />);
+    expect(await screen.findByRole("button", { name: "Диалог" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
+    const settingsNavigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
+    fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Живой разговор" }));
+
+    const devBadges = await screen.findAllByRole("button", { name: "Dev" });
+    expect(devBadges.length).toBeGreaterThan(0);
+    fireEvent.click(devBadges[0]);
+
+    expect(await screen.findByRole("heading", { name: "Интерфейс" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: /Режим разработчика/ })).toBeInTheDocument();
   });
 
   it("сохраняет выбранные устройства ввода и вывода", async () => {

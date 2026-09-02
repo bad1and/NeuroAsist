@@ -191,6 +191,7 @@ export type PublicSettings = {
   model: string;
   personality: string;
   interface_locale: InterfaceLocale;
+  developer_mode_enabled: boolean;
   voice_language: string;
   voice_microphone_profile: "headset" | "balanced" | "speakers";
   voice_input_device_id: string;

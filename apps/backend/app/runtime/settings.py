@@ -28,6 +28,7 @@ class RuntimeSettings:
     # stay independent from ``voice_language`` so changing the interface does
     # not alter Iris, STT, TTS, or the user's conversation data.
     interface_locale: str = "ru"
+    developer_mode_enabled: bool = False
     personality: str = "default"
     voice_language: str = "ru"
     voice_microphone_profile: str = "balanced"
