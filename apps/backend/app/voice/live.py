@@ -500,12 +500,23 @@ class VoiceSessionManager:
             directive_sent = True
             if presentation_cue is not None and presentation_cue.expression_strength != "muted":
                 from apps.backend.app.schemas.character import Emotion
-                directive = AvatarDirective(
-                    emotion=Emotion(presentation_cue.avatar_emotion),
-                    gesture=presentation_cue.allowed_gestures[0],
-                    intensity=presentation_cue.avatar_intensity,
-                )
-            directive = make_live_directive_expressive(directive, transcript)
+                # LLM-first: when the model specified a non-neutral emotion, preserve it as authoritative.
+                if directive.emotion != Emotion.NEUTRAL:
+                    gesture = directive.gesture if directive.gesture not in {"auto", "none"} else presentation_cue.allowed_gestures[0]
+                    directive = AvatarDirective(
+                        emotion=directive.emotion,
+                        gesture=gesture,
+                        intensity=max(0.3, directive.intensity),
+                    )
+                elif presentation_cue.avatar_emotion != "neutral":
+                    gesture = directive.gesture if directive.gesture not in {"auto", "none"} else presentation_cue.allowed_gestures[0]
+                    directive = AvatarDirective(
+                        emotion=Emotion(presentation_cue.avatar_emotion),
+                        gesture=gesture,
+                        intensity=presentation_cue.avatar_intensity,
+                    )
+            if directive.emotion == Emotion.NEUTRAL:
+                directive = make_live_directive_expressive(directive, transcript)
             context.voice_style = resolve_voice_style(
                 context.voice_style,
                 emotion=directive.emotion.value,

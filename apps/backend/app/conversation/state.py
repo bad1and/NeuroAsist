@@ -122,11 +122,11 @@ class CharacterStateReducer:
 
     def apply_affect(self, state: AffectState, appraisal: EventAppraisal) -> AffectState:
         strength = appraisal.confidence * appraisal.intensity
-        state.valence = _clamp(state.valence + appraisal.valence * strength * 0.18, -1.0, 1.0)
+        state.valence = _clamp(state.valence + appraisal.valence * strength * 0.45, -1.0, 1.0)
         state.arousal = _clamp(state.arousal + appraisal.arousal * strength * 0.14, 0.0, 1.0)
         for emotion, impulse in appraisal.emotion_impulses.items():
             if emotion in EMOTION_HALF_LIVES_MINUTES:
-                setattr(state, emotion, _clamp(getattr(state, emotion) + _clamp(impulse, -1, 1) * strength * 0.18, 0, 1))
+                setattr(state, emotion, _clamp(getattr(state, emotion) + _clamp(impulse, -1, 1) * strength * 0.45, 0, 1))
         state.social_openness = _clamp(
             state.social_openness + (state.joy + state.interest - state.hurt - state.anger) * 0.025,
             0.0,
@@ -172,15 +172,15 @@ class CharacterStateReducer:
     @staticmethod
     def _derive_emotions(state: AffectState, now: datetime) -> None:
         scores = {name: getattr(state, name) for name in EMOTION_HALF_LIVES_MINUTES}
-        if scores["interest"] < .38:
+        if scores["interest"] < .28:
             scores["interest"] = 0.0
-        if scores["playfulness"] < .25:
+        if scores["playfulness"] < .20:
             scores["playfulness"] = 0.0
         winner, score = max(scores.items(), key=lambda item: item[1])
         current_score = scores.get(state.primary_emotion, 0.0)
         # Hysteresis prevents avatar/prompt flicker on nearby values.
         # Baseline curiosity is intentionally not a visible "thinking" mood.
-        if score < .04:
+        if score < .02:
             winner = "neutral"
         elif state.primary_emotion != "neutral" and current_score >= score - .08:
             winner = state.primary_emotion
