@@ -86,6 +86,7 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         model=settings.deepseek_model,
         personality=runtime_settings.personality,
         interface_locale=runtime_settings.interface_locale,
+        developer_mode_enabled=runtime_settings.developer_mode_enabled,
         voice_language=runtime_settings.voice_language,
         voice_microphone_profile=runtime_settings.voice_microphone_profile,
         voice_input_device_id=runtime_settings.voice_input_device_id,
@@ -174,6 +175,9 @@ async def patch_runtime_settings(
                 detail="Unsupported interface locale",
             )
         runtime_settings.interface_locale = payload.interface_locale
+
+    if payload.developer_mode_enabled is not None:
+        runtime_settings.developer_mode_enabled = bool(payload.developer_mode_enabled)
 
     if payload.voice_language is not None:
         if payload.voice_language not in AVAILABLE_VOICE_LANGUAGES:

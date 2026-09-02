@@ -16,6 +16,7 @@ import {
   IconComputerDatabase,
   IconInterfaceSpirals,
   IconInterfaceUserQueenCrown,
+  IconInterfaceLock,
 } from "./CustomIcons";
 import { FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, SendHorizontal } from "lucide-react";
@@ -2611,6 +2612,47 @@ function EventsPage({
   );
 }
 
+function DevBadge({
+  active,
+  onClick,
+  title,
+}: {
+  active?: boolean;
+  onClick?: () => void;
+  title?: string;
+}) {
+  return (
+    <span
+      className={`dev-badge${active ? " is-active" : ""}`}
+      title={
+        title ??
+        (active
+          ? "Параметр режима разработчика"
+          : "Требуется режим разработчика (нажмите, чтобы перейти в раздел «Интерфейс»)")
+      }
+      onClick={(e) => {
+        if (onClick) {
+          e.preventDefault();
+          e.stopPropagation();
+          onClick();
+        }
+      }}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={(e) => {
+        if (onClick && (e.key === "Enter" || e.key === " ")) {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+    >
+      <IconInterfaceLock size={10} aria-hidden="true" />
+      <span>Dev</span>
+    </span>
+  );
+}
+
+
 export function SettingsPage({
   settings,
   avatarStatus,
@@ -2634,6 +2676,7 @@ export function SettingsPage({
 }) {
   const [activeSection, setActiveSection] = useState<SettingsSection>("conversation");
   const [interfaceLocale, setInterfaceLocale] = useState<InterfaceLocale>("ru");
+  const [developerModeEnabled, setDeveloperModeEnabled] = useState(false);
   const [voiceLanguage, setVoiceLanguage] = useState("ru");
   const [voiceMicrophoneProfile, setVoiceMicrophoneProfile] = useState<MicrophoneProfile>("balanced");
   const [voiceInputDeviceId, setVoiceInputDeviceId] = useState("");
@@ -2681,6 +2724,7 @@ export function SettingsPage({
 
   const applySettingsToForm = useCallback((nextSettings: PublicSettings) => {
     setInterfaceLocale(nextSettings.interface_locale === "en" ? "en" : "ru");
+    setDeveloperModeEnabled(Boolean(nextSettings.developer_mode_enabled));
     setVoiceLanguage(nextSettings.voice_language);
     setVoiceMicrophoneProfile(nextSettings.voice_microphone_profile ?? "balanced");
     setVoiceInputDeviceId(nextSettings.voice_input_device_id ?? "");
@@ -2911,7 +2955,7 @@ export function SettingsPage({
 
   return (
     <section className="panel settings-panel">
-      <SettingsNavigation current={activeSection} onChange={setActiveSection} />
+      <SettingsNavigation current={activeSection} developerMode={developerModeEnabled} onChange={setActiveSection} />
 
       <div className="settings-content" ref={settingsContentRef}>
         <header className="settings-heading">
@@ -2962,13 +3006,36 @@ export function SettingsPage({
               </CustomSelect>
               <small>Выберите язык кнопок, меню и системных подсказок.</small>
             </label>
+            <SettingsSwitch
+              checked={developerModeEnabled}
+              label="Режим разработчика"
+              description="Разблокирует расширенные настройки голоса, таймингов живого разговора, отладки аватара и прямого управления данными."
+              onChange={(checked) => {
+                const previousValue = developerModeEnabled;
+                setDeveloperModeEnabled(checked);
+                saveRuntimeSetting(
+                  { developer_mode_enabled: checked },
+                  () => setDeveloperModeEnabled(previousValue),
+                );
+              }}
+            />
           </fieldset>
         </div>
 
         <div className="system-stack" hidden={!(["models", "backups", "maintenance", "events"] as SettingsSection[]).includes(activeSection)}>
-          <div hidden={activeSection !== "models"}><ModelManager /></div>
+          <div hidden={activeSection !== "models"}>
+            <ModelManager
+              developerMode={developerModeEnabled}
+              onUnlockRequest={() => setActiveSection("system-interface")}
+            />
+          </div>
           <div hidden={activeSection !== "backups"}><BackupControls /></div>
-          <div hidden={activeSection !== "maintenance"}><SystemMaintenance /></div>
+          <div hidden={activeSection !== "maintenance"}>
+            <SystemMaintenance
+              developerMode={developerModeEnabled}
+              onUnlockRequest={() => setActiveSection("system-interface")}
+            />
+          </div>
           <div hidden={activeSection !== "events"}>
             <EventsPage events={events} onRefreshEvents={onRefreshEvents} compact />
           </div>
@@ -2981,6 +3048,8 @@ export function SettingsPage({
             placement={settings.avatar_placement}
             inAppVisible={settings.avatar_in_app_visible}
             interfaceLocale={interfaceLocale}
+            developerMode={developerModeEnabled}
+            onUnlockRequest={() => setActiveSection("system-interface")}
             onRefresh={onRefreshAvatar}
             onOverlayChanged={onAvatarOverlayChanged}
             onSettingsChanged={onSettingsChanged}
@@ -3012,10 +3081,11 @@ export function SettingsPage({
 
         <fieldset className="settings-group" hidden={activeSection !== "voice-devices"}>
           <legend>Устройства</legend>
-          <label>
+          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
             Профиль микрофона
             <CustomSelect
               value={voiceMicrophoneProfile}
+              disabled={!developerModeEnabled}
               onChange={(event) => {
                 const nextValue = event.target.value as MicrophoneProfile;
                 const previousValue = voiceMicrophoneProfile;
@@ -3027,7 +3097,10 @@ export function SettingsPage({
               <option value="headset">Гарнитура</option>
               <option value="speakers">Колонки</option>
             </CustomSelect>
-            <small>Управляет эхоподавлением и шумоподавлением браузера для записи и живого режима.</small>
+            <small>
+              Управляет эхоподавлением и шумоподавлением браузера для записи и живого режима.
+              {!developerModeEnabled && " Доступно в режиме разработчика."}
+            </small>
           </label>
 
           <label>
@@ -3093,11 +3166,15 @@ export function SettingsPage({
         </fieldset>
 
         <fieldset className="settings-group" hidden={activeSection !== "voice"}>
-          <legend>Синтез речи</legend>
-          <label>
+          <legend style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+            <span>Синтез речи</span>
+            <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
+          </legend>
+          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
             Голос {ttsProviderLabel}
             <CustomSelect
               value={voiceTtsVoice}
+              disabled={saving || !developerModeEnabled}
               onChange={(event) => {
                 const nextValue = event.target.value;
                 const previousValue = voiceTtsVoice;
@@ -3113,7 +3190,7 @@ export function SettingsPage({
             </CustomSelect>
           </label>
 
-          <label>
+          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
             Скорость воспроизведения <strong>{voicePlaybackRate.toFixed(2)}×</strong>
             <input
               min="0.70"
@@ -3121,6 +3198,7 @@ export function SettingsPage({
               step="0.05"
               type="range"
               value={voicePlaybackRate}
+              disabled={saving || !developerModeEnabled}
               onChange={(event) => {
                 const nextValue = Number(event.target.value);
                 const previousValue = voicePlaybackRate;
@@ -3130,9 +3208,9 @@ export function SettingsPage({
             />
           </label>
 
-          <label>
+          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
             Подача голоса
-            <CustomSelect value={voiceTtsStyle} onChange={(event) => void changeVoiceStyle(event.target.value)} disabled={saving}>
+            <CustomSelect value={voiceTtsStyle} onChange={(event) => void changeVoiceStyle(event.target.value)} disabled={saving || !developerModeEnabled}>
               <option value="auto">Авто — по эмоции нейросети</option>
               <option value="calm">Спокойно</option>
               <option value="normal">Обычно</option>
@@ -3143,9 +3221,9 @@ export function SettingsPage({
             <small>Действует до перезапуска приложения.</small>
           </label>
 
-          <label>
+          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
             Выразительность
-            <CustomSelect value={voiceExpressionLevel} onChange={(event) => void changeVoiceExpression(event.target.value)} disabled={saving}>
+            <CustomSelect value={voiceExpressionLevel} onChange={(event) => void changeVoiceExpression(event.target.value)} disabled={saving || !developerModeEnabled}>
               <option value="minimal">Минимальная — почти нейтрально</option>
               <option value="natural">Естественная — рекомендовано</option>
               <option value="noticeable">Заметная — сильнее эмоции</option>
@@ -3153,7 +3231,7 @@ export function SettingsPage({
             <small>Усиливает или смягчает выбранную подачу; обычный профиль не меняется.</small>
           </label>
 
-          <div className="readonly-setting">
+          <div className={`readonly-setting${!developerModeEnabled ? " dev-locked-field" : ""}`}>
             <span>Движок синтеза</span>
             <strong>
               {ttsRuntimeLabel}
@@ -3163,8 +3241,11 @@ export function SettingsPage({
         </fieldset>
 
         <fieldset className="settings-group" hidden={activeSection !== "voice-recognition"}>
-          <legend>Детектор речи</legend>
-          <div className="readonly-setting">
+          <legend style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+            <span>Детектор речи</span>
+            <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
+          </legend>
+          <div className={`readonly-setting${!developerModeEnabled ? " dev-locked-field" : ""}`}>
             <span>Детектор речи</span>
             <strong>
               {settings.voice_vad?.active_provider ?? "energy"}
@@ -3176,47 +3257,56 @@ export function SettingsPage({
         </fieldset>
 
         <fieldset className="settings-group" hidden={activeSection !== "voice-recognition"}>
-          <legend>Словарь распознавания</legend>
-          <label>
+          <legend style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+            <span>Словарь распознавания</span>
+            <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
+          </legend>
+          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
             Канонический термин = точный вариант | точный вариант
             <textarea
               rows={9}
               value={sttTermsText}
               onChange={(event) => setSttTermsText(event.target.value)}
               placeholder={"NeuroAsist = Нейро Асист | нейроасист\nGigaAM = Гига АМ | гигаэм"}
-              disabled={saving}
+              disabled={saving || !developerModeEnabled}
             />
             <small>Исправляются только перечисленные варианты. Нечёткий поиск и LLM не используются.</small>
           </label>
-          <button className="secondary" type="button" onClick={() => void saveSttTerms()} disabled={saving}>
+          <button className="secondary" type="button" onClick={() => void saveSttTerms()} disabled={saving || !developerModeEnabled}>
             Сохранить словарь распознавания
           </button>
         </fieldset>
 
         <fieldset className="settings-group" hidden={activeSection !== "voice-recognition"}>
-          <legend>Словарь произношений</legend>
-          <label>
+          <legend style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+            <span>Словарь произношений</span>
+            <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
+          </legend>
+          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
             Термин = как произносить
             <textarea
               rows={8}
               value={pronunciationsText}
               onChange={(event) => setPronunciationsText(event.target.value)}
               placeholder={"OpenAI = Оупен Эй Ай\nКак-то = к+ак-то\nМука = му́ка"}
-              disabled={saving}
+              disabled={saving || !developerModeEnabled}
             />
             <small>
               Одна пара на строку. Ударение можно задать как «к+ак-то» или «ка́к-то».
               Изменения применяются к следующей фразе без перезапуска.
             </small>
           </label>
-          <button className="secondary" type="button" onClick={() => void savePronunciations()} disabled={saving}>
+          <button className="secondary" type="button" onClick={() => void savePronunciations()} disabled={saving || !developerModeEnabled}>
             Сохранить словарь
           </button>
         </fieldset>
 
         <fieldset className="settings-group" hidden={activeSection !== "voice-advanced"}>
-          <legend>Дополнительно</legend>
-          <label>
+          <legend style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+            <span>Дополнительно</span>
+            <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
+          </legend>
+          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
             Сегментов в буфере
             <input
               min="1"
@@ -3224,6 +3314,7 @@ export function SettingsPage({
               step="1"
               type="number"
               value={prebufferSegments}
+              disabled={!developerModeEnabled}
               onChange={(event) => {
                 const nextValue = Number(event.target.value);
                 const previousValue = prebufferSegments;
@@ -3233,7 +3324,7 @@ export function SettingsPage({
             />
           </label>
 
-          <label>
+          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
             Задержка буфера, мс
             <input
               min="0"
@@ -3241,6 +3332,7 @@ export function SettingsPage({
               step="50"
               type="number"
               value={prebufferMs}
+              disabled={!developerModeEnabled}
               onChange={(event) => {
                 const nextValue = Number(event.target.value);
                 const previousValue = prebufferMs;
@@ -3254,6 +3346,7 @@ export function SettingsPage({
             type="button"
             aria-expanded={showSttCapture}
             aria-controls="stt-guided-capture"
+            disabled={!developerModeEnabled}
             onClick={() => setShowSttCapture((value) => !value)}
           >
             {showSttCapture ? "Скрыть сбор тестовых записей" : "Собрать приватный STT-корпус"}
@@ -3314,10 +3407,16 @@ export function SettingsPage({
             </CustomSelect>
           </label>
 
-          <label>
+          <div className="dev-subgroup-header">
+            <span>Тонкие параметры и тайминги</span>
+            <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
+          </div>
+
+          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
             Прямое обращение
             <CustomSelect
               value={liveSettings.live_conversation_address_strictness}
+              disabled={!developerModeEnabled}
               onChange={(event) => updateLiveSetting(
                 "live_conversation_address_strictness",
                 event.target.value as LiveConversationSettings["live_conversation_address_strictness"],
@@ -3329,10 +3428,11 @@ export function SettingsPage({
             </CustomSelect>
           </label>
 
-          <label>
+          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
             Чувствительность к перебиванию
             <CustomSelect
               value={liveSettings.live_conversation_interruption_sensitivity}
+              disabled={!developerModeEnabled}
               onChange={(event) => updateLiveSetting(
                 "live_conversation_interruption_sensitivity",
                 event.target.value as LiveConversationSettings["live_conversation_interruption_sensitivity"],
@@ -3344,10 +3444,11 @@ export function SettingsPage({
             </CustomSelect>
           </label>
 
-          <label>
+          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
             Терпимость к паузам
             <CustomSelect
               value={liveSettings.live_conversation_pause_tolerance}
+              disabled={!developerModeEnabled}
               onChange={(event) => updateLiveSetting(
                 "live_conversation_pause_tolerance",
                 event.target.value as LiveConversationSettings["live_conversation_pause_tolerance"],
@@ -3359,10 +3460,11 @@ export function SettingsPage({
             </CustomSelect>
           </label>
 
-          <label>
+          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
             Выраженность эмоций
             <CustomSelect
               value={liveSettings.live_conversation_emotion_expression}
+              disabled={!developerModeEnabled}
               onChange={(event) => updateLiveSetting(
                 "live_conversation_emotion_expression",
                 event.target.value as LiveConversationSettings["live_conversation_emotion_expression"],
@@ -3374,10 +3476,11 @@ export function SettingsPage({
             </CustomSelect>
           </label>
 
-          <label>
+          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
             Восстановление настроения
             <CustomSelect
               value={liveSettings.live_conversation_mood_recovery}
+              disabled={!developerModeEnabled}
               onChange={(event) => updateLiveSetting(
                 "live_conversation_mood_recovery",
                 event.target.value as LiveConversationSettings["live_conversation_mood_recovery"],
@@ -3389,10 +3492,11 @@ export function SettingsPage({
             </CustomSelect>
           </label>
 
-          <label>
+          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
             Влияние недавних событий
             <CustomSelect
               value={liveSettings.live_conversation_recent_event_weight}
+              disabled={!developerModeEnabled}
               onChange={(event) => updateLiveSetting(
                 "live_conversation_recent_event_weight",
                 event.target.value as LiveConversationSettings["live_conversation_recent_event_weight"],
@@ -3404,10 +3508,11 @@ export function SettingsPage({
             </CustomSelect>
           </label>
 
-          <label>
+          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
             Защита от собственного голоса
             <CustomSelect
               value={liveSettings.live_conversation_echo_mode}
+              disabled={!developerModeEnabled}
               onChange={(event) => updateLiveSetting(
                 "live_conversation_echo_mode",
                 event.target.value as LiveConversationSettings["live_conversation_echo_mode"],
@@ -3420,11 +3525,15 @@ export function SettingsPage({
         </fieldset>
 
         <fieldset className="settings-group" hidden={activeSection !== "memory"}>
-          <legend>Память</legend>
-          <label>
+          <legend style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+            <span>Память</span>
+            <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
+          </legend>
+          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
             Режим сохранения
             <CustomSelect
               value={memoryMode}
+              disabled={!developerModeEnabled}
               onChange={(event) => {
                 const nextValue = event.target.value;
                 const previousValue = memoryMode;
@@ -3461,7 +3570,7 @@ const SETTINGS_NAVIGATION: Array<{
   label: string;
   icon: any;
   directSection?: SettingsSection;
-  items: Array<{ section: SettingsSection; label: string }>;
+  items: Array<{ section: SettingsSection; label: string; devOnly?: boolean }>;
 }> = [
   {
     id: "behavior",
@@ -3483,8 +3592,8 @@ const SETTINGS_NAVIGATION: Array<{
     items: [
       { section: "voice", label: "Основное" },
       { section: "voice-devices", label: "Устройства" },
-      { section: "voice-recognition", label: "Распознавание" },
-      { section: "voice-advanced", label: "Дополнительно" },
+      { section: "voice-recognition", label: "Распознавание", devOnly: true },
+      { section: "voice-advanced", label: "Дополнительно", devOnly: true },
     ],
   },
   {
@@ -3501,15 +3610,23 @@ const SETTINGS_NAVIGATION: Array<{
     items: [
       { section: "system-interface", label: "Интерфейс" },
       { section: "system-overview", label: "Обзор" },
-      { section: "models", label: "Модели" },
+      { section: "models", label: "Модели", devOnly: true },
       { section: "backups", label: "Резервные копии" },
-      { section: "maintenance", label: "Обслуживание данных" },
-      { section: "events", label: "Журнал событий" },
+      { section: "maintenance", label: "Обслуживание данных", devOnly: true },
+      { section: "events", label: "Журнал событий", devOnly: true },
     ],
   },
 ];
 
-function SettingsNavigation({ current, onChange }: { current: SettingsSection; onChange: (section: SettingsSection) => void }) {
+function SettingsNavigation({
+  current,
+  developerMode = false,
+  onChange,
+}: {
+  current: SettingsSection;
+  developerMode?: boolean;
+  onChange: (section: SettingsSection) => void;
+}) {
   const activeGroup = SETTINGS_NAVIGATION.find((group) => group.directSection === current || group.items.some((item) => item.section === current))?.id ?? "behavior";
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => ({
     behavior: true,
@@ -3562,7 +3679,15 @@ function SettingsNavigation({ current, onChange }: { current: SettingsSection; o
             </button>
             <div id={childrenId} className="settings-nav-children" hidden={!isExpanded}>
               {group.items.map((item) => (
-                <SettingsSectionButton key={item.section} section={item.section} current={current} label={item.label} onClick={onChange} />
+                <SettingsSectionButton
+                  key={item.section}
+                  section={item.section}
+                  current={current}
+                  label={item.label}
+                  devOnly={item.devOnly}
+                  developerMode={developerMode}
+                  onClick={onChange}
+                />
               ))}
             </div>
           </div>
@@ -3576,17 +3701,22 @@ function SettingsSectionButton({
   section,
   current,
   label,
+  devOnly,
+  developerMode,
   onClick,
 }: {
   section: SettingsSection;
   current: SettingsSection;
   label: string;
+  devOnly?: boolean;
+  developerMode?: boolean;
   onClick: (section: SettingsSection) => void;
 }) {
+  const isDimmed = Boolean(devOnly && !developerMode);
   return (
     <button
       type="button"
-      className={`settings-nav-button${section === current ? " is-active" : ""}`}
+      className={`settings-nav-button${section === current ? " is-active" : ""}${isDimmed ? " is-dev-dimmed" : ""}`}
       aria-current={section === current ? "page" : undefined}
       onClick={(e) => {
         animateTabSwitch(e.currentTarget);
@@ -3598,7 +3728,13 @@ function SettingsSectionButton({
   );
 }
 
-function ModelManager() {
+function ModelManager({
+  developerMode = false,
+  onUnlockRequest,
+}: {
+  developerMode?: boolean;
+  onUnlockRequest?: () => void;
+}) {
   const [models, setModels] = useState<ManagedModel[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -3624,6 +3760,7 @@ function ModelManager() {
   }, [models.length]);
 
   const install = async (modelId: string) => {
+    if (!developerMode) return;
     setMessage(null);
     try {
       await installModel(modelId);
@@ -3634,6 +3771,7 @@ function ModelManager() {
   };
 
   const remove = async (modelId: string) => {
+    if (!developerMode) return;
     setMessage(null);
     try {
       await removeModel(modelId);
@@ -3645,7 +3783,19 @@ function ModelManager() {
 
   return (
     <section className="system-card" aria-label="Управление моделями" ref={listRef}>
-      <div className="panel-header"><div><h2>Модели</h2><span>Хранятся вне папки приложения</span></div><button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void refresh(); }}><IconInterfaceSpirals size={16} aria-hidden="true" />Обновить</button></div>
+      <div className="panel-header">
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <h2>Модели</h2>
+            <DevBadge active={developerMode} onClick={onUnlockRequest} />
+          </div>
+          <span>Хранятся вне папки приложения</span>
+        </div>
+        <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void refresh(); }}>
+          <IconInterfaceSpirals size={16} aria-hidden="true" />
+          Обновить
+        </button>
+      </div>
       {models.map((model) => {
         const percent = model.total_bytes > 0 ? Math.min(100, Math.round((model.downloaded_bytes / model.total_bytes) * 100)) : 0;
         return <div className="settings-group" key={model.id}>
@@ -3654,8 +3804,26 @@ function ModelManager() {
           {model.status === "failed" && <span className="notice">{model.error}</span>}
           {model.status === "downloading" && <progress value={percent} max="100">{percent}%</progress>}
           <div className="model-actions">
-            {!model.installed && <button className="primary-button" onClick={(e) => { animateButtonPress(e.currentTarget); void install(model.id); }} disabled={model.status === "downloading"}>{model.status === "failed" ? "Повторить загрузку" : "Скачать"}</button>}
-            {model.installed && <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void remove(model.id); }}>Удалить</button>}
+            {!model.installed && (
+              <button
+                className="primary-button"
+                onClick={(e) => { animateButtonPress(e.currentTarget); void install(model.id); }}
+                disabled={!developerMode || model.status === "downloading"}
+                title={!developerMode ? "Требуется режим разработчика" : undefined}
+              >
+                {model.status === "failed" ? "Повторить загрузку" : "Скачать"}
+              </button>
+            )}
+            {model.installed && (
+              <button
+                className="secondary"
+                onClick={(e) => { animateButtonPress(e.currentTarget); void remove(model.id); }}
+                disabled={!developerMode}
+                title={!developerMode ? "Требуется режим разработчика" : undefined}
+              >
+                Удалить
+              </button>
+            )}
           </div>
           {model.restart_required && model.installed && <small>Перезапустите Iris, чтобы использовать модель.</small>}
         </div>;
@@ -3721,7 +3889,13 @@ function BackupControls() {
   );
 }
 
-function SystemMaintenance() {
+function SystemMaintenance({
+  developerMode = false,
+  onUnlockRequest,
+}: {
+  developerMode?: boolean;
+  onUnlockRequest?: () => void;
+}) {
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [pendingAction, setPendingAction] = useState<{
@@ -3732,6 +3906,7 @@ function SystemMaintenance() {
   } | null>(null);
 
   const run = async (action: () => Promise<unknown>, success: string) => {
+    if (!developerMode) return;
     setBusy(true);
     setMessage(null);
     try {
@@ -3746,21 +3921,32 @@ function SystemMaintenance() {
     }
   };
 
-  return <section className="system-card maintenance-card" aria-label="Обслуживание данных">
-    <div className="panel-header"><div><h2>Обслуживание данных</h2><span>Необратимые действия вынесены отдельно</span></div><IconComputerDatabase size={20} aria-hidden="true" /></div>
-    <div className="maintenance-actions">
-      <button className="secondary" disabled={busy} onClick={(e) => { animateButtonPress(e.currentTarget); setPendingAction({ title: "Перестроить индекс памяти?", description: "Сами записи останутся на месте. Iris заново подготовит их для поиска.", action: reindexMemories, success: "Индекс памяти перестроен." }); }}>Перестроить индекс памяти</button>
-      <button className="secondary danger-button" disabled={busy} onClick={(e) => { animateButtonPress(e.currentTarget); setPendingAction({ title: "Очистить долгосрочную память?", description: "История диалогов сохранится, но восстановить записи памяти будет нельзя.", action: clearMemories, success: "Долгосрочная память очищена." }); }}>Очистить память</button>
-      <button className="danger-button" disabled={busy} onClick={(e) => { animateButtonPress(e.currentTarget); setPendingAction({ title: "Сбросить все данные Iris?", description: "История, сводки и долгосрочная память будут удалены без возможности восстановления.", action: resetAllCompanionData, success: "Все данные помощника удалены." }); }}>Сбросить все данные</button>
-    </div>
-    {message && <div className="notice" role="status">{message}</div>}
-    <AppDialog open={Boolean(pendingAction)} title={pendingAction?.title ?? ""} description={pendingAction?.description} onClose={() => !busy && setPendingAction(null)}>
-      <div className="dialog-actions">
-        <button className="secondary" type="button" disabled={busy} onClick={() => setPendingAction(null)}>Отмена</button>
-        <button className="danger-button" type="button" disabled={busy} onClick={() => pendingAction && void run(pendingAction.action, pendingAction.success)}>{busy ? "Выполняю…" : "Подтвердить"}</button>
+  return (
+    <section className="system-card maintenance-card" aria-label="Обслуживание данных">
+      <div className="panel-header">
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <h2>Обслуживание данных</h2>
+            <DevBadge active={developerMode} onClick={onUnlockRequest} />
+          </div>
+          <span>Необратимые действия вынесены отдельно</span>
+        </div>
+        <IconComputerDatabase size={20} aria-hidden="true" />
       </div>
-    </AppDialog>
-  </section>;
+      <div className={`maintenance-actions${!developerMode ? " dev-locked-field" : ""}`}>
+        <button className="secondary" disabled={busy || !developerMode} onClick={(e) => { animateButtonPress(e.currentTarget); setPendingAction({ title: "Перестроить индекс памяти?", description: "Сами записи останутся на месте. Iris заново подготовит их для поиска.", action: reindexMemories, success: "Индекс памяти перестроен." }); }}>Перестроить индекс памяти</button>
+        <button className="secondary danger-button" disabled={busy || !developerMode} onClick={(e) => { animateButtonPress(e.currentTarget); setPendingAction({ title: "Очистить долгосрочную память?", description: "История диалогов сохранится, но восстановить записи памяти будет нельзя.", action: clearMemories, success: "Долгосрочная память очищена." }); }}>Очистить память</button>
+        <button className="danger-button" disabled={busy || !developerMode} onClick={(e) => { animateButtonPress(e.currentTarget); setPendingAction({ title: "Сбросить все данные Iris?", description: "История, сводки и долгосрочная память будут удалены без возможности восстановления.", action: resetAllCompanionData, success: "Все данные помощника удалены." }); }}>Сбросить все данные</button>
+      </div>
+      {message && <div className="notice" role="status">{message}</div>}
+      <AppDialog open={Boolean(pendingAction)} title={pendingAction?.title ?? ""} description={pendingAction?.description} onClose={() => !busy && setPendingAction(null)}>
+        <div className="dialog-actions">
+          <button className="secondary" type="button" disabled={busy} onClick={() => setPendingAction(null)}>Отмена</button>
+          <button className="danger-button" type="button" disabled={busy || !developerMode} onClick={() => pendingAction && void run(pendingAction.action, pendingAction.success)}>{busy ? "Выполняю…" : "Подтвердить"}</button>
+        </div>
+      </AppDialog>
+    </section>
+  );
 }
 
 function AvatarControls({
@@ -3769,6 +3955,8 @@ function AvatarControls({
   placement,
   inAppVisible,
   interfaceLocale,
+  developerMode = false,
+  onUnlockRequest,
   onRefresh,
   onOverlayChanged,
   onSettingsChanged,
@@ -3778,6 +3966,8 @@ function AvatarControls({
   placement: AvatarPlacement;
   inAppVisible: boolean;
   interfaceLocale: InterfaceLocale;
+  developerMode?: boolean;
+  onUnlockRequest?: () => void;
   onRefresh: () => Promise<void>;
   onOverlayChanged: (overlay: AvatarOverlaySettings | null) => void;
   onSettingsChanged: (settings: PublicSettings) => void;
@@ -3809,6 +3999,7 @@ function AvatarControls({
   }, [initialOverlay, onOverlayChanged]);
 
   const run = async (action: () => Promise<unknown>, success: string) => {
+    if (!developerMode) return;
     setBusy(true);
     setMessage(null);
     try {
@@ -3889,7 +4080,10 @@ function AvatarControls({
         <InfoRow label="Целевая эмоция" value={engine?.target_emotion ?? "нейтральная"} />
       </div>
       <details className="avatar-technical">
-        <summary>Технические данные</summary>
+        <summary style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span>Технические данные</span>
+          <DevBadge active={developerMode} onClick={onUnlockRequest} />
+        </summary>
         <div className="avatar-grid">
           <InfoRow label="Протокол" value={avatarStatus ? `v${avatarStatus.protocol_version}` : "недоступен"} />
           <InfoRow label="Профиль движения" value={client?.current_motion_profile ?? "нет данных"} />
@@ -3904,44 +4098,65 @@ function AvatarControls({
           disabled={!enabled || busy}
           onChange={(checked) => void (placement === "in_app" ? updateInAppVisibility(checked) : updateOverlay({ visible: checked }))}
         />
-        {placement === "desktop_overlay" && <>
-          <SettingsSwitch checked={overlay?.always_on_top ?? true} label="Поверх окон" disabled={!enabled || busy} onChange={(checked) => void updateOverlay({ always_on_top: checked })} />
-          <SettingsSwitch checked={overlay?.locked ?? true} label="Заблокировать клики" disabled={!enabled || busy} onChange={(checked) => void updateOverlay({ locked: checked })} />
-        </>}
+        {placement === "desktop_overlay" && (
+          <div className={!developerMode ? "dev-locked-field" : ""} style={{ display: "grid", gap: 6, width: "100%" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <small style={{ color: "var(--color-text-muted)" }}>Опции оверлея</small>
+              <DevBadge active={developerMode} onClick={onUnlockRequest} />
+            </div>
+            <SettingsSwitch
+              checked={overlay?.always_on_top ?? true}
+              label="Поверх окон"
+              disabled={!enabled || busy || !developerMode}
+              onChange={(checked) => void updateOverlay({ always_on_top: checked })}
+            />
+            <SettingsSwitch
+              checked={overlay?.locked ?? true}
+              label="Заблокировать клики"
+              disabled={!enabled || busy || !developerMode}
+              onChange={(checked) => void updateOverlay({ locked: checked })}
+            />
+          </div>
+        )}
       </div>
       <details className="avatar-test-disclosure">
-        <summary>Тест эмоций и жестов <ChevronDown size={16} aria-hidden="true" /></summary>
-        <div className="avatar-test-grid">
+        <summary style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            Тест эмоций и жестов <ChevronDown size={16} aria-hidden="true" />
+          </span>
+          <DevBadge active={developerMode} onClick={onUnlockRequest} />
+        </summary>
+        <div className={`avatar-test-grid${!developerMode ? " dev-locked-field" : ""}`}>
         {placement === "desktop_overlay" && <label>
           Масштаб оверлея {overlay?.scale?.toFixed(1) ?? "1.0"}
-          <input min="0.5" max="2" step="0.1" type="range" value={overlay?.scale ?? 1} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ scale: Number(event.target.value) })} />
+          <input min="0.5" max="2" step="0.1" type="range" value={overlay?.scale ?? 1} disabled={!enabled || busy || !developerMode} onChange={(event) => void updateOverlay({ scale: Number(event.target.value) })} />
         </label>}
         <label>
           Тестовая фраза
-          <input value={phrase} onChange={(event) => setPhrase(event.target.value)} disabled={!enabled || busy} />
+          <input value={phrase} onChange={(event) => setPhrase(event.target.value)} disabled={!enabled || busy || !developerMode} />
         </label>
         <label>
           Эмоция
-          <CustomSelect value={emotion} onChange={(event) => setEmotion(event.target.value)} disabled={!enabled || busy}>
+          <CustomSelect value={emotion} onChange={(event) => setEmotion(event.target.value)} disabled={!enabled || busy || !developerMode}>
             {Object.entries(AVATAR_EMOTION_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </CustomSelect>
         </label>
         <label>
           Тестовый жест
-          <CustomSelect value={gesture} onChange={(event) => setGesture(event.target.value)} disabled={!enabled || busy}>
+          <CustomSelect value={gesture} onChange={(event) => setGesture(event.target.value)} disabled={!enabled || busy || !developerMode}>
             {Object.entries(AVATAR_GESTURE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </CustomSelect>
         </label>
         <label>
           Интенсивность движения {motionIntensity.toFixed(1)}
-          <input min="0" max="1" step="0.1" type="range" value={motionIntensity} onChange={(event) => setMotionIntensity(Number(event.target.value))} disabled={!enabled || busy} />
+          <input min="0" max="1" step="0.1" type="range" value={motionIntensity} onChange={(event) => setMotionIntensity(Number(event.target.value))} disabled={!enabled || busy || !developerMode} />
         </label>
         </div>
       <div className="avatar-test-actions">
-        <button className="primary-button" onClick={(e) => { animateButtonPress(e.currentTarget); void run(() => sendAvatarTestPhrase({ text: phrase, emotion }), "Тестовая фраза отправлена."); }} disabled={!enabled || busy || !phrase.trim()}>Отправить фразу</button>
-        <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void run(() => sendAvatarTestEmotion({ emotion, intensity: 1 }), "Эмоция отправлена."); }} disabled={!enabled || busy}>Отправить эмоцию</button>
-        <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void run(() => sendAvatarTestGesture({ gesture, intensity: motionIntensity, interrupt: true }), "Тестовый жест отправлен."); }} disabled={!enabled || busy}>Отправить жест</button>
-        <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void run(stopAvatar, "Движение сброшено."); }} disabled={!enabled || busy}>Сбросить движение</button>
+        <button className="primary-button" onClick={(e) => { animateButtonPress(e.currentTarget); void run(() => sendAvatarTestPhrase({ text: phrase, emotion }), "Тестовая фраза отправлена."); }} disabled={!enabled || busy || !developerMode || !phrase.trim()}>Отправить фразу</button>
+        <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void run(() => sendAvatarTestEmotion({ emotion, intensity: 1 }), "Эмоция отправлена."); }} disabled={!enabled || busy || !developerMode}>Отправить эмоцию</button>
+        <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void run(() => sendAvatarTestGesture({ gesture, intensity: motionIntensity, interrupt: true }), "Тестовый жест отправлен."); }} disabled={!enabled || busy || !developerMode}>Отправить жест</button>
+        <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void run(stopAvatar, "Движение сброшено."); }} disabled={!enabled || busy || !developerMode}>Сбросить движение</button>
         </div>
       </details>
       {message && <div className="notice" role="status">{message}</div>}
