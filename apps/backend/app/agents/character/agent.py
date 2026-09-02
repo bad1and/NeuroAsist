@@ -22,7 +22,14 @@ from apps.backend.app.agents.character.voice_input import (
     VoiceInputInterpreter,
 )
 from apps.backend.app.llm.base import ChatMessage, LLMProvider, llm_call_purpose
-from apps.backend.app.schemas.character import CharacterTurn
+from apps.backend.app.schemas.character import (
+    AffectCue,
+    CharacterTurn,
+    DeliveryCue,
+    Emotion,
+    Gesture,
+    GestureCue,
+)
 from apps.backend.app.storage.sqlite_history import SQLiteMessageHistory
 
 logger = logging.getLogger(__name__)
@@ -936,7 +943,6 @@ class CharacterAgent:
 
         Background state acts as a context baseline only when the LLM leaves its emotion neutral.
         """
-        from apps.backend.app.schemas.character import AffectCue, DeliveryCue, Emotion, Gesture, GestureCue
         assert parsed.turn is not None
         llm_emotion = parsed.turn.affect.emotion if parsed.turn.affect is not None else Emotion.NEUTRAL
         llm_intensity = parsed.turn.affect.intensity if parsed.turn.affect is not None else None

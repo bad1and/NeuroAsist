@@ -633,3 +633,36 @@ def test_live_input_uses_only_protocol_v3() -> None:
             assert ready["protocol_version"] == 3
             socket.send_bytes(b"\0\0" * 512)
             socket.send_json({"type": "voice.input.stop"})
+
+
+@pytest.mark.anyio
+async def test_live_voice_unbound_local_regression_when_presentation_cue_none() -> None:
+    class EchoAgent:
+        def classify_intent(self, _text: str) -> str:
+            return "casual_chat"
+
+        async def stream_user_message(self, *_args, **_kwargs):
+            yield "[[avatar emotion=neutral gesture=auto intensity=1.0]] Привет!"
+
+    manager = VoiceSessionManager(MockTTSProvider(), retry_count=0)
+    connection = FakeVoiceConnection()
+    manager._connections["session-test"] = connection
+
+    task = await manager.start(
+        session_id="session-test",
+        utterance_id="utt-test",
+        transcript="приветик",
+        language="ru",
+        voice="ru_f1",
+        agent=EchoAgent(),
+        presentation_cue=None,
+    )
+    await task
+
+    # Must succeed cleanly without voice.error (previously failed with UnboundLocalError 'Emotion')
+    error_events = [event for event in connection.events if event.get("type") == "voice.error"]
+    assert not error_events, f"Unexpected error events: {error_events}"
+    completed_events = [event for event in connection.events if event.get("type") == "voice.text.completed"]
+    assert len(completed_events) == 1
+    assert "Привет" in completed_events[0]["reply"]
+
