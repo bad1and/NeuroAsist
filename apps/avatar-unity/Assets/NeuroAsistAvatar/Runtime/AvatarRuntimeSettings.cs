@@ -16,8 +16,17 @@ namespace NeuroAsist.Avatar
         public LipSyncMode LipSyncMode = LipSyncMode.Auto;
         [Range(0f, 1f)] public float AudioVolume = 1f;
         public string DefaultEmotion = "neutral";
-        [Min(.05f)] public float EmotionBlendInSeconds = .45f;
-        [Min(.05f)] public float EmotionBlendOutSeconds = .6f;
+        [Min(.05f)] public float EmotionBlendInSeconds = .80f;
+        [Min(.05f)] public float EmotionBlendOutSeconds = 1.40f;
+        [Range(.05f, 3f)] public float EmotionAttackTime = .80f;
+        [Range(.05f, 4f)] public float EmotionReleaseTime = 1.40f;
+        [Range(0f, 2f)] public float EmotionHoldTime = .55f;
+        [Min(.2f)] public float EmotionMaxVelocity = 1.8f;
+        public bool EmotionMicroDynamics = true;
+
+        public float GetAttackTime() => EmotionAttackTime > 0f ? EmotionAttackTime : EmotionBlendInSeconds;
+        public float GetReleaseTime() => EmotionReleaseTime > 0f ? EmotionReleaseTime : EmotionBlendOutSeconds;
+        public float GetHoldTime() => EmotionHoldTime >= 0f ? EmotionHoldTime : 0.55f;
         [Range(0f, 1f)] public float StreamPlaybackPrebufferSeconds = .2f;
         public bool ApplyAvatarLowProfile;
         public int AvatarFrameRate = 60;

@@ -361,9 +361,10 @@ class VoiceSessionManager:
                 await self._avatar_service.stream_metadata(
                     session_id=context.session_id,
                     utterance_id=context.utterance_id,
-                    emotion=directive.emotion,
+                    emotion=directive.emotion.value if hasattr(directive.emotion, "value") else str(directive.emotion),
                     gesture=directive.gesture,
                     gesture_intensity=directive.intensity,
+                    intensity=directive.intensity,
                 )
                 if not self._is_active(context):
                     await self._avatar_service.stop(
@@ -549,6 +550,7 @@ class VoiceSessionManager:
                     emotion=directive.emotion.value,
                     gesture=directive.gesture,
                     gesture_intensity=directive.intensity,
+                    intensity=directive.intensity,
                 )
                 if not self._is_active(context):
                     await self._avatar_service.stop(

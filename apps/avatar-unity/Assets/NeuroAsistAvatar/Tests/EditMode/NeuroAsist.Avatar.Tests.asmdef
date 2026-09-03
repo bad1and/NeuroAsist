@@ -1,6 +1,6 @@
 {
   "name": "NeuroAsist.Avatar.Tests",
-  "references": ["NeuroAsist.Avatar.Runtime"],
+  "references": ["NeuroAsist.Avatar.Runtime", "VRM10"],
   "includePlatforms": ["Editor"],
   "optionalUnityReferences": ["TestAssemblies"]
 }

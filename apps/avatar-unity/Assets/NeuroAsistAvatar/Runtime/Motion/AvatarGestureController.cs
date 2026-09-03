@@ -78,10 +78,14 @@ namespace NeuroAsist.Avatar
         private IEnumerator FadeTo(float target, int token, float seconds)
         {
             var start = GetWeight();
-            for (var elapsed = 0f; elapsed < seconds; elapsed += Time.deltaTime)
+            var duration = Mathf.Max(.01f, seconds);
+            for (var elapsed = 0f; elapsed < duration; elapsed += Time.deltaTime)
             {
                 if (token != generation) yield break;
-                SetWeight(Mathf.Lerp(start, target, elapsed / seconds));
+                var t = Mathf.Clamp01(elapsed / duration);
+                // Quintic smootherstep with zero initial and terminal jerk for physical inertia
+                var eased = t * t * t * (t * (6f * t - 15f) + 10f);
+                SetWeight(Mathf.Lerp(start, target, eased));
                 yield return null;
             }
             if (token == generation) SetWeight(target);

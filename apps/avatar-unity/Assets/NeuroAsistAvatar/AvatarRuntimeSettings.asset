@@ -20,8 +20,13 @@ MonoBehaviour:
   LipSyncMode: 0
   AudioVolume: 1
   DefaultEmotion: neutral
-  EmotionBlendInSeconds: 0.45
-  EmotionBlendOutSeconds: 0.6
+  EmotionBlendInSeconds: 0.8
+  EmotionBlendOutSeconds: 1.4
+  EmotionAttackTime: 0.8
+  EmotionReleaseTime: 1.4
+  EmotionHoldTime: 0.6
+  EmotionMaxVelocity: 1.8
+  EmotionMicroDynamics: 1
   StreamPlaybackPrebufferSeconds: 0.2
   ApplyAvatarLowProfile: 0
   AvatarFrameRate: 60

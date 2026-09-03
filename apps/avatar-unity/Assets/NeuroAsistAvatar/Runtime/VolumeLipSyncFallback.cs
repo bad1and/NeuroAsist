@@ -18,7 +18,20 @@ namespace NeuroAsist.Avatar
         private void Awake() { if (vrm == null) vrm = GetComponentInChildren<Vrm10Instance>(); }
         private void Update()
         {
-            if (!enabled || audioSource == null || !audioSource.isPlaying) { ResetMouth(); return; }
+            if (!enabled || audioSource == null || !audioSource.isPlaying)
+            {
+                if (current > 0.001f)
+                {
+                    current = Mathf.Lerp(current, 0f, Time.deltaTime * Release * 60f);
+                    Apply(current);
+                }
+                else if (current != 0f)
+                {
+                    current = 0f;
+                    Apply(0f);
+                }
+                return;
+            }
             audioSource.GetOutputData(samples, 0);
             var sum = 0f; for (var i = 0; i < samples.Length; i++) sum += samples[i] * samples[i];
             var rms = Mathf.Sqrt(sum / samples.Length); var target = rms <= NoiseGate ? 0f : Mathf.Clamp01((rms - NoiseGate) * 18f) * MaxWeight;
@@ -32,7 +45,16 @@ namespace NeuroAsist.Avatar
             return GetComponent<global::uLipSync.uLipSync>() == null;
         }
         public void SetActive(bool value) => enabled = value;
-        public void ResetMouth() { current = 0f; Apply(0f); }
+        public void ResetMouth() => ResetMouth(false);
+        public void ResetMouth(bool immediate)
+        {
+            if (immediate)
+            {
+                current = 0f;
+                Apply(0f);
+            }
+        }
+        private void OnDisable() => ResetMouth(true);
         private void Apply(float weight)
         {
             if (vrm == null) { DisableFallback(); return; }
