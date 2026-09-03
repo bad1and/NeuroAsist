@@ -89,6 +89,105 @@ class CharacterStateService:
             self._emit("character.reflection.completed", "info", {"worker": "durable"})
         return worked
 
+    def record_assistant_turn(
+        self,
+        *,
+        reply_text: str,
+        emotion: str = "neutral",
+        intensity: float = 0.7,
+        valence: float | None = None,
+        arousal: float | None = None,
+        intent: str = "casual_chat",
+        participant_key: str = "primary",
+    ) -> None:
+        """Synchronize character state with the AI model's authoritative neural emotion."""
+        text_lower = reply_text.casefold()
+        forgiving_markers = (
+            "прощаю", "простила", "ладно, проехали", "проехали", "всё хорошо",
+            "все хорошо", "не сержусь", "не обижаюсь", "не дуюсь", "мир",
+            "да ладно тебе", "забыли", "ничего страшного", "всё в порядке", "все в порядке",
+        )
+        is_forgiving = any(marker in text_lower for marker in forgiving_markers)
+        is_positive_or_neutral = emotion in {"happy", "joy", "neutral", "smirk", "playfulness"}
+
+        canon_map = {
+            "happy": "joy",
+            "joy": "joy",
+            "sad": "sadness",
+            "sadness": "sadness",
+            "angry": "anger",
+            "anger": "anger",
+            "annoyed": "irritation",
+            "smirk": "playfulness",
+            "thinking": "interest",
+            "concerned": "anxiety",
+        }
+        canonical = canon_map.get(emotion.lower(), emotion.lower())
+
+        with self._lock:
+            self._ensure_loaded()
+            has_repair_cause = any(
+                c.get("resolution_kind") == "apology_repair" or c.get("event_kind") in {"insult", "broken_promise"}
+                for c in self._affect.causes
+            )
+            now_iso = datetime.now(UTC).isoformat(timespec="milliseconds")
+
+            if is_forgiving or (has_repair_cause and is_positive_or_neutral):
+                self._reducer.resolve_forgiveness(self._affect)
+                if canonical in {"joy", "happy"}:
+                    self._affect.joy = max(self._affect.joy, 0.45)
+                    self._affect.irritation = 0.0
+                    self._affect.anger = 0.0
+                    self._affect.hurt = 0.0
+                    self._affect.primary_emotion = "joy"
+            elif canonical in canon_map.values():
+                setattr(self._affect, canonical, max(getattr(self._affect, canonical, 0.0), min(1.0, intensity * 0.85)))
+                self._affect.primary_emotion = canonical
+                if canonical in {"anger", "irritation"}:
+                    self._affect.joy = 0.0
+                    self._affect.cooling_down_turns = 2
+                    self._affect.playfulness = max(0.0, self._affect.playfulness - 0.5)
+                    self._affect.valence = max(-1.0, min(-0.15, self._affect.valence - 0.25))
+                    for c in self._affect.causes:
+                        if c.get("event_kind") in {"shared_success", "important_news", "praise"}:
+                            c["status"] = "expired"
+                    self._affect.causes = [c for c in self._affect.causes if c.get("status", "active") == "active"]
+                elif canonical in {"joy", "playfulness"}:
+                    self._affect.cooling_down_turns = 0
+                    self._affect.irritation = 0.0
+                    self._affect.anger = 0.0
+                    self._affect.hurt = 0.0
+                    self._affect.valence = min(1.0, max(0.2, self._affect.valence + 0.25))
+                elif canonical in {"sadness", "sad"}:
+                    self._affect.joy = 0.0
+                    self._affect.cooling_down_turns = max(0, self._affect.cooling_down_turns - 1)
+                    self._affect.valence = max(-1.0, min(-0.15, self._affect.valence - 0.25))
+                else:
+                    self._affect.cooling_down_turns = max(0, self._affect.cooling_down_turns - 1)
+            elif emotion == "neutral":
+                # If AI chose neutral, let negative tension ease naturally
+                self._affect.cooling_down_turns = max(0, self._affect.cooling_down_turns - 1)
+                if self._affect.primary_emotion in {"irritation", "anger", "hurt"}:
+                    self._affect.primary_emotion = "neutral"
+
+            if valence is not None and valence != 0.0:
+                self._affect.valence = max(-1.0, min(1.0, float(valence)))
+            if arousal is not None and arousal != 0.0:
+                self._affect.arousal = max(0.0, min(1.0, float(arousal)))
+
+            self._affect.updated_at = now_iso
+            self._store.save_character_state_snapshot(
+                PRIMARY_RELATIONSHIP_ID,
+                self._affect.as_dict(),
+                schema_version=2,
+            )
+            self._emit("character.state.assistant_turn_recorded", "info", {
+                "emotion": emotion,
+                "primary_emotion": self._affect.primary_emotion,
+                "forgiven": is_forgiving,
+                "intensity": intensity,
+            })
+
     def prepare(
         self,
         *,
@@ -101,16 +200,19 @@ class CharacterStateService:
         stt_uncertain: bool = False,
         serious: bool = False,
         task_like: bool = False,
+        appraisal: EventAppraisal | None = None,
     ) -> StateTurnContext:
         """Classify, reduce and durably store exactly once per accepted user message."""
-        causal_window = self._store.memory_extraction_context(message_id, 4)
-        previous_assistant = next(
-            (item.effective_content for item in reversed(causal_window[:-1]) if item.role == "assistant"),
-            None,
-        )
-        appraisal = self._decision.appraise(
-            transcript, message_id, participant_key, previous_assistant,
-        ).model_copy(
+        if appraisal is None:
+            causal_window = self._store.memory_extraction_context(message_id, 4)
+            previous_assistant = next(
+                (item.effective_content for item in reversed(causal_window[:-1]) if item.role == "assistant"),
+                None,
+            )
+            appraisal = self._decision.appraise(
+                transcript, message_id, participant_key, previous_assistant,
+            )
+        appraisal = appraisal.model_copy(
             update={"addressedness": addressedness, "stt_uncertain": stt_uncertain, "serious": serious}
         )
         can_apply = (

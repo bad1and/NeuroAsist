@@ -107,6 +107,11 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
         if coordinator is None or lease is None:
             return
         assistant_message = await coordinator.complete_assistant(payload.session_id, lease, reply)
+        if state_service is not None:
+            await asyncio.to_thread(
+                state_service.record_assistant_turn,
+                reply_text=reply,
+            )
         if request.app.state.memory_service is not None:
             await asyncio.to_thread(
                 request.app.state.memory_service.schedule_extraction,
@@ -227,6 +232,16 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
                 state_behavior=state_behavior,
             )
             assistant_message = await coordinator.complete_assistant(payload.session_id, lease, result["reply"])
+            if state_service is not None:
+                await asyncio.to_thread(
+                    state_service.record_assistant_turn,
+                    reply_text=result.get("reply", ""),
+                    emotion=result.get("emotion", "neutral"),
+                    intensity=result.get("intensity", 0.7),
+                    valence=result.get("valence", 0.0),
+                    arousal=result.get("arousal", 0.0),
+                    intent=result.get("intent", "casual_chat"),
+                )
             if request.app.state.memory_service is not None:
                 await asyncio.to_thread(
                     request.app.state.memory_service.schedule_extraction,

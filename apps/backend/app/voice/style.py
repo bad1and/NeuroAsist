@@ -40,21 +40,22 @@ def resolve_voice_style(
     emotion: str | None = None,
     pace: str | None = None,
     emphasis: float = 0.0,
+    intensity: float = 0.7,
 ) -> VoiceStyle:
     manual = coerce_voice_style(requested)
     if manual is not VoiceStyle.AUTO:
         return manual
-    if emotion in {"angry", "annoyed"}:
+    if emotion in {"angry", "annoyed", "irritation"}:
         return VoiceStyle.ASSERTIVE
-    if emotion in {"sad", "embarrassed"}:
+    if emotion in {"sad", "embarrassed", "hurt", "sadness"}:
         return VoiceStyle.CALM
-    if emotion in {"thinking", "concerned"}:
+    if emotion in {"thinking", "concerned", "interest", "curiosity", "anxiety"}:
         return VoiceStyle.THOUGHTFUL
-    if emotion in {"happy", "surprised", "smirk"} or pace == "fast":
+    if emotion in {"happy", "joy", "surprised", "smirk", "playfulness"} or pace == "fast":
         return VoiceStyle.ENERGETIC
     if pace == "slow":
         return VoiceStyle.CALM
-    if emphasis >= 0.65:
+    if emphasis >= 0.65 or intensity >= 0.85:
         return VoiceStyle.ASSERTIVE
     return VoiceStyle.NORMAL
 

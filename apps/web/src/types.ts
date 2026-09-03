@@ -71,7 +71,7 @@ export type CharacterStateView = {
   updated_at: string;
 };
 
-export type CharacterStateEvent = { id: string; event_kind: string; created_at: string; confidence: number; intensity: number; delta: Record<string, unknown> };
+export type CharacterStateEvent = { id: string; event_kind: string; created_at: string; confidence: number; intensity: number; delta: Record<string, unknown>; snippet?: string };
 
 export type VoiceServerEvent = {
   version: 1;

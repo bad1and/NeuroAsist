@@ -62,7 +62,7 @@ def test_name_boundary_genre_and_affection_are_context_safe(tmp_path) -> None:
     ).event_kind == "neutral"
     assert ConversationDecisionEngine.appraise(
         "я тебя люблю", "affection",
-    ).event_kind == "affection"
+    ).event_kind == "neutral"
     assert ConversationDecisionEngine.appraise(
         "ну не репа а репо", "correction", previous_assistant_text="А вот репа — это игра?"
     ).event_kind == "iris_mistake_corrected"

@@ -19,17 +19,9 @@ from apps.backend.app.schemas.character import (
 
 
 def deterministic_turn(reply: str, user_text: str = "") -> CharacterTurn:
-    """Keep a valid reply when model metadata is absent or invalid.
-
-    This deliberately has no model dependency, which makes metadata degradation
-    predictable for batch and live paths alike.
-    """
+    """Keep a valid reply when model metadata is absent or invalid."""
     text = (user_text or "").lower()
-    if any(marker in text for marker in ("бесит", "заеб", "злит", "ненавиж", "ошибк")):
-        emotion, gesture = Emotion.ANNOYED, Gesture.FRUSTRATION
-    elif any(marker in text for marker in ("спасибо", "класс", "круто", "ура", "молодец", "ахах", "смеш")):
-        emotion, gesture = Emotion.HAPPY, Gesture.TALK
-    elif "?" in text or text.startswith(("как ", "почему ", "что ", "кто ", "где ", "когда ", "зачем ")):
+    if "?" in text or text.startswith(("как ", "почему ", "что ", "кто ", "где ", "когда ", "зачем ")):
         emotion, gesture = Emotion.THINKING, Gesture.QUESTION
     else:
         emotion, gesture = Emotion.NEUTRAL, Gesture.AUTO
@@ -43,7 +35,7 @@ def deterministic_turn(reply: str, user_text: str = "") -> CharacterTurn:
 
 
 def classify_intent(user_text: str) -> Intent:
-    text = user_text.strip().lower()
+    text = (user_text or "").lower().strip()
     if not text:
         return Intent.UNKNOWN
     task_markers = (
@@ -99,6 +91,9 @@ def legacy_result(
     if include_metadata:
         result["gesture_intensity"] = turn.gesture.intensity
         result["metadata"] = turn.metadata_frame()
+        result["intensity"] = turn.affect.intensity
+        result["valence"] = turn.affect.valence
+        result["arousal"] = turn.affect.arousal
     return result
 
 

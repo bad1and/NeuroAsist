@@ -108,6 +108,7 @@ class VoiceSessionManager:
         tts_concurrency_max: int = 2,
         avatar_service=None,
         event_publisher=None,
+        character_state_service=None,
     ) -> None:
         self._tts_provider = tts_provider
         self._queue_size = queue_size
@@ -137,10 +138,14 @@ class VoiceSessionManager:
         self._active: dict[str, UtteranceContext] = {}
         self._avatar_service = avatar_service
         self._event_publisher = event_publisher
+        self._character_state_service = character_state_service
         self._text_completed_handler: TextCompletedHandler | None = None
 
     def bind_avatar_service(self, avatar_service) -> None:
         self._avatar_service = avatar_service
+
+    def bind_character_state_service(self, character_state_service) -> None:
+        self._character_state_service = character_state_service
 
     def bind_text_completed_handler(
         self,
@@ -484,6 +489,7 @@ class VoiceSessionManager:
         pending_voice_directive: VoiceDirective | None = None
         speech_sequence = 0
         avatar_start_task: asyncio.Task | None = None
+        latest_applied_directive: AvatarDirective = AvatarDirective()
 
         async def ensure_avatar_stream_started() -> None:
             nonlocal avatar_start_task
@@ -494,7 +500,8 @@ class VoiceSessionManager:
             await task
 
         async def apply_directive(directive: AvatarDirective) -> None:
-            nonlocal directive_sent
+            nonlocal directive_sent, latest_applied_directive
+            latest_applied_directive = directive
             if directive_sent:
                 return
             directive_sent = True
@@ -522,6 +529,7 @@ class VoiceSessionManager:
                 emotion=directive.emotion.value,
                 pace=presentation_cue.tts_pace if presentation_cue is not None else None,
                 emphasis=presentation_cue.tts_emphasis if presentation_cue is not None else 0.0,
+                intensity=directive.intensity,
             )
             if presentation_cue is not None:
                 context.base_pace = coerce_speech_pace(presentation_cue.tts_pace)
@@ -694,6 +702,13 @@ class VoiceSessionManager:
             completed_reply = "".join(reply_parts).strip()
             if on_assistant_completed is not None:
                 await on_assistant_completed(completed_reply)
+            if self._character_state_service is not None and completed_reply:
+                await asyncio.to_thread(
+                    self._character_state_service.record_assistant_turn,
+                    reply_text=completed_reply,
+                    emotion=latest_applied_directive.emotion.value,
+                    intensity=latest_applied_directive.intensity,
+                )
             if self._text_completed_handler is not None and self._is_active(context):
                 await self._text_completed_handler(
                     context.session_id,

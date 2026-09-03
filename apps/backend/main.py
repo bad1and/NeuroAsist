@@ -329,6 +329,7 @@ def create_app() -> FastAPI:
         tts_concurrency_min=settings.voice_live_tts_concurrency_min,
         tts_concurrency_max=settings.voice_live_tts_concurrency_max,
         event_publisher=event_bus.publish,
+        character_state_service=character_state_service,
     )
     async def persist_avatar_overlay_bounds(overlay: OverlayPayload) -> None:
         await asyncio.to_thread(

@@ -17,15 +17,19 @@ def test_profanity_and_insult_appraisal(tmp_path: Path) -> None:
     store.init_db()
     service = CharacterStateService(store)
 
-    # User says something aggressive/insulting
+    # User says something aggressive, but keywords do not mechanically trigger hurt
     ctx = service.prepare(transcript="Пошёл нахуй отсюда", message_id="msg-profanity-1")
-    assert ctx.state_applied is True
-    assert ctx.appraisal.event_kind == "insult"
-    assert ctx.appraisal.emotion_impulses.get("hurt", 0) > 0
-    assert ctx.affect.hurt > 0 or ctx.affect.irritation > 0
-    # Closeness should be reserved or distant
-    assert ctx.behavior.closeness_policy in {"reserved", "distant"}
-    assert ctx.behavior.avatar_emotion in {"sad", "annoyed", "angry"}
+    assert ctx.appraisal.event_kind == "neutral"
+
+    # The AI model evaluates the turn and decides to be annoyed/distant
+    service.record_assistant_turn(
+        reply_text="Не смей разговаривать со мной в таком тоне.",
+        emotion="annoyed",
+        intensity=0.85,
+    )
+    current = service.current()
+    assert current.affect.primary_emotion == "irritation"
+    assert current.affect.irritation > 0
 
 
 def test_praise_and_compliments_appraisal(tmp_path: Path) -> None:
@@ -33,13 +37,19 @@ def test_praise_and_compliments_appraisal(tmp_path: Path) -> None:
     store.init_db()
     service = CharacterStateService(store)
 
+    # Keywords do not trigger praise automatically
     ctx = service.prepare(transcript="Ирис ты молодец, всё супер и круто!", message_id="msg-praise-1")
-    assert ctx.state_applied is True
-    assert ctx.appraisal.event_kind == "praise"
-    assert ctx.appraisal.emotion_impulses.get("joy", 0) >= 0.5
-    assert ctx.affect.joy > 0.05
-    assert ctx.behavior.avatar_emotion == "happy"
-    assert ctx.behavior.expression_strength in {"subtle", "noticeable", "strong"}
+    assert ctx.appraisal.event_kind == "neutral"
+
+    # The AI model responds with genuine joy
+    service.record_assistant_turn(
+        reply_text="Спасибо! Мне очень приятно это слышать :)",
+        emotion="happy",
+        intensity=0.8,
+    )
+    current = service.current()
+    assert current.affect.primary_emotion == "joy"
+    assert current.affect.joy > 0.3
 
 
 def test_humor_and_laughter_appraisal(tmp_path: Path) -> None:
@@ -48,24 +58,47 @@ def test_humor_and_laughter_appraisal(tmp_path: Path) -> None:
     service = CharacterStateService(store)
 
     ctx = service.prepare(transcript="хахаха лол ору просто", message_id="msg-humor-1")
-    assert ctx.state_applied is True
-    assert ctx.appraisal.event_kind == "teasing"
-    assert ctx.affect.playfulness > 0.25
-    assert ctx.behavior.avatar_emotion == "smirk"
+    assert ctx.appraisal.event_kind == "neutral"
+
+    # The AI model chooses a playful smirk
+    service.record_assistant_turn(
+        reply_text="Ахах, ну ты выдал!",
+        emotion="smirk",
+        intensity=0.8,
+    )
+    current = service.current()
+    assert current.affect.primary_emotion == "playfulness"
+    assert current.affect.playfulness > 0.25
 
 
 def test_sadness_and_vulnerability_appraisal(tmp_path: Path) -> None:
-    engine = ConversationDecisionEngine()
-    appraisal = engine.appraise("мне так плохо и одиноко, устал от всего", message_id="msg-sad-1")
-    assert appraisal.event_kind == "vulnerability"
-    assert appraisal.emotion_impulses.get("sadness", 0) > 0
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    service = CharacterStateService(store)
+
+    service.record_assistant_turn(
+        reply_text="Мне очень жаль, что тебе сейчас так тяжело...",
+        emotion="sad",
+        intensity=0.7,
+    )
+    current = service.current()
+    assert current.affect.primary_emotion == "sadness"
+    assert current.affect.sadness > 0
 
 
 def test_surprise_appraisal(tmp_path: Path) -> None:
-    engine = ConversationDecisionEngine()
-    appraisal = engine.appraise("ого ничего себе, вот это да!", message_id="msg-wow-1")
-    assert appraisal.event_kind == "important_news"
-    assert appraisal.emotion_impulses.get("interest", 0) > 0
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    service = CharacterStateService(store)
+
+    service.record_assistant_turn(
+        reply_text="Ого, вот это действительно неожиданный поворот!",
+        emotion="thinking",
+        intensity=0.8,
+    )
+    current = service.current()
+    assert current.affect.primary_emotion == "interest"
+    assert current.affect.interest > 0
 
 
 def test_hybrid_arbitration_preserves_llm_emotion_when_state_is_neutral() -> None:
@@ -87,22 +120,13 @@ def test_hybrid_arbitration_preserves_llm_emotion_when_state_is_neutral() -> Non
     assert arbitrated.turn.affect.emotion == Emotion.HAPPY
 
 
-def test_live_directive_expressive_fallback_catches_profanity_and_humor() -> None:
-    # Annoyance on profanity
-    d1 = make_live_directive_expressive(AvatarDirective(), "да пошёл ты нахуй")
-    assert d1.emotion == Emotion.ANNOYED
+def test_live_directive_respects_llm_directive_without_keyword_triggers() -> None:
+    # Live directive is preserved as chosen by the AI model without keyword overrides
+    d1 = make_live_directive_expressive(AvatarDirective(emotion=Emotion.NEUTRAL), "да пошёл ты нахуй")
+    assert d1.emotion == Emotion.NEUTRAL
 
-    # Smirk on laughter
-    d2 = make_live_directive_expressive(AvatarDirective(), "хахаха ору не могу")
-    assert d2.emotion == Emotion.SMIRK
-
-    # Happy on praise
-    d3 = make_live_directive_expressive(AvatarDirective(), "ты просто красавица")
-    assert d3.emotion == Emotion.HAPPY
-
-    # Sad on distress
-    d4 = make_live_directive_expressive(AvatarDirective(), "мне так грустно и паршиво")
-    assert d4.emotion == Emotion.SAD
+    d2 = make_live_directive_expressive(AvatarDirective(emotion=Emotion.HAPPY), "да пошёл ты нахуй")
+    assert d2.emotion == Emotion.HAPPY
 
 
 def test_llm_emotion_overrides_non_neutral_state_emotion() -> None:

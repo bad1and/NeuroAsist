@@ -55,6 +55,7 @@ class AffectState:
     psychological_tension: float = 0.0
     interaction_load: float = 0.0
     last_decay_at: str | None = None
+    cooling_down_turns: int = 0
     mood_epoch: int = 0
     updated_at: str = field(default_factory=_now)
 
@@ -160,11 +161,35 @@ class CharacterStateReducer:
                 })
                 state.causes = state.causes[:8]
         if appraisal.event_kind == "apology":
+            state.hurt = round(max(0.0, state.hurt * 0.35 - 0.1), 4)
+            state.anger = round(max(0.0, state.anger * 0.3 - 0.1), 4)
+            state.irritation = round(max(0.0, state.irritation * 0.35 - 0.1), 4)
+            state.valence = _clamp(state.valence + 0.35, -1.0, 1.0)
+            state.social_openness = _clamp(state.social_openness + 0.25, 0.0, 1.0)
+            state.desire_for_silence = _clamp(state.desire_for_silence - 0.35, 0.0, 1.0)
             for cause in state.causes:
                 if cause.get("event_kind") in {"insult", "broken_promise", "important_negative_event"}:
-                    cause["current_strength"] = round(float(cause.get("current_strength", 0.0)) * .7, 6)
+                    cause["current_strength"] = round(float(cause.get("current_strength", 0.0)) * .35, 6)
                     cause["resolution_kind"] = "apology_repair"
                     cause["resolved_by_event_id"] = appraisal.cause_message_ids[0] if appraisal.cause_message_ids else None
+        self._derive_emotions(state, datetime.now(UTC))
+        state.updated_at = _now()
+        return state
+
+    def resolve_forgiveness(self, state: AffectState) -> AffectState:
+        """Fully resolves conflict causes and clears lingering hurt when Iris forgives or reconciles."""
+        state.hurt = 0.0
+        state.anger = 0.0
+        state.irritation = 0.0
+        state.psychological_tension = 0.0
+        state.valence = _clamp(max(0.1, state.valence + 0.25), -1.0, 1.0)
+        state.desire_for_silence = 0.0
+        state.cooling_down_turns = 0
+        for cause in state.causes:
+            if cause.get("resolution_kind") == "apology_repair" or cause.get("event_kind") in {"insult", "broken_promise", "important_negative_event", "apology"}:
+                cause["status"] = "resolved"
+                cause["current_strength"] = 0.0
+        state.causes = [c for c in state.causes if c.get("status", "active") == "active"]
         self._derive_emotions(state, datetime.now(UTC))
         state.updated_at = _now()
         return state
@@ -176,13 +201,20 @@ class CharacterStateReducer:
             scores["interest"] = 0.0
         if scores["playfulness"] < .20:
             scores["playfulness"] = 0.0
+        if scores["hurt"] < .08:
+            scores["hurt"] = 0.0
+        if scores["irritation"] < .08:
+            scores["irritation"] = 0.0
+        if scores["anger"] < .08:
+            scores["anger"] = 0.0
         winner, score = max(scores.items(), key=lambda item: item[1])
         current_score = scores.get(state.primary_emotion, 0.0)
         # Hysteresis prevents avatar/prompt flicker on nearby values.
-        # Baseline curiosity is intentionally not a visible "thinking" mood.
+        # Acute negative reactions (irritation, anger, hurt) immediately break positive hysteresis.
+        has_acute_negative = scores["anger"] >= 0.10 or scores["irritation"] >= 0.10 or scores["hurt"] >= 0.10
         if score < .02:
             winner = "neutral"
-        elif state.primary_emotion != "neutral" and current_score >= score - .08:
+        elif state.primary_emotion != "neutral" and not has_acute_negative and current_score >= score - .08 and current_score > 0.0:
             winner = state.primary_emotion
         if winner != state.primary_emotion:
             state.primary_emotion = winner
