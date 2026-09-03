@@ -3,7 +3,7 @@ import { deleteCharacterReflection, getCharacterReflections, getCharacterState, 
 import type { CharacterReflection, CharacterStateEvent, CharacterStateView } from "./types";
 import { interfaceIntlLocale } from "./i18n";
 import { animateButtonPress, animateCardRemove, animatePageEnter, animateStaggerCards, useAnimeScope } from "./animations";
-import { Metaballs } from '@paper-design/shaders-react';
+import { IrisMoodOrb } from "./components/IrisMoodOrb";
 import { getMoodVisuals, getStrengthLabel } from './mood-visuals';
 import { IconInterfaceSettingGaugeDashboard1, IconInterfaceCalendarMark, IconInterfaceEditMagicWand } from "./CustomIcons";
 import { AppDialog } from "./components/AppDialog";
@@ -38,9 +38,27 @@ function formatTimelineDate(dateStr: string) {
     .replace(',', locale === "en-US" ? ' at' : ' в');
 }
 
+const EVENT_KIND_META: Record<string, { label: string; markerClass: string; isImportant?: boolean }> = {
+  insult: { label: "Резкость / Защита границ", markerClass: "marker-rose", isImportant: true },
+  shared_success: { label: "Общий успех", markerClass: "marker-gold", isImportant: true },
+  "shared success": { label: "Общий успех", markerClass: "marker-gold", isImportant: true },
+  important_news: { label: "Яркая новость", markerClass: "marker-sky", isImportant: true },
+  "important news": { label: "Яркая новость", markerClass: "marker-sky", isImportant: true },
+  apology: { label: "Примирение", markerClass: "marker-green", isImportant: true },
+  broken_promise: { label: "Нарушенное обещание", markerClass: "marker-rose", isImportant: true },
+  promise_made: { label: "Обещание", markerClass: "marker-indigo", isImportant: true },
+  teasing: { label: "Шутка / Подкол", markerClass: "marker-purple", isImportant: true },
+  praise: { label: "Похвала", markerClass: "marker-gold", isImportant: true },
+  support: { label: "Поддержка", markerClass: "marker-teal", isImportant: true },
+  disagreement: { label: "Разногласие", markerClass: "marker-orange", isImportant: true },
+  vulnerability: { label: "Откровенность", markerClass: "marker-pink", isImportant: true },
+  neutral: { label: "Спокойная беседа", markerClass: "marker-neutral", isImportant: false },
+};
+
 type TimelineItem =
   | { type: "event"; timestamp: number; key: string; data: CharacterStateEvent }
-  | { type: "reflection"; timestamp: number; key: string; data: CharacterReflection };
+  | { type: "reflection"; timestamp: number; key: string; data: CharacterReflection }
+  | { type: "neutral_group"; timestamp: number; key: string; count: number };
 
 export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: string }> }) {
   const [state, setState] = useState<CharacterStateView | null>(null);
@@ -63,18 +81,57 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
     animatePageEnter(root);
   }, []);
 
+  const [filterOnlyImportant, setFilterOnlyImportant] = useState(true);
   const timelineRef = useRef<HTMLDivElement | null>(null);
 
   const timelineItems = useMemo(() => {
-    const items: TimelineItem[] = [];
+    const rawItems: Array<
+      | { type: "event"; timestamp: number; key: string; data: CharacterStateEvent }
+      | { type: "reflection"; timestamp: number; key: string; data: CharacterReflection }
+    > = [];
     for (const e of events) {
-      items.push({ type: "event", timestamp: new Date(e.created_at).getTime(), key: "evt-" + e.id, data: e });
+      rawItems.push({ type: "event", timestamp: new Date(e.created_at).getTime(), key: "evt-" + e.id, data: e });
     }
     for (const r of reflections) {
-      items.push({ type: "reflection", timestamp: new Date(r.created_at).getTime(), key: "ref-" + r.id, data: r });
+      rawItems.push({ type: "reflection", timestamp: new Date(r.created_at).getTime(), key: "ref-" + r.id, data: r });
     }
-    return items.sort((a, b) => b.timestamp - a.timestamp);
-  }, [events, reflections]);
+    rawItems.sort((a, b) => b.timestamp - a.timestamp);
+
+    if (!filterOnlyImportant) {
+      return rawItems as TimelineItem[];
+    }
+
+    const filtered: TimelineItem[] = [];
+    let neutralGroupCount = 0;
+    let latestNeutralTimestamp = 0;
+
+    const flushNeutrals = () => {
+      if (neutralGroupCount > 0) {
+        filtered.push({
+          type: "neutral_group",
+          timestamp: latestNeutralTimestamp,
+          key: `neutrals-${latestNeutralTimestamp}-${neutralGroupCount}`,
+          count: neutralGroupCount,
+        });
+        neutralGroupCount = 0;
+      }
+    };
+
+    for (const item of rawItems) {
+      if (item.type === "event" && (item.data.event_kind === "neutral" || !item.data.event_kind)) {
+        neutralGroupCount++;
+        if (latestNeutralTimestamp === 0) {
+          latestNeutralTimestamp = item.timestamp;
+        }
+      } else {
+        flushNeutrals();
+        latestNeutralTimestamp = 0;
+        filtered.push(item);
+      }
+    }
+    flushNeutrals();
+    return filtered;
+  }, [events, reflections, filterOnlyImportant]);
 
   useEffect(() => {
     if (timelineRef.current && timelineItems.length > 0) {
@@ -127,23 +184,11 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
               <div className="state-hero-card mood-card">
                 <div className="mood-visual">
                   <div className="mood-metaball-container">
-                    {(() => {
-                      const visuals = getMoodVisuals(state.mood.primary_emotion);
-                      return (
-                        <div className="mood-metaball-canvas">
-                          <Metaballs
-                            width={1280}
-                            height={720}
-                            colors={visuals.colors}
-                            colorBack="#000000"
-                            count={20}
-                            size={1}
-                            speed={visuals.speed}
-                            scale={0.64}
-                          />
-                        </div>
-                      );
-                    })()}
+                    <IrisMoodOrb
+                      emotion={state.mood.primary_emotion}
+                      strength={state.mood.expression_strength}
+                      size={80}
+                    />
                   </div>
                   <div className="mood-info">
                     <h2>{getMoodVisuals(state.mood.primary_emotion).labelRu}</h2>
@@ -223,13 +268,31 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
         <main className="state-timeline-container" ref={timelineRef}>
           <div className="state-timeline-header">
             <h2>Живая история</h2>
-            <label className="toggle-notes">
-              <div className="custom-checkbox-wrapper">
-                <input type="checkbox" checked={reflectionEnabled} onChange={(event) => void toggleReflections(event.target.checked)}/>
-                <span className="checkbox-indicator"></span>
+            <div className="timeline-header-controls">
+              <div className="timeline-filter-pills">
+                <button
+                  type="button"
+                  className={`timeline-filter-pill ${filterOnlyImportant ? "active" : ""}`}
+                  onClick={() => setFilterOnlyImportant(true)}
+                >
+                  Только важные
+                </button>
+                <button
+                  type="button"
+                  className={`timeline-filter-pill ${!filterOnlyImportant ? "active" : ""}`}
+                  onClick={() => setFilterOnlyImportant(false)}
+                >
+                  Все ({events.length + reflections.length})
+                </button>
               </div>
-              Личные заметки
-            </label>
+              <label className="toggle-notes">
+                <div className="custom-checkbox-wrapper">
+                  <input type="checkbox" checked={reflectionEnabled} onChange={(event) => void toggleReflections(event.target.checked)}/>
+                  <span className="checkbox-indicator"></span>
+                </div>
+                Личные заметки
+              </label>
+            </div>
           </div>
 
           {!reflectionEnabled && <p className="notice">Создание новых личных заметок отключено.</p>}
@@ -242,10 +305,29 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
               </div>
             ) : (
               timelineItems.map((item) => {
+                if (item.type === "neutral_group") {
+                  return (
+                    <article className="state-timeline-item type-neutral-group" key={item.key}>
+                      <div className="timeline-marker" />
+                      <div
+                        className="timeline-content card-glass neutral-summary"
+                        onClick={() => setFilterOnlyImportant(false)}
+                        title="Нажмите, чтобы развернуть все сообщения"
+                      >
+                        <span>Спокойный диалог ({item.count} {item.count === 1 ? "реплика" : item.count < 5 ? "реплики" : "реплик"})</span>
+                        <span className="neutral-expand-hint">Показать всё →</span>
+                      </div>
+                    </article>
+                  );
+                }
                 if (item.type === "event") {
                   const ev = item.data;
+                  const meta = EVENT_KIND_META[ev.event_kind] || {
+                    label: ev.event_kind.split("_").join(" "),
+                    markerClass: "marker-neutral",
+                  };
                   return (
-                    <article className="state-timeline-item type-event" key={item.key}>
+                    <article className={`state-timeline-item type-event ${meta.markerClass}`} key={item.key}>
                       <div className="timeline-marker">
                         <IconInterfaceSettingGaugeDashboard1 size={14} />
                       </div>
@@ -254,7 +336,12 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
                           <strong>Событие</strong>
                           <time>{formatTimelineDate(ev.created_at)}</time>
                         </div>
-                        <h4 data-i18n-skip>{ev.event_kind.split("_").join(" ")}</h4>
+                        <h4 data-i18n-skip>{meta.label}</h4>
+                        {ev.snippet && (
+                          <blockquote className="timeline-quote" data-i18n-skip>
+                            «{ev.snippet}»
+                          </blockquote>
+                        )}
                       </div>
                     </article>
                   );

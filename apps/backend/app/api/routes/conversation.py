@@ -27,6 +27,25 @@ def _state_view(request: Request) -> dict[str, object]:
     }
 
 
+_RUSSIAN_CAUSE_LABELS: dict[str, str] = {
+    "insult": "грубость / оскорбление",
+    "shared_success": "общий успех",
+    "shared success": "общий успех",
+    "important_news": "яркая новость",
+    "important news": "яркая новость",
+    "apology": "примирение",
+    "broken_promise": "нарушенное обещание",
+    "promise_made": "обещание",
+    "vulnerability": "откровенность",
+    "support": "поддержка",
+    "praise": "похвала",
+    "teasing": "подкол / шутка",
+    "disagreement": "разногласие",
+    "rejection": "дистанция",
+    "user_frustration": "переживание",
+}
+
+
 @router.get("/state", response_model=CharacterStatePublicView)
 def character_state(request: Request) -> CharacterStatePublicView:
     service = getattr(request.app.state, "character_state_service", None)
@@ -37,7 +56,13 @@ def character_state(request: Request) -> CharacterStatePublicView:
     return CharacterStatePublicView(
         mood=MoodPublicView(primary_emotion=context.affect.primary_emotion, expression_strength=context.behavior.expression_strength, secondary_emotions=context.affect.secondary_emotions),
         relationship=RelationshipProfilePublicView(**{key: value for key, value in profile.__dict__.items() if key in RelationshipProfilePublicView.model_fields}),
-        causes=[EmotionCausePublicView(label=str(cause.get("display_label") or cause.get("event_kind", "event")), status=str(cause.get("status", "active"))) for cause in context.affect.causes[:8]],
+        causes=[
+            EmotionCausePublicView(
+                label=str(cause.get("display_label") or _RUSSIAN_CAUSE_LABELS.get(cause.get("event_kind"), cause.get("event_kind", "событие"))),
+                status=str(cause.get("status", "active")),
+            )
+            for cause in context.affect.causes[:8]
+        ],
         incognito=bool(request.app.state.runtime_settings.memory_incognito),
         updated_at=context.affect.updated_at,
     )
@@ -49,6 +74,15 @@ def character_state_events(request: Request, limit: int = 50, cursor: str | None
     if store is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Timeline V2 is disabled")
     events = store.list_character_state_events("primary", limit=limit, before=cursor)
+    for ev in events:
+        cause_ids = ev.get("cause_message_ids") or []
+        if cause_ids:
+            try:
+                msg = store.get_message(str(cause_ids[0]))
+                if msg is not None and msg.content:
+                    ev["snippet"] = msg.content[:120].strip()
+            except Exception:
+                pass
     return {"events": events, "next_cursor": events[-1]["created_at"] if len(events) == limit else None}
 
 

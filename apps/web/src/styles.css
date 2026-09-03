@@ -1094,6 +1094,14 @@ select { appearance: auto; }
   background: #86795B;
 }
 
+.status-pill-dot.rose {
+  background: #865B6E;
+}
+
+.status-pill-dot.blue {
+  background: #5B6F86;
+}
+
 .chat-start-banner {
   position: relative;
   width: calc(var(--dock-base-width, 829px) * var(--dock-scale, 1));
@@ -6062,11 +6070,36 @@ body {
   gap: 20px;
   margin-bottom: 16px;
 }
-.mood-metaball-container {
+.mood-metaball-container,
+.iris-mood-orb-container {
   width: 80px;
   height: 80px;
   flex-shrink: 0;
   position: relative;
+  border-radius: 50%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at center, rgba(124, 58, 237, 0.15) 0%, rgba(15, 17, 26, 0.5) 75%, transparent 100%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 24px rgba(124, 58, 237, 0.2), inset 0 0 16px rgba(255, 255, 255, 0.06);
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+.iris-mood-orb-container:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+  box-shadow: 0 0 32px rgba(124, 58, 237, 0.32), inset 0 0 20px rgba(255, 255, 255, 0.1);
+}
+.iris-mood-orb-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: 50%;
+  pointer-events: auto;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.iris-mood-orb-container:hover .iris-mood-orb-canvas {
+  transform: scale(1.04);
 }
 .mood-metaball-canvas {
   position: absolute;
@@ -6157,9 +6190,44 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 .state-timeline-header h2 {
   margin: 0;
+}
+.timeline-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.timeline-filter-pills {
+  display: flex;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 3px;
+  border-radius: 9999px;
+  border: 1px solid var(--color-border);
+}
+.timeline-filter-pill {
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: all 0.2s ease-out;
+}
+.timeline-filter-pill:hover {
+  color: var(--color-text);
+}
+.timeline-filter-pill.active {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
 }
 .toggle-notes {
   margin: 0 !important;
@@ -6261,6 +6329,100 @@ body {
   padding: 2px 8px;
   border-radius: 12px;
   text-transform: capitalize;
+}
+
+.timeline-quote {
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border-left: 3px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 0 8px 8px 0;
+  font-style: italic;
+  font-size: 0.88rem;
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+}
+
+.type-neutral-group {
+  margin: 4px 0;
+}
+.type-neutral-group .timeline-marker {
+  width: 12px;
+  height: 12px;
+  left: -12px;
+  top: 15px;
+  background: var(--color-border);
+  border: none;
+}
+.neutral-summary {
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  border-style: dashed;
+}
+.neutral-summary:hover {
+  color: var(--color-text);
+  border-color: var(--color-text-muted);
+}
+.neutral-expand-hint {
+  font-size: 0.78rem;
+  opacity: 0.7;
+}
+
+/* Timeline marker color accents */
+.marker-rose .timeline-marker {
+  background: rgba(244, 63, 94, 0.15);
+  border-color: #f43f5e;
+  color: #fb7185;
+}
+.marker-gold .timeline-marker {
+  background: rgba(250, 204, 21, 0.15);
+  border-color: #facc15;
+  color: #fde047;
+}
+.marker-sky .timeline-marker {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: #38bdf8;
+  color: #7dd3fc;
+}
+.marker-green .timeline-marker {
+  background: rgba(52, 211, 153, 0.15);
+  border-color: #34d399;
+  color: #6ee7b7;
+}
+.marker-purple .timeline-marker {
+  background: rgba(192, 132, 252, 0.15);
+  border-color: #c084fc;
+  color: #d8b4fe;
+}
+.marker-indigo .timeline-marker {
+  background: rgba(129, 140, 248, 0.15);
+  border-color: #818cf8;
+  color: #a5b4fc;
+}
+.marker-teal .timeline-marker {
+  background: rgba(45, 212, 191, 0.15);
+  border-color: #2dd4bf;
+  color: #5eead4;
+}
+.marker-orange .timeline-marker {
+  background: rgba(251, 146, 60, 0.15);
+  border-color: #fb923c;
+  color: #fdba74;
+}
+.marker-pink .timeline-marker {
+  background: rgba(244, 114, 182, 0.15);
+  border-color: #f472b6;
+  color: #f9a8d4;
+}
+.marker-neutral .timeline-marker {
+  background: rgba(148, 163, 184, 0.1);
+  border-color: #64748b;
+  color: #94a3b8;
 }
 
 @media (max-width: 48rem) {

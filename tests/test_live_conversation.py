@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from apps.backend.app.conversation.decision import ConversationDecisionEngine, DecisionContext
-from apps.backend.app.conversation.schemas import ConversationAction, SpeakerRole
+from apps.backend.app.conversation.schemas import ConversationAction, EventAppraisal, SpeakerRole
 from apps.backend.app.conversation.speaker import SpeakerRoleEstimator
 from apps.backend.app.conversation.service import LiveConversationService
 from apps.backend.app.conversation.state import AffectState, CharacterStateReducer, ParticipantState
@@ -267,9 +267,12 @@ def test_vocative_to_another_person_overrides_implicit_request() -> None:
 
 
 def test_relationship_delta_is_bounded_and_diminishes() -> None:
-    engine = ConversationDecisionEngine()
     reducer = CharacterStateReducer()
-    appraisal = engine.appraise("Ты тупая", "message-1")
+    appraisal = EventAppraisal(
+        event_kind="insult", confidence=0.85, intensity=0.7, valence=-0.75, arousal=0.75,
+        direction="toward_iris", emotion_impulses={"hurt": 0.7},
+        relationship_impulses={"trust": -0.35, "tension": 0.5}, cause_message_ids=["message-1"],
+    )
     state = ParticipantState()
 
     state, first = reducer.apply_relationship(state, appraisal)

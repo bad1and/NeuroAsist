@@ -27,51 +27,8 @@ class AvatarDirective:
 
 
 def make_live_directive_expressive(directive: AvatarDirective, user_text: str) -> AvatarDirective:
-    """Fallback to keep live avatar reactions visible when a model defaults its directive to neutral."""
-    if directive.emotion != Emotion.NEUTRAL:
-        return directive
-    text = (user_text or "").lower()
-    emotion = directive.emotion
-    if emotion == Emotion.NEUTRAL:
-        if any(marker in text for marker in (
-            "бесит", "заеб", "злит", "ненавиж", "туп", "ошибк",
-            "нахуй", "блядь", "блять", "сука", "пиздец", "хуёво", "хуево",
-            "дура", "тупая", "тупой", "заткнись", "идиот", "дебил", "урод",
-            "мразь", "тварь", "отвали", "отстань", "достал", "достала",
-            "бесишь", "раздражает", "задолбал",
-        )):
-            emotion = Emotion.ANNOYED
-        elif any(marker in text for marker in (
-            "спасибо", "класс", "круто", "ура", "молодец",
-            "офигенно", "шикарно", "супер", "отлично", "прекрасно",
-            "лучшая", "лучший", "красавица", "збс", "пушка", "огонь",
-            "замечательно", "великолепно",
-        )):
-            emotion = Emotion.HAPPY
-        elif any(marker in text for marker in (
-            "хаха", "лол", "lol", "ору", "ржу", "кек", "жиза", "ржака",
-            "угар", "ха-ха", "😂", "🤣", "ахаха", "ахах", "смеш",
-        )):
-            emotion = Emotion.SMIRK
-        elif any(marker in text for marker in (
-            "грустно", "плохо", "хреново", "тяжело", "одиноко", "паршиво",
-            "депрессия", "нет сил", "устал", "устала", "тошно",
-        )):
-            emotion = Emotion.SAD
-        elif any(marker in text for marker in (
-            "ого", "вау", "охренеть", "офигеть", "ничего себе", "ни фига себе",
-            "не может быть", "вот это да", "ничоси",
-        )):
-            emotion = Emotion.SURPRISED
-        elif "?" in text or text.startswith(("как ", "почему ", "что ", "кто ", "где ", "когда ", "зачем ")):
-            emotion = Emotion.THINKING
-        else:
-            emotion = Emotion.NEUTRAL
-    # Affect remains a useful fallback, but an omitted body gesture must stay
-    # omitted.  The Unity behaviour director can then choose a context-aware,
-    # non-repeating micro action instead of forcing the same Talk clip on every
-    # answer.
-    return AvatarDirective(emotion, directive.gesture, max(.45, directive.intensity))
+    """Respect the neural LLM directive directly without artificial keyword overrides."""
+    return directive
 
 
 class LiveDirectiveParser:

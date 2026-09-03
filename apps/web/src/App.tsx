@@ -1002,6 +1002,7 @@ export function ChatPage({
   const avatarOwnsAudioRef = useRef(false);
   const liveAudioStartedRef = useRef(false);
   const liveMetadataRef = useRef({ emotion: "neutral", intent: "unknown" });
+  const [liveVoiceEmotion, setLiveVoiceEmotion] = useState<string | null>(null);
   const pendingSpeakerLabelRef = useRef("Вы");
   const latestPlaybackSegmentRef = useRef("");
   const playbackSegmentTextsRef = useRef<string[]>([]);
@@ -1553,10 +1554,12 @@ export function ChatPage({
           setVoiceState("thinking");
         } else if (event.type === "voice.metadata") {
           clearLiveSttTranscript();
+          const nextEmotion = event.emotion ?? "neutral";
           liveMetadataRef.current = {
-            emotion: event.emotion ?? "neutral",
+            emotion: nextEmotion,
             intent: event.intent ?? "unknown",
           };
+          setLiveVoiceEmotion(nextEmotion);
           setMessages((current) => current.map((message) =>
             message.utteranceId === event.utterance_id
               ? { ...message, emotion: event.emotion, intent: event.intent }
@@ -2188,6 +2191,23 @@ export function ChatPage({
     }
   };
 
+  const currentEmotion = useMemo(() => {
+    if (liveVoiceEmotion && liveVoiceEmotion !== "neutral") {
+      return liveVoiceEmotion;
+    }
+    if (liveMetadataRef.current.emotion && liveMetadataRef.current.emotion !== "neutral") {
+      return liveMetadataRef.current.emotion;
+    }
+    const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+    if (lastAssistant?.emotion) {
+      return lastAssistant.emotion;
+    }
+    if (avatarStatus?.emotion_engine?.current_emotion) {
+      return avatarStatus.emotion_engine.current_emotion;
+    }
+    return "neutral";
+  }, [avatarStatus?.emotion_engine?.current_emotion, liveVoiceEmotion, messages]);
+
   const statusBadge = useMemo(() => {
     if (!isDialogActive) {
       return { text: "Ирис ждёт вас)", dotClass: "purple" };
@@ -2204,26 +2224,35 @@ export function ChatPage({
     if (voiceState === "transcribing") {
       return { text: "Ирис распознаёт", dotClass: "amber" };
     }
-    const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
-    if (lastAssistant?.emotion === "joy" || liveMetadataRef.current.emotion === "joy") {
-      return { text: "Ирис радуется", dotClass: "green" };
+    switch (currentEmotion) {
+      case "joy":
+      case "happy":
+        return { text: "Ирис радуется", dotClass: "green" };
+      case "hurt":
+        return { text: "Ирис обижается", dotClass: "rose" };
+      case "anger":
+      case "angry":
+        return { text: "Ирис сердится", dotClass: "rose" };
+      case "annoyed":
+      case "irritation":
+        return { text: "Ирис раздражена", dotClass: "amber" };
+      case "sadness":
+      case "sad":
+        return { text: "Ирис грустит", dotClass: "blue" };
+      case "smirk":
+      case "playfulness":
+        return { text: "Ирис подкалывает", dotClass: "purple" };
+      case "thinking":
+      case "interest":
+      case "curiosity":
+        return { text: "Ирис размышляет", dotClass: "amber" };
+      case "anxiety":
+      case "concerned":
+        return { text: "Ирис настороже", dotClass: "amber" };
+      default:
+        return { text: "Ирис на связи", dotClass: "purple" };
     }
-    return { text: "Ирис радуется", dotClass: "green" };
-  }, [isDialogActive, loading, messages, voiceState]);
-
-  const currentEmotion = useMemo(() => {
-    if (liveMetadataRef.current.emotion && liveMetadataRef.current.emotion !== "neutral") {
-      return liveMetadataRef.current.emotion;
-    }
-    const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
-    if (lastAssistant?.emotion) {
-      return lastAssistant.emotion;
-    }
-    if (avatarStatus?.emotion_engine?.current_emotion) {
-      return avatarStatus.emotion_engine.current_emotion;
-    }
-    return "neutral";
-  }, [avatarStatus?.emotion_engine?.current_emotion, messages]);
+  }, [currentEmotion, isDialogActive, loading, voiceState]);
 
   let lastAssistantIndex = -1;
   for (let i = messages.length - 1; i >= 0; i--) {

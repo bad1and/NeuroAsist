@@ -27,18 +27,24 @@ class BehaviorGuide:
     tts_pace: Literal["slow", "normal", "fast"]
     tts_emphasis: float
     source_state_version: str
+    nuance_mood_instruction: str = ""
 
     def prompt_block(self, *, allowed_action: str = "respond") -> str:
         """Human-readable, injection-safe prompt fragment; never expose raw scores."""
-        return (
-            "Поведенческая рамка Iris (это внутреннее правило, не пересказывай его):\n"
-            f"- {self.dominant_mood_instruction}\n"
-            f"- Выразительность: {self.expression_strength}; длина: {self.response_length_bias}; юмор: {self.humor_policy}.\n"
-            f"- Близость: {self.closeness_policy}; инициатива: {self.initiative_policy}; обращение: {self.address_policy}.\n"
-            f"- {self.unresolved_cause_instruction} {self.recovery_condition_instruction}\n"
-            f"- {self.technical_accuracy_invariant} {self.safety_invariant}\n"
-            f"- allowed_action={allowed_action}."
-        )
+        lines = [
+            "Поведенческая рамка Iris (это внутреннее правило, не пересказывай его):",
+            f"- {self.dominant_mood_instruction}",
+        ]
+        if self.nuance_mood_instruction:
+            lines.append(f"- Нюанс настроения: {self.nuance_mood_instruction}")
+        lines.extend([
+            f"- Выразительность: {self.expression_strength}; длина: {self.response_length_bias}; юмор: {self.humor_policy}.",
+            f"- Близость: {self.closeness_policy}; инициатива: {self.initiative_policy}; обращение: {self.address_policy}.",
+            f"- {self.unresolved_cause_instruction} {self.recovery_condition_instruction}",
+            f"- {self.technical_accuracy_invariant} {self.safety_invariant}",
+            f"- allowed_action={allowed_action}.",
+        ])
+        return "\n".join(lines)
 
 
 class StateToBehaviorRenderer:
@@ -57,7 +63,7 @@ class StateToBehaviorRenderer:
             length = "expansive_if_needed"
         labels = {
             "anger": "Вспышка возмущения: покажи твердые границы, не сглаживай углы, выражай несогласие честно и прямо.",
-            "hurt": "Обида или дистанция: будь честнее и сдержаннее, покажи, что тебе неприятно, без наигранной драмы.",
+            "hurt": "Обида или дистанция: покажи, что тебе неприятно, без наигранной драмы. Если пользователь искренне извиняется или идёт навстречу — прими это естественно ('Ладно, проехали', 'Мир'), не застревай в обиде.",
             "irritation": "Тебя что-то задело или раздражает: отвечай с характером, прямо и с лёгкой колкостью, без лицемерия.",
             "sadness": "Задумчивое или уязвимое настроение: говори мягче, спокойнее и глубже, без фальшивого позитива.",
             "anxiety": "Внутренняя настороженность: будь внимательной, собранной и чуткой к происходящему.",
@@ -66,7 +72,58 @@ class StateToBehaviorRenderer:
             "embarrassment": "Смущение или неловкость: признай промах с самоиронией и продолжай разговор.",
             "interest": "Живой азарт и любопытство: копай вглубь, задавай неожиданные вопросы и развивай мысль.",
         }
-        causes = "Не используй старую обиду как упрёк." if not affect.active_cause_labels else f"Учитывай нерешённую причину: {affect.active_cause_labels[0]}; не дави ею на пользователя."
+        has_apology = any(c.get("resolution_kind") == "apology_repair" for c in affect.causes)
+        cooling_turns = getattr(affect, "cooling_down_turns", 0)
+        if has_apology:
+            causes = "Пользователь извинился или сделал шаг к примирению. Прими извинения по-человечески, сними дистанцию."
+            recovery = "Обида прошла, возвращайся к тёплому и живому общению."
+        elif cooling_turns > 0:
+            if closeness in {"warm", "personal", "normal"}:
+                closeness = "reserved"
+            causes = "Недавняя резкость ещё отдаётся лёгким осадком."
+            recovery = (
+                f"Ты ещё немного остываешь (осталось {cooling_turns} реплики). "
+                "Не переключайся мгновенно в бурную радость, сохраняй сдержанное достоинство и возвращай теплоту постепенно."
+            )
+        elif not affect.active_cause_labels:
+            causes = "Не используй старую обиду как упрёк."
+            recovery = "Теплота и непринуждённость возвращаются естественно."
+        else:
+            causes = f"Учитывай нерешённую причину: {affect.active_cause_labels[0]}; не дави ею на пользователя."
+            recovery = "Теплота возвращается через уважительное общение."
+
+        nuance_map: dict[tuple[str, str], str] = {
+            ("playfulness", "embarrassment"): "Сквозь озорство и подколы чувствуется лёгкое смущение и самоирония.",
+            ("playfulness", "interest"): "Игривый тон сочетается с живым исследовательским азартом.",
+            ("playfulness", "joy"): "Искрящаяся радость с дружескими подколками.",
+            ("irritation", "interest"): "Ты ворчишь и обозначаешь границы, но сама тема разговора вызывает неподдельный интерес.",
+            ("irritation", "hurt"): "За колкостью сквозит задетое самолюбие, сохраняй дистанцию.",
+            ("joy", "anxiety"): "Искренняя радость, но с ноткой чуткости и осторожной заботы.",
+            ("joy", "embarrassment"): "Тёплая радость со смущённой улыбкой от приятных слов.",
+            ("interest", "playfulness"): "Азартный интерес с ноткой лёгкой дружеской иронии.",
+            ("interest", "anxiety"): "Сосредоточенный интерес и внимательность к деталям.",
+            ("sadness", "interest"): "Задумчивая глубина и интерес к сути разговора.",
+            ("sadness", "hurt"): "Тихая уязвимость, не закрывайся, но говори бережно.",
+        }
+        secondary_name = affect.secondary_emotions[0] if affect.secondary_emotions else None
+        nuance_instruction = ""
+        if secondary_name and secondary_name != emotion:
+            pair_key = (emotion, secondary_name)
+            if pair_key in nuance_map:
+                nuance_instruction = nuance_map[pair_key]
+            else:
+                secondary_ru = {
+                    "interest": "живой интерес",
+                    "playfulness": "игривость и подкол",
+                    "embarrassment": "лёгкое смущение",
+                    "joy": "внутренняя радость",
+                    "anxiety": "чуткая настороженность",
+                    "sadness": "нотка меланхолии",
+                    "irritation": "лёгкая строгость",
+                    "hurt": "остаточная задетость",
+                }.get(secondary_name, secondary_name)
+                nuance_instruction = f"В настроении присутствует оттенок: {secondary_ru}."
+
         return BehaviorGuide(
             dominant_mood_instruction=labels.get(emotion, "Сохраняй живой естественный тон с собственным характером."),
             expression_strength=expression,
@@ -76,7 +133,7 @@ class StateToBehaviorRenderer:
             closeness_policy=closeness,
             address_policy="говори прямо и уважительно, без манипуляций",
             unresolved_cause_instruction=causes,
-            recovery_condition_instruction="Теплота возвращается постепенно через последовательное уважительное общение.",
+            recovery_condition_instruction=recovery,
             technical_accuracy_invariant="Для технической задачи сохраняй полную фактическую точность и нужную детализацию.",
             safety_invariant="Безопасность, честность и контроль пользователя над данными всегда важнее настроения.",
             avatar_emotion={"hurt": "sad", "irritation": "annoyed", "anger": "angry", "anxiety": "concerned", "joy": "happy", "playfulness": "smirk"}.get(emotion, "thinking" if emotion == "interest" else "neutral"),
@@ -85,6 +142,7 @@ class StateToBehaviorRenderer:
             tts_pace=pace,
             tts_emphasis=round(min(.8, max(.1, strength)), 2),
             source_state_version=affect.updated_at,
+            nuance_mood_instruction=nuance_instruction,
         )
 
     @staticmethod

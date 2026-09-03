@@ -155,14 +155,11 @@ def test_malformed_machine_header_is_not_spoken() -> None:
 
 
 def test_live_directive_fallback_is_visible_and_contextual() -> None:
-    # Fallback affect is useful, but forcing a body clip on every answer made
-    # Iris mechanically repeat Talk/Frustration. The renderer now plans auto
-    # movement from real audio segments instead.
-    assert make_live_directive_expressive(AvatarDirective(), "Почему опять ошибка?") == AvatarDirective("annoyed", "auto", 1.0)
-    assert make_live_directive_expressive(AvatarDirective(), "Спасибо, это круто") == AvatarDirective("happy", "auto", 1.0)
-    assert make_live_directive_expressive(AvatarDirective(), "Меня это бесит") == AvatarDirective("annoyed", "auto", 1.0)
-    assert make_live_directive_expressive(AvatarDirective(), "Как это работает?") == AvatarDirective("thinking", "auto", 1.0)
-    assert make_live_directive_expressive(AvatarDirective(), "Сделай заметку") == AvatarDirective("neutral", "auto", 1.0)
+    # Live directive directly respects the AI model's emotion without overriding with keywords
+    assert make_live_directive_expressive(AvatarDirective(), "Почему опять ошибка?") == AvatarDirective()
+    assert make_live_directive_expressive(AvatarDirective(), "Спасибо, это круто") == AvatarDirective()
+    assert make_live_directive_expressive(AvatarDirective(), "Меня это бесит") == AvatarDirective()
+    assert make_live_directive_expressive(AvatarDirective(), "Сделай заметку") == AvatarDirective()
     assert make_live_directive_expressive(AvatarDirective("thinking", "auto", .7), "Почему?") == AvatarDirective("thinking", "auto", .7)
 
 

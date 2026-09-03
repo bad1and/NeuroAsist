@@ -324,15 +324,6 @@ class ConversationDecisionEngine:
         previous_assistant_text: str | None = None,
     ) -> EventAppraisal:
         text = transcript.casefold()
-        affection = bool(re.search(r"\b(?:я\s+)?тебя\s+люблю\b|\bлюблю\s+тебя\b|\bобнимаю\s+тебя\b", text))
-        if affection:
-            return EventAppraisal(
-                event_kind="affection", confidence=.92,
-                intensity=min(1.0, 0.45 + len(text) / 500), valence=.55, arousal=.55,
-                direction="toward_iris", target_participant=participant,
-                emotion_impulses={"joy": .35, "playfulness": .12},
-                relationship_impulses={"warmth": .25}, cause_message_ids=[message_id],
-            )
         correction = re.search(r"\bне\s+([\w.ё-]+)\s*,?\s+а\s+([\w.ё-]+)\b", text)
         if correction and previous_assistant_text:
             old_value = correction.group(1).strip(".").casefold()
@@ -343,75 +334,6 @@ class ConversationDecisionEngine:
                     target_participant=participant,
                     emotion_impulses={"embarrassment": .35, "interest": .18},
                     relationship_impulses={"tension": -.03}, cause_message_ids=[message_id],
-                )
-        mappings = (
-            (("помогу", "я рядом", "держись"), "support", .32, {"joy": .16, "interest": .18}, {"warmth": .14}),
-            (("извини", "прости", "виноват"), "apology", .55, {"hurt": -.45, "irritation": -.35}, {"tension": -.35}),
-            (("спасибо", "молодец", "умница", "классно", "круто", "офигенно", "красавица",
-              "лучшая", "лучший", "шикарно", "збс", "зашибись", "пушка",
-              "огонь", "бомба", "супер", "великолепно", "прекрасно", "отлично",
-              "замечательно", "потрясающе", "идеально", "обалдеть", "восхитительно",
-              "мне нравится", "нравишься мне"),
-             "praise", .45, {"joy": .5}, {"warmth": .3}),
-            # --- Profanity / aggression ---
-            (("нахуй", "иди нахуй", "пошла нахуй", "пошёл нахуй", "пошел нахуй",
-              "ёбаный", "ебаный", "пиздец", "сука", "блядь", "блять",
-              "хуёво", "хуево", "пидор", "мразь", "тварь", "урод", "уродина",
-              "ублюдок", "гнида", "шалава", "шлюха"),
-             "insult", -.75, {"hurt": .7, "irritation": .55, "anger": .3}, {"trust": -.35, "tension": .5}),
-            (("ненавижу", "дура", "тупая", "тупой", "заткнись", "идиотка", "идиот",
-              "дебил", "дебилка", "кретин", "дурак", "дурочка"),
-             "insult", -.75, {"hurt": .7, "irritation": .45}, {"trust": -.35, "tension": .5}),
-            # --- Humor / laughter ---
-            (("хаха", "ахаха", "ахах", "хахах", "лол", "lol", "ору", "ржу",
-              "кек", "жиза", "ржака", "угар", "смешно", "ха-ха", "😂", "🤣",
-              "ахахах", "хахаха", "ха ха", "смеюсь"),
-             "teasing", .35, {"playfulness": .65, "joy": .2}, {"warmth": .08}),
-            (("обещаю",), "promise_made", .35, {"interest": .35}, {"trust": .15}),
-            (("не выполнил", "не сдержал обещание"), "broken_promise", -.65, {"hurt": .55, "anxiety": .25}, {"trust": -.4, "tension": .35}),
-            (("сделал", "получилось", "закончили", "справились", "ура", "победа",
-              "удалось", "наконец-то", "заработало", "ништяк"),
-             "shared_success", .55, {"joy": .55, "energy": .2}, {"warmth": .16}),
-            # --- Sadness / distress ---
-            (("боюсь", "мне плохо", "тяжело", "грустно", "хреново", "паршиво",
-              "одиноко", "не хочу ничего", "всё плохо", "депрессия",
-              "мне хуёво", "мне хуево", "невыносимо", "нет сил", "устал от всего",
-              "устала от всего", "опустошён", "опустошена", "тошно",
-              "жить не хочу", "выгорание"),
-             "vulnerability", -.25, {"sadness": .45, "anxiety": .25, "interest": .2}, {"warmth": .12}),
-            (("ты ошиблась", "ты не про того", "не это"), "iris_mistake_corrected", -.12, {"embarrassment": .35, "interest": .18}, {"tension": -.03}),
-            (("не согласен", "неправильно", "ерунда", "бред", "чушь", "фигня",
-              "глупость", "ерунду несёшь", "ерунду несешь"),
-             "disagreement", -.15, {"irritation": .15, "interest": .16}, {}),
-            (("отстань", "не хочу с тобой", "отвали", "не трогай", "оставь меня",
-              "не лезь", "уйди"),
-             "rejection", -.55, {"hurt": .4, "sadness": .15}, {"warmth": -.2, "tension": .2}),
-            # --- Frustration / annoyance (milder than insult) ---
-            (("бесит эта", "ненавижу эту", "достало это", "задолбало", "заебало",
-              "заколебало", "надоело", "раздражает", "бесишь", "достала",
-              "достал", "опять", "ну вот опять", "блин", "чёрт", "черт",
-              "ну ёмаё", "ну ёмоё", "капец", "трэш"),
-             "user_frustration", -.18, {"irritation": .35, "anxiety": .08, "interest": .14}, {"warmth": .04}),
-            # --- Surprise / amazement ---
-            (("ого", "ни фига себе", "вау", "охренеть", "офигеть", "ничоси",
-              "ничего себе", "серьёзно", "серьезно", "это реально", "не может быть",
-              "обалдеть", "ни хрена себе", "ну нифига", "ну ничего себе",
-              "опа", "ой", "вот это да"),
-             "important_news", .25, {"interest": .55, "joy": .15}, {"warmth": .05}),
-        )
-        for needles, kind, valence, emotions, relations in mappings:
-            if any(needle in text for needle in needles):
-                return EventAppraisal(
-                    event_kind=kind,
-                    confidence=0.82,
-                    intensity=min(1.0, 0.45 + len(text) / 500),
-                    valence=valence,
-                    arousal=abs(valence),
-                    direction="toward_iris",
-                    target_participant=participant,
-                    emotion_impulses=emotions,
-                    relationship_impulses=relations,
-                    cause_message_ids=[message_id],
                 )
         return EventAppraisal(
             event_kind="neutral",

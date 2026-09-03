@@ -69,9 +69,9 @@ export const MOOD_MAP: Record<string, MoodVisuals> = {
   },
   "anxiety": {
     labelRu: "Тревога",
-    colors: ["#fcd34d", "#9333ea", "#3b0764"],
-    speed: 1.6,
-    warp: 0.24,
+    colors: ["#fed7aa", "#a855f7", "#4c1d95"], // Synced with concerned
+    speed: 1.4,
+    warp: 0.20,
   },
   "concerned": {
     labelRu: "Опасение",
@@ -111,15 +111,15 @@ export const MOOD_MAP: Record<string, MoodVisuals> = {
   },
   "interest": {
     labelRu: "Интерес",
-    colors: ["#34d399", "#0284c7", "#a855f7"],
+    colors: ["#38bdf8", "#6366f1", "#9333ea"], // Synced with thinking
     speed: 1.8,
-    warp: 0.22,
+    warp: 0.20,
   },
   "curiosity": {
     labelRu: "Любопытство",
-    colors: ["#34d399", "#0284c7", "#a855f7"], // Ethereal Mint, Sapphire Blue, Luminous Purple
-    speed: 1.9,
-    warp: 0.24,
+    colors: ["#38bdf8", "#6366f1", "#9333ea"],
+    speed: 1.8,
+    warp: 0.22,
   },
   "affection": {
     labelRu: "Привязанность",
