@@ -101,6 +101,7 @@ select { appearance: auto; }
   min-height: 42px;
   padding: 9px 12px;
   border-radius: 12px;
+  font-weight: 650;
   color: var(--color-text-soft);
   background: transparent;
   text-align: left;
@@ -112,6 +113,7 @@ select { appearance: auto; }
   transform: translateX(2px);
 }
 .navigation-button.is-active, .settings-nav-button.is-active {
+  font-weight: 750;
   color: var(--color-accent-ink);
   background: var(--color-accent);
   box-shadow: none;
@@ -2770,6 +2772,7 @@ textarea::placeholder {
   width: 100%;
   min-height: 42px;
   border-radius: 12px;
+  font-weight: 650;
   color: var(--color-text-soft);
   transition:
     color 0.16s ease,
@@ -2786,6 +2789,7 @@ textarea::placeholder {
 
 .navigation-button.is-active,
 .settings-nav-button.is-active {
+  font-weight: 750;
   color: var(--color-accent-ink);
   background: var(--color-accent);
   box-shadow: none;
@@ -3743,9 +3747,9 @@ body {
   margin-inline-start: 0;
   color: var(--color-text-muted);
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 650;
   letter-spacing: -0.01em;
-  opacity: 0.56;
+  opacity: 0.72;
   transform: translateY(11px);
   white-space: nowrap;
 }
@@ -4729,6 +4733,7 @@ body {
 
 .navigation-button.is-active,
 .settings-nav-button.is-active {
+  font-weight: 750;
   color: var(--color-accent-ink);
   background: var(--color-accent);
   box-shadow: none;
