@@ -52,24 +52,29 @@ namespace NeuroAsist.Avatar
             for (var i = 0; i < keys.Length; i++)
             {
                 var target = i == activeIndex ? targetVolume * maxWeight : 0f;
-                weights[i] = Mathf.SmoothDamp(weights[i], target, ref velocity[i], smoothTime);
+                float vowelSmooth = target > weights[i] ? smoothTime : Mathf.Max(smoothTime * 1.6f, 0.085f);
+                weights[i] = Mathf.SmoothDamp(weights[i], target, ref velocity[i], vowelSmooth);
                 SetWeight(keys[i], weights[i]);
             }
         }
 
-        public void ResetMouth()
+        public void ResetMouth() => ResetMouth(false);
+        public void ResetMouth(bool immediate)
         {
             activeIndex = -1;
             targetVolume = 0f;
-            for (var i = 0; i < keys.Length; i++)
+            if (immediate)
             {
-                weights[i] = 0f;
-                velocity[i] = 0f;
-                SetWeight(keys[i], 0f);
+                for (var i = 0; i < keys.Length; i++)
+                {
+                    weights[i] = 0f;
+                    velocity[i] = 0f;
+                    SetWeight(keys[i], 0f);
+                }
             }
         }
 
-        private void OnDisable() => ResetMouth();
+        private void OnDisable() => ResetMouth(true);
 
         private void SetWeight(ExpressionKey key, float value)
         {

@@ -102,7 +102,8 @@ class AvatarService:
             "avatar.speak", session_id,
             SpeakPayload(utterance_id=utterance_id, text=text, audio_url=audio_url,
                          emotion=state.target_emotion, intent=intent, gesture=state.gesture,
-                         gesture_intensity=state.intensity, interrupt=interrupt).model_dump(mode="json"),
+                         gesture_intensity=state.intensity,
+                         interrupt=interrupt).model_dump(mode="json"),
             utterance_id=utterance_id,
         )
 
@@ -182,10 +183,12 @@ class AvatarService:
         )
 
     async def stream_metadata(
-        self, *, session_id: str, utterance_id: str, emotion: str, gesture: str, gesture_intensity: float
+        self, *, session_id: str, utterance_id: str, emotion: str, gesture: str, gesture_intensity: float,
+        intensity: float | None = None,
     ) -> BroadcastResult:
+        actual_intensity = intensity if intensity is not None else gesture_intensity
         state = self.emotion_engine.apply_metadata(
-            emotion=Emotion(emotion), gesture=Gesture(gesture), intensity=gesture_intensity,
+            emotion=Emotion(emotion), gesture=Gesture(gesture), intensity=actual_intensity,
             utterance_id=utterance_id,
         )
         return await self._broadcast(

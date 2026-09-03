@@ -19,7 +19,8 @@ _SYSTEM_PROMPT = """Ты классификатор живого разгово�
 Причины: incomplete_turn, direct_address, invited, ambient_speech, self_talk, other_person,
 relevant_opening, emotional_event, cooldown, speech_budget, echo, low_confidence.
 
-ВАЖНО: Не ставь neutral для emotion_impulses, если в сообщении есть какой-то эмоциональный заряд.
+ВАЖНО: Если сообщение спокойное, нейтральное или по делу — neutral является естественным и правильным.
+Не ставь neutral для emotion_impulses, только если в сообщении есть реальный эмоциональный заряд.
 Мат, оскорбления → hurt, irritation, anger. Похвала, благодарность → joy. Смех (хаха, лол, ору) → playfulness.
 Грусть, жалобы → sadness, anxiety. Удивление → interest. Разочарование → irritation.
 event_kind: support, apology, insult, teasing, praise, disagreement, rejection, promise_made,
