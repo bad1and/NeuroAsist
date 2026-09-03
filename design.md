@@ -15,7 +15,7 @@ Iris — спокойное графитовое рабочее простран
 
 ## Типографика
 
-- Интерфейс: Onest Variable, 400–700. Шрифт поддерживает кириллицу и сочетает мягкую геометрию с хорошей читаемостью в плотных настройках.
+- Интерфейс: Proxima Nova, 300–800. Современный геометрический гротеск с превосходной читаемостью и поддержкой кириллицы.
 - Диагностика и машинные значения: системный monospace.
 - Заголовки короткие, без декоративного верхнего регистра.
 - Основной текст ограничивается комфортной длиной строки; подписи остаются читаемыми, а не «серыми ради серого».
@@ -68,7 +68,7 @@ Iris — спокойное графитовое рабочее простран
   --color-accent: oklch(50.2% 0.069 298.9);
   --color-accent-ink: oklch(98% 0.008 265);
   --color-focus: oklch(76% 0.069 298.9);
-  --font-ui: "Onest Variable", "Segoe UI Variable", sans-serif;
+  --font-ui: "Proxima Nova", sans-serif;
   --font-mono: "Cascadia Mono", Consolas, monospace;
   --spacing-3xs: 0.25rem;
   --spacing-2xs: 0.5rem;
@@ -99,7 +99,7 @@ Iris — спокойное графитовое рабочее простран
     "focus": { "$value": "oklch(76% 0.069 298.9)", "$type": "color" }
   },
   "font": {
-    "ui": { "$value": "Onest Variable, Segoe UI Variable, sans-serif", "$type": "fontFamily" },
+    "ui": { "$value": "Proxima Nova, sans-serif", "$type": "fontFamily" },
     "mono": { "$value": "Cascadia Mono, Consolas, monospace", "$type": "fontFamily" }
   },
   "space": {
