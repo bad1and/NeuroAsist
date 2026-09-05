@@ -1,0 +1,33 @@
+# Direct dependencies of the shipped Python sidecar.
+#
+# Keep transitive packages out of this file: pip resolves them from these
+# tested top-level pins in a clean environment. Binary/runtime boundaries that
+# PyInstaller must collect explicitly are listed even when another package also
+# depends on them.
+-c constraints.txt
+
+av==18.0.0
+chromadb==1.5.2
+ctranslate2==4.8.1
+fastapi==0.116.0
+faster-whisper==1.2.1
+gigaam @ git+https://github.com/salute-developers/GigaAM.git@559d88d6b72541412743929f633a6ae7c9950b85
+huggingface-hub==0.36.2
+num2words==0.5.14
+numpy==2.5.1
+onnx==1.19.1
+onnxruntime==1.23.2
+openai==2.44.0
+pydantic==2.13.4
+pydantic-settings==2.10.1
+python-dotenv==1.2.2
+python-multipart==0.0.20
+sentencepiece==0.2.2
+sentence-transformers==3.4.1
+silero-vad==6.2.1
+soundfile==0.14.0
+torch==2.11.0
+torchaudio==2.11.0
+transformers==4.57.3
+uvicorn==0.35.0
+websockets==16.0

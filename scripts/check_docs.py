@@ -69,7 +69,6 @@ def check_versions(errors: list[str]) -> str:
         "apps/web/package.json": web_package.get("version"),
         "apps/web/package-lock.json": web_lock.get("version"),
         "apps/web lock root package": web_lock.get("packages", {}).get("", {}).get("version"),
-        "apps/web lock local root dependency": web_lock.get("packages", {}).get("../..", {}).get("version"),
         "apps/desktop/package.json": desktop_package.get("version"),
         "apps/desktop/package-lock.json": desktop_lock.get("version"),
         "apps/desktop lock root package": desktop_lock.get("packages", {}).get("", {}).get("version"),
@@ -209,12 +208,121 @@ def check_readme_parity(errors: list[str]) -> None:
         errors.append("README.md and README.ru.md heading structures differ")
 
 
+def _requirement_entries(relative_path: str) -> list[str]:
+    return [
+        line.strip()
+        for line in (ROOT / relative_path).read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+
+def _requirement_name(entry: str) -> str | None:
+    if entry.startswith("-"):
+        return None
+    match = re.match(r"^([A-Za-z0-9_.-]+)(?:\s*@|\s*[<>=!~])", entry)
+    return match.group(1).lower().replace("_", "-") if match else None
+
+
+def check_dependency_profiles(errors: list[str]) -> None:
+    root_entries = _requirement_entries("requirements.txt")
+    expected_root = ["-r requirements/runtime.txt", "-r requirements/dev.txt"]
+    if root_entries != expected_root:
+        errors.append(
+            "requirements.txt must include only the runtime and dev dependency profiles"
+        )
+
+    runtime_entries = _requirement_entries("requirements/runtime.txt")
+    runtime_names = {
+        name for entry in runtime_entries if (name := _requirement_name(entry)) is not None
+    }
+    required_runtime = {
+        "av",
+        "chromadb",
+        "ctranslate2",
+        "fastapi",
+        "faster-whisper",
+        "gigaam",
+        "huggingface-hub",
+        "num2words",
+        "numpy",
+        "onnx",
+        "onnxruntime",
+        "openai",
+        "pydantic",
+        "pydantic-settings",
+        "python-dotenv",
+        "python-multipart",
+        "sentencepiece",
+        "sentence-transformers",
+        "silero-vad",
+        "soundfile",
+        "torch",
+        "torchaudio",
+        "transformers",
+        "uvicorn",
+        "websockets",
+    }
+    missing = sorted(required_runtime - runtime_names)
+    if missing:
+        errors.append("requirements/runtime.txt is missing: " + ", ".join(missing))
+
+    retired = {
+        "edge-tts",
+        "py7zr",
+        "silero",
+        "silero-stress",
+        "supertonic",
+        "torchvision",
+    }
+    for profile in (
+        "requirements/runtime.txt",
+        "requirements/dev.txt",
+        "requirements/constraints.txt",
+        "requirements/torch-cpu.txt",
+        "requirements/torch-cu128.txt",
+    ):
+        names = {
+            name
+            for entry in _requirement_entries(profile)
+            if (name := _requirement_name(entry)) is not None
+        }
+        stale = sorted(names & retired)
+        if stale:
+            errors.append(f"{profile} contains retired direct dependencies: {', '.join(stale)}")
+
+    build_entries = _requirement_entries("requirements/build.txt")
+    if "-r runtime.txt" not in build_entries or not any(
+        _requirement_name(entry) == "pyinstaller" for entry in build_entries
+    ):
+        errors.append("requirements/build.txt must include runtime.txt and PyInstaller")
+
+    for profile, index in (
+        ("requirements/torch-cpu.txt", "https://download.pytorch.org/whl/cpu"),
+        ("requirements/torch-cu128.txt", "https://download.pytorch.org/whl/cu128"),
+    ):
+        text = (ROOT / profile).read_text(encoding="utf-8")
+        if index not in text or "torch==2.11.0" not in text or "torchaudio==2.11.0" not in text:
+            errors.append(f"{profile} must pin the expected PyTorch channel and packages")
+
+    release_script = (ROOT / "scripts/build-desktop-release.ps1").read_text(encoding="utf-8")
+    for marker in (
+        "requirements\\build.txt",
+        "requirements\\torch-cpu.txt",
+        "build\\release-venv",
+    ):
+        if marker not in release_script:
+            errors.append(f"release build must use isolated dependency marker {marker!r}")
+    if 'Join-Path $root "requirements.txt"' in release_script:
+        errors.append("release build must not install the developer requirements profile")
+
+
 def main() -> int:
     errors: list[str] = []
     version = check_versions(errors)
     check_environment_reference(errors)
     check_links(errors)
     check_readme_parity(errors)
+    check_dependency_profiles(errors)
     if errors:
         print("Documentation check failed:")
         for error in errors:

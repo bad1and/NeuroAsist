@@ -11,6 +11,7 @@
 - [Release checklist 1.0](release-checklist.md) — обязательные условия публикации.
 - [Release runbook](release-runbook.md) — CI, Windows candidate artifact и ручные evidence gates.
 - [Версии](versioning.md) — источник версии, зеркала и порядок подготовки релиза.
+- [Python-зависимости](dependencies.md) — runtime/dev/build профили и чистая release-среда.
 - [HTTP и WebSocket API](api.md) — authentication, route groups и transport versions.
 - [Текущий статус](MILESTONES.md) — что уже реализовано и что остаётся до публичной версии.
 - [Coding Agent](coding-agent.md) — Docker sandbox и границы безопасности.

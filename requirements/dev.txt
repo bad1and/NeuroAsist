@@ -1,0 +1,6 @@
+# Test and repository-maintenance dependencies. Runtime dependencies are
+# included by the root requirements.txt rather than duplicated here.
+-c constraints.txt
+
+psutil==7.2.2
+pytest==9.1.1

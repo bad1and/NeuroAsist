@@ -14,12 +14,10 @@
     "preview": "vite preview --host 127.0.0.1 --port 4173"
   },
   "dependencies": {
-    "@paper-design/shaders-react": "^0.0.80",
     "@tauri-apps/api": "^2.11.1",
     "animejs": "^4.5.0",
     "lottie-web": "^5.13.0",
     "lucide-react": "^0.468.0",
-    "neuroasist": "file:../..",
     "react": "19.2.3",
     "react-dom": "19.2.3"
   },

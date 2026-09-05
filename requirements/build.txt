@@ -1,0 +1,4 @@
+# Release-only build environment. The resulting installer contains the Python
+# runtime and application dependencies; end users do not install this file.
+-r runtime.txt
+pyinstaller==6.21.0

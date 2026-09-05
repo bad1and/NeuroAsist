@@ -37,7 +37,9 @@ build script uses DigiCert's timestamp service when it is omitted.
 The candidate workflow never creates a GitHub Release or declares a build
 stable. A tag must exactly equal `v` plus the root `VERSION` value.
 
-The NSIS candidate is a CPU-base installer. A CUDA-enabled PyTorch wheel adds
+The NSIS candidate is a CPU-base installer. The build creates a disposable
+environment, explicitly installs `requirements/torch-cpu.txt`, and keeps a
+defensive CUDA-DLL scan before packaging. A CUDA-enabled PyTorch wheel adds
 multiple gigabytes of optional DLLs and exceeds NSIS's 2 GiB packaging limit.
 The supported default voice configuration is CPU; a GPU runtime must be shipped
 and qualified as a separate, explicit add-on before it can be advertised in a
