@@ -48,22 +48,10 @@ namespace NeuroAsist.Avatar
         {
             if (isSpeaking == value) return;
             isSpeaking = value;
-            if (isSpeaking)
+            if (lookAroundRoutine != null)
             {
-                // When speaking begins, smoothly return gaze target to anchor directly at the user
-                if (lookAroundRoutine != null)
-                {
-                    StopCoroutine(lookAroundRoutine);
-                    lookAroundRoutine = StartCoroutine(ReturnTargetToBase());
-                }
-            }
-            else
-            {
-                // Visible continuation momentum when speech finishes:
-                // Prominently carries the head in current motion direction (~2.5°-3.5°), then naturally swings back like an elastic pendulum
-                float impulseSign = Mathf.Abs(yawVelocity) > 0.3f ? Mathf.Sign(yawVelocity) : (Random.value < 0.5f ? -1f : 1f);
-                yawVelocity = impulseSign * Mathf.Max(Mathf.Abs(yawVelocity) * 1.5f, 9.5f);
-                pitchVelocity = Mathf.Max(pitchVelocity, 5.5f); // visible, warm affirmative settling nod
+                StopCoroutine(lookAroundRoutine);
+                lookAroundRoutine = StartCoroutine(ReturnTargetToBase());
             }
         }
 
@@ -75,11 +63,6 @@ namespace NeuroAsist.Avatar
                 SetSpeaking(false);
                 StopLookAround();
             }
-            else if (presence == AvatarState.Thinking && target != null && lookAroundRoutine == null)
-            {
-                SetSpeaking(false);
-                lookAroundRoutine = StartCoroutine(ThoughtfulAfterPause());
-            }
             else if (presence == AvatarState.Speaking)
             {
                 SetSpeaking(true);
@@ -87,6 +70,7 @@ namespace NeuroAsist.Avatar
             else
             {
                 SetSpeaking(false);
+                StopLookAround();
             }
         }
 
@@ -158,23 +142,8 @@ namespace NeuroAsist.Avatar
             currentYaw = SpringDamp(currentYaw, targetYaw, ref yawVelocity, springFreq, 0.68f, Time.deltaTime);
             currentPitch = SpringDamp(currentPitch, targetPitch, ref pitchVelocity, springFreq, 0.70f, Time.deltaTime);
 
-            float effectivePitch = currentPitch;
-            float effectiveYaw = currentYaw;
-
-            if (isSpeaking && appliedWeight > 0.1f)
-            {
-                // Natural conversational micro-movements:
-                // Gentle side-to-side inflection (±1.2°)
-                float conversationalYaw = Mathf.Sin(Time.time * 1.5f) * 1.2f;
-                // Subtle affirming micro-nods DOWN (0 to +0.8° down, never upward)
-                float conversationalPitch = Mathf.Max(0f, Mathf.Sin(Time.time * 2.0f)) * 0.8f;
-
-                effectiveYaw += conversationalYaw * (1f - currentSuppression);
-                effectivePitch += conversationalPitch * (1f - currentSuppression);
-            }
-
-            // Apply look orientation additively to animator's frame rotation, preserving natural breathing/nodding motion
-            head.localRotation = head.localRotation * Quaternion.Euler(effectivePitch, effectiveYaw, 0f);
+            // Apply look orientation additively to animator's frame rotation, preserving natural posture
+            head.localRotation = head.localRotation * Quaternion.Euler(currentPitch, currentYaw, 0f);
         }
 
         private System.Collections.IEnumerator LookAround(float durationSeconds, IdleLookPattern pattern)

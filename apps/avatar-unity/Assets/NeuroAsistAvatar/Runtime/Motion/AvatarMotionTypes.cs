@@ -3,8 +3,66 @@ using UnityEngine;
 
 namespace NeuroAsist.Avatar
 {
-    public enum AvatarEmotion { Neutral, Happy, Sad, Angry, Surprised, Relaxed, Thinking, Annoyed, Smirk }
-    public enum GestureTag { None, Auto, Talk, Greeting, Agreement, Disagreement, Question, Explanation, Thinking, Surprise, Frustration, Farewell, Shrug }
+    public enum AvatarEmotion
+    {
+        Neutral = 0,
+        Happy = 1,
+        Sad = 2,
+        Angry = 3,
+        Surprised = 4,
+        Relaxed = 5,
+        Thinking = 6,
+        Annoyed = 7,
+        Smirk = 8,
+        Embarrassed = 9,
+        Concerned = 10,
+        Playful = 11,
+        Pouting = 12,
+        Wink = 13,
+        Wink_Left = 14,
+        Skeptical = 15,
+        Proud = 16,
+        Sleepy = 17,
+        Excited = 18,
+        Shocked = 19,
+        Touched = 20,
+        Teasing = 21,
+        Curious = 22,
+        Confused = 23,
+    }
+
+    public enum GestureTag
+    {
+        None = 0,
+        Auto = 1,
+        Talk = 2,
+        Greeting = 3,
+        Agreement = 4,
+        Disagreement = 5,
+        Question = 6,
+        Explanation = 7,
+        Thinking = 8,
+        Surprise = 9,
+        Frustration = 10,
+        Farewell = 11,
+        Shrug = 12,
+        Talk_Right = 13,
+        Talk_Left = 14,
+        Greeting_Right = 15,
+        Greeting_Left = 16,
+        Greeting_Casual = 17,
+        Question_Right = 18,
+        Question_Left = 19,
+        Explanation_Right = 20,
+        Explanation_Left = 21,
+        Thinking_Right = 22,
+        Thinking_Left = 23,
+        Farewell_Right = 24,
+        Farewell_Left = 25,
+        Farewell_Casual = 26,
+        Nod = 27,
+    }
+
     public enum IdleCategory { Micro, Normal, Long }
     public enum IdleLookPattern { None, Wander, SideGlance, Thoughtful }
 
@@ -29,17 +87,70 @@ namespace NeuroAsist.Avatar
 
         public static AvatarEmotion ParseEmotion(string value)
         {
-            if (Enum.TryParse(value, true, out AvatarEmotion result)) return result;
+            if (string.IsNullOrWhiteSpace(value)) return AvatarEmotion.Neutral;
+            var clean = value.Trim().Replace("-", "_");
+            if (Enum.TryParse(clean, true, out AvatarEmotion result)) return result;
             return AvatarEmotion.Neutral;
         }
 
         public static GestureTag ParseGesture(string value)
         {
-            if (Enum.TryParse(value, true, out GestureTag result)) return result;
+            if (string.IsNullOrWhiteSpace(value)) return GestureTag.Auto;
+            var clean = value.Trim().Replace("-", "_");
+            if (Enum.TryParse(clean, true, out GestureTag result)) return result;
             return GestureTag.Auto;
         }
 
         public static string ToTransport(this GestureTag value) => value.ToString().ToLowerInvariant();
+
+        public static GestureTag BaseGesture(GestureTag tag)
+        {
+            switch (tag)
+            {
+                case GestureTag.Greeting_Right:
+                case GestureTag.Greeting_Left:
+                case GestureTag.Greeting_Casual:
+                    return GestureTag.Greeting;
+                case GestureTag.Farewell_Right:
+                case GestureTag.Farewell_Left:
+                case GestureTag.Farewell_Casual:
+                    return GestureTag.Farewell;
+                case GestureTag.Thinking_Right:
+                case GestureTag.Thinking_Left:
+                    return GestureTag.Thinking;
+                case GestureTag.Question_Right:
+                case GestureTag.Question_Left:
+                    return GestureTag.Question;
+                case GestureTag.Explanation_Right:
+                case GestureTag.Explanation_Left:
+                    return GestureTag.Explanation;
+                case GestureTag.Talk_Right:
+                case GestureTag.Talk_Left:
+                    return GestureTag.Talk;
+                default:
+                    return tag;
+            }
+        }
+
+        public static bool IsExplicitLeftHand(GestureTag tag)
+        {
+            return tag == GestureTag.Greeting_Left ||
+                   tag == GestureTag.Farewell_Left ||
+                   tag == GestureTag.Thinking_Left ||
+                   tag == GestureTag.Question_Left ||
+                   tag == GestureTag.Explanation_Left ||
+                   tag == GestureTag.Talk_Left;
+        }
+
+        public static bool IsExplicitRightHand(GestureTag tag)
+        {
+            return tag == GestureTag.Greeting_Right ||
+                   tag == GestureTag.Farewell_Right ||
+                   tag == GestureTag.Thinking_Right ||
+                   tag == GestureTag.Question_Right ||
+                   tag == GestureTag.Explanation_Right ||
+                   tag == GestureTag.Talk_Right;
+        }
     }
 
     public interface IMotionRandom

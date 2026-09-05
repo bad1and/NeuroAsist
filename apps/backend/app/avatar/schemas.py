@@ -18,9 +18,15 @@ SUPPORTED_PROTOCOL_VERSIONS = (LEGACY_PROTOCOL_VERSION, PROTOCOL_VERSION)
 # protocol safe while allowing a complete thought to reach the avatar.
 MAX_STREAM_AUDIO_BASE64_CHARS = 6_000_000
 GESTURE_TAGS = frozenset({
-    "none", "auto", "talk", "greeting", "agreement", "disagreement",
-    "question", "explanation", "thinking", "surprise", "frustration",
-    "farewell", "shrug",
+    "none", "auto", "talk", "talk_right", "talk_left",
+    "greeting", "greeting_right", "greeting_left", "greeting_casual",
+    "agreement", "disagreement",
+    "question", "question_right", "question_left",
+    "explanation", "explanation_right", "explanation_left",
+    "thinking", "thinking_right", "thinking_left",
+    "surprise", "frustration",
+    "farewell", "farewell_right", "farewell_left", "farewell_casual",
+    "shrug", "nod",
 })
 AVATAR_PRESENCE_STATES = frozenset({"idle", "listening", "thinking", "speaking"})
 
@@ -78,6 +84,7 @@ class StreamMetadataPayload(ProtocolModel):
     emotion: Emotion = Emotion.NEUTRAL
     gesture: str = "auto"
     gesture_intensity: float = Field(default=1.0, ge=0.0, le=1.0)
+    intensity: float = Field(default=1.0, ge=0.0, le=1.0)
 
 
 class StreamMotionCuePayload(ProtocolModel):
@@ -85,6 +92,8 @@ class StreamMotionCuePayload(ProtocolModel):
 
     gesture: str = "auto"
     emphasized: bool = False
+    emotion: str | None = None
+    intensity: float | None = None
 
     _normalize_gesture = field_validator("gesture", mode="before")(normalize_gesture)
 

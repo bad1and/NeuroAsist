@@ -159,13 +159,23 @@ namespace NeuroAsist.Avatar
         {
             if (!speechCues.TryGetValue(sequence, out var cue)) return;
             speechCues.Remove(sequence);
-            if (!speaking || gestureController == null || gestureController.IsPlaying) return;
-            if (!CanScheduleAutomaticAccent(cue.Duration, cue.Requested, Time.unscaledTime, automaticAccentTimes)) return;
+            if (!speaking || gestureController == null) return;
+
+            var isExplicit = cue.Requested != GestureTag.Auto && cue.Requested != GestureTag.None;
+            if (!isExplicit)
+            {
+                if (gestureController.IsPlaying) return;
+                if (!CanScheduleAutomaticAccent(cue.Duration, cue.Requested, Time.unscaledTime, automaticAccentTimes)) return;
+            }
+
             var tag = ResolveSpeechGesture(cue);
             if (tag == GestureTag.None || tag == GestureTag.Auto) return;
             var intensity = (cue.Emphasized ? .86f : .68f) * (profile == null ? 1f : profile.GestureIntensityMultiplier);
-            if (!gestureController.Trigger(tag, emotion, true, intensity, false, new List<string>(recentAutomaticVariants))) return;
-            RememberAutomaticVariant(gestureController.ActiveVariantId, Time.unscaledTime);
+            if (!gestureController.Trigger(tag, emotion, true, intensity, isExplicit, new List<string>(recentAutomaticVariants))) return;
+            if (!isExplicit)
+            {
+                RememberAutomaticVariant(gestureController.ActiveVariantId, Time.unscaledTime);
+            }
         }
 
         public void StopGesture(bool immediate = false) => gestureController?.Stop(immediate);
@@ -184,7 +194,6 @@ namespace NeuroAsist.Avatar
         {
             lookController?.SetPresence(next);
             SetSpeaking(next == AvatarState.Speaking);
-            if (next == AvatarState.Thinking) SetEmotion(AvatarEmotion.Thinking);
             if (next == AvatarState.Error || next == AvatarState.Disconnected) { StopGesture(false); SetSpeaking(false); }
         }
 
@@ -235,11 +244,8 @@ namespace NeuroAsist.Avatar
         private GestureTag ResolveSpeechGesture(SpeechMotionCue cue)
         {
             if (cue.Requested != GestureTag.Auto && cue.Requested != GestureTag.None) return cue.Requested;
-            if (cue.Duration < MinimumAutomaticAccentSeconds) return GestureTag.None;
-            if (emotion == AvatarEmotion.Thinking) return cue.Emphasized ? GestureTag.Question : GestureTag.Thinking;
-            if (emotion == AvatarEmotion.Angry || emotion == AvatarEmotion.Annoyed)
-                return cue.Emphasized ? GestureTag.Frustration : GestureTag.Talk;
-            return cue.Emphasized ? GestureTag.Explanation : GestureTag.Talk;
+            // No scripted gestures: only neural network triggers gestures explicitly
+            return GestureTag.None;
         }
 
         private void RememberAutomaticVariant(string variant, float now)
@@ -255,16 +261,8 @@ namespace NeuroAsist.Avatar
 
         public static bool CanScheduleAutomaticAccent(float durationSeconds, GestureTag requested, float now, IList<float> previous)
         {
-            if (requested == GestureTag.Auto && durationSeconds < MinimumAutomaticAccentSeconds) return false;
-            var recent = 0;
-            for (var i = previous.Count - 1; i >= 0; i--)
-            {
-                var age = now - previous[i];
-                if (age > 30f) break;
-                recent++;
-                if (age < 6f) return false;
-            }
-            return recent < 2;
+            // Only explicitly requested gestures are allowed; no automatic scripts
+            return requested != GestureTag.Auto && requested != GestureTag.None;
         }
 
         private void RestoreRootAfterOneShot()

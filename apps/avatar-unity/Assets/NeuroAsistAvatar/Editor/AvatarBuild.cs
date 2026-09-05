@@ -16,6 +16,10 @@ namespace NeuroAsist.AvatarEditor
             AvatarRuntimeSetup.Setup();
             var output = Path.GetFullPath(Path.Combine("Builds", "NeuroAsistAvatar", "NeuroAsistAvatar.exe"));
             Directory.CreateDirectory(Path.GetDirectoryName(output));
+            if (File.Exists(output))
+            {
+                File.Delete(output);
+            }
             var report = BuildPipeline.BuildPlayer(
                 EditorBuildSettings.scenes,
                 output,

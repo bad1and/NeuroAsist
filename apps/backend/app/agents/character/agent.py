@@ -948,24 +948,12 @@ class CharacterAgent:
         llm_intensity = parsed.turn.affect.intensity if parsed.turn.affect is not None else None
 
         # Primary authority: The LLM model understands context, nuance, sarcasm, and character intent.
-        if llm_emotion != Emotion.NEUTRAL:
-            final_emotion = llm_emotion
-            final_intensity = max(0.2, llm_intensity if llm_intensity is not None else 0.7)
-        elif guide.avatar_emotion != "neutral":
-            final_emotion = Emotion(guide.avatar_emotion)
-            final_intensity = guide.avatar_intensity
-        else:
-            final_emotion = Emotion.NEUTRAL
-            final_intensity = guide.avatar_intensity
+        final_emotion = llm_emotion
+        final_intensity = max(0.1, llm_intensity if llm_intensity is not None else 0.7)
 
-        # Gesture preservation: if the model explicitly chose a gesture (other than auto/none),
-        # respect the model's acting choice.
+        # Gesture preservation: respect the model's acting choice. If the model didn't ask for a gesture, do not invent one.
         llm_gesture = parsed.turn.gesture.name if parsed.turn.gesture is not None else Gesture.AUTO
-        if llm_gesture not in {Gesture.AUTO, Gesture.NONE} and llm_gesture in Gesture:
-            final_gesture = llm_gesture
-        else:
-            gesture_name = next((name for name in guide.allowed_gestures if name in Gesture._value2member_map_), "auto")
-            final_gesture = Gesture(gesture_name)
+        final_gesture = llm_gesture if llm_gesture in Gesture else Gesture.AUTO
 
         delivery_pace = parsed.turn.delivery.pace if parsed.turn.delivery is not None and parsed.turn.delivery.pace != "normal" else guide.tts_pace
         delivery_emphasis = parsed.turn.delivery.emphasis if parsed.turn.delivery is not None and parsed.turn.delivery.emphasis > 0.0 else guide.tts_emphasis

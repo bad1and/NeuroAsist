@@ -4,13 +4,18 @@ import re
 from dataclasses import dataclass
 
 from apps.backend.app.schemas.character import Emotion
-from apps.backend.app.voice.delivery import clean_voice_directives
 
 
 _EMOTIONS = frozenset(item.value for item in Emotion)
 _GESTURES = frozenset({
-    "none", "auto", "talk", "greeting", "agreement", "disagreement", "question",
-    "explanation", "thinking", "surprise", "frustration", "farewell", "shrug",
+    "none", "auto", "talk", "talk_right", "talk_left",
+    "greeting", "greeting_right", "greeting_left", "greeting_casual",
+    "agreement", "disagreement", "question", "question_right", "question_left",
+    "explanation", "explanation_right", "explanation_left",
+    "thinking", "thinking_right", "thinking_left",
+    "surprise", "frustration",
+    "farewell", "farewell_right", "farewell_left", "farewell_casual",
+    "shrug", "nod",
 })
 _HEADER_RE = re.compile(
     r"^\[\[avatar\s+emotion=(?P<emotion>[a-z_]+)\s+gesture=(?P<gesture>[a-z_]+)\s+intensity=(?P<intensity>0(?:\.\d+)?|1(?:\.0+)?)\s*\]\]",
@@ -24,6 +29,34 @@ class AvatarDirective:
     emotion: Emotion = Emotion.NEUTRAL
     gesture: str = "auto"
     intensity: float = 1.0
+
+
+def parse_avatar_directive(tag_text: str) -> AvatarDirective:
+    """Parse [[avatar ...]] tag with arbitrary attribute ordering and partial attributes."""
+    inner = tag_text.strip()
+    if inner.startswith("[[") and inner.endswith("]]"):
+        inner = inner[2:-2].strip()
+    if inner.lower().startswith("avatar"):
+        inner = inner[6:].strip()
+    attrs = dict(re.findall(r'([a-zA-Z_]+)\s*=\s*([^\s\]]+)', inner))
+    raw_emotion = attrs.get("emotion", "").lower().replace("-", "_")
+    raw_gesture = attrs.get("gesture", "").lower().replace("-", "_")
+    raw_intensity = attrs.get("intensity")
+
+    if raw_emotion in ("tongue", "tongue_out"):
+        emotion = Emotion.TEASING
+    elif raw_emotion in _EMOTIONS:
+        emotion = Emotion(raw_emotion)
+    else:
+        emotion = Emotion.NEUTRAL
+
+    gesture = raw_gesture if raw_gesture in _GESTURES else "auto"
+    try:
+        intensity = float(raw_intensity) if raw_intensity is not None else 1.0
+        intensity = max(0.0, min(1.0, intensity))
+    except (ValueError, TypeError):
+        intensity = 1.0
+    return AvatarDirective(emotion=emotion, gesture=gesture, intensity=intensity)
 
 
 def make_live_directive_expressive(directive: AvatarDirective, user_text: str) -> AvatarDirective:
@@ -65,8 +98,8 @@ class LiveDirectiveParser:
                 remainder = leading_space + stripped[end + 2 :]
                 self._resolved = True
                 self._buffer = ""
-                match = _HEADER_RE.match(header)
-                return (self._from_header(match) if match else AvatarDirective()), self._parts(remainder)
+                directive = parse_avatar_directive(header)
+                return directive, self._parts(remainder)
             if not final and len(stripped) <= self._MAX_PREFIX:
                 return None, []
             self._resolved = True
@@ -95,14 +128,7 @@ class LiveDirectiveParser:
     def _from_header(match: re.Match[str] | None) -> AvatarDirective:
         if match is None:
             return AvatarDirective()
-        emotion = match.group("emotion").lower()
-        gesture = match.group("gesture").lower()
-        intensity = float(match.group("intensity"))
-        return AvatarDirective(
-            emotion=Emotion(emotion) if emotion in _EMOTIONS else Emotion.NEUTRAL,
-            gesture=gesture if gesture in _GESTURES else "auto",
-            intensity=max(0.0, min(1.0, intensity)),
-        )
+        return parse_avatar_directive(match.group(0))
 
     @staticmethod
     def _from_legacy_direction(value: str) -> AvatarDirective:
@@ -126,7 +152,11 @@ class LiveDirectiveParser:
 
 def clean_live_reply(raw_reply: str) -> str:
     """Strip the initial control/directorial prefix before committing the reply to history."""
+    from apps.backend.app.voice.delivery import clean_voice_directives
     parser = LiveDirectiveParser()
     _, parts = parser.feed(raw_reply)
     _, tail = parser.finish()
-    return clean_voice_directives("".join([*parts, *tail]))
+    cleaned = clean_voice_directives("".join([*parts, *tail]))
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    cleaned = re.sub(r" ([.,!?:;…])", r"\1", cleaned)
+    return cleaned.strip()

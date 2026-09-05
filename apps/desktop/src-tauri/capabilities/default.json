@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-capability",
   "description": "Main companion control window",
-  "windows": ["main"],
+  "windows": ["main", "qa_studio"],
   "permissions": [
     "core:default",
     "core:window:allow-close",

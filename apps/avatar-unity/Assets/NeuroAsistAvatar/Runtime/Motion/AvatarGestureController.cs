@@ -32,10 +32,17 @@ namespace NeuroAsist.Avatar
         public bool Trigger(GestureTag tag, AvatarEmotion emotion, bool speaking, float intensity, bool interrupt, ICollection<string> recentVariants = null)
         {
             if (settings == null || !settings.MotionEnabled) return false;
-            var next = Select(settings.GestureDefinitions, tag, emotion, speaking, active == null ? -1 : active.Priority, Time.unscaledTime, lastPlayed, random);
+            var isExplicit = tag != GestureTag.Auto && tag != GestureTag.None;
+            var ignoreCooldown = interrupt || isExplicit;
+            var currentPriority = (active == null || (isExplicit && interrupt)) ? -1 : active.Priority;
+            var next = Select(settings.GestureDefinitions, tag, emotion, speaking, currentPriority, Time.unscaledTime, lastPlayed, random, ignoreCooldown);
             if (next == null) return false;
-            if (active != null && (!interrupt || !active.CanInterrupt || next.Priority < active.Priority)) return false;
-            var variant = next.SelectAnimatorState(random, recentVariants);
+            if (active != null && !interrupt) return false;
+            if (active != null && !isExplicit && (!active.CanInterrupt || next.Priority < active.Priority)) return false;
+            bool? preferMirror = null;
+            if (AvatarMotionNames.IsExplicitLeftHand(tag)) preferMirror = true;
+            else if (AvatarMotionNames.IsExplicitRightHand(tag)) preferMirror = false;
+            var variant = next.SelectAnimatorState(random, recentVariants, preferMirror);
             if (string.IsNullOrWhiteSpace(variant)) return false;
             Stop(false);
             active = next;
@@ -95,20 +102,24 @@ namespace NeuroAsist.Avatar
         private void OnDisable() => Stop(true);
 
         public static GestureDefinition Select(IList<GestureDefinition> values, GestureTag tag, AvatarEmotion emotion, bool speaking,
-            int currentPriority, float now, IDictionary<string, float> played, IMotionRandom random)
+            int currentPriority, float now, IDictionary<string, float> played, IMotionRandom random, bool ignoreCooldown = false)
         {
             if (values == null) return null;
+            var baseTag = AvatarMotionNames.BaseGesture(tag);
             var choices = new List<GestureDefinition>();
             for (var i = 0; i < values.Count; i++)
             {
                 var item = values[i];
                 if (item == null || string.IsNullOrWhiteSpace(item.AnimatorState) || !item.Allows(emotion, speaking)) continue;
-                if (tag != GestureTag.Auto && tag != item.Tag) continue;
+                if (tag != GestureTag.Auto && tag != item.Tag && baseTag != item.Tag) continue;
                 if (item.Priority < currentPriority) continue;
-                if (played.TryGetValue(item.Id, out var last) && now - last < item.CooldownSeconds) continue;
+                if (!ignoreCooldown && played.TryGetValue(item.Id, out var last) && now - last < item.CooldownSeconds) continue;
                 choices.Add(item);
             }
-            return choices.Count == 0 ? null : choices[random.Range(0, choices.Count)];
+            if (choices.Count == 0) return null;
+            var exact = choices.FindAll(c => c.Tag == tag);
+            if (exact.Count > 0) return exact[random.Range(0, exact.Count)];
+            return choices[random.Range(0, choices.Count)];
         }
     }
 }

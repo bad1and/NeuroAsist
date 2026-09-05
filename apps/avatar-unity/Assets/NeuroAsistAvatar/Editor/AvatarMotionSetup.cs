@@ -35,20 +35,70 @@ namespace NeuroAsist.AvatarEditor
         {
             EnsureFolders();
             var settings = AssetDatabase.LoadAssetAtPath<AvatarMotionSettings>(SettingsPath);
-            if (settings != null) return settings;
-            settings = ScriptableObject.CreateInstance<AvatarMotionSettings>();
-            var neutral = CreateProfile("Neutral", "neutral", 1f, 1f, 1f);
-            settings.DefaultProfile = neutral;
+            if (settings == null)
+            {
+                settings = ScriptableObject.CreateInstance<AvatarMotionSettings>();
+                var neutral = CreateProfile("Neutral", "neutral", 1f, 1f, 1f);
+                settings.DefaultProfile = neutral;
+                AssetDatabase.CreateAsset(settings, SettingsPath);
+            }
+
+            var existingEmotions = new HashSet<AvatarEmotion>();
+            foreach (var ep in settings.EmotionProfiles) if (ep != null) existingEmotions.Add(ep.Emotion);
+
             foreach (var item in new[] {
-                (AvatarEmotion.Neutral, neutral), (AvatarEmotion.Happy, CreateProfile("Happy", "happy", 1.15f, 1.2f, 1.05f)),
-                (AvatarEmotion.Sad, CreateProfile("Sad", "sad", .55f, .75f, .8f)), (AvatarEmotion.Angry, CreateProfile("Angry", "angry", .9f, 1.1f, 1.2f)),
-                (AvatarEmotion.Surprised, CreateProfile("Surprised", "surprised", 1.05f, 1.05f, 1.1f)), (AvatarEmotion.Relaxed, CreateProfile("Relaxed", "relaxed", .65f, .8f, .8f)),
-                (AvatarEmotion.Thinking, CreateProfile("Thinking", "thinking", .6f, .75f, .85f)), (AvatarEmotion.Annoyed, CreateProfile("Annoyed", "annoyed", .8f, .9f, 1.1f)),
+                (AvatarEmotion.Neutral, settings.DefaultProfile ?? CreateProfile("Neutral", "neutral", 1f, 1f, 1f)),
+                (AvatarEmotion.Happy, CreateProfile("Happy", "happy", 1.15f, 1.2f, 1.05f)),
+                (AvatarEmotion.Sad, CreateProfile("Sad", "sad", .55f, .75f, .8f)),
+                (AvatarEmotion.Angry, CreateProfile("Angry", "angry", .9f, 1.1f, 1.2f)),
+                (AvatarEmotion.Surprised, CreateProfile("Surprised", "surprised", 1.05f, 1.05f, 1.1f)),
+                (AvatarEmotion.Relaxed, CreateProfile("Relaxed", "relaxed", .65f, .8f, .8f)),
+                (AvatarEmotion.Thinking, CreateProfile("Thinking", "thinking", .6f, .75f, .85f)),
+                (AvatarEmotion.Annoyed, CreateProfile("Annoyed", "annoyed", .8f, .9f, 1.1f)),
                 (AvatarEmotion.Smirk, CreateProfile("Smirk", "smirk", .9f, 1f, 1f)),
-            }) settings.EmotionProfiles.Add(new EmotionMotionProfile { Emotion = item.Item1, Profile = item.Item2 });
-            foreach (var tag in new[] { GestureTag.Talk, GestureTag.Greeting, GestureTag.Agreement, GestureTag.Disagreement, GestureTag.Question, GestureTag.Explanation, GestureTag.Thinking, GestureTag.Surprise, GestureTag.Frustration, GestureTag.Farewell, GestureTag.Shrug })
-                settings.GestureDefinitions.Add(CreateGesture(tag));
-            AssetDatabase.CreateAsset(settings, SettingsPath);
+                (AvatarEmotion.Embarrassed, CreateProfile("Embarrassed", "embarrassed", .65f, .75f, .85f)),
+                (AvatarEmotion.Concerned, CreateProfile("Concerned", "concerned", .7f, .85f, .9f)),
+                (AvatarEmotion.Playful, CreateProfile("Playful", "playful", 1.0f, 1.05f, 1.0f)),
+                (AvatarEmotion.Pouting, CreateProfile("Pouting", "pouting", .7f, .9f, 1.1f)),
+                (AvatarEmotion.Wink, CreateProfile("Wink", "wink", 1.1f, 1.0f, 1.0f)),
+                (AvatarEmotion.Wink_Left, CreateProfile("WinkLeft", "wink_left", 1.1f, 1.0f, 1.0f)),
+                (AvatarEmotion.Skeptical, CreateProfile("Skeptical", "skeptical", .75f, .85f, .95f)),
+                (AvatarEmotion.Proud, CreateProfile("Proud", "proud", 1.0f, 1.05f, 1.1f)),
+                (AvatarEmotion.Sleepy, CreateProfile("Sleepy", "sleepy", .45f, .6f, .7f)),
+                (AvatarEmotion.Excited, CreateProfile("Excited", "excited", 1.25f, 1.25f, 1.15f)),
+                (AvatarEmotion.Shocked, CreateProfile("Shocked", "shocked", 1.1f, 1.15f, 1.2f)),
+                (AvatarEmotion.Touched, CreateProfile("Touched", "touched", .7f, .85f, .95f)),
+                (AvatarEmotion.Teasing, CreateProfile("Teasing", "teasing", .95f, 1.0f, 1.0f)),
+                (AvatarEmotion.Curious, CreateProfile("Curious", "curious", .85f, .95f, 1.05f)),
+                (AvatarEmotion.Confused, CreateProfile("Confused", "confused", .75f, .85f, .95f)),
+            })
+            {
+                if (!existingEmotions.Contains(item.Item1))
+                {
+                    settings.EmotionProfiles.Add(new EmotionMotionProfile { Emotion = item.Item1, Profile = item.Item2 });
+                }
+            }
+
+            var existingTags = new HashSet<GestureTag>();
+            foreach (var g in settings.GestureDefinitions) if (g != null) existingTags.Add(g.Tag);
+
+            foreach (var tag in new[] {
+                GestureTag.Talk, GestureTag.Greeting, GestureTag.Agreement, GestureTag.Disagreement,
+                GestureTag.Question, GestureTag.Explanation, GestureTag.Thinking, GestureTag.Surprise,
+                GestureTag.Frustration, GestureTag.Farewell, GestureTag.Shrug,
+                GestureTag.Greeting_Right, GestureTag.Greeting_Left, GestureTag.Greeting_Casual,
+                GestureTag.Farewell_Right, GestureTag.Farewell_Left, GestureTag.Farewell_Casual,
+                GestureTag.Thinking_Right, GestureTag.Thinking_Left,
+                GestureTag.Question_Right, GestureTag.Question_Left,
+                GestureTag.Explanation_Right, GestureTag.Explanation_Left,
+                GestureTag.Talk_Right, GestureTag.Talk_Left, GestureTag.Nod
+            })
+            {
+                if (!existingTags.Contains(tag))
+                {
+                    settings.GestureDefinitions.Add(CreateGesture(tag));
+                }
+            }
             return settings;
         }
 
@@ -59,9 +109,12 @@ namespace NeuroAsist.AvatarEditor
             if (existing != null) return existing;
             var profile = ScriptableObject.CreateInstance<MotionProfile>();
             profile.ProfileId = id; profile.GestureFrequencyMultiplier = gestureFrequency; profile.GestureIntensityMultiplier = intensity; profile.HeadLookWeight = headWeight;
-            profile.AlternativeIdles.Add(new AlternativeIdleDefinition { Id = "IdleLookAround", AnimatorState = "IdleLookAround", Category = IdleCategory.Micro, DurationSeconds = 1.8f });
-            profile.AlternativeIdles.Add(new AlternativeIdleDefinition { Id = "IdleShiftWeight", AnimatorState = "IdleShiftWeight", Category = IdleCategory.Normal, DurationSeconds = 3f });
-            profile.AlternativeIdles.Add(new AlternativeIdleDefinition { Id = "IdleSmallStretch", AnimatorState = "IdleSmallStretch", Category = IdleCategory.Long, DurationSeconds = 4f });
+            profile.AlternativeIdles.Add(new AlternativeIdleDefinition { Id = "IdleLookWander", AnimatorState = AvatarMotionNames.DefaultIdleState, LookPattern = IdleLookPattern.Wander, Category = IdleCategory.Micro, DurationSeconds = 4.5f, CooldownSeconds = 25f });
+            profile.AlternativeIdles.Add(new AlternativeIdleDefinition { Id = "IdleSideGlance", AnimatorState = AvatarMotionNames.DefaultIdleState, LookPattern = IdleLookPattern.SideGlance, Category = IdleCategory.Micro, DurationSeconds = 3.5f, CooldownSeconds = 25f });
+            profile.AlternativeIdles.Add(new AlternativeIdleDefinition { Id = "IdleThoughtfulLook", AnimatorState = AvatarMotionNames.DefaultIdleState, LookPattern = IdleLookPattern.Thoughtful, Category = IdleCategory.Micro, DurationSeconds = 4f, CooldownSeconds = 30f });
+            profile.AlternativeIdleProbability = .35f;
+            profile.IdleIntervalMinSeconds = 16f;
+            profile.IdleIntervalMaxSeconds = 32f;
             AssetDatabase.CreateAsset(profile, path);
             return profile;
         }
@@ -72,9 +125,54 @@ namespace NeuroAsist.AvatarEditor
             var existing = AssetDatabase.LoadAssetAtPath<GestureDefinition>(path);
             if (existing != null) return existing;
             var value = ScriptableObject.CreateInstance<GestureDefinition>();
-            value.Id = tag + "Gesture"; value.Tag = tag; value.AnimatorState = tag == GestureTag.Talk ? "TalkGesture01" : tag.ToString();
-            value.Priority = tag == GestureTag.Greeting || tag == GestureTag.Farewell ? 50 : 10;
-            value.HeadLookSuppression = tag == GestureTag.Thinking ? .3f : 0f;
+            value.Id = tag + "Gesture";
+            value.Tag = tag;
+            switch (tag)
+            {
+                case GestureTag.Talk:
+                case GestureTag.Talk_Right:
+                    value.AnimatorState = "TalkGesture01"; break;
+                case GestureTag.Talk_Left:
+                    value.AnimatorState = "TalkGesture01Mirror"; break;
+                case GestureTag.Greeting:
+                case GestureTag.Greeting_Right:
+                    value.AnimatorState = "Greeting"; break;
+                case GestureTag.Greeting_Left:
+                    value.AnimatorState = "GreetingMirror"; break;
+                case GestureTag.Greeting_Casual:
+                    value.AnimatorState = "GreetingCasual"; break;
+                case GestureTag.Farewell:
+                case GestureTag.Farewell_Right:
+                    value.AnimatorState = "Farewell"; break;
+                case GestureTag.Farewell_Left:
+                    value.AnimatorState = "FarewellMirror"; break;
+                case GestureTag.Farewell_Casual:
+                    value.AnimatorState = "FarewellCasual"; break;
+                case GestureTag.Thinking:
+                case GestureTag.Thinking_Right:
+                    value.AnimatorState = "Thinking"; break;
+                case GestureTag.Thinking_Left:
+                    value.AnimatorState = "ThinkingMirror"; break;
+                case GestureTag.Question:
+                case GestureTag.Question_Right:
+                    value.AnimatorState = "Question"; break;
+                case GestureTag.Question_Left:
+                    value.AnimatorState = "QuestionMirror"; break;
+                case GestureTag.Explanation:
+                case GestureTag.Explanation_Right:
+                    value.AnimatorState = "Explanation"; break;
+                case GestureTag.Explanation_Left:
+                    value.AnimatorState = "ExplanationMirror"; break;
+                case GestureTag.Nod:
+                    value.AnimatorState = "Agreement"; break;
+                default:
+                    value.AnimatorState = tag.ToString(); break;
+            }
+            value.Priority = tag == GestureTag.Greeting || tag == GestureTag.Farewell
+                || tag == GestureTag.Greeting_Right || tag == GestureTag.Greeting_Left
+                || tag == GestureTag.Greeting_Casual || tag == GestureTag.Farewell_Right
+                || tag == GestureTag.Farewell_Left || tag == GestureTag.Farewell_Casual ? 50 : 10;
+            value.HeadLookSuppression = tag == GestureTag.Thinking || tag == GestureTag.Thinking_Right || tag == GestureTag.Thinking_Left ? .3f : 0f;
             AssetDatabase.CreateAsset(value, path);
             return value;
         }
@@ -82,19 +180,30 @@ namespace NeuroAsist.AvatarEditor
         private static AnimatorController EnsureController()
         {
             var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(ControllerPath);
-            if (controller != null) return controller;
-            controller = AnimatorController.CreateAnimatorControllerAtPath(ControllerPath);
-            controller.AddParameter("IsSpeaking", AnimatorControllerParameterType.Bool);
-            controller.AddParameter("MotionIntensity", AnimatorControllerParameterType.Float);
-            controller.AddParameter("BaseIdle", AnimatorControllerParameterType.Int);
+            if (controller == null) controller = AnimatorController.CreateAnimatorControllerAtPath(ControllerPath);
+            if (!HasParameter(controller, "IsSpeaking")) controller.AddParameter("IsSpeaking", AnimatorControllerParameterType.Bool);
+            if (!HasParameter(controller, "MotionIntensity")) controller.AddParameter("MotionIntensity", AnimatorControllerParameterType.Float);
+            if (!HasParameter(controller, "BaseIdle")) controller.AddParameter("BaseIdle", AnimatorControllerParameterType.Int);
+
             var baseMachine = controller.layers[0].stateMachine;
             AddStates(baseMachine, new[] { "IdleNeutral", "IdleRelaxed", "IdleEnergetic", "IdleSad", "IdleThinking", "IdleLookAround", "IdleShiftWeight", "IdleSmallStretch" }, "IdleNeutral");
-            controller.AddLayer(AvatarMotionNames.GestureLayer);
+
+            if (controller.layers.Length < 2) controller.AddLayer(AvatarMotionNames.GestureLayer);
             var layers = controller.layers;
-            AddStates(layers[1].stateMachine, new[] { "Empty", "TalkGesture01", "Greeting", "Agreement", "Disagreement", "Question", "Explanation", "Thinking", "Surprise", "Frustration", "Farewell", "Shrug" }, "Empty");
+            AddStates(layers[1].stateMachine, new[] {
+                "Empty", "TalkGesture01", "Greeting", "GreetingCasual", "Agreement", "Disagreement",
+                "Question", "Explanation", "Thinking", "Surprise", "Frustration", "Farewell", "FarewellCasual", "Shrug"
+            }, "Empty");
             controller.layers = layers;
             return controller;
         }
+
+        private static bool HasParameter(AnimatorController controller, string name)
+        {
+            foreach (var p in controller.parameters) if (p.name == name) return true;
+            return false;
+        }
+
         private static void AssignIncludedClips(AnimatorController controller)
         {
             var clips = new Dictionary<string, AnimationClip>();
@@ -124,6 +233,7 @@ namespace NeuroAsist.AvatarEditor
                 ["IdleSmallStretch"] = "X Bot@Idle",
                 ["TalkGesture01"] = "X Bot@Talking",
                 ["Greeting"] = "X Bot@Waving",
+                ["GreetingCasual"] = "X Bot@Talking",
                 ["Agreement"] = "X Bot@Agreeing",
                 ["Disagreement"] = "X Bot@Shaking Head No",
                 ["Question"] = "X Bot@TalkingQuestion",
@@ -132,7 +242,9 @@ namespace NeuroAsist.AvatarEditor
                 ["Surprise"] = "X Bot@Surprised",
                 ["Frustration"] = "X Bot@Angry",
                 ["Farewell"] = "X Bot@WavingGoodbye",
+                ["FarewellCasual"] = "X Bot@Talking",
                 ["Shrug"] = "X Bot@Shrugging",
+                ["Nod"] = "X Bot@Agreeing",
             };
             foreach (var layer in controller.layers) AssignLayerClips(layer.stateMachine, assignments, clips);
         }
@@ -173,15 +285,13 @@ namespace NeuroAsist.AvatarEditor
             foreach (var profile in profiles)
             {
                 if (profile == null || !repaired.Add(profile)) continue;
-                // The old generated assets contained two empty state slots. Replace exactly
-                // that legacy layout with three root-safe, non-repeating look variations.
-                if (profile.AlternativeIdles.Count != 3 || profile.AlternativeIdles[1] == null || profile.AlternativeIdles[2] == null
-                    || !string.IsNullOrWhiteSpace(profile.AlternativeIdles[1].AnimatorState) || !string.IsNullOrWhiteSpace(profile.AlternativeIdles[2].AnimatorState)) continue;
                 profile.AlternativeIdles.Clear();
-                profile.AlternativeIdles.Add(new AlternativeIdleDefinition { Id = "IdleLookWander", AnimatorState = AvatarMotionNames.DefaultIdleState, LookPattern = IdleLookPattern.Wander, Category = IdleCategory.Micro, DurationSeconds = 4.5f, CooldownSeconds = 18f });
-                profile.AlternativeIdles.Add(new AlternativeIdleDefinition { Id = "IdleSideGlance", AnimatorState = AvatarMotionNames.DefaultIdleState, LookPattern = IdleLookPattern.SideGlance, Category = IdleCategory.Micro, DurationSeconds = 3.5f, CooldownSeconds = 16f });
-                profile.AlternativeIdles.Add(new AlternativeIdleDefinition { Id = "IdleThoughtfulLook", AnimatorState = AvatarMotionNames.DefaultIdleState, LookPattern = IdleLookPattern.Thoughtful, Category = IdleCategory.Micro, DurationSeconds = 4f, CooldownSeconds = 24f });
-                profile.AlternativeIdleProbability = .65f;
+                profile.AlternativeIdles.Add(new AlternativeIdleDefinition { Id = "IdleLookWander", AnimatorState = AvatarMotionNames.DefaultIdleState, LookPattern = IdleLookPattern.Wander, Category = IdleCategory.Micro, DurationSeconds = 4.5f, CooldownSeconds = 25f });
+                profile.AlternativeIdles.Add(new AlternativeIdleDefinition { Id = "IdleSideGlance", AnimatorState = AvatarMotionNames.DefaultIdleState, LookPattern = IdleLookPattern.SideGlance, Category = IdleCategory.Micro, DurationSeconds = 3.5f, CooldownSeconds = 25f });
+                profile.AlternativeIdles.Add(new AlternativeIdleDefinition { Id = "IdleThoughtfulLook", AnimatorState = AvatarMotionNames.DefaultIdleState, LookPattern = IdleLookPattern.Thoughtful, Category = IdleCategory.Micro, DurationSeconds = 4f, CooldownSeconds = 30f });
+                profile.AlternativeIdleProbability = .35f;
+                profile.IdleIntervalMinSeconds = 16f;
+                profile.IdleIntervalMaxSeconds = 32f;
                 EditorUtility.SetDirty(profile);
             }
         }
@@ -191,6 +301,8 @@ namespace NeuroAsist.AvatarEditor
             var safe = new HashSet<GestureTag> {
                 GestureTag.Talk, GestureTag.Question, GestureTag.Thinking, GestureTag.Explanation,
                 GestureTag.Agreement, GestureTag.Disagreement, GestureTag.Shrug,
+                GestureTag.Greeting, GestureTag.Greeting_Casual, GestureTag.Farewell, GestureTag.Farewell_Casual,
+                GestureTag.Surprise, GestureTag.Frustration, GestureTag.Nod,
             };
             var machine = controller.layers[1].stateMachine;
             foreach (var definition in settings.GestureDefinitions)
@@ -226,14 +338,39 @@ namespace NeuroAsist.AvatarEditor
             foreach (var child in machine.states) if (child.state.name == name) return child.state;
             return null;
         }
+
         private static void AddStates(AnimatorStateMachine machine, IEnumerable<string> names, string defaultName)
         {
+            var statesToRemove = new List<ChildAnimatorState>();
+            foreach (var child in machine.states)
+            {
+                var sName = child.state.name;
+                var spaceIdx = sName.LastIndexOf(' ');
+                if (spaceIdx > 0 && int.TryParse(sName.Substring(spaceIdx + 1), out _))
+                {
+                    statesToRemove.Add(child);
+                }
+            }
+            foreach (var child in statesToRemove)
+            {
+                machine.RemoveState(child.state);
+            }
+
             foreach (var name in names)
             {
-                var state = machine.AddState(name);
-                if (name == defaultName) machine.defaultState = state;
+                var existing = FindState(machine, name);
+                if (existing == null)
+                {
+                    var state = machine.AddState(name);
+                    if (name == defaultName) machine.defaultState = state;
+                }
+                else if (name == defaultName && machine.defaultState == null)
+                {
+                    machine.defaultState = existing;
+                }
             }
         }
+
         private static AvatarMask EnsureMask()
         {
             var mask = AssetDatabase.LoadAssetAtPath<AvatarMask>(MaskPath);

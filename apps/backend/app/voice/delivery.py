@@ -52,10 +52,9 @@ class VoiceDirective:
     pace: SpeechPace = SpeechPace.NORMAL
     emphasis: SpeechEmphasis = SpeechEmphasis.NONE
     speed: float | None = None
-    # This is deliberately a small, renderer-neutral semantic hint.  It never
-    # becomes visible text and the avatar service still validates it against
-    # the active emotional profile before it reaches Unity.
     gesture: str = "auto"
+    emotion: str | None = None
+    emotion_intensity: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +67,8 @@ class SpeechSegment:
     sequence: int = 0
     pause_before_ms: int = 0
     motion_gesture: str = "auto"
+    emotion: str | None = None
+    emotion_intensity: float | None = None
 
     def with_sequence(self, sequence: int) -> "SpeechSegment":
         return SpeechSegment(
@@ -79,6 +80,8 @@ class SpeechSegment:
             sequence=sequence,
             pause_before_ms=self.pause_before_ms,
             motion_gesture=self.motion_gesture,
+            emotion=self.emotion,
+            emotion_intensity=self.emotion_intensity,
         )
 
 
@@ -128,14 +131,36 @@ def make_speech_segment(
         pause_after_ms=pause_after_ms(text, forced_clause_split=forced_clause_split),
         sequence=sequence,
         motion_gesture=directive.gesture if directive is not None else "auto",
+        emotion=directive.emotion if directive is not None else None,
+        emotion_intensity=directive.emotion_intensity if directive is not None else None,
     )
 
 
 def plan_speech(text: str, delivery=None) -> list[SpeechSegment]:
-    """Build a deterministic batch plan from Character Protocol delivery cues."""
-    sentences = split_spoken_sentences(text)
-    if not sentences:
+    """Build a deterministic batch plan from Character Protocol delivery cues and inline directives."""
+    # First extract any inline directives
+    parser = LiveVoiceDirectiveParser(max_directives=64, max_motion_directives=64)
+    tokens = [*parser.feed(text), *parser.finish()]
+
+    # Collect sentences while associating with the current active directive
+    sentences_with_directives: list[tuple[str, VoiceDirective | None]] = []
+    current_directive: VoiceDirective | None = None
+
+    for item in tokens:
+        if isinstance(item, VoiceDirective):
+            current_directive = item
+        elif isinstance(item, str) and item.strip():
+            for sentence in split_spoken_sentences(item):
+                sentences_with_directives.append((sentence, current_directive))
+
+    if not sentences_with_directives:
+        clean = clean_voice_directives(text)
+        sentences = split_spoken_sentences(clean)
+        sentences_with_directives = [(s, None) for s in sentences]
+
+    if not sentences_with_directives:
         return []
+
     base_pace = coerce_speech_pace(getattr(delivery, "pace", SpeechPace.NORMAL))
     overrides = {
         int(item.segment): VoiceDirective(
@@ -144,30 +169,44 @@ def plan_speech(text: str, delivery=None) -> list[SpeechSegment]:
             getattr(item, "speed", None),
         )
         for item in list(getattr(delivery, "overrides", ()) or ())[:3]
-        if 1 <= int(item.segment) <= len(sentences)
+        if 1 <= int(item.segment) <= len(sentences_with_directives)
     }
-    return [
-        make_speech_segment(
-            sentence,
-            sequence=index - 1,
-            base_pace=base_pace,
-            directive=overrides.get(index),
+
+    segments: list[SpeechSegment] = []
+    for index, (sentence, directive) in enumerate(sentences_with_directives, start=1):
+        override = overrides.get(index)
+        effective_directive = directive
+        if override is not None:
+            effective_directive = VoiceDirective(
+                pace=override.pace,
+                emphasis=override.emphasis,
+                speed=override.speed,
+                gesture=directive.gesture if directive is not None else "auto",
+                emotion=directive.emotion if directive is not None else None,
+                emotion_intensity=directive.emotion_intensity if directive is not None else None,
+            )
+        segments.append(
+            make_speech_segment(
+                sentence,
+                sequence=index - 1,
+                base_pace=base_pace,
+                directive=effective_directive,
+            )
         )
-        for index, sentence in enumerate(sentences, start=1)
-    ]
+    return segments
 
 
 class LiveVoiceDirectiveParser:
-    """Strip interleaved voice tags and emit fragment-safe control events."""
+    """Strip interleaved voice and avatar tags and emit fragment-safe control events."""
 
-    _START = "[[voice"
-    _MAX_TAG = 128
-    _TAG_RE = re.compile(
+    _START = "[["
+    _MAX_TAG = 192
+    _VOICE_TAG_RE = re.compile(
         r"^\[\[voice\s+pace=(?P<pace>[a-z_]+)\s+emphasis=(?P<emphasis>[a-z_]+)(?:\s+gesture=(?P<gesture>[a-z_]+))?\s*\]\]$",
         re.IGNORECASE,
     )
 
-    def __init__(self, max_directives: int = 3, max_motion_directives: int = 2) -> None:
+    def __init__(self, max_directives: int = 16, max_motion_directives: int = 16) -> None:
         self._buffer = ""
         self._discarding_tag = False
         self._max_directives = max(0, max_directives)
@@ -195,15 +234,15 @@ class LiveVoiceDirectiveParser:
                 self._buffer = self._buffer[end + 2 :]
                 self._discarding_tag = False
                 continue
+
             lowered = self._buffer.lower()
             start = lowered.find(self._START)
             if start < 0:
-                # Retain a possible split prefix such as ``[[voi``.
+                # Retain a possible split prefix such as `[` or `[[` at end of buffer
                 keep = 0
                 if not final:
-                    for size in range(1, min(len(self._buffer), len(self._START) - 1) + 1):
-                        if self._START.startswith(lowered[-size:]):
-                            keep = size
+                    if self._buffer.endswith("["):
+                        keep = 1
                     if keep:
                         visible = self._buffer[:-keep]
                         if visible:
@@ -213,47 +252,76 @@ class LiveVoiceDirectiveParser:
                 output.append(self._buffer)
                 self._buffer = ""
                 break
-            if start:
+
+            if start > 0:
                 output.append(self._buffer[:start])
                 self._buffer = self._buffer[start:]
                 continue
+
+            # Buffer starts with "[["
             end = self._buffer.find("]]", len(self._START))
             if end < 0:
                 if not final and len(self._buffer) <= self._MAX_TAG:
                     break
-                # A malformed or overlong machine tag is never visible/spoken.
+                # A malformed or overlong machine tag is never visible/spoken
                 self._buffer = ""
                 self._discarding_tag = not final
                 continue
+
             raw_tag = self._buffer[: end + 2]
             self._buffer = self._buffer[end + 2 :]
-            if self._accepted >= self._max_directives:
+            raw_tag_lower = raw_tag.lower()
+
+            if raw_tag_lower.startswith("[[avatar"):
+                from apps.backend.app.voice.directives import parse_avatar_directive
+                avatar_dir = parse_avatar_directive(raw_tag)
+                if self._accepted < self._max_directives:
+                    self._accepted += 1
+                    gesture = avatar_dir.gesture
+                    if gesture != "auto":
+                        if self._accepted_motion >= self._max_motion_directives:
+                            gesture = "auto"
+                        else:
+                            self._accepted_motion += 1
+                    output.append(VoiceDirective(
+                        gesture=gesture,
+                        emotion=avatar_dir.emotion.value,
+                        emotion_intensity=avatar_dir.intensity,
+                    ))
                 continue
-            match = self._TAG_RE.match(raw_tag)
-            self._accepted += 1
-            if match is None:
-                output.append(VoiceDirective())
+
+            if raw_tag_lower.startswith("[[voice"):
+                if self._accepted >= self._max_directives:
+                    continue
+                match = self._VOICE_TAG_RE.match(raw_tag)
+                self._accepted += 1
+                if match is None:
+                    output.append(VoiceDirective())
+                    continue
+                gesture = (match.group("gesture") or "auto").lower()
+                if gesture != "auto":
+                    if self._accepted_motion >= self._max_motion_directives:
+                        gesture = "auto"
+                    else:
+                        self._accepted_motion += 1
+                output.append(VoiceDirective(
+                    coerce_speech_pace(match.group("pace").lower()),
+                    coerce_speech_emphasis(match.group("emphasis").lower()),
+                    gesture=gesture,
+                ))
                 continue
-            gesture = (match.group("gesture") or "auto").lower()
-            # Do not let a chatty model turn every sentence into choreography.
-            # The automatic director remains responsible for all unmarked lines.
-            if gesture != "auto":
-                if self._accepted_motion >= self._max_motion_directives:
-                    gesture = "auto"
-                else:
-                    self._accepted_motion += 1
-            output.append(VoiceDirective(
-                coerce_speech_pace(match.group("pace").lower()),
-                coerce_speech_emphasis(match.group("emphasis").lower()),
-                gesture=gesture,
-            ))
+
+            # Any other [[...]] machine tag is dropped from speech/display
+            continue
         return [item for item in output if not isinstance(item, str) or item]
 
 
 def clean_voice_directives(text: str) -> str:
-    parser = LiveVoiceDirectiveParser()
+    parser = LiveVoiceDirectiveParser(max_directives=99, max_motion_directives=99)
     parts = [*parser.feed(text), *parser.finish()]
-    return "".join(item for item in parts if isinstance(item, str)).strip()
+    result = "".join(item for item in parts if isinstance(item, str))
+    result = re.sub(r"\[\[(?:avatar|voice)\s+[^\]]+\]\]", "", result, flags=re.IGNORECASE)
+    return result.strip()
 
 
 def resequence(segments: Iterable[SpeechSegment]) -> list[SpeechSegment]:

@@ -20,16 +20,19 @@ from apps.backend.app.schemas.character import (
 
 def deterministic_turn(reply: str, user_text: str = "") -> CharacterTurn:
     """Keep a valid reply when model metadata is absent or invalid."""
-    text = (user_text or "").lower()
-    if "?" in text or text.startswith(("как ", "почему ", "что ", "кто ", "где ", "когда ", "зачем ")):
-        emotion, gesture = Emotion.THINKING, Gesture.QUESTION
-    else:
-        emotion, gesture = Emotion.NEUTRAL, Gesture.AUTO
+    if "?" in (user_text or ""):
+        return CharacterTurn(
+            reply=reply,
+            intent=classify_intent(user_text),
+            affect=AffectCue(emotion=Emotion.THINKING),
+            gesture=GestureCue(name=Gesture.QUESTION),
+            delivery=DeliveryCue(),
+        )
     return CharacterTurn(
         reply=reply,
         intent=classify_intent(user_text),
-        affect=AffectCue(emotion=emotion),
-        gesture=GestureCue(name=gesture),
+        affect=AffectCue(emotion=Emotion.NEUTRAL),
+        gesture=GestureCue(name=Gesture.AUTO),
         delivery=DeliveryCue(),
     )
 

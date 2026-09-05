@@ -229,5 +229,73 @@ namespace NeuroAsist.Avatar.Tests
 
             Object.DestroyImmediate(go);
         }
+
+        [Test]
+        public void NewEmotionsResolveAndClampMaxIntensity()
+        {
+            var go = new GameObject("TestNewEmotions");
+            var controller = go.AddComponent<AvatarEmotionController>();
+            controller.Configure(null, null);
+
+            controller.SetEmotion("pouting", 1f);
+            Assert.That(controller.GetTargetWeight("pouting"), Is.EqualTo(0.75f));
+
+            controller.SetEmotion("wink", 1f);
+            Assert.That(controller.GetTargetWeight("wink"), Is.EqualTo(0.80f));
+
+            controller.SetEmotion("excited", 1f);
+            Assert.That(controller.GetTargetWeight("excited"), Is.EqualTo(0.85f));
+
+            controller.SetEmotion("sleepy", 1f);
+            Assert.That(controller.GetTargetWeight("sleepy"), Is.EqualTo(0.55f));
+
+            Assert.That(AvatarEmotionController.IsTransient("shocked"), Is.True);
+            Assert.That(AvatarEmotionController.IsTransient("wink"), Is.True);
+            Assert.That(AvatarEmotionController.IsTransient("pouting"), Is.False);
+
+            Object.DestroyImmediate(go);
+        }
+
+        [Test]
+        public void TransientWinkAnimatesSnappilyAndAutoReleases()
+        {
+            var go = new GameObject("TestAvatarWink");
+            var controller = go.AddComponent<AvatarEmotionController>();
+            controller.Configure(null, null);
+
+            // Establish base emotion
+            controller.SetEmotion("happy", 1f);
+            Assert.That(controller.BaseEmotion, Is.EqualTo("happy"));
+
+            // Trigger wink
+            controller.SetEmotion("wink", 1f);
+            Assert.That(controller.GetTargetWeight("wink"), Is.EqualTo(0.80f));
+            Assert.That(controller.IsTransientActive, Is.True);
+
+            // After 0.12s (7 frames), eyelid channel should be closing rapidly (much faster than standard 0.8s attack)
+            for (int i = 0; i < 7; i++)
+            {
+                controller.ManualUpdate(0.0166f);
+            }
+            Assert.That(controller.GetWeight("wink"), Is.GreaterThan(0.30f), "Wink must close snappily");
+
+            // After 0.40s total (25 frames), transient duration has expired and target auto-releases back to base emotion
+            for (int i = 0; i < 20; i++)
+            {
+                controller.ManualUpdate(0.0166f);
+            }
+            Assert.That(controller.IsTransientActive, Is.False, "Transient must have finished");
+            Assert.That(controller.CurrentEmotion, Is.EqualTo("happy"), "Must return to base emotion");
+            Assert.That(controller.GetTargetWeight("wink"), Is.EqualTo(0f), "Wink target must return to 0");
+
+            // After another 0.25s, eye wink channel should be released / open again
+            for (int i = 0; i < 20; i++)
+            {
+                controller.ManualUpdate(0.0166f);
+            }
+            Assert.That(controller.GetWeight("wink"), Is.LessThan(0.05f), "Eye should be open again");
+
+            Object.DestroyImmediate(go);
+        }
     }
 }

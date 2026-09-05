@@ -92,6 +92,13 @@ def test_speak_gesture_is_backward_compatible_and_unknown_falls_back() -> None:
     assert explicit.gesture_intensity == .8
     assert unknown.gesture == "auto"
 
+    right_hand = SpeakPayload(utterance_id="u", text="hello", audio_url="/voice/audio/a.wav", gesture="GREETING_RIGHT")
+    left_hand = SpeakPayload(utterance_id="u", text="hello", audio_url="/voice/audio/a.wav", gesture="GREETING_LEFT")
+    pouting_phrase = SpeakPayload(utterance_id="u", text="hmph", audio_url="/voice/audio/a.wav", emotion="pouting", gesture="shrug")
+    assert right_hand.gesture == "greeting_right"
+    assert left_hand.gesture == "greeting_left"
+    assert pouting_phrase.emotion == "pouting"
+
 
 def test_avatar_presence_states_are_normalized_for_new_and_legacy_clients() -> None:
     assert StatePayload(state="LISTENING").state == "listening"
@@ -270,7 +277,7 @@ async def test_v2_stream_metadata_is_sent_only_to_v2_clients() -> None:
     assert v2_socket.sent[0]["type"] == "avatar.overlay.configure"
     assert v2_socket.sent[-1]["type"] == "avatar.stream.metadata"
     assert v2_socket.sent[-1]["payload"] == {
-        "utterance_id": "u", "emotion": "smirk", "gesture": "shrug", "gesture_intensity": .55,
+        "utterance_id": "u", "emotion": "smirk", "gesture": "shrug", "gesture_intensity": .55, "intensity": .55,
     }
 
 

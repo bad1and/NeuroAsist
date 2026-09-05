@@ -27,38 +27,20 @@ namespace NeuroAsist.Avatar
         public void Configure(AvatarMotionSettings value) => settings = value;
         public void SetRandom(IMotionRandom value) => random = value ?? new UnityMotionRandom();
         public void SetProfile(MotionProfile value) { profile = value; generation++; }
+
         public void StartScheduling()
         {
-            if (loop == null) loop = StartCoroutine(ScheduleLoop());
+            // Pure neural mode: spontaneous scripted alternative idles are completely disabled.
+            StopScheduling();
         }
+
         public void StopScheduling()
         {
             generation++;
             if (loop != null) { StopCoroutine(loop); loop = null; }
         }
+
         private void OnDisable() => StopScheduling();
-        private IEnumerator ScheduleLoop()
-        {
-            while (true)
-            {
-                var current = profile;
-                if (current == null || settings == null || !settings.MotionEnabled || !settings.IdleSchedulingEnabled)
-                {
-                    yield return new WaitForSeconds(1f);
-                    continue;
-                }
-                var token = generation;
-                yield return new WaitForSeconds(random.Range(current.IdleIntervalMinSeconds, current.IdleIntervalMaxSeconds));
-                if (token != generation || IsBlocked != null && IsBlocked()) continue;
-                if (random.Range(0f, 1f) > current.AlternativeIdleProbability) continue;
-                var next = Select(ResolveIdles(current), previousId, Time.unscaledTime, lastPlayed, random, IsSpeaking != null && IsSpeaking(), current.AllowLongIdleWhileSpeaking);
-                if (next == null) continue;
-                previousId = next.Id;
-                lastPlayed[next.Id] = Time.unscaledTime;
-                OnIdleRequested?.Invoke(next);
-                yield return new WaitForSeconds(next.DurationSeconds / Mathf.Max(.1f, next.Speed));
-            }
-        }
 
         public static AlternativeIdleDefinition Select(IList<AlternativeIdleDefinition> values, string previous, float now,
             IDictionary<string, float> played, IMotionRandom random, bool speaking, bool allowLongWhileSpeaking)
