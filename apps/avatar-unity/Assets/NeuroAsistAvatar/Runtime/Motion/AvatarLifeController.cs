@@ -15,6 +15,7 @@ namespace NeuroAsist.Avatar
         [SerializeField] private Vrm10Instance vrm;
         [SerializeField] private AvatarMotionController motion;
         [SerializeField] private AvatarStateController state;
+        [SerializeField] private AvatarEmotionController emotionController;
         [Range(0f, 1.5f)] [SerializeField] private float intensity = 1f;
 
         private Transform spine;
@@ -28,12 +29,10 @@ namespace NeuroAsist.Avatar
         private Coroutine blink;
 
         private AvatarState previousState = AvatarState.Idle;
-        private float pendulumAmplitude;
-        private float pendulumPhase;
 
-        public void Configure(Animator valueAnimator, Vrm10Instance valueVrm, AvatarMotionController valueMotion, AvatarStateController valueState)
+        public void Configure(Animator valueAnimator, Vrm10Instance valueVrm, AvatarMotionController valueMotion, AvatarStateController valueState, AvatarEmotionController valueEmotion = null)
         {
-            animator = valueAnimator; vrm = valueVrm; motion = valueMotion; state = valueState; FindBones();
+            animator = valueAnimator; vrm = valueVrm; motion = valueMotion; state = valueState; emotionController = valueEmotion; FindBones();
         }
 
         private void Awake()
@@ -42,6 +41,7 @@ namespace NeuroAsist.Avatar
             if (vrm == null) vrm = GetComponentInChildren<Vrm10Instance>();
             if (motion == null) motion = GetComponent<AvatarMotionController>();
             if (state == null) state = GetComponent<AvatarStateController>();
+            if (emotionController == null) emotionController = GetComponent<AvatarEmotionController>() ?? GetComponentInParent<AvatarEmotionController>();
             FindBones();
         }
 
@@ -63,30 +63,19 @@ namespace NeuroAsist.Avatar
         }
 
         /// <summary>
-        /// Triggers a secondary damped pendulum sway through the torso when returning to neutral posture.
+        /// Torso settling stub: kept for backward compatibility, pendulum swaying disabled for rock-solid posture.
         /// </summary>
         public void TriggerPendulumSettling(float strength = 1f)
         {
-            pendulumAmplitude = Mathf.Clamp(pendulumAmplitude + strength * 2.2f, 0f, 3.5f);
-            pendulumPhase = 0f;
         }
 
         private void OnStateChanged(AvatarState next)
         {
-            if (previousState == AvatarState.Speaking && next != AvatarState.Speaking)
-            {
-                // When finishing a speaking turn, dissipate kinetic energy via an organic pendulum recoil
-                TriggerPendulumSettling(1.0f);
-            }
             previousState = next;
         }
 
         private void OnProfileChanged(MotionProfile newProfile)
         {
-            if (newProfile != null && (newProfile.ProfileId == "neutral" || newProfile.ProfileId == "default"))
-            {
-                TriggerPendulumSettling(0.75f);
-            }
         }
 
         private void LateUpdate()
@@ -104,30 +93,13 @@ namespace NeuroAsist.Avatar
 
             phase += Time.deltaTime * Mathf.Lerp(.95f, 1.3f, Mathf.Clamp01(smoothedLife));
             var breath = Mathf.Sin(phase) * smoothedLife;
-            var sway = Mathf.Sin(phase * .43f + 1.7f) * smoothedLife;
 
-            // Physical pendulum inertia: natural harmonic dissipation after large motion/emotion transitions
-            float pendulumPitch = 0f;
-            float pendulumRoll = 0f;
-            float pendulumYaw = 0f;
-
-            if (pendulumAmplitude > 0.001f)
-            {
-                pendulumPhase += Time.deltaTime * 2.8f;
-                pendulumAmplitude = Mathf.MoveTowards(pendulumAmplitude, 0f, Time.deltaTime * 0.35f);
-                float envelope = pendulumAmplitude * Mathf.Exp(-pendulumPhase * 0.28f);
-
-                pendulumPitch = Mathf.Cos(pendulumPhase) * envelope * 1.8f;
-                pendulumRoll = Mathf.Sin(pendulumPhase * 0.85f) * envelope * 1.5f;
-                pendulumYaw = Mathf.Sin(pendulumPhase * 0.65f) * envelope * 0.9f;
-            }
-
-            // Apply biological breathing + pendulum dissipation additively to upper-body bones
-            Apply(spine, new Vector3((.38f * breath) + (pendulumPitch * 0.60f), (.13f * breath) + (pendulumYaw * 0.50f), (.05f * sway) + (pendulumRoll * 0.60f)));
-            Apply(chest, new Vector3((.74f * breath) + (pendulumPitch * 1.10f), (.22f * breath) + (pendulumYaw * 0.90f), (-.16f * breath + .10f * sway) + (pendulumRoll * 1.10f)));
-            Apply(upperChest, new Vector3((.46f * breath) + (pendulumPitch * 0.80f), (.18f * breath) + (pendulumYaw * 0.65f), (.08f * sway) + (pendulumRoll * 0.80f)));
-            Apply(leftShoulder, new Vector3((.16f * breath) + (pendulumPitch * 0.35f), (.04f * sway), (.34f * breath) + (pendulumRoll * 0.45f)));
-            Apply(rightShoulder, new Vector3((-.13f * breath) - (pendulumPitch * 0.35f), (-.04f * sway), (-.29f * breath) - (pendulumRoll * 0.45f)));
+            // Stable biological breathing pitch only (no drunken roll, sway or yaw oscillations)
+            Apply(spine, new Vector3(.12f * breath, 0f, 0f));
+            Apply(chest, new Vector3(.28f * breath, 0f, 0f));
+            Apply(upperChest, new Vector3(.16f * breath, 0f, 0f));
+            Apply(leftShoulder, new Vector3(.08f * breath, 0f, 0f));
+            Apply(rightShoulder, new Vector3(-.08f * breath, 0f, 0f));
         }
 
         private IEnumerator BlinkLoop()
@@ -135,13 +107,27 @@ namespace NeuroAsist.Avatar
             while (true)
             {
                 yield return new WaitForSeconds(Random.Range(1.9f, 5.4f));
+                if (ShouldSkipProceduralBlink())
+                    continue;
                 yield return BlinkOnce();
                 if (Random.value < .14f)
                 {
                     yield return new WaitForSeconds(Random.Range(.09f, .18f));
-                    yield return BlinkOnce();
+                    if (!ShouldSkipProceduralBlink())
+                        yield return BlinkOnce();
                 }
             }
+        }
+
+        private bool ShouldSkipProceduralBlink()
+        {
+            if (emotionController == null) return false;
+            var current = emotionController.CurrentEmotion;
+            if (string.IsNullOrEmpty(current)) return false;
+            var clean = current.Trim().ToLowerInvariant().Replace("-", "_");
+            return clean == "wink" || clean == "wink_left" || clean == "teasing" || clean == "playful"
+                   || emotionController.GetWeight(ExpressionKey.BlinkRight) > 0.1f
+                   || emotionController.GetWeight(ExpressionKey.BlinkLeft) > 0.1f;
         }
 
         private IEnumerator BlinkOnce()

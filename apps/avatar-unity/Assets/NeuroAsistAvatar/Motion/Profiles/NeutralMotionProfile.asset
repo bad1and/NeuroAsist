@@ -15,15 +15,15 @@ MonoBehaviour:
   ProfileId: neutral
   BaseIdleState: IdleNeutral
   BaseIdleSpeed: 1
-  IdleIntervalMinSeconds: 3.8
-  IdleIntervalMaxSeconds: 8.5
-  AlternativeIdleProbability: 0.65
+  IdleIntervalMinSeconds: 16
+  IdleIntervalMaxSeconds: 32
+  AlternativeIdleProbability: 0.35
   GestureFrequencyMultiplier: 1
   GestureIntensityMultiplier: 1
   HeadLookWeight: 1
-  HeadTurnSpeed: 5
   LifeMotionIntensity: 1.1
   GazeInterest: 0.82
+  HeadTurnSpeed: 5
   AllowLongIdleWhileSpeaking: 0
   AlternativeIdles:
   - Id: IdleLookWander
@@ -31,19 +31,19 @@ MonoBehaviour:
     Category: 0
     LookPattern: 1
     DurationSeconds: 4.5
-    CooldownSeconds: 18
+    CooldownSeconds: 25
     Speed: 1
   - Id: IdleSideGlance
     AnimatorState: IdleNeutral
     Category: 0
     LookPattern: 2
     DurationSeconds: 3.5
-    CooldownSeconds: 16
+    CooldownSeconds: 25
     Speed: 1
   - Id: IdleThoughtfulLook
     AnimatorState: IdleNeutral
     Category: 0
     LookPattern: 3
     DurationSeconds: 4
-    CooldownSeconds: 24
+    CooldownSeconds: 30
     Speed: 1

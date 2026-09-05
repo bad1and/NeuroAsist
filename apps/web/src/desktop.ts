@@ -91,3 +91,93 @@ export async function setAvatarInAppVisible(visible: boolean, revision: number):
   if (!isDesktopApp()) return;
   await invoke<void>("set_avatar_in_app_visible", { visible, revision });
 }
+
+let browserQaWindow: Window | null = null;
+
+export async function openQaStudioWindow(): Promise<void> {
+  if (isDesktopApp()) {
+    try {
+      await invoke("open_qa_studio");
+      return;
+    } catch {
+      // Fall back to window.open if command fails
+    }
+  }
+  const url = `${window.location.origin}${window.location.pathname}?view=qa-studio`;
+  if (browserQaWindow && !browserQaWindow.closed) {
+    browserQaWindow.focus();
+    return;
+  }
+  browserQaWindow = window.open(
+    url,
+    "IrisQAStudio",
+    "width=760,height=880,menubar=no,toolbar=no,location=no,status=no,resizable=yes"
+  );
+  if (browserQaWindow) {
+    browserQaWindow.focus();
+  }
+}
+
+export async function closeQaStudioWindow(): Promise<void> {
+  if (isDesktopApp()) {
+    try {
+      await invoke("close_qa_studio");
+    } catch {
+      // Ignore
+    }
+  }
+  if (browserQaWindow && !browserQaWindow.closed) {
+    browserQaWindow.close();
+    browserQaWindow = null;
+  }
+  try {
+    const channel = new BroadcastChannel("iris_qa_studio");
+    channel.postMessage({ action: "close" });
+    channel.close();
+  } catch {
+    // Ignore
+  }
+}
+
+export async function isQaStudioWindowOpen(): Promise<boolean> {
+  if (isDesktopApp()) {
+    try {
+      return await invoke<boolean>("is_qa_studio_open");
+    } catch {
+      return false;
+    }
+  }
+  return Boolean(browserQaWindow && !browserQaWindow.closed);
+}
+
+export async function listenForQaStudioState(
+  listener: (open: boolean) => void,
+): Promise<UnlistenFn> {
+  let unlistenTauri: UnlistenFn | undefined;
+  if (isDesktopApp()) {
+    try {
+      unlistenTauri = await listen<boolean>("qa-studio-state", ({ payload }) => listener(payload));
+    } catch {
+      // Ignore
+    }
+  }
+  let channel: BroadcastChannel | null = null;
+  try {
+    channel = new BroadcastChannel("iris_qa_studio");
+    channel.onmessage = (event: MessageEvent) => {
+      if (event.data?.action === "state" && typeof event.data.open === "boolean") {
+        listener(event.data.open);
+      } else if (event.data?.action === "closed") {
+        listener(false);
+      }
+    };
+  } catch {
+    // Ignore
+  }
+
+  return () => {
+    unlistenTauri?.();
+    channel?.close();
+  };
+}
+

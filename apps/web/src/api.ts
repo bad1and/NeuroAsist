@@ -434,7 +434,14 @@ export function updateAvatarOverlay(payload: Partial<AvatarOverlaySettings>): Pr
   return requestJson<AvatarOverlaySettings>("/avatar/overlay", { method: "PUT", body: JSON.stringify(payload) });
 }
 
-export function sendAvatarTestPhrase(payload: { text: string; emotion: string }): Promise<{ voice_request_id: string; status: string }> {
+export function sendAvatarTestPhrase(payload: {
+  text: string;
+  emotion?: string;
+  intent?: string;
+  gesture?: string;
+  gesture_intensity?: number;
+  interrupt?: boolean;
+}): Promise<{ voice_request_id: string; status: string }> {
   return requestJson("/avatar/test/speak", { method: "POST", body: JSON.stringify(payload) });
 }
 

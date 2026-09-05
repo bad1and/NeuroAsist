@@ -411,6 +411,8 @@ class VoiceSessionManager:
                     pause_after_ms=segment.pause_after_ms,
                     sequence=segment.sequence,
                     motion_gesture=segment.motion_gesture,
+                    emotion=segment.emotion,
+                    emotion_intensity=segment.emotion_intensity,
                 )
                 if sequence == 0:
                     self._publish_latency(
@@ -488,6 +490,8 @@ class VoiceSessionManager:
         voice_directive_parser = LiveVoiceDirectiveParser()
         directive_sent = False
         pending_voice_directive: VoiceDirective | None = None
+        active_emotion: str | None = None
+        active_emotion_intensity: float | None = None
         speech_sequence = 0
         avatar_start_task: asyncio.Task | None = None
         latest_applied_directive: AvatarDirective = AvatarDirective()
@@ -501,40 +505,23 @@ class VoiceSessionManager:
             await task
 
         async def apply_directive(directive: AvatarDirective) -> None:
-            nonlocal directive_sent, latest_applied_directive
+            nonlocal directive_sent, latest_applied_directive, active_emotion, active_emotion_intensity
             latest_applied_directive = directive
-            if directive_sent:
-                return
-            directive_sent = True
-            if presentation_cue is not None and presentation_cue.expression_strength != "muted":
-                default_gesture = presentation_cue.allowed_gestures[0] if presentation_cue.allowed_gestures else "auto"
-                # LLM-first: when the model specified a non-neutral emotion, preserve it as authoritative.
-                if directive.emotion != Emotion.NEUTRAL:
-                    gesture = directive.gesture if directive.gesture not in {"auto", "none"} else default_gesture
-                    directive = AvatarDirective(
-                        emotion=directive.emotion,
-                        gesture=gesture,
-                        intensity=max(0.3, directive.intensity),
-                    )
-                elif presentation_cue.avatar_emotion != "neutral":
-                    gesture = directive.gesture if directive.gesture not in {"auto", "none"} else default_gesture
-                    directive = AvatarDirective(
-                        emotion=Emotion(presentation_cue.avatar_emotion),
-                        gesture=gesture,
-                        intensity=presentation_cue.avatar_intensity,
-                    )
-            if directive.emotion == Emotion.NEUTRAL:
-                directive = make_live_directive_expressive(directive, transcript)
-            context.voice_style = resolve_voice_style(
-                context.voice_style,
-                emotion=directive.emotion.value,
-                pace=presentation_cue.tts_pace if presentation_cue is not None else None,
-                emphasis=presentation_cue.tts_emphasis if presentation_cue is not None else 0.0,
-                intensity=directive.intensity,
-            )
-            if presentation_cue is not None:
-                context.base_pace = coerce_speech_pace(presentation_cue.tts_pace)
-            await ensure_avatar_stream_started()
+            active_emotion = directive.emotion.value
+            active_emotion_intensity = directive.intensity
+            # Pure neural authority: the AI model's directive is authoritative and unmodified.
+            if not directive_sent:
+                directive_sent = True
+                context.voice_style = resolve_voice_style(
+                    context.voice_style,
+                    emotion=directive.emotion.value,
+                    pace=presentation_cue.tts_pace if presentation_cue is not None else None,
+                    emphasis=presentation_cue.tts_emphasis if presentation_cue is not None else 0.0,
+                    intensity=directive.intensity,
+                )
+                if presentation_cue is not None:
+                    context.base_pace = coerce_speech_pace(presentation_cue.tts_pace)
+                await ensure_avatar_stream_started()
             frame = metadata_frame(
                 intent=intent,
                 emotion=directive.emotion.value,
@@ -581,6 +568,8 @@ class VoiceSessionManager:
                 forced_clause_split=segment_text.rstrip().endswith((",", ";", ":")),
             )
             paragraph_pause = 180 if "\n\n" in raw_segment else segment.pause_after_ms
+            effective_emotion = segment.emotion or active_emotion
+            effective_intensity = segment.emotion_intensity if segment.emotion_intensity is not None else active_emotion_intensity
             segment = SpeechSegment(
                 text=segment.text,
                 pace=segment.pace,
@@ -590,6 +579,8 @@ class VoiceSessionManager:
                 pause_after_ms=paragraph_pause,
                 sequence=segment.sequence,
                 motion_gesture=segment.motion_gesture,
+                emotion=effective_emotion,
+                emotion_intensity=effective_intensity,
             )
             if speech_sequence == 0:
                 self._publish_latency(
@@ -615,6 +606,16 @@ class VoiceSessionManager:
                             for raw_segment in chunker.flush():
                                 await enqueue_spoken_segment(raw_segment)
                         pending_voice_directive = item
+                        if item.emotion is not None:
+                            try:
+                                parsed_emotion = Emotion(item.emotion)
+                            except ValueError:
+                                parsed_emotion = Emotion.NEUTRAL
+                            await apply_directive(AvatarDirective(
+                                emotion=parsed_emotion,
+                                gesture=item.gesture,
+                                intensity=item.emotion_intensity if item.emotion_intensity is not None else 1.0,
+                            ))
                         continue
                     reply_parts.append(item)
                     await self._send(context, "voice.text.delta", delta=item)
@@ -692,6 +693,16 @@ class VoiceSessionManager:
                         for raw_segment in chunker.flush():
                             await enqueue_spoken_segment(raw_segment)
                     pending_voice_directive = item
+                    if item.emotion is not None:
+                        try:
+                            parsed_emotion = Emotion(item.emotion)
+                        except ValueError:
+                            parsed_emotion = Emotion.NEUTRAL
+                        await apply_directive(AvatarDirective(
+                            emotion=parsed_emotion,
+                            gesture=item.gesture,
+                            intensity=item.emotion_intensity if item.emotion_intensity is not None else 1.0,
+                        ))
                 elif item:
                     reply_parts.append(item)
                     await self._send(context, "voice.text.delta", delta=item)
@@ -701,7 +712,8 @@ class VoiceSessionManager:
                 await apply_directive(AvatarDirective())
             for raw_segment in chunker.flush():
                 await enqueue_spoken_segment(raw_segment)
-            completed_reply = "".join(reply_parts).strip()
+            completed_reply = re.sub(r"[ \t]+", " ", "".join(reply_parts)).strip()
+            completed_reply = re.sub(r" ([.,!?:;…])", r"\1", completed_reply)
             if on_assistant_completed is not None:
                 await on_assistant_completed(completed_reply)
             if self._character_state_service is not None and completed_reply:
@@ -927,6 +939,8 @@ class VoiceSessionManager:
                 motion=StreamMotionCuePayload(
                     gesture=part_text.motion_gesture,
                     emphasized=part_text.emphasis is SpeechEmphasis.LIGHT,
+                    emotion=part_text.emotion,
+                    intensity=part_text.emotion_intensity,
                 ),
             )
             if not self._is_active(context):
@@ -1165,6 +1179,8 @@ class VoiceSessionManager:
             pause_after_ms=parent.pause_after_ms if final else 60,
             sequence=parent.sequence,
             motion_gesture=parent.motion_gesture,
+            emotion=parent.emotion,
+            emotion_intensity=parent.emotion_intensity,
         )
 
     def _preferred_split_offset(self, text: str, *, target_words: int, max_words: int) -> int:
@@ -1324,6 +1340,8 @@ class VoiceSessionManager:
                 sequence=segment.sequence + index,
                 # A retry-safe subchunk must not replay the same semantic accent.
                 motion_gesture=segment.motion_gesture if is_first else "auto",
+                emotion=segment.emotion if is_first else None,
+                emotion_intensity=segment.emotion_intensity if is_first else None,
             )
             await self._enqueue(queue, worker, job)
         if len(jobs) > 1:

@@ -15,7 +15,11 @@ MonoBehaviour:
   Id: FarewellGesture
   Tag: 11
   AnimatorState: Farewell
+  VariantAnimatorStates:
+  - FarewellMirror
+  BlendInSeconds: 0.55
   DurationSeconds: 2
+  BlendOutSeconds: 0.65
   Weight: 1
   Speed: 1
   CooldownSeconds: 8

@@ -451,6 +451,7 @@ MonoBehaviour:
   idleScheduler: {fileID: 975465926}
   gestureController: {fileID: 975465925}
   lookController: {fileID: 975465924}
+  lifeController: {fileID: 0}
   transitionSeconds: 0.7
   rootDriftWarningDistance: 0.02
 --- !u!114 &975465924

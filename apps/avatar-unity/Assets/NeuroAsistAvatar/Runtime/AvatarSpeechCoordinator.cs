@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace NeuroAsist.Avatar
@@ -10,6 +12,7 @@ namespace NeuroAsist.Avatar
         [SerializeField] private AvatarStateController state;
         [SerializeField] private VolumeLipSyncFallback fallback;
         [SerializeField] private AvatarMotionController motion;
+        [SerializeField] private AvatarLookController lookController;
         private int generation;
         private string currentUtterance;
         private int nextStreamSequence;
@@ -17,17 +20,75 @@ namespace NeuroAsist.Avatar
         private float pendingStreamGestureIntensity = 1f;
         private string currentStreamEmotion = "neutral";
 
+        private sealed class SegmentEmotionCue
+        {
+            public string Emotion;
+            public float Intensity;
+        }
+
+        private readonly Dictionary<int, SegmentEmotionCue> segmentEmotions = new Dictionary<int, SegmentEmotionCue>();
+
+        private void Awake()
+        {
+            if (player == null) player = GetComponent<AvatarAudioPlayer>() ?? GetComponentInChildren<AvatarAudioPlayer>();
+            if (lookController == null) lookController = GetComponent<AvatarLookController>() ?? GetComponentInChildren<AvatarLookController>();
+            HookStreamEvents();
+        }
+
         private void OnEnable()
         {
-            if (player != null) player.StreamClipStarted -= OnStreamClipStarted;
+            HookStreamEvents();
         }
 
         private void OnDisable()
         {
-            if (player != null) player.StreamClipStarted -= OnStreamClipStarted;
+            UnhookStreamEvents();
         }
 
-        private void OnStreamClipStarted(int sequence) => motion?.OnSpeechSegmentStarted(sequence);
+        private void OnDestroy()
+        {
+            UnhookStreamEvents();
+        }
+
+        private void HookStreamEvents()
+        {
+            if (player != null)
+            {
+                player.StreamClipStarted -= OnStreamClipStarted;
+                player.StreamClipStarted += OnStreamClipStarted;
+            }
+        }
+
+        private void UnhookStreamEvents()
+        {
+            if (player != null)
+            {
+                player.StreamClipStarted -= OnStreamClipStarted;
+            }
+        }
+
+        private void ApplyEmotion(string emotionName, float intensity)
+        {
+            if (string.IsNullOrEmpty(emotionName)) return;
+            currentStreamEmotion = emotionName;
+            emotion.SetEmotion(emotionName, intensity);
+            motion?.SetEmotion(emotionName);
+            if (string.Equals(emotionName, "thinking", StringComparison.OrdinalIgnoreCase))
+            {
+                var look = lookController ?? (motion != null ? motion.GetComponent<AvatarLookController>() : null);
+                look?.PlayLookAround(2.5f, IdleLookPattern.Thoughtful);
+            }
+        }
+
+        private void OnStreamClipStarted(int sequence)
+        {
+            if (segmentEmotions.TryGetValue(sequence, out var cue) && !string.IsNullOrEmpty(cue.Emotion))
+            {
+                ApplyEmotion(cue.Emotion, cue.Intensity);
+                segmentEmotions.Remove(sequence);
+            }
+            motion?.OnSpeechSegmentStarted(sequence);
+        }
 
         public void SetAudioMuted(bool muted) { player?.SetMuted(muted); }
 
@@ -35,8 +96,7 @@ namespace NeuroAsist.Avatar
         {
             generation++; currentUtterance = payload.utterance_id;
             var targetIntensity = payload.intensity > 0f ? payload.intensity : (payload.gesture_intensity > 0f ? payload.gesture_intensity : 1f);
-            emotion.SetEmotion(payload.emotion, targetIntensity);
-            motion?.SetEmotion(payload.emotion);
+            ApplyEmotion(payload.emotion, targetIntensity);
             motion?.StopGesture(false);
             state.SetState(AvatarState.Downloading);
             fallback.SetActive(fallback.ShouldBeActive());
@@ -46,7 +106,6 @@ namespace NeuroAsist.Avatar
                 {
                     if (localGeneration != generation) return;
                     emotion.SetSpeaking(true);
-                    if (AvatarEmotionController.IsTransient(payload.emotion)) emotion.SetEmotion("neutral", 1f);
                     state.SetState(AvatarState.Speaking);
                     motion?.TriggerGesture(AvatarMotionNames.ParseGesture(payload.gesture), payload.gesture_intensity, payload.interrupt);
                     client.SendPlayback("avatar.playback.started", payload.utterance_id, command.message_id, null, AvatarProtocol.ClientLatencyMs(command));
@@ -56,8 +115,7 @@ namespace NeuroAsist.Avatar
                     if (localGeneration != generation) return;
                     emotion.SetSpeaking(false);
                     fallback.ResetMouth();
-                    emotion.SetEmotion("neutral", 1f);
-                    motion?.ResetToNeutral();
+                    motion?.StopGesture(false);
                     state.SetState(AvatarState.Idle);
                     client.SendPlayback("avatar.playback.finished", payload.utterance_id, command.message_id);
                 },
@@ -66,6 +124,7 @@ namespace NeuroAsist.Avatar
                     if (localGeneration != generation) return;
                     emotion.SetSpeaking(false);
                     fallback.ResetMouth();
+                    motion?.StopGesture(false);
                     state.SetState(AvatarState.Error);
                     client.SendPlayback("avatar.playback.failed", payload.utterance_id, command.message_id, reason);
                 });
@@ -75,26 +134,27 @@ namespace NeuroAsist.Avatar
         {
             if (!string.IsNullOrEmpty(utteranceId) && utteranceId != currentUtterance) return;
             generation++;
+            segmentEmotions.Clear();
             pendingStreamGesture = GestureTag.Auto;
-            currentStreamEmotion = "neutral";
             emotion.SetSpeaking(false);
             player.Stop();
             fallback.ResetMouth();
-            emotion.SetEmotion("neutral", 1f);
-            motion?.ResetToNeutral();
+            motion?.StopGesture(true);
             state.SetState(AvatarState.Idle);
         }
 
         public void StreamStart(AvatarCommand command, AvatarCommandPayload payload)
         {
             generation++;
+            segmentEmotions.Clear();
             currentUtterance = payload.utterance_id;
             nextStreamSequence = 0;
             pendingStreamGesture = GestureTag.Auto;
             pendingStreamGestureIntensity = 1f;
-            currentStreamEmotion = payload.emotion ?? "thinking";
-            emotion.SetEmotion(payload.emotion ?? "thinking", 1f);
-            motion?.SetEmotion(payload.emotion ?? "thinking");
+            if (!string.IsNullOrEmpty(payload.emotion))
+            {
+                ApplyEmotion(payload.emotion, 1f);
+            }
             motion?.StopGesture(false);
             motion?.BeginSpeechMotion();
             state.SetState(AvatarState.Thinking);
@@ -104,7 +164,6 @@ namespace NeuroAsist.Avatar
                 {
                     if (localGeneration != generation) return;
                     emotion.SetSpeaking(true);
-                    if (AvatarEmotionController.IsTransient(currentStreamEmotion)) emotion.SetEmotion("neutral", 1f);
                     state.SetState(AvatarState.Speaking);
                     motion?.TriggerGesture(pendingStreamGesture, pendingStreamGestureIntensity, true);
                     client.SendPlayback("avatar.playback.started", currentUtterance, command.message_id, null, AvatarProtocol.ClientLatencyMs(command));
@@ -113,11 +172,10 @@ namespace NeuroAsist.Avatar
                 {
                     if (localGeneration != generation) return;
                     emotion.SetSpeaking(false);
+                    segmentEmotions.Clear();
                     pendingStreamGesture = GestureTag.Auto;
-                    currentStreamEmotion = "neutral";
                     fallback.ResetMouth();
-                    emotion.SetEmotion("neutral", 1f);
-                    motion?.ResetToNeutral();
+                    motion?.StopGesture(false);
                     state.SetState(AvatarState.Idle);
                     client.SendPlayback("avatar.playback.finished", currentUtterance, command.message_id);
                 },
@@ -125,7 +183,9 @@ namespace NeuroAsist.Avatar
                 {
                     if (localGeneration != generation) return;
                     emotion.SetSpeaking(false);
+                    segmentEmotions.Clear();
                     fallback.ResetMouth();
+                    motion?.StopGesture(false);
                     state.SetState(AvatarState.Error);
                     client.SendPlayback("avatar.playback.failed", currentUtterance, command.message_id, reason);
                 });
@@ -135,11 +195,13 @@ namespace NeuroAsist.Avatar
         {
             if (payload.utterance_id != currentUtterance) return;
             var intensity = payload.intensity > 0f ? payload.intensity : Mathf.Clamp01(payload.gesture_intensity);
-            currentStreamEmotion = payload.emotion ?? "neutral";
-            emotion.SetEmotion(payload.emotion ?? "neutral", intensity);
-            motion?.SetEmotion(payload.emotion ?? "neutral");
+            ApplyEmotion(payload.emotion ?? "neutral", intensity);
             pendingStreamGesture = AvatarMotionNames.ParseGesture(payload.gesture);
             pendingStreamGestureIntensity = intensity;
+            if (pendingStreamGesture != GestureTag.Auto && pendingStreamGesture != GestureTag.None && player != null && player.IsPlaying)
+            {
+                motion?.TriggerGesture(pendingStreamGesture, pendingStreamGestureIntensity, true);
+            }
         }
 
         public void StreamSegment(AvatarCommand command, AvatarCommandPayload payload, byte[] audio)
@@ -147,6 +209,14 @@ namespace NeuroAsist.Avatar
             if (payload.utterance_id != currentUtterance || payload.sequence != nextStreamSequence)
                 throw new System.InvalidOperationException("Unexpected stream segment order");
             fallback.SetActive(fallback.ShouldBeActive());
+            if (payload.motion != null && !string.IsNullOrEmpty(payload.motion.emotion))
+            {
+                segmentEmotions[payload.sequence] = new SegmentEmotionCue
+                {
+                    Emotion = payload.motion.emotion,
+                    Intensity = payload.motion.intensity > 0f ? payload.motion.intensity : 1f,
+                };
+            }
             motion?.QueueSpeechCue(payload.sequence, payload.duration_seconds, payload.motion);
             player.EnqueueWav(audio, generation, payload.sequence);
             nextStreamSequence++;

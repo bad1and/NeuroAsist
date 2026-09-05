@@ -33,6 +33,36 @@ MonoBehaviour:
     Profile: {fileID: 11400000, guid: 448eb82b964ceda4f8e52b5423595c0f, type: 2}
   - Emotion: 8
     Profile: {fileID: 11400000, guid: ced73ea342362b743839f6d012a19a59, type: 2}
+  - Emotion: 9
+    Profile: {fileID: 11400000, guid: 378d0fa3957f8b74da3d92fa77818d66, type: 2}
+  - Emotion: 10
+    Profile: {fileID: 11400000, guid: cf1b428d912cfbc4c90d5894bbe1a3f5, type: 2}
+  - Emotion: 11
+    Profile: {fileID: 11400000, guid: b548fda8dd9c88a4a905e11e8b9ee257, type: 2}
+  - Emotion: 12
+    Profile: {fileID: 11400000, guid: 73d4260ef96023b4fa5e97c69cc833bb, type: 2}
+  - Emotion: 13
+    Profile: {fileID: 11400000, guid: 6261314c861e2f449aadd8c4fb37f690, type: 2}
+  - Emotion: 14
+    Profile: {fileID: 11400000, guid: 81252ce8fef23c04b82cdccbfb369439, type: 2}
+  - Emotion: 15
+    Profile: {fileID: 11400000, guid: 03adc46e82970664cb4a3c18d66fc01b, type: 2}
+  - Emotion: 16
+    Profile: {fileID: 11400000, guid: 08aec171410c8c4469016f344032e12d, type: 2}
+  - Emotion: 17
+    Profile: {fileID: 11400000, guid: 8ffd14a34bc126b47bded230d645cd39, type: 2}
+  - Emotion: 18
+    Profile: {fileID: 11400000, guid: caf324b38ff05ca4cb53a97651744484, type: 2}
+  - Emotion: 19
+    Profile: {fileID: 11400000, guid: 801d5db58cb1f22479ce856641e4a849, type: 2}
+  - Emotion: 20
+    Profile: {fileID: 11400000, guid: fee0b5af18f7c334db7cf582e46564b6, type: 2}
+  - Emotion: 21
+    Profile: {fileID: 11400000, guid: c74eca2d0aba21a4bb916fcef931f731, type: 2}
+  - Emotion: 22
+    Profile: {fileID: 11400000, guid: 09e9e0d4b86d3d34fb4ab6c175e00a1c, type: 2}
+  - Emotion: 23
+    Profile: {fileID: 11400000, guid: 44b86e0b3096eb34f8dc88cdf2d6e484, type: 2}
   GestureDefinitions:
   - {fileID: 11400000, guid: 13b28e34c31a3984797d9ee1ca80cf56, type: 2}
   - {fileID: 11400000, guid: ef4f565a528c9ba4e96a2509d0e6a919, type: 2}
@@ -45,6 +75,21 @@ MonoBehaviour:
   - {fileID: 11400000, guid: c750d6948b2156c439c322c0ca0ad25e, type: 2}
   - {fileID: 11400000, guid: cb6557a5b5a96fb40849804ab2c2a642, type: 2}
   - {fileID: 11400000, guid: 323640518ae49ef4b8ed95871f27e2c1, type: 2}
+  - {fileID: 11400000, guid: eaa6a659e118fc640bbd56670918d586, type: 2}
+  - {fileID: 11400000, guid: 4b971da36c0f804409e6c5a949acdb0b, type: 2}
+  - {fileID: 11400000, guid: 9a21b443f8c55094d89435aa5ff73d9a, type: 2}
+  - {fileID: 11400000, guid: 345980db7df723944ad36ffe5a854d64, type: 2}
+  - {fileID: 11400000, guid: bd65578a8f970004b97bde2fd7c59910, type: 2}
+  - {fileID: 11400000, guid: 47e84dd541252c64495cac6cdb2b7e29, type: 2}
+  - {fileID: 11400000, guid: 0c670585ba329ac4d896fc01cc366846, type: 2}
+  - {fileID: 11400000, guid: eae0a73af2752774ebf7c7f8ca085b7c, type: 2}
+  - {fileID: 11400000, guid: ee97cbfcc6526e34ca241ad6e9f497ca, type: 2}
+  - {fileID: 11400000, guid: c58f8dc8b05dc2143a1a2caefca51fe3, type: 2}
+  - {fileID: 11400000, guid: 5fccc152596aa4644bde4c1a4faf60d0, type: 2}
+  - {fileID: 11400000, guid: 44d511aab6628be4e9974fb494e845d2, type: 2}
+  - {fileID: 11400000, guid: b6c3dc46590e4c1499c52ebf3a87adf0, type: 2}
+  - {fileID: 11400000, guid: c7d4cee43781c434b9f2f35b1f09a16c, type: 2}
+  - {fileID: 11400000, guid: 086c792284c731c45ae45723ba36fc54, type: 2}
   IdleSchedulingEnabled: 1
   AutoGestureIntervalMinSeconds: 3
   AutoGestureIntervalMaxSeconds: 8

@@ -20,6 +20,7 @@ from apps.backend.app.voice.delivery import (
     VoiceDirective,
     clean_voice_directives,
     make_speech_segment,
+    plan_speech,
 )
 
 
@@ -662,4 +663,127 @@ async def test_live_voice_unbound_local_regression_when_presentation_cue_none() 
     completed_events = [event for event in connection.events if event.get("type") == "voice.text.completed"]
     assert len(completed_events) == 1
     assert "Привет" in completed_events[0]["reply"]
+
+
+def test_multi_inline_avatar_directives_in_stream() -> None:
+    parser = LiveVoiceDirectiveParser()
+    deltas = [
+        "Привет! ",
+        "[[avatar emotion=teasing",
+        " intensity=0.9]]А теперь язычок! ",
+        "[[avatar emotion=smirk gesture=shrug]]И ухмылка.",
+    ]
+    items = []
+    for delta in deltas:
+        items.extend(parser.feed(delta))
+    items.extend(parser.finish())
+
+    text_items = [x for x in items if isinstance(x, str)]
+    directives = [x for x in items if isinstance(x, VoiceDirective)]
+
+    assert "".join(text_items) == "Привет! А теперь язычок! И ухмылка."
+    assert len(directives) == 2
+    assert directives[0].emotion == "teasing"
+    assert directives[0].emotion_intensity == 0.9
+    assert directives[1].emotion == "smirk"
+    assert directives[1].gesture == "shrug"
+
+
+def test_clean_live_reply_strips_multiple_inline_tags() -> None:
+    raw = "[[avatar emotion=happy gesture=greeting_right intensity=0.9]] Привет! [[avatar emotion=teasing]] Смотри: бе-е! [[avatar emotion=smirk gesture=shrug]] Ну вот."
+    cleaned = clean_live_reply(raw)
+    assert "[[avatar" not in cleaned
+    assert "emotion=" not in cleaned
+    assert "gesture=" not in cleaned
+    assert "Привет! Смотри: бе-е! Ну вот." in cleaned
+
+
+def test_plan_speech_with_multiple_inline_avatar_tags() -> None:
+    text = "[[avatar emotion=happy gesture=greeting_right intensity=0.9]] Привет! Рада видеть. [[avatar emotion=teasing intensity=1.0]] А вот и язычок! [[avatar emotion=smirk gesture=shrug]] Ну как тебе?"
+    segments = plan_speech(text)
+
+    assert len(segments) >= 3
+    assert segments[0].emotion == "happy"
+    assert segments[0].motion_gesture == "greeting_right"
+    assert segments[0].emotion_intensity == 0.9
+    assert "[[avatar" not in segments[0].text
+
+    # Find the teasing segment
+    teasing_seg = next(s for s in segments if s.emotion == "teasing")
+    assert "язычок" in teasing_seg.text
+    assert teasing_seg.emotion_intensity == 1.0
+
+    # Find the smirk segment
+    smirk_seg = next(s for s in segments if s.emotion == "smirk")
+    assert smirk_seg.motion_gesture == "shrug"
+    assert "Ну как тебе" in smirk_seg.text
+
+
+@pytest.mark.anyio
+async def test_live_voice_streams_multi_emotion_segments_to_avatar() -> None:
+    class MultiEmotionAgent:
+        def classify_intent(self, _text: str) -> str:
+            return "casual_chat"
+
+        async def stream_user_message(self, *_args, **_kwargs):
+            yield "[[avatar emotion=happy gesture=greeting_right intensity=0.9]] Привет! Поднимаю правую руку! "
+            yield "[[avatar emotion=teasing intensity=1.0]] А теперь высовываю язычок: бе-е-е! "
+            yield "[[avatar emotion=pouting gesture=shrug intensity=0.8]] А теперь надула губки."
+
+    class RecordingAvatarService:
+        def __init__(self):
+            self.metadata_calls = []
+            self.segments = []
+
+        async def stream_start(self, **kwargs):
+            pass
+
+        async def stream_metadata(self, **kwargs):
+            self.metadata_calls.append(kwargs)
+
+        async def stream_segment(self, **kwargs):
+            self.segments.append(kwargs)
+
+        async def stream_end(self, **kwargs):
+            pass
+
+        async def stop(self, **kwargs):
+            pass
+
+    avatar_service = RecordingAvatarService()
+    manager = VoiceSessionManager(MockTTSProvider(), retry_count=0, avatar_service=avatar_service)
+    connection = FakeVoiceConnection()
+    manager._connections["session-multi"] = connection
+
+    task = await manager.start(
+        session_id="session-multi",
+        utterance_id="utt-multi",
+        transcript="покажи движения",
+        language="ru",
+        voice="ru_f1",
+        agent=MultiEmotionAgent(),
+        presentation_cue=None,
+    )
+    await task
+
+    # 1. Verify no tags leaked to client deltas or completed reply
+    for event in connection.events:
+        if event.get("type") == "voice.text.delta":
+            assert "[[avatar" not in event.get("delta", "")
+        if event.get("type") == "voice.text.completed":
+            reply = event.get("reply", "")
+            assert "[[avatar" not in reply
+            assert "Привет! Поднимаю правую руку! А теперь высовываю язычок: бе-е-е! А теперь надула губки." == reply
+
+    # 2. Verify avatar service received stream metadata updates for multiple emotions
+    received_emotions = [call["emotion"] for call in avatar_service.metadata_calls]
+    assert "happy" in received_emotions
+    assert "teasing" in received_emotions
+    assert "pouting" in received_emotions
+
+    # 3. Verify avatar segments carried the respective emotions
+    segment_emotions = [seg["motion"].emotion for seg in avatar_service.segments if seg.get("motion")]
+    assert "happy" in segment_emotions
+    assert "teasing" in segment_emotions
+    assert "pouting" in segment_emotions
 

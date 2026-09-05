@@ -32,13 +32,20 @@ namespace NeuroAsist.Avatar
                 && (AllowedEmotions.Count == 0 || AllowedEmotions.Contains(emotion));
         }
 
-        public string SelectAnimatorState(IMotionRandom random, ICollection<string> excluded = null)
+        public string SelectAnimatorState(IMotionRandom random, ICollection<string> excluded = null, bool? preferMirror = null)
         {
             var choices = new List<string>();
             if (!string.IsNullOrWhiteSpace(AnimatorState)) choices.Add(AnimatorState);
             foreach (var state in VariantAnimatorStates)
                 if (!string.IsNullOrWhiteSpace(state) && !choices.Contains(state)) choices.Add(state);
             if (choices.Count == 0) return null;
+
+            if (preferMirror.HasValue)
+            {
+                var filtered = choices.FindAll(s => preferMirror.Value ? s.EndsWith("Mirror") : !s.EndsWith("Mirror"));
+                if (filtered.Count > 0) choices = filtered;
+            }
+
             if (excluded != null && choices.Count > 1)
             {
                 var fresh = choices.FindAll(value => !excluded.Contains(value));

@@ -909,12 +909,58 @@ fn remove_api_key(app: AppHandle) -> Result<DesktopRuntime, String> {
     app.state::<DesktopState>().restart_core(&app)
 }
 
+#[tauri::command]
+fn open_qa_studio(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("qa_studio") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        let _ = app.emit("qa-studio-state", true);
+        return Ok(());
+    }
+    let runtime = app.state::<DesktopState>().runtime();
+    let bootstrap = format!(
+        "window.__NEUROASIST_DESKTOP_CONFIG__ = {}; window.__IRIS_VIEW__ = 'qa-studio';",
+        serde_json::to_string(&runtime).map_err(|e| e.to_string())?
+    );
+    WebviewWindowBuilder::new(&app, "qa_studio", WebviewUrl::App("index.html".into()))
+        .title("Лаборатория тестирования аватара — QA Studio")
+        .decorations(true)
+        .inner_size(760.0, 880.0)
+        .min_inner_size(520.0, 600.0)
+        .initialization_script(&bootstrap)
+        .build()
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("qa-studio-state", true);
+    Ok(())
+}
+
+#[tauri::command]
+fn close_qa_studio(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("qa_studio") {
+        let _ = window.close();
+    }
+    let _ = app.emit("qa-studio-state", false);
+    Ok(())
+}
+
+#[tauri::command]
+fn is_qa_studio_open(app: AppHandle) -> bool {
+    app.get_webview_window("qa_studio").is_some()
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             show_main_window(app)
         }))
         .on_window_event(|window, event| {
+            if window.label() == "qa_studio" {
+                if matches!(event, WindowEvent::Destroyed) {
+                    let _ = window.app_handle().emit("qa-studio-state", false);
+                }
+                return;
+            }
             if window.label() != "main" {
                 return;
             }
@@ -997,7 +1043,10 @@ fn main() {
             set_avatar_in_app_visible,
             api_key_configured,
             save_api_key,
-            remove_api_key
+            remove_api_key,
+            open_qa_studio,
+            close_qa_studio,
+            is_qa_studio_open
         ])
         .build(tauri::generate_context!())
         .expect("error while building Iris desktop shell");

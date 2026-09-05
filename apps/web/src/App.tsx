@@ -19,7 +19,8 @@ import {
   IconInterfaceLock,
 } from "./CustomIcons";
 import { FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, SendHorizontal } from "lucide-react";
+import { ChevronDown, SendHorizontal, Sparkles } from "lucide-react";
+import { AvatarDevStudioStandalonePage } from "./components/AvatarDevPanel";
 import {
   FigmaStartFlowerIcon,
   FigmaMicIcon,
@@ -123,7 +124,22 @@ import {
   type MicrophoneProfile,
 } from "./vad";
 import { OverviewPage } from "./overview";
-import { configureAvatarPlacement, getDesktopRuntime, initialCoreStatus, listenForAvatarVisibility, listenForCoreStatus, restartDesktopCore, setDesktopInterfaceLocale, type CoreStatus } from "./desktop";
+import {
+  configureAvatarPlacement,
+  getDesktopRuntime,
+  initialCoreStatus,
+  listenForAvatarVisibility,
+  listenForCoreStatus,
+  restartDesktopCore,
+  setDesktopInterfaceLocale,
+  type CoreStatus,
+  openQaStudioWindow,
+  closeQaStudioWindow,
+  isQaStudioWindowOpen,
+  listenForQaStudioState,
+  isDesktopApp,
+} from "./desktop";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { StartupScreen } from "./components/StartupScreen";
 import { WindowChrome } from "./components/WindowChrome";
 import { AppDialog } from "./components/AppDialog";
@@ -209,13 +225,25 @@ type LevelFilter = "all" | EventLevel;
 
 const AVATAR_EMOTION_LABELS: Record<string, string> = {
   neutral: "Нейтральная", happy: "Радость", sad: "Грусть", angry: "Злость",
-  annoyed: "Раздражение", smirk: "Улыбка", thinking: "Задумчивость", surprised: "Удивление",
+  annoyed: "Раздражение", smirk: "Ухмылка", thinking: "Задумчивость", surprised: "Удивление",
   embarrassed: "Смущение", concerned: "Обеспокоенность",
+  playful: "Озорная / Игривая", pouting: "Надутые щёчки",
+  wink: "Подмигивание (правый)", wink_left: "Подмигивание (левый)",
+  skeptical: "Скептицизм", proud: "Гордость / Довольная", sleepy: "Сонная",
+  excited: "Восторг", shocked: "Шок", touched: "Растроганная",
+  teasing: "Дразнящая", relaxed: "Расслабленная", curious: "Любопытство", confused: "Озадаченная",
 };
 const AVATAR_GESTURE_LABELS: Record<string, string> = {
-  greeting: "Приветствие", agreement: "Согласие", disagreement: "Несогласие", question: "Вопрос",
-  explanation: "Объяснение", thinking: "Размышление", surprise: "Удивление", frustration: "Фрустрация",
-  farewell: "Прощание", shrug: "Пожимание плечами", talk: "Разговор",
+  greeting: "Приветствие (авто)", greeting_right: "Приветствие (правая рука)",
+  greeting_left: "Приветствие (левая рука)", greeting_casual: "Приветствие (непринуждённое)",
+  farewell: "Прощание (авто)", farewell_right: "Прощание (правая рука)",
+  farewell_left: "Прощание (левая рука)", farewell_casual: "Прощание (спокойное)",
+  talk: "Разговор (авто)", talk_right: "Разговор (правая рука)", talk_left: "Разговор (левая рука)",
+  thinking: "Размышление (авто)", thinking_right: "Размышление (правая рука)", thinking_left: "Размышление (левая рука)",
+  question: "Вопрос (авто)", question_right: "Вопрос (правая рука)", question_left: "Вопрос (левая рука)",
+  explanation: "Объяснение (авто)", explanation_right: "Объяснение (правая рука)", explanation_left: "Объяснение (левая рука)",
+  agreement: "Согласие", disagreement: "Несогласие",
+  surprise: "Удивление", frustration: "Фрустрация", shrug: "Пожимание плечами", nod: "Кивок",
 };
 
 function formatPronunciations(entries: Record<string, string>): string {
@@ -373,7 +401,41 @@ function parseSttTerms(value: string): Record<string, string[]> {
   );
 }
 
+function isQaStudioWindow(): boolean {
+  if (typeof window === "undefined") return false;
+  if ((window as unknown as { __IRIS_VIEW__?: string }).__IRIS_VIEW__ === "qa-studio") {
+    return true;
+  }
+  if (isDesktopApp()) {
+    try {
+      if (getCurrentWindow().label === "qa_studio") {
+        return true;
+      }
+    } catch {
+      // Ignore
+    }
+  }
+  try {
+    if (window.location) {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("view") === "qa-studio" || window.location.hash === "#qa-studio") {
+        return true;
+      }
+    }
+  } catch {
+    // Ignore
+  }
+  return false;
+}
+
 export default function App() {
+  if (isQaStudioWindow()) {
+    return <AvatarDevStudioStandalonePage />;
+  }
+  return <MainApp />;
+}
+
+function MainApp() {
   const desktopManaged = isDesktopManaged();
   const [coreStatus, setCoreStatus] = useState<CoreStatus>(initialCoreStatus);
   const [showStartup, setShowStartup] = useState(desktopManaged);
@@ -394,6 +456,30 @@ export default function App() {
   const [avatarStatus, setAvatarStatus] = useState<AvatarStatusResponse | null>(null);
   const [avatarOverlay, setAvatarOverlay] = useState<AvatarOverlaySettings | null>(null);
   const [settings, setSettings] = useState<PublicSettings | null>(null);
+  const [qaStudioOpen, setQaStudioOpen] = useState(false);
+
+  useEffect(() => {
+    void isQaStudioWindowOpen().then((open) => {
+      setQaStudioOpen(open);
+    });
+    let stop: (() => void) | undefined;
+    void listenForQaStudioState((open) => {
+      setQaStudioOpen(open);
+    }).then((unlisten) => {
+      stop = unlisten;
+    });
+    return () => stop?.();
+  }, []);
+
+  const handleToggleQaStudio = useCallback(async (open: boolean) => {
+    if (open) {
+      await openQaStudioWindow();
+      setQaStudioOpen(true);
+    } else {
+      await closeQaStudioWindow();
+      setQaStudioOpen(false);
+    }
+  }, []);
   const [interfaceLocale, setInterfaceLocale] = useState<InterfaceLocale>(initialInterfaceLocale);
   const [events, setEvents] = useState<BackendEvent[]>([]);
   // A settings mutation is authoritative.  Do not allow an older polling
@@ -779,6 +865,9 @@ export default function App() {
                   void refreshOverview();
                   void refreshEvents();
                 }}
+                qaStudioEnabled={qaStudioOpen}
+                onToggleQaStudioEnabled={handleToggleQaStudio}
+                onOpenQaStudio={() => void handleToggleQaStudio(true)}
               />
             </Suspense>
           )}
@@ -2692,6 +2781,9 @@ export function SettingsPage({
   onAvatarOverlayChanged,
   onInterfaceLocaleChange,
   onSettingsChanged,
+  qaStudioEnabled,
+  onToggleQaStudioEnabled,
+  onOpenQaStudio,
 }: {
   settings: PublicSettings | null;
   avatarStatus: AvatarStatusResponse | null;
@@ -2702,6 +2794,9 @@ export function SettingsPage({
   onAvatarOverlayChanged: (overlay: AvatarOverlaySettings | null) => void;
   onInterfaceLocaleChange: (locale: InterfaceLocale) => void;
   onSettingsChanged: (settings: PublicSettings) => void;
+  qaStudioEnabled?: boolean;
+  onToggleQaStudioEnabled?: (enabled: boolean) => void;
+  onOpenQaStudio?: () => void;
 }) {
   const [activeSection, setActiveSection] = useState<SettingsSection>("conversation");
   const [interfaceLocale, setInterfaceLocale] = useState<InterfaceLocale>("ru");
@@ -3048,6 +3143,14 @@ export function SettingsPage({
                 );
               }}
             />
+            <SettingsSwitch
+              checked={Boolean(qaStudioEnabled)}
+              label="Окно тестирования аватара (QA Studio)"
+              description="Отдельное автономное окно для проверки всех 24 эмоций, жестов, сценариев речи и сброса. При включении открывается, при выключении — закрывается."
+              onChange={(checked) => {
+                onToggleQaStudioEnabled?.(checked);
+              }}
+            />
           </fieldset>
         </div>
 
@@ -3082,6 +3185,7 @@ export function SettingsPage({
             onRefresh={onRefreshAvatar}
             onOverlayChanged={onAvatarOverlayChanged}
             onSettingsChanged={onSettingsChanged}
+            onOpenQaStudio={onOpenQaStudio}
           />
         </div>
 
@@ -3989,6 +4093,7 @@ function AvatarControls({
   onRefresh,
   onOverlayChanged,
   onSettingsChanged,
+  onOpenQaStudio,
 }: {
   avatarStatus: AvatarStatusResponse | null;
   overlay: AvatarOverlaySettings | null;
@@ -4000,6 +4105,7 @@ function AvatarControls({
   onRefresh: () => Promise<void>;
   onOverlayChanged: (overlay: AvatarOverlaySettings | null) => void;
   onSettingsChanged: (settings: PublicSettings) => void;
+  onOpenQaStudio?: () => void;
 }) {
   const defaultTestPhrase = interfaceLocale === "en" ? "Avatar test." : "Проверка аватара.";
   const [phrase, setPhrase] = useState(defaultTestPhrase);
@@ -4147,6 +4253,26 @@ function AvatarControls({
             />
           </div>
         )}
+      </div>
+      <div className="avatar-qa-studio-callout" style={{ margin: "16px 0", padding: "16px 18px", borderRadius: "14px", background: "linear-gradient(135deg, rgba(139, 92, 246, 0.14), rgba(99, 102, 241, 0.08))", border: "1px solid rgba(139, 92, 246, 0.3)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "14px", flexWrap: "wrap" }}>
+        <div>
+          <strong style={{ display: "flex", alignItems: "center", gap: 6, color: "#fff", fontSize: "13.5px" }}>
+            <Sparkles size={15} style={{ color: "#a78bfa" }} />
+            Лаборатория тестирования аватара (QA Studio)
+          </strong>
+          <span style={{ display: "block", color: "rgba(255, 255, 255, 0.65)", fontSize: "12px", marginTop: 2 }}>
+            Автономное отдельное окно тестировщика: мгновенный запуск всех 24 эмоций, 20 жестов, сценариев речи и сброс.
+          </span>
+        </div>
+        <button
+          type="button"
+          className="primary-button"
+          onClick={() => onOpenQaStudio?.()}
+          style={{ padding: "8px 16px", borderRadius: "10px", fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+        >
+          <Sparkles size={14} />
+          Открыть отдельное окно QA Studio
+        </button>
       </div>
       <details className="avatar-test-disclosure">
         <summary style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>

@@ -29,6 +29,7 @@ namespace NeuroAsist.Avatar
 
         public AudioSource Source => audioSource;
         public int Generation => generation;
+        public bool IsPlaying => (audioSource != null && audioSource.isPlaying) || playback != null;
         public event Action<int> StreamClipStarted;
         public event Action<int> StreamClipFinished;
         public void Configure(AvatarRuntimeSettings value, AudioSource source) { settings = value; audioSource = source; }

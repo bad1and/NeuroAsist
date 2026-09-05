@@ -365,6 +365,21 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             {"session_id": payload.session_id, "metadata": agent.last_turn.metadata_frame()},
         )
     response = ChatResponse(**result)
+    avatar_service = getattr(request.app.state, "avatar_service", None)
+    if avatar_service is not None and getattr(avatar_service, "enabled", False):
+        await avatar_service.set_emotion(
+            session_id=payload.session_id,
+            emotion=result.get("emotion", "neutral"),
+            intensity=result.get("intensity", 1.0),
+        )
+        gesture = result.get("gesture", "auto")
+        if gesture and gesture not in {"none", "auto"}:
+            await avatar_service.gesture(
+                session_id=payload.session_id,
+                gesture=gesture,
+                intensity=result.get("intensity", 1.0),
+            )
+
     # Text chat is independently speakable.  Avatar availability only affects
     # animation delivery inside the orchestrator, not whether audio is made.
     if settings.voice_tts_enabled and result["reply"].strip():
@@ -381,6 +396,7 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             emotion=result["emotion"],
             intent=result["intent"],
             gesture=result.get("gesture", "auto"),
+            gesture_intensity=result.get("intensity", 1.0),
             voice=voice,
             style=resolve_turn_voice_style(getattr(request.app.state, "voice_tts_style", "auto"), agent.last_turn),
         )

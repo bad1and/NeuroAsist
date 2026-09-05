@@ -7,9 +7,9 @@ namespace NeuroAsist.Protocol;
 public static class CharacterProtocolV3
 {
     public const int Version = 3;
-    public static readonly IReadOnlyList<string> Emotions = new[] { "neutral", "happy", "sad", "angry", "annoyed", "smirk", "thinking", "surprised", "embarrassed", "concerned" };
+    public static readonly IReadOnlyList<string> Emotions = new[] { "neutral", "happy", "sad", "angry", "annoyed", "smirk", "thinking", "surprised", "embarrassed", "concerned", "playful", "pouting", "wink", "wink_left", "skeptical", "proud", "sleepy", "excited", "shocked", "touched", "teasing", "relaxed", "curious", "confused" };
     public static readonly IReadOnlyList<string> Intents = new[] { "casual_chat", "question", "task_request", "unknown" };
-    public static readonly IReadOnlyList<string> Gestures = new[] { "none", "auto", "talk", "greeting", "agreement", "disagreement", "question", "explanation", "thinking", "surprise", "frustration", "farewell", "shrug" };
+    public static readonly IReadOnlyList<string> Gestures = new[] { "none", "auto", "talk", "talk_right", "talk_left", "greeting", "greeting_right", "greeting_left", "greeting_casual", "agreement", "disagreement", "question", "question_right", "question_left", "explanation", "explanation_right", "explanation_left", "thinking", "thinking_right", "thinking_left", "surprise", "frustration", "farewell", "farewell_right", "farewell_left", "farewell_casual", "shrug", "nod" };
 }
 
 public sealed class CharacterTurn

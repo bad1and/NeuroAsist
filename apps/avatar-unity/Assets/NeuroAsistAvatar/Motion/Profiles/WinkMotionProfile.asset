@@ -1,0 +1,49 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c723a697943b8f84fabbe4afa8367762, type: 3}
+  m_Name: WinkMotionProfile
+  m_EditorClassIdentifier: 
+  ProfileId: wink
+  BaseIdleState: IdleNeutral
+  BaseIdleSpeed: 1
+  IdleIntervalMinSeconds: 16
+  IdleIntervalMaxSeconds: 32
+  AlternativeIdleProbability: 0.35
+  GestureFrequencyMultiplier: 1.1
+  GestureIntensityMultiplier: 1
+  HeadLookWeight: 1
+  LifeMotionIntensity: 1
+  GazeInterest: 0.6
+  HeadTurnSpeed: 5
+  AllowLongIdleWhileSpeaking: 0
+  AlternativeIdles:
+  - Id: IdleLookWander
+    AnimatorState: IdleNeutral
+    Category: 0
+    LookPattern: 1
+    DurationSeconds: 4.5
+    CooldownSeconds: 25
+    Speed: 1
+  - Id: IdleSideGlance
+    AnimatorState: IdleNeutral
+    Category: 0
+    LookPattern: 2
+    DurationSeconds: 3.5
+    CooldownSeconds: 25
+    Speed: 1
+  - Id: IdleThoughtfulLook
+    AnimatorState: IdleNeutral
+    Category: 0
+    LookPattern: 3
+    DurationSeconds: 4
+    CooldownSeconds: 30
+    Speed: 1

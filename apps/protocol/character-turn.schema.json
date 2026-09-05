@@ -32,6 +32,27 @@
       "title": "AffectCue",
       "type": "object"
     },
+    "CodingDelegationCue": {
+      "description": "Untrusted, optional routing hint from the *same* Character response.\n\nIt is deliberately tolerant of unknown model fields.  The CodingBridge\nvalidates the confidence and the original user request before it can create\na durable task; this cue is never visible to the user or sent to tools.",
+      "properties": {
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        }
+      },
+      "title": "CodingDelegationCue",
+      "type": "object"
+    },
     "ContinuityCue": {
       "additionalProperties": false,
       "properties": {
@@ -146,7 +167,21 @@
         "thinking",
         "surprised",
         "embarrassed",
-        "concerned"
+        "concerned",
+        "playful",
+        "pouting",
+        "wink",
+        "wink_left",
+        "skeptical",
+        "proud",
+        "sleepy",
+        "excited",
+        "shocked",
+        "touched",
+        "teasing",
+        "relaxed",
+        "curious",
+        "confused"
       ],
       "title": "Emotion",
       "type": "string"
@@ -156,16 +191,31 @@
         "none",
         "auto",
         "talk",
+        "talk_right",
+        "talk_left",
         "greeting",
+        "greeting_right",
+        "greeting_left",
+        "greeting_casual",
         "agreement",
         "disagreement",
         "question",
+        "question_right",
+        "question_left",
         "explanation",
+        "explanation_right",
+        "explanation_left",
         "thinking",
+        "thinking_right",
+        "thinking_left",
         "surprise",
         "frustration",
         "farewell",
-        "shrug"
+        "farewell_right",
+        "farewell_left",
+        "farewell_casual",
+        "shrug",
+        "nod"
       ],
       "title": "Gesture",
       "type": "string"
@@ -364,6 +414,17 @@
       "maxItems": 3,
       "title": "Memory Decisions",
       "type": "array"
+    },
+    "coding_delegation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CodingDelegationCue"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

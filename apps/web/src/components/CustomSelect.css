@@ -29,7 +29,8 @@
   min-height: 38px;
   padding: 8px 12px;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--radius-control, 20px);
+  corner-shape: squircle;
   background: var(--color-surface-raised, #242526);
   color: var(--color-text, #f0f0f0);
   cursor: pointer;
@@ -94,7 +95,8 @@
   overscroll-behavior: contain;
   background: var(--color-surface-raised, #242526);
   border: none !important;
-  border-radius: 10px;
+  border-radius: var(--radius-md, 24px);
+  corner-shape: squircle;
   z-index: 1000;
   box-shadow: 0 14px 36px -4px rgba(0, 0, 0, 0.55), 0 4px 14px rgba(0, 0, 0, 0.35);
   padding: 5px;
@@ -151,14 +153,15 @@
   background: rgba(255, 255, 255, 0.28);
 }
 
-/* 3. Options (скругление 8px, спокойный hover и выделение плашкой без галочек) */
+/* 3. Options (скругление 13px, спокойный hover и выделение плашкой без галочек) */
 .custom-select-option {
   display: flex;
   align-items: center;
   padding: 8px 12px;
   cursor: pointer;
   color: var(--color-text, #f0f0f0);
-  border-radius: 8px;
+  border-radius: var(--radius-xs, 13px);
+  corner-shape: squircle;
   transition: background-color 0.14s ease, color 0.14s ease;
   font-size: 13.5px;
   line-height: 1.4;

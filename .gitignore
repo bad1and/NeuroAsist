@@ -220,3 +220,6 @@ apps/avatar-unity/*.csproj
 apps/avatar-unity/*.sln
 apps/avatar-unity/.vsconfig
 rules.md
+
+# Promotional materials and renders
+promo/

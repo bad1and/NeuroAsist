@@ -31,7 +31,11 @@ class EmotionMapping(_MappingModel):
 
 
 def _default_mapping() -> dict[Emotion, EmotionMapping]:
-    expressive = [Gesture.AUTO, Gesture.TALK, Gesture.GREETING, Gesture.AGREEMENT]
+    expressive = [
+        Gesture.AUTO, Gesture.TALK, Gesture.TALK_RIGHT, Gesture.TALK_LEFT,
+        Gesture.GREETING, Gesture.GREETING_RIGHT, Gesture.GREETING_LEFT, Gesture.GREETING_CASUAL,
+        Gesture.AGREEMENT, Gesture.NOD, Gesture.SHRUG,
+    ]
     mapping: dict[Emotion, EmotionMapping] = {
         emotion: EmotionMapping(
             expression=emotion.value,
@@ -59,6 +63,48 @@ def _default_mapping() -> dict[Emotion, EmotionMapping]:
     mapping[Emotion.SURPRISED] = mapping[Emotion.SURPRISED].model_copy(
         update={"motion_profile": "alert", "allowed_gestures": [Gesture.AUTO, Gesture.SURPRISE, Gesture.TALK]}
     )
+    mapping[Emotion.PLAYFUL] = mapping[Emotion.PLAYFUL].model_copy(
+        update={"motion_profile": "playful", "allowed_gestures": [Gesture.AUTO, Gesture.TALK, Gesture.GREETING, Gesture.SHRUG, Gesture.NOD]}
+    )
+    mapping[Emotion.POUTING] = mapping[Emotion.POUTING].model_copy(
+        update={"motion_profile": "tense", "allowed_gestures": [Gesture.AUTO, Gesture.SHRUG, Gesture.DISAGREEMENT, Gesture.TALK]}
+    )
+    mapping[Emotion.WINK] = mapping[Emotion.WINK].model_copy(
+        update={"motion_profile": "playful", "allowed_gestures": [Gesture.AUTO, Gesture.GREETING, Gesture.AGREEMENT, Gesture.NOD, Gesture.TALK]}
+    )
+    mapping[Emotion.WINK_LEFT] = mapping[Emotion.WINK_LEFT].model_copy(
+        update={"motion_profile": "playful", "allowed_gestures": [Gesture.AUTO, Gesture.GREETING, Gesture.AGREEMENT, Gesture.NOD, Gesture.TALK]}
+    )
+    mapping[Emotion.SKEPTICAL] = mapping[Emotion.SKEPTICAL].model_copy(
+        update={"motion_profile": "thoughtful", "allowed_gestures": [Gesture.AUTO, Gesture.SHRUG, Gesture.QUESTION, Gesture.THINKING, Gesture.DISAGREEMENT]}
+    )
+    mapping[Emotion.PROUD] = mapping[Emotion.PROUD].model_copy(
+        update={"motion_profile": "energetic", "allowed_gestures": [Gesture.AUTO, Gesture.AGREEMENT, Gesture.NOD, Gesture.TALK, Gesture.EXPLANATION]}
+    )
+    mapping[Emotion.SLEEPY] = mapping[Emotion.SLEEPY].model_copy(
+        update={"motion_profile": "calm", "allowed_gestures": [Gesture.AUTO, Gesture.SHRUG, Gesture.TALK, Gesture.FAREWELL]}
+    )
+    mapping[Emotion.EXCITED] = mapping[Emotion.EXCITED].model_copy(
+        update={"motion_profile": "energetic", "allowed_gestures": [Gesture.AUTO, Gesture.GREETING, Gesture.AGREEMENT, Gesture.NOD, Gesture.TALK, Gesture.EXPLANATION]}
+    )
+    mapping[Emotion.SHOCKED] = mapping[Emotion.SHOCKED].model_copy(
+        update={"motion_profile": "alert", "allowed_gestures": [Gesture.AUTO, Gesture.SURPRISE, Gesture.QUESTION, Gesture.TALK]}
+    )
+    mapping[Emotion.TOUCHED] = mapping[Emotion.TOUCHED].model_copy(
+        update={"motion_profile": "attentive", "allowed_gestures": [Gesture.AUTO, Gesture.AGREEMENT, Gesture.NOD, Gesture.TALK, Gesture.GREETING_CASUAL]}
+    )
+    mapping[Emotion.TEASING] = mapping[Emotion.TEASING].model_copy(
+        update={"motion_profile": "playful", "allowed_gestures": [Gesture.AUTO, Gesture.TALK, Gesture.SHRUG, Gesture.GREETING_CASUAL, Gesture.NOD]}
+    )
+    mapping[Emotion.RELAXED] = mapping[Emotion.RELAXED].model_copy(
+        update={"motion_profile": "calm", "allowed_gestures": [Gesture.AUTO, Gesture.TALK, Gesture.SHRUG, Gesture.AGREEMENT, Gesture.NOD]}
+    )
+    mapping[Emotion.CURIOUS] = mapping[Emotion.CURIOUS].model_copy(
+        update={"motion_profile": "thoughtful", "allowed_gestures": [Gesture.AUTO, Gesture.QUESTION, Gesture.THINKING, Gesture.TALK]}
+    )
+    mapping[Emotion.CONFUSED] = mapping[Emotion.CONFUSED].model_copy(
+        update={"motion_profile": "thoughtful", "allowed_gestures": [Gesture.AUTO, Gesture.SHRUG, Gesture.QUESTION, Gesture.THINKING]}
+    )
     return mapping
 
 
@@ -81,10 +127,15 @@ class EmotionEngine:
     """State machine that rejects obsolete stop/gesture operations."""
 
     _GESTURE_PRIORITIES = {
-        Gesture.AUTO: 0, Gesture.NONE: 0, Gesture.TALK: 1, Gesture.EXPLANATION: 2,
-        Gesture.QUESTION: 2, Gesture.SHRUG: 2, Gesture.AGREEMENT: 2,
-        Gesture.DISAGREEMENT: 2, Gesture.THINKING: 2, Gesture.GREETING: 3,
-        Gesture.SURPRISE: 3, Gesture.FRUSTRATION: 3, Gesture.FAREWELL: 3,
+        Gesture.AUTO: 0, Gesture.NONE: 0,
+        Gesture.TALK: 1, Gesture.TALK_RIGHT: 1, Gesture.TALK_LEFT: 1,
+        Gesture.EXPLANATION: 2, Gesture.EXPLANATION_RIGHT: 2, Gesture.EXPLANATION_LEFT: 2,
+        Gesture.QUESTION: 2, Gesture.QUESTION_RIGHT: 2, Gesture.QUESTION_LEFT: 2,
+        Gesture.SHRUG: 2, Gesture.AGREEMENT: 2, Gesture.NOD: 2,
+        Gesture.DISAGREEMENT: 2, Gesture.THINKING: 2, Gesture.THINKING_RIGHT: 2, Gesture.THINKING_LEFT: 2,
+        Gesture.GREETING: 3, Gesture.GREETING_RIGHT: 3, Gesture.GREETING_LEFT: 3, Gesture.GREETING_CASUAL: 3,
+        Gesture.SURPRISE: 3, Gesture.FRUSTRATION: 3,
+        Gesture.FAREWELL: 3, Gesture.FAREWELL_RIGHT: 3, Gesture.FAREWELL_LEFT: 3, Gesture.FAREWELL_CASUAL: 3,
     }
 
     def __init__(self, mapping: dict[Emotion, EmotionMapping] | None = None, *, mapping_valid: bool = True, mapping_error: str | None = None) -> None:
@@ -117,17 +168,26 @@ class EmotionEngine:
     def state(self) -> EmotionState:
         return self._state
 
-    def apply_metadata(self, *, emotion: Emotion, gesture: Gesture, intensity: float, utterance_id: str | None) -> EmotionState:
-        """Apply one metadata frame. Repeated frames for the same utterance are idempotent."""
-        if utterance_id and self._state.source_utterance_id == utterance_id:
+    def apply_metadata(
+        self,
+        *,
+        emotion: Emotion,
+        gesture: Gesture,
+        intensity: float,
+        utterance_id: str | None,
+        force: bool = False,
+    ) -> EmotionState:
+        """Apply metadata frame dynamically as chosen by the AI without dropping subsequent frames."""
+        if not force and utterance_id and self._state.source_utterance_id == utterance_id:
             return self._state
         mapping = self.mapping[emotion]
-        selected_gesture = gesture if gesture in mapping.allowed_gestures else Gesture.AUTO
+        if gesture not in mapping.allowed_gestures:
+            gesture = Gesture.AUTO if Gesture.AUTO in mapping.allowed_gestures else mapping.allowed_gestures[0]
         self._state = EmotionState(
-            current_emotion=self._state.current_emotion,
+            current_emotion=self._state.target_emotion,
             target_emotion=emotion,
             intensity=max(0.0, min(1.0, intensity)),
-            gesture=selected_gesture,
+            gesture=gesture,
             motion_profile=mapping.motion_profile,
             attack_ms=mapping.attack_ms,
             minimum_hold_ms=mapping.minimum_hold_ms,
@@ -139,28 +199,27 @@ class EmotionEngine:
         return self._state
 
     def apply_gesture(self, gesture: Gesture, *, intensity: float = 1.0, interrupt: bool = True) -> EmotionState:
-        allowed = self.mapping[self._state.target_emotion].allowed_gestures
-        if gesture not in allowed:
-            gesture = Gesture.AUTO
-        if not interrupt and self._GESTURE_PRIORITIES[gesture] < self._GESTURE_PRIORITIES[self._state.gesture]:
+        mapping = self.mapping[self._state.target_emotion]
+        if gesture not in mapping.allowed_gestures:
+            return self._state
+        if not interrupt and self._GESTURE_PRIORITIES.get(gesture, 0) < self._GESTURE_PRIORITIES.get(self._state.gesture, 0):
             return self._state
         self._state = EmotionState(**{**self._state.__dict__, "gesture": gesture, "intensity": max(0.0, min(1.0, intensity))})
         return self._state
 
     def stop(self, utterance_id: str | None = None) -> EmotionState:
-        """Only the active generation may reset the face to its neutral baseline."""
         if utterance_id is not None and utterance_id != self._state.source_utterance_id:
             return self._state
-        neutral = self.mapping[Emotion.NEUTRAL]
+        mapping = self.mapping[Emotion.NEUTRAL]
         self._state = EmotionState(
             current_emotion=self._state.target_emotion,
             target_emotion=Emotion.NEUTRAL,
-            intensity=neutral.weight,
+            intensity=self._state.intensity,
             gesture=Gesture.AUTO,
-            motion_profile=neutral.motion_profile,
-            attack_ms=neutral.attack_ms,
-            minimum_hold_ms=neutral.minimum_hold_ms,
-            release_ms=neutral.release_ms,
+            motion_profile=mapping.motion_profile,
+            attack_ms=mapping.attack_ms,
+            minimum_hold_ms=mapping.minimum_hold_ms,
+            release_ms=mapping.release_ms,
             source_utterance_id=None,
             generation=self._state.generation + 1,
             speaking=False,

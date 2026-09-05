@@ -161,9 +161,6 @@ class AvatarService:
         from .schemas import StreamMotionCuePayload
 
         cue = StreamMotionCuePayload.model_validate(motion or {})
-        allowed = self.emotion_engine.mapping[self.emotion_engine.state.target_emotion].allowed_gestures
-        if Gesture(cue.gesture) not in allowed:
-            cue = cue.model_copy(update={"gesture": Gesture.AUTO.value})
         return await self._broadcast(
             "avatar.stream.segment",
             session_id,
@@ -190,6 +187,7 @@ class AvatarService:
         state = self.emotion_engine.apply_metadata(
             emotion=Emotion(emotion), gesture=Gesture(gesture), intensity=actual_intensity,
             utterance_id=utterance_id,
+            force=True,
         )
         return await self._broadcast(
             "avatar.stream.metadata",
@@ -199,6 +197,7 @@ class AvatarService:
                 emotion=state.target_emotion,
                 gesture=state.gesture,
                 gesture_intensity=state.intensity,
+                intensity=state.intensity,
             ).model_dump(mode="json"),
             utterance_id=utterance_id,
             protocol_version=2,
