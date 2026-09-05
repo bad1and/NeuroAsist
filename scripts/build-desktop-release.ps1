@@ -10,7 +10,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$python = Join-Path $root ".venv\Scripts\python.exe"
+$bootstrapPython = Join-Path $root ".venv\Scripts\python.exe"
+$releaseEnvironment = Join-Path $root "build\release-venv"
+$python = Join-Path $releaseEnvironment "Scripts\python.exe"
 $desktop = Join-Path $root "apps\desktop"
 $tauri = Join-Path $desktop "src-tauri"
 $output = Join-Path $root "build\core"
@@ -74,29 +76,39 @@ if ($RequireCleanWorktree) {
     }
 }
 
-if (-not (Test-Path -LiteralPath $python)) {
-    throw "Python virtual environment not found at $python"
+if (-not (Test-Path -LiteralPath $bootstrapPython)) {
+    throw "Bootstrap Python virtual environment not found at $bootstrapPython"
 }
 if (-not (Test-Path -LiteralPath $avatarExecutable)) {
     throw "Release build requires the Unity avatar at $avatarExecutable. Build it with npm --prefix apps/desktop run build:avatar first."
 }
 
-& $python (Join-Path $root "scripts\check_docs.py")
+& $bootstrapPython (Join-Path $root "scripts\check_docs.py")
 Assert-LastExitCode "Validating release metadata and documentation"
 
 if (-not $SkipDependencyInstall) {
-    # Keep the generated release requirements separate so PyInstaller remains
-    # a build-only dependency and the pinned runtime file stays unchanged.
-    $releaseRequirements = Join-Path $root "build\requirements-release.txt"
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $releaseRequirements) | Out-Null
-    Get-Content -LiteralPath (Join-Path $root "requirements.txt") | Set-Content -Encoding utf8 -LiteralPath $releaseRequirements
-    Add-Content -Encoding utf8 -LiteralPath $releaseRequirements "pyinstaller==6.21.0"
-    & $python -m pip install --requirement $releaseRequirements
+    # Never package from the long-lived developer environment. PyInstaller can
+    # discover optional packages that are not in the application manifest, so
+    # even a harmless old experiment can silently increase the installer.
+    if (Test-Path -LiteralPath $releaseEnvironment) {
+        Remove-Item -LiteralPath $releaseEnvironment -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $releaseEnvironment) | Out-Null
+    & $bootstrapPython -m venv $releaseEnvironment
+    Assert-LastExitCode "Creating isolated release Python environment"
+    & $python -m pip install --requirement (Join-Path $root "requirements\torch-cpu.txt")
+    Assert-LastExitCode "Installing CPU PyTorch runtime"
+    & $python -m pip install --requirement (Join-Path $root "requirements\build.txt")
     Assert-LastExitCode "Installing release Python dependencies"
+    & $python (Join-Path $root "scripts\check_python_dependencies.py") --profile runtime --profile build --strict
+    Assert-LastExitCode "Validating isolated release Python dependencies"
     npm ci --prefix (Join-Path $root "apps\web")
     Assert-LastExitCode "Installing web dependencies"
     npm ci --prefix $desktop
     Assert-LastExitCode "Installing desktop dependencies"
+}
+elseif (-not (Test-Path -LiteralPath $python)) {
+    throw "-SkipDependencyInstall requires the isolated release environment at $releaseEnvironment"
 }
 
 $coreResource = Join-Path $output "neuroasist-core"

@@ -45,6 +45,9 @@ PRIVATE_SUFFIXES = frozenset(
     }
 )
 PRIVATE_PATH_PARTS = frozenset({"diagnostics", "stt-audio", "private-corpus"})
+RETIRED_RUNTIME_PACKAGES = frozenset(
+    {"edge-tts", "py7zr", "silero", "silero-stress", "supertonic", "torchvision"}
+)
 
 
 def sha256(path: Path) -> str:
@@ -75,6 +78,36 @@ def private_paths(roots: Iterable[Path]) -> list[str]:
             ):
                 findings.append(f"{root.name}/{relative.as_posix()}")
     return findings
+
+
+def retired_dependency_paths(roots: Iterable[Path]) -> list[str]:
+    """Return package paths that belong to removed runtime integrations."""
+
+    def is_retired_package_part(part: str) -> bool:
+        normalized = part.lower().replace("_", "-")
+        if normalized in RETIRED_RUNTIME_PACKAGES:
+            return True
+        if not normalized.endswith(".dist-info"):
+            return False
+        distribution = normalized.removesuffix(".dist-info")
+        return any(
+            distribution.startswith(f"{package}-")
+            and distribution.removeprefix(f"{package}-")[:1].isdigit()
+            for package in RETIRED_RUNTIME_PACKAGES
+        )
+
+    findings: set[str] = set()
+    for root in roots:
+        if not root.is_dir():
+            raise ValueError(f"Release resource directory does not exist: {root}")
+        for path in sorted(root.rglob("*")):
+            relative = path.relative_to(root)
+            for index, part in enumerate(relative.parts):
+                if is_retired_package_part(part):
+                    package_path = Path(*relative.parts[: index + 1]).as_posix()
+                    findings.add(f"{root.name}/{package_path}")
+                    break
+    return sorted(findings)
 
 
 def git_revision() -> str | None:
@@ -110,6 +143,10 @@ def build_manifest(
     if forbidden:
         formatted = "\n- ".join(forbidden)
         raise ValueError(f"Private runtime data is present in the package staging tree:\n- {formatted}")
+    retired_dependencies = retired_dependency_paths(scanned_roots)
+    if retired_dependencies:
+        formatted = "\n- ".join(retired_dependencies)
+        raise ValueError(f"Retired dependencies are present in the package staging tree:\n- {formatted}")
 
     return {
         "schema_version": 1,
@@ -127,6 +164,11 @@ def build_manifest(
             "method": "pre-nsis-resource-tree",
             "scanned_roots": [str(root) for root in scanned_roots],
             "forbidden_files": [],
+        },
+        "dependency_scan": {
+            "method": "pre-nsis-resource-tree",
+            "retired_packages": sorted(RETIRED_RUNTIME_PACKAGES),
+            "forbidden_paths": [],
         },
     }
 

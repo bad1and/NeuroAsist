@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({ getCharacterState: vi.fn(), getCharacterStateEvents: vi.fn(), getCharacterReflections: vi.fn(), getReflectionSettings: vi.fn(), resetCharacterState: vi.fn(), updateReflectionSettings: vi.fn(), deleteCharacterReflection: vi.fn() }));
 vi.mock("./api", () => api);
-vi.mock("@paper-design/shaders-react", () => ({ Metaballs: () => <div data-testid="metaballs" /> }));
 import { StatePage } from "./state";
 
 beforeEach(() => {

@@ -1,0 +1,7 @@
+# Optional NVIDIA development/runtime profile. This is not included in the
+# CPU-base installer and must be qualified as a separate release artifact.
+--index-url https://download.pytorch.org/whl/cu128
+-c constraints.txt
+
+torch==2.11.0
+torchaudio==2.11.0

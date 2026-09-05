@@ -166,16 +166,20 @@ PyInstaller/build dependencies available through the script.
 .\scripts\build-desktop-release.ps1
 ```
 
-The script builds the PyInstaller `--onedir` core, temporarily adds it to Tauri
-resources, builds NSIS, token-smokes the packaged sidecar, scans package staging
-trees for private runtime files, emits a SHA-256 manifest and restores
-`tauri.conf.json` in `finally`. Candidate output defaults to:
+The script recreates `build\release-venv` from `requirements\build.txt`, builds
+the PyInstaller `--onedir` core from that isolated environment, temporarily adds
+it to Tauri resources, builds NSIS, token-smokes the packaged sidecar, scans
+package staging trees for private runtime files and retired dependencies, emits a SHA-256 manifest and
+restores `tauri.conf.json` in `finally`. It never packages from the developer
+`.venv`, where abandoned experiment packages may still be installed. Candidate
+output defaults to:
 
 ```text
 artifacts\
 ```
 
-For repeated builds after dependencies are already installed:
+For repeated builds after the isolated release environment has already been
+created from the current dependency profile:
 
 ```powershell
 .\scripts\build-desktop-release.ps1 -SkipDependencyInstall -ArtifactDirectory artifacts
@@ -185,6 +189,9 @@ For repeated builds after dependencies are already installed:
 build from the **same** checkout. It still removes CUDA-only DLLs from that
 generated sidecar, because the 1.0 candidate is CPU-base. Do not use it after a
 source, dependency or `VERSION` change.
+
+Dependency ownership and the clean-environment update procedure are documented
+in [Python dependency profiles](dependencies.md).
 
 Smoke a standalone packaged core when an executable has been produced:
 

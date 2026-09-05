@@ -1,0 +1,6 @@
+# Install this profile before runtime.txt to select the CPU PyTorch wheels.
+--index-url https://download.pytorch.org/whl/cpu
+-c constraints.txt
+
+torch==2.11.0
+torchaudio==2.11.0

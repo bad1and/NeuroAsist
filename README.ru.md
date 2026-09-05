@@ -82,14 +82,20 @@ cd Iris
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128
+python -m pip install -r requirements.txt
 
 npm ci
 npm ci --prefix apps/web
 npm ci --prefix apps/desktop
 ```
 
-Репозиторий фиксирует проверенный граф Python- и JavaScript-зависимостей. Если CUDA недоступна, установите подходящую для компьютера сборку PyTorch и оставьте `VOICE_STT_DEVICE=cpu`.
+`requirements.txt` собирает раздельные runtime- и dev-профили. Для CUDA-development сначала установите совместимые `torch` и `torchaudio` из индекса PyTorch, затем выполните обычную команду выше:
+
+```powershell
+python -m pip install -r requirements/torch-cu128.txt
+```
+
+Оставьте `VOICE_STT_DEVICE=cpu`, если CUDA недоступна. Эти требования относятся к запуску из исходников: Windows installer включает изолированный Python-sidecar и не должен требовать от пользователя Python, Node или Rust. Профили и правила обновления описаны в [документе о зависимостях](Docs/dependencies.md).
 
 ### 2. Настройка
 
