@@ -48,12 +48,7 @@ htmlcov/
 .cache
 nosetests.xml
 coverage.xml
-output/live-soak*.json
-output/live-soak*.md
-output/live-soak*.stdout.log
-output/live-soak*.stderr.log
-output/tts-model-comparison/TeraTTSv2/
-output/tts-model-comparison/TeraTTSv2-listening-pack/
+/output/
 *.cover
 *.py,cover
 .hypothesis/
@@ -75,6 +70,17 @@ data/
 logs/
 !tests/fixtures/
 !tests/fixtures/*.sqlite3
+
+# Local recordings and generated media must never enter the repository.
+*.db
+*.db-journal
+*.wav
+*.pcm
+*.mp3
+*.flac
+*.ogg
+!tests/fixtures/live_audio/
+!tests/fixtures/live_audio/*.wav
 
 # Flask stuff:
 instance/
@@ -211,9 +217,17 @@ MemoryCaptures/
 data/diagnostics/stt-audio/
 data/stt-private-corpus/
 data/stt-*.json
-output/stt-*.json
-output/stt-*.md
-output/qwen-worker-benchmark/
+
+# Repository-local tools, exports, and experiment scratch space
+/.agents/
+/.hallmark/
+/.playwright-mcp/
+/Audio/
+/from iris/
+/lottie-player/
+/lottie-skottie/
+/tests/**/output/
+/apps/web/public/upload*.png
 
 # Unity IDE-generated project files
 apps/avatar-unity/*.csproj
