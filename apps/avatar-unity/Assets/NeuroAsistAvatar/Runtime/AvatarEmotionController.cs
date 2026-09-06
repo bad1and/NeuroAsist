@@ -413,31 +413,38 @@ namespace NeuroAsist.Avatar
             switch (requested)
             {
                 case "pouting":
-                    TryAddCustom("CheekPuff", 0.85f);
-                    TryAddCustom("MouthPucker", 0.80f);
-                    TryAddCustom("BrowInnerUp", 0.45f);
-                    TryAddCustom("EyeSquintLeft", 0.10f);
-                    TryAddCustom("EyeSquintRight", 0.10f);
+                    TryAddCustom("CheekPuff", 1.0f);
+                    TryAddCustom("MouthPucker", 0.75f);
+                    TryAddCustom("MouthFrownLeft", 0.35f);
+                    TryAddCustom("MouthFrownRight", 0.35f);
+                    TryAddCustom("MouthShrugLower", 0.40f);
+                    TryAddCustom("BrowInnerUp", 0.60f);
+                    TryAddCustom("BrowDownLeft", 0.20f);
+                    TryAddCustom("BrowDownRight", 0.20f);
+                    TryAddCustom("EyeSquintLeft", 0.20f);
+                    TryAddCustom("EyeSquintRight", 0.20f);
                     break;
                 case "wink":
                     if (HasSupportedExpression(ExpressionKey.BlinkRight))
                         TryAddKey(ExpressionKey.BlinkRight, 1.0f);
                     else
                         TryAddCustom("EyeBlinkRight", 1.0f);
-                    TryAddCustom("MouthSmileRight", 0.22f);
+                    TryAddCustom("MouthSmileRight", 0.35f);
                     TryAddCustom("MouthSmileLeft", 0.15f);
-                    TryAddCustom("BrowOuterUpRight", 0.18f);
+                    TryAddCustom("BrowOuterUpRight", 0.25f);
                     break;
                 case "wink_left":
                     if (HasSupportedExpression(ExpressionKey.BlinkLeft))
                         TryAddKey(ExpressionKey.BlinkLeft, 1.0f);
                     else
                         TryAddCustom("EyeBlinkLeft", 1.0f);
-                    TryAddCustom("MouthSmileLeft", 0.22f);
+                    TryAddCustom("MouthSmileLeft", 0.35f);
                     TryAddCustom("MouthSmileRight", 0.15f);
-                    TryAddCustom("BrowOuterUpLeft", 0.18f);
+                    TryAddCustom("BrowOuterUpLeft", 0.25f);
                     break;
                 case "teasing":
+                case "tongue_out":
+                case "tongue":
                     TryAddCustom("TongueOut", 1.0f);
                     TryAddCustom("JawOpen", 0.26f);
                     if (HasSupportedExpression(ExpressionKey.BlinkRight))
@@ -448,25 +455,13 @@ namespace NeuroAsist.Avatar
                     TryAddCustom("MouthSmileLeft", 0.15f);
                     TryAddCustom("BrowOuterUpRight", 0.20f);
                     break;
-                case "tongue_out":
-                case "tongue":
-                    TryAddCustom("TongueOut", 1.0f);
-                    TryAddCustom("JawOpen", 0.26f);
-                    TryAddCustom("EyeWideLeft", 0.15f);
-                    TryAddCustom("EyeWideRight", 0.15f);
-                    TryAddCustom("MouthSmileRight", 0.20f);
-                    TryAddCustom("MouthSmileLeft", 0.15f);
-                    break;
                 case "playful":
-                    TryAddCustom("TongueOut", 0.60f);
-                    TryAddCustom("JawOpen", 0.20f);
-                    if (HasSupportedExpression(ExpressionKey.BlinkRight))
-                        TryAddKey(ExpressionKey.BlinkRight, 0.80f);
-                    else
-                        TryAddCustom("EyeBlinkRight", 0.80f);
-                    TryAddCustom("MouthSmileRight", 0.25f);
-                    TryAddCustom("MouthSmileLeft", 0.15f);
-                    TryAddCustom("BrowOuterUpRight", 0.20f);
+                    TryAddKey(ExpressionKey.Happy, 0.50f);
+                    TryAddCustom("MouthSmileRight", 0.50f);
+                    TryAddCustom("MouthSmileLeft", 0.25f);
+                    TryAddCustom("BrowOuterUpRight", 0.35f);
+                    TryAddCustom("EyeSquintLeft", 0.30f);
+                    TryAddCustom("EyeSquintRight", 0.15f);
                     break;
                 case "thinking":
                     TryAddCustom("BrowInnerUp", 0.50f);
@@ -506,6 +501,7 @@ namespace NeuroAsist.Avatar
                     break;
                 case "shocked":
                     TryAddKey(ExpressionKey.Surprised, 0.85f);
+                    TryAddCustom("Surprised", 0.85f);
                     TryAddCustom("surprised", 0.85f);
                     TryAddCustom("EyeWideLeft", 0.95f);
                     TryAddCustom("EyeWideRight", 0.95f);
@@ -513,6 +509,7 @@ namespace NeuroAsist.Avatar
                     break;
                 case "surprised":
                     TryAddKey(ExpressionKey.Surprised, 0.80f);
+                    TryAddCustom("Surprised", 0.80f);
                     TryAddCustom("surprised", 0.80f);
                     TryAddCustom("EyeWideLeft", 0.70f);
                     TryAddCustom("EyeWideRight", 0.70f);
@@ -534,13 +531,23 @@ namespace NeuroAsist.Avatar
                     TryAddCustom("BrowInnerUp", 0.65f);
                     TryAddCustom("EyeSquintLeft", 0.45f);
                     TryAddCustom("EyeSquintRight", 0.45f);
-                    TryAddCustom("CheekPuff", 0.30f);
+                    TryAddCustom("CheekPuff", 0.35f);
                     TryAddCustom("MouthSmileRight", 0.25f);
                     break;
                 case "sleepy":
-                    TryAddCustom("EyeSquintLeft", 0.75f);
-                    TryAddCustom("EyeSquintRight", 0.75f);
-                    TryAddCustom("MouthClose", 0.35f);
+                    if (HasSupportedExpression(ExpressionKey.Blink))
+                        TryAddKey(ExpressionKey.Blink, 0.60f);
+                    else
+                    {
+                        TryAddCustom("EyeBlinkLeft", 0.60f);
+                        TryAddCustom("EyeBlinkRight", 0.60f);
+                    }
+                    TryAddCustom("EyeSquintLeft", 0.45f);
+                    TryAddCustom("EyeSquintRight", 0.45f);
+                    TryAddCustom("BrowDownLeft", 0.25f);
+                    TryAddCustom("BrowDownRight", 0.25f);
+                    TryAddCustom("MouthClose", 0.30f);
+                    TryAddCustom("MouthRollLower", 0.20f);
                     break;
                 case "curious":
                     TryAddCustom("EyeWideLeft", 0.70f);
@@ -553,6 +560,41 @@ namespace NeuroAsist.Avatar
                     TryAddCustom("BrowDownLeft", 0.70f);
                     TryAddCustom("MouthFrownLeft", 0.35f);
                     TryAddCustom("EyeSquintLeft", 0.30f);
+                    break;
+                case "annoyed":
+                    TryAddKey(ExpressionKey.Angry, 0.40f);
+                    TryAddCustom("BrowDownLeft", 0.55f);
+                    TryAddCustom("BrowDownRight", 0.55f);
+                    TryAddCustom("EyeSquintLeft", 0.30f);
+                    TryAddCustom("EyeSquintRight", 0.30f);
+                    TryAddCustom("MouthFrownLeft", 0.35f);
+                    TryAddCustom("MouthFrownRight", 0.35f);
+                    TryAddCustom("MouthPressLeft", 0.30f);
+                    TryAddCustom("MouthPressRight", 0.30f);
+                    break;
+                case "relaxed":
+                    TryAddKey(ExpressionKey.Relaxed, 0.75f);
+                    TryAddCustom("EyeSquintLeft", 0.35f);
+                    TryAddCustom("EyeSquintRight", 0.35f);
+                    TryAddCustom("MouthSmileLeft", 0.30f);
+                    TryAddCustom("MouthSmileRight", 0.30f);
+                    TryAddCustom("BrowInnerUp", 0.15f);
+                    break;
+                case "happy":
+                    TryAddKey(ExpressionKey.Happy, 1.0f);
+                    TryAddCustom("MouthSmileLeft", 0.50f);
+                    TryAddCustom("MouthSmileRight", 0.50f);
+                    break;
+                case "sad":
+                    TryAddKey(ExpressionKey.Sad, 1.0f);
+                    TryAddCustom("MouthFrownLeft", 0.45f);
+                    TryAddCustom("MouthFrownRight", 0.45f);
+                    TryAddCustom("BrowInnerUp", 0.40f);
+                    break;
+                case "angry":
+                    TryAddKey(ExpressionKey.Angry, 1.0f);
+                    TryAddCustom("BrowDownLeft", 0.75f);
+                    TryAddCustom("BrowDownRight", 0.75f);
                     break;
                 default:
                     TryAddKey(primary, 1.0f);
@@ -677,7 +719,7 @@ namespace NeuroAsist.Avatar
         {
             switch ((value ?? "neutral").Trim().ToLowerInvariant().Replace("-", "_"))
             {
-                case "happy": case "excited": case "proud": case "touched":
+                case "happy": case "excited": case "proud": case "touched": case "playful":
                     return ExpressionKey.Happy;
                 case "sad": case "concerned":
                     return ExpressionKey.Sad;
@@ -695,7 +737,7 @@ namespace NeuroAsist.Avatar
                     return ExpressionKey.BlinkLeft;
                 case "pouting":
                     return ExpressionKey.CreateCustom("CheekPuff");
-                case "teasing": case "tongue_out": case "tongue": case "playful":
+                case "teasing": case "tongue_out": case "tongue":
                     return ExpressionKey.CreateCustom("TongueOut");
                 case "smirk":
                     return ExpressionKey.CreateCustom("MouthSmileRight");

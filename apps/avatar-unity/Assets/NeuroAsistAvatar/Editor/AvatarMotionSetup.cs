@@ -172,7 +172,23 @@ namespace NeuroAsist.AvatarEditor
                 || tag == GestureTag.Greeting_Right || tag == GestureTag.Greeting_Left
                 || tag == GestureTag.Greeting_Casual || tag == GestureTag.Farewell_Right
                 || tag == GestureTag.Farewell_Left || tag == GestureTag.Farewell_Casual ? 50 : 10;
-            value.HeadLookSuppression = tag == GestureTag.Thinking || tag == GestureTag.Thinking_Right || tag == GestureTag.Thinking_Left ? .3f : 0f;
+            value.HeadLookSuppression = tag == GestureTag.Thinking || tag == GestureTag.Thinking_Right || tag == GestureTag.Thinking_Left ? .3f
+                : (tag == GestureTag.Nod || tag == GestureTag.Agreement || tag == GestureTag.Disagreement ? .7f : 0f);
+            if (tag == GestureTag.Talk || tag == GestureTag.Talk_Right || tag == GestureTag.Talk_Left
+                || tag == GestureTag.Explanation || tag == GestureTag.Explanation_Right || tag == GestureTag.Explanation_Left
+                || tag == GestureTag.Greeting_Casual || tag == GestureTag.Farewell_Casual)
+            {
+                value.DeniedEmotions = new List<AvatarEmotion>
+                {
+                    AvatarEmotion.Pouting,
+                    AvatarEmotion.Wink,
+                    AvatarEmotion.Wink_Left,
+                    AvatarEmotion.Teasing,
+                    AvatarEmotion.Sleepy,
+                    AvatarEmotion.Thinking,
+                    AvatarEmotion.Shocked,
+                };
+            }
             AssetDatabase.CreateAsset(value, path);
             return value;
         }
@@ -233,16 +249,16 @@ namespace NeuroAsist.AvatarEditor
                 ["IdleSmallStretch"] = "X Bot@Idle",
                 ["TalkGesture01"] = "X Bot@Talking",
                 ["Greeting"] = "X Bot@Waving",
-                ["GreetingCasual"] = "X Bot@Talking",
+                ["GreetingCasual"] = "X Bot@Waving",
                 ["Agreement"] = "X Bot@Agreeing",
                 ["Disagreement"] = "X Bot@Shaking Head No",
                 ["Question"] = "X Bot@TalkingQuestion",
-                ["Explanation"] = "X Bot@Talking",
+                ["Explanation"] = "X Bot@TalkingQuestion",
                 ["Thinking"] = "X Bot@Thinking",
                 ["Surprise"] = "X Bot@Surprised",
                 ["Frustration"] = "X Bot@Angry",
                 ["Farewell"] = "X Bot@WavingGoodbye",
-                ["FarewellCasual"] = "X Bot@Talking",
+                ["FarewellCasual"] = "X Bot@WavingGoodbye",
                 ["Shrug"] = "X Bot@Shrugging",
                 ["Nod"] = "X Bot@Agreeing",
             };
@@ -382,7 +398,7 @@ namespace NeuroAsist.AvatarEditor
             // gesture. Keeping Body off prevents an overlay clip from lowering or
             // rotating the avatar while the base idle owns the stance.
             mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.Body, false);
-            mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.Head, false);
+            mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.Head, true);
             mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.LeftLeg, false);
             mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.RightLeg, false);
             mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.LeftArm, true);

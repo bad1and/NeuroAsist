@@ -118,5 +118,96 @@ namespace NeuroAsist.Avatar.Tests
             Assert.That(allowed, Is.SameAs(gesture));
             Object.DestroyImmediate(gesture);
         }
+
+        [Test] public void SelectReturnsNullWhenTagIsNone()
+        {
+            var gesture = ScriptableObject.CreateInstance<GestureDefinition>();
+            gesture.Id = "talk"; gesture.AnimatorState = "Talk"; gesture.Tag = GestureTag.Talk;
+            var picked = AvatarGestureController.Select(new List<GestureDefinition> { gesture }, GestureTag.None, AvatarEmotion.Neutral, true, -1, 0f, new Dictionary<string, float>(), new FixedRandom());
+            Assert.That(picked, Is.Null);
+            Object.DestroyImmediate(gesture);
+        }
+
+        [Test] public void SelectAutoGestureReturnsNullForFacialMicroEmotions()
+        {
+            var talk = ScriptableObject.CreateInstance<GestureDefinition>();
+            talk.Id = "talk"; talk.AnimatorState = "Talk"; talk.Tag = GestureTag.Talk;
+            var definitions = new List<GestureDefinition> { talk };
+
+            var microEmotions = new[] { AvatarEmotion.Pouting, AvatarEmotion.Wink, AvatarEmotion.Wink_Left, AvatarEmotion.Teasing, AvatarEmotion.Sleepy };
+            foreach (var emotion in microEmotions)
+            {
+                var picked = AvatarGestureController.Select(definitions, GestureTag.Auto, emotion, true, -1, 0f, new Dictionary<string, float>(), new FixedRandom());
+                Assert.That(picked, Is.Null, $"Auto gesture for facial emotion {emotion} must resolve to null");
+            }
+            Object.DestroyImmediate(talk);
+        }
+
+        [Test] public void SelectAutoGestureResolvesThinkingToThinkingGesture()
+        {
+            var talk = ScriptableObject.CreateInstance<GestureDefinition>();
+            talk.Id = "talk"; talk.AnimatorState = "Talk"; talk.Tag = GestureTag.Talk;
+            var thinking = ScriptableObject.CreateInstance<GestureDefinition>();
+            thinking.Id = "thinking"; thinking.AnimatorState = "Thinking"; thinking.Tag = GestureTag.Thinking;
+            var definitions = new List<GestureDefinition> { talk, thinking };
+
+            var picked = AvatarGestureController.Select(definitions, GestureTag.Auto, AvatarEmotion.Thinking, true, -1, 0f, new Dictionary<string, float>(), new FixedRandom());
+            Assert.That(picked, Is.SameAs(thinking));
+            Object.DestroyImmediate(talk);
+            Object.DestroyImmediate(thinking);
+        }
+
+        [Test] public void TalkGestureDeniedEmotionsBlocksSelection()
+        {
+            var talk = ScriptableObject.CreateInstance<GestureDefinition>();
+            talk.Id = "talk"; talk.AnimatorState = "Talk"; talk.Tag = GestureTag.Talk;
+            talk.DeniedEmotions.Add(AvatarEmotion.Pouting);
+            var definitions = new List<GestureDefinition> { talk };
+
+            var blocked = AvatarGestureController.Select(definitions, GestureTag.Talk, AvatarEmotion.Pouting, true, -1, 0f, new Dictionary<string, float>(), new FixedRandom());
+            Assert.That(blocked, Is.Null);
+            var allowed = AvatarGestureController.Select(definitions, GestureTag.Talk, AvatarEmotion.Neutral, true, -1, 0f, new Dictionary<string, float>(), new FixedRandom());
+            Assert.That(allowed, Is.SameAs(talk));
+            Object.DestroyImmediate(talk);
+        }
+
+        [Test] public void ExplicitHandGesturesAllowedUnderAllEmotions()
+        {
+            var right = ScriptableObject.CreateInstance<GestureDefinition>();
+            right.Id = "greeting_right"; right.AnimatorState = "Greeting"; right.Tag = GestureTag.Greeting_Right;
+            var left = ScriptableObject.CreateInstance<GestureDefinition>();
+            left.Id = "greeting_left"; left.AnimatorState = "GreetingMirror"; left.Tag = GestureTag.Greeting_Left;
+            var definitions = new List<GestureDefinition> { right, left };
+
+            foreach (AvatarEmotion emotion in System.Enum.GetValues(typeof(AvatarEmotion)))
+            {
+                var pickedRight = AvatarGestureController.Select(definitions, GestureTag.Greeting_Right, emotion, false, -1, 0f, new Dictionary<string, float>(), new FixedRandom(), true);
+                Assert.That(pickedRight, Is.SameAs(right), $"Greeting_Right must be allowed under emotion {emotion}");
+
+                var pickedLeft = AvatarGestureController.Select(definitions, GestureTag.Greeting_Left, emotion, false, -1, 0f, new Dictionary<string, float>(), new FixedRandom(), true);
+                Assert.That(pickedLeft, Is.SameAs(left), $"Greeting_Left must be allowed under emotion {emotion}");
+            }
+
+            Object.DestroyImmediate(right);
+            Object.DestroyImmediate(left);
+        }
+
+        [Test] public void ResolveAutoGestureProvidesDistinctGesturesAcrossEmotions()
+        {
+            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Angry), Is.EqualTo(GestureTag.Frustration));
+            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Sad), Is.EqualTo(GestureTag.Shrug));
+            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Surprised), Is.EqualTo(GestureTag.Surprise));
+            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Thinking), Is.EqualTo(GestureTag.Thinking));
+            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Proud), Is.EqualTo(GestureTag.Nod));
+            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Skeptical), Is.EqualTo(GestureTag.Disagreement));
+            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Curious), Is.EqualTo(GestureTag.Thinking));
+            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Confused), Is.EqualTo(GestureTag.Shrug));
+            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Excited), Is.EqualTo(GestureTag.Greeting_Right));
+            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Neutral), Is.EqualTo(GestureTag.None));
+            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Pouting), Is.EqualTo(GestureTag.None));
+            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Wink), Is.EqualTo(GestureTag.None));
+            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Teasing), Is.EqualTo(GestureTag.None));
+            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Sleepy), Is.EqualTo(GestureTag.None));
+        }
     }
 }

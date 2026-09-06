@@ -68,3 +68,49 @@ def test_stop_returns_to_neutral_with_transition_parameters() -> None:
     assert stopped.gesture is Gesture.AUTO
     assert stopped.speaking is False
     assert stopped.release_ms > 0
+
+
+def test_auto_gesture_resolves_cleanly_for_novel_and_micro_emotions() -> None:
+    engine = EmotionEngine.from_path(ROOT / "apps/protocol/avatar-emotion-mapping.json")
+
+    pouting = engine.apply_metadata(emotion=Emotion.POUTING, gesture=Gesture.AUTO, intensity=.8, utterance_id="1")
+    assert pouting.gesture is Gesture.NONE
+
+    wink = engine.apply_metadata(emotion=Emotion.WINK, gesture=Gesture.AUTO, intensity=.8, utterance_id="2", force=True)
+    assert wink.gesture is Gesture.NONE
+
+    teasing = engine.apply_metadata(emotion=Emotion.TEASING, gesture=Gesture.AUTO, intensity=.8, utterance_id="3", force=True)
+    assert teasing.gesture is Gesture.NONE
+
+    sleepy = engine.apply_metadata(emotion=Emotion.SLEEPY, gesture=Gesture.AUTO, intensity=.6, utterance_id="4", force=True)
+    assert sleepy.gesture is Gesture.NONE
+
+    thinking = engine.apply_metadata(emotion=Emotion.THINKING, gesture=Gesture.AUTO, intensity=.7, utterance_id="5", force=True)
+    assert thinking.gesture is Gesture.THINKING_RIGHT
+
+    confused = engine.apply_metadata(emotion=Emotion.CONFUSED, gesture=Gesture.AUTO, intensity=.7, utterance_id="6", force=True)
+    assert confused.gesture is Gesture.SHRUG
+
+    proud = engine.apply_metadata(emotion=Emotion.PROUD, gesture=Gesture.AUTO, intensity=.8, utterance_id="7", force=True)
+    assert proud.gesture is Gesture.NOD
+
+
+def test_explicit_hand_gestures_apply_under_any_emotion() -> None:
+    engine = EmotionEngine.from_path(ROOT / "apps/protocol/avatar-emotion-mapping.json")
+
+    # In pouting emotion, explicit greeting_right must succeed
+    engine.apply_metadata(emotion=Emotion.POUTING, gesture=Gesture.AUTO, intensity=.8, utterance_id="1")
+    right = engine.apply_gesture(Gesture.GREETING_RIGHT, interrupt=True)
+    assert right.gesture is Gesture.GREETING_RIGHT
+
+    # In thinking emotion, explicit greeting_left must succeed
+    engine.apply_metadata(emotion=Emotion.THINKING, gesture=Gesture.AUTO, intensity=.7, utterance_id="2", force=True)
+    left = engine.apply_gesture(Gesture.GREETING_LEFT, interrupt=True)
+    assert left.gesture is Gesture.GREETING_LEFT
+
+    # Explicit metadata gesture must not be overridden to none
+    explicit_meta = engine.apply_metadata(
+        emotion=Emotion.POUTING, gesture=Gesture.GREETING_RIGHT, intensity=.8, utterance_id="3", force=True
+    )
+    assert explicit_meta.gesture is Gesture.GREETING_RIGHT
+

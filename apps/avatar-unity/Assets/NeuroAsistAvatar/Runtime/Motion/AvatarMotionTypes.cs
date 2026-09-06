@@ -151,6 +151,57 @@ namespace NeuroAsist.Avatar
                    tag == GestureTag.Explanation_Right ||
                    tag == GestureTag.Talk_Right;
         }
+
+        public static bool IsFacialMicroEmotion(AvatarEmotion emotion)
+        {
+            return emotion == AvatarEmotion.Pouting
+                || emotion == AvatarEmotion.Wink
+                || emotion == AvatarEmotion.Wink_Left
+                || emotion == AvatarEmotion.Teasing
+                || emotion == AvatarEmotion.Sleepy;
+        }
+
+        public static GestureTag ResolveAutoGesture(AvatarEmotion emotion)
+        {
+            switch (emotion)
+            {
+                case AvatarEmotion.Neutral:
+                case AvatarEmotion.Relaxed:
+                case AvatarEmotion.Sleepy:
+                case AvatarEmotion.Pouting:
+                case AvatarEmotion.Wink:
+                case AvatarEmotion.Wink_Left:
+                case AvatarEmotion.Teasing:
+                    return GestureTag.None;
+                case AvatarEmotion.Happy:
+                case AvatarEmotion.Playful:
+                    return GestureTag.Greeting_Casual;
+                case AvatarEmotion.Excited:
+                    return GestureTag.Greeting_Right;
+                case AvatarEmotion.Proud:
+                case AvatarEmotion.Touched:
+                    return GestureTag.Nod;
+                case AvatarEmotion.Thinking:
+                case AvatarEmotion.Curious:
+                case AvatarEmotion.Concerned:
+                    return GestureTag.Thinking;
+                case AvatarEmotion.Skeptical:
+                    return GestureTag.Disagreement;
+                case AvatarEmotion.Surprised:
+                case AvatarEmotion.Shocked:
+                    return GestureTag.Surprise;
+                case AvatarEmotion.Sad:
+                case AvatarEmotion.Confused:
+                case AvatarEmotion.Embarrassed:
+                case AvatarEmotion.Smirk:
+                    return GestureTag.Shrug;
+                case AvatarEmotion.Angry:
+                case AvatarEmotion.Annoyed:
+                    return GestureTag.Frustration;
+                default:
+                    return GestureTag.None;
+            }
+        }
     }
 
     public interface IMotionRandom

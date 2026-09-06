@@ -249,9 +249,23 @@ namespace NeuroAsist.Avatar.Tests
             controller.SetEmotion("sleepy", 1f);
             Assert.That(controller.GetTargetWeight("sleepy"), Is.EqualTo(0.55f));
 
+            controller.SetEmotion("annoyed", 1f);
+            Assert.That(controller.GetTargetWeight("annoyed"), Is.EqualTo(0.60f));
+
+            controller.SetEmotion("relaxed", 1f);
+            Assert.That(controller.GetTargetWeight("relaxed"), Is.EqualTo(0.60f));
+
+            controller.SetEmotion("playful", 1f);
+            Assert.That(controller.GetTargetWeight("playful"), Is.EqualTo(0.75f));
+
+            controller.SetEmotion("teasing", 1f);
+            Assert.That(controller.GetTargetWeight("teasing"), Is.EqualTo(0.80f));
+
             Assert.That(AvatarEmotionController.IsTransient("shocked"), Is.True);
             Assert.That(AvatarEmotionController.IsTransient("wink"), Is.True);
+            Assert.That(AvatarEmotionController.IsTransient("teasing"), Is.True);
             Assert.That(AvatarEmotionController.IsTransient("pouting"), Is.False);
+            Assert.That(AvatarEmotionController.IsTransient("playful"), Is.False);
 
             Object.DestroyImmediate(go);
         }

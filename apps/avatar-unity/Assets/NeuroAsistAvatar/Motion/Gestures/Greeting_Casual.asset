@@ -27,5 +27,12 @@ MonoBehaviour:
   CanInterrupt: 1
   Priority: 50
   HeadLookSuppression: 0
-  AllowedEmotions: 
-  DeniedEmotions: 
+  AllowedEmotions: []
+  DeniedEmotions:
+  - 12
+  - 13
+  - 14
+  - 21
+  - 17
+  - 6
+  - 19

@@ -472,12 +472,17 @@ function MainApp() {
   }, []);
 
   const handleToggleQaStudio = useCallback(async (open: boolean) => {
-    if (open) {
-      await openQaStudioWindow();
-      setQaStudioOpen(true);
-    } else {
-      await closeQaStudioWindow();
-      setQaStudioOpen(false);
+    setQaStudioOpen(open);
+    try {
+      if (open) {
+        await openQaStudioWindow();
+      } else {
+        await closeQaStudioWindow();
+      }
+    } catch (err) {
+      console.error("Failed to toggle QA Studio window:", err);
+      const actualOpen = await isQaStudioWindowOpen();
+      setQaStudioOpen(actualOpen);
     }
   }, []);
   const [interfaceLocale, setInterfaceLocale] = useState<InterfaceLocale>(initialInterfaceLocale);
