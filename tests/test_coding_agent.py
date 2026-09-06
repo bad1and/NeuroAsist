@@ -22,6 +22,7 @@ from apps.backend.app.storage.timeline import TimelineHistoryAdapter, TimelineSt
 def coding_settings(tmp_path: Path, project: Path) -> Settings:
     return Settings(
         deepseek_api_key="test-key",
+        coding_api_key="test-coding-key",
         app_data_dir=str(tmp_path / "app-data"),
         sqlite_path=str(tmp_path / "timeline.sqlite3"),
         coding_workspace_root=str(tmp_path / "coding-workspaces"),
@@ -708,6 +709,7 @@ def test_coding_settings_and_task_api_contract(monkeypatch, tmp_path: Path) -> N
     (project / "module.py").write_text("x = 1\n", encoding="utf-8")
     settings = Settings(
         deepseek_api_key="test-key",
+        coding_api_key="test-coding-key",
         app_data_dir=str(tmp_path / "app-data"),
         sqlite_path=str(tmp_path / "timeline.sqlite3"),
         coding_workspace_root=str(tmp_path / "coding-workspaces"),

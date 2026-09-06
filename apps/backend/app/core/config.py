@@ -3,7 +3,29 @@ import os
 from pathlib import Path
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+
+
+_SECRET_SETTING_NAMES = frozenset({"deepseek_api_key", "coding_api_key"})
+_runtime_deepseek_api_key: str | None = None
+_runtime_coding_api_key: str | None = None
+
+
+class _SourceWithoutApiKeys(PydanticBaseSettingsSource):
+    """Keep ordinary deployment settings while rejecting external API secrets."""
+
+    def __init__(self, source: PydanticBaseSettingsSource) -> None:
+        super().__init__(source.settings_cls)
+        self._source = source
+
+    def get_field_value(self, field, field_name: str):
+        return self._source.get_field_value(field, field_name)
+
+    def __call__(self) -> dict[str, object]:
+        values = self._source()
+        for name in _SECRET_SETTING_NAMES:
+            values.pop(name, None)
+        return values
 
 ROOT_DIR = Path(__file__).resolve().parents[4]
 APP_VERSION = (ROOT_DIR / "VERSION").read_text(encoding="utf-8").strip()
@@ -17,8 +39,27 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        # API keys are accepted only as explicit in-memory constructor values.
+        # The desktop shell supplies those values over an anonymous stdin pipe;
+        # .env and the inherited process environment are intentionally ignored.
+        return (
+            init_settings,
+            _SourceWithoutApiKeys(env_settings),
+            _SourceWithoutApiKeys(dotenv_settings),
+            _SourceWithoutApiKeys(file_secret_settings),
+        )
+
     app_name: str = "Iris"
-    deepseek_api_key: str | None = Field(default=None, validation_alias="DEEPSEEK_API_KEY")
+    deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-flash"
     # Explicit output budgets for each LLM purpose. DeepSeek V4 supports very
@@ -31,7 +72,7 @@ class Settings(BaseSettings):
     llm_reflection_max_tokens: int = Field(default=300, ge=64, le=8_192)
     llm_adjudication_max_tokens: int = Field(default=350, ge=64, le=8_192)
     # Coding uses a separate profile and may opt into model reasoning. It still
-    # needs a finite ceiling when the dedicated key falls back to the main key.
+    # needs a finite ceiling of its own.
     llm_coding_max_tokens: int = Field(default=8_192, ge=256, le=65_536)
     sqlite_path: str = "data/neuroasist.sqlite3"
     app_data_dir: str | None = Field(default=None, validation_alias="NEUROASIST_APP_DATA_DIR")
@@ -166,7 +207,7 @@ class Settings(BaseSettings):
     # Feature availability can be disabled by an administrator; individual
     # desktop users still start with the agent switched off in RuntimeSettings.
     coding_agent_enabled: bool = True
-    coding_api_key: str | None = Field(default=None, validation_alias="CODING_API_KEY")
+    coding_api_key: str | None = None
     coding_base_url: str | None = None
     # A stable image name lets every project release use the same local coding
     # runtime. Operators may still override it when they maintain their own.
@@ -211,8 +252,8 @@ class Settings(BaseSettings):
 
     @property
     def coding_llm_api_key(self) -> str | None:
-        """Dedicated key when configured, otherwise the existing DeepSeek key."""
-        return self.coding_api_key or self.llm_api_key
+        """Dedicated key for the isolated Coding Agent."""
+        return self.coding_api_key
 
     @property
     def coding_llm_base_url(self) -> str:
@@ -350,4 +391,24 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    return Settings(
+        deepseek_api_key=_runtime_deepseek_api_key,
+        coding_api_key=_runtime_coding_api_key,
+    )
+
+
+def configure_runtime_credentials(
+    *,
+    deepseek_api_key: str | None,
+    coding_api_key: str | None,
+) -> None:
+    """Install desktop-provided credentials in memory before app creation."""
+    global _runtime_deepseek_api_key, _runtime_coding_api_key
+    _runtime_deepseek_api_key = _clean_secret(deepseek_api_key)
+    _runtime_coding_api_key = _clean_secret(coding_api_key)
+    get_settings.cache_clear()
+
+
+def _clean_secret(value: str | None) -> str | None:
+    cleaned = value.strip() if value else ""
+    return cleaned or None

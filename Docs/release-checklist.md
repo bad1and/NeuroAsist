@@ -23,6 +23,7 @@
 - [ ] Desktop core smoke подтверждает token auth и graceful shutdown.
 - [ ] Packaged core smoke проходит на собранном sidecar.
 - [ ] Privacy/static scan не находит ключи, `.env`, пользовательскую БД или diagnostic audio в artifact.
+- [ ] DeepSeek и Coding API вводятся только через настройки, хранятся раздельно в Windows Credential Manager и отсутствуют в environment ядра.
 - [ ] Dependency scan не находит удалённые TTS/STT-библиотеки или `torchvision` в Python-sidecar.
 - [ ] GitHub `CI` и `Documentation` прошли на release commit; ссылка на runs приложена.
 - [ ] `Synthetic lifecycle soak` приложил успешный одночасовой report с RSS threshold.

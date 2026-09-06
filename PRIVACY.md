@@ -22,7 +22,7 @@ Conversation generation, background memory consolidation, reflections and
 optional Coding Agent reasoning send prompts to the configured DeepSeek-
 compatible endpoint. Requests may contain the current user message, a bounded
 recent context, compact retrieved memories and system instructions required for
-the task. Coding Agent uses a separate purpose profile and can use a separate
+the task. Coding Agent uses a separate purpose profile and requires a separate
 API key.
 
 Review the endpoint provider's privacy and retention policy before use. Iris
@@ -34,9 +34,10 @@ Installed desktop data is stored under `%LOCALAPPDATA%\NeuroAsist` by default.
 See [operations](Docs/operations.md) for the layout. Browser development may
 use repository-relative `data/` and `logs/` paths.
 
-Windows Credential Manager stores the desktop API key. `.env` is supported for
-development and must never be committed. Runtime settings and backup ZIP files
-exclude API keys.
+Windows Credential Manager stores the DeepSeek and Coding API keys as separate
+entries. The desktop shell passes them to the local core through an anonymous
+stdin pipe; inherited environment variables and `.env` are not accepted as API
+key sources. Runtime settings and backup ZIP files exclude API keys.
 
 ## Diagnostics
 

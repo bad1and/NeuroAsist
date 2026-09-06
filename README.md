@@ -103,13 +103,12 @@ Keep `VOICE_STT_DEVICE=cpu` when CUDA is unavailable. These prerequisites apply 
 Copy-Item .env.example .env
 ```
 
-For browser/backend development, set at least:
-
-```env
-DEEPSEEK_API_KEY=your_deepseek_api_key
-```
-
-The Tauri first-run screen can store that key in Windows Credential Manager instead. Secrets are not written to runtime settings, backups, or Git. All supported static options and safe defaults are documented inline in [.env.example](.env.example).
+Start the Tauri application and enter the DeepSeek and Coding API keys under
+**Settings → System → API keys**. They are stored as separate entries in Windows
+Credential Manager and delivered to the local core over an anonymous pipe.
+Secrets in `.env` or inherited environment variables are intentionally ignored
+and are never written to runtime settings, backups, or Git. All non-secret static
+options and safe defaults are documented inline in [.env.example](.env.example).
 
 ### 3. Start the desktop application
 
@@ -132,6 +131,8 @@ npm --prefix apps/web run dev
 ```
 
 Open `http://127.0.0.1:5173`. API documentation is at `http://127.0.0.1:8000/docs`.
+This mode is intended for UI and local-core work and does not receive credentials;
+use the Tauri development launch for real model requests.
 
 ## Optional setup
 
@@ -141,7 +142,10 @@ Open `http://127.0.0.1:5173`. API documentation is at `http://127.0.0.1:8000/doc
 docker build -t neuroasist-coding:latest -f apps/backend/docker/coding.Dockerfile apps/backend/docker
 ```
 
-Start Docker Desktop, configure `CODING_API_KEY` if a separate key is desired, then enable the agent in its application section. Read the [Coding Agent safety model](Docs/coding-agent.md) before allowing project context.
+Start Docker Desktop, save a dedicated Coding API key in application settings,
+then enable the agent in its application section. The Coding Agent never falls
+back to the conversation key. Read the [Coding Agent safety model](Docs/coding-agent.md)
+before allowing project context.
 
 ### Unity avatar
 

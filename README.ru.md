@@ -103,13 +103,12 @@ python -m pip install -r requirements/torch-cu128.txt
 Copy-Item .env.example .env
 ```
 
-Для запуска backend в development-режиме укажите минимум:
-
-```env
-DEEPSEEK_API_KEY=your_deepseek_api_key
-```
-
-При первом запуске Tauri ключ можно сохранить через интерфейс в Windows Credential Manager. Секреты не записываются в runtime settings, backups или Git. Все поддерживаемые статические параметры и безопасные значения по умолчанию описаны в [.env.example](.env.example).
+Запустите Tauri-приложение и введите ключи DeepSeek и Coding API в разделе
+**Настройки → Система → API-ключи**. Они хранятся отдельными записями в Windows
+Credential Manager и передаются локальному ядру через анонимный канал. Секреты
+из `.env` и унаследованных переменных окружения намеренно игнорируются и не
+попадают в runtime settings, резервные копии или Git. Все несекретные статические
+параметры описаны в [.env.example](.env.example).
 
 ### 3. Запуск desktop-приложения
 
@@ -132,6 +131,8 @@ npm --prefix apps/web run dev
 ```
 
 Интерфейс откроется на `http://127.0.0.1:5173`, OpenAPI — на `http://127.0.0.1:8000/docs`.
+Этот режим предназначен для разработки UI и локального ядра и не получает
+API-ключи; для реальных запросов к моделям запускайте development через Tauri.
 
 ## Опциональные компоненты
 
@@ -141,7 +142,10 @@ npm --prefix apps/web run dev
 docker build -t neuroasist-coding:latest -f apps/backend/docker/coding.Dockerfile apps/backend/docker
 ```
 
-Запустите Docker Desktop, при необходимости задайте отдельный `CODING_API_KEY`, затем включите агента в соответствующем разделе приложения. Перед передачей файлов проекта прочитайте [модель безопасности Coding Agent](Docs/coding-agent.md).
+Запустите Docker Desktop, сохраните отдельный Coding API-ключ в настройках
+приложения, затем включите агента в соответствующем разделе. Coding Agent не
+использует ключ диалоговой модели как запасной. Перед передачей файлов проекта
+прочитайте [модель безопасности Coding Agent](Docs/coding-agent.md).
 
 ### Unity-аватар
 

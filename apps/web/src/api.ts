@@ -45,6 +45,18 @@ export function saveDesktopApiKey(apiKey: string): Promise<unknown> {
   return invokeDesktop("save_api_key", { apiKey });
 }
 
+export function saveDesktopCodingApiKey(apiKey: string): Promise<unknown> {
+  return invokeDesktop("save_coding_api_key", { apiKey });
+}
+
+export function removeDesktopApiKey(): Promise<unknown> {
+  return invokeDesktop("remove_api_key");
+}
+
+export function removeDesktopCodingApiKey(): Promise<unknown> {
+  return invokeDesktop("remove_coding_api_key");
+}
+
 export const WS_EVENTS_URL =
   DESKTOP_RUNTIME?.wsEventsUrl
   ?? import.meta.env.VITE_WS_EVENTS_URL
