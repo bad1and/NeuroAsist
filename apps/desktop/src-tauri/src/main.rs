@@ -910,7 +910,7 @@ fn remove_api_key(app: AppHandle) -> Result<DesktopRuntime, String> {
 }
 
 #[tauri::command]
-fn open_qa_studio(app: AppHandle) -> Result<(), String> {
+async fn open_qa_studio(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("qa_studio") {
         let _ = window.show();
         let _ = window.unminimize();
@@ -936,7 +936,7 @@ fn open_qa_studio(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn close_qa_studio(app: AppHandle) -> Result<(), String> {
+async fn close_qa_studio(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("qa_studio") {
         let _ = window.close();
     }
@@ -945,7 +945,7 @@ fn close_qa_studio(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn is_qa_studio_open(app: AppHandle) -> bool {
+async fn is_qa_studio_open(app: AppHandle) -> bool {
     app.get_webview_window("qa_studio").is_some()
 }
 

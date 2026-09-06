@@ -7082,7 +7082,7 @@ body {
 .menu-toggle.icon-button,
 .sidebar-close.icon-button {
   corner-shape: squircle;
-  border-radius: var(--radius-control, 20px);
+  border-radius: var(--radius-control, 22px);
   clip-path: url(#apple-squircle-square);
 }
 
@@ -7090,7 +7090,7 @@ body {
 .history-card-delete,
 .memory-toolbar .icon-button {
   corner-shape: squircle;
-  border-radius: 15px !important;
+  border-radius: 16px !important;
   clip-path: url(#apple-squircle-square);
 }
 
@@ -7098,14 +7098,14 @@ body {
 .history-card-icon,
 .notification-icon-box {
   corner-shape: squircle;
-  border-radius: 18px !important;
+  border-radius: 20px !important;
   clip-path: url(#apple-squircle-square);
 }
 
 /* 2. Window Chrome Controls (Mini-squircles for 36x32px buttons) */
 .window-controls button {
   corner-shape: squircle;
-  border-radius: 15px !important;
+  border-radius: 16px !important;
 }
 
 /* 3. Action Buttons & Navigation Elements (44px standard height) */
@@ -7122,7 +7122,7 @@ body {
 .journal-back-button,
 .coding-back-button {
   corner-shape: squircle;
-  border-radius: var(--radius-control, 22px) !important;
+  border-radius: var(--radius-control, 24px) !important;
 }
 
 /* 4. Interface Plates, Cards & Floating Surfaces */
@@ -7145,19 +7145,38 @@ body {
 .dialog-card,
 .settings-panel {
   corner-shape: squircle;
-  border-radius: var(--radius-card, 34px) !important;
+  border-radius: var(--radius-card, 36px) !important;
 }
 
-/* Large / Hero Plates & Floating Dialogs */
+/* Large Major Panels, Hero Blocks & Floating Dialogs */
+.overview-grid,
 .overview-hero,
-.state-hero-card {
+.state-hero-card,
+.settings-panel > .settings-content,
+.memory-panel > .memory-content,
+.coding-panel > .coding-content {
   corner-shape: squircle;
-  border-radius: var(--radius-lg, 42px) !important;
+  border-radius: var(--radius-lg, 44px) !important;
 }
 
 .app-dialog {
   corner-shape: squircle;
-  border-radius: var(--radius-dialog, 46px) !important;
+  border-radius: var(--radius-dialog, 48px) !important;
+}
+
+/* Navigation Panels & Medium Plates */
+.settings-panel > .settings-navigation,
+.memory-panel > .memory-navigation,
+.coding-panel > .coding-navigation {
+  corner-shape: squircle;
+  border-radius: var(--radius-md, 28px) !important;
+}
+
+/* Search Bars & Toolbars */
+.search-form,
+.memory-toolbar .search-form {
+  corner-shape: squircle;
+  border-radius: var(--radius-control, 24px) !important;
 }
 
 /* Sub-plates, Embedded Forms & List Rows (Concentric nesting: R_inner = R_outer - Padding) */
@@ -7166,36 +7185,37 @@ body {
 .avatar-technical,
 .avatar-test-disclosure {
   corner-shape: squircle;
-  border-radius: 22px !important;
+  border-radius: 24px !important;
 }
 
 .memory-create-form {
   corner-shape: squircle;
-  border-radius: 24px !important;
+  border-radius: 26px !important;
 }
 
 .coding-result-box,
 .coding-diff {
   corner-shape: squircle;
-  border-radius: 26px !important;
+  border-radius: 28px !important;
 }
 
 .info-row,
 .notice,
 .error-banner {
   corner-shape: squircle;
-  border-radius: 22px !important;
+  border-radius: 24px !important;
 }
 
-.search-results .message {
+.search-results .message,
+.journal-content .message {
   corner-shape: squircle;
-  border-radius: 18px !important;
+  border-radius: 22px !important;
 }
 
 .avatar-technical summary,
 .avatar-test-disclosure summary {
   corner-shape: squircle;
-  border-radius: 16px !important;
+  border-radius: 18px !important;
 }
 
 /* 5. Inputs, Textareas, and Dropdown Plates */
@@ -7203,48 +7223,48 @@ input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
 select,
 .custom-select-trigger {
   corner-shape: squircle;
-  border-radius: var(--radius-control, 20px) !important;
+  border-radius: var(--radius-control, 22px) !important;
 }
 
 textarea {
   corner-shape: squircle;
-  border-radius: 24px !important;
+  border-radius: 26px !important;
 }
 
 .custom-select-dropdown {
   corner-shape: squircle;
-  border-radius: 24px !important;
+  border-radius: 26px !important;
 }
 
 .custom-select-option {
   corner-shape: squircle;
-  border-radius: 13px !important;
+  border-radius: 14px !important;
 }
 
 /* 6. Elongated Squircles for Pills, Badges & Filter Controls (Intelligent sizing) */
 .filters button,
 .coding-filter-pill {
   corner-shape: squircle;
-  border-radius: 18px !important;
+  border-radius: 20px !important;
 }
 
 .timeline-filter-pills {
   corner-shape: squircle;
-  border-radius: 16px !important;
+  border-radius: 18px !important;
 }
 
 .timeline-filter-pill {
   corner-shape: squircle;
-  border-radius: 13px !important;
+  border-radius: 14px !important;
 }
 
 .status-pill,
 .settings-save-status {
   corner-shape: squircle;
-  border-radius: 15px !important;
+  border-radius: 16px !important;
 }
 
-/* Micro badges (~18-22px height: 10px gives max squircle roundness) */
+/* Micro badges (~18-22px height: 11px gives maximum squircle roundness) */
 .dev-badge,
 .journal-badge,
 .memory-status,
@@ -7252,7 +7272,7 @@ textarea {
 .notification-stack-badge,
 .journal-content .message.system {
   corner-shape: squircle;
-  border-radius: 10px !important;
+  border-radius: 11px !important;
 }
 
 /* 7. Terminal & Code Containers */
@@ -7262,7 +7282,7 @@ pre,
 .coding-result-box pre,
 .notification-details {
   corner-shape: squircle;
-  border-radius: var(--radius-control, 22px) !important;
+  border-radius: var(--radius-control, 24px) !important;
 }
 
 /* 8. Circular Send Button */

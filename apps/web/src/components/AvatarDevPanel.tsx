@@ -22,7 +22,8 @@ import {
   stopAvatar,
   getAvatarStatus,
 } from "../api";
-import { closeQaStudioWindow } from "../desktop";
+import { closeQaStudioWindow, isDesktopApp } from "../desktop";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { AvatarStatusResponse } from "../types";
 
 export interface AvatarDevPanelProps {
@@ -120,30 +121,44 @@ const PRESETS: TestPreset[] = [
   {
     title: "Тест обеих рук (поочередно)",
     description: "Проверяет поднятие сначала правой, а затем левой руки без застревания.",
-    text: "Ну смотри, давай проверим руки! Вот я поднимаю правую руку, а теперь поднимаю левую руку!",
+    text: "Ну смотри, давай проверим руки! [[avatar gesture=greeting_right]] Вот я поднимаю правую руку. [[avatar gesture=greeting_left]] А теперь поднимаю левую руку!",
     emotion: "happy",
     gesture: "greeting_right",
   },
   {
     title: "Тест мимики (винки, язык, щёчки)",
     description: "Проверяет быструю смену морфов: правый глаз, левый глаз, язык и надутые щёчки.",
-    text: "Вот подмигиваю тебе правым глазом, а теперь левым. Могу язык показать, а теперь надула щёчки!",
+    text: "Вот подмигиваю тебе правым глазом. [[avatar emotion=wink_left gesture=none]] А теперь левым. [[avatar emotion=teasing gesture=none]] Могу язык показать! [[avatar emotion=pouting gesture=none]] А теперь надула щёчки!",
     emotion: "wink",
-    gesture: "auto",
+    gesture: "none",
   },
   {
     title: "Каскад всего арсенала (мульти-сегмент)",
     description: "Комплексный стресс-тест всех сегментов диалога и жестов подряд.",
-    text: "Ну смотри, покажу весь арсенал! Удивилась, теперь задумалась, пожимаю плечами и улыбаюсь тебе!",
+    text: "Ну смотри, покажу весь арсенал! [[avatar emotion=surprised gesture=surprise]] Удивилась, [[avatar emotion=thinking gesture=thinking_right]] теперь задумалась, [[avatar emotion=smirk gesture=shrug]] пожимаю плечами [[avatar emotion=happy gesture=greeting_casual]] и улыбаюсь тебе!",
     emotion: "excited",
     gesture: "greeting_casual",
   },
   {
-    title: "Кивок и разъяснение",
-    description: "Проверяет речевые акценты, кивок и объяснение.",
-    text: "Да, абсолютно с тобой согласна! Сейчас я тебе всё подробно и аккуратно объясню.",
+    title: "Согласие и кивок",
+    description: "Проверяет естественный кивок головы и одобрение без лишних движений руками.",
+    text: "Да, абсолютно с тобой согласна! [[avatar emotion=proud gesture=nod]] Именно так всё и устроено.",
     emotion: "proud",
     gesture: "nod",
+  },
+  {
+    title: "Сомнение и несогласие",
+    description: "Проверяет покачивание головой и скептическое выражение лица.",
+    text: "Хм, я очень сильно в этом сомневаюсь. [[avatar emotion=skeptical gesture=disagreement]] Нет, так точно не пойдёт!",
+    emotion: "skeptical",
+    gesture: "disagreement",
+  },
+  {
+    title: "Эмоциональный спектр (злость, удивление, растерянность)",
+    description: "Проверяет выразительные движения: фрустрацию, всплеск удивления и озадаченный шраг.",
+    text: "[[avatar emotion=angry gesture=frustration]] Ну сколько можно! [[avatar emotion=surprised gesture=surprise]] Ого, ты правда это сделал? [[avatar emotion=confused gesture=shrug]] Я просто поражена!",
+    emotion: "angry",
+    gesture: "frustration",
   },
 ];
 
@@ -605,7 +620,7 @@ export function AvatarDevStudioStandalonePage() {
       channel.postMessage({ action: "state", open: true });
       channel.onmessage = (event: MessageEvent) => {
         if (event.data?.action === "close") {
-          window.close();
+          void handleCloseWindow();
         }
       };
     } catch {
@@ -628,7 +643,6 @@ export function AvatarDevStudioStandalonePage() {
       window.clearInterval(interval);
       window.removeEventListener("beforeunload", handleBeforeUnload);
       try {
-        channel?.postMessage({ action: "closed" });
         channel?.close();
       } catch {
         // Ignore
@@ -645,6 +659,14 @@ export function AvatarDevStudioStandalonePage() {
       // Ignore
     }
     await closeQaStudioWindow();
+    if (isDesktopApp()) {
+      try {
+        await getCurrentWindow().close();
+        return;
+      } catch {
+        // Fall back to window.close
+      }
+    }
     window.close();
   };
 

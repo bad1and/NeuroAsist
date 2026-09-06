@@ -12,6 +12,7 @@ namespace NeuroAsist.Avatar
         [Range(0.01f, 1f)] [SerializeField] private float blendSeconds = .35f;
         private readonly Dictionary<string, float> lastPlayed = new Dictionary<string, float>();
         private Coroutine activeRoutine;
+        private Coroutine fadeRoutine;
         private GestureDefinition active;
         private int generation;
         private int layer = -1;
@@ -31,7 +32,7 @@ namespace NeuroAsist.Avatar
         private void CacheLayer() { layer = animator == null ? -1 : animator.GetLayerIndex(AvatarMotionNames.GestureLayer); }
         public bool Trigger(GestureTag tag, AvatarEmotion emotion, bool speaking, float intensity, bool interrupt, ICollection<string> recentVariants = null)
         {
-            if (settings == null || !settings.MotionEnabled) return false;
+            if (settings == null || !settings.MotionEnabled || tag == GestureTag.None) return false;
             var isExplicit = tag != GestureTag.Auto && tag != GestureTag.None;
             var ignoreCooldown = interrupt || isExplicit;
             var currentPriority = (active == null || (isExplicit && interrupt)) ? -1 : active.Priority;
@@ -55,31 +56,37 @@ namespace NeuroAsist.Avatar
         {
             generation++;
             if (activeRoutine != null) { StopCoroutine(activeRoutine); activeRoutine = null; }
+            if (fadeRoutine != null) { StopCoroutine(fadeRoutine); fadeRoutine = null; }
             var old = active; active = null; activeVariantId = null;
-            if (immediate) SetWeight(0f); else StartCoroutine(FadeTo(0f, generation, old != null ? old.BlendOutSeconds : blendSeconds));
+            if (immediate) SetWeight(0f); else fadeRoutine = StartCoroutine(FadeTo(0f, generation, old != null ? old.BlendOutSeconds : blendSeconds));
             SetHeadLookSuppression?.Invoke(0f);
             if (old != null) Finished?.Invoke(old);
         }
         private IEnumerator Run(GestureDefinition definition, string animatorState, float intensity, int token)
         {
             var statePath = AvatarMotionNames.StatePath(AvatarMotionNames.GestureLayer, animatorState);
-            if (animator == null || layer < 0 || !animator.HasState(layer, Animator.StringToHash(statePath)))
+            var hasPath = animator != null && layer >= 0 && animator.HasState(layer, Animator.StringToHash(statePath));
+            var hasShort = animator != null && layer >= 0 && animator.HasState(layer, Animator.StringToHash(animatorState));
+            if (animator == null || layer < 0 || (!hasPath && !hasShort))
             {
                 if (token == generation) { active = null; Failed?.Invoke(definition, "Animator gesture state is missing"); }
                 yield break;
             }
-            animator.CrossFadeInFixedTime(statePath, definition.BlendInSeconds, layer, 0f);
+            animator.CrossFadeInFixedTime(hasPath ? statePath : animatorState, definition.BlendInSeconds, layer, 0f);
             lastPlayed[definition.Id] = Time.unscaledTime;
             SetHeadLookSuppression?.Invoke(definition.HeadLookSuppression);
             Started?.Invoke(definition);
-            yield return FadeTo(Mathf.Clamp01(definition.Weight * intensity), token, definition.BlendInSeconds);
+            if (fadeRoutine != null) { StopCoroutine(fadeRoutine); fadeRoutine = null; }
+            fadeRoutine = StartCoroutine(FadeTo(Mathf.Clamp01(definition.Weight * intensity), token, definition.BlendInSeconds));
+            yield return fadeRoutine;
             yield return new WaitForSeconds(Mathf.Max(.05f, definition.DurationSeconds / definition.Speed));
             if (token != generation) yield break;
-            yield return FadeTo(0f, token, definition.BlendOutSeconds);
+            fadeRoutine = StartCoroutine(FadeTo(0f, token, definition.BlendOutSeconds));
+            yield return fadeRoutine;
             if (token != generation) yield break;
             animator.CrossFadeInFixedTime(AvatarMotionNames.StatePath(AvatarMotionNames.GestureLayer, AvatarMotionNames.EmptyGestureState), definition.BlendOutSeconds, layer, 0f);
             SetHeadLookSuppression?.Invoke(0f);
-            active = null; activeVariantId = null; activeRoutine = null;
+            active = null; activeVariantId = null; activeRoutine = null; fadeRoutine = null;
             Finished?.Invoke(definition);
         }
         private IEnumerator FadeTo(float target, int token, float seconds)
@@ -104,20 +111,22 @@ namespace NeuroAsist.Avatar
         public static GestureDefinition Select(IList<GestureDefinition> values, GestureTag tag, AvatarEmotion emotion, bool speaking,
             int currentPriority, float now, IDictionary<string, float> played, IMotionRandom random, bool ignoreCooldown = false)
         {
-            if (values == null) return null;
-            var baseTag = AvatarMotionNames.BaseGesture(tag);
+            if (values == null || tag == GestureTag.None) return null;
+            var effectiveTag = tag == GestureTag.Auto ? AvatarMotionNames.ResolveAutoGesture(emotion) : tag;
+            if (effectiveTag == GestureTag.None) return null;
+            var baseTag = AvatarMotionNames.BaseGesture(effectiveTag);
             var choices = new List<GestureDefinition>();
             for (var i = 0; i < values.Count; i++)
             {
                 var item = values[i];
                 if (item == null || string.IsNullOrWhiteSpace(item.AnimatorState) || !item.Allows(emotion, speaking)) continue;
-                if (tag != GestureTag.Auto && tag != item.Tag && baseTag != item.Tag) continue;
+                if (effectiveTag != item.Tag && baseTag != item.Tag) continue;
                 if (item.Priority < currentPriority) continue;
                 if (!ignoreCooldown && played.TryGetValue(item.Id, out var last) && now - last < item.CooldownSeconds) continue;
                 choices.Add(item);
             }
             if (choices.Count == 0) return null;
-            var exact = choices.FindAll(c => c.Tag == tag);
+            var exact = choices.FindAll(c => c.Tag == effectiveTag);
             if (exact.Count > 0) return exact[random.Range(0, exact.Count)];
             return choices[random.Range(0, choices.Count)];
         }

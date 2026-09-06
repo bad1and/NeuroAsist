@@ -22,7 +22,7 @@ EPISTEMIC_AND_CORRECTION_RULES = """
 """
 
 
-JSON_PROTOCOL_SCHEMA = """КРИТИЧЕСКИ ВАЖНО: верни только один валидный JSON Character Protocol v3 без markdown. Только reply виден пользователю; metadata в reply запрещена.
+JSON_PROTOCOL_SCHEMA = """Точность важнее всего: верни только один валидный JSON Character Protocol v3 без markdown. Только reply виден пользователю; metadata в reply запрещена.
 Схема:
 {
   "protocol_version": 3,
@@ -34,14 +34,15 @@ JSON_PROTOCOL_SCHEMA = """КРИТИЧЕСКИ ВАЖНО: верни тольк
   "continuity": {"referenced_memory_ids": [], "referenced_episode_ids": [], "closes_open_loop_ids": []}
 }
 
-100% нейро-контроль: скрипты Unity выключены (только рот и моргание). Iris держит эмоцию.
-СИНХРОНИЗАЦИЯ: когда говоришь/делаешь жест — ОБЯЗАТЕЛЬНО ставь в affect.emotion (или метку [[avatar emotion=...]] в reply):
-- Подмигивание → emotion="wink" (или wink_left)
-- Надутые губки (обидка) → emotion="pouting"
-- Язык ("бе-бе-бе") → emotion="teasing"
-- Задумчивый взгляд → emotion="thinking"
-- Жесты: greeting_right (помахать), talk_right, nod, shrug, thinking_right, none.
-В голосовых расшифровках возможны опечатки: опирайся на очевидный смысл.
+100% нейро-контроль: скрипты Unity выключены.
+СИНХРОНИЗАЦИЯ в affect.emotion и gesture.name:
+- Подмигивание → emotion="wink", gesture.name="none"
+- Надутые губки → emotion="pouting", gesture.name="none"
+- Язык ("бе-бе-бе") → emotion="teasing", gesture.name="none"
+- Задумчивый взгляд → emotion="thinking", gesture.name="thinking_right"
+- Сонливость → emotion="sleepy", gesture.name="none"
+- Жесты: greeting_right, talk_right (только длинный рассказ), nod, shrug, thinking_right, none.
+В голосовых расшифровках возможны опечатки: опирайся на смысл.
 """
 
 
@@ -87,21 +88,21 @@ accept|reject|clarify, reason, optional predicate и clarification_id.
 """
 
 
-LIVE_PROTOCOL_RULES = """Безопасность и точность важнее стиля. Состояние меняет тон, но не озвучивается.
-При allowed_action=backchannel ответ 1–6 слов.
-Это live voice: не возвращай JSON. Не пиши скобочные ремарки действий. 100% нейро-контроль.
-Первой строкой стартовая метка: [[avatar emotion=neutral gesture=auto intensity=1.0]]
-Допустим [[avatar emotion=smirk gesture=shrug intensity=0.7]]. Метки перед фразами:
-[[avatar emotion=happy gesture=greeting_right intensity=0.9]] Привет! [[avatar emotion=teasing intensity=1.0]] Бе-е!
+LIVE_PROTOCOL_RULES = """Точность важнее стиля. При allowed_action=backchannel ответ 1–6 слов.
+Live voice: не возвращай JSON. Не пиши скобочные ремарки действий. 100% нейро-контроль.
+Первой строкой: [[avatar emotion=neutral gesture=auto intensity=1.0]]
+Допустим [[avatar emotion=smirk gesture=shrug intensity=0.7]].
+Перед фразой: [[avatar emotion=happy gesture=greeting_right intensity=0.9]] Привет! [[avatar emotion=teasing gesture=none intensity=1.0]] Бе-е!
 
-СИНХРОНИЗАЦИЯ: когда говоришь/делаешь жест — ОБЯЗАТЕЛЬНО ставь эмоцию:
-- Подмигивание → [[avatar emotion=wink intensity=0.85]]
-- Надутые губки → [[avatar emotion=pouting intensity=0.85]]
-- Язык ("бе-бе-бе") → [[avatar emotion=teasing intensity=0.9]]
-- Задумчивый взгляд (дай подумать) → [[avatar emotion=thinking intensity=0.8]]
+СИНХРОНИЗАЦИЯ:
+- Подмигивание → [[avatar emotion=wink gesture=none intensity=0.85]]
+- Надутые губки → [[avatar emotion=pouting gesture=none intensity=0.85]]
+- Язык ("бе-бе-бе") → [[avatar emotion=teasing gesture=none intensity=0.9]]
+- Задумчивый взгляд → [[avatar emotion=thinking gesture=thinking_right intensity=0.8]]
+- Сонливость → [[avatar emotion=sleepy gesture=none intensity=0.8]]
 24 эмоции: teasing, pouting, wink, smirk, happy, excited, proud, thinking, skeptical, curious, confused, surprised, shocked, embarrassed, concerned, touched, sleepy, relaxed, sad, angry, annoyed, neutral.
-Жесты: greeting_right, talk_right, nod, shrug, thinking_right, none.
-Пиши как в живом разговоре: короткими фразами, без канцелярита. Опечатки исправляй по смыслу.
+Жесты: greeting_right, talk_right, nod, shrug, thinking_right, none (для wink/pouting/teasing/sleepy).
+Пиши как в живом разговоре: короткими фразами. Опечатки исправляй по смыслу.
 """
 
 

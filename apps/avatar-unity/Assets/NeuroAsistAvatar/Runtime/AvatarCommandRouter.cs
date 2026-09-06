@@ -41,7 +41,17 @@ namespace NeuroAsist.Avatar
                     break;
                 case "avatar.stream.end":
                     client.SendAck(command.message_id, true); speech.StreamEnd(command, payload); break;
-                case "avatar.emotion": client.SendAck(command.message_id, true); emotion.SetEmotion(payload.emotion, payload.intensity); motion?.SetEmotion(payload.emotion); break;
+                case "avatar.emotion":
+                    client.SendAck(command.message_id, true);
+                    emotion.SetEmotion(payload.emotion, payload.intensity);
+                    motion?.SetEmotion(payload.emotion);
+                    var emo = AvatarMotionNames.ParseEmotion(payload.emotion);
+                    var autoTag = AvatarMotionNames.ResolveAutoGesture(emo);
+                    if (autoTag != GestureTag.None && autoTag != GestureTag.Talk && emo != AvatarEmotion.Neutral)
+                    {
+                        motion?.TriggerGesture(autoTag, payload.intensity, true);
+                    }
+                    break;
                 case "avatar.gesture":
                     client.SendAck(command.message_id, true);
                     motion?.TriggerGesture(AvatarMotionNames.ParseGesture(payload.gesture), payload.intensity, payload.interrupt);

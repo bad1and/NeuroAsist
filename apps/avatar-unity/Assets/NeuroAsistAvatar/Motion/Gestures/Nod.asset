@@ -26,6 +26,6 @@ MonoBehaviour:
   CanRunWhileSpeaking: 1
   CanInterrupt: 1
   Priority: 10
-  HeadLookSuppression: 0
+  HeadLookSuppression: 0.7
   AllowedEmotions: 
   DeniedEmotions: 

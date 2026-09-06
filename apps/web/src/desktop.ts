@@ -99,7 +99,8 @@ export async function openQaStudioWindow(): Promise<void> {
     try {
       await invoke("open_qa_studio");
       return;
-    } catch {
+    } catch (error) {
+      console.error("Failed to open QA studio desktop window:", error);
       // Fall back to window.open if command fails
     }
   }
@@ -122,8 +123,8 @@ export async function closeQaStudioWindow(): Promise<void> {
   if (isDesktopApp()) {
     try {
       await invoke("close_qa_studio");
-    } catch {
-      // Ignore
+    } catch (error) {
+      console.error("Failed to close QA studio desktop window:", error);
     }
   }
   if (browserQaWindow && !browserQaWindow.closed) {
@@ -153,14 +154,15 @@ export async function isQaStudioWindowOpen(): Promise<boolean> {
 export async function listenForQaStudioState(
   listener: (open: boolean) => void,
 ): Promise<UnlistenFn> {
-  let unlistenTauri: UnlistenFn | undefined;
   if (isDesktopApp()) {
     try {
-      unlistenTauri = await listen<boolean>("qa-studio-state", ({ payload }) => listener(payload));
-    } catch {
-      // Ignore
+      return await listen<boolean>("qa-studio-state", ({ payload }) => listener(payload));
+    } catch (error) {
+      console.error("Failed to listen for qa-studio-state:", error);
+      return () => undefined;
     }
   }
+
   let channel: BroadcastChannel | null = null;
   try {
     channel = new BroadcastChannel("iris_qa_studio");
@@ -176,7 +178,6 @@ export async function listenForQaStudioState(
   }
 
   return () => {
-    unlistenTauri?.();
     channel?.close();
   };
 }
