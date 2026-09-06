@@ -26,9 +26,6 @@ ROOT_MARKDOWN = (
     "design.md",
     "apps/desktop/README.md",
     "apps/avatar-unity/README.md",
-    "output/tts-model-comparison/README.md",
-    "tests/baya_approved_handoff/README.md",
-    "tests/chatterbox_v3_experiment/README.md",
 )
 
 
@@ -169,7 +166,6 @@ def check_environment_reference(errors: list[str]) -> None:
 def maintained_markdown() -> list[Path]:
     files = {ROOT / item for item in ROOT_MARKDOWN}
     files.update((ROOT / "Docs").rglob("*.md"))
-    files.update((ROOT / "tests/chatterbox_v3_experiment/output").rglob("*.md"))
     return sorted(files)
 
 
