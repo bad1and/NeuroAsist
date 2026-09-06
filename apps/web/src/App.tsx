@@ -70,7 +70,10 @@ import {
   resetConversationSession,
   resetAllCompanionData,
   resolveApiUrl,
+  removeDesktopApiKey,
+  removeDesktopCodingApiKey,
   saveDesktopApiKey,
+  saveDesktopCodingApiKey,
   sendChatMessage,
   sendLiveTextMessage,
   searchTimeline,
@@ -199,6 +202,7 @@ type SettingsSection =
   | "voice-advanced"
   | "memory"
   | "system-interface"
+  | "api-keys"
   | "system-overview"
   | "models"
   | "backups"
@@ -442,6 +446,7 @@ function MainApp() {
   const [retryingCore, setRetryingCore] = useState(false);
   const startupStartedAt = useRef(Date.now());
   const [activeView, setActiveView] = useState<AppView>("overview");
+  const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSection | undefined>();
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
@@ -496,6 +501,12 @@ function MainApp() {
   const [startingSession, setStartingSession] = useState(false);
   const servicesReady = !desktopManaged || coreStatus === "ready";
   const setupRequired = Boolean(settings && !settings.api_key_configured && isDesktopManaged());
+
+  useEffect(() => {
+    if (!setupRequired) return;
+    setSettingsInitialSection("api-keys");
+    setActiveView("settings");
+  }, [setupRequired]);
 
   useInterfaceLocale(interfaceLocale);
 
@@ -760,10 +771,6 @@ function MainApp() {
     return <StartupScreen status={coreStatus} retrying={retryingCore} onRetry={() => void retryCore()} />;
   }
 
-  if (setupRequired) {
-    return <div className="app-shell setup-shell"><SetupWizard onComplete={refreshOverview} /></div>;
-  }
-
   const closeNavigation = () => {
     setNavigationOpen((current) => {
       if (current) window.setTimeout(() => menuToggleRef.current?.focus(), 0);
@@ -840,6 +847,10 @@ function MainApp() {
                 settings={settings}
                 events={events}
                 sessionId={sessionId}
+                onOpenApiSettings={() => {
+                  setSettingsInitialSection("api-keys");
+                  switchView("settings");
+                }}
                 onSettingsChanged={(nextSettings) => {
                   overviewRevision.current += 1;
                   setSettings(nextSettings);
@@ -851,6 +862,7 @@ function MainApp() {
             <Suspense fallback={<LazyPageFallback />}>
               <LazySettingsPage
                 settings={settings}
+                initialSection={settingsInitialSection}
                 avatarStatus={avatarStatus}
                 avatarOverlay={avatarOverlay}
                 events={events}
@@ -880,46 +892,6 @@ function MainApp() {
         <NotificationHost onNavigate={(view) => switchView(view as AppView)} />
       </section>
     </div>
-  );
-}
-
-function SetupWizard({ onComplete }: { onComplete: () => Promise<void> }) {
-  const [apiKey, setApiKey] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    setBusy(true);
-    setMessage(null);
-    try {
-      await saveDesktopApiKey(apiKey);
-      setApiKey("");
-      await onComplete();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Не удалось сохранить ключ API.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <main className="setup-workspace">
-      <section className="setup-card" aria-labelledby="setup-title">
-        <span className="eyebrow">Первичная настройка</span>
-        <h1 id="setup-title">Подключите Iris</h1>
-        <p>Введите ключ DeepSeek один раз. Он хранится в диспетчере учётных данных Windows, а не в файлах проекта.</p>
-        <form className="setup-form" onSubmit={submit}>
-          <label>
-            Ключ API DeepSeek
-            <input type="password" autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="sk-…" required />
-          </label>
-          <button className="primary-button" type="submit" disabled={busy || !apiKey.trim()}>{busy ? "Подключаем…" : "Продолжить"}</button>
-        </form>
-        <p className="setup-hint">Настройки голоса и моделей можно изменить позже в разделе «Настройки».</p>
-        {message && <div className="notice" role="status">{message}</div>}
-      </section>
-    </main>
   );
 }
 
@@ -2778,6 +2750,7 @@ function DevBadge({
 
 export function SettingsPage({
   settings,
+  initialSection,
   avatarStatus,
   avatarOverlay,
   events,
@@ -2791,6 +2764,7 @@ export function SettingsPage({
   onOpenQaStudio,
 }: {
   settings: PublicSettings | null;
+  initialSection?: SettingsSection;
   avatarStatus: AvatarStatusResponse | null;
   avatarOverlay: AvatarOverlaySettings | null;
   events: BackendEvent[];
@@ -2843,6 +2817,8 @@ export function SettingsPage({
   });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [deepseekApiKeyInput, setDeepseekApiKeyInput] = useState("");
+  const [codingApiKeyInput, setCodingApiKeyInput] = useState("");
   const [showSttCapture, setShowSttCapture] = useState(false);
   const autosaveTimersRef = useRef<Partial<Record<SettingsSection, number>>>({});
   // Settings are polled by the app shell.  Once this form is open, a polling
@@ -2850,6 +2826,10 @@ export function SettingsPage({
   // they get a chance to press Save (most visibly the participant mode).
   const hasInitialSettings = useRef(false);
   const autosave = useRuntimeSettingsAutosave(onSettingsChanged);
+
+  useEffect(() => {
+    if (initialSection) setActiveSection(initialSection);
+  }, [initialSection]);
 
   const applySettingsToForm = useCallback((nextSettings: PublicSettings) => {
     setInterfaceLocale(nextSettings.interface_locale === "en" ? "en" : "ru");
@@ -2899,6 +2879,51 @@ export function SettingsPage({
   const saveRuntimeSetting = useCallback((patch: RuntimeSettingsPatch, rollback?: () => void) => {
     autosave.save(patch, rollback);
   }, [autosave]);
+
+  const refreshSettingsAfterCredentialChange = useCallback(async () => {
+    const nextSettings = await getSettings();
+    onSettingsChanged(nextSettings);
+  }, [onSettingsChanged]);
+
+  const saveApiCredential = async (kind: "deepseek" | "coding") => {
+    const value = kind === "deepseek" ? deepseekApiKeyInput.trim() : codingApiKeyInput.trim();
+    if (!value) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      if (kind === "deepseek") {
+        await saveDesktopApiKey(value);
+        setDeepseekApiKeyInput("");
+      } else {
+        await saveDesktopCodingApiKey(value);
+        setCodingApiKeyInput("");
+      }
+      await refreshSettingsAfterCredentialChange();
+      setMessage(`${kind === "deepseek" ? "DeepSeek" : "Coding"} API-ключ сохранён в защищённом хранилище Windows.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Не удалось сохранить API-ключ.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeApiCredential = async (kind: "deepseek" | "coding") => {
+    setSaving(true);
+    setMessage(null);
+    try {
+      if (kind === "deepseek") {
+        await removeDesktopApiKey();
+      } else {
+        await removeDesktopCodingApiKey();
+      }
+      await refreshSettingsAfterCredentialChange();
+      setMessage(`${kind === "deepseek" ? "DeepSeek" : "Coding"} API-ключ удалён из защищённого хранилища Windows.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Не удалось удалить API-ключ.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const updateLiveSetting = <K extends keyof LiveConversationSettings>(
     key: K,
@@ -3027,6 +3052,7 @@ export function SettingsPage({
     "voice-advanced": { title: "Дополнительно", description: "Буфер воспроизведения и приватный сбор тестовых записей." },
     memory: { title: "Память", description: "Какие сведения Iris может сохранять между разговорами." },
     "system-interface": { title: "Интерфейс", description: "Общие настройки интерфейса." },
+    "api-keys": { title: "API-ключи", description: "Защищённое локальное хранение ключей моделей." },
     "system-overview": { title: "Система", description: "Состояние подключения и компонентов Iris." },
     models: { title: "Модели", description: "Загрузка и обслуживание локальных моделей." },
     backups: { title: "Резервные копии", description: "Копии памяти и настроек профиля." },
@@ -3069,6 +3095,7 @@ export function SettingsPage({
   );
 
   const activeSettingsMeta = settingsSectionMeta[activeSection];
+  const desktopCredentialStorageAvailable = isDesktopApp();
   const settingsContentRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -3097,8 +3124,113 @@ export function SettingsPage({
           </div>
         </header>
 
+        <div className="form-grid settings-form" hidden={activeSection !== "api-keys"}>
+          {!settings.api_key_configured && (
+            <div className="notice is-error" role="alert">
+              <IconInterfaceAlertAlarmBell2 size={17} aria-hidden="true" />
+              <div>
+                <strong>DeepSeek API-ключ не настроен.</strong>
+                <p>Диалог и функции памяти недоступны. Сохраните ключ ниже, чтобы подключить Iris.</p>
+              </div>
+            </div>
+          )}
+          {!settings.coding_api_key_configured && (
+            <div className="notice is-warning" role="status">
+              <IconInterfaceAlertAlarmBell2 size={17} aria-hidden="true" />
+              <div>
+                <strong>Coding API-ключ не настроен.</strong>
+                <p>Coding Agent останется выключенным, пока не будет сохранён отдельный ключ.</p>
+              </div>
+            </div>
+          )}
+          <fieldset className="settings-group">
+            <legend>DeepSeek API</legend>
+            <div className="readonly-setting">
+              <span>Состояние</span>
+              <strong>{settings.api_key_configured ? "Ключ настроен" : "Ключ не настроен"}</strong>
+            </div>
+            <label htmlFor="deepseek-api-key-input">
+              API-ключ DeepSeek
+              <input
+                id="deepseek-api-key-input"
+                type="password"
+                autoComplete="new-password"
+                value={deepseekApiKeyInput}
+                onChange={(event) => setDeepseekApiKeyInput(event.target.value)}
+                placeholder={settings.api_key_configured ? "Введите новый ключ для замены" : "sk-…"}
+                disabled={saving || !desktopCredentialStorageAvailable}
+              />
+              <small>Используется для диалога, памяти и фоновых ответов Iris. Значение никогда не отображается обратно.</small>
+            </label>
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={saving || !desktopCredentialStorageAvailable || !deepseekApiKeyInput.trim()}
+                onClick={() => void saveApiCredential("deepseek")}
+              >
+                {settings.api_key_configured ? "Заменить ключ" : "Сохранить ключ"}
+              </button>
+              <button
+                className="danger-button"
+                type="button"
+                disabled={saving || !desktopCredentialStorageAvailable || !settings.api_key_configured}
+                onClick={() => void removeApiCredential("deepseek")}
+              >
+                Удалить
+              </button>
+            </div>
+          </fieldset>
+
+          <fieldset className="settings-group">
+            <legend>Coding API</legend>
+            <div className="readonly-setting">
+              <span>Состояние</span>
+              <strong>{settings.coding_api_key_configured ? "Ключ настроен" : "Ключ не настроен"}</strong>
+            </div>
+            <label htmlFor="coding-api-key-input">
+              API-ключ Coding Agent
+              <input
+                id="coding-api-key-input"
+                type="password"
+                autoComplete="new-password"
+                value={codingApiKeyInput}
+                onChange={(event) => setCodingApiKeyInput(event.target.value)}
+                placeholder={settings.coding_api_key_configured ? "Введите новый ключ для замены" : "sk-…"}
+                disabled={saving || !desktopCredentialStorageAvailable}
+              />
+              <small>Отдельный ключ для задач Coding Agent. Основной DeepSeek-ключ автоматически не используется.</small>
+            </label>
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={saving || !desktopCredentialStorageAvailable || !codingApiKeyInput.trim()}
+                onClick={() => void saveApiCredential("coding")}
+              >
+                {settings.coding_api_key_configured ? "Заменить ключ" : "Сохранить ключ"}
+              </button>
+              <button
+                className="danger-button"
+                type="button"
+                disabled={saving || !desktopCredentialStorageAvailable || !settings.coding_api_key_configured}
+                onClick={() => void removeApiCredential("coding")}
+              >
+                Удалить
+              </button>
+            </div>
+          </fieldset>
+
+          {!desktopCredentialStorageAvailable && (
+            <div className="notice" role="status">
+              Управление ключами доступно в установленном desktop-приложении.
+            </div>
+          )}
+        </div>
+
         <div className="settings-grid system-status-grid" hidden={activeSection !== "system-overview"}>
-          <InfoRow label="Ключ API" value={settings.api_key_configured ? "Настроен" : "Не настроен"} />
+          <InfoRow label="DeepSeek API" value={settings.api_key_configured ? "Настроен" : "Не настроен"} />
+          <InfoRow label="Coding API" value={settings.coding_api_key_configured ? "Настроен" : "Не настроен"} />
           <InfoRow label="Провайдер" value={settings.provider} />
           <InfoRow label="Модель" value={settings.model} />
           <InfoRow label="История в контексте" value={`${settings.chat_history_limit} сообщений`} />
@@ -3194,7 +3326,7 @@ export function SettingsPage({
           />
         </div>
 
-        <div className="form-grid settings-form" hidden={activeSection === "avatar" || activeSection === "system-interface" || activeSection === "system-overview" || ["models", "backups", "maintenance", "events"].includes(activeSection)}>
+        <div className="form-grid settings-form" hidden={activeSection === "avatar" || activeSection === "system-interface" || activeSection === "api-keys" || activeSection === "system-overview" || ["models", "backups", "maintenance", "events"].includes(activeSection)}>
         <fieldset className="settings-group" hidden={activeSection !== "voice"}>
           <legend>Основное</legend>
           <label>
@@ -3747,6 +3879,7 @@ const SETTINGS_NAVIGATION: Array<{
     icon: IconComputerScreenCurve,
     items: [
       { section: "system-interface", label: "Интерфейс" },
+      { section: "api-keys", label: "API-ключи" },
       { section: "system-overview", label: "Обзор" },
       { section: "models", label: "Модели", devOnly: true },
       { section: "backups", label: "Резервные копии" },

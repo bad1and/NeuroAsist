@@ -3,7 +3,7 @@ use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     path::PathBuf,
-    process::{Child, Command},
+    process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicU64, Ordering},
         Mutex,
@@ -30,9 +30,9 @@ use windows::Win32::{
     UI::WindowsAndMessaging::{
         EnumWindows, GetClassNameW, GetParent, GetWindowLongPtrW, GetWindowThreadProcessId,
         SetLayeredWindowAttributes, SetParent, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-        GWLP_HWNDPARENT, GWL_EXSTYLE, GWL_STYLE, HWND_TOP, LWA_COLORKEY,
-        SWP_ASYNCWINDOWPOS, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE,
-        SW_SHOWNA, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
+        GWLP_HWNDPARENT, GWL_EXSTYLE, GWL_STYLE, HWND_TOP, LWA_COLORKEY, SWP_ASYNCWINDOWPOS,
+        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_SHOWNA,
+        WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
     },
 };
 
@@ -47,7 +47,8 @@ const UNITY_WINDOW_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
 #[cfg(windows)]
 const UNITY_WINDOW_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const KEYRING_SERVICE: &str = "NeuroAsist";
-const KEYRING_ACCOUNT: &str = "deepseek_api_key";
+const DEEPSEEK_KEYRING_ACCOUNT: &str = "deepseek_api_key";
+const CODING_KEYRING_ACCOUNT: &str = "coding_api_key";
 // Matches the embedded Unity camera clear colour (#1d2022). A neutral matte
 // makes the unavoidable colour-key transition much less visible at hair and
 // clothing edges than the previous saturated blue key.
@@ -199,6 +200,7 @@ impl DesktopState {
             .map_err(|error| format!("Could not create Iris data directory: {error}"))?;
         let port = runtime.api_base_url.rsplit(':').next().unwrap_or("8000");
         let api_key = read_api_key()?;
+        let coding_api_key = read_coding_api_key()?;
         let avatar_enabled = self.avatar_executable(app).is_some() && !self.safe_mode;
         let process =
             if cfg!(debug_assertions) || env::var_os("NEUROASIST_CORE_EXECUTABLE").is_some() {
@@ -211,13 +213,12 @@ impl DesktopState {
                     &runtime.api_token,
                     self.safe_mode,
                     avatar_enabled,
-                    api_key.as_deref(),
                 );
-                CoreProcess::Native(
-                    command
-                        .spawn()
-                        .map_err(|error| format!("Could not start Neuro Core: {error}"))?,
-                )
+                let mut child = command
+                    .spawn()
+                    .map_err(|error| format!("Could not start Neuro Core: {error}"))?;
+                write_core_credentials(&mut child, api_key.as_deref(), coding_api_key.as_deref())?;
+                CoreProcess::Native(child)
             } else {
                 let executable = app
                     .path()
@@ -240,7 +241,6 @@ impl DesktopState {
                     &runtime.api_token,
                     self.safe_mode,
                     avatar_enabled,
-                    api_key.as_deref(),
                 );
                 // PyInstaller onedir resolves its bundled DLLs relative to
                 // the resource directory. The source checkout root is only
@@ -248,9 +248,10 @@ impl DesktopState {
                 if let Some(resource_root) = executable.parent() {
                     command.current_dir(resource_root);
                 }
-                let child = command
+                let mut child = command
                     .spawn()
                     .map_err(|error| format!("Could not start bundled Neuro Core: {error}"))?;
+                write_core_credentials(&mut child, api_key.as_deref(), coding_api_key.as_deref())?;
                 CoreProcess::Native(child)
             };
         *self.core.lock().map_err(|_| "core mutex poisoned")? = Some(process);
@@ -879,30 +880,55 @@ fn desktop_runtime(app: AppHandle) -> DesktopRuntime {
 }
 
 #[tauri::command]
-fn api_key_configured() -> Result<bool, String> {
-    Ok(read_api_key()?.is_some())
+fn save_api_key(api_key: String, app: AppHandle) -> Result<DesktopRuntime, String> {
+    save_credential(DEEPSEEK_KEYRING_ACCOUNT, "DeepSeek", api_key, app)
 }
 
 #[tauri::command]
-fn save_api_key(api_key: String, app: AppHandle) -> Result<DesktopRuntime, String> {
-    let api_key = api_key.trim();
-    if api_key.is_empty() {
-        return Err("API key cannot be empty".into());
-    }
-    keyring_entry()?.set_password(api_key).map_err(|error| {
-        format!("Could not save API key in Windows Credential Manager: {error}")
-    })?;
-    app.state::<DesktopState>().restart_core(&app)
+fn save_coding_api_key(api_key: String, app: AppHandle) -> Result<DesktopRuntime, String> {
+    save_credential(CODING_KEYRING_ACCOUNT, "Coding", api_key, app)
 }
 
 #[tauri::command]
 fn remove_api_key(app: AppHandle) -> Result<DesktopRuntime, String> {
-    let entry = keyring_entry()?;
+    remove_credential(DEEPSEEK_KEYRING_ACCOUNT, "DeepSeek", app)
+}
+
+#[tauri::command]
+fn remove_coding_api_key(app: AppHandle) -> Result<DesktopRuntime, String> {
+    remove_credential(CODING_KEYRING_ACCOUNT, "Coding", app)
+}
+
+fn save_credential(
+    account: &str,
+    label: &str,
+    api_key: String,
+    app: AppHandle,
+) -> Result<DesktopRuntime, String> {
+    let api_key = api_key.trim();
+    if api_key.is_empty() {
+        return Err(format!("{label} API key cannot be empty"));
+    }
+    keyring_entry(account)?
+        .set_password(api_key)
+        .map_err(|error| {
+            format!("Could not save {label} API key in Windows Credential Manager: {error}")
+        })?;
+    if read_credential(account, label)?.as_deref() != Some(api_key) {
+        return Err(format!(
+            "Windows Credential Manager did not persist the {label} API key"
+        ));
+    }
+    app.state::<DesktopState>().restart_core(&app)
+}
+
+fn remove_credential(account: &str, label: &str, app: AppHandle) -> Result<DesktopRuntime, String> {
+    let entry = keyring_entry(account)?;
     match entry.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => {}
         Err(error) => {
             return Err(format!(
-                "Could not remove API key from Windows Credential Manager: {error}"
+                "Could not remove {label} API key from Windows Credential Manager: {error}"
             ))
         }
     }
@@ -1041,9 +1067,10 @@ fn main() {
             configure_avatar_placement,
             set_avatar_in_app_bounds,
             set_avatar_in_app_visible,
-            api_key_configured,
             save_api_key,
+            save_coding_api_key,
             remove_api_key,
+            remove_coding_api_key,
             open_qa_studio,
             close_qa_studio,
             is_qa_studio_open
@@ -1136,8 +1163,8 @@ fn random_token() -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn keyring_entry() -> Result<Entry, String> {
-    Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
+fn keyring_entry(account: &str) -> Result<Entry, String> {
+    Entry::new(KEYRING_SERVICE, account)
         .map_err(|error| format!("Windows Credential Manager is unavailable: {error}"))
 }
 
@@ -1461,6 +1488,15 @@ unsafe fn is_unity_render_window(window: HWND) -> bool {
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
+    #[test]
+    fn keyring_uses_persistent_windows_credential_store() {
+        assert!(matches!(
+            keyring::default::default_credential_builder().persistence(),
+            keyring::credential::CredentialPersistence::UntilDelete
+        ));
+    }
+
     #[test]
     fn avatar_placement_json_accepts_only_the_embedded_value() {
         assert_eq!(
@@ -1501,13 +1537,57 @@ mod tests {
 }
 
 fn read_api_key() -> Result<Option<String>, String> {
-    match keyring_entry()?.get_password() {
+    read_credential(DEEPSEEK_KEYRING_ACCOUNT, "DeepSeek")
+}
+
+fn read_coding_api_key() -> Result<Option<String>, String> {
+    read_credential(CODING_KEYRING_ACCOUNT, "Coding")
+}
+
+fn read_credential(account: &str, label: &str) -> Result<Option<String>, String> {
+    match keyring_entry(account)?.get_password() {
         Ok(value) if !value.trim().is_empty() => Ok(Some(value)),
         Ok(_) | Err(keyring::Error::NoEntry) => Ok(None),
         Err(error) => Err(format!(
-            "Could not read API key from Windows Credential Manager: {error}"
+            "Could not read {label} API key from Windows Credential Manager: {error}"
         )),
     }
+}
+
+#[derive(Serialize)]
+struct CoreCredentials<'a> {
+    deepseek_api_key: Option<&'a str>,
+    coding_api_key: Option<&'a str>,
+}
+
+fn write_core_credentials(
+    child: &mut Child,
+    deepseek_api_key: Option<&str>,
+    coding_api_key: Option<&str>,
+) -> Result<(), String> {
+    let result = (|| {
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| "Neuro Core credential pipe is unavailable".to_owned())?;
+        serde_json::to_writer(
+            &mut stdin,
+            &CoreCredentials {
+                deepseek_api_key,
+                coding_api_key,
+            },
+        )
+        .map_err(|error| format!("Could not serialize Neuro Core credentials: {error}"))?;
+        stdin
+            .write_all(b"\n")
+            .and_then(|_| stdin.flush())
+            .map_err(|error| format!("Could not deliver Neuro Core credentials: {error}"))
+    })();
+    if result.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    result
 }
 
 fn core_command(root: &PathBuf) -> Result<Command, String> {
@@ -1532,12 +1612,15 @@ fn configure_core_command(
     token: &str,
     safe_mode: bool,
     avatar_enabled: bool,
-    api_key: Option<&str>,
 ) {
     command
         .current_dir(root)
+        .stdin(Stdio::piped())
+        .env_remove("DEEPSEEK_API_KEY")
+        .env_remove("CODING_API_KEY")
         .env("NEUROASIST_PORT", port)
         .env("NEUROASIST_DESKTOP_TOKEN", token)
+        .env("NEUROASIST_CREDENTIALS_STDIN", "1")
         .env("NEUROASIST_APP_DATA_DIR", data_root)
         .env("PYTHONUTF8", "1")
         .env("PYTHONIOENCODING", "utf-8")
@@ -1553,9 +1636,6 @@ fn configure_core_command(
             "AVATAR_ENABLED",
             if avatar_enabled { "true" } else { "false" },
         );
-    if let Some(api_key) = api_key {
-        command.env("DEEPSEEK_API_KEY", api_key);
-    }
 }
 
 fn core_health_is_ready(runtime: &DesktopRuntime) -> bool {

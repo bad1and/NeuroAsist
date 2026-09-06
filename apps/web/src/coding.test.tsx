@@ -117,6 +117,7 @@ describe("CodingAgentPage", () => {
         settings={mockSettings}
         events={[]}
         sessionId="sess-1"
+        onOpenApiSettings={vi.fn()}
         onSettingsChanged={vi.fn()}
       />
     );
@@ -155,6 +156,7 @@ describe("CodingAgentPage", () => {
         settings={mockSettings}
         events={[]}
         sessionId="sess-1"
+        onOpenApiSettings={vi.fn()}
         onSettingsChanged={vi.fn()}
       />
     );
@@ -186,12 +188,32 @@ describe("CodingAgentPage", () => {
     });
   });
 
+  it("направляет в настройки, когда отдельный Coding API-ключ отсутствует", async () => {
+    const onOpenApiSettings = vi.fn();
+    render(
+      <CodingAgentPage
+        settings={{ ...mockSettings, coding_api_key_configured: false }}
+        events={[]}
+        sessionId="sess-1"
+        onOpenApiSettings={onOpenApiSettings}
+        onSettingsChanged={vi.fn()}
+      />
+    );
+
+    const nav = await screen.findByRole("navigation", { name: /Разделы Coding Agent/i });
+    fireEvent.click(within(nav).getByRole("button", { name: /Параметры/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть настройки API" }));
+
+    expect(onOpenApiSettings).toHaveBeenCalledOnce();
+  });
+
   it("фильтрует список задач по статусам и поисковому запросу", async () => {
     const { container } = render(
       <CodingAgentPage
         settings={mockSettings}
         events={[]}
         sessionId="sess-1"
+        onOpenApiSettings={vi.fn()}
         onSettingsChanged={vi.fn()}
       />
     );

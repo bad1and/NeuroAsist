@@ -45,8 +45,11 @@ Desktop shell задаёт `%LOCALAPPDATA%\NeuroAsist` как writable data root
 `NEUROASIST_APP_DATA_DIR` changes the root. In browser development the relative
 `SQLITE_PATH` and `VOICE_AUDIO_DIR` defaults resolve against the repository.
 
-API keys are supplied by `.env` in development or Windows Credential Manager
-in desktop mode. They are not written to `settings.json` or backups.
+DeepSeek and Coding API keys are separate Windows Credential Manager entries,
+managed under **Settings → System → API keys**. The desktop shell delivers them
+to the local core through an anonymous stdin pipe at startup. API-key variables
+from `.env` and the inherited process environment are ignored. Keys are not
+written to `settings.json`, logs or backups.
 
 ## Logs and diagnostics
 

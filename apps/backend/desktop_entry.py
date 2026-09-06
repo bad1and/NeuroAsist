@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import sys
 
 # TeraTTS loads a bundled RUAccent vocabulary through ``Path.read_text()``.
 # On Windows the interpreter encoding must be selected before importing the
@@ -12,6 +14,36 @@ os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
 import uvicorn
 from fastapi import FastAPI
+
+
+def load_runtime_credentials() -> None:
+    """Read one credential payload from the desktop shell's anonymous pipe."""
+    if os.getenv("NEUROASIST_CREDENTIALS_STDIN") != "1":
+        return
+    raw = sys.stdin.buffer.readline(65_537)
+    if not raw or len(raw) > 65_536:
+        raise RuntimeError("Desktop credential payload is missing or too large")
+    try:
+        payload = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("Desktop credential payload is invalid") from error
+    if not isinstance(payload, dict):
+        raise RuntimeError("Desktop credential payload must be an object")
+
+    from apps.backend.app.core.config import configure_runtime_credentials
+
+    configure_runtime_credentials(
+        deepseek_api_key=_optional_string(payload.get("deepseek_api_key")),
+        coding_api_key=_optional_string(payload.get("coding_api_key")),
+    )
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise RuntimeError("Desktop credential values must be strings")
+    return value
 
 
 def configure_safe_mode() -> None:
@@ -41,6 +73,7 @@ def create_desktop_app() -> FastAPI:
 
 def main() -> None:
     configure_safe_mode()
+    load_runtime_credentials()
     port = int(os.getenv("NEUROASIST_PORT", "8000"))
     app = create_desktop_app()
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="info")

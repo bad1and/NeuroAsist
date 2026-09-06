@@ -58,8 +58,10 @@ checkout on another drive uses that checkout's parent directory automatically.
 `CODING_ALLOWED_PROJECT_ROOTS` is an optional comma-separated allowlist of
 project-context directories. When omitted, the current NeuroAsist repository
 root is the only allowed project context.
-`CODING_API_KEY` is optional and lets an operator use a dedicated DeepSeek key;
-otherwise the normal desktop-provided `DEEPSEEK_API_KEY` is used. The runtime
+The Coding API key is entered under **Settings → System → API keys** and stored
+as its own Windows Credential Manager entry. It is required for the Coding
+Agent and never falls back to the conversation DeepSeek key. Neither `.env` nor
+inherited environment variables are accepted as a secret source. The runtime
 stores no API key. `CODING_AGENT_ENABLED=false` hides execution globally while
 preserving past task records.
 

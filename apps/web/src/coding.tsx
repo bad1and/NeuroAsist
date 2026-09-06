@@ -99,11 +99,13 @@ export function CodingAgentPage({
   settings,
   events,
   sessionId,
+  onOpenApiSettings,
   onSettingsChanged,
 }: {
   settings: PublicSettings | null;
   events: BackendEvent[];
   sessionId: string | null;
+  onOpenApiSettings: () => void;
   onSettingsChanged: (settings: PublicSettings) => void;
 }) {
   const [activeSection, setActiveSection] = useState<CodingSection>("tasks");
@@ -977,7 +979,10 @@ export function CodingAgentPage({
                 <IconInterfaceAlertAlarmBell2 size={17} />
                 <div>
                   <strong>API-ключ не настроен:</strong>
-                  <p>Для работы кодинг-агента требуется настроить ключ модели (CODING_API_KEY) в переменных окружения ядра.</p>
+                  <p>Для работы кодинг-агента сохраните отдельный Coding API-ключ в настройках приложения.</p>
+                  <button className="secondary" type="button" onClick={onOpenApiSettings}>
+                    Открыть настройки API
+                  </button>
                 </div>
               </div>
             )}

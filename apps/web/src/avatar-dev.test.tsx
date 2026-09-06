@@ -135,5 +135,46 @@ describe("AvatarDevStudioStandalonePage", () => {
 
     expect(screen.getByRole("switch", { name: /Окно тестирования аватара/ })).toBeChecked();
   });
+
+  it("renders separate hidden DeepSeek and Coding API fields", () => {
+    const mockSettings = {
+      api_key_configured: true,
+      coding_api_key_configured: false,
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+      chat_history_limit: 10,
+      log_level: "info",
+      voice_language: "ru",
+      voice_tts_voice: "ru_f1",
+      voice_playback_rate: 1,
+      voice_tts_provider: "teratts",
+      developer_mode_enabled: false,
+      interface_locale: "ru" as const,
+      available_voice_languages: ["ru"],
+      available_personalities: ["default"],
+      available_tts_voices: ["ru_f1"],
+    };
+
+    render(
+      <SettingsPage
+        settings={mockSettings as any}
+        initialSection="api-keys"
+        avatarStatus={null}
+        avatarOverlay={null}
+        events={[]}
+        onRefreshEvents={vi.fn()}
+        onRefreshAvatar={vi.fn()}
+        onAvatarOverlayChanged={vi.fn()}
+        onInterfaceLocaleChange={vi.fn()}
+        onSettingsChanged={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "API-ключи" })).toBeInTheDocument();
+    expect(screen.getByLabelText(/API-ключ DeepSeek/)).toHaveAttribute("type", "password");
+    expect(screen.getByLabelText(/API-ключ Coding Agent/)).toHaveAttribute("type", "password");
+    expect(screen.getByText("Ключ настроен")).toBeInTheDocument();
+    expect(screen.getByText("Ключ не настроен")).toBeInTheDocument();
+  });
 });
 
