@@ -745,10 +745,23 @@ describe("русский интерфейс", () => {
     expect(screen.getByText(/Текущий диалог будет завершён и сохранён в истории/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Начать новый диалог" }));
 
-    await waitFor(() => expect(api.resetConversationSession).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(api.resetConversationSession).toHaveBeenCalledWith("new_dialog"));
+    expect(api.resetConversationSession).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
     fireEvent.click(screen.getByRole("button", { name: "Живой разговор" }));
     expect(screen.queryByRole("button", { name: "Сбросить сессию" })).not.toBeInTheDocument();
+  });
+
+  it("завершает даже пустой диалог одним атомарным сбросом с правильной причиной", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Начать" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Завершить" }));
+
+    await waitFor(() => expect(api.resetConversationSession).toHaveBeenCalledWith("manual_reset"));
+    expect(api.resetConversationSession).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("button", { name: "Начать" })).toBeInTheDocument();
   });
 
   it("оставляет только историю и забывание записи", async () => {

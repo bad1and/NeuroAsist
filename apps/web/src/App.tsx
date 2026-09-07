@@ -50,7 +50,6 @@ import {
   createBackup,
   getBackups,
   getEvents,
-  closeCurrentEpisode,
   getTimelineJournal,
   getTimelineMessages,
   getConversationSession,
@@ -91,6 +90,7 @@ import {
   sendAvatarTestPhrase,
   stopAvatar,
   updateAvatarOverlay,
+  type ConversationBoundaryReason,
 } from "./api";
 import type {
   BackendEvent,
@@ -689,10 +689,12 @@ function MainApp() {
     });
   }, [servicesReady, settings?.avatar_placement]);
 
-  const startFreshSession = useCallback(async () => {
+  const startFreshSession = useCallback(async (
+    boundaryReason: ConversationBoundaryReason = "new_dialog",
+  ) => {
     setStartingSession(true);
     try {
-      const session = await resetConversationSession();
+      const session = await resetConversationSession(boundaryReason);
       setSessionId(session.session_id);
     } finally {
       setStartingSession(false);
@@ -1030,7 +1032,7 @@ export function ChatPage({
   onRefreshEvents: () => Promise<void>;
   onOpenMemory: () => void;
   onOpenSettings?: () => void;
-  onStartNewDialog: () => Promise<void>;
+  onStartNewDialog: (boundaryReason?: ConversationBoundaryReason) => Promise<void>;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -2223,13 +2225,12 @@ export function ChatPage({
     stopVoicePlayback();
     setVoiceState("idle");
     try {
-      await closeCurrentEpisode();
-      await onStartNewDialog();
-    } catch {
-      // Ignore if session reset fails
+      await onStartNewDialog("manual_reset");
+      setMessages([]);
+      setIsStarted(false);
+    } catch (finishError) {
+      setError(finishError instanceof Error ? finishError.message : "Не удалось завершить диалог.");
     }
-    setMessages([]);
-    setIsStarted(false);
   };
 
   const startNewDialog = async () => {
@@ -2248,7 +2249,7 @@ export function ChatPage({
       setLiveConversation(false);
       setMicrophoneMuted(false);
       interruptAssistantSpeech();
-      await onStartNewDialog();
+      await onStartNewDialog("new_dialog");
       setMessages([]);
       setIsStarted(false);
       setNewDialogConfirmationOpen(false);

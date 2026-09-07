@@ -2334,13 +2334,15 @@ class TimelineStore:
             connection.execute("DELETE FROM conversation_episodes WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,))
             return {"messages": int(messages), "memories": int(memories), "episodes": int(episodes)}
 
-    def reset_session(self) -> dict[str, object]:
+    def reset_session(self, boundary_reason: str = "new_dialog") -> dict[str, object]:
         """Close the active episode and issue a fresh active session without deleting history."""
+        if boundary_reason not in {"new_dialog", "manual_reset"}:
+            raise ValueError(f"Unsupported session boundary reason: {boundary_reason}")
         with self._immediate_connect() as connection:
             now = self._now()
             episode = self._current_episode_row(connection)
             if episode is not None:
-                self._close_episode(connection, episode, "new_dialog", now)
+                self._close_episode(connection, episode, boundary_reason, now)
             connection.execute("DELETE FROM conversation_turn_state WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,))
             session_id = uuid4().hex
             connection.execute(
