@@ -14,6 +14,7 @@ from apps.backend.app.voice.delivery import (
     SpeechSegment,
     plan_speech,
 )
+from apps.backend.app.voice.directives import infer_animation_directive
 from apps.backend.app.voice.providers import TTSRequest, TTSResult, split_tts_chunks
 from apps.backend.app.voice.style import VoiceStyle
 
@@ -172,9 +173,18 @@ class SpeechOrchestrator:
                  "duration_ms": result.duration_ms, "voice": result.voice,
                  "chunks_count": result.chunks_count, "audio_duration_seconds": result.audio_duration_seconds},
             )
+            resolved_gesture = gesture
+            if not resolved_gesture or resolved_gesture == "auto":
+                planned = plan_speech(text, delivery)
+                if planned and planned[0].motion_gesture and planned[0].motion_gesture != "auto":
+                    resolved_gesture = planned[0].motion_gesture
+                else:
+                    inferred = infer_animation_directive(None, text)
+                    resolved_gesture = inferred.gesture if inferred.gesture and inferred.gesture != "auto" else "talk_right"
+
             await self.avatar_service.speak(
                 session_id=session_id, utterance_id=voice_request_id, text=text, audio_url=audio_url,
-                emotion=emotion, intent=intent, gesture=gesture,
+                emotion=emotion, intent=intent, gesture=resolved_gesture,
                 gesture_intensity=gesture_intensity, interrupt=interrupt,
             )
 

@@ -11,12 +11,12 @@ EMOTION_HALF_LIVES_MINUTES: dict[str, float] = {
     "joy": 12.0,
     "interest": 20.0,
     "playfulness": 20.0,
-    "irritation": 20.0,
-    "anger": 25.0,
+    "irritation": 30.0,
+    "anger": 35.0,
     "embarrassment": 15.0,
     "anxiety": 45.0,
-    "sadness": 60.0,
-    "hurt": 90.0,
+    "sadness": 75.0,
+    "hurt": 120.0,
     "fatigue": 120.0,
 }
 RELATIONSHIP_FACETS = {"familiarity", "trust", "warmth", "tension", "playfulness"}
@@ -123,21 +123,40 @@ class CharacterStateReducer:
 
     def apply_affect(self, state: AffectState, appraisal: EventAppraisal) -> AffectState:
         strength = appraisal.confidence * appraisal.intensity
-        state.valence = _clamp(state.valence + appraisal.valence * strength * 0.45, -1.0, 1.0)
-        state.arousal = _clamp(state.arousal + appraisal.arousal * strength * 0.14, 0.0, 1.0)
+        active_negative = sum(
+            1 for c in state.causes
+            if c.get("event_kind") in {"insult", "user_frustration", "rejection"}
+            and c.get("status", "active") == "active"
+        )
+        escalation = 1.0 + min(0.6, active_negative * 0.2)
+        state.valence = _clamp(state.valence + appraisal.valence * strength * 0.50, -1.0, 1.0)
+        state.arousal = _clamp(state.arousal + appraisal.arousal * strength * 0.18, 0.0, 1.0)
         for emotion, impulse in appraisal.emotion_impulses.items():
             if emotion in EMOTION_HALF_LIVES_MINUTES:
-                setattr(state, emotion, _clamp(getattr(state, emotion) + _clamp(impulse, -1, 1) * strength * 0.45, 0, 1))
-        state.social_openness = _clamp(
-            state.social_openness + (state.joy + state.interest - state.hurt - state.anger) * 0.025,
-            0.0,
-            1.0,
-        )
-        state.desire_for_silence = _clamp(
-            state.desire_for_silence + (state.hurt + state.fatigue + state.irritation) * 0.025,
-            0.0,
-            1.0,
-        )
+                if emotion in {"hurt", "anger", "irritation"}:
+                    multiplier = 0.65 * escalation
+                elif emotion in {"joy", "playfulness"}:
+                    multiplier = 0.55
+                else:
+                    multiplier = 0.45
+                setattr(state, emotion, _clamp(getattr(state, emotion) + _clamp(impulse, -1, 1) * strength * multiplier, 0, 1))
+
+        if appraisal.event_kind in {"insult", "rejection"} and strength >= 0.35:
+            state.social_openness = _clamp(state.social_openness - 0.20, 0.0, 1.0)
+            state.desire_for_silence = _clamp(state.desire_for_silence + 0.20, 0.0, 1.0)
+            state.joy = max(0.0, state.joy - 0.25)
+            state.playfulness = max(0.0, state.playfulness - 0.25)
+        else:
+            state.social_openness = _clamp(
+                state.social_openness + (state.joy + state.interest - state.hurt - state.anger) * 0.025,
+                0.0,
+                1.0,
+            )
+            state.desire_for_silence = _clamp(
+                state.desire_for_silence + (state.hurt + state.fatigue + state.irritation) * 0.025,
+                0.0,
+                1.0,
+            )
         if appraisal.cause_message_ids and strength >= 0.05 and appraisal.event_kind not in {"neutral", "interruption"}:
             fingerprint = f"{appraisal.target_participant}:{appraisal.event_kind}:{','.join(sorted(appraisal.cause_message_ids))}"
             existing = next((item for item in state.causes if item.get("fingerprint") == fingerprint and item.get("status", "active") == "active"), None)

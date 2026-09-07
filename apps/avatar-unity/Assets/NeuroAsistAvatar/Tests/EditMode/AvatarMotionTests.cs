@@ -105,6 +105,13 @@ namespace NeuroAsist.Avatar.Tests
             Assert.That(AvatarMotionNames.ParseGesture("greeting_right"), Is.EqualTo(GestureTag.Greeting_Right));
             Assert.That(AvatarMotionNames.ParseGesture("farewell_left"), Is.EqualTo(GestureTag.Farewell_Left));
             Assert.That(AvatarMotionNames.ParseGesture("nod"), Is.EqualTo(GestureTag.Nod));
+            Assert.That(AvatarMotionNames.ParseGesture("head_scratch"), Is.EqualTo(GestureTag.Head_Scratch));
+            Assert.That(AvatarMotionNames.ParseGesture("clapping"), Is.EqualTo(GestureTag.Clapping));
+            Assert.That(AvatarMotionNames.ParseGesture("laughing"), Is.EqualTo(GestureTag.Laughing));
+            Assert.That(AvatarMotionNames.ParseGesture("thumbs_up"), Is.EqualTo(GestureTag.Thumbs_Up));
+            Assert.That(AvatarMotionNames.ParseGesture("facepalm"), Is.EqualTo(GestureTag.Facepalm));
+            Assert.That(AvatarMotionNames.ParseGesture("pointing"), Is.EqualTo(GestureTag.Pointing));
+            Assert.That(AvatarMotionNames.ParseGesture("bow"), Is.EqualTo(GestureTag.Bow));
         }
 
         [Test] public void ExplicitGestureBypassesCooldownWhenIgnoreCooldownIsTrue()

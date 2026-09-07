@@ -76,6 +76,13 @@ class Gesture(str, Enum):
     FAREWELL_CASUAL = "farewell_casual"
     SHRUG = "shrug"
     NOD = "nod"
+    HEAD_SCRATCH = "head_scratch"
+    CLAPPING = "clapping"
+    LAUGHING = "laughing"
+    THUMBS_UP = "thumbs_up"
+    FACEPALM = "facepalm"
+    POINTING = "pointing"
+    BOW = "bow"
 
 
 class ProtocolModel(BaseModel):
@@ -88,11 +95,32 @@ class AffectCue(ProtocolModel):
     valence: float = Field(default=0.0, ge=-1.0, le=1.0)
     arousal: float = Field(default=0.0, ge=0.0, le=1.0)
 
+    @field_validator("emotion", mode="before")
+    @classmethod
+    def _coerce_emotion(cls, value: object) -> object:
+        if isinstance(value, str):
+            clean = value.strip().lower().replace("-", "_")
+            if clean in ("tongue", "tongue_out"):
+                return Emotion.TEASING
+            return Emotion(clean)
+        return value
+
 
 class GestureCue(ProtocolModel):
     name: Gesture = Gesture.AUTO
     intensity: float = Field(default=1.0, ge=0.0, le=1.0)
     interrupt: bool = True
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _coerce_gesture_name(cls, value: object) -> object:
+        if isinstance(value, str):
+            clean = value.strip().lower().replace("-", "_")
+            try:
+                return Gesture(clean)
+            except ValueError:
+                return Gesture.AUTO
+        return value
 
 
 class DeliveryOverride(ProtocolModel):
@@ -184,6 +212,27 @@ class CharacterTurn(ProtocolModel):
         if not stripped:
             raise ValueError("reply must not be blank")
         return stripped
+
+    @field_validator("gesture", mode="before")
+    @classmethod
+    def _coerce_turn_gesture(cls, value: object) -> object:
+        if isinstance(value, str):
+            clean = value.strip().lower().replace("-", "_")
+            try:
+                return GestureCue(name=Gesture(clean))
+            except ValueError:
+                return GestureCue(name=Gesture.AUTO)
+        return value
+
+    @field_validator("affect", mode="before")
+    @classmethod
+    def _coerce_turn_affect(cls, value: object) -> object:
+        if isinstance(value, str):
+            clean = value.strip().lower().replace("-", "_")
+            if clean in ("tongue", "tongue_out"):
+                return AffectCue(emotion=Emotion.TEASING)
+            return AffectCue(emotion=Emotion(clean))
+        return value
 
     def metadata_frame(self) -> dict[str, object]:
         """Return avatar metadata only; memory proposals are private to the backend."""

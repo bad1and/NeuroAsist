@@ -33,11 +33,13 @@ namespace NeuroAsist.Avatar
         public bool Trigger(GestureTag tag, AvatarEmotion emotion, bool speaking, float intensity, bool interrupt, ICollection<string> recentVariants = null)
         {
             if (settings == null || !settings.MotionEnabled || tag == GestureTag.None) return false;
-            var isExplicit = tag != GestureTag.Auto && tag != GestureTag.None;
+            var isSpeech = tag == GestureTag.Talk || tag == GestureTag.Talk_Right || tag == GestureTag.Talk_Left;
+            var isExplicit = tag != GestureTag.Auto && tag != GestureTag.None && !isSpeech;
             var ignoreCooldown = interrupt || isExplicit;
             var currentPriority = (active == null || (isExplicit && interrupt)) ? -1 : active.Priority;
             var next = Select(settings.GestureDefinitions, tag, emotion, speaking, currentPriority, Time.unscaledTime, lastPlayed, random, ignoreCooldown);
             if (next == null) return false;
+            if (active != null && isSpeech && active.Priority > next.Priority) return false;
             if (active != null && !interrupt) return false;
             if (active != null && !isExplicit && (!active.CanInterrupt || next.Priority < active.Priority)) return false;
             bool? preferMirror = null;

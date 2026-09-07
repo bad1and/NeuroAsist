@@ -415,16 +415,8 @@ def create_app() -> FastAPI:
             intensity: float,
             generation: int,
         ) -> None:
-            session = await conversation_service.ensure_session(session_id)
-            if session.generation != generation:
-                return
-            await avatar_service.set_emotion(
-                session_id=session_id,
-                emotion=emotion,
-                intensity=intensity,
-            )
-            if session.generation != generation:
-                await avatar_service.stop(session_id=session_id)
+            # Pure neural control: background synthetic reactions do not override neural avatar emotion.
+            pass
 
         async def conversation_deferred_response(
             session_id: str,

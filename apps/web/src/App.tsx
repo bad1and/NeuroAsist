@@ -248,6 +248,8 @@ const AVATAR_GESTURE_LABELS: Record<string, string> = {
   explanation: "Объяснение (авто)", explanation_right: "Объяснение (правая рука)", explanation_left: "Объяснение (левая рука)",
   agreement: "Согласие", disagreement: "Несогласие",
   surprise: "Удивление", frustration: "Фрустрация", shrug: "Пожимание плечами", nod: "Кивок",
+  head_scratch: "Почесать голову", clapping: "Аплодисменты", laughing: "Смех",
+  thumbs_up: "Палец вверх", facepalm: "Фейспалм", pointing: "Указать пальцем", bow: "Поклон",
 };
 
 function formatPronunciations(entries: Record<string, string>): string {

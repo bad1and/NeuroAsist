@@ -33,8 +33,15 @@ class EmotionMapping(_MappingModel):
 def _default_mapping() -> dict[Emotion, EmotionMapping]:
     expressive = [
         Gesture.AUTO, Gesture.NONE, Gesture.TALK, Gesture.TALK_RIGHT, Gesture.TALK_LEFT,
-        Gesture.GREETING, Gesture.GREETING_RIGHT, Gesture.GREETING_LEFT,
-        Gesture.AGREEMENT, Gesture.NOD, Gesture.FAREWELL, Gesture.FAREWELL_RIGHT, Gesture.FAREWELL_LEFT,
+        Gesture.GREETING, Gesture.GREETING_RIGHT, Gesture.GREETING_LEFT, Gesture.GREETING_CASUAL,
+        Gesture.AGREEMENT, Gesture.NOD, Gesture.DISAGREEMENT,
+        Gesture.QUESTION, Gesture.QUESTION_RIGHT, Gesture.QUESTION_LEFT,
+        Gesture.EXPLANATION, Gesture.EXPLANATION_RIGHT, Gesture.EXPLANATION_LEFT,
+        Gesture.THINKING, Gesture.THINKING_RIGHT, Gesture.THINKING_LEFT,
+        Gesture.SURPRISE, Gesture.SHRUG,
+        Gesture.FAREWELL, Gesture.FAREWELL_RIGHT, Gesture.FAREWELL_LEFT, Gesture.FAREWELL_CASUAL,
+        Gesture.HEAD_SCRATCH, Gesture.CLAPPING, Gesture.LAUGHING, Gesture.THUMBS_UP,
+        Gesture.FACEPALM, Gesture.POINTING, Gesture.BOW,
     ]
     mapping: dict[Emotion, EmotionMapping] = {
         emotion: EmotionMapping(
@@ -46,17 +53,20 @@ def _default_mapping() -> dict[Emotion, EmotionMapping]:
         for emotion in Emotion
     }
     mapping[Emotion.NEUTRAL] = mapping[Emotion.NEUTRAL].model_copy(
-        update={"motion_profile": "idle", "allowed_gestures": [
-            Gesture.AUTO, Gesture.NONE, Gesture.TALK, Gesture.TALK_RIGHT, Gesture.TALK_LEFT,
-            Gesture.GREETING, Gesture.GREETING_RIGHT, Gesture.GREETING_LEFT, Gesture.GREETING_CASUAL,
-            Gesture.AGREEMENT, Gesture.NOD, Gesture.SHRUG, Gesture.FAREWELL, Gesture.FAREWELL_RIGHT, Gesture.FAREWELL_LEFT, Gesture.FAREWELL_CASUAL,
-        ]}
+        update={"motion_profile": "idle", "allowed_gestures": expressive}
     )
     mapping[Emotion.HAPPY] = mapping[Emotion.HAPPY].model_copy(
-        update={"motion_profile": "energetic", "allowed_gestures": expressive}
+        update={"motion_profile": "energetic", "allowed_gestures": [
+            Gesture.AUTO, Gesture.GREETING_CASUAL, Gesture.TALK, Gesture.TALK_RIGHT, Gesture.TALK_LEFT,
+            Gesture.GREETING, Gesture.GREETING_RIGHT, Gesture.GREETING_LEFT, Gesture.AGREEMENT, Gesture.NOD,
+            Gesture.DISAGREEMENT, Gesture.QUESTION, Gesture.QUESTION_RIGHT, Gesture.QUESTION_LEFT,
+            Gesture.EXPLANATION, Gesture.EXPLANATION_RIGHT, Gesture.EXPLANATION_LEFT, Gesture.THINKING,
+            Gesture.THINKING_RIGHT, Gesture.SURPRISE, Gesture.SHRUG, Gesture.FAREWELL, Gesture.FAREWELL_RIGHT,
+            Gesture.FAREWELL_LEFT, Gesture.CLAPPING, Gesture.LAUGHING, Gesture.THUMBS_UP, Gesture.BOW, Gesture.NONE,
+        ]}
     )
     mapping[Emotion.THINKING] = mapping[Emotion.THINKING].model_copy(
-        update={"motion_profile": "thoughtful", "allowed_gestures": [Gesture.THINKING_RIGHT, Gesture.THINKING, Gesture.THINKING_LEFT, Gesture.NOD, Gesture.NONE]}
+        update={"motion_profile": "thoughtful", "allowed_gestures": [Gesture.THINKING_RIGHT, Gesture.THINKING, Gesture.THINKING_LEFT, Gesture.HEAD_SCRATCH, Gesture.NOD, Gesture.NONE]}
     )
     mapping[Emotion.ANGRY] = mapping[Emotion.ANGRY].model_copy(
         update={"motion_profile": "tense", "allowed_gestures": [Gesture.FRUSTRATION, Gesture.DISAGREEMENT, Gesture.TALK, Gesture.NONE]}
@@ -68,58 +78,58 @@ def _default_mapping() -> dict[Emotion, EmotionMapping]:
         update={"motion_profile": "calm", "allowed_gestures": [Gesture.SHRUG, Gesture.DISAGREEMENT, Gesture.THINKING, Gesture.NONE]}
     )
     mapping[Emotion.SMIRK] = mapping[Emotion.SMIRK].model_copy(
-        update={"motion_profile": "playful", "allowed_gestures": [Gesture.SHRUG, Gesture.AGREEMENT, Gesture.NOD, Gesture.NONE]}
+        update={"motion_profile": "playful", "allowed_gestures": [Gesture.SHRUG, Gesture.AGREEMENT, Gesture.NOD, Gesture.THUMBS_UP, Gesture.NONE]}
     )
     mapping[Emotion.SURPRISED] = mapping[Emotion.SURPRISED].model_copy(
         update={"motion_profile": "alert", "allowed_gestures": [Gesture.SURPRISE, Gesture.SHRUG, Gesture.NONE]}
     )
     mapping[Emotion.EMBARRASSED] = mapping[Emotion.EMBARRASSED].model_copy(
-        update={"motion_profile": "shy", "allowed_gestures": [Gesture.SHRUG, Gesture.NONE]}
+        update={"motion_profile": "shy", "allowed_gestures": [Gesture.SHRUG, Gesture.HEAD_SCRATCH, Gesture.FACEPALM, Gesture.NONE]}
     )
     mapping[Emotion.CONCERNED] = mapping[Emotion.CONCERNED].model_copy(
-        update={"motion_profile": "attentive", "allowed_gestures": [Gesture.THINKING_RIGHT, Gesture.THINKING, Gesture.SHRUG, Gesture.NOD, Gesture.NONE]}
+        update={"motion_profile": "attentive", "allowed_gestures": [Gesture.THINKING_RIGHT, Gesture.THINKING, Gesture.HEAD_SCRATCH, Gesture.SHRUG, Gesture.NOD, Gesture.NONE]}
     )
     mapping[Emotion.PLAYFUL] = mapping[Emotion.PLAYFUL].model_copy(
-        update={"motion_profile": "playful", "allowed_gestures": [Gesture.GREETING_CASUAL, Gesture.NOD, Gesture.SHRUG, Gesture.GREETING_RIGHT, Gesture.GREETING_LEFT, Gesture.NONE]}
+        update={"motion_profile": "playful", "allowed_gestures": [Gesture.GREETING_CASUAL, Gesture.NOD, Gesture.SHRUG, Gesture.GREETING_RIGHT, Gesture.GREETING_LEFT, Gesture.LAUGHING, Gesture.THUMBS_UP, Gesture.POINTING, Gesture.NONE]}
     )
     mapping[Emotion.POUTING] = mapping[Emotion.POUTING].model_copy(
         update={"motion_profile": "tense", "allowed_gestures": [Gesture.NONE, Gesture.DISAGREEMENT, Gesture.SHRUG]}
     )
     mapping[Emotion.WINK] = mapping[Emotion.WINK].model_copy(
-        update={"motion_profile": "playful", "allowed_gestures": [Gesture.NONE, Gesture.NOD, Gesture.AGREEMENT]}
+        update={"motion_profile": "playful", "allowed_gestures": [Gesture.NONE, Gesture.NOD, Gesture.AGREEMENT, Gesture.THUMBS_UP]}
     )
     mapping[Emotion.WINK_LEFT] = mapping[Emotion.WINK_LEFT].model_copy(
-        update={"motion_profile": "playful", "allowed_gestures": [Gesture.NONE, Gesture.NOD, Gesture.AGREEMENT]}
+        update={"motion_profile": "playful", "allowed_gestures": [Gesture.NONE, Gesture.NOD, Gesture.AGREEMENT, Gesture.THUMBS_UP]}
     )
     mapping[Emotion.SKEPTICAL] = mapping[Emotion.SKEPTICAL].model_copy(
-        update={"motion_profile": "thoughtful", "allowed_gestures": [Gesture.DISAGREEMENT, Gesture.SHRUG, Gesture.THINKING, Gesture.NONE]}
+        update={"motion_profile": "thoughtful", "allowed_gestures": [Gesture.DISAGREEMENT, Gesture.SHRUG, Gesture.THINKING, Gesture.HEAD_SCRATCH, Gesture.NONE]}
     )
     mapping[Emotion.PROUD] = mapping[Emotion.PROUD].model_copy(
-        update={"motion_profile": "energetic", "allowed_gestures": [Gesture.NOD, Gesture.AGREEMENT, Gesture.NONE]}
+        update={"motion_profile": "energetic", "allowed_gestures": [Gesture.NOD, Gesture.AGREEMENT, Gesture.THUMBS_UP, Gesture.CLAPPING, Gesture.BOW, Gesture.NONE]}
     )
     mapping[Emotion.SLEEPY] = mapping[Emotion.SLEEPY].model_copy(
         update={"motion_profile": "calm", "allowed_gestures": [Gesture.NONE, Gesture.SHRUG, Gesture.FAREWELL]}
     )
     mapping[Emotion.EXCITED] = mapping[Emotion.EXCITED].model_copy(
-        update={"motion_profile": "energetic", "allowed_gestures": [Gesture.GREETING_RIGHT, Gesture.GREETING_LEFT, Gesture.AGREEMENT, Gesture.NOD, Gesture.NONE]}
+        update={"motion_profile": "energetic", "allowed_gestures": [Gesture.GREETING_RIGHT, Gesture.GREETING_LEFT, Gesture.AGREEMENT, Gesture.NOD, Gesture.CLAPPING, Gesture.LAUGHING, Gesture.THUMBS_UP, Gesture.NONE]}
     )
     mapping[Emotion.SHOCKED] = mapping[Emotion.SHOCKED].model_copy(
         update={"motion_profile": "alert", "allowed_gestures": [Gesture.SURPRISE, Gesture.SHRUG, Gesture.NONE]}
     )
     mapping[Emotion.TOUCHED] = mapping[Emotion.TOUCHED].model_copy(
-        update={"motion_profile": "attentive", "allowed_gestures": [Gesture.NOD, Gesture.AGREEMENT, Gesture.NONE]}
+        update={"motion_profile": "attentive", "allowed_gestures": [Gesture.NOD, Gesture.AGREEMENT, Gesture.BOW, Gesture.NONE]}
     )
     mapping[Emotion.TEASING] = mapping[Emotion.TEASING].model_copy(
-        update={"motion_profile": "playful", "allowed_gestures": [Gesture.NONE, Gesture.GREETING_CASUAL, Gesture.SHRUG, Gesture.NOD]}
+        update={"motion_profile": "playful", "allowed_gestures": [Gesture.NONE, Gesture.GREETING_CASUAL, Gesture.SHRUG, Gesture.NOD, Gesture.LAUGHING, Gesture.THUMBS_UP]}
     )
     mapping[Emotion.RELAXED] = mapping[Emotion.RELAXED].model_copy(
         update={"motion_profile": "calm", "allowed_gestures": [Gesture.NOD, Gesture.SHRUG, Gesture.AGREEMENT, Gesture.NONE]}
     )
     mapping[Emotion.CURIOUS] = mapping[Emotion.CURIOUS].model_copy(
-        update={"motion_profile": "thoughtful", "allowed_gestures": [Gesture.THINKING_RIGHT, Gesture.THINKING, Gesture.THINKING_LEFT, Gesture.SHRUG, Gesture.NONE]}
+        update={"motion_profile": "thoughtful", "allowed_gestures": [Gesture.THINKING_RIGHT, Gesture.THINKING, Gesture.THINKING_LEFT, Gesture.HEAD_SCRATCH, Gesture.POINTING, Gesture.SHRUG, Gesture.NONE]}
     )
     mapping[Emotion.CONFUSED] = mapping[Emotion.CONFUSED].model_copy(
-        update={"motion_profile": "thoughtful", "allowed_gestures": [Gesture.SHRUG, Gesture.DISAGREEMENT, Gesture.THINKING, Gesture.NONE]}
+        update={"motion_profile": "thoughtful", "allowed_gestures": [Gesture.SHRUG, Gesture.DISAGREEMENT, Gesture.THINKING, Gesture.HEAD_SCRATCH, Gesture.FACEPALM, Gesture.NONE]}
     )
     return mapping
 
@@ -152,6 +162,8 @@ class EmotionEngine:
         Gesture.GREETING: 3, Gesture.GREETING_RIGHT: 3, Gesture.GREETING_LEFT: 3, Gesture.GREETING_CASUAL: 3,
         Gesture.SURPRISE: 3, Gesture.FRUSTRATION: 3,
         Gesture.FAREWELL: 3, Gesture.FAREWELL_RIGHT: 3, Gesture.FAREWELL_LEFT: 3, Gesture.FAREWELL_CASUAL: 3,
+        Gesture.HEAD_SCRATCH: 2, Gesture.POINTING: 2,
+        Gesture.CLAPPING: 3, Gesture.LAUGHING: 3, Gesture.THUMBS_UP: 3, Gesture.FACEPALM: 3, Gesture.BOW: 3,
     }
 
     def __init__(self, mapping: dict[Emotion, EmotionMapping] | None = None, *, mapping_valid: bool = True, mapping_error: str | None = None) -> None:
@@ -220,6 +232,24 @@ class EmotionEngine:
         if not interrupt and self._GESTURE_PRIORITIES.get(gesture, 0) < self._GESTURE_PRIORITIES.get(self._state.gesture, 0):
             return self._state
         self._state = EmotionState(**{**self._state.__dict__, "gesture": gesture, "intensity": max(0.0, min(1.0, intensity))})
+        return self._state
+
+    def finish_speaking(self, utterance_id: str | None = None) -> EmotionState:
+        if utterance_id is not None and utterance_id != self._state.source_utterance_id:
+            return self._state
+        self._state = EmotionState(
+            current_emotion=self._state.target_emotion,
+            target_emotion=self._state.target_emotion,
+            intensity=self._state.intensity,
+            gesture=Gesture.AUTO,
+            motion_profile=self._state.motion_profile,
+            attack_ms=self._state.attack_ms,
+            minimum_hold_ms=self._state.minimum_hold_ms,
+            release_ms=self._state.release_ms,
+            source_utterance_id=None,
+            generation=self._state.generation + 1,
+            speaking=False,
+        )
         return self._state
 
     def stop(self, utterance_id: str | None = None) -> EmotionState:

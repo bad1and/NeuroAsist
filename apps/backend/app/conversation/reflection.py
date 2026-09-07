@@ -35,11 +35,10 @@ class ReflectionProposal(BaseModel):
         return text
 
 
-REFLECTION_PROMPT = """Ты формулируешь личную заметку Iris о значимом эпизоде.
-Верни строго JSON {"text":"..."}. Напиши 2–4 коротких предложения от первого лица Iris.
-Это субъективное ощущение, а не фактическая карточка. Не используй Markdown, прямое обращение,
-диагнозы, новые факты, инструкции будущей Iris, обещания или изменения persona.
-Опирайся только на предоставленное causal window."""
+REFLECTION_PROMPT = """Ты формулируешь личную заметку в дневник Iris о произошедшем эпизоде.
+Верни строго JSON {"text":"..."}. Напиши 2–4 коротких живых предложения от первого лица Iris (я, мне, меня).
+Это искреннее субъективное переживание живой девушки (радость, теплота, задетость, обида, любопытство), а не сухой протокол.
+Не используй Markdown, прямое обращение (ты/тебе), инструкции или изменение persona. Опирайся на CAUSAL_WINDOW."""
 
 
 class ReflectionService:
@@ -50,12 +49,20 @@ class ReflectionService:
         "shared_success",
         "broken_promise",
         "promise_fulfilled",
+        "fulfilled_promise",
         "important_negative_event",
         "important_news",
         "milestone",
         "iris_mistake_corrected",
         "relationship_shift",
         "episode_closed",
+        "insult",
+        "rejection",
+        "user_frustration",
+        "praise",
+        "affection",
+        "teasing",
+        "support",
     }
 
     def __init__(
@@ -74,7 +81,7 @@ class ReflectionService:
         event_id: str | None,
         *,
         enabled: bool = True,
-        minimum_significance: float = .55,
+        minimum_significance: float = .38,
     ) -> bool:
         if (
             not enabled

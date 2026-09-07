@@ -90,6 +90,13 @@ MonoBehaviour:
   - {fileID: 11400000, guid: b6c3dc46590e4c1499c52ebf3a87adf0, type: 2}
   - {fileID: 11400000, guid: c7d4cee43781c434b9f2f35b1f09a16c, type: 2}
   - {fileID: 11400000, guid: 086c792284c731c45ae45723ba36fc54, type: 2}
+  - {fileID: 11400000, guid: a43a97d10c23ea648aac7fc6692ee849, type: 2}
+  - {fileID: 11400000, guid: d568a5085520aac4aa378b5349a61909, type: 2}
+  - {fileID: 11400000, guid: 57c046364c7f77645a5254de9fe37c65, type: 2}
+  - {fileID: 11400000, guid: 413c8ed9857208e489e33754004f48d7, type: 2}
+  - {fileID: 11400000, guid: 1ce9e5a5fe3165c4494c2945a99aa423, type: 2}
+  - {fileID: 11400000, guid: ec9fb2c8e0155b1488f016428b839539, type: 2}
+  - {fileID: 11400000, guid: da3f6121981fcfa4a981e9b0bf6adb62, type: 2}
   IdleSchedulingEnabled: 1
   AutoGestureIntervalMinSeconds: 3
   AutoGestureIntervalMaxSeconds: 8

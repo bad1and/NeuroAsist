@@ -108,6 +108,23 @@ class ConversationDecisionEngine:
         "которая", "которое", "которые", "которую", "которого", "которому",
         "которым", "котором", "которых", "которыми", "сколько", "чем",
     }
+    _safety_insult = re.compile(
+        r"(?iu)(?:"
+        r"\b(?:ты\s+)?(?:тупая|дура|шлюха|сука|мразь|заебала|заебал|бесполезная|бесполезный|уродка|тварь|хуесоска|ебанутая|ебанутый|конченая|конченый|дебилка|дебил|идиотка)\b|"
+        r"\b(?:пошла|пош[её]л|иди)\s+(?:нахер|нахуй|в\s+пизду|в\s+жопу)\b|"
+        r"\b(?:заткнись|отъебись|закрой\s+рот|закрой\s+пасть|херню\s+несешь|херню\s+неси)\b"
+        r")"
+    )
+    _safety_praise = re.compile(
+        r"(?iu)(?:"
+        r"\b(?:ты\s+)?(?:лучшая|умница|молодец|красотка|прелесть|обожаю\s+тебя)\b|"
+        r"\bспасибо(?:\s+(?:огромное|большое|тебе))?\b|"
+        r"\bвыручила|ты\s+супер|люблю\s+тебя\b"
+        r")"
+    )
+    _safety_apology = re.compile(
+        r"(?iu)\b(?:прости|прости\s+меня|извини|извини\s+меня|извиняюсь|сорян|сорри|я\s+был\s+неправ|я\s+была\s+неправа|мир\?)\b"
+    )
 
     def decide(
         self,
@@ -316,8 +333,9 @@ class ConversationDecisionEngine:
             "ambiguous", False, False, False, ("insufficient_addressing_evidence",),
         )
 
-    @staticmethod
+    @classmethod
     def appraise(
+        cls,
         transcript: str,
         message_id: str,
         participant: str = "primary",
@@ -330,11 +348,51 @@ class ConversationDecisionEngine:
             if old_value and old_value in previous_assistant_text.casefold():
                 return EventAppraisal(
                     event_kind="iris_mistake_corrected", confidence=.93, intensity=.58,
-                    valence=-.12, arousal=.35, direction="toward_iris",
+                    valence=0.0, arousal=0.0, direction="toward_iris",
                     target_participant=participant,
-                    emotion_impulses={"embarrassment": .35, "interest": .18},
-                    relationship_impulses={"tension": -.03}, cause_message_ids=[message_id],
+                    emotion_impulses={},
+                    relationship_impulses={}, cause_message_ids=[message_id],
                 )
+        if cls._safety_insult.search(text):
+            return EventAppraisal(
+                event_kind="insult",
+                confidence=0.85,
+                intensity=0.8,
+                valence=-0.8,
+                arousal=0.6,
+                direction="toward_iris",
+                target_participant=participant,
+                emotion_impulses={"hurt": 0.75, "anger": 0.65, "irritation": 0.8},
+                relationship_impulses={"trust": -0.08, "warmth": -0.07, "tension": 0.08},
+                cause_message_ids=[message_id],
+                serious=True,
+            )
+        if cls._safety_apology.search(text):
+            return EventAppraisal(
+                event_kind="apology",
+                confidence=0.8,
+                intensity=0.6,
+                valence=0.45,
+                arousal=0.2,
+                direction="toward_iris",
+                target_participant=participant,
+                emotion_impulses={"joy": 0.3},
+                relationship_impulses={"tension": -0.06, "warmth": 0.04},
+                cause_message_ids=[message_id],
+            )
+        if cls._safety_praise.search(text):
+            return EventAppraisal(
+                event_kind="praise",
+                confidence=0.8,
+                intensity=0.6,
+                valence=0.55,
+                arousal=0.35,
+                direction="toward_iris",
+                target_participant=participant,
+                emotion_impulses={"joy": 0.6, "interest": 0.25},
+                relationship_impulses={"warmth": 0.05, "trust": 0.03},
+                cause_message_ids=[message_id],
+            )
         return EventAppraisal(
             event_kind="neutral",
             confidence=0.7,
