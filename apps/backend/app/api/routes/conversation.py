@@ -2,7 +2,7 @@ import asyncio
 
 from pydantic import BaseModel, Field
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Body, HTTPException, Request, status
 
 from apps.backend.app.api.routes.settings import _commit_runtime_settings_patch
 from apps.backend.app.schemas.character_state import CharacterStatePublicView, EmotionCausePublicView, MoodPublicView, ReflectionPublicView, ReflectionSettingsView, RelationshipProfilePublicView
@@ -12,6 +12,10 @@ router = APIRouter(prefix="/conversation", tags=["conversation"])
 
 class StateResetRequest(BaseModel):
     scope: str = Field(pattern="^(mood|relationship)$")
+
+
+class SessionResetRequest(BaseModel):
+    boundary_reason: str = Field(default="new_dialog", pattern="^(new_dialog|manual_reset)$")
 
 
 def _state_view(request: Request) -> dict[str, object]:
@@ -212,7 +216,10 @@ async def open_session(request: Request) -> dict[str, object]:
 
 
 @router.post("/session/reset")
-async def reset_session(request: Request) -> dict[str, object]:
+async def reset_session(
+    request: Request,
+    payload: SessionResetRequest | None = Body(default=None),
+) -> dict[str, object]:
     store = getattr(request.app.state, "timeline_store", None)
     if store is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Timeline V2 is disabled")
@@ -229,7 +236,8 @@ async def reset_session(request: Request) -> dict[str, object]:
         service = getattr(request.app.state, "conversation_service", None)
         if service is not None:
             await service.close_session(previous_session_id)
-    result = await asyncio.to_thread(store.reset_session)
+    boundary_reason = payload.boundary_reason if payload is not None else "new_dialog"
+    result = await asyncio.to_thread(store.reset_session, boundary_reason)
     request.app.state.event_bus.publish(
         "conversation.session_reset", "warning", "Conversation session reset", result,
     )

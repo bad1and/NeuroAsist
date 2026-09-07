@@ -148,27 +148,23 @@ def test_finish_dialog_persists_messages_and_closed_episode_in_journal(monkeypat
         # Assistant reply
         client.post("/timeline/messages", json={"role": "assistant", "content": "Привет! Чем могу помочь?", "session_id": session, "input_mode": "text"})
 
-        # Finish dialog by calling close episode
-        closed_res = client.post("/episodes/current/close")
-        assert closed_res.status_code == 200
-        closed_ep = closed_res.json()["episode"]
-        assert closed_ep["status"] == "closed"
-        assert closed_ep["message_count"] == 2
-        assert closed_ep["ended_at"] is not None
-
-        # Reset session (as done on finish)
-        reset_res = client.post("/conversation/session/reset")
+        # Finish is one atomic reset: it closes the episode and starts a new session.
+        reset_res = client.post(
+            "/conversation/session/reset",
+            json={"boundary_reason": "manual_reset"},
+        )
         assert reset_res.status_code == 200
 
         # Verify journal has the closed episode
         journal = client.get("/timeline/journal").json()["items"]
-        assert len(journal) >= 1
-        journal_ep = next(item for item in journal if item["id"] == closed_ep["id"])
+        journal_ep = next(item for item in journal if item["boundary_reason"] == "manual_reset")
         assert journal_ep["status"] == "closed"
         assert journal_ep["message_count"] == 2
+        assert journal_ep["ended_at"] is not None
+        assert journal_ep["boundary_reason"] == "manual_reset"
 
         # Verify messages for the closed episode are preserved and returned
-        messages = client.get(f"/timeline/messages?episode_id={closed_ep['id']}").json()["items"]
+        messages = client.get(f"/timeline/messages?episode_id={journal_ep['id']}").json()["items"]
         assert len(messages) == 2
         assert [m["content"] for m in messages] == ["Привет, Iris", "Привет! Чем могу помочь?"]
 
@@ -177,7 +173,10 @@ def test_session_reset_endpoint_issues_new_id_and_rejects_stale_requests(monkeyp
     client, _ = make_client(monkeypatch, tmp_path)
     with client:
         first = client.post("/conversation/session/reset")
-        second = client.post("/conversation/session/reset")
+        second = client.post(
+            "/conversation/session/reset",
+            json={"boundary_reason": "manual_reset"},
+        )
         stale = client.post("/chat", json={"session_id": first.json()["session_id"], "message": "устарело"})
 
     assert first.status_code == 200 and second.status_code == 200

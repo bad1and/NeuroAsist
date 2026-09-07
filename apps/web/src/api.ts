@@ -144,8 +144,15 @@ export type ReflectionSettings = { enabled: boolean; min_significance: number };
 export function getReflectionSettings(): Promise<ReflectionSettings> { return requestJson("/conversation/state/reflections/settings"); }
 export function updateReflectionSettings(payload: ReflectionSettings): Promise<ReflectionSettings> { return requestJson("/conversation/state/reflections/settings", { method: "PATCH", body: JSON.stringify(payload) }); }
 
-export function resetConversationSession(): Promise<{ session_id: string; messages: number; episodes: number }> {
-  return requestJson("/conversation/session/reset", { method: "POST" });
+export type ConversationBoundaryReason = "new_dialog" | "manual_reset";
+
+export function resetConversationSession(
+  boundaryReason: ConversationBoundaryReason = "new_dialog",
+): Promise<{ session_id: string; messages: number; episodes: number }> {
+  return requestJson("/conversation/session/reset", {
+    method: "POST",
+    body: JSON.stringify({ boundary_reason: boundaryReason }),
+  });
 }
 
 export function getConversationSession(): Promise<{ session_id: string; created: boolean }> {
@@ -332,12 +339,6 @@ export function getTimelineMessages(
   if (sessionId) params.set("session_id", sessionId);
   if (episodeId) params.set("episode_id", episodeId);
   return requestJson(`/timeline/messages?${params.toString()}`);
-}
-
-export function closeCurrentEpisode(): Promise<{ episode: TimelineJournalItem } | null> {
-  return requestJson<{ episode: TimelineJournalItem }>("/episodes/current/close", {
-    method: "POST",
-  }).catch(() => null);
 }
 
 export function getTimelineJournal(): Promise<{ items: TimelineJournalItem[] }> {
