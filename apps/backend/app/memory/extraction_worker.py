@@ -88,7 +88,7 @@ class MemoryExtractionWorker:
         self._memory_service = memory_service
         self._llm_provider = llm_provider
         self._event_publisher = event_publisher
-        self._reflection_policy = reflection_policy or (lambda: (True, .55))
+        self._reflection_policy = reflection_policy or (lambda: (True, .38))
         self._respect_coalescing = respect_coalescing
 
     async def run_once(self) -> bool:

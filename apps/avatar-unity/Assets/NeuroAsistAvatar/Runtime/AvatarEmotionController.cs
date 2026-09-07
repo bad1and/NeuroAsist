@@ -671,7 +671,7 @@ namespace NeuroAsist.Avatar
         {
             if (string.IsNullOrWhiteSpace(value)) return false;
             var clean = value.Trim().ToLowerInvariant().Replace("-", "_");
-            return clean == "surprised" || clean == "shocked" || clean == "wink" || clean == "wink_left" ||
+            return clean == "wink" || clean == "wink_left" ||
                    clean == "teasing" || clean == "tongue_out" || clean == "tongue";
         }
 
@@ -683,8 +683,6 @@ namespace NeuroAsist.Avatar
             {
                 "wink" => 0.35f,
                 "wink_left" => 0.35f,
-                "surprised" => 0.75f,
-                "shocked" => 0.75f,
                 "teasing" => 1.80f,
                 "tongue_out" => 1.80f,
                 "tongue" => 1.80f,

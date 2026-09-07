@@ -122,6 +122,18 @@ def make_speech_segment(
         if directive is not None and directive.speed is not None
         else OVERRIDE_TEMPO[pace] if directive is not None else BASE_TEMPO[pace]
     )
+    motion_gesture = directive.gesture if directive is not None and directive.gesture and directive.gesture != "auto" else None
+    if motion_gesture is None:
+        if directive is not None and directive.emotion in ("pouting", "wink", "wink_left", "teasing", "sleepy"):
+            motion_gesture = "none"
+        else:
+            from apps.backend.app.voice.directives import infer_animation_directive
+            inferred = infer_animation_directive(None, text)
+            if inferred.gesture and inferred.gesture not in ("auto", "talk_right", "talk"):
+                motion_gesture = inferred.gesture
+            else:
+                motion_gesture = "talk_right" if sequence == 0 else "none"
+
     return SpeechSegment(
         text=text.strip(),
         pace=pace,
@@ -130,7 +142,7 @@ def make_speech_segment(
         pause_before_ms=35 if emphasis is SpeechEmphasis.LIGHT else 0,
         pause_after_ms=pause_after_ms(text, forced_clause_split=forced_clause_split),
         sequence=sequence,
-        motion_gesture=directive.gesture if directive is not None else "auto",
+        motion_gesture=motion_gesture,
         emotion=directive.emotion if directive is not None else None,
         emotion_intensity=directive.emotion_intensity if directive is not None else None,
     )
@@ -272,7 +284,7 @@ class LiveVoiceDirectiveParser:
             self._buffer = self._buffer[end + 2 :]
             raw_tag_lower = raw_tag.lower()
 
-            if raw_tag_lower.startswith("[[avatar"):
+            if any(raw_tag_lower.startswith(p) for p in ("[[avatar", "[avatar", "[[anim", "[anim", "[[gesture", "[gesture")):
                 from apps.backend.app.voice.directives import parse_avatar_directive
                 avatar_dir = parse_avatar_directive(raw_tag)
                 if self._accepted < self._max_directives:
@@ -290,7 +302,7 @@ class LiveVoiceDirectiveParser:
                     ))
                 continue
 
-            if raw_tag_lower.startswith("[[voice"):
+            if raw_tag_lower.startswith("[[voice") or raw_tag_lower.startswith("[voice"):
                 if self._accepted >= self._max_directives:
                     continue
                 match = self._VOICE_TAG_RE.match(raw_tag)
@@ -320,7 +332,7 @@ def clean_voice_directives(text: str) -> str:
     parser = LiveVoiceDirectiveParser(max_directives=99, max_motion_directives=99)
     parts = [*parser.feed(text), *parser.finish()]
     result = "".join(item for item in parts if isinstance(item, str))
-    result = re.sub(r"\[\[(?:avatar|voice)\s+[^\]]+\]\]", "", result, flags=re.IGNORECASE)
+    result = re.sub(r"\[\[?(?:avatar|voice|anim|gesture)\b[^\]]+\]\]?", "", result, flags=re.IGNORECASE)
     return result.strip()
 
 

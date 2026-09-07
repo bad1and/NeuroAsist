@@ -61,6 +61,13 @@ namespace NeuroAsist.Avatar
         Farewell_Left = 25,
         Farewell_Casual = 26,
         Nod = 27,
+        Head_Scratch = 28,
+        Clapping = 29,
+        Laughing = 30,
+        Thumbs_Up = 31,
+        Facepalm = 32,
+        Pointing = 33,
+        Bow = 34,
     }
 
     public enum IdleCategory { Micro, Normal, Long }

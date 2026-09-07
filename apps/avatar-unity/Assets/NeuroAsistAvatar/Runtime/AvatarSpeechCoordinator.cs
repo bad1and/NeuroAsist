@@ -114,6 +114,15 @@ namespace NeuroAsist.Avatar
                     emotion.SetSpeaking(true);
                     state.SetState(AvatarState.Speaking);
                     var gestureTag = AvatarMotionNames.ParseGesture(payload.gesture);
+                    if (gestureTag == GestureTag.Auto)
+                    {
+                        var parsedEmotion = AvatarMotionNames.ParseEmotion(payload.emotion);
+                        gestureTag = AvatarMotionNames.ResolveAutoGesture(parsedEmotion);
+                        if (gestureTag == GestureTag.None && !AvatarMotionNames.IsFacialMicroEmotion(parsedEmotion))
+                        {
+                            gestureTag = GestureTag.Talk;
+                        }
+                    }
                     if (gestureTag != GestureTag.None)
                     {
                         motion?.TriggerGesture(gestureTag, payload.gesture_intensity, payload.interrupt);
@@ -124,8 +133,6 @@ namespace NeuroAsist.Avatar
                 {
                     if (localGeneration != generation) return;
                     emotion.SetSpeaking(false);
-                    emotion.SetEmotion("neutral", 1f);
-                    motion?.SetEmotion(AvatarEmotion.Neutral);
                     fallback.ResetMouth();
                     motion?.StopGesture(false);
                     state.SetState(AvatarState.Idle);
@@ -135,8 +142,6 @@ namespace NeuroAsist.Avatar
                 {
                     if (localGeneration != generation) return;
                     emotion.SetSpeaking(false);
-                    emotion.SetEmotion("neutral", 1f);
-                    motion?.SetEmotion(AvatarEmotion.Neutral);
                     fallback.ResetMouth();
                     motion?.StopGesture(false);
                     state.SetState(AvatarState.Error);
@@ -151,8 +156,6 @@ namespace NeuroAsist.Avatar
             segmentEmotions.Clear();
             pendingStreamGesture = GestureTag.None;
             emotion.SetSpeaking(false);
-            emotion.SetEmotion("neutral", 1f);
-            motion?.SetEmotion(AvatarEmotion.Neutral);
             player.Stop();
             fallback.ResetMouth();
             motion?.StopGesture(true);
@@ -181,6 +184,15 @@ namespace NeuroAsist.Avatar
                     if (localGeneration != generation) return;
                     emotion.SetSpeaking(true);
                     state.SetState(AvatarState.Speaking);
+                    if (pendingStreamGesture == GestureTag.Auto)
+                    {
+                        var emo = AvatarMotionNames.ParseEmotion(payload.emotion);
+                        pendingStreamGesture = AvatarMotionNames.ResolveAutoGesture(emo);
+                        if (pendingStreamGesture == GestureTag.None && !AvatarMotionNames.IsFacialMicroEmotion(emo))
+                        {
+                            pendingStreamGesture = GestureTag.Talk;
+                        }
+                    }
                     if (pendingStreamGesture != GestureTag.None)
                     {
                         motion?.TriggerGesture(pendingStreamGesture, pendingStreamGestureIntensity, true);
@@ -191,8 +203,6 @@ namespace NeuroAsist.Avatar
                 {
                     if (localGeneration != generation) return;
                     emotion.SetSpeaking(false);
-                    emotion.SetEmotion("neutral", 1f);
-                    motion?.SetEmotion(AvatarEmotion.Neutral);
                     segmentEmotions.Clear();
                     pendingStreamGesture = GestureTag.None;
                     fallback.ResetMouth();
@@ -204,8 +214,6 @@ namespace NeuroAsist.Avatar
                 {
                     if (localGeneration != generation) return;
                     emotion.SetSpeaking(false);
-                    emotion.SetEmotion("neutral", 1f);
-                    motion?.SetEmotion(AvatarEmotion.Neutral);
                     segmentEmotions.Clear();
                     fallback.ResetMouth();
                     motion?.StopGesture(false);
@@ -221,11 +229,20 @@ namespace NeuroAsist.Avatar
             ApplyEmotion(payload.emotion ?? "neutral", intensity);
             pendingStreamGesture = AvatarMotionNames.ParseGesture(payload.gesture);
             pendingStreamGestureIntensity = intensity;
+            if (pendingStreamGesture == GestureTag.Auto)
+            {
+                var emo = AvatarMotionNames.ParseEmotion(payload.emotion);
+                pendingStreamGesture = AvatarMotionNames.ResolveAutoGesture(emo);
+                if (pendingStreamGesture == GestureTag.None && !AvatarMotionNames.IsFacialMicroEmotion(emo))
+                {
+                    pendingStreamGesture = GestureTag.Talk;
+                }
+            }
             if (pendingStreamGesture == GestureTag.None)
             {
                 motion?.StopGesture(false);
             }
-            else if (pendingStreamGesture != GestureTag.Auto && player != null && player.IsPlaying)
+            else if (player != null && player.IsPlaying)
             {
                 motion?.TriggerGesture(pendingStreamGesture, pendingStreamGestureIntensity, true);
             }

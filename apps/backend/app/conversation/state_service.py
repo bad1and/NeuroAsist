@@ -48,7 +48,7 @@ class CharacterStateService:
         self._renderer = StateToBehaviorRenderer()
         self._profiles = RelationshipProfileBuilder()
         self._reflections = ReflectionService(store, reflection_llm_provider, event_publisher)
-        self._reflection_policy = reflection_policy or (lambda: (True, .55))
+        self._reflection_policy = reflection_policy or (lambda: (True, .38))
         self._publish = event_publisher
         self._decision = ConversationDecisionEngine()
         self._lock = RLock()
@@ -101,14 +101,9 @@ class CharacterStateService:
         participant_key: str = "primary",
     ) -> None:
         """Synchronize character state with the AI model's authoritative neural emotion."""
-        text_lower = reply_text.casefold()
-        forgiving_markers = (
-            "прощаю", "простила", "ладно, проехали", "проехали", "всё хорошо",
-            "все хорошо", "не сержусь", "не обижаюсь", "не дуюсь", "мир",
-            "да ладно тебе", "забыли", "ничего страшного", "всё в порядке", "все в порядке",
-        )
-        is_forgiving = any(marker in text_lower for marker in forgiving_markers)
-        is_positive_or_neutral = emotion in {"happy", "joy", "neutral", "smirk", "playfulness"}
+        # Pure neural control: character state aligns with the AI model's authoritative neural emotion
+        is_positive = emotion in {"happy", "joy", "smirk", "playfulness"}
+        is_neutral = emotion == "neutral"
 
         canon_map = {
             "happy": "joy",
@@ -118,6 +113,7 @@ class CharacterStateService:
             "angry": "anger",
             "anger": "anger",
             "annoyed": "irritation",
+            "hurt": "hurt",
             "smirk": "playfulness",
             "thinking": "interest",
             "concerned": "anxiety",
@@ -127,12 +123,12 @@ class CharacterStateService:
         with self._lock:
             self._ensure_loaded()
             has_repair_cause = any(
-                c.get("resolution_kind") == "apology_repair" or c.get("event_kind") in {"insult", "broken_promise"}
+                c.get("resolution_kind") == "apology_repair" or c.get("event_kind") in {"insult", "broken_promise", "important_negative_event"}
                 for c in self._affect.causes
             )
             now_iso = datetime.now(UTC).isoformat(timespec="milliseconds")
 
-            if is_forgiving or (has_repair_cause and is_positive_or_neutral):
+            if is_positive and (has_repair_cause or self._affect.primary_emotion in {"irritation", "anger", "hurt"}):
                 self._reducer.resolve_forgiveness(self._affect)
                 if canonical in {"joy", "happy"}:
                     self._affect.joy = max(self._affect.joy, 0.45)
@@ -143,15 +139,25 @@ class CharacterStateService:
             elif canonical in canon_map.values():
                 setattr(self._affect, canonical, max(getattr(self._affect, canonical, 0.0), min(1.0, intensity * 0.85)))
                 self._affect.primary_emotion = canonical
-                if canonical in {"anger", "irritation"}:
+                if canonical == "anger":
                     self._affect.joy = 0.0
-                    self._affect.cooling_down_turns = 2
+                    self._affect.cooling_down_turns = max(self._affect.cooling_down_turns, 4)
                     self._affect.playfulness = max(0.0, self._affect.playfulness - 0.5)
                     self._affect.valence = max(-1.0, min(-0.15, self._affect.valence - 0.25))
                     for c in self._affect.causes:
                         if c.get("event_kind") in {"shared_success", "important_news", "praise"}:
                             c["status"] = "expired"
                     self._affect.causes = [c for c in self._affect.causes if c.get("status", "active") == "active"]
+                elif canonical == "irritation":
+                    self._affect.joy = 0.0
+                    self._affect.cooling_down_turns = max(self._affect.cooling_down_turns, 3)
+                    self._affect.playfulness = max(0.0, self._affect.playfulness - 0.4)
+                    self._affect.valence = max(-1.0, min(-0.15, self._affect.valence - 0.20))
+                elif canonical == "hurt":
+                    self._affect.joy = 0.0
+                    self._affect.cooling_down_turns = max(self._affect.cooling_down_turns, 4)
+                    self._affect.playfulness = max(0.0, self._affect.playfulness - 0.5)
+                    self._affect.valence = max(-1.0, min(-0.25, self._affect.valence - 0.35))
                 elif canonical in {"joy", "playfulness"}:
                     self._affect.cooling_down_turns = 0
                     self._affect.irritation = 0.0
@@ -184,7 +190,7 @@ class CharacterStateService:
             self._emit("character.state.assistant_turn_recorded", "info", {
                 "emotion": emotion,
                 "primary_emotion": self._affect.primary_emotion,
-                "forgiven": is_forgiving,
+                "forgiven": is_positive and (has_repair_cause or self._affect.primary_emotion == "joy"),
                 "intensity": intensity,
             })
 

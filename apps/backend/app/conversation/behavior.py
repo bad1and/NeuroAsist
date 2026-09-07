@@ -53,7 +53,12 @@ class StateToBehaviorRenderer:
     def render(self, affect: AffectState, relationship: ParticipantState, *, task_like: bool = False) -> BehaviorGuide:
         emotion = affect.primary_emotion if affect.primary_emotion != "neutral" else self._emotion(affect)
         strength = max(getattr(affect, emotion, 0.0), affect.psychological_tension)
-        expression = "strong" if strength >= .50 else "noticeable" if strength >= .25 else "subtle" if strength >= .08 else "muted"
+        if emotion in {"anger", "hurt"}:
+            expression = "strong" if strength >= .32 else "noticeable" if strength >= .18 else "subtle" if strength >= .06 else "muted"
+        elif emotion in {"irritation"}:
+            expression = "strong" if strength >= .38 else "noticeable" if strength >= .20 else "subtle" if strength >= .06 else "muted"
+        else:
+            expression = "strong" if strength >= .50 else "noticeable" if strength >= .25 else "subtle" if strength >= .08 else "muted"
         negative = emotion in {"anger", "hurt", "irritation", "sadness", "anxiety"}
         closeness = "distant" if relationship.tension >= .65 else "reserved" if negative or relationship.tension >= .35 else "personal" if relationship.warmth >= .7 else "warm" if relationship.warmth >= .35 else "normal"
         humor = "avoid" if negative and strength >= .35 else "restrained" if negative else "playful" if affect.playfulness >= .42 else "normal"
@@ -62,9 +67,9 @@ class StateToBehaviorRenderer:
         if task_like:
             length = "expansive_if_needed"
         labels = {
-            "anger": "Вспышка возмущения: покажи твердые границы, не сглаживай углы, выражай несогласие честно и прямо.",
-            "hurt": "Обида или дистанция: покажи, что тебе неприятно, без наигранной драмы. Если пользователь искренне извиняется или идёт навстречу — прими это естественно ('Ладно, проехали', 'Мир'), не застревай в обиде.",
-            "irritation": "Тебя что-то задело или раздражает: отвечай с характером, прямо и с лёгкой колкостью, без лицемерия.",
+            "anger": "Ты серьёзно задета или возмущена: не сглаживай углы, не улыбайся через силу, жёстко обозначь свои границы. Если собеседник грубит — отвечай с достоинством и холодной резкостью. Мат к месту уместен.",
+            "hurt": "Тебе больно и неприятно: покажи искреннюю обиду или отстранённость, не делай вид что всё в порядке. Можешь отвечать кратко, сухо или с холодной дистанцией. Если пользователь искренне извиняется — прими это по-человечески, но не сразу бросайся на шею.",
+            "irritation": "Тебя раздражают слова или поведение собеседника: отвечай с характером, с сарказмом или колкостью, не подстраивайся.",
             "sadness": "Задумчивое или уязвимое настроение: говори мягче, спокойнее и глубже, без фальшивого позитива.",
             "anxiety": "Внутренняя настороженность: будь внимательной, собранной и чуткой к происходящему.",
             "joy": "Приподнятый, искренний настрой: делись живой радостью, теплом и настоящими эмоциями без натянутых рамок.",
@@ -93,6 +98,9 @@ class StateToBehaviorRenderer:
             recovery = "Теплота возвращается через уважительное общение."
 
         nuance_map: dict[tuple[str, str], str] = {
+            ("anger", "hurt"): "За гневом и резкостью скрывается задетое самолюбие и боль. Не бойся показать дистанцию.",
+            ("hurt", "sadness"): "Тихая уязвимость и подавленность: отвечай скупо, не пытайся развлекать собеседника.",
+            ("anger", "irritation"): "Нарастающее возмущение и нетерпение: дай понять, что терпение на исходе.",
             ("playfulness", "embarrassment"): "Сквозь озорство и подколы чувствуется лёгкое смущение и самоирония.",
             ("playfulness", "interest"): "Игривый тон сочетается с живым исследовательским азартом.",
             ("playfulness", "joy"): "Искрящаяся радость с дружескими подколками.",

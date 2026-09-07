@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from apps.backend.app.avatar.emotion_engine import EmotionEngine
 from apps.backend.app.schemas.character import Emotion, Gesture
 
@@ -113,4 +115,57 @@ def test_explicit_hand_gestures_apply_under_any_emotion() -> None:
         emotion=Emotion.POUTING, gesture=Gesture.GREETING_RIGHT, intensity=.8, utterance_id="3", force=True
     )
     assert explicit_meta.gesture is Gesture.GREETING_RIGHT
+
+
+def test_finish_speaking_preserves_target_emotion_for_neural_continuity() -> None:
+    engine = EmotionEngine()
+    engine.apply_metadata(emotion=Emotion.HAPPY, gesture=Gesture.GREETING_RIGHT, intensity=.85, utterance_id="u-1")
+    assert engine.state.target_emotion is Emotion.HAPPY
+    assert engine.state.speaking is True
+
+    finished = engine.finish_speaking("u-1")
+    assert finished.target_emotion is Emotion.HAPPY
+    assert finished.intensity == .85
+    assert finished.speaking is False
+    assert finished.source_utterance_id is None
+
+
+@pytest.mark.anyio
+async def test_avatar_service_playback_finished_preserves_neural_emotion() -> None:
+    from apps.backend.app.avatar.connection_manager import AvatarConnectionManager
+    from apps.backend.app.avatar.protocol import parse_incoming
+    from apps.backend.app.avatar.service import AvatarService
+    from apps.backend.app.events.bus import EventBus
+
+    class DummySocket:
+        async def send_json(self, _msg: dict) -> None:
+            pass
+
+    manager = AvatarConnectionManager()
+    client = await manager.register(DummySocket())
+    service = AvatarService(manager, EventBus(), enabled=True, heartbeat_interval_seconds=10, client_timeout_seconds=30)
+
+    # Start speech with neural emotion 'smirk'
+    await service.speak(
+        session_id="s1", utterance_id="utt-99", text="Шутка", audio_url="/test.wav",
+        emotion="smirk", intent="casual_chat",
+    )
+    assert service.emotion_engine.state.target_emotion is Emotion.SMIRK
+    assert service.emotion_engine.state.speaking is True
+
+    # Playback finished from Unity
+    envelope, payload = parse_incoming({
+        "protocol_version": 1,
+        "type": "avatar.playback.finished",
+        "message_id": "m1",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "session_id": "s1",
+        "payload": {"utterance_id": "utt-99"},
+    })
+    await service.inbound(client.client_id, envelope, payload)
+
+    # Must preserve SMIRK! Not wiped to neutral
+    assert service.emotion_engine.state.target_emotion is Emotion.SMIRK
+    assert service.emotion_engine.state.speaking is False
+
 

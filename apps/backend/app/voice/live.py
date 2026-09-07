@@ -23,6 +23,7 @@ from apps.backend.app.voice.providers import (
 from apps.backend.app.voice.text import TextChunker, TextNormalizer
 from apps.backend.app.voice.directives import (
     AvatarDirective, LiveDirectiveParser, clean_live_reply, make_live_directive_expressive,
+    infer_animation_directive,
 )
 from apps.backend.app.voice.delivery import (
     LiveVoiceDirectiveParser,
@@ -397,6 +398,11 @@ class VoiceSessionManager:
                     text,
                     sequence=sequence,
                     base_pace=context.base_pace,
+                    directive=VoiceDirective(
+                        gesture=directive.gesture if sequence == 0 else "none",
+                        emotion=directive.emotion.value,
+                        emotion_intensity=directive.intensity,
+                    ),
                     forced_clause_split=text.rstrip().endswith((",", ";", ":")),
                 )
                 segment = SpeechSegment(
@@ -410,9 +416,9 @@ class VoiceSessionManager:
                     pause_before_ms=segment.pause_before_ms,
                     pause_after_ms=segment.pause_after_ms,
                     sequence=segment.sequence,
-                    motion_gesture=segment.motion_gesture,
-                    emotion=segment.emotion,
-                    emotion_intensity=segment.emotion_intensity,
+                    motion_gesture=directive.gesture if sequence == 0 and directive.gesture != "auto" else segment.motion_gesture,
+                    emotion=directive.emotion.value,
+                    emotion_intensity=directive.intensity,
                 )
                 if sequence == 0:
                     self._publish_latency(
@@ -486,7 +492,7 @@ class VoiceSessionManager:
         normalizer = TextNormalizer()
         pending: asyncio.Task | None = None
         first_delta_seen = False
-        directive_parser = LiveDirectiveParser()
+        directive_parser = LiveDirectiveParser(user_text=transcript)
         voice_directive_parser = LiveVoiceDirectiveParser()
         directive_sent = False
         pending_voice_directive: VoiceDirective | None = None
@@ -505,10 +511,32 @@ class VoiceSessionManager:
             await task
 
         async def apply_directive(directive: AvatarDirective) -> None:
-            nonlocal directive_sent, latest_applied_directive, active_emotion, active_emotion_intensity
+            nonlocal directive_sent, latest_applied_directive, active_emotion, active_emotion_intensity, pending_voice_directive
+            effective_gesture = directive.gesture
+            effective_emotion = directive.emotion
+            if effective_gesture in ("auto", None, ""):
+                inferred = infer_animation_directive(transcript, None)
+                if inferred.gesture and inferred.gesture != "auto":
+                    effective_gesture = inferred.gesture
+                    if effective_emotion == Emotion.NEUTRAL:
+                        effective_emotion = inferred.emotion
+                else:
+                    effective_gesture = "talk_right"
+
+            directive = AvatarDirective(
+                emotion=effective_emotion,
+                gesture=effective_gesture,
+                intensity=directive.intensity,
+            )
             latest_applied_directive = directive
             active_emotion = directive.emotion.value
             active_emotion_intensity = directive.intensity
+            if pending_voice_directive is None and directive.gesture:
+                pending_voice_directive = VoiceDirective(
+                    gesture=directive.gesture,
+                    emotion=directive.emotion.value,
+                    emotion_intensity=directive.intensity,
+                )
             # Pure neural authority: the AI model's directive is authoritative and unmodified.
             if not directive_sent:
                 directive_sent = True
@@ -709,7 +737,8 @@ class VoiceSessionManager:
                     for raw_segment in chunker.feed(item):
                         await enqueue_spoken_segment(raw_segment)
             if not directive_sent:
-                await apply_directive(AvatarDirective())
+                inferred = infer_animation_directive(transcript, "".join(reply_parts))
+                await apply_directive(inferred)
             for raw_segment in chunker.flush():
                 await enqueue_spoken_segment(raw_segment)
             completed_reply = re.sub(r"[ \t]+", " ", "".join(reply_parts)).strip()

@@ -279,13 +279,13 @@ class AvatarService:
             self.event_bus.publish("avatar.speaking_started", "info", "Avatar playback started", {"client_id": client_id, "utterance_id": payload.utterance_id, "client_latency_ms": payload.client_latency_ms})
         elif envelope.type == "avatar.playback.finished":
             await self.manager.update(client_id, current_utterance_id=None, state="idle")
-            self.emotion_engine.stop(payload.utterance_id)
+            self.emotion_engine.finish_speaking(payload.utterance_id)
             self.event_bus.publish("avatar.speaking_finished", "info", "Avatar playback finished", {"client_id": client_id, "utterance_id": payload.utterance_id})
             if self._playback_finished_handler is not None:
                 await self._playback_finished_handler(payload.utterance_id)
         elif envelope.type == "avatar.playback.failed":
             await self.manager.update(client_id, current_utterance_id=None, state="idle")
-            self.emotion_engine.stop(payload.utterance_id)
+            self.emotion_engine.finish_speaking(payload.utterance_id)
             self.event_bus.publish("avatar.playback_failed", "warning", "Avatar playback failed", {"client_id": client_id, "utterance_id": payload.utterance_id, "reason": payload.reason})
         elif envelope.type == "avatar.state.changed":
             await self.manager.update(client_id, state=payload.state)

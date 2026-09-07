@@ -17,19 +17,20 @@ def test_profanity_and_insult_appraisal(tmp_path: Path) -> None:
     store.init_db()
     service = CharacterStateService(store)
 
-    # User says something aggressive, but keywords do not mechanically trigger hurt
+    # User directs aggression at Iris -> triggers insult safety-net appraisal
     ctx = service.prepare(transcript="Пошёл нахуй отсюда", message_id="msg-profanity-1")
-    assert ctx.appraisal.event_kind == "neutral"
+    assert ctx.appraisal.event_kind == "insult"
+    assert ctx.affect.hurt > 0 or ctx.affect.anger > 0 or ctx.affect.irritation > 0
 
-    # The AI model evaluates the turn and decides to be annoyed/distant
+    # The AI model evaluates the turn and responds with indignation/cold boundaries
     service.record_assistant_turn(
         reply_text="Не смей разговаривать со мной в таком тоне.",
         emotion="annoyed",
         intensity=0.85,
     )
     current = service.current()
-    assert current.affect.primary_emotion == "irritation"
-    assert current.affect.irritation > 0
+    assert current.affect.primary_emotion in {"irritation", "anger", "hurt"}
+    assert current.affect.irritation > 0 or current.affect.anger > 0
 
 
 def test_praise_and_compliments_appraisal(tmp_path: Path) -> None:
@@ -37,9 +38,10 @@ def test_praise_and_compliments_appraisal(tmp_path: Path) -> None:
     store.init_db()
     service = CharacterStateService(store)
 
-    # Keywords do not trigger praise automatically
+    # User praises Iris -> triggers praise appraisal
     ctx = service.prepare(transcript="Ирис ты молодец, всё супер и круто!", message_id="msg-praise-1")
-    assert ctx.appraisal.event_kind == "neutral"
+    assert ctx.appraisal.event_kind == "praise"
+    assert ctx.affect.joy > 0
 
     # The AI model responds with genuine joy
     service.record_assistant_turn(
@@ -184,3 +186,81 @@ def test_live_directive_preserves_llm_emotion_even_with_trigger_words() -> None:
     # Must preserve SMIRK instead of forcing ANNOYED
     assert expressive2.emotion == Emotion.SMIRK
     assert expressive2.gesture == "shrug"
+
+
+def test_insult_escalation_and_cooling(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    service = CharacterStateService(store)
+
+    # First insult
+    ctx1 = service.prepare(transcript="Ты тупая дура", message_id="msg-esc-1")
+    assert ctx1.appraisal.event_kind == "insult"
+    hurt1 = ctx1.affect.hurt
+
+    # Second insult escalates hurt and irritation
+    ctx2 = service.prepare(transcript="Заткнись и отъебись", message_id="msg-esc-2")
+    assert ctx2.appraisal.event_kind == "insult"
+    assert ctx2.affect.hurt >= hurt1
+
+    # Assistant reacts with anger
+    service.record_assistant_turn(
+        reply_text="Ты переходишь все границы. Разговаривай нормально или не пиши мне.",
+        emotion="angry",
+        intensity=0.9,
+    )
+    current = service.current()
+    assert current.affect.primary_emotion in {"anger", "irritation", "hurt"}
+    assert current.affect.cooling_down_turns >= 4
+
+
+def test_forgiveness_after_insult(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    service = CharacterStateService(store)
+
+    # User insults Iris
+    service.prepare(transcript="Пошла нахер отсюда", message_id="msg-forgive-1")
+    service.record_assistant_turn(
+        reply_text="Понятно. Больше не хочу с тобой общаться.",
+        emotion="angry",
+        intensity=0.9,
+    )
+    assert service.current().affect.cooling_down_turns >= 4
+
+    # User genuinely apologizes -> triggers apology appraisal and dissolves malice
+    ctx_apology = service.prepare(transcript="Прости меня пожалуйста, я был неправ и сорвался", message_id="msg-forgive-2")
+    assert ctx_apology.appraisal.event_kind == "apology"
+
+    # Assistant accepts apology with warmth
+    service.record_assistant_turn(
+        reply_text="Ладно, проехали. Давай без этого больше.",
+        emotion="happy",
+        intensity=0.7,
+    )
+    current = service.current()
+    assert current.affect.hurt == 0.0
+    assert current.affect.anger == 0.0
+    assert current.affect.cooling_down_turns == 0
+    assert current.affect.primary_emotion == "joy"
+
+
+def test_emotion_half_lives_decay() -> None:
+    from datetime import UTC, datetime, timedelta
+    reducer = CharacterStateReducer()
+    t0 = datetime(2026, 9, 1, 12, 0, 0, tzinfo=UTC)
+    state = AffectState(
+        hurt=0.8,
+        anger=0.8,
+        irritation=0.8,
+        updated_at=t0.isoformat(timespec="milliseconds"),
+    )
+
+    # Decay after 35 minutes (half-life of anger)
+    t1 = t0 + timedelta(minutes=35)
+    decayed = reducer.decay(state, now=t1)
+    # Anger should be roughly half (0.8 * 0.5 = 0.4)
+    assert 0.35 <= decayed.anger <= 0.45
+    # Hurt has 120m half-life, so at 35m it should still be significant (> 0.6)
+    assert decayed.hurt > 0.60
+

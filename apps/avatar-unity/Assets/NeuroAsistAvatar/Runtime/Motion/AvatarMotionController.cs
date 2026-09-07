@@ -147,10 +147,20 @@ namespace NeuroAsist.Avatar
 
         public void QueueSpeechCue(int sequence, float durationSeconds, AvatarMotionCuePayload cue)
         {
+            var requestedTag = AvatarMotionNames.ParseGesture(cue != null ? cue.gesture : "auto");
+            if (requestedTag == GestureTag.Auto && cue != null && !string.IsNullOrEmpty(cue.emotion))
+            {
+                var parsedEmo = AvatarMotionNames.ParseEmotion(cue.emotion);
+                if (!AvatarMotionNames.IsFacialMicroEmotion(parsedEmo))
+                {
+                    var resolved = AvatarMotionNames.ResolveAutoGesture(parsedEmo);
+                    requestedTag = resolved != GestureTag.None ? resolved : GestureTag.Talk;
+                }
+            }
             speechCues[sequence] = new SpeechMotionCue
             {
                 Duration = Mathf.Max(0f, durationSeconds),
-                Requested = AvatarMotionNames.ParseGesture(cue != null ? cue.gesture : "auto"),
+                Requested = requestedTag,
                 Emphasized = cue != null && cue.emphasized,
             };
         }
@@ -161,8 +171,9 @@ namespace NeuroAsist.Avatar
             speechCues.Remove(sequence);
             if (!speaking || gestureController == null) return;
 
-            var isExplicit = cue.Requested != GestureTag.Auto && cue.Requested != GestureTag.None;
-            if (!isExplicit)
+            var isSpeech = cue.Requested == GestureTag.Talk || cue.Requested == GestureTag.Talk_Right || cue.Requested == GestureTag.Talk_Left;
+            var isAction = cue.Requested != GestureTag.Auto && cue.Requested != GestureTag.None && !isSpeech;
+            if (!isAction)
             {
                 if (gestureController.IsPlaying) return;
                 if (!CanScheduleAutomaticAccent(cue.Duration, cue.Requested, Time.unscaledTime, automaticAccentTimes)) return;
@@ -171,8 +182,8 @@ namespace NeuroAsist.Avatar
             var tag = ResolveSpeechGesture(cue);
             if (tag == GestureTag.None || tag == GestureTag.Auto) return;
             var intensity = (cue.Emphasized ? .86f : .68f) * (profile == null ? 1f : profile.GestureIntensityMultiplier);
-            if (!gestureController.Trigger(tag, emotion, true, intensity, isExplicit, new List<string>(recentAutomaticVariants))) return;
-            if (!isExplicit)
+            if (!gestureController.Trigger(tag, emotion, true, intensity, isAction, new List<string>(recentAutomaticVariants))) return;
+            if (!isAction)
             {
                 RememberAutomaticVariant(gestureController.ActiveVariantId, Time.unscaledTime);
             }

@@ -91,7 +91,9 @@ namespace NeuroAsist.AvatarEditor
                 GestureTag.Thinking_Right, GestureTag.Thinking_Left,
                 GestureTag.Question_Right, GestureTag.Question_Left,
                 GestureTag.Explanation_Right, GestureTag.Explanation_Left,
-                GestureTag.Talk_Right, GestureTag.Talk_Left, GestureTag.Nod
+                GestureTag.Talk_Right, GestureTag.Talk_Left, GestureTag.Nod,
+                GestureTag.Head_Scratch, GestureTag.Clapping, GestureTag.Laughing,
+                GestureTag.Thumbs_Up, GestureTag.Facepalm, GestureTag.Pointing, GestureTag.Bow
             })
             {
                 if (!existingTags.Contains(tag))
@@ -165,15 +167,43 @@ namespace NeuroAsist.AvatarEditor
                     value.AnimatorState = "ExplanationMirror"; break;
                 case GestureTag.Nod:
                     value.AnimatorState = "Agreement"; break;
+                case GestureTag.Head_Scratch:
+                    value.AnimatorState = "HeadScratch"; break;
+                case GestureTag.Clapping:
+                    value.AnimatorState = "Clapping"; break;
+                case GestureTag.Laughing:
+                    value.AnimatorState = "Laughing"; break;
+                case GestureTag.Thumbs_Up:
+                    value.AnimatorState = "ThumbsUp"; break;
+                case GestureTag.Facepalm:
+                    value.AnimatorState = "Facepalm"; break;
+                case GestureTag.Pointing:
+                    value.AnimatorState = "Pointing"; break;
+                case GestureTag.Bow:
+                    value.AnimatorState = "Bow"; break;
                 default:
                     value.AnimatorState = tag.ToString(); break;
             }
-            value.Priority = tag == GestureTag.Greeting || tag == GestureTag.Farewell
+            if (tag == GestureTag.Head_Scratch || tag == GestureTag.Clapping || tag == GestureTag.Laughing
+                || tag == GestureTag.Thumbs_Up || tag == GestureTag.Facepalm || tag == GestureTag.Pointing
+                || tag == GestureTag.Bow)
+            {
+                value.Priority = 60;
+            }
+            else if (tag == GestureTag.Greeting || tag == GestureTag.Farewell
                 || tag == GestureTag.Greeting_Right || tag == GestureTag.Greeting_Left
                 || tag == GestureTag.Greeting_Casual || tag == GestureTag.Farewell_Right
-                || tag == GestureTag.Farewell_Left || tag == GestureTag.Farewell_Casual ? 50 : 10;
-            value.HeadLookSuppression = tag == GestureTag.Thinking || tag == GestureTag.Thinking_Right || tag == GestureTag.Thinking_Left ? .3f
-                : (tag == GestureTag.Nod || tag == GestureTag.Agreement || tag == GestureTag.Disagreement ? .7f : 0f);
+                || tag == GestureTag.Farewell_Left || tag == GestureTag.Farewell_Casual)
+            {
+                value.Priority = 50;
+            }
+            else
+            {
+                value.Priority = 10;
+            }
+            value.HeadLookSuppression = tag == GestureTag.Facepalm || tag == GestureTag.Head_Scratch ? .6f
+                : (tag == GestureTag.Thinking || tag == GestureTag.Thinking_Right || tag == GestureTag.Thinking_Left ? .3f
+                : (tag == GestureTag.Nod || tag == GestureTag.Agreement || tag == GestureTag.Disagreement || tag == GestureTag.Bow ? .7f : 0f));
             if (tag == GestureTag.Talk || tag == GestureTag.Talk_Right || tag == GestureTag.Talk_Left
                 || tag == GestureTag.Explanation || tag == GestureTag.Explanation_Right || tag == GestureTag.Explanation_Left
                 || tag == GestureTag.Greeting_Casual || tag == GestureTag.Farewell_Casual)
@@ -208,7 +238,8 @@ namespace NeuroAsist.AvatarEditor
             var layers = controller.layers;
             AddStates(layers[1].stateMachine, new[] {
                 "Empty", "TalkGesture01", "Greeting", "GreetingCasual", "Agreement", "Disagreement",
-                "Question", "Explanation", "Thinking", "Surprise", "Frustration", "Farewell", "FarewellCasual", "Shrug"
+                "Question", "Explanation", "Thinking", "Surprise", "Frustration", "Farewell", "FarewellCasual", "Shrug",
+                "HeadScratch", "Clapping", "Laughing", "ThumbsUp", "Facepalm", "Pointing", "Bow"
             }, "Empty");
             controller.layers = layers;
             return controller;
@@ -227,11 +258,20 @@ namespace NeuroAsist.AvatarEditor
                 "X Bot@Idle", "X Bot@Thinking",
                 "X Bot@Talking", "X Bot@TalkingQuestion", "X Bot@Waving", "X Bot@WavingGoodbye", "X Bot@Agreeing",
                 "X Bot@Shaking Head No", "X Bot@Shrugging", "X Bot@Surprised", "X Bot@Angry",
+                "X Bot@Look Around", "X Bot@Head Scratch", "X Bot@Bashful", "X Bot@Clapping", "X Bot@Laughing",
+                "X Bot@Thumbs Up", "X Bot@Standing Thumbs Up", "X Bot@Facepalm", "X Bot@Pointing", "X Bot@Bow",
             })
             {
                 var path = "Assets/NeuroAsistAvatar/Animations/" + item + ".fbx";
                 foreach (var asset in AssetDatabase.LoadAllAssetsAtPath(path))
                     if (asset is AnimationClip clip && !clip.name.StartsWith("__preview__")) { clips[item] = clip; break; }
+            }
+
+            string ResolveClip(params string[] candidates)
+            {
+                foreach (var candidate in candidates)
+                    if (clips.ContainsKey(candidate)) return candidate;
+                return candidates[candidates.Length - 1];
             }
 
             var assignments = new Dictionary<string, string>
@@ -244,7 +284,7 @@ namespace NeuroAsist.AvatarEditor
                 ["IdleEnergetic"] = "X Bot@Idle",
                 ["IdleSad"] = "X Bot@Idle",
                 ["IdleThinking"] = "X Bot@Idle",
-                ["IdleLookAround"] = "X Bot@Idle",
+                ["IdleLookAround"] = ResolveClip("X Bot@Look Around", "X Bot@Idle"),
                 ["IdleShiftWeight"] = "X Bot@Idle",
                 ["IdleSmallStretch"] = "X Bot@Idle",
                 ["TalkGesture01"] = "X Bot@Talking",
@@ -261,6 +301,13 @@ namespace NeuroAsist.AvatarEditor
                 ["FarewellCasual"] = "X Bot@WavingGoodbye",
                 ["Shrug"] = "X Bot@Shrugging",
                 ["Nod"] = "X Bot@Agreeing",
+                ["HeadScratch"] = ResolveClip("X Bot@Head Scratch", "X Bot@Bashful", "X Bot@Thinking"),
+                ["Clapping"] = ResolveClip("X Bot@Clapping", "X Bot@Agreeing"),
+                ["Laughing"] = ResolveClip("X Bot@Laughing", "X Bot@Talking"),
+                ["ThumbsUp"] = ResolveClip("X Bot@Standing Thumbs Up", "X Bot@Thumbs Up", "X Bot@Agreeing"),
+                ["Facepalm"] = ResolveClip("X Bot@Facepalm", "X Bot@Shrugging"),
+                ["Pointing"] = ResolveClip("X Bot@Pointing", "X Bot@TalkingQuestion"),
+                ["Bow"] = ResolveClip("X Bot@Bow", "X Bot@Agreeing"),
             };
             foreach (var layer in controller.layers) AssignLayerClips(layer.stateMachine, assignments, clips);
         }
@@ -271,6 +318,8 @@ namespace NeuroAsist.AvatarEditor
                 "X Bot@Idle", "X Bot@Thinking", "X Bot@Talking", "X Bot@TalkingQuestion", "X Bot@Waving",
                 "X Bot@WavingGoodbye", "X Bot@Agreeing", "X Bot@Shaking Head No", "X Bot@Shrugging",
                 "X Bot@Surprised", "X Bot@Angry",
+                "X Bot@Look Around", "X Bot@Head Scratch", "X Bot@Bashful", "X Bot@Clapping", "X Bot@Laughing",
+                "X Bot@Thumbs Up", "X Bot@Standing Thumbs Up", "X Bot@Facepalm", "X Bot@Pointing", "X Bot@Bow",
             })
             {
                 var path = "Assets/NeuroAsistAvatar/Animations/" + item + ".fbx";
@@ -319,6 +368,7 @@ namespace NeuroAsist.AvatarEditor
                 GestureTag.Agreement, GestureTag.Disagreement, GestureTag.Shrug,
                 GestureTag.Greeting, GestureTag.Greeting_Casual, GestureTag.Farewell, GestureTag.Farewell_Casual,
                 GestureTag.Surprise, GestureTag.Frustration, GestureTag.Nod,
+                GestureTag.Head_Scratch, GestureTag.Thumbs_Up, GestureTag.Pointing, GestureTag.Facepalm, GestureTag.Bow,
             };
             var machine = controller.layers[1].stateMachine;
             foreach (var definition in settings.GestureDefinitions)

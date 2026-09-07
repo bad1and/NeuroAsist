@@ -115,6 +115,15 @@ const GESTURES_CATALOG: GestureItem[] = [
   { id: "explanation_left", name: "Объяснение (слева)", category: "speech", hint: "Разъясняющий жест (зеркало)" },
   { id: "question_right", name: "Вопрос (справа)", category: "speech", hint: "Вопросительный жест" },
   { id: "question_left", name: "Вопрос (слева)", category: "speech", hint: "Вопросительный жест (зеркало)" },
+
+  // Expressions & Actions
+  { id: "head_scratch", name: "Почесать голову", category: "body", hint: "Замешательство / размышление" },
+  { id: "clapping", name: "Аплодисменты", category: "hands", hint: "Хлопает в ладоши / восторг" },
+  { id: "laughing", name: "Смех", category: "body", hint: "Искренний смех / веселье" },
+  { id: "thumbs_up", name: "Палец вверх", category: "hands", hint: "Одобрение / «класс»" },
+  { id: "facepalm", name: "Фейспалм", category: "hands", hint: "Рука к лицу / неловкость" },
+  { id: "pointing", name: "Указать пальцем", category: "hands", hint: "Жест указания" },
+  { id: "bow", name: "Поклон", category: "body", hint: "Уважительный поклон" },
 ];
 
 const PRESETS: TestPreset[] = [
@@ -159,6 +168,27 @@ const PRESETS: TestPreset[] = [
     text: "[[avatar emotion=angry gesture=frustration]] Ну сколько можно! [[avatar emotion=surprised gesture=surprise]] Ого, ты правда это сделал? [[avatar emotion=confused gesture=shrug]] Я просто поражена!",
     emotion: "angry",
     gesture: "frustration",
+  },
+  {
+    title: "Почесать затылок (замешательство)",
+    description: "Проверяет реакцию аватара на озадаченность и жест почесывания затылка.",
+    text: "Хм, погоди-ка... [[avatar emotion=thinking gesture=head_scratch]] Дай-ка подумать, как это лучше сделать.",
+    emotion: "thinking",
+    gesture: "head_scratch",
+  },
+  {
+    title: "Аплодисменты и восторг",
+    description: "Проверяет жест хлопков в ладоши и радостную эмоцию.",
+    text: "Ура, у нас всё получилось! [[avatar emotion=excited gesture=clapping]] Браво, отличная работа!",
+    emotion: "excited",
+    gesture: "clapping",
+  },
+  {
+    title: "Фейспалм и неловкость",
+    description: "Проверяет прикладывание руки к лицу при конфузе.",
+    text: "Ой, ну как же так... [[avatar emotion=embarrassed gesture=facepalm]] Какой позор!",
+    emotion: "embarrassed",
+    gesture: "facepalm",
   },
 ];
 

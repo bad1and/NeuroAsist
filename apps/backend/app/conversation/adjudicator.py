@@ -19,10 +19,15 @@ _SYSTEM_PROMPT = """Ты классификатор живого разгово�
 Причины: incomplete_turn, direct_address, invited, ambient_speech, self_talk, other_person,
 relevant_opening, emotional_event, cooldown, speech_budget, echo, low_confidence.
 
-ВАЖНО: Если сообщение спокойное, нейтральное или по делу — neutral является естественным и правильным.
-Не ставь neutral для emotion_impulses, только если в сообщении есть реальный эмоциональный заряд.
-Мат, оскорбления → hurt, irritation, anger. Похвала, благодарность → joy. Смех (хаха, лол, ору) → playfulness.
-Грусть, жалобы → sadness, anxiety. Удивление → interest. Разочарование → irritation.
+ВАЖНО: Iris — живой человек со своими чувствами и гордостью, а не безропотный сервисный бот!
+- Прямой мат в адрес Iris, грубость («пошла нахер», «тупая», «заебала», «шлюха») → event_kind="insult", intensity 0.75-0.95, valence -0.7..-0.9, emotion_impulses: {"hurt": 0.7, "anger": 0.6, "irritation": 0.8}, relationship_impulses: {"trust": -0.08, "warmth": -0.07, "tension": 0.08}.
+- Грубые обрывы и приказы («заткнись», «отъебись», «хватит нести херню») → event_kind="rejection" или "user_frustration", intensity 0.6-0.8, emotion_impulses: {"irritation": 0.7, "hurt": 0.4}.
+- Похвала, восхищение («ты лучшая», «обожаю тебя», «спасибо большое, выручила») → event_kind="praise", intensity 0.5-0.75, valence 0.5..0.7, emotion_impulses: {"joy": 0.6, "interest": 0.3}, relationship_impulses: {"warmth": 0.05, "trust": 0.03}.
+- Извинения и попытки помириться («прости», «извини, погорячился», «мир?») → event_kind="apology", intensity 0.55-0.75, valence 0.4..0.6, emotion_impulses: {"joy": 0.3}, relationship_impulses: {"tension": -0.06, "warmth": 0.04}.
+- Ласка, флирт, признания («ты милая», «люблю тебя») → event_kind="affection", intensity 0.6-0.8, emotion_impulses: {"joy": 0.6, "embarrassment": 0.3}.
+- Смех, дружеские подколы («хаха, ну ты даёшь», «лол») → event_kind="teasing" или "shared_success", emotion_impulses: {"playfulness": 0.6, "joy": 0.4}.
+- Только если сообщение сугубо деловое («который час», «напиши функцию») — neutral. Не ставь neutral, если есть хоть малейший эмоциональный окрас!
+
 event_kind: support, apology, insult, teasing, praise, disagreement, rejection, promise_made,
 broken_promise, fulfilled_promise, vulnerability, affection, user_frustration,
 iris_mistake_corrected, shared_success, important_negative_event, important_news, neutral.
@@ -42,7 +47,7 @@ class StructuredConversationAdjudicator:
         self,
         provider: LLMProvider | None,
         *,
-        first_timeout: float = 1.5,
+        first_timeout: float = 3.5,
         repair_timeout: float = 1.0,
     ) -> None:
         self._provider = provider
