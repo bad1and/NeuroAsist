@@ -109,7 +109,7 @@ describe("Unified Notification System", () => {
       expect(screen.queryByText(/Connection refused/)).not.toBeInTheDocument();
     });
 
-    it("shows stack indicator when multiple notifications exist and allows dismiss", () => {
+    it("shows multiple notifications simultaneously and allows dismiss", () => {
       act(() => {
         notify.info("Первое", "Сообщение 1");
         notify.warning("Второе", "Сообщение 2");
@@ -117,18 +117,32 @@ describe("Unified Notification System", () => {
 
       render(<NotificationHost />);
 
-      expect(screen.getByText("+1")).toBeInTheDocument();
+      // Both notifications should now be visible simultaneously!
+      expect(screen.getByText("Первое")).toBeInTheDocument();
+      expect(screen.getByText("Второе")).toBeInTheDocument();
 
-      // Close current notification
-      const closeBtn = screen.getByLabelText("Закрыть уведомление");
-      fireEvent.click(closeBtn);
+      // Close first visible notification
+      const closeBtns = screen.getAllByLabelText("Закрыть уведомление");
+      fireEvent.click(closeBtns[0]);
 
       act(() => {
         vi.advanceTimersByTime(250);
       });
 
-      // Second notification should now be visible
+      // Remaining notification should still be visible
       expect(screen.getByText("Первое")).toBeInTheDocument();
+    });
+
+    it("shows queue badge when notifications exceed maxVisible", () => {
+      act(() => {
+        notify.info("1", "Сообщение 1");
+        notify.info("2", "Сообщение 2");
+        notify.info("3", "Сообщение 3");
+        notify.info("4", "Сообщение 4");
+      });
+
+      render(<NotificationHost maxVisible={3} />);
+      expect(screen.getByText("+1")).toBeInTheDocument();
     });
 
     it("calls onNavigate when clicking clickable notification", () => {
@@ -144,5 +158,33 @@ describe("Unified Notification System", () => {
 
       expect(navigateFn).toHaveBeenCalledWith("memory");
     });
+
+    it("copies error details to clipboard when clicking copy button on error notification", async () => {
+      const writeTextMock = vi.fn().mockResolvedValue(undefined);
+      Object.assign(navigator, {
+        clipboard: {
+          writeText: writeTextMock,
+        },
+      });
+
+      act(() => {
+        notify.error("Сбой сервиса", "Не удалось запустить ядро", {
+          details: "RuntimeError: Connection timed out",
+        });
+      });
+
+      render(<NotificationHost />);
+
+      const copyBtn = screen.getByRole("button", { name: /Скопировать/i });
+      expect(copyBtn).toBeInTheDocument();
+
+      fireEvent.click(copyBtn);
+
+      expect(writeTextMock).toHaveBeenCalledWith(
+        expect.stringContaining("RuntimeError: Connection timed out")
+      );
+      expect(screen.getByText("Скопировано!")).toBeInTheDocument();
+    });
   });
 });
+

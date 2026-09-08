@@ -14,6 +14,12 @@ import {
   Maximize2,
   Minimize2,
   RefreshCw,
+  Bell,
+  Info,
+  CheckCircle2,
+  AlertTriangle,
+  AlertCircle,
+  Layers,
 } from "lucide-react";
 import {
   sendAvatarTestEmotion,
@@ -22,6 +28,8 @@ import {
   stopAvatar,
   getAvatarStatus,
 } from "../api";
+import { notify, type NotificationType } from "../notifications";
+import { NotificationHost } from "./NotificationHost";
 import { closeQaStudioWindow, isDesktopApp } from "../desktop";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { AvatarStatusResponse } from "../types";
@@ -192,8 +200,514 @@ const PRESETS: TestPreset[] = [
   },
 ];
 
+interface NotificationDevPaneProps {
+  onNotifyFeedback?: (msg: string) => void;
+}
+
+export function NotificationDevPane({ onNotifyFeedback }: NotificationDevPaneProps) {
+  const [customTitle, setCustomTitle] = useState("Тестовое уведомление");
+  const [customMessage, setCustomMessage] = useState(
+    "Это демонстрационное сообщение для проверки дизайна и анимации уведомлений."
+  );
+  const [customDetails, setCustomDetails] = useState("");
+  const [customType, setCustomType] = useState<NotificationType>("info");
+  const [customDuration, setCustomDuration] = useState<string>("default");
+
+  const firePreset = (
+    type: NotificationType,
+    title: string,
+    message: string,
+    options?: { details?: string; duration?: number | "persistent"; actions?: any[] }
+  ) => {
+    switch (type) {
+      case "error":
+        notify.error(title, message, options);
+        break;
+      case "warning":
+        notify.warning(title, message, options);
+        break;
+      case "success":
+        notify.success(title, message, options);
+        break;
+      case "reminder":
+        notify.reminder(title, message, options);
+        break;
+      case "info":
+      default:
+        notify.info(title, message, options);
+        break;
+    }
+    onNotifyFeedback?.(`Уведомление [${type}] вызвано`);
+  };
+
+  const handleCustomSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customTitle.trim() || !customMessage.trim()) return;
+
+    let duration: number | "persistent" | undefined;
+    if (customDuration === "persistent") duration = "persistent";
+    else if (customDuration === "3000") duration = 3000;
+    else if (customDuration === "8000") duration = 8000;
+    else if (customDuration === "15000") duration = 15000;
+
+    firePreset(customType, customTitle, customMessage, {
+      details: customDetails.trim() || undefined,
+      duration,
+    });
+  };
+
+  const handleStackDemo = () => {
+    notify.info("1/3 Очередь задач", "Первое уведомление: фоновый процесс запущен.");
+    window.setTimeout(() => {
+      notify.warning("2/3 Высокая нагрузка", "Второе уведомление: нагрузка на систему возросла.");
+    }, 120);
+    window.setTimeout(() => {
+      notify.success("3/3 Операция готова", "Третье уведомление: стек сформирован (+2 в очереди).");
+    }, 240);
+    onNotifyFeedback?.("Стек из 3 уведомлений отправлен в очередь");
+  };
+
+  return (
+    <div className="avatar-dev-content-pane">
+      {/* 1. Quick Presets */}
+      <div className="avatar-dev-presets-section">
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 10,
+            flexWrap: "wrap",
+            gap: 8,
+          }}
+        >
+          <h4 className="avatar-dev-section-title" style={{ margin: 0 }}>
+            Основные типы уведомлений
+          </h4>
+          <button
+            type="button"
+            className="avatar-dev-btn-action"
+            onClick={() => {
+              notify.dismissAll();
+              onNotifyFeedback?.("Все уведомления закрыты");
+            }}
+            title="Закрыть все активные уведомления"
+          >
+            <X size={12} />
+            <span>Очистить все</span>
+          </button>
+        </div>
+
+        <div
+          className="avatar-dev-presets-grid"
+          style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}
+        >
+          {/* Info */}
+          <div className="avatar-dev-preset-card">
+            <div className="avatar-dev-preset-top">
+              <span
+                className="avatar-dev-preset-title"
+                style={{ display: "flex", alignItems: "center", gap: 6 }}
+              >
+                <Info size={14} style={{ color: "var(--color-focus, #38bdf8)" }} />
+                Инфо (Info)
+              </span>
+              <button
+                type="button"
+                className="avatar-dev-btn-preset-run"
+                onClick={() =>
+                  firePreset(
+                    "info",
+                    "Системная служба",
+                    "Фоновые сервисы активны и работают в штатном режиме."
+                  )
+                }
+              >
+                <SendHorizontal size={12} />
+                <span>Показать</span>
+              </button>
+            </div>
+            <p className="avatar-dev-preset-desc">
+              Информационное сообщение (авто-закрытие через 4.5 сек).
+            </p>
+          </div>
+
+          {/* Success */}
+          <div className="avatar-dev-preset-card">
+            <div className="avatar-dev-preset-top">
+              <span
+                className="avatar-dev-preset-title"
+                style={{ display: "flex", alignItems: "center", gap: 6 }}
+              >
+                <CheckCircle2 size={14} style={{ color: "var(--color-success, #34d399)" }} />
+                Успех (Success)
+              </span>
+              <button
+                type="button"
+                className="avatar-dev-btn-preset-run"
+                onClick={() =>
+                  firePreset(
+                    "success",
+                    "Профиль сохранён",
+                    "Настройки аватара и модели голоса успешно синхронизированы."
+                  )
+                }
+              >
+                <SendHorizontal size={12} />
+                <span>Показать</span>
+              </button>
+            </div>
+            <p className="avatar-dev-preset-desc">
+              Зелёный индикатор подтверждения успеха (авто-закрытие 4.5 сек).
+            </p>
+          </div>
+
+          {/* Warning */}
+          <div className="avatar-dev-preset-card">
+            <div className="avatar-dev-preset-top">
+              <span
+                className="avatar-dev-preset-title"
+                style={{ display: "flex", alignItems: "center", gap: 6 }}
+              >
+                <AlertTriangle size={14} style={{ color: "var(--color-warning, #fbbf24)" }} />
+                Предупреждение (Warning)
+              </span>
+              <button
+                type="button"
+                className="avatar-dev-btn-preset-run"
+                onClick={() =>
+                  firePreset(
+                    "warning",
+                    "Задержка синтеза",
+                    "Обнаружена повышенная нагрузка на GPU. Возможны задержки речи."
+                  )
+                }
+              >
+                <SendHorizontal size={12} />
+                <span>Показать</span>
+              </button>
+            </div>
+            <p className="avatar-dev-preset-desc">
+              Жёлтый индикатор повышенного внимания (авто-закрытие 8 сек).
+            </p>
+          </div>
+
+          {/* Error */}
+          <div className="avatar-dev-preset-card">
+            <div className="avatar-dev-preset-top">
+              <span
+                className="avatar-dev-preset-title"
+                style={{ display: "flex", alignItems: "center", gap: 6 }}
+              >
+                <AlertCircle size={14} style={{ color: "var(--color-danger, #f87171)" }} />
+                Ошибка (Error)
+              </span>
+              <button
+                type="button"
+                className="avatar-dev-btn-preset-run"
+                onClick={() =>
+                  firePreset(
+                    "error",
+                    "Сбой подключения к серверу",
+                    "Не удалось связаться с WebSocket 127.0.0.1:8000. Проверьте запущен ли демон."
+                  )
+                }
+              >
+                <SendHorizontal size={12} />
+                <span>Показать</span>
+              </button>
+            </div>
+            <p className="avatar-dev-preset-desc">
+              Красный индикатор ошибки (персистентный, остаётся до закрытия).
+            </p>
+          </div>
+
+          {/* Reminder */}
+          <div className="avatar-dev-preset-card">
+            <div className="avatar-dev-preset-top">
+              <span
+                className="avatar-dev-preset-title"
+                style={{ display: "flex", alignItems: "center", gap: 6 }}
+              >
+                <Bell size={14} style={{ color: "var(--color-focus, #a78bfa)" }} />
+                Напоминание (Reminder)
+              </span>
+              <button
+                type="button"
+                className="avatar-dev-btn-preset-run"
+                onClick={() =>
+                  firePreset(
+                    "reminder",
+                    "Запланированное событие",
+                    "Через 10 минут запланирована калибровка звукового ввода."
+                  )
+                }
+              >
+                <SendHorizontal size={12} />
+                <span>Показать</span>
+              </button>
+            </div>
+            <p className="avatar-dev-preset-desc">
+              Фиолетовый колокольчик (персистентный, остаётся до закрытия).
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* 2. Interactive Scenarios */}
+      <div className="avatar-dev-presets-section" style={{ marginTop: 18 }}>
+        <h4 className="avatar-dev-section-title">Интерактивные сценарии</h4>
+        <div
+          className="avatar-dev-presets-grid"
+          style={{ gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}
+        >
+          {/* Actions */}
+          <div className="avatar-dev-preset-card">
+            <div className="avatar-dev-preset-top">
+              <span className="avatar-dev-preset-title">С кнопками действий</span>
+              <button
+                type="button"
+                className="avatar-dev-btn-preset-run"
+                onClick={() => {
+                  notify.show({
+                    type: "info",
+                    title: "Доступно обновление",
+                    message: "Загружен новый пакет эмоций и жестов для аватара.",
+                    actions: [
+                      {
+                        label: "Применить",
+                        variant: "primary",
+                        onClick: () => notify.success("Применено", "Пакет обновлений успешно установлен!"),
+                      },
+                      {
+                        label: "Позже",
+                        variant: "secondary",
+                        onClick: () => {},
+                      },
+                    ],
+                  });
+                  onNotifyFeedback?.("Отправлено уведомление с кнопками действий");
+                }}
+              >
+                <SendHorizontal size={12} />
+                <span>Запустить</span>
+              </button>
+            </div>
+            <p className="avatar-dev-preset-desc">
+              Проверка кнопок действий (Primary и Secondary) прямо в карточке тоста.
+            </p>
+          </div>
+
+          {/* Details */}
+          <div className="avatar-dev-preset-card">
+            <div className="avatar-dev-preset-top">
+              <span className="avatar-dev-preset-title">С подробностями (стек)</span>
+              <button
+                type="button"
+                className="avatar-dev-btn-preset-run"
+                onClick={() => {
+                  notify.error(
+                    "Ошибка выполнения операции",
+                    "Сбой ядра при распределении памяти. Нажмите стрелку для просмотра трассировки.",
+                    {
+                      details:
+                        "RuntimeError: CUDA out of memory.\n  Tried to allocate 512.00 MiB (GPU 0; 8.00 GiB total capacity)\n  at torch.cuda.empty_cache()\n  at worker.inference.generate_tokens(pipeline.py:142)\n  at async engine.run_step(engine.py:88)",
+                    }
+                  );
+                  onNotifyFeedback?.("Отправлено уведомление с раскрываемыми деталями");
+                }}
+              >
+                <SendHorizontal size={12} />
+                <span>Запустить</span>
+              </button>
+            </div>
+            <p className="avatar-dev-preset-desc">
+              Кнопка разворачивания шеврона и блок моноширинного кода с деталями ошибки.
+            </p>
+          </div>
+
+          {/* Stack layers */}
+          <div className="avatar-dev-preset-card">
+            <div className="avatar-dev-preset-top">
+              <span className="avatar-dev-preset-title">Стек из 3 уведомлений</span>
+              <button
+                type="button"
+                className="avatar-dev-btn-preset-run"
+                onClick={handleStackDemo}
+              >
+                <Layers size={12} />
+                <span>Тест стека</span>
+              </button>
+            </div>
+            <p className="avatar-dev-preset-desc">
+              Отправляет 3 тоста подряд: слои стопки под карточкой, бейдж «+2» и перелистывание.
+            </p>
+          </div>
+
+          {/* Long message */}
+          <div className="avatar-dev-preset-card">
+            <div className="avatar-dev-preset-top">
+              <span className="avatar-dev-preset-title">Длинный текст</span>
+              <button
+                type="button"
+                className="avatar-dev-btn-preset-run"
+                onClick={() => {
+                  notify.info(
+                    "Подробный отчет системы",
+                    "В ходе выполнения фоновой оптимизации было проанализировано 1 420 записей памяти, дедуплицировано 8 индексов и высвобождено 140 МБ оперативной памяти. Все параметры стабилизированы."
+                  );
+                  onNotifyFeedback?.("Отправлено многострочное уведомление");
+                }}
+              >
+                <SendHorizontal size={12} />
+                <span>Запустить</span>
+              </button>
+            </div>
+            <p className="avatar-dev-preset-desc">
+              Проверяет ограничение строк и кнопку разворачивания полного текста.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Custom Notification Builder */}
+      <div className="avatar-dev-custom-speech-section" style={{ marginTop: 18 }}>
+        <h4 className="avatar-dev-section-title">Конструктор произвольного уведомления</h4>
+        <form onSubmit={handleCustomSubmit} className="avatar-dev-speech-form">
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <label
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 4,
+                fontSize: 12,
+                color: "var(--color-text-soft)",
+              }}
+            >
+              Заголовок:
+              <input
+                type="text"
+                className="avatar-dev-input"
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 10,
+                  border: "none",
+                  background: "rgba(255, 255, 255, 0.07)",
+                  color: "#fff",
+                  fontSize: 13,
+                }}
+                value={customTitle}
+                onChange={(e) => setCustomTitle(e.target.value)}
+                placeholder="Заголовок уведомления..."
+              />
+            </label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <label
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 4,
+                  fontSize: 12,
+                  color: "var(--color-text-soft)",
+                }}
+              >
+                Тип:
+                <select
+                  className="avatar-dev-select"
+                  value={customType}
+                  onChange={(e) => setCustomType(e.target.value as NotificationType)}
+                >
+                  <option value="info">Info (Инфо)</option>
+                  <option value="success">Success (Успех)</option>
+                  <option value="warning">Warning (Предупреждение)</option>
+                  <option value="error">Error (Ошибка)</option>
+                  <option value="reminder">Reminder (Напоминание)</option>
+                </select>
+              </label>
+              <label
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 4,
+                  fontSize: 12,
+                  color: "var(--color-text-soft)",
+                }}
+              >
+                Длительность:
+                <select
+                  className="avatar-dev-select"
+                  value={customDuration}
+                  onChange={(e) => setCustomDuration(e.target.value)}
+                >
+                  <option value="default">По умолчанию</option>
+                  <option value="3000">3 секунды</option>
+                  <option value="8000">8 секунд</option>
+                  <option value="15000">15 секунд</option>
+                  <option value="persistent">Навсегда (persistent)</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <label
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              fontSize: 12,
+              color: "var(--color-text-soft)",
+              marginTop: 8,
+            }}
+          >
+            Текст сообщения:
+            <textarea
+              className="avatar-dev-textarea"
+              rows={2}
+              value={customMessage}
+              onChange={(e) => setCustomMessage(e.target.value)}
+              placeholder="Основной текст уведомления..."
+            />
+          </label>
+
+          <label
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              fontSize: 12,
+              color: "var(--color-text-soft)",
+              marginTop: 8,
+            }}
+          >
+            Технические подробности (необязательно):
+            <textarea
+              className="avatar-dev-textarea"
+              rows={2}
+              value={customDetails}
+              onChange={(e) => setCustomDetails(e.target.value)}
+              placeholder="Дополнительный лог, JSON или стек ошибки для раскрытия..."
+              style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}
+            />
+          </label>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+            <button
+              type="submit"
+              className="avatar-dev-btn-primary"
+              disabled={!customTitle.trim() || !customMessage.trim()}
+            >
+              <Bell size={14} />
+              <span>Вызвать уведомление</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanelProps) {
-  const [activeTab, setActiveTab] = useState<"emotions" | "gestures" | "speech">("emotions");
+  const [activeTab, setActiveTab] = useState<"emotions" | "gestures" | "speech" | "notifications">("emotions");
   const [emotionCategory, setEmotionCategory] = useState<string>("all");
   const [gestureCategory, setGestureCategory] = useState<string>("all");
   const [intensity, setIntensity] = useState<number>(1.0);
@@ -215,6 +729,7 @@ export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanel
 
   const showNotification = useCallback((message: string) => {
     setLastAction(message);
+    notify.info("Тест аватара", message, { duration: 3500 });
     const timer = setTimeout(() => {
       setLastAction((prev) => (prev === message ? null : prev));
     }, 3500);
@@ -303,7 +818,7 @@ export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanel
     <div
       className={`avatar-dev-studio-window ${isMinimized ? "is-minimized" : ""}`}
       role="dialog"
-      aria-label="Лаборатория тестирования аватара"
+      aria-label="Окно тестирования"
     >
       {/* Window Header */}
       <div className="avatar-dev-header">
@@ -312,7 +827,7 @@ export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanel
             <Sparkles size={13} className="avatar-dev-sparkle-icon" />
             <span>QA Studio</span>
           </div>
-          <h3 className="avatar-dev-title">Лаборатория аватара</h3>
+          <h3 className="avatar-dev-title">Окно тестирования</h3>
           <div className={`avatar-dev-connection-tag ${isConnected ? "is-online" : "is-offline"}`}>
             <span className="connection-dot" />
             <span>{isConnected ? `${clientName} (${presenceState})` : "Unity оффлайн"}</span>
@@ -392,6 +907,14 @@ export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanel
               >
                 <Volume2 size={13} />
                 <span>Речь & Сценарии</span>
+              </button>
+              <button
+                type="button"
+                className={`avatar-dev-tab ${activeTab === "notifications" ? "is-active" : ""}`}
+                onClick={() => setActiveTab("notifications")}
+              >
+                <Bell size={13} />
+                <span>Уведомления</span>
               </button>
             </div>
           </div>
@@ -584,6 +1107,11 @@ export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanel
             </div>
           )}
 
+          {/* Tab 4: Notifications */}
+          {activeTab === "notifications" && (
+            <NotificationDevPane onNotifyFeedback={showNotification} />
+          )}
+
           {/* Footer Notice */}
           {lastAction && (
             <div className="avatar-dev-statusbar">
@@ -597,7 +1125,7 @@ export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanel
 }
 
 export function AvatarDevStudioStandalonePage() {
-  const [activeTab, setActiveTab] = useState<"emotions" | "gestures" | "speech">("emotions");
+  const [activeTab, setActiveTab] = useState<"emotions" | "gestures" | "speech" | "notifications">("emotions");
   const [emotionCategory, setEmotionCategory] = useState<string>("all");
   const [gestureCategory, setGestureCategory] = useState<string>("all");
   const [intensity, setIntensity] = useState<number>(1.0);
@@ -620,6 +1148,7 @@ export function AvatarDevStudioStandalonePage() {
 
   const showNotification = useCallback((message: string) => {
     setLastAction(message);
+    notify.info("Тест аватара", message, { duration: 3500 });
     const timer = window.setTimeout(() => {
       setLastAction((prev) => (prev === message ? null : prev));
     }, 4000);
@@ -789,7 +1318,7 @@ export function AvatarDevStudioStandalonePage() {
       : GESTURES_CATALOG.filter((g) => g.category === gestureCategory);
 
   return (
-    <div className="avatar-dev-standalone-page" role="region" aria-label="Автономное окно тестирования аватара">
+    <div className="avatar-dev-standalone-page" role="region" aria-label="Окно тестирования">
       {/* Standalone Window Header */}
       <div className="avatar-dev-header">
         <div className="avatar-dev-title-row">
@@ -798,8 +1327,8 @@ export function AvatarDevStudioStandalonePage() {
             <span>QA STUDIO v2.0</span>
           </div>
           <div className="avatar-dev-titles-group">
-            <h1 className="avatar-dev-title">Iris QA Studio</h1>
-            <span className="avatar-dev-subtitle">Автономный стенд тестирования аватара</span>
+            <h1 className="avatar-dev-title">Окно тестирования</h1>
+            <span className="avatar-dev-subtitle">Iris QA Studio • Автономный стенд тестирования</span>
           </div>
           <div className={`avatar-dev-connection-tag ${isConnected ? "is-online" : "is-offline"}`}>
             <span className="connection-dot" />
@@ -842,7 +1371,7 @@ export function AvatarDevStudioStandalonePage() {
             type="button"
             className="avatar-dev-btn-close"
             onClick={() => void handleCloseWindow()}
-            title="Закрыть отдельное окно тестирования"
+            title="Закрыть окно тестирования"
           >
             <X size={14} />
             <span>Закрыть окно</span>
@@ -902,6 +1431,14 @@ export function AvatarDevStudioStandalonePage() {
           >
             <Volume2 size={13} />
             <span>Речь & Сценарии</span>
+          </button>
+          <button
+            type="button"
+            className={`avatar-dev-tab ${activeTab === "notifications" ? "is-active" : ""}`}
+            onClick={() => setActiveTab("notifications")}
+          >
+            <Bell size={13} />
+            <span>Уведомления</span>
           </button>
         </div>
       </div>
@@ -1081,6 +1618,11 @@ export function AvatarDevStudioStandalonePage() {
         </div>
       )}
 
+      {/* Tab 4: Notifications Testing */}
+      {activeTab === "notifications" && (
+        <NotificationDevPane onNotifyFeedback={showNotification} />
+      )}
+
       {/* Footer Statusbar */}
       <div className="avatar-dev-statusbar">
         <span className="avatar-dev-status-text">
@@ -1090,11 +1632,13 @@ export function AvatarDevStudioStandalonePage() {
               <span>{lastAction}</span>
             </>
           ) : (
-            <span>Готов к тестированию аватара. Выберите эмоцию, жест или сценарий речи.</span>
+            <span>Готов к тестированию. Выберите эмоцию, жест, сценарий речи или уведомление.</span>
           )}
         </span>
         <span className="avatar-dev-backend-tag">Backend: 127.0.0.1:8000</span>
       </div>
+
+      <NotificationHost />
     </div>
   );
 }

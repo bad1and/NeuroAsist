@@ -790,6 +790,7 @@ describe("русский интерфейс", () => {
     api.deleteTimelineRange.mockResolvedValue({ deleted: 4 });
     render(<JournalPage />);
 
+    fireEvent.click(await screen.findByRole("button", { name: /Диалог от/ }));
     fireEvent.click(await screen.findByRole("button", { name: /Удалить историю до/ }));
     expect(screen.getByRole("heading", { name: "Удалить часть истории?" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Удалить историю" }));

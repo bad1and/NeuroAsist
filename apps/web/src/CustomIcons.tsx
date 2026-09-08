@@ -1866,3 +1866,108 @@ export function IconUsersFeedback({ size = 24, ...props }: CustomIconProps) {
     </svg>
   );
 }
+
+export function IconInterfaceCross({ size = 14, ...props }: CustomIconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M3.29289 2.29289C3.68342 1.90237 4.31658 1.90237 4.70711 2.29289L7 4.58579L9.29289 2.29289C9.68342 1.90237 10.3166 1.90237 10.7071 2.29289C11.0976 2.68342 11.0976 3.31658 10.7071 3.70711L8.41421 6L10.7071 8.29289C11.0976 8.68342 11.0976 9.31658 10.7071 9.70711C10.3166 10.0976 9.68342 10.0976 9.29289 9.70711L7 7.41421L4.70711 9.70711C4.31658 10.0976 3.68342 10.0976 3.29289 9.70711C2.90237 9.31658 2.90237 8.68342 3.29289 8.29289L5.58579 6L3.29289 3.70711C2.90237 3.31658 2.90237 2.68342 3.29289 2.29289Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+export function IconInterfaceCheckCircle({ size = 14, ...props }: CustomIconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M7 0.5C3.41015 0.5 0.5 3.41015 0.5 7C0.5 10.5899 3.41015 13.5 7 13.5C10.5899 13.5 13.5 10.5899 13.5 7C13.5 3.41015 10.5899 0.5 7 0.5ZM10.0303 5.53033C10.3232 5.23744 10.3232 4.76256 10.0303 4.46967C9.73744 4.17678 9.26256 4.17678 8.96967 4.46967L6.25 7.18934L5.03033 5.96967C4.73744 5.67678 4.26256 5.67678 3.96967 5.96967C3.67678 6.26256 3.67678 6.73744 3.96967 7.03033L5.71967 8.78033C6.01256 9.07322 6.48744 9.07322 6.78033 8.78033L10.0303 5.53033Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+export function IconInterfaceAlertTriangle({ size = 14, ...props }: CustomIconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M6.13397 1.25C6.51887 0.583334 7.48113 0.583333 7.86603 1.25L13.0622 10.25C13.4471 10.9167 12.9659 11.75 12.1962 11.75H1.80385C1.03405 11.75 0.552922 10.9167 0.937822 10.25L6.13397 1.25ZM7 3.5C6.58579 3.5 6.25 3.83579 6.25 4.25V7C6.25 7.41421 6.58579 7.75 7 7.75C7.41421 7.75 7.75 7.41421 7.75 7V4.25C7.75 3.83579 7.41421 3.5 7 3.5ZM7 9C6.44772 9 6 9.44772 6 10C6 10.5523 6.44772 11 7 11C7.55228 11 8 10.5523 8 10C8 9.44772 7.55228 9 7 9Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+export function IconInterfaceAlertCircle({ size = 14, ...props }: CustomIconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M7 0.5C3.41015 0.5 0.5 3.41015 0.5 7C0.5 10.5899 3.41015 13.5 7 13.5C10.5899 13.5 13.5 10.5899 13.5 7C13.5 3.41015 10.5899 0.5 7 0.5ZM7 3C7.41421 3 7.75 3.33579 7.75 3.75V7C7.75 7.41421 7.41421 7.75 7 7.75C6.58579 7.75 6.25 7.41421 6.25 7V3.75C6.25 3.33579 6.58579 3 7 3ZM7 9C6.44772 9 6 9.44772 6 10C6 10.5523 6.44772 11 7 11C7.55228 11 8 10.5523 8 10C8 9.44772 7.55228 9 7 9Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+export function IconInterfaceInfoCircle({ size = 14, ...props }: CustomIconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M7 0.5C3.41015 0.5 0.5 3.41015 0.5 7C0.5 10.5899 3.41015 13.5 7 13.5C10.5899 13.5 13.5 10.5899 13.5 7C13.5 3.41015 10.5899 0.5 7 0.5ZM7 3.25C7.55228 3.25 8 3.69772 8 4.25C8 4.80228 7.55228 5.25 7 5.25C6.44772 5.25 6 4.80228 6 4.25C6 3.69772 6.44772 3.25 7 3.25ZM6.25 6.5C6.25 6.08579 6.58579 5.75 7 5.75C7.41421 5.75 7.75 6.08579 7.75 6.5V10.25C7.75 10.6642 7.41421 11 7 11C6.58579 11 6.25 10.6642 6.25 10.25V6.5Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+export function IconInterfaceCopy({ size = 14, ...props }: CustomIconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M4.5 1C3.67157 1 3 1.67157 3 2.5V8.5C3 9.32843 3.67157 10 4.5 10H10.5C11.3284 10 12 9.32843 12 8.5V2.5C12 1.67157 11.3284 1 10.5 1H4.5ZM2 4C1.44772 4 1 4.44772 1 5V11.5C1 12.3284 1.67157 13 2.5 13H9C9.55228 13 10 12.5523 10 12C10 11.4477 9.55228 11 9 11H2.5C2.22386 11 2 10.7761 2 10.5V5C2 4.44772 1.55228 4 2 4Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+export function IconInterfaceChevronDown({ size = 14, ...props }: CustomIconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M2.29289 4.29289C2.68342 3.90237 3.31658 3.90237 3.70711 4.29289L7 7.58579L10.2929 4.29289C10.6834 3.90237 11.3166 3.90237 11.7071 4.29289C12.0976 4.68342 12.0976 5.31658 11.7071 5.70711L7.70711 9.70711C7.31658 10.0976 6.68342 10.0976 6.29289 9.70711L2.29289 5.70711C1.90237 5.31658 1.90237 4.68342 2.29289 4.29289Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+export function IconInterfaceChevronUp({ size = 14, ...props }: CustomIconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M2.29289 9.70711C1.90237 9.31658 1.90237 8.68342 2.29289 8.29289L6.29289 4.29289C6.68342 3.90237 7.31658 3.90237 7.70711 4.29289L11.7071 8.29289C12.0976 8.68342 12.0976 9.31658 11.7071 9.70711C11.3166 10.0976 10.6834 10.0976 10.2929 9.70711L7 6.41421L3.70711 9.70711C3.31658 10.0976 2.68342 10.0976 2.29289 9.70711Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
