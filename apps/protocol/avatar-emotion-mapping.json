@@ -22,5 +22,13 @@
   "teasing": {"expression": "teasing", "weight": 0.7, "motion_profile": "playful", "allowed_gestures": ["none", "greeting_casual", "shrug", "nod", "laughing", "thumbs_up"], "attack_ms": 150, "minimum_hold_ms": 480, "release_ms": 240},
   "relaxed": {"expression": "relaxed", "weight": 0.5, "motion_profile": "calm", "allowed_gestures": ["nod", "shrug", "agreement", "none"], "attack_ms": 220, "minimum_hold_ms": 650, "release_ms": 300},
   "curious": {"expression": "curious", "weight": 0.7, "motion_profile": "thoughtful", "allowed_gestures": ["thinking_right", "thinking", "thinking_left", "head_scratch", "pointing", "shrug", "none"], "attack_ms": 160, "minimum_hold_ms": 500, "release_ms": 260},
-  "confused": {"expression": "confused", "weight": 0.65, "motion_profile": "thoughtful", "allowed_gestures": ["shrug", "disagreement", "thinking", "head_scratch", "facepalm", "none"], "attack_ms": 180, "minimum_hold_ms": 520, "release_ms": 270}
+  "confused": {"expression": "confused", "weight": 0.65, "motion_profile": "thoughtful", "allowed_gestures": ["shrug", "disagreement", "thinking", "head_scratch", "facepalm", "none"], "attack_ms": 180, "minimum_hold_ms": 520, "release_ms": 270},
+  "hurt": {"expression": "sad", "weight": 0.85, "motion_profile": "tense", "allowed_gestures": ["disagreement", "shrug", "thinking", "none"], "attack_ms": 150, "minimum_hold_ms": 650, "release_ms": 300},
+  "affection": {"expression": "touched", "weight": 0.75, "motion_profile": "attentive", "allowed_gestures": ["nod", "agreement", "bow", "thumbs_up", "none"], "attack_ms": 180, "minimum_hold_ms": 600, "release_ms": 260},
+  "grateful": {"expression": "happy", "weight": 0.75, "motion_profile": "attentive", "allowed_gestures": ["nod", "agreement", "bow", "thumbs_up", "none"], "attack_ms": 160, "minimum_hold_ms": 550, "release_ms": 250},
+  "bored": {"expression": "neutral", "weight": 0.5, "motion_profile": "calm", "allowed_gestures": ["shrug", "head_scratch", "none"], "attack_ms": 220, "minimum_hold_ms": 600, "release_ms": 300},
+  "fatigued": {"expression": "sleepy", "weight": 0.65, "motion_profile": "calm", "allowed_gestures": ["none", "shrug", "farewell"], "attack_ms": 250, "minimum_hold_ms": 700, "release_ms": 350},
+  "indignant": {"expression": "angry", "weight": 0.8, "motion_profile": "tense", "allowed_gestures": ["frustration", "disagreement", "talk", "none"], "attack_ms": 130, "minimum_hold_ms": 600, "release_ms": 300},
+  "disappointed": {"expression": "sad", "weight": 0.75, "motion_profile": "calm", "allowed_gestures": ["shrug", "disagreement", "thinking", "none"], "attack_ms": 200, "minimum_hold_ms": 650, "release_ms": 300},
+  "fear": {"expression": "shocked", "weight": 0.85, "motion_profile": "alert", "allowed_gestures": ["surprise", "shrug", "none"], "attack_ms": 80, "minimum_hold_ms": 450, "release_ms": 300}
 }

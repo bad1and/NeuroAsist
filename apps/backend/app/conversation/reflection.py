@@ -24,7 +24,7 @@ class ReflectionProposal(BaseModel):
     def validate_subjective_text(cls, value: str) -> str:
         text = " ".join(value.split()).strip()
         sentences = [item for item in re.split(r"(?<=[.!?])\s+", text) if item]
-        if not 2 <= len(sentences) <= 4:
+        if not 1 <= len(sentences) <= 5:
             raise ValueError("reflection_sentence_count")
         if any(marker in text for marker in ("#", "*", "```", "- ")):
             raise ValueError("reflection_markdown")
@@ -63,6 +63,14 @@ class ReflectionService:
         "affection",
         "teasing",
         "support",
+        "offense",
+        "boundary_set",
+        "emotional_moment",
+        "gratitude",
+        "disagreement",
+        "curiosity",
+        "general_observation",
+        "in_turn_diary",
     }
 
     def __init__(
@@ -81,7 +89,7 @@ class ReflectionService:
         event_id: str | None,
         *,
         enabled: bool = True,
-        minimum_significance: float = .38,
+        minimum_significance: float = .25,
     ) -> bool:
         if (
             not enabled

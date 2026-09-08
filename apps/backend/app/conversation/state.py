@@ -18,6 +18,8 @@ EMOTION_HALF_LIVES_MINUTES: dict[str, float] = {
     "sadness": 75.0,
     "hurt": 120.0,
     "fatigue": 120.0,
+    "affection": 35.0,
+    "grateful": 30.0,
 }
 RELATIONSHIP_FACETS = {"familiarity", "trust", "warmth", "tension", "playfulness"}
 
@@ -48,6 +50,11 @@ class AffectState:
     embarrassment: float = 0.0
     playfulness: float = 0.15
     fatigue: float = 0.0
+    affection: float = 0.0
+    grateful: float = 0.0
+    patience: float = 1.0
+    offended: bool = False
+    grievance_cause: str | None = None
     causes: list[dict[str, object]] = field(default_factory=list)
     primary_emotion: str = "neutral"
     primary_emotion_since: str | None = None
@@ -115,6 +122,11 @@ class CharacterStateReducer:
             cause["last_decayed_at"] = current.isoformat(timespec="milliseconds")
             if decayed < .02:
                 cause["status"] = "expired"
+        if state.patience < 1.0:
+            patience_recovery_rate = 60.0 * multiplier
+            state.patience = min(1.0, state.patience + (1.0 - state.patience) * (1.0 - math.pow(0.5, elapsed_minutes / patience_recovery_rate)))
+            if state.patience >= 0.85:
+                state.offended = False
         state.causes = [cause for cause in state.causes if cause.get("status", "active") == "active"][:8]
         self._derive_emotions(state, current)
         state.last_decay_at = current.isoformat(timespec="milliseconds")

@@ -99,10 +99,11 @@ class CharacterStateService:
         arousal: float | None = None,
         intent: str = "casual_chat",
         participant_key: str = "primary",
+        cognitive_appraisal: dict | None = None,
+        diary_note: dict | None = None,
     ) -> None:
-        """Synchronize character state with the AI model's authoritative neural emotion."""
-        # Pure neural control: character state aligns with the AI model's authoritative neural emotion
-        is_positive = emotion in {"happy", "joy", "smirk", "playfulness"}
+        """Synchronize character state with the AI model's authoritative neural emotion and cognitive appraisal."""
+        is_positive = emotion in {"happy", "joy", "smirk", "playfulness", "affection", "grateful"}
         is_neutral = emotion == "neutral"
 
         canon_map = {
@@ -113,10 +114,25 @@ class CharacterStateService:
             "angry": "anger",
             "anger": "anger",
             "annoyed": "irritation",
+            "irritation": "irritation",
             "hurt": "hurt",
             "smirk": "playfulness",
+            "playful": "playfulness",
+            "playfulness": "playfulness",
             "thinking": "interest",
+            "curious": "interest",
             "concerned": "anxiety",
+            "anxious": "anxiety",
+            "embarrassed": "embarrassment",
+            "embarrassment": "embarrassment",
+            "affection": "affection",
+            "grateful": "grateful",
+            "fatigue": "fatigue",
+            "fatigued": "fatigue",
+            "tired": "fatigue",
+            "bored": "fatigue",
+            "indignant": "anger",
+            "disappointed": "sadness",
         }
         canonical = canon_map.get(emotion.lower(), emotion.lower())
 
@@ -128,8 +144,60 @@ class CharacterStateService:
             )
             now_iso = datetime.now(UTC).isoformat(timespec="milliseconds")
 
-            if is_positive and (has_repair_cause or self._affect.primary_emotion in {"irritation", "anger", "hurt"}):
+            # 1. Apply cognitive appraisal from AI model
+            if cognitive_appraisal:
+                if "patience" in cognitive_appraisal:
+                    self._affect.patience = max(0.0, min(1.0, float(cognitive_appraisal["patience"])))
+                if "offended" in cognitive_appraisal:
+                    self._affect.offended = bool(cognitive_appraisal["offended"])
+                if cognitive_appraisal.get("grievance_cause"):
+                    self._affect.grievance_cause = str(cognitive_appraisal["grievance_cause"])[:200]
+                if self._affect.offended or self._affect.patience < 0.6:
+                    cause_label = self._affect.grievance_cause or "Обида или нарушение личных границ"
+                    fp = f"grievance:{cause_label[:40]}"
+                    if not any(c.get("fingerprint") == fp and c.get("status") == "active" for c in self._affect.causes):
+                        self._affect.causes.insert(0, {
+                            "id": fp,
+                            "fingerprint": fp,
+                            "event_kind": "insult",
+                            "emotion": canonical if canonical in {"hurt", "anger", "irritation"} else "hurt",
+                            "display_label": cause_label,
+                            "initial_strength": round(max(0.6, intensity), 4),
+                            "current_strength": round(max(0.6, intensity), 4),
+                            "status": "active",
+                            "created_at": now_iso,
+                        })
+                        self._affect.causes = self._affect.causes[:8]
+
+            # 2. Apply diary note if AI model decided to record one
+            if diary_note and diary_note.get("should_record"):
+                d_text = str(diary_note.get("text", "")).strip()
+                if d_text and len(d_text) >= 15:
+                    d_sig = float(diary_note.get("significance", 0.6))
+                    d_emo = str(diary_note.get("primary_emotion", emotion))
+                    try:
+                        self._store.create_reflection(
+                            relationship_id=PRIMARY_RELATIONSHIP_ID,
+                            text=d_text,
+                            trigger_kind="diary_entry",
+                            trigger_label="Личная заметка Iris",
+                            significance=d_sig,
+                            primary_emotion=d_emo,
+                            generator_version="in_turn_v1",
+                        )
+                        self._emit("character.reflection.completed", "info", {
+                            "source": "in_turn_diary",
+                            "text": d_text[:80],
+                            "emotion": d_emo,
+                        })
+                    except Exception as exc:
+                        logger.warning("Failed to save in-turn diary reflection: %s", exc)
+
+            # 3. Handle emotional transition and forgiveness
+            if is_positive and (has_repair_cause or self._affect.primary_emotion in {"irritation", "anger", "hurt"} or self._affect.offended):
                 self._reducer.resolve_forgiveness(self._affect)
+                self._affect.offended = False
+                self._affect.patience = min(1.0, self._affect.patience + 0.35)
                 if canonical in {"joy", "happy"}:
                     self._affect.joy = max(self._affect.joy, 0.45)
                     self._affect.irritation = 0.0
@@ -155,14 +223,16 @@ class CharacterStateService:
                     self._affect.valence = max(-1.0, min(-0.15, self._affect.valence - 0.20))
                 elif canonical == "hurt":
                     self._affect.joy = 0.0
-                    self._affect.cooling_down_turns = max(self._affect.cooling_down_turns, 4)
-                    self._affect.playfulness = max(0.0, self._affect.playfulness - 0.5)
-                    self._affect.valence = max(-1.0, min(-0.25, self._affect.valence - 0.35))
-                elif canonical in {"joy", "playfulness"}:
+                    self._affect.cooling_down_turns = max(self._affect.cooling_down_turns, 5)
+                    self._affect.playfulness = max(0.0, self._affect.playfulness - 0.6)
+                    self._affect.valence = max(-1.0, min(-0.35, self._affect.valence - 0.40))
+                    self._affect.offended = True
+                elif canonical in {"joy", "playfulness", "affection", "grateful"}:
                     self._affect.cooling_down_turns = 0
                     self._affect.irritation = 0.0
                     self._affect.anger = 0.0
                     self._affect.hurt = 0.0
+                    self._affect.offended = False
                     self._affect.valence = min(1.0, max(0.2, self._affect.valence + 0.25))
                 elif canonical in {"sadness", "sad"}:
                     self._affect.joy = 0.0
@@ -171,10 +241,8 @@ class CharacterStateService:
                 else:
                     self._affect.cooling_down_turns = max(0, self._affect.cooling_down_turns - 1)
             elif emotion == "neutral":
-                # If AI chose neutral, let negative tension ease naturally
+                # If AI chose neutral, let negative tension ease naturally without wiping emotional state
                 self._affect.cooling_down_turns = max(0, self._affect.cooling_down_turns - 1)
-                if self._affect.primary_emotion in {"irritation", "anger", "hurt"}:
-                    self._affect.primary_emotion = "neutral"
 
             if valence is not None and valence != 0.0:
                 self._affect.valence = max(-1.0, min(1.0, float(valence)))
@@ -192,6 +260,8 @@ class CharacterStateService:
                 "primary_emotion": self._affect.primary_emotion,
                 "forgiven": is_positive and (has_repair_cause or self._affect.primary_emotion == "joy"),
                 "intensity": intensity,
+                "patience": self._affect.patience,
+                "offended": self._affect.offended,
             })
 
     def prepare(

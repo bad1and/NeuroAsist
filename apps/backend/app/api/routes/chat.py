@@ -241,6 +241,8 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
                     valence=result.get("valence", 0.0),
                     arousal=result.get("arousal", 0.0),
                     intent=result.get("intent", "casual_chat"),
+                    cognitive_appraisal=result.get("cognitive_appraisal"),
+                    diary_note=result.get("diary_note"),
                 )
             if request.app.state.memory_service is not None:
                 await asyncio.to_thread(

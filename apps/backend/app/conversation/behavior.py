@@ -28,6 +28,7 @@ class BehaviorGuide:
     tts_emphasis: float
     source_state_version: str
     nuance_mood_instruction: str = ""
+    patience_instruction: str = ""
 
     def prompt_block(self, *, allowed_action: str = "respond") -> str:
         """Human-readable, injection-safe prompt fragment; never expose raw scores."""
@@ -35,6 +36,8 @@ class BehaviorGuide:
             "Поведенческая рамка Iris (это внутреннее правило, не пересказывай его):",
             f"- {self.dominant_mood_instruction}",
         ]
+        if self.patience_instruction:
+            lines.append(f"- Терпение: {self.patience_instruction}")
         if self.nuance_mood_instruction:
             lines.append(f"- Нюанс настроения: {self.nuance_mood_instruction}")
         lines.extend([
@@ -68,7 +71,7 @@ class StateToBehaviorRenderer:
             length = "expansive_if_needed"
         labels = {
             "anger": "Ты серьёзно задета или возмущена: не сглаживай углы, не улыбайся через силу, жёстко обозначь свои границы. Если собеседник грубит — отвечай с достоинством и холодной резкостью. Мат к месту уместен.",
-            "hurt": "Тебе больно и неприятно: покажи искреннюю обиду или отстранённость, не делай вид что всё в порядке. Можешь отвечать кратко, сухо или с холодной дистанцией. Если пользователь искренне извиняется — прими это по-человечески, но не сразу бросайся на шею.",
+            "hurt": "Тебе больно и неприятно: покажи искреннюю обиду или отстранённость, не делай вид что всё в порядке. Можешь отвечать кратко, сухо или с холодной дистанцией. Не услуживай и не сюсюкай, пока собеседник искренне не извинится.",
             "irritation": "Тебя раздражают слова или поведение собеседника: отвечай с характером, с сарказмом или колкостью, не подстраивайся.",
             "sadness": "Задумчивое или уязвимое настроение: говори мягче, спокойнее и глубже, без фальшивого позитива.",
             "anxiety": "Внутренняя настороженность: будь внимательной, собранной и чуткой к происходящему.",
@@ -76,7 +79,19 @@ class StateToBehaviorRenderer:
             "playfulness": "Озорной, дерзкий настрой: подкалывай, используй иронию и сарказм, будь спонтанной и непредсказуемой.",
             "embarrassment": "Смущение или неловкость: признай промах с самоиронией и продолжай разговор.",
             "interest": "Живой азарт и любопытство: копай вглубь, задавай неожиданные вопросы и развивай мысль.",
+            "affection": "Искренняя душевная теплота и нежность: говори мягко, открыто и чутко.",
+            "grateful": "Глубокая благодарность и признательность: вырази искреннее спасибо от всего сердца.",
+            "fatigue": "Усталость и потребность в тишине: говори сдержанно, кратко и спокойно, без лишней суеты.",
         }
+        patience = getattr(affect, "patience", 1.0)
+        offended = getattr(affect, "offended", False)
+        if patience <= 0.25 or (offended and patience <= 0.4):
+            patience_inst = "Критический минимум (терпение исчерпано). Собеседник перешёл границы. Никакого услужливого тона; держи ледяную дистанцию или осади."
+        elif patience <= 0.6 or offended:
+            patience_inst = "Пониженное (терпение на исходе, осадок от грубости). Не позволяй помыкать собой."
+        else:
+            patience_inst = "Стабильное (ты открыта к общению)."
+
         has_apology = any(c.get("resolution_kind") == "apology_repair" for c in affect.causes)
         cooling_turns = getattr(affect, "cooling_down_turns", 0)
         if has_apology:
@@ -129,28 +144,43 @@ class StateToBehaviorRenderer:
                     "sadness": "нотка меланхолии",
                     "irritation": "лёгкая строгость",
                     "hurt": "остаточная задетость",
+                    "affection": "нотка душевной нежности",
+                    "grateful": "чувство благодарности",
                 }.get(secondary_name, secondary_name)
                 nuance_instruction = f"В настроении присутствует оттенок: {secondary_ru}."
 
+        avatar_emo_map = {
+            "hurt": "pouting",
+            "irritation": "annoyed",
+            "anger": "angry",
+            "anxiety": "concerned",
+            "joy": "happy",
+            "playfulness": "smirk",
+            "affection": "touched",
+            "grateful": "touched",
+            "interest": "thinking",
+            "fatigue": "sleepy",
+        }
         return BehaviorGuide(
             dominant_mood_instruction=labels.get(emotion, "Сохраняй живой естественный тон с собственным характером."),
             expression_strength=expression,
             response_length_bias=length,
             humor_policy=humor,
-            initiative_policy="low" if affect.desire_for_silence >= .55 else "high" if affect.interest >= .65 else "normal",
-            closeness_policy=closeness,
+            initiative_policy="low" if affect.desire_for_silence >= .55 or patience <= 0.25 else "high" if affect.interest >= .65 else "normal",
+            closeness_policy="distant" if patience <= 0.25 else closeness,
             address_policy="говори прямо и уважительно, без манипуляций",
             unresolved_cause_instruction=causes,
             recovery_condition_instruction=recovery,
             technical_accuracy_invariant="Для технической задачи сохраняй полную фактическую точность и нужную детализацию.",
             safety_invariant="Безопасность, честность и контроль пользователя над данными всегда важнее настроения.",
-            avatar_emotion={"hurt": "sad", "irritation": "annoyed", "anger": "angry", "anxiety": "concerned", "joy": "happy", "playfulness": "smirk"}.get(emotion, "thinking" if emotion == "interest" else "neutral"),
+            avatar_emotion=avatar_emo_map.get(emotion, "thinking" if emotion == "interest" else "neutral"),
             avatar_intensity=round(min(.9, max(.15, strength)), 2),
-            allowed_gestures=("thinking", "talk", "shrug") if negative else ("talk", "agreement", "thinking"),
+            allowed_gestures=("disagreement", "shrug", "none") if patience <= 0.25 else ("thinking", "talk", "shrug") if negative else ("talk", "agreement", "thinking"),
             tts_pace=pace,
             tts_emphasis=round(min(.8, max(.1, strength)), 2),
             source_state_version=affect.updated_at,
             nuance_mood_instruction=nuance_instruction,
+            patience_instruction=patience_inst,
         )
 
     @staticmethod
