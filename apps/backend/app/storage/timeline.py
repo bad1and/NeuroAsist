@@ -2762,6 +2762,36 @@ class TimelineStore:
             row = connection.execute("SELECT id FROM character_state_events WHERE idempotency_key = ?", (idempotency_key,)).fetchone()
         return str(row["id"]) if row is not None else None
 
+    def update_character_state_event(
+        self,
+        event_id: str,
+        *,
+        event_kind: str | None = None,
+        intensity: float | None = None,
+        confidence: float | None = None,
+    ) -> bool:
+        updates: list[str] = []
+        params: list[object] = []
+        if event_kind is not None:
+            updates.append("event_kind = ?")
+            params.append(str(event_kind))
+        if intensity is not None:
+            updates.append("intensity = ?")
+            params.append(float(intensity))
+        if confidence is not None:
+            updates.append("confidence = ?")
+            params.append(float(confidence))
+        if not updates:
+            return False
+        params.append(event_id)
+        with self._connect() as connection:
+            result = connection.execute(
+                f"UPDATE character_state_events SET {', '.join(updates)} WHERE id = ?",
+                params,
+            )
+            return bool(result.rowcount)
+
+
     def upsert_participant_state(
         self,
         *,

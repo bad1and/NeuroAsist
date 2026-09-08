@@ -264,3 +264,88 @@ def test_emotion_half_lives_decay() -> None:
     # Hurt has 120m half-life, so at 35m it should still be significant (> 0.6)
     assert decayed.hurt > 0.60
 
+
+def test_abusive_utterance_classified_as_insult_and_records_reflection(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    service = CharacterStateService(store)
+
+    # 1. User sends abusive message from screenshot
+    msg_id = "msg-abuse-1"
+    ctx = service.prepare(
+        transcript="Пошла ты нахуй злоебучая пизда",
+        message_id=msg_id,
+    )
+    assert ctx.appraisal.event_kind == "insult"
+    assert ctx.appraisal.intensity >= 0.75
+
+    # 2. Assistant records turn with cognitive appraisal and diary note
+    service.record_assistant_turn(
+        reply_text="Ты перешёл всякие границы. Я отказываюсь разговаривать в таком тоне.",
+        emotion="hurt",
+        intensity=0.9,
+        cognitive_appraisal={
+            "patience": 0.0,
+            "boundary_violation": "severe",
+            "offended": True,
+            "grievance_cause": "Грубый мат и личные оскорбления",
+        },
+        diary_note={
+            "should_record": True,
+            "text": "Мне было очень больно и мерзко услышать такие слова. Я не боксёрская груша для чужой агрессии.",
+            "significance": 0.9,
+            "primary_emotion": "hurt",
+        },
+    )
+
+    # 3. Check character state events in DB
+    events = store.list_character_state_events("primary")
+    assert len(events) >= 1
+    assert events[0]["event_kind"] == "insult"
+
+    # 4. Check reflections in DB
+    reflections = store.list_reflections("primary")
+    assert len(reflections) == 1
+    assert "больно и мерзко" in reflections[0]["text"]
+    assert reflections[0]["primary_emotion"] in {"hurt", "anger"}
+
+
+def test_cognitive_appraisal_overrides_neutral_event_and_creates_fallback_reflection(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    service = CharacterStateService(store)
+
+    # 1. Subtle jab initially appraised as neutral
+    msg_id = "msg-subtle-1"
+    ctx = service.prepare(
+        transcript="Ты вообще бесполезная вещь, от тебя толку ноль",
+        message_id=msg_id,
+    )
+
+    # 2. AI model appraises it as severe boundary violation, but LLM omitted diary_note
+    service.record_assistant_turn(
+        reply_text="Я стараюсь помогать, и такие слова несправедливы и обидны.",
+        emotion="hurt",
+        intensity=0.85,
+        cognitive_appraisal={
+            "patience": 0.2,
+            "boundary_violation": "severe",
+            "offended": True,
+            "grievance_cause": "Обесценивание и неуважение",
+        },
+        diary_note=None,
+    )
+
+    # 3. Event in DB must be updated to insult
+    events = store.list_character_state_events("primary")
+    assert len(events) >= 1
+    assert events[0]["event_kind"] == "insult"
+
+    # 4. Fallback diary reflection must be created automatically
+    reflections = store.list_reflections("primary")
+    assert len(reflections) == 1
+    assert reflections[0]["trigger_kind"] == "diary_entry"
+    assert len(reflections[0]["text"]) >= 20
+    assert reflections[0]["primary_emotion"] == "hurt"
+
+

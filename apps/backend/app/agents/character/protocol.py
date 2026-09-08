@@ -154,6 +154,9 @@ def legacy_result(
         "reply": turn.reply,
         "emotion": turn.affect.emotion.value,
         "intent": turn.intent.value,
+        "intensity": turn.affect.intensity,
+        "valence": turn.affect.valence,
+        "arousal": turn.affect.arousal,
     }
     if turn.cognitive_appraisal is not None:
         result["cognitive_appraisal"] = turn.cognitive_appraisal.model_dump(mode="json")
@@ -164,9 +167,6 @@ def legacy_result(
     if include_metadata:
         result["gesture_intensity"] = turn.gesture.intensity
         result["metadata"] = turn.metadata_frame()
-        result["intensity"] = turn.affect.intensity
-        result["valence"] = turn.affect.valence
-        result["arousal"] = turn.affect.arousal
     return result
 
 

@@ -112,15 +112,22 @@ def character_reflections(request: Request) -> dict[str, object]:
         "iris_mistake_corrected": "Исправление ошибки Iris",
         "milestone": "Важная веха",
         "episode_closed": "Завершение значимого эпизода",
+        "diary_entry": "Личная заметка Iris",
+        "insult": "Резкость / Защита границ",
+        "praise": "Похвала",
+        "support": "Поддержка",
     }
     reflections = []
     for item in store.list_reflections("primary"):
         trigger_kind = str(item.get("trigger_kind", "event"))
+        metadata = item.get("metadata") or {}
+        custom_label = metadata.get("trigger_label") or metadata.get("display_label")
+        trigger_label = custom_label or labels.get(trigger_kind, "Личная заметка Iris" if trigger_kind == "diary_entry" else "Значимый эпизод")
         reflections.append(ReflectionPublicView(
             id=str(item["id"]),
             text=str(item["text"]),
             trigger_kind=trigger_kind,
-            trigger_label=labels.get(trigger_kind, "Значимый эпизод"),
+            trigger_label=trigger_label,
             significance=float(item["significance"]),
             primary_emotion=str(item["primary_emotion"]),
             created_at=str(item["created_at"]),
