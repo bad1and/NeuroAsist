@@ -14,6 +14,11 @@ from typing import Any, Literal
 
 from apps.backend.app.runtime.settings import RuntimeSettings
 from apps.backend.app.memory.consolidation import CommitmentProposal, ConsolidationResult, FactProposal, TopicProposal
+from apps.backend.app.memory.slots import (
+    KNOWN_MEMORY_SLOTS,
+    MEMORY_SLOT_POLICIES,
+    SINGLE_VALUE_MEMORY_SLOTS,
+)
 from apps.backend.app.semantic.vector_index import NullVectorIndex, VectorDimensionMismatch
 from apps.backend.app.storage.timeline import StoredTimelineMessage, TimelineStore
 
@@ -36,34 +41,9 @@ class MemoryService:
     )
     _SECRET_WORDS = ("парол", "password", "код подтверждения", "код из смс", "cvv", "токен", "token", "api key")
     _SINGLE_VALUE_PREDICATES = {"name", "current_statement", "current_goal", "prefers_response_length"}
-    _CANONICAL_VERSION = 19
-    _SINGLE_VALUE_SLOTS = {
-        "user.name",
-        "assistant.developer_count",
-        "user.current_mood",
-        "user.current_activity",
-        "user.current_goal",
-        "user.prefers_response_length",
-        "user.health_constraint",
-        "user.constraint",
-    }
-    _KNOWN_SLOTS = {
-        "user.name",
-        "assistant.developer",
-        "assistant.developer_count",
-        "user.likes_category",
-        "user.likes_game",
-        "user.preference",
-        "user.note",
-        "user.relationship.friend",
-        "user.game_detail",
-        "user.current_mood",
-        "user.current_activity",
-        "user.current_goal",
-        "user.prefers_response_length",
-        "user.health_constraint",
-        "user.constraint",
-    }
+    _CANONICAL_VERSION = 20
+    _SINGLE_VALUE_SLOTS = SINGLE_VALUE_MEMORY_SLOTS
+    _KNOWN_SLOTS = KNOWN_MEMORY_SLOTS
     _NAME_PREFIX = re.compile(
         r"(?:\bменя\s+зовут\b|\bмо[её]\s+имя(?:\s+(?:это|[-—:]))?\b|\bmy\s+name\s+is\b|\bcall\s+me\b)",
         flags=re.IGNORECASE,
@@ -101,6 +81,24 @@ class MemoryService:
     _CURRENT_GOAL_FACT = re.compile(
         r"моя\s+(?:текущая\s+)?цель(?:\s+в\s+разработке)?\s*(?:(?:это|—|-)\s*)?"
         r"(.+?)(?=\s+(?:а|и)\s+ещ[её]\b|[.!?\n]|$)",
+        flags=re.IGNORECASE,
+    )
+    _OCCUPATION_FACT = re.compile(
+        r"(?:\bмоя\s+профессия\s*(?:(?:это|—|-)\s*)?"
+        r"|\bя\s+работаю\s+(?:как\s+)?"
+        r"|\bi\s+work\s+as\s+)"
+        r"([^.!?\n]{2,120}?)(?=\s+(?:а|и)\s+ещ[её]\b|[.!?\n]|$)",
+        flags=re.IGNORECASE,
+    )
+    _PET_FACT = re.compile(
+        r"\bу\s+меня\s+(?:есть\s+)?"
+        r"((?:кот|кошка|собака|п[её]с|щенок|хомяк|попугай|питомец)\b"
+        r"[^.!?\n]{0,80}?)(?=\s+(?:а|и)\s+ещ[её]\b|[.!?\n]|$)",
+        flags=re.IGNORECASE,
+    )
+    _LEARNING_FACT = re.compile(
+        r"\bя\s+(?:изучаю|учу|осваиваю)\s+"
+        r"([^.!?\n]{2,120}?)(?=\s+(?:а|и)\s+ещ[её]\b|[.!?\n]|$)",
         flags=re.IGNORECASE,
     )
     _DURABLE_GAME_GENRE = re.compile(
@@ -155,6 +153,7 @@ class MemoryService:
         context_max_tokens: int = 900,
         vector_index=None,
         semantic_enabled: bool = False,
+        semantic_requested: bool | None = None,
         semantic_limit: int = 8,
         llm_extraction_enabled: bool = False,
         llm_min_confidence: float = 0.70,
@@ -169,6 +168,7 @@ class MemoryService:
         self._max_candidates_per_turn = max_candidates_per_turn
         self._context_max_tokens = context_max_tokens
         self._vector_index = vector_index or NullVectorIndex()
+        self._semantic_requested = semantic_enabled if semantic_requested is None else semantic_requested
         self._semantic_enabled = semantic_enabled and getattr(self._vector_index, "available", False)
         self._semantic_limit = semantic_limit
         self._semantic_degraded_reason: str | None = None
@@ -326,6 +326,32 @@ class MemoryService:
     def semantic_enabled(self) -> bool:
         return self._semantic_enabled and self._semantic_degraded_reason is None
 
+    def capabilities(self) -> dict[str, object]:
+        if not self._enabled or self._runtime.memory_mode == "off":
+            writer = "off"
+        elif self.incognito:
+            writer = "incognito"
+        elif self.uses_background_extraction:
+            writer = "background_llm"
+        elif self._llm_extraction_enabled:
+            writer = "synchronous_llm"
+        else:
+            writer = "deterministic_only"
+        backend = str(getattr(self._vector_index, "backend", "null"))
+        provider = str(
+            getattr(getattr(self._vector_index, "embedding_provider", None), "model_id", "none")
+        )
+        return {
+            "writer": writer,
+            "retrieval": "hybrid" if self.semantic_enabled else "fts_only",
+            "semantic_requested": self._semantic_requested,
+            "semantic_enabled": self.semantic_enabled,
+            "backend": backend,
+            "embedding_provider": provider,
+            "degraded_reason": self._semantic_degraded_reason,
+            "slot_registry_version": self._CANONICAL_VERSION,
+        }
+
     def retrieve(self, query: str, limit: int = 6) -> list[dict[str, object]]:
         if not self._enabled or self.incognito:
             return []
@@ -368,20 +394,58 @@ class MemoryService:
         topic_rows = self._store.list_topics(
             status="active", query=query, limit=limit, include_details=False,
         )
-        commitment_rows = self._store.list_commitments(
-            status="open", limit=limit, include_evidence=False,
+        topic_fts_scores = {
+            str(item["id"]): 1.0 / (position + 1)
+            for position, item in enumerate(topic_rows)
+        }
+        topic_semantic_scores = self._semantic_namespace_scores(
+            query, "topic_memory", limit,
         )
+        topic_candidates = {str(item["id"]): item for item in topic_rows}
+        for topic_id in topic_semantic_scores:
+            topic = self._store.get_topic(topic_id)
+            if topic is not None and topic.get("status") == "active":
+                topic_candidates[topic_id] = topic
+        commitment_rows = self._store.list_commitments(
+            status="open", query=query, limit=limit, include_evidence=False,
+        )
+        commitment_fts_scores = {
+            str(item["id"]): 1.0 / (position + 1)
+            for position, item in enumerate(commitment_rows)
+        }
+        commitment_semantic_scores = self._semantic_namespace_scores(
+            query, "commitment_memory", limit,
+        )
+        commitment_candidates = {
+            str(item["id"]): item for item in commitment_rows
+        }
+        for commitment_id in commitment_semantic_scores:
+            commitment = self._store.get_commitment(commitment_id)
+            if commitment is not None and commitment.get("status") == "open":
+                commitment_candidates[commitment_id] = commitment
         query_terms = set(re.findall(r"[^\W_]+", self._normalize(query), flags=re.UNICODE))
-        for topic in topic_rows:
+        for topic in topic_candidates.values():
             text = f"{topic['title']} {topic['summary_text']}"
             overlap = len(query_terms & set(re.findall(r"[^\W_]+", self._normalize(text), flags=re.UNICODE)))
-            if overlap:
-                memories.append({"id": f"topic:{topic['id']}", "namespace": "topic_memory", "predicate": str(topic["title"]), "value_text": str(topic["summary_text"]), "importance": .7, "confidence": 1.0, "status": "active", "source_message_ids": [], "retrieval": {"score": round(.35 + .1 * overlap, 4), "components": {"exact": 0, "fts": overlap, "semantic": 0, "importance": .7}, "reasons": ["topic_fts"]}})
-        for commitment in commitment_rows:
+            topic_id = str(topic["id"])
+            lexical_score = topic_fts_scores.get(topic_id, 0.0)
+            semantic_score = topic_semantic_scores.get(topic_id, 0.0)
+            if overlap or lexical_score or semantic_score:
+                score = .50 * semantic_score + .28 * lexical_score + .08 * min(overlap, 2) + .07
+                reasons = (["topic_semantic"] if semantic_score else []) + (["topic_fts"] if lexical_score or overlap else [])
+                memories.append({"id": f"topic:{topic_id}", "namespace": "topic_memory", "predicate": str(topic["title"]), "value_text": str(topic["summary_text"]), "importance": .7, "confidence": 1.0, "status": "active", "source_message_ids": [], "retrieval": {"score": round(score, 4), "components": {"exact": 0, "fts": round(lexical_score, 4), "semantic": round(semantic_score, 4), "importance": .7}, "reasons": reasons}})
+        for commitment in commitment_candidates.values():
             text = f"{commitment['title']} {commitment['details']}"
             overlap = len(query_terms & set(re.findall(r"[^\W_]+", self._normalize(text), flags=re.UNICODE)))
-            if overlap or any(marker in self._normalize(query) for marker in ("план", "обещ", "задач", "loop", "обяз")):
-                memories.append({"id": f"commitment:{commitment['id']}", "namespace": "commitment_memory", "predicate": str(commitment["title"]), "value_text": str(commitment["details"] or commitment["title"]), "importance": float(commitment["importance"]), "confidence": float(commitment["confidence"]), "status": "active", "source_message_ids": [], "retrieval": {"score": round(.5 + .1 * overlap + .1 * float(commitment["importance"]), 4), "components": {"open_loop": 1, "fts": overlap, "importance": commitment["importance"]}, "reasons": ["open_commitment"]}})
+            commitment_id = str(commitment["id"])
+            lexical_score = commitment_fts_scores.get(commitment_id, 0.0)
+            semantic_score = commitment_semantic_scores.get(commitment_id, 0.0)
+            explicit_loop_query = any(marker in self._normalize(query) for marker in ("план", "обещ", "задач", "loop", "обяз"))
+            if overlap or lexical_score or semantic_score or explicit_loop_query:
+                importance = float(commitment["importance"])
+                score = .45 * semantic_score + .25 * lexical_score + .08 * min(overlap, 2) + .12 * importance + (.10 if explicit_loop_query else 0)
+                reasons = ["open_commitment"] + (["commitment_semantic"] if semantic_score else []) + (["commitment_fts"] if lexical_score or overlap else [])
+                memories.append({"id": f"commitment:{commitment_id}", "namespace": "commitment_memory", "predicate": str(commitment["title"]), "value_text": str(commitment["details"] or commitment["title"]), "importance": importance, "confidence": float(commitment["confidence"]), "status": "active", "source_message_ids": [], "retrieval": {"score": round(score, 4), "components": {"open_loop": 1, "fts": round(lexical_score, 4), "semantic": round(semantic_score, 4), "importance": importance}, "reasons": reasons}})
         eligibility = None
         source_eligibility = getattr(self._store, "memory_source_eligibility", None)
         factual_ids = [
@@ -404,8 +468,9 @@ class MemoryService:
         selected: list[dict[str, object]] = []
         used_tokens = 0
         seen: set[str] = set()
-        retrieved_ids: list[str] = []
         for memory in sorted(memories, key=lambda item: float(dict(item.get("retrieval", {})).get("score", 0)), reverse=True):
+            if len(selected) >= limit:
+                break
             fingerprint = self._fingerprint(str(memory.get("namespace", "factual_memory")), str(memory["predicate"]), str(memory["value_text"]))
             if fingerprint in seen:
                 continue
@@ -415,16 +480,63 @@ class MemoryService:
                 continue
             used_tokens += estimate
             selected.append(memory)
-            if not str(memory["id"]).startswith(("topic:", "commitment:")):
-                retrieved_ids.append(str(memory["id"]))
-        if retrieved_ids:
-            record_batch = getattr(self._store, "record_memory_retrievals", None)
-            if callable(record_batch):
-                record_batch(retrieved_ids)
-            else:
-                for memory_id in retrieved_ids:
-                    self._store.record_memory_retrieval(memory_id)
         return selected
+
+    def retrieve_episode_summaries(
+        self,
+        query: str,
+        *,
+        active_episode_id: str | None = None,
+        limit: int = 2,
+    ) -> list[dict[str, object]]:
+        """Retrieve prior episodes by meaning, with FTS and recent fallback."""
+        if not self._enabled or self.incognito:
+            return []
+        lexical = self._store.list_episode_summaries(
+            query=query,
+            exclude_episode_id=active_episode_id,
+            limit=limit,
+        )
+        lexical_scores = {
+            str(item["id"]): 1.0 / (position + 1)
+            for position, item in enumerate(lexical)
+        }
+        semantic_scores = self._semantic_namespace_scores(
+            query, "episode_summary", max(limit, self._semantic_limit),
+        )
+        candidates = {str(item["id"]): item for item in lexical}
+        for summary_id in semantic_scores:
+            summary = self._store.get_episode_summary(summary_id)
+            if summary is not None and (
+                active_episode_id is None
+                or summary.get("episode_id") != active_episode_id
+            ):
+                candidates[summary_id] = summary
+        if not candidates:
+            return self._store.list_episode_summaries(
+                exclude_episode_id=active_episode_id,
+                limit=limit,
+            )
+        ranked = [
+            {
+                **summary,
+                "retrieval": {
+                    "score": round(
+                        .70 * semantic_scores.get(summary_id, 0.0)
+                        + .30 * lexical_scores.get(summary_id, 0.0),
+                        4,
+                    ),
+                    "semantic_score": round(semantic_scores.get(summary_id, 0.0), 4),
+                    "fts_score": round(lexical_scores.get(summary_id, 0.0), 4),
+                },
+            }
+            for summary_id, summary in candidates.items()
+        ]
+        return sorted(
+            ranked,
+            key=lambda item: float(dict(item["retrieval"])["score"]),
+            reverse=True,
+        )[:limit]
 
     def explain_retrieval(self, query: str, limit: int = 8) -> dict[str, object]:
         started = time.perf_counter()
@@ -439,6 +551,65 @@ class MemoryService:
             "considered_ids": [item["id"] for item in items],
             "latency_ms": round((time.perf_counter() - started) * 1000, 2),
             "items": items,
+        }
+
+    def apply_continuity_feedback(
+        self,
+        *,
+        referenced_memory_ids: list[str],
+        referenced_episode_ids: list[str],
+        closes_open_loop_ids: list[str],
+        allowed_memory_ids: list[str],
+        allowed_episode_ids: list[str],
+        allowed_open_loop_ids: list[str],
+    ) -> dict[str, list[str]]:
+        """Apply model continuity metadata only within the supplied context.
+
+        Model-provided identifiers are untrusted.  A fact is counted as used,
+        and an open loop can be closed, only when that exact identifier was
+        present in the context for this turn.  This makes ``access_count`` an
+        actual-use signal instead of a retrieval/impression counter.
+        """
+        allowed_facts = {
+            str(item_id)
+            for item_id in allowed_memory_ids
+            if item_id and not str(item_id).startswith(("topic:", "commitment:"))
+        }
+        referenced = list(dict.fromkeys(
+            str(item_id)
+            for item_id in referenced_memory_ids
+            if str(item_id) in allowed_facts
+        ))
+        if referenced:
+            self._store.record_memory_retrievals(referenced)
+
+        allowed_episodes = {str(item_id) for item_id in allowed_episode_ids if item_id}
+        referenced_episodes = list(dict.fromkeys(
+            str(item_id)
+            for item_id in referenced_episode_ids
+            if str(item_id) in allowed_episodes
+        ))
+
+        allowed_loops = {
+            str(item_id)
+            for item_id in allowed_open_loop_ids
+            if item_id
+        }
+        closed: list[str] = []
+        for reported_id in dict.fromkeys(str(item_id) for item_id in closes_open_loop_ids):
+            prefixed = reported_id if reported_id.startswith("commitment:") else f"commitment:{reported_id}"
+            if prefixed not in allowed_loops:
+                continue
+            commitment_id = prefixed.removeprefix("commitment:")
+            commitment = self._store.get_commitment(commitment_id)
+            if commitment is None or commitment.get("status") != "open":
+                continue
+            self.update_commitment(commitment_id, {"status": "completed"})
+            closed.append(prefixed)
+        return {
+            "referenced_memory_ids": referenced,
+            "referenced_episode_ids": referenced_episodes,
+            "closed_open_loop_ids": closed,
         }
 
     def extract_from_message(self, message: StoredTimelineMessage | None) -> list[dict[str, object]]:
@@ -1235,6 +1406,48 @@ class MemoryService:
         self._store.ensure_autonomous_memory_guards()
         return result
 
+    def repair_v20_slot_registry(self) -> dict[str, object]:
+        """Reapply the v20 slot registry to active, source-backed facts."""
+        repair_key = "slot-registry-v20"
+        previous = self._store.memory_repair_run(repair_key)
+        if previous is not None and previous.get("status") == "completed":
+            return dict(previous.get("result", {})) | {"idempotent_noop": True}
+        result: dict[str, object] = {
+            "canonicalized": 0,
+            "newly_supported": 0,
+            "index_jobs": 0,
+        }
+        with self._write_lock, self._store.consolidation_transaction():
+            for item in self._store.list_memories(status="active", limit=500):
+                source = next(
+                    (
+                        message
+                        for message_id in reversed(item.get("source_message_ids", []))
+                        if (message := self._store.get_message(str(message_id))) is not None
+                    ),
+                    None,
+                )
+                candidates = self._canonical_candidates(item, source)
+                if len(candidates) != 1:
+                    continue
+                canonical = candidates[0]
+                if canonical.get("slot_key") not in self._KNOWN_SLOTS:
+                    continue
+                was_known = item.get("slot_key") in self._KNOWN_SLOTS
+                self._store.update_memory(
+                    str(item["id"]),
+                    self._canonical_fields(canonical),
+                    actor="migration",
+                    action="canonicalized_v20_slot_registry",
+                )
+                self._schedule_vector_sync({**canonical, "id": item["id"]})
+                result["canonicalized"] = int(result["canonicalized"]) + 1
+                result["index_jobs"] = int(result["index_jobs"]) + 1
+                if not was_known:
+                    result["newly_supported"] = int(result["newly_supported"]) + 1
+            self._store.finish_memory_repair(repair_key, result)
+        return result
+
     @staticmethod
     def memory_update(memory: dict[str, object]) -> dict[str, str]:
         status = str(memory["status"])
@@ -1413,6 +1626,16 @@ class MemoryService:
         self._delete_vector(memory_id)
         return memory
 
+    def forget_permanently(self, memory_id: str) -> dict[str, object]:
+        if self._store.get_memory(memory_id) is None:
+            raise KeyError(memory_id)
+        # Queue the rebuildable-index deletion before removing the canonical
+        # row, so a crash cannot leave Chroma stale without a durable repair.
+        self._delete_vector(memory_id)
+        if not self._store.purge_memory(memory_id):
+            raise KeyError(memory_id)
+        return {"id": memory_id, "purged": True}
+
     def restore(self, memory_id: str) -> dict[str, object]:
         with self._write_lock, self._store.consolidation_transaction():
             existing = self._store.get_memory(memory_id)
@@ -1523,6 +1746,18 @@ class MemoryService:
             return
         self._store.enqueue_memory_index_job(str(summary["id"]), "episode_summary")
 
+    def update_topic(self, topic_id: str, changes: dict[str, object]) -> dict[str, object]:
+        topic = self._store.update_topic(topic_id, changes, actor="user")
+        self._store.enqueue_memory_index_job(topic_id, "topic_memory")
+        return topic
+
+    def update_commitment(
+        self, commitment_id: str, changes: dict[str, object],
+    ) -> dict[str, object]:
+        commitment = self._store.update_commitment(commitment_id, changes)
+        self._store.enqueue_memory_index_job(commitment_id, "commitment_memory")
+        return commitment
+
     def _apply_candidate(
         self, values: dict[str, object], *, actor: str,
         action: str = "autonomous_accepted", sync_vector: bool = True,
@@ -1545,6 +1780,13 @@ class MemoryService:
                     values.get("source_episode_id"),
                     float(values.get("source_quality", 1.0)),
                 )
+                if values.get("expires_at") is not None:
+                    exact = self._store.update_memory(
+                        str(exact["id"]),
+                        {"expires_at": values["expires_at"]},
+                        actor="policy",
+                        action="temporal_reinforced",
+                    )
                 if actor == "user":
                     exact = self._store.update_memory(
                         str(exact["id"]),
@@ -1650,7 +1892,7 @@ class MemoryService:
         ):
             return MemoryDecision("clarify", "locked_conflict")
         if (
-            str(values.get("kind")) == "relationship"
+            slot == "user.relationship.friend"
             and not self._relationship_is_unambiguous(values)
         ):
             return MemoryDecision("clarify", "ambiguous_relationship")
@@ -1810,31 +2052,65 @@ class MemoryService:
         fts_scores = {str(item["id"]): 1.0 / (position + 1) for position, item in enumerate(fts)}
         semantic_scores: dict[str, float] = {}
         candidates = {str(item["id"]): item for item in fts}
-        if self.semantic_enabled:
-            try:
-                results = self._vector_index.search_sync(query, "memory", self._semantic_limit)
-                indexed_ids = {result.item_id for result in results}
-                source_ids = {item_id for item_id, _ in self._store.semantic_index_items("memory")}
-                source_search = getattr(self._vector_index, "search_source_sync", None)
-                if callable(source_search) and source_ids - indexed_ids:
-                    results = list(results) + [
-                        result for result in source_search(query, "memory", self._semantic_limit)
-                        if result.item_id not in indexed_ids
-                    ]
-                for result in results:
-                    semantic_scores[result.item_id] = result.score
-                    memory = self._store.get_memory(result.item_id)
-                    if memory is not None and memory["status"] == "active":
-                        candidates[result.item_id] = memory
-            except Exception as exc:
-                self._degrade_semantic(exc)
+        semantic_scores = self._semantic_namespace_scores(query, "memory", self._semantic_limit)
+        for memory_id in semantic_scores:
+            memory = self._store.get_memory(memory_id)
+            if memory is not None and memory["status"] == "active":
+                candidates[memory_id] = memory
         temporal = self._is_temporal_query(query)
         return self._attach_retrieval(list(candidates.values()), fts_scores, semantic_scores, temporal)[:limit]
+
+    def _semantic_namespace_scores(
+        self, query: str, namespace: str, limit: int,
+    ) -> dict[str, float]:
+        """Search one rebuildable namespace and bridge only truly missing rows.
+
+        The previous implementation mistook the top-k result IDs for the full
+        index inventory.  Once more than ``k`` items existed it re-embedded the
+        entire SQLite source on every query, effectively bypassing Chroma.
+        """
+        if not self.semantic_enabled:
+            return {}
+        try:
+            results = list(self._vector_index.search_sync(query, namespace, limit))
+            snapshot_method = getattr(self._vector_index, "snapshot_sync", None)
+            source_search = getattr(self._vector_index, "search_source_sync", None)
+            if callable(snapshot_method) and callable(source_search):
+                indexed_ids = set(snapshot_method(namespace).get("ids", []))
+                source_ids = {
+                    item_id for item_id, _ in self._store.semantic_index_items(namespace)
+                }
+                missing_ids = source_ids - indexed_ids
+                if missing_ids:
+                    existing = {result.item_id for result in results}
+                    try:
+                        source_results = source_search(
+                            query, namespace, limit, item_ids=missing_ids,
+                        )
+                    except TypeError:
+                        # Compatibility with a third-party adapter implementing
+                        # the older three-argument contract.
+                        source_results = source_search(query, namespace, limit)
+                    results.extend(
+                        result for result in source_results
+                        if result.item_id in missing_ids and result.item_id not in existing
+                    )
+            return {
+                result.item_id: max(0.0, min(1.0, float(result.score)))
+                for result in results
+                if result.score > 0
+            }
+        except Exception as exc:
+            self._degrade_semantic(exc)
+            return {}
 
     def _should_auto_activate(self, values: dict[str, object], sensitive: bool) -> bool:
         if sensitive and self._sensitive_mode == "ask":
             return False
-        if str(values.get("kind")) == "relationship" and not self._relationship_is_unambiguous(values):
+        if (
+            str(values.get("slot_key") or "") == "user.relationship.friend"
+            and not self._relationship_is_unambiguous(values)
+        ):
             # Names and social roles are easy to misread in informal dialogue.
             # Keep uncertain ties in Memory Center for review instead of making
             # them permanent context that can distort later answers.
@@ -1885,12 +2161,11 @@ class MemoryService:
             fts_score = fts_scores.get(memory_id, 0.0)
             semantic_score = max(0.0, semantic_scores.get(memory_id, 0.0))
             temporal_score = self._temporal_score(str(memory["created_at"])) if temporal else 0.0
-            recency = self._temporal_score(str(memory["updated_at"])) * 10
+            recency = self._temporal_score(str(memory["updated_at"])) * (.5 if temporal else .1)
             source_quality = float(memory.get("source_quality", 1.0))
-            recent_use_penalty = min(.08, float(memory.get("access_count", 0)) * .002)
-            score = 0.45 * semantic_score + 0.22 * fts_score + 0.10 * float(memory["importance"]) + 0.08 * float(memory["confidence"]) + .08 * source_quality + recency + temporal_score - recent_use_penalty
+            score = 0.48 * semantic_score + 0.26 * fts_score + 0.10 * float(memory["importance"]) + 0.08 * float(memory["confidence"]) + .08 * source_quality + recency + temporal_score
             reasons = (["semantic"] if semantic_score else []) + (["fts"] if fts_score else []) + (["temporal"] if temporal else [])
-            ranked.append({**memory, "namespace": "factual_memory", "retrieval": {"score": round(score, 4), "semantic_score": round(semantic_score, 4), "fts_score": round(fts_score, 4), "components": {"exact": 0.0, "fts": round(fts_score, 4), "semantic": round(semantic_score, 4), "importance": float(memory["importance"]), "confidence": float(memory["confidence"]), "recency": round(recency, 4), "source_quality": source_quality, "recent_use_penalty": round(recent_use_penalty, 4)}, "reasons": reasons}})
+            ranked.append({**memory, "namespace": "factual_memory", "retrieval": {"score": round(score, 4), "semantic_score": round(semantic_score, 4), "fts_score": round(fts_score, 4), "components": {"exact": 0.0, "fts": round(fts_score, 4), "semantic": round(semantic_score, 4), "importance": float(memory["importance"]), "confidence": float(memory["confidence"]), "recency": round(recency, 4), "source_quality": source_quality}, "reasons": reasons}})
         return sorted(ranked, key=lambda item: item["retrieval"]["score"], reverse=True)
 
     def _sync_vector(self, memory: dict[str, object]) -> None:
@@ -2026,8 +2301,16 @@ class MemoryService:
         """Convert high-value model variants into stable v17 slots."""
         text = self._normalize(source.effective_content) if source is not None else ""
         user_developer = bool(
-            re.search(r"\bя\b.{0,50}\b(?:твой|твоих|разработчик|создател)", text)
-            and re.search(r"\b(?:разработчик|создател)", text)
+            re.search(
+                r"\bя\b.{0,30}\b(?:твой|твоя|твоим)\b.{0,30}"
+                r"\b(?:разработчик|создател)",
+                text,
+            )
+            or re.search(
+                r"\bя\b.{0,30}\b(?:разработал|создал)\w*\b.{0,20}"
+                r"\b(?:тебя|iris|ирис)\b",
+                text,
+            )
         )
         second_developer = re.search(
             r"\b(?:второго|другого)\s+(?:твоего\s+)?(?:разработчика|создателя)\s+зовут\s+([a-zа-яё][a-zа-яё'’-]{1,39})",
@@ -2106,10 +2389,12 @@ class MemoryService:
             )
             for item in self._store.list_memories(status="active", limit=250)
         )
-        if user_developer or (
-            subject == "user" and ("develop" in predicate or predicate == "role")
-            and ("develop" in legacy_value or predicate != "role")
-        ):
+        explicit_developer_relation = (
+            subject == "user"
+            and predicate in {"is_developer_of", "developer_of"}
+            and any(marker in legacy_value for marker in ("iris", "ирис", "assistant"))
+        )
+        if user_developer or explicit_developer_relation:
             name = self._canonical_person_name(self._active_user_name() or "пользователь")
             developer_count = 2 if (
                 known_second_developer
@@ -2263,6 +2548,15 @@ class MemoryService:
         elif predicate in {"likes", "prefers", "preference", "style"} and subject == "user":
             slot = "user.preference"
             object_key = object_key or f"preference:{self._normalize(value)}"
+        elif predicate in {"dislikes", "hates", "avoids", "does_not_like"} and subject == "user":
+            slot, predicate = "user.dislike", "dislikes"
+            object_key = object_key or f"dislike:{self._normalize(value)}"
+        elif predicate in {"interest", "interested_in", "hobby", "hobbies"} and subject == "user":
+            slot, predicate = "user.interest", "interest"
+            object_key = object_key or f"interest:{self._normalize(value)}"
+        elif predicate in {"habit", "routine", "usually"} and subject == "user":
+            slot, predicate = "user.habit", "habit"
+            object_key = object_key or f"habit:{self._normalize(value)}"
         elif predicate == "explicit_memory" and subject == "user":
             slot, object_key = "user.note", f"note:{self._normalize(value)}"
         elif predicate in {
@@ -2277,41 +2571,37 @@ class MemoryService:
             result["cardinality"] = "multi"
         elif predicate in {"has_friend", "friend"} and subject == "user":
             slot, object_key = "user.relationship.friend", f"person:{self._normalize(value)}"
+        elif predicate in {"pet", "has_pet", "pets"} and subject == "user":
+            slot, predicate = "user.pet", "pet"
+            object_key = object_key or f"pet:{self._normalize(value)}"
         elif predicate in {"game_features", "plays_game_with_upgrades", "plays_for_fun"}:
             slot, object_key = "user.game_detail", f"detail:{predicate}"
-        if slot in {
-            "user.name", "assistant.developer", "assistant.developer_count",
-            "user.likes_category", "user.likes_game", "user.preference", "user.note",
-            "user.relationship.friend", "user.game_detail",
-            "user.prefers_response_length",
-            "user.health_constraint", "user.constraint",
-        }:
-            result["temporal_semantics"] = "atemporal"
-        if slot in self._SINGLE_VALUE_SLOTS:
-            result["cardinality"] = "single"
-        elif slot:
-            result["cardinality"] = "multi"
+        elif predicate in {"occupation", "profession", "job", "works_as", "role"} and subject == "user":
+            slot, predicate, object_key = "user.occupation", "occupation", "user"
+        elif predicate in {"skill", "skills", "knows", "uses", "technology"} and subject == "user":
+            slot, predicate = "user.skill", "skill"
+            object_key = object_key or f"skill:{self._normalize(value)}"
+        elif predicate in {"learning", "studies", "studying", "learns"} and subject == "user":
+            slot, predicate = "user.learning", "learning"
+            object_key = object_key or f"learning:{self._normalize(value)}"
+        elif predicate in {"project", "current_project", "working_on"} and subject == "user":
+            slot, predicate = "user.project", "project"
+            object_key = object_key or f"project:{self._normalize(value)}"
+        elif predicate in {"location", "lives_in", "city", "current_location"} and subject == "user":
+            slot, predicate, object_key = "user.location", "location", "user"
+        policy = MEMORY_SLOT_POLICIES.get(slot)
+        if policy is not None:
+            result["cardinality"] = policy.cardinality
+            result["temporal_semantics"] = policy.temporal_semantics
+            if policy.ttl_days is not None:
+                result["expires_at"] = (
+                    datetime.now(UTC) + timedelta(days=policy.ttl_days)
+                ).isoformat(timespec="milliseconds")
         temporal = str(result.get("temporal_semantics", "atemporal"))
         if not result.get("expires_at") and temporal in {"current", "period"}:
-            days = 1 if slot in {"user.current_mood", "user.current_activity"} else 7 if temporal == "current" else 30
+            days = 7 if temporal == "current" else 30
             result["expires_at"] = (datetime.now(UTC) + timedelta(days=days)).isoformat(timespec="milliseconds")
-        aliases = {
-            "user.name": "имя пользователя user name кто я",
-            "assistant.developer": "разработчик разработчики создатель создатели developer developers Iris",
-            "assistant.developer_count": "число количество разработчиков developer count",
-            "user.likes_category": "любимый жанр шутеры shooters game genre",
-            "user.likes_game": "любимая игра играет game plays",
-            "user.preference": "предпочтение любит нравится preference likes",
-            "user.note": "явно запомнить заметка remember note",
-            "user.relationship.friend": "друг друзья friend relationship",
-            "user.game_detail": "детали игры особенности улучшения game features upgrades",
-            "user.current_mood": "настроение mood сейчас",
-            "user.current_activity": "занятие activity сейчас",
-            "user.current_goal": "цель goal сейчас",
-            "user.prefers_response_length": "длина ответов короткие длинные response length",
-            "user.health_constraint": "здоровье аллергия диагноз ограничение health allergy",
-            "user.constraint": "ограничение constraint restriction",
-        }.get(slot, "")
+        aliases = policy.search_aliases if policy is not None else ""
         result.update({
             "subject": subject,
             "predicate": predicate,
@@ -2372,7 +2662,7 @@ class MemoryService:
                 "name" in text or "имя" in text or "зовут" in text
             )
             if target == slot_key or inferred_name:
-                self._store.update_commitment(str(commitment["id"]), {
+                self.update_commitment(str(commitment["id"]), {
                     "status": "completed", "target_slot": slot_key,
                 })
 
@@ -2497,6 +2787,34 @@ class MemoryService:
                     "scope": "user_profile", "kind": "goal", "subject": "user",
                     "predicate": "current_goal", "value_text": value[:500],
                     "importance": 0.8, "confidence": 0.97, "sensitivity": "normal",
+                })
+        occupation_match = self._OCCUPATION_FACT.search(text)
+        if occupation_match is not None:
+            value = self._clean_memory_value(occupation_match.group(1))
+            # Bare adverbs and work-location phrases are not occupations.
+            if value and not re.match(r"(?iu)^(?:над|в|на|с|по)\b", value):
+                candidates.append({
+                    "scope": "user_profile", "kind": "skill", "subject": "user",
+                    "predicate": "occupation", "value_text": value[:200],
+                    "importance": 0.8, "confidence": 0.97, "sensitivity": "normal",
+                })
+        pet_match = self._PET_FACT.search(text)
+        if pet_match is not None:
+            value = self._clean_memory_value(pet_match.group(1))
+            if value:
+                candidates.append({
+                    "scope": "relationship", "kind": "relationship", "subject": "user",
+                    "predicate": "pet", "value_text": value[:200],
+                    "importance": 0.75, "confidence": 0.97, "sensitivity": "normal",
+                })
+        learning_match = self._LEARNING_FACT.search(text)
+        if learning_match is not None:
+            value = self._clean_memory_value(learning_match.group(1))
+            if value:
+                candidates.append({
+                    "scope": "user_profile", "kind": "skill", "subject": "user",
+                    "predicate": "learning", "value_text": value[:200],
+                    "importance": 0.7, "confidence": 0.97, "sensitivity": "normal",
                 })
         genre_match = self._DURABLE_GAME_GENRE.search(text)
         if genre_match is not None:

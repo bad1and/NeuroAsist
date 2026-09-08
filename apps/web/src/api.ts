@@ -389,6 +389,10 @@ export function deleteMemory(memoryId: string): Promise<{ memory: MemoryItem }> 
   return requestJson(`/memory/${encodeURIComponent(memoryId)}`, { method: "DELETE" });
 }
 
+export function purgeMemory(memoryId: string): Promise<{ memory: { id: string; purged: boolean } }> {
+  return requestJson(`/memory/${encodeURIComponent(memoryId)}/purge`, { method: "DELETE" });
+}
+
 export function restoreMemory(memoryId: string): Promise<{ memory: MemoryItem }> {
   return requestJson(`/memory/${encodeURIComponent(memoryId)}/restore`, { method: "POST" });
 }
