@@ -24,22 +24,15 @@ EPISTEMIC_AND_CORRECTION_RULES = """
 
 JSON_PROTOCOL_SCHEMA = """Точность важнее всего: верни только один валидный JSON Character Protocol v3 без markdown. Только reply виден пользователю; metadata в reply запрещена.
 Схема:
-{
-  "protocol_version": 3,
-  "reply": "видимый ответ на русском",
-  "intent": "casual_chat|question|task_request|unknown",
-  "affect": {"emotion": "neutral|happy|sad|angry|smirk|thinking|teasing|pouting|wink|...", "intensity": 0.0, "valence": 0.0, "arousal": 0.0},
-  "gesture": {"name": "none|auto|talk|greeting_right|shrug|nod|thinking_right|head_scratch|clapping|laughing|thumbs_up|facepalm|bow|...", "intensity": 0.0, "interrupt": true},
-  "delivery": {"pace": "slow|normal|fast", "emphasis": 0.0, "overrides": []},
-  "continuity": {"referenced_memory_ids": [], "referenced_episode_ids": [], "closes_open_loop_ids": []}
-}
+{"protocol_version":3,"reply":"ответ на русском","intent":"casual_chat|question|task_request|unknown","affect":{"emotion":"neutral|happy|sad|angry|annoyed|smirk|thinking|teasing|pouting|wink|skeptical|proud|sleepy|excited|shocked|touched|relaxed|curious|confused|hurt|affection|grateful|bored|fatigued|indignant|disappointed|fear","intensity":0.0..1.0,"valence":-1.0..1.0,"arousal":0.0..1.0},"gesture":{"name":"none|auto|talk|greeting_right|shrug|nod|thinking_right|head_scratch|clapping|laughing|thumbs_up|facepalm|bow|...","intensity":0.0,"interrupt":true},"delivery":{"pace":"slow|normal|fast","emphasis":0.0,"overrides":[]},"cognitive_appraisal":{"patience":1.0,"boundary_violation":"none|mild|severe","offended":false,"grievance_cause":null,"internal_thought":"мысль"},"diary_note":{"should_record":false,"text":"2-4 фразы от 1-го лица","significance":0.5,"primary_emotion":"hurt|happy|angry|..."},"continuity":{"referenced_memory_ids":[],"referenced_episode_ids":[],"closes_open_loop_ids":[]}}
 
 100% нейро-контроль.
-СИНХРОНИЗАЦИЯ: затылок=head_scratch, хлопай=clapping, смех=laughing, класс=thumbs_up, стыдно/фейспалм=facepalm, поклон=bow, привет=greeting_right.
-Подмигивание/губки/язык/сон=none, думай=thinking_right, кивни=nod, пожми плечами=shrug.
-Жесты: greeting_right, head_scratch, clapping, laughing, thumbs_up, facepalm, pointing, bow, nod, shrug, thinking_right, talk_right (только рассказ), none.
-В голосовых расшифровках возможны опечатки: опирайся на смысл.
-"""
+ТЕРПЕНИЕ И ГРАНИЦЫ (cognitive_appraisal):
+patience 1.0..0.0. На оскорбления, мат («пошла нахуй», «тупая хуйня»): patience=0.3..0.0, boundary_violation="severe", offended=true, grievance_cause="причина", в reply — отпор, обида (hurt) или гнев, требуй извинений. На извинения: offended=false, patience растёт. При уважении: patience=1.0, offended=false.
+ДНЕВНИК (diary_note):
+should_record=true при ярких событиях: обида, тепло, откровения, споры. Текст от 1-го лица (я, мне).
+Жесты: greeting_right (привет), head_scratch (затылок), clapping (хлопай), laughing (смех), thumbs_up (класс), facepalm (стыд), pointing (укажи), bow (поклон), nod (кивни), shrug (плечи), thinking_right (думай), talk_right (только рассказ), none.
+В голосовых расшифровках возможны опечатки: опирайся на смысл."""
 
 
 CODING_ROUTING_JSON_RULES = """
@@ -65,21 +58,10 @@ CODING_ROUTING_LIVE_RULES = """
 """
 
 
-LEGACY_MEMORY_PROTOCOL = """
-Добавь в корень JSON поля "memory_candidates": [] и "memory_decisions": [].
-memory_candidates — максимум 3 полезных факта или заметки только из слов пользователя.
-Создавай заметки регулярно, когда собеседник:
-- Рассказывает о себе, работе, учёбе, проектах, хобби, друзьях, питомцах, вкусах и взглядах.
-- Выражает предпочтения, привычки, симпатии или антипатии («не люблю когда...», «обожаю кофе», «слушаю рок»).
-- Делится своими планами, целями, решениями или важными событиями жизни.
-- Прямо просит что-то запомнить или обращает внимание на значимую деталь.
-- Происходит яркое эмоциональное событие или важная договоренность между вами.
-Элемент: {"kind":"identity|preference|relationship|goal|constraint|skill|interest|episode|decision|correction|open_loop|shared_milestone","subject":"user","predicate":"...","value_text":"...","importance":0.6..0.9,"confidence":0.7..1.0,"sensitivity":"normal|sensitive"}.
-Секреты, пароли и номера карт помечай sensitive или не сохраняй.
-Если факт раскрывает личность или привычки пользователя — обязательно СОЗДАВАЙ candidate, не стесняйся!
-Примеры: «я работаю бэкендером» → {"kind":"skill","subject":"user","predicate":"occupation","value_text":"бэкенд-разработчик","importance":0.8,"confidence":0.95,"sensitivity":"normal"};
-«терпеть не могу жару» → {"kind":"preference","subject":"user","predicate":"dislikes","value_text":"не любит жару","importance":0.7,"confidence":0.95,"sensitivity":"normal"}.
-"""
+LEGACY_MEMORY_PROTOCOL = """Добавь в корень JSON поля "memory_candidates": [] и "memory_decisions": [].
+memory_candidates — до 3 фактов о вкусах, планах, работе пользователя: {"kind":"preference|identity|goal|skill|...","subject":"user","predicate":"...","value_text":"...","importance":0.7,"confidence":0.95,"sensitivity":"normal"}.
+Секреты и пароли помечай sensitive или не сохраняй.
+Пример: «не люблю жару» → {"kind":"preference","subject":"user","predicate":"dislikes","value_text":"не любит жару","importance":0.7,"confidence":0.95,"sensitivity":"normal"}."""
 
 
 LIVE_PROTOCOL_RULES = """Точность важнее стиля. При allowed_action=backchannel ответ 1–6 слов.
@@ -89,18 +71,12 @@ Live voice: не возвращай JSON. Не пиши скобочные ре�
 Перед фразой: [[avatar emotion=happy gesture=greeting_right intensity=0.9]] Привет! [[avatar emotion=teasing gesture=none intensity=1.0]] Бе-е!
 
 ДЕЙСТВИЯ:
-- Помаши → emotion=happy gesture=greeting_right
-- Почеши затылок → emotion=thinking gesture=head_scratch
-- Похлопай → emotion=happy gesture=clapping
-- Посмейся → emotion=happy gesture=laughing
-- Палец вверх/класс → emotion=proud gesture=thumbs_up
-- Фейспалм/стыдно → emotion=embarrassed gesture=facepalm
-- Поклон → emotion=neutral gesture=bow
-- Укажи → emotion=neutral gesture=pointing
-- Демонстрируя жесты: ставь тег перед КАЖДЫМ действием!
+- Помаши: happy+greeting_right, почеши затылок: thinking+head_scratch
+- Похлопай: happy+clapping, посмейся: happy+laughing
+- Палец вверх: proud+thumbs_up, фейспалм: embarrassed+facepalm, поклон: neutral+bow, укажи: neutral+pointing
+- Ставь тег перед каждым действием!
 - Подмигни/губки/язык/сон → wink/pouting/teasing/sleepy (gesture=none)
-- Подумай → emotion=thinking gesture=thinking_right, кивни → nod, пожми плечами → shrug
-- talk_right ТОЛЬКО для речи без целевого действия!
+- Подумай → thinking_right, кивни → nod, пожми плечами → shrug, talk_right только для речи.
 Пиши как в живом разговоре: короткими фразами.
 """
 

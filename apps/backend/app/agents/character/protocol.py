@@ -105,6 +105,8 @@ def parse_turn(payload: dict[str, Any], *, user_text: str = "") -> tuple[Charact
         or "delivery" in payload_copy
         or "memory_candidates" in payload_copy
         or "coding_delegation" in payload_copy
+        or "cognitive_appraisal" in payload_copy
+        or "diary_note" in payload_copy
         or isinstance(payload_copy.get("gesture"), dict)
     ):
         try:
@@ -153,6 +155,10 @@ def legacy_result(
         "emotion": turn.affect.emotion.value,
         "intent": turn.intent.value,
     }
+    if turn.cognitive_appraisal is not None:
+        result["cognitive_appraisal"] = turn.cognitive_appraisal.model_dump(mode="json")
+    if turn.diary_note is not None:
+        result["diary_note"] = turn.diary_note.model_dump(mode="json")
     if include_gesture:
         result["gesture"] = turn.gesture.name.value
     if include_metadata:

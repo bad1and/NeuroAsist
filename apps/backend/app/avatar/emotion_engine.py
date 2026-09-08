@@ -131,6 +131,30 @@ def _default_mapping() -> dict[Emotion, EmotionMapping]:
     mapping[Emotion.CONFUSED] = mapping[Emotion.CONFUSED].model_copy(
         update={"motion_profile": "thoughtful", "allowed_gestures": [Gesture.SHRUG, Gesture.DISAGREEMENT, Gesture.THINKING, Gesture.HEAD_SCRATCH, Gesture.FACEPALM, Gesture.NONE]}
     )
+    mapping[Emotion.HURT] = mapping[Emotion.HURT].model_copy(
+        update={"expression": "sad", "weight": 0.85, "motion_profile": "tense", "allowed_gestures": [Gesture.DISAGREEMENT, Gesture.SHRUG, Gesture.THINKING, Gesture.NONE]}
+    )
+    mapping[Emotion.AFFECTION] = mapping[Emotion.AFFECTION].model_copy(
+        update={"expression": "touched", "weight": 0.75, "motion_profile": "attentive", "allowed_gestures": [Gesture.NOD, Gesture.AGREEMENT, Gesture.BOW, Gesture.THUMBS_UP, Gesture.NONE]}
+    )
+    mapping[Emotion.GRATEFUL] = mapping[Emotion.GRATEFUL].model_copy(
+        update={"expression": "happy", "weight": 0.75, "motion_profile": "attentive", "allowed_gestures": [Gesture.NOD, Gesture.AGREEMENT, Gesture.BOW, Gesture.THUMBS_UP, Gesture.NONE]}
+    )
+    mapping[Emotion.BORED] = mapping[Emotion.BORED].model_copy(
+        update={"expression": "neutral", "weight": 0.5, "motion_profile": "calm", "allowed_gestures": [Gesture.SHRUG, Gesture.HEAD_SCRATCH, Gesture.NONE]}
+    )
+    mapping[Emotion.FATIGUED] = mapping[Emotion.FATIGUED].model_copy(
+        update={"expression": "sleepy", "weight": 0.65, "motion_profile": "calm", "allowed_gestures": [Gesture.NONE, Gesture.SHRUG, Gesture.FAREWELL]}
+    )
+    mapping[Emotion.INDIGNANT] = mapping[Emotion.INDIGNANT].model_copy(
+        update={"expression": "angry", "weight": 0.8, "motion_profile": "tense", "allowed_gestures": [Gesture.FRUSTRATION, Gesture.DISAGREEMENT, Gesture.TALK, Gesture.NONE]}
+    )
+    mapping[Emotion.DISAPPOINTED] = mapping[Emotion.DISAPPOINTED].model_copy(
+        update={"expression": "sad", "weight": 0.75, "motion_profile": "calm", "allowed_gestures": [Gesture.SHRUG, Gesture.DISAGREEMENT, Gesture.THINKING, Gesture.NONE]}
+    )
+    mapping[Emotion.FEAR] = mapping[Emotion.FEAR].model_copy(
+        update={"expression": "shocked", "weight": 0.85, "motion_profile": "alert", "allowed_gestures": [Gesture.SURPRISE, Gesture.SHRUG, Gesture.NONE]}
+    )
     return mapping
 
 
