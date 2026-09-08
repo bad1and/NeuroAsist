@@ -50,7 +50,14 @@ def create_memory(payload: MemoryCreate, request: Request) -> dict[str, object]:
 
 @router.patch("/{memory_id}")
 def patch_memory(memory_id: str, payload: MemoryPatch, request: Request) -> dict[str, object]:
-    _autonomous_memory_only()
+    try:
+        return {
+            "memory": _service(request).edit(
+                memory_id, payload.model_dump(exclude_none=True),
+            ),
+        }
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Memory not found") from exc
 
 
 @router.delete("/{memory_id}")
@@ -61,9 +68,20 @@ def delete_memory(memory_id: str, request: Request) -> dict[str, object]:
         raise HTTPException(status_code=404, detail="Memory not found") from exc
 
 
+@router.delete("/{memory_id}/purge")
+def purge_memory(memory_id: str, request: Request) -> dict[str, object]:
+    try:
+        return {"memory": _service(request).forget_permanently(memory_id)}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Memory not found") from exc
+
+
 @router.post("/{memory_id}/restore")
 def restore_memory(memory_id: str, request: Request) -> dict[str, object]:
-    _autonomous_memory_only()
+    try:
+        return {"memory": _service(request).restore(memory_id)}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Memory not found") from exc
 
 
 @router.post("/{memory_id}/confirm")
@@ -98,7 +116,14 @@ def create_topic(payload: TopicCreate, request: Request) -> dict[str, object]:
 
 @router.patch("/topics/{topic_id}")
 def patch_topic(topic_id: str, payload: TopicPatch, request: Request) -> dict[str, object]:
-    _autonomous_memory_only()
+    try:
+        return {
+            "topic": _service(request).update_topic(
+                topic_id, payload.model_dump(exclude_none=True),
+            ),
+        }
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Memory topic not found") from exc
 
 
 @router.post("/topics/{topic_id}/merge/{merged_id}")
@@ -107,8 +132,14 @@ def merge_topics(topic_id: str, merged_id: str, request: Request) -> dict[str, o
 
 
 @router.get("/commitments")
-def list_commitments(request: Request, status: str | None = None) -> dict[str, object]:
-    return {"items": _service(request).store.list_commitments(status=status)}
+def list_commitments(
+    request: Request,
+    status: str | None = None,
+    q: str | None = Query(default=None, max_length=200),
+) -> dict[str, object]:
+    return {
+        "items": _service(request).store.list_commitments(status=status, query=q),
+    }
 
 
 @router.post("/commitments")
@@ -118,12 +149,26 @@ def create_commitment(payload: CommitmentCreate, request: Request) -> dict[str, 
 
 @router.patch("/commitments/{commitment_id}")
 def patch_commitment(commitment_id: str, payload: CommitmentPatch, request: Request) -> dict[str, object]:
-    _autonomous_memory_only()
+    try:
+        return {
+            "commitment": _service(request).update_commitment(
+                commitment_id, payload.model_dump(exclude_none=True),
+            ),
+        }
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Memory commitment not found") from exc
 
 
 @router.post("/commitments/{commitment_id}/close")
 def close_commitment(commitment_id: str, request: Request) -> dict[str, object]:
-    _autonomous_memory_only()
+    try:
+        return {
+            "commitment": _service(request).update_commitment(
+                commitment_id, {"status": "completed"},
+            ),
+        }
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Memory commitment not found") from exc
 
 
 @router.get("/conflicts")
@@ -136,6 +181,7 @@ def memory_diagnostics(request: Request, limit: int = Query(default=20, ge=1, le
     service = _service(request)
     return {
         **service.store.memory_diagnostics(limit=limit),
+        "capabilities": service.capabilities(),
         "index_health": service.semantic_diagnostics(),
     }
 

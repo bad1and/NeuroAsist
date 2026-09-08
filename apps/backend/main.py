@@ -252,6 +252,10 @@ def create_app() -> FastAPI:
         context_max_tokens=settings.memory_context_max_tokens,
         vector_index=vector_index,
         semantic_enabled=semantic_mode_enabled,
+        semantic_requested=(
+            settings.semantic_retrieval_enabled
+            and settings.semantic_retrieval_eval_passed
+        ),
         semantic_limit=settings.semantic_retrieval_limit,
         llm_extraction_enabled=settings.memory_llm_extraction_enabled,
         llm_min_confidence=settings.memory_llm_min_confidence,
@@ -851,6 +855,12 @@ def create_app() -> FastAPI:
             "info",
             "Autonomous memory v19 repair checked",
             memory_service.repair_v19_autonomous_memory(),
+        ))
+        events.append((
+            "memory.v20_repair",
+            "info",
+            "Memory slot registry v20 repair checked",
+            memory_service.repair_v20_slot_registry(),
         ))
         expired = memory_service.expire_due_memories()
         if expired:

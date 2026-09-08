@@ -500,6 +500,16 @@ export type MemoryDiagnosticRun = {
 export type MemoryDiagnostics = {
   queue: Record<string, number>;
   runs: MemoryDiagnosticRun[];
+  capabilities?: {
+    writer: string;
+    retrieval: string;
+    semantic_requested: boolean;
+    semantic_enabled: boolean;
+    backend: string;
+    embedding_provider: string;
+    degraded_reason?: string | null;
+    slot_registry_version: number;
+  };
   active_by_namespace?: Record<string, number>;
   repair?: {
     repair_key: string;
