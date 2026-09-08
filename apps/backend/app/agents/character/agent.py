@@ -72,6 +72,8 @@ class CharacterAgent:
         memory_service=None,
         persona_name: str = "default",
         coding_bridge=None,
+        situational_coordinator=None,
+        runtime_settings=None,
     ) -> None:
         self._llm_provider = llm_provider
         self._history = history
@@ -82,6 +84,8 @@ class CharacterAgent:
         self._voice_input = VoiceInputInterpreter(memory_service)
         self._persona = get_persona(persona_name)
         self._coding_bridge = coding_bridge
+        self._situational_coordinator = situational_coordinator
+        self._runtime_settings = runtime_settings
         self.last_turn: CharacterTurn | None = None
         self.last_memory_updates: list[dict[str, str]] = []
         self._last_user_message = None
@@ -148,6 +152,34 @@ class CharacterAgent:
         )
         return interpreted, effective_text, built_context
 
+    async def _resolve_situational_context(self, user_text: str) -> str | None:
+        """Resolve Tier 1 micro-header and optional Tier 2 deep enrichment without double roundtrips."""
+        if self._situational_coordinator is None:
+            return None
+        manual_city = getattr(self._runtime_settings, "location_city", None)
+        location_mode = getattr(self._runtime_settings, "location_mode", "auto")
+        weather_enabled = getattr(self._runtime_settings, "weather_enabled", True)
+        news_enabled = getattr(self._runtime_settings, "news_enabled", True)
+        news_category = getattr(self._runtime_settings, "news_category", "all")
+
+        ambient_header = await self._situational_coordinator.get_ambient_header(
+            manual_city=manual_city,
+            location_mode=location_mode,
+            weather_enabled=weather_enabled,
+        )
+        deep_enrichment = await self._situational_coordinator.evaluate_and_enrich(
+            user_text,
+            manual_city=manual_city,
+            location_mode=location_mode,
+            weather_enabled=weather_enabled,
+            news_enabled=news_enabled,
+            default_news_category=news_category,
+        )
+        parts = [ambient_header]
+        if deep_enrichment:
+            parts.append(deep_enrichment)
+        return "\n\n".join(parts)
+
     async def handle_user_message(
         self,
         session_id: str,
@@ -202,6 +234,9 @@ class CharacterAgent:
             )
         if coding_context:
             state_context = "\n\n".join(part for part in (state_context, f"CODING AGENT COORDINATION:\n{coding_context}") if part)
+        situational_context = await self._resolve_situational_context(prompt_user_text)
+        if situational_context:
+            state_context = "\n\n".join(part for part in (state_context, situational_context) if part)
         model_routing_candidate = await self._should_request_model_delegation(effective_text)
         required_anchors = self._required_response_anchors(prompt_user_text)
         if built_context is not None:
@@ -515,6 +550,9 @@ class CharacterAgent:
             return
         if coding_context:
             state_context = "\n\n".join(part for part in (state_context, f"CODING AGENT COORDINATION:\n{coding_context}") if part)
+        situational_context = await self._resolve_situational_context(prompt_user_text)
+        if situational_context:
+            state_context = "\n\n".join(part for part in (state_context, situational_context) if part)
         model_routing_candidate = await self._should_request_model_delegation(effective_text)
         required_anchors = self._required_response_anchors(prompt_user_text)
         if built_context is not None:

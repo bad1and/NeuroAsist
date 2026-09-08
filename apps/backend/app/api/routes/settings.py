@@ -144,6 +144,11 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         available_personalities=AVAILABLE_PERSONALITIES,
         available_voice_languages=AVAILABLE_VOICE_LANGUAGES,
         available_tts_voices=_available_tts_voices(request),
+        location_mode=runtime_settings.location_mode,
+        location_city=runtime_settings.location_city,
+        weather_enabled=runtime_settings.weather_enabled,
+        news_enabled=runtime_settings.news_enabled,
+        news_category=runtime_settings.news_category,
     )
 
 
@@ -287,6 +292,25 @@ async def patch_runtime_settings(
 
     if payload.coding_auto_delegate is not None:
         runtime_settings.coding_auto_delegate = payload.coding_auto_delegate
+
+    if payload.location_mode is not None:
+        if payload.location_mode not in ("auto", "manual"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported location mode")
+        runtime_settings.location_mode = payload.location_mode
+
+    if payload.location_city is not None:
+        runtime_settings.location_city = payload.location_city.strip()
+
+    if payload.weather_enabled is not None:
+        runtime_settings.weather_enabled = bool(payload.weather_enabled)
+
+    if payload.news_enabled is not None:
+        runtime_settings.news_enabled = bool(payload.news_enabled)
+
+    if payload.news_category is not None:
+        if payload.news_category not in ("all", "general", "tech"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported news category")
+        runtime_settings.news_category = payload.news_category
 
     for field_name, allowed_values in LIVE_SETTING_VALUES.items():
         value = getattr(payload, field_name)

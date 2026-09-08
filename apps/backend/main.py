@@ -28,7 +28,9 @@ from apps.backend.app.api.routes.models import router as models_router
 from apps.backend.app.api.routes.maintenance import router as maintenance_router
 from apps.backend.app.api.routes.conversation import router as conversation_router
 from apps.backend.app.api.routes.coding import router as coding_router
+from apps.backend.app.api.routes.environment import router as environment_router
 from apps.backend.app.api.websocket import router as websocket_router
+from apps.backend.app.environment.coordinator import SituationalCoordinator
 from apps.backend.app.core.config import APP_VERSION, ROOT_DIR, get_settings
 from apps.backend.app.core.logging import configure_logging
 from apps.backend.app.events.bus import EventBus
@@ -193,6 +195,7 @@ def create_app() -> FastAPI:
     runtime_settings = runtime_settings_store.load(runtime_defaults)
     coding_agent_service = CodingAgentService(settings, runtime_settings, timeline_store, event_bus.publish)
     coding_bridge = CodingBridge(coding_agent_service)
+    situational_coordinator = SituationalCoordinator()
     app.state.voice_tts_style = "auto"
     app.state.voice_tts_expression_level = "natural"
     model_manager = ModelManager(settings.app_data_path / "models", event_bus.publish)
@@ -439,6 +442,8 @@ def create_app() -> FastAPI:
                 memory_service=memory_service,
                 persona_name=runtime_settings.personality,
                 coding_bridge=coding_bridge,
+                situational_coordinator=situational_coordinator,
+                runtime_settings=runtime_settings,
             )
             source_message = (
                 await asyncio.to_thread(
@@ -533,6 +538,8 @@ def create_app() -> FastAPI:
             event_publisher=event_bus.publish, context_manager=context_manager, memory_service=memory_service,
             persona_name=runtime_settings.personality,
             coding_bridge=coding_bridge,
+            situational_coordinator=situational_coordinator,
+            runtime_settings=runtime_settings,
         )
         utterance_id = uuid.uuid4().hex
         voice = voice_service.resolve_tts_voice(language, runtime_settings.voice_tts_voice)
@@ -1247,6 +1254,7 @@ def create_app() -> FastAPI:
         await voice_session_manager.close()
         await speech_orchestrator.close()
         await avatar_service.close()
+        await situational_coordinator.close()
         voice_service_close = getattr(voice_service, "close", None)
         if voice_service_close is not None:
             await voice_service_close()
@@ -1293,6 +1301,7 @@ def create_app() -> FastAPI:
     app.state.runtime_settings_store = runtime_settings_store
     app.state.coding_agent_service = coding_agent_service
     app.state.coding_bridge = coding_bridge
+    app.state.situational_coordinator = situational_coordinator
     app.state.model_manager = model_manager
     app.state.backup_service = backup_service
     app.state.voice_service = voice_service
@@ -1306,6 +1315,7 @@ def create_app() -> FastAPI:
     app.include_router(avatar_router)
     app.include_router(events_router)
     app.include_router(settings_router)
+    app.include_router(environment_router)
     app.include_router(status_router)
     app.include_router(voice_router)
     app.include_router(timeline_router)

@@ -21,6 +21,7 @@ import {
 import { FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, SendHorizontal, Sparkles } from "lucide-react";
 import { AvatarDevStudioStandalonePage } from "./components/AvatarDevPanel";
+import { EnvironmentSettings } from "./components/EnvironmentSettings";
 import {
   FigmaStartFlowerIcon,
   FigmaMicIcon,
@@ -195,6 +196,7 @@ const SIDEBAR_COLLAPSED_STORAGE_KEY = "iris.sidebar.collapsed";
 const CHAT_ERROR_AUTO_DISMISS_MS = 8_000;
 type SettingsSection =
   | "conversation"
+  | "environment"
   | "avatar"
   | "voice"
   | "voice-devices"
@@ -3048,6 +3050,7 @@ export function SettingsPage({
     .join(" · ");
   const settingsSectionMeta: Record<SettingsSection, { title: string; description: string }> = {
     conversation: { title: "Живой разговор", description: "Когда Iris слушает, вступает в разговор и выражает эмоции." },
+    environment: { title: "Окружение и гео", description: "Локация, местное время, погода и новостные сводки." },
     avatar: { title: "Аватар", description: "Размещение, внешний вид и тестовые команды Iris." },
     voice: { title: "Голос", description: "Звучание, темп и подача речи." },
     "voice-devices": { title: "Устройства", description: "Микрофон, наушники и профиль записи." },
@@ -3329,7 +3332,15 @@ export function SettingsPage({
           />
         </div>
 
-        <div className="form-grid settings-form" hidden={activeSection === "avatar" || activeSection === "system-interface" || activeSection === "api-keys" || activeSection === "system-overview" || ["models", "backups", "maintenance", "events"].includes(activeSection)}>
+        <div className="form-grid settings-form" hidden={activeSection !== "environment"}>
+          <EnvironmentSettings
+            settings={settings}
+            developerMode={developerModeEnabled}
+            onSettingsChanged={onSettingsChanged}
+          />
+        </div>
+
+        <div className="form-grid settings-form" hidden={activeSection === "avatar" || activeSection === "environment" || activeSection === "system-interface" || activeSection === "api-keys" || activeSection === "system-overview" || ["models", "backups", "maintenance", "events"].includes(activeSection)}>
         <fieldset className="settings-group" hidden={activeSection !== "voice"}>
           <legend>Основное</legend>
           <label>
@@ -3849,7 +3860,10 @@ const SETTINGS_NAVIGATION: Array<{
     id: "behavior",
     label: "Поведение",
     icon: IconInterfacePageControllerSettings,
-    items: [{ section: "conversation", label: "Живой разговор" }],
+    items: [
+      { section: "conversation", label: "Живой разговор" },
+      { section: "environment", label: "Окружение и гео" },
+    ],
   },
   {
     id: "avatar",

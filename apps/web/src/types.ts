@@ -257,6 +257,50 @@ export type PublicSettings = {
   available_personalities: string[];
   available_voice_languages: string[];
   available_tts_voices: string[];
+  location_mode?: "auto" | "manual";
+  location_city?: string;
+  weather_enabled?: boolean;
+  news_enabled?: boolean;
+  news_category?: "all" | "general" | "tech";
+};
+
+export type EnvironmentStatus = {
+  status: string;
+  ambient_header: string;
+  time: {
+    iso: string;
+    formatted_date: string;
+    formatted_time: string;
+    weekday: string;
+    day_period: string;
+    timezone: string;
+    offset: string;
+  };
+  location: {
+    city: string;
+    country: string;
+    latitude: number | null;
+    longitude: number | null;
+    timezone: string;
+    source: string;
+  };
+  weather: {
+    temperature: number;
+    apparent_temperature: number;
+    condition: string;
+    humidity: number;
+    wind_speed: number;
+    precipitation: number;
+    city: string;
+    detailed: string;
+  } | null;
+  settings: {
+    location_mode: string;
+    location_city: string;
+    weather_enabled: boolean;
+    news_enabled: boolean;
+    news_category: string;
+  };
 };
 
 export type CodingTaskStatus =

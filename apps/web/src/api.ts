@@ -191,11 +191,20 @@ export function updateRuntimeSettings(payload: {
   coding_project_root?: string;
   coding_workspace_name?: string;
   coding_auto_delegate?: boolean;
+  location_mode?: PublicSettings["location_mode"];
+  location_city?: PublicSettings["location_city"];
+  weather_enabled?: PublicSettings["weather_enabled"];
+  news_enabled?: PublicSettings["news_enabled"];
+  news_category?: PublicSettings["news_category"];
 }): Promise<PublicSettings> {
   return requestJson<PublicSettings>("/settings/runtime", {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
+}
+
+export function getEnvironmentStatus(): Promise<import("./types").EnvironmentStatus> {
+  return requestJson<import("./types").EnvironmentStatus>("/environment/status");
 }
 
 export function getCodingStatus(refresh = false): Promise<CodingStatus> {
