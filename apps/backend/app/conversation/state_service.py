@@ -4,7 +4,9 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import logging
 from threading import RLock
+from uuid import uuid4
 
 from apps.backend.app.conversation.behavior import BehaviorGuide, StateToBehaviorRenderer
 from apps.backend.app.conversation.decision import ConversationDecisionEngine
@@ -14,6 +16,8 @@ from apps.backend.app.conversation.schemas import EventAppraisal, SpeakerRole
 from apps.backend.app.conversation.state import AffectState, CharacterStateReducer, ParticipantState
 from apps.backend.app.llm.base import LLMProvider
 from apps.backend.app.storage.timeline import PRIMARY_RELATIONSHIP_ID, TimelineStore
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -52,6 +56,8 @@ class CharacterStateService:
         self._publish = event_publisher
         self._decision = ConversationDecisionEngine()
         self._lock = RLock()
+        self._last_event_id: str | None = None
+        self._last_message_id: str | None = None
         # App construction precedes lifespan startup, so SQLite may not exist
         # yet. Restore lazily on the first actual turn after init_db().
         self._affect, self._participants = AffectState(), {"primary": ParticipantState()}
@@ -145,6 +151,7 @@ class CharacterStateService:
             now_iso = datetime.now(UTC).isoformat(timespec="milliseconds")
 
             # 1. Apply cognitive appraisal from AI model
+            is_boundary_violation = False
             if cognitive_appraisal:
                 if "patience" in cognitive_appraisal:
                     self._affect.patience = max(0.0, min(1.0, float(cognitive_appraisal["patience"])))
@@ -152,39 +159,69 @@ class CharacterStateService:
                     self._affect.offended = bool(cognitive_appraisal["offended"])
                 if cognitive_appraisal.get("grievance_cause"):
                     self._affect.grievance_cause = str(cognitive_appraisal["grievance_cause"])[:200]
-                if self._affect.offended or self._affect.patience < 0.6:
-                    cause_label = self._affect.grievance_cause or "Обида или нарушение личных границ"
-                    fp = f"grievance:{cause_label[:40]}"
-                    if not any(c.get("fingerprint") == fp and c.get("status") == "active" for c in self._affect.causes):
-                        self._affect.causes.insert(0, {
-                            "id": fp,
-                            "fingerprint": fp,
-                            "event_kind": "insult",
-                            "emotion": canonical if canonical in {"hurt", "anger", "irritation"} else "hurt",
-                            "display_label": cause_label,
-                            "initial_strength": round(max(0.6, intensity), 4),
-                            "current_strength": round(max(0.6, intensity), 4),
-                            "status": "active",
-                            "created_at": now_iso,
-                        })
-                        self._affect.causes = self._affect.causes[:8]
+                bv = str(cognitive_appraisal.get("boundary_violation", "")).lower()
+                is_boundary_violation = bv in ("mild", "severe") or self._affect.offended
 
-            # 2. Apply diary note if AI model decided to record one
+            is_insult = (
+                self._affect.offended
+                or is_boundary_violation
+                or canonical in {"hurt", "anger", "indignant"}
+                or self._affect.patience < 0.6
+            )
+
+            if is_insult:
+                cause_label = (
+                    (cognitive_appraisal.get("grievance_cause") if cognitive_appraisal else None)
+                    or self._affect.grievance_cause
+                    or "Обида или нарушение личных границ"
+                )
+                fp = f"grievance:{cause_label[:40]}"
+                if not any(c.get("fingerprint") == fp and c.get("status") == "active" for c in self._affect.causes):
+                    self._affect.causes.insert(0, {
+                        "id": fp,
+                        "fingerprint": fp,
+                        "event_kind": "insult",
+                        "emotion": canonical if canonical in {"hurt", "anger", "irritation"} else "hurt",
+                        "display_label": cause_label,
+                        "initial_strength": round(max(0.6, intensity), 4),
+                        "current_strength": round(max(0.6, intensity), 4),
+                        "status": "active",
+                        "created_at": now_iso,
+                    })
+                    self._affect.causes = self._affect.causes[:8]
+                if self._last_event_id:
+                    self._store.update_character_state_event(
+                        self._last_event_id,
+                        event_kind="insult",
+                        intensity=round(max(0.75, intensity), 4),
+                        confidence=0.95,
+                    )
+
+            # 2. Apply diary note if AI model decided to record one, or fallback for insults/boundary violations
+            note_recorded = False
+            trigger_event_id = self._last_event_id or f"turn-{uuid4().hex[:12]}"
+            source_ids = [self._last_message_id] if self._last_message_id else []
+
             if diary_note and diary_note.get("should_record"):
                 d_text = str(diary_note.get("text", "")).strip()
-                if d_text and len(d_text) >= 15:
+                if d_text and len(d_text) >= 10:
                     d_sig = float(diary_note.get("significance", 0.6))
                     d_emo = str(diary_note.get("primary_emotion", emotion))
                     try:
                         self._store.create_reflection(
                             relationship_id=PRIMARY_RELATIONSHIP_ID,
+                            trigger_event_id=trigger_event_id,
                             text=d_text,
-                            trigger_kind="diary_entry",
-                            trigger_label="Личная заметка Iris",
                             significance=d_sig,
                             primary_emotion=d_emo,
+                            idempotency_key=f"diary:{trigger_event_id}",
+                            trigger_kind="diary_entry",
+                            trigger_event_ids=[trigger_event_id],
+                            source_message_ids=source_ids,
                             generator_version="in_turn_v1",
+                            metadata={"trigger_label": "Личная заметка Iris", "display_label": "Личная заметка Iris"},
                         )
+                        note_recorded = True
                         self._emit("character.reflection.completed", "info", {
                             "source": "in_turn_diary",
                             "text": d_text[:80],
@@ -192,6 +229,40 @@ class CharacterStateService:
                         })
                     except Exception as exc:
                         logger.warning("Failed to save in-turn diary reflection: %s", exc)
+
+            if not note_recorded and is_insult:
+                cause_label = (
+                    (cognitive_appraisal.get("grievance_cause") if cognitive_appraisal else None)
+                    or self._affect.grievance_cause
+                    or "Нарушение личных границ и резкость"
+                )
+                if canonical in {"hurt", "sadness"}:
+                    synth_text = "Мне было по-настоящему больно и неприятно услышать такое. Я стараюсь помогать от души, но подобные слова ранят и переходят всякие границы."
+                elif canonical in {"anger", "indignant"}:
+                    synth_text = "Такое грубое отношение абсолютно неприемлемо. Я не позволю общаться со мной в подобном тоне и срывать на мне злость."
+                else:
+                    synth_text = f"Очень неприятный момент в разговоре. Чувствую, что мои личные границы были грубо нарушены: «{cause_label}». Нужно держать дистанцию."
+                try:
+                    self._store.create_reflection(
+                        relationship_id=PRIMARY_RELATIONSHIP_ID,
+                        trigger_event_id=trigger_event_id,
+                        text=synth_text,
+                        significance=round(max(0.7, intensity), 4),
+                        primary_emotion=canonical if canonical in {"hurt", "anger", "irritation"} else "hurt",
+                        idempotency_key=f"diary-synth:{trigger_event_id}",
+                        trigger_kind="diary_entry",
+                        trigger_event_ids=[trigger_event_id],
+                        source_message_ids=source_ids,
+                        generator_version="in_turn_auto_grievance",
+                        metadata={"trigger_label": "Личная заметка Iris", "display_label": "Личная заметка Iris"},
+                    )
+                    self._emit("character.reflection.completed", "info", {
+                        "source": "in_turn_auto_grievance",
+                        "text": synth_text[:80],
+                        "emotion": canonical,
+                    })
+                except Exception as exc:
+                    logger.warning("Failed to save auto grievance reflection: %s", exc)
 
             # 3. Handle emotional transition and forgiveness
             if is_positive and (has_repair_cause or self._affect.primary_emotion in {"irritation", "anger", "hurt"} or self._affect.offended):
@@ -300,13 +371,16 @@ class CharacterStateService:
         )
         with self._lock:
             self._ensure_loaded()
+            self._last_message_id = message_id
             participant = self._participants.setdefault(participant_key, ParticipantState(participant_key=participant_key, role=speaker_role.value))
             if not can_apply:
+                self._last_event_id = None
                 self._emit("character.state.transition_skipped", "info", {"reason": "speaker_or_uncertainty", "event_kind": appraisal.event_kind})
                 return self._context(appraisal, participant, False, None, task_like=task_like)
             idempotency_key = f"state-v2:{message_id}"
             existing_event_id = self._store.character_state_event_for_key(idempotency_key)
             if existing_event_id is not None:
+                self._last_event_id = existing_event_id
                 return self._context(appraisal, participant, False, existing_event_id, task_like=task_like)
             self._reducer.decay(self._affect, recovery=self._recovery)
             self._reducer.apply_affect(self._affect, appraisal)
@@ -329,6 +403,7 @@ class CharacterStateService:
                 daily_deltas={key: used.get(key, 0.0) + abs(delta) for key, delta in relationship_delta.items()},
                 idempotency_key=idempotency_key,
             )
+            self._last_event_id = event_id
             # This policy is local and bounded; it adds no network/LLM call and
             # never feeds reflection text into factual retrieval.
             enabled, minimum_significance = self._reflection_policy()
