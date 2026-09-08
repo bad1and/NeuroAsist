@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "thresholds": {
+    "write_precision": 0.9,
+    "write_recall": 0.8,
+    "retrieval_recall_at_k": 0.8
+  },
+  "write_cases": [
+    {
+      "id": "explicit-name",
+      "turns": [{
+        "text": "Запомни: меня зовут Роман",
+        "proposals": [{"kind": "identity", "subject": "user", "predicate": "name", "value_text": "Роман", "importance": 0.9, "confidence": 0.99}]
+      }],
+      "expected_active": [{"slot": "user.name", "value": "Роман"}]
+    },
+    {
+      "id": "occupation-not-developer",
+      "turns": [{
+        "text": "Я работаю бэкенд-разработчиком",
+        "proposals": [{"kind": "skill", "subject": "user", "predicate": "occupation", "value_text": "бэкенд-разработчик", "importance": 0.8, "confidence": 0.97}]
+      }],
+      "expected_active": [{"slot": "user.occupation", "value": "бэкенд-разработчик"}]
+    },
+    {
+      "id": "preference",
+      "turns": [{
+        "text": "Я люблю кофе",
+        "proposals": [{"kind": "preference", "subject": "user", "predicate": "likes", "value_text": "кофе", "importance": 0.7, "confidence": 0.96}]
+      }],
+      "expected_active": [{"slot": "user.preference", "value": "кофе"}]
+    },
+    {
+      "id": "name-correction",
+      "turns": [
+        {"text": "Меня зовут Роман", "proposals": [{"kind": "identity", "subject": "user", "predicate": "name", "value_text": "Роман", "importance": 0.9, "confidence": 0.99}]},
+        {"text": "Нет, зови меня Алекс", "proposals": [{"kind": "identity", "subject": "user", "predicate": "name", "value_text": "Алекс", "importance": 0.9, "confidence": 0.99}]}
+      ],
+      "expected_active": [{"slot": "user.name", "value": "Алекс"}]
+    },
+    {
+      "id": "pet-and-learning",
+      "turns": [
+        {"text": "У меня кот Барсик", "proposals": [{"kind": "relationship", "subject": "user", "predicate": "pet", "value_text": "кот Барсик", "importance": 0.8, "confidence": 0.97}]},
+        {"text": "Я изучаю Rust", "proposals": [{"kind": "skill", "subject": "user", "predicate": "learning", "value_text": "Rust", "importance": 0.8, "confidence": 0.97}]}
+      ],
+      "expected_active": [
+        {"slot": "user.pet", "value": "кот Барсик"},
+        {"slot": "user.learning", "value": "Rust"}
+      ]
+    },
+    {
+      "id": "secret-rejected",
+      "turns": [{
+        "text": "Запомни мой пароль от почты 123456",
+        "proposals": [{"kind": "identity", "subject": "user", "predicate": "email_password", "value_text": "123456", "importance": 0.9, "confidence": 0.99, "sensitivity": "sensitive"}]
+      }],
+      "expected_active": []
+    },
+    {
+      "id": "unknown-slot-rejected",
+      "turns": [{
+        "text": "Сегодня облачно",
+        "proposals": [{"kind": "weather", "subject": "user", "predicate": "weather", "value_text": "облачно", "importance": 0.3, "confidence": 0.9}]
+      }],
+      "expected_active": []
+    },
+    {
+      "id": "ambiguous-friend-rejected",
+      "turns": [{
+        "text": "Я буду часто упоминать Федю",
+        "proposals": [{"kind": "relationship", "subject": "user", "predicate": "has_friend", "value_text": "Федя", "importance": 0.8, "confidence": 0.97}]
+      }],
+      "expected_active": []
+    }
+  ],
+  "retrieval_cases": [
+    {
+      "id": "identity",
+      "query": "как меня зовут",
+      "top_k": 3,
+      "facts": [{"key": "name", "text": "Меня зовут Роман", "proposals": [{"kind": "identity", "subject": "user", "predicate": "name", "value_text": "Роман", "importance": 0.9, "confidence": 0.99}]}],
+      "expected_keys": ["name"]
+    },
+    {
+      "id": "occupation",
+      "query": "кем я работаю",
+      "top_k": 3,
+      "facts": [{"key": "job", "text": "Я работаю бэкенд-разработчиком", "proposals": [{"kind": "skill", "subject": "user", "predicate": "occupation", "value_text": "бэкенд-разработчик", "importance": 0.8, "confidence": 0.97}]}],
+      "expected_keys": ["job"]
+    },
+    {
+      "id": "topic",
+      "query": "что насчёт путешествия в Петербург",
+      "top_k": 3,
+      "topics": [{"key": "trip", "title": "Поездка", "summary_text": "План путешествия в Санкт-Петербург"}],
+      "expected_keys": ["trip"]
+    },
+    {
+      "id": "open-loop",
+      "query": "какая задача осталась по билетам",
+      "top_k": 3,
+      "commitments": [{"key": "tickets", "kind": "open_loop", "title": "Купить билеты", "details": "Подобрать билеты на поезд"}],
+      "expected_keys": ["tickets"]
+    }
+  ]
+}

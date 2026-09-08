@@ -45,6 +45,45 @@ def test_hybrid_retrieval_finds_multilingual_semantic_match_and_explains_it(tmp_
     assert "semantic" in result["items"][0]["retrieval"]["reasons"]
 
 
+def test_semantic_retrieval_covers_topics_and_open_commitments(tmp_path: Path) -> None:
+    store, service = _semantic_service(tmp_path)
+    topic = store.create_topic({
+        "title": "Летняя поездка",
+        "summary_text": "Хотим побывать в Санкт-Петербурге",
+    })
+    commitment = store.create_commitment({
+        "title": "Купить билеты",
+        "details": "Подобрать билеты в Санкт-Петербург",
+    })
+    service.reindex()
+
+    items = service.retrieve("travel to Saint Petersburg", limit=6)
+    by_id = {str(item["id"]): item for item in items}
+
+    assert f"topic:{topic['id']}" in by_id
+    assert f"commitment:{commitment['id']}" in by_id
+    assert "topic_semantic" in by_id[f"topic:{topic['id']}"]["retrieval"]["reasons"]
+    assert "commitment_semantic" in by_id[f"commitment:{commitment['id']}"]["retrieval"]["reasons"]
+
+
+def test_episode_summaries_are_retrieved_semantically_across_languages(tmp_path: Path) -> None:
+    store, service = _semantic_service(tmp_path)
+    source, _ = store.append_message(
+        role="user",
+        content="Мы планируем поездку в Санкт-Петербург",
+        input_mode="text",
+    )
+    store.close_current_episode("test")
+    summary = store.summarize_episode(source.episode_id)
+    assert summary is not None
+    service.reindex()
+
+    results = service.retrieve_episode_summaries("travel to Saint Petersburg")
+
+    assert results[0]["id"] == summary["id"]
+    assert results[0]["retrieval"]["semantic_score"] > 0
+
+
 def test_vector_namespace_rebuilds_and_rejects_mixed_dimensions(tmp_path: Path) -> None:
     store, service = _semantic_service(tmp_path)
     source, _ = store.append_message(role="user", content="Источник", input_mode="text")
