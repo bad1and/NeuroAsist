@@ -489,6 +489,7 @@ class CharacterAgent:
             parsed,
             session_id,
             input_mode,
+            built_context=built_context,
             persist_reply=persist_reply,
             persist_reply_callback=persist_reply_callback,
         )
@@ -676,6 +677,7 @@ class CharacterAgent:
         session_id: str,
         input_mode: str,
         *,
+        built_context=None,
         persist_reply: bool,
         persist_reply_callback: Callable[[str], Any] | None,
     ) -> dict[str, Any]:
@@ -731,6 +733,22 @@ class CharacterAgent:
                     self._memory_service.memory_update(memory) for memory in created
                 )
             self._memory_service.schedule_extraction(assistant_message)
+            continuity = parsed.turn.continuity if parsed.valid and parsed.turn is not None else None
+            apply_feedback = getattr(self._memory_service, "apply_continuity_feedback", None)
+            if continuity is not None and built_context is not None and callable(apply_feedback):
+                diagnostics = built_context.diagnostics
+                try:
+                    feedback = apply_feedback(
+                        referenced_memory_ids=continuity.referenced_memory_ids,
+                        referenced_episode_ids=continuity.referenced_episode_ids,
+                        closes_open_loop_ids=continuity.closes_open_loop_ids,
+                        allowed_memory_ids=list(diagnostics.get("selected_memory_ids", [])),
+                        allowed_episode_ids=list(diagnostics.get("selected_summary_ids", [])),
+                        allowed_open_loop_ids=list(diagnostics.get("selected_open_loop_ids", [])),
+                    )
+                    diagnostics["continuity_feedback"] = feedback
+                except Exception as exc:  # pragma: no cover - reply persistence must win
+                    logger.warning("Could not apply continuity feedback: %s", exc)
         self.last_turn = parsed.turn
         return parsed.payload
 

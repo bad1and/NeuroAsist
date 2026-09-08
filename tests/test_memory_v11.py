@@ -220,6 +220,34 @@ def test_v19_resolves_candidates_and_installs_autonomy_guard(tmp_path: Path) -> 
         }, actor="test")
 
 
+def test_v20_slot_registry_upgrades_newly_supported_profile_facts(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    source, _ = store.append_message(
+        role="user", content="Я работаю бэкенд-разработчиком", input_mode="text",
+    )
+    legacy = store.create_memory({
+        "scope": "user_profile",
+        "kind": "skill",
+        "subject": "user",
+        "predicate": "occupation",
+        "value_text": "бэкенд-разработчик",
+        "status": "active",
+        "source_message_ids": [source.id],
+        "source_episode_id": source.episode_id,
+        "extractor_version": "consolidation-v11",
+    }, actor="extractor")
+
+    first = service.repair_v20_slot_registry()
+    second = service.repair_v20_slot_registry()
+    upgraded = store.get_memory(str(legacy["id"]))
+
+    assert first["newly_supported"] == 1
+    assert second["idempotent_noop"] is True
+    assert upgraded["slot_key"] == "user.occupation"
+    assert upgraded["normalization_version"] == 20
+    assert upgraded["expires_at"]
+
+
 def test_v17_assigns_ttl_and_closes_name_loop_when_slot_is_filled(tmp_path: Path) -> None:
     store, service = _service(tmp_path)
     mood_source, _ = store.append_message(role="user", content="Сейчас я бодрый", input_mode="text")

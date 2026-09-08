@@ -94,14 +94,16 @@ class Settings(BaseSettings):
     memory_sensitive_mode: str = "ask"
     memory_max_candidates_per_turn: int = 3
     memory_context_max_tokens: int = 900
-    memory_llm_extraction_enabled: bool = False
+    # These are safe, non-secret product capabilities and must work in a clean
+    # desktop install where the development-only .env file is absent.
+    memory_llm_extraction_enabled: bool = True
     memory_llm_min_confidence: float = 0.70
     memory_async_extraction_enabled: bool = True
     memory_auto_min_confidence: float = 0.85
     memory_auto_min_importance: float = 0.60
-    semantic_retrieval_enabled: bool = False
-    semantic_retrieval_eval_passed: bool = False
-    semantic_vector_backend: str = "sqlite"
+    semantic_retrieval_enabled: bool = True
+    semantic_retrieval_eval_passed: bool = True
+    semantic_vector_backend: str = "chroma"
     semantic_chroma_path: str | None = None
     semantic_embedding_provider: str = "hash"
     semantic_embedding_model_id: str = "hash-multilingual-v1"

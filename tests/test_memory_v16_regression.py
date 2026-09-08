@@ -56,7 +56,6 @@ def test_name_boundary_genre_and_affection_are_context_safe(tmp_path) -> None:
         input_mode="text",
     )
     assert service.extract_high_precision_from_message(genre)[0]["predicate"] == "likes_category"
-
     assert ConversationDecisionEngine.appraise(
         "я люблю играть в шутеры", "preference",
     ).event_kind == "neutral"
@@ -66,6 +65,20 @@ def test_name_boundary_genre_and_affection_are_context_safe(tmp_path) -> None:
     assert ConversationDecisionEngine.appraise(
         "ну не репа а репо", "correction", previous_assistant_text="А вот репа — это игра?"
     ).event_kind == "iris_mistake_corrected"
+
+
+def test_resilient_writer_covers_occupation_pet_and_learning(tmp_path) -> None:
+    store, service = _service(tmp_path)
+    cases = (
+        ("Я работаю бэкенд-разработчиком", "user.occupation", "бэкенд-разработчиком"),
+        ("У меня кот Барсик", "user.pet", "кот Барсик"),
+        ("Я изучаю Rust", "user.learning", "Rust"),
+    )
+
+    for text, slot, value in cases:
+        source, _ = store.append_message(role="user", content=text, input_mode="text")
+        saved = service.extract_resilient_facts_from_message(source)
+        assert [(item["slot_key"], item["value_text"]) for item in saved] == [(slot, value)]
 
 
 def test_partial_output_keeps_valid_siblings_and_persists_diagnostics(tmp_path) -> None:
@@ -166,6 +179,30 @@ def test_consolidation_trailing_debounce_updates_one_job_and_correction_flushes(
     assert ready["id"] == first_job["id"]
     assert ready["available_at"] == "2000-01-01T12:00:40.000+00:00"
     assert asyncio.run(worker.run_once()) is True
+
+
+def test_finishing_dialog_flushes_pending_consolidation_debounce(tmp_path, monkeypatch) -> None:
+    store, service = _service(tmp_path)
+    monkeypatch.setattr(store, "_now", lambda: "2099-08-21T12:00:00.000+00:00")
+    source, _ = store.append_message(
+        role="user", content="я люблю кофе", input_mode="text",
+    )
+    assert service.schedule_extraction(source) is True
+    with store._connect() as connection:
+        before = dict(connection.execute(
+            "SELECT * FROM background_jobs WHERE type = 'memory_consolidation' AND status = 'pending'",
+        ).fetchone())
+    assert before["available_at"] == "2099-08-21T12:01:15.000+00:00"
+
+    monkeypatch.setattr(store, "_now", lambda: "2000-01-01T12:00:10.000+00:00")
+    reset = store.reset_session("manual_reset")
+
+    assert reset["memory_jobs_flushed"] == 1
+    with store._connect() as connection:
+        after = dict(connection.execute(
+            "SELECT * FROM background_jobs WHERE type = 'memory_consolidation' AND status = 'pending'",
+        ).fetchone())
+    assert after["available_at"] == "2000-01-01T12:00:10.000+00:00"
 
 
 def test_memory_schedule_novelty_gate_ignores_small_talk_and_assistant_words(tmp_path) -> None:
