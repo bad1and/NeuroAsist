@@ -6,6 +6,7 @@ import {
   IconMailChatBubbleTextSquare,
   IconInterfaceCursorArrow2,
   IconInterfaceCalendarMark,
+  IconComputerRobotCyborg1,
 } from "./CustomIcons";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
@@ -105,7 +106,7 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
 
   useEffect(() => {
     if (listRef.current) {
-      const selector = results ? ".message" : ".history-card";
+      const selector = results ? ".journal-message" : ".history-item-minimal";
       animateStaggerCards(listRef.current, selector, 30);
     }
   }, [items, results]);
@@ -191,7 +192,7 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
 
     return (
       <article
-        className={`history-card settings-nav-direct ${isSelected ? "is-selected is-active" : ""} ${isCurrent ? "is-active-episode" : ""}`}
+        className={`history-item-minimal ${isSelected ? "is-active" : ""}`}
         key={item.id ?? item.day}
         onClick={() => onSelectEpisode(item)}
         role="button"
@@ -204,36 +205,24 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
         }}
         aria-label={`Диалог от ${formatDate(item.day)}`}
       >
-        <div className="history-card-icon" aria-hidden="true">
-          <IconMailChatBubbleTextSquare size={16} />
+        <div className="history-item-minimal-icon" aria-hidden="true">
+          <IconMailChatBubbleTextSquare size={19} />
         </div>
-        <div className="history-card-info">
-          <div className="history-card-title-row">
+        <div className="history-item-minimal-content">
+          <div className="history-item-minimal-header">
             <strong>{item.title || formatDate(item.day)}</strong>
             {isCurrent && (
-              <span className="journal-badge active" title="Текущий диалог" aria-label="Текущий диалог">
+              <span title="Текущий диалог" aria-label="Текущий диалог">
                 <span className="journal-pulse-dot" />
-                Текущий
               </span>
             )}
           </div>
-          <p>
-            {item.message_count} {item.message_count === 1 ? "сообщение" : "сообщений"} ·{" "}
-            {isCurrent ? "активен сейчас" : (item.last_activity_at ? `активность в ${formatTime(item.last_activity_at)}` : "")}
-          </p>
+          <div className="history-item-minimal-meta">
+            {item.message_count} {item.message_count === 1 ? "сообщение" : "сообщений"}
+            {item.last_activity_at && !isCurrent ? ` · ${formatTime(item.last_activity_at)}` : ""}
+            {isCurrent ? " · сейчас" : ""}
+          </div>
         </div>
-        <button
-          className="icon-button danger-button history-card-delete"
-          title="Удалить историю до этой даты"
-          aria-label={`Удалить историю до ${formatDate(item.day)}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            animateButtonPress(e.currentTarget);
-            setPendingDelete(item);
-          }}
-        >
-          <IconInterfaceDeleteBin3 size={15} />
-        </button>
       </article>
     );
   };
@@ -241,7 +230,7 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
   return (
     <section className="panel history-panel journal-panel" ref={containerRef}>
       <div className={`journal-layout ${selectedEpisode ? "has-selected" : ""}`}>
-        <aside className="journal-sidebar settings-navigation" aria-label="Список диалогов">
+        <aside className="journal-sidebar journal-sidebar-new" aria-label="Список диалогов">
           <div className="journal-sidebar-header">
             <form className="search-form compact journal-search-form" onSubmit={onSearch}>
               <input
@@ -270,18 +259,7 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
                   Сбросить
                 </button>
               )}
-              <button
-                className="icon-button"
-                type="button"
-                onClick={(e) => {
-                  animateButtonPress(e.currentTarget);
-                  void refresh();
-                }}
-                aria-label="Обновить историю"
-                title="Обновить историю"
-              >
-                <IconInterfaceSpirals size={16} />
-              </button>
+
               <button
                 className="icon-button search-submit"
                 type="submit"
@@ -308,10 +286,17 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
                   const roleClass = isUser ? "user" : isAssistant ? "assistant" : "system";
                   return (
                     <article
-                      className={`message ${roleClass}`}
+                      className={`journal-message ${roleClass}`}
                       key={message.id}
                     >
-                      <div className="message-role">{roleLabel}</div>
+                      <div className="message-role">
+                        {isAssistant && (
+                          <span className="message-role-avatar assistant" aria-hidden="true">
+                            <IconComputerRobotCyborg1 size={11} />
+                          </span>
+                        )}
+                        <span>{roleLabel}</span>
+                      </div>
                       <p data-i18n-skip>{message.content || message.corrected_content || message.original_content || ""}</p>
                       {message.created_at && (
                         <span className="message-time">{formatTime(message.created_at)}</span>
@@ -337,8 +322,8 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
         <main className="journal-content settings-content memory-content" ref={contentRef} aria-label="Сообщения выбранного диалога">
           {selectedEpisode ? (
             <>
-              <header className="journal-content-header settings-heading memory-heading">
-                <div className="journal-content-header-main">
+              <header className="journal-content-header">
+                <div className="journal-header-left">
                   <button
                     className="journal-back-button secondary"
                     type="button"
@@ -348,43 +333,27 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
                     <ChevronLeft size={16} aria-hidden="true" />
                     <span>Назад к списку</span>
                   </button>
-                  <div className="journal-content-header-info">
+                  <div className="journal-header-title-group">
                     <h2>{selectedEpisode.title || formatDate(selectedEpisode.day)}</h2>
-                    <div className="journal-content-header-meta">
+                    <div className="journal-header-meta">
                       <span>
                         {selectedEpisode.message_count}{" "}
                         {selectedEpisode.message_count === 1 ? "сообщение" : "сообщений"}
                       </span>
-                      {selectedEpisode.started_at && (
+                      {selectedEpisode.last_activity_at ? (
+                        <span>· Активность в {formatTime(selectedEpisode.last_activity_at)}</span>
+                      ) : selectedEpisode.started_at ? (
                         <span>· {formatShortDate(selectedEpisode.started_at)}</span>
-                      )}
-                      {!selectedEpisode.ended_at && (
-                        <span className="journal-badge active" title="Активный диалог">
-                          <span className="journal-pulse-dot" />
-                          Активен
-                        </span>
-                      )}
+                      ) : null}
+
                     </div>
                   </div>
                 </div>
 
-                <div className="journal-content-header-actions">
-                  {!selectedEpisode.ended_at && onOpenChat && (
-                    <button
-                      className="primary-button journal-continue-btn"
-                      type="button"
-                      onClick={(e) => {
-                        animateButtonPress(e.currentTarget);
-                        onOpenChat();
-                      }}
-                      title="Перейти к активному диалогу"
-                    >
-                      <span>В диалог</span>
-                      <IconInterfaceCursorArrow2 size={14} aria-hidden="true" />
-                    </button>
-                  )}
+                <div className="journal-header-actions">
+
                   <button
-                    className="secondary"
+                    className="secondary journal-delete-action"
                     type="button"
                     title="Удалить историю до этой даты"
                     aria-label={`Удалить историю до ${formatDate(selectedEpisode.day)}`}
@@ -420,10 +389,17 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
                       const roleClass = isUser ? "user" : isAssistant ? "assistant" : "system";
                       return (
                         <article
-                          className={`message ${roleClass}`}
+                          className={`journal-message ${roleClass}`}
                           key={message.id}
                         >
-                          <div className="message-role">{roleLabel}</div>
+                          <div className="message-role">
+                            {isAssistant && (
+                              <span className="message-role-avatar assistant" aria-hidden="true">
+                                <IconComputerRobotCyborg1 size={11} />
+                              </span>
+                            )}
+                            <span>{roleLabel}</span>
+                          </div>
                           <p data-i18n-skip>{message.content || message.corrected_content || message.original_content || ""}</p>
                           {message.created_at && (
                             <span className="message-time">{formatTime(message.created_at)}</span>
@@ -442,11 +418,18 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
             </>
           ) : (
             <div className="journal-placeholder empty-state">
-              <div className="journal-placeholder-icon" aria-hidden="true">
-                <IconInterfaceTimeStopWatchCircle size={38} />
+              <div className="journal-placeholder-icon-wrap" aria-hidden="true">
+                <div className="journal-placeholder-icon">
+                  <IconInterfaceTimeStopWatchCircle size={36} />
+                </div>
               </div>
               <strong>Выберите диалог для просмотра</strong>
               <span>Сообщения выбранного чата появятся здесь. Вы можете просматривать прошлые сессии и искать нужную информацию.</span>
+              {items.length > 0 && (
+                <div className="journal-placeholder-stats">
+                  <span>Всего сессий в истории: {items.length}</span>
+                </div>
+              )}
             </div>
           )}
         </main>

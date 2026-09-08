@@ -46,9 +46,10 @@ import { SettingsPage } from "./App";
 import { openQaStudioWindow, closeQaStudioWindow } from "./desktop";
 
 describe("AvatarDevStudioStandalonePage", () => {
-  it("renders standalone page without crashing and handles tabs", () => {
+  it("renders standalone page without crashing and handles tabs including notifications", () => {
     render(<AvatarDevStudioStandalonePage />);
-    expect(screen.getByText("Iris QA Studio")).toBeInTheDocument();
+    expect(screen.getByText("Окно тестирования")).toBeInTheDocument();
+    expect(screen.getByText(/Iris QA Studio/)).toBeInTheDocument();
     expect(screen.getByText("QA STUDIO v2.0")).toBeInTheDocument();
 
     // Switch to Gestures tab
@@ -60,12 +61,19 @@ describe("AvatarDevStudioStandalonePage", () => {
     const speechTab = screen.getByRole("button", { name: /Речь & Сценарии/ });
     fireEvent.click(speechTab);
     expect(screen.getByText("Быстрые сценарии тестирования")).toBeInTheDocument();
+
+    // Switch to Notifications tab
+    const notificationsTab = screen.getByRole("button", { name: /Уведомления/ });
+    fireEvent.click(notificationsTab);
+    expect(screen.getByText("Основные типы уведомлений")).toBeInTheDocument();
+    expect(screen.getByText("Интерактивные сценарии")).toBeInTheDocument();
+    expect(screen.getByText("Конструктор произвольного уведомления")).toBeInTheDocument();
   });
 
   it("renders App when isQaStudioWindow is true", () => {
     (window as any).__IRIS_VIEW__ = "qa-studio";
     render(<App />);
-    expect(screen.getByText("Iris QA Studio")).toBeInTheDocument();
+    expect(screen.getByText("Окно тестирования")).toBeInTheDocument();
   });
 
   it("renders SettingsPage with QA Studio switch and toggles it", () => {
@@ -110,7 +118,7 @@ describe("AvatarDevStudioStandalonePage", () => {
     const interfaceBtn = screen.getByRole("button", { name: /Интерфейс/ });
     fireEvent.click(interfaceBtn);
 
-    const switchInput = screen.getByRole("switch", { name: /Окно тестирования аватара/ });
+    const switchInput = screen.getByRole("switch", { name: /Окно тестирования/ });
     expect(switchInput).not.toBeChecked();
 
     fireEvent.click(switchInput);
@@ -133,7 +141,7 @@ describe("AvatarDevStudioStandalonePage", () => {
       />,
     );
 
-    expect(screen.getByRole("switch", { name: /Окно тестирования аватара/ })).toBeChecked();
+    expect(screen.getByRole("switch", { name: /Окно тестирования/ })).toBeChecked();
   });
 
   it("renders separate hidden DeepSeek and Coding API fields", () => {

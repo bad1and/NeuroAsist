@@ -29,7 +29,7 @@
   min-height: 38px;
   padding: 8px 12px;
   border: none;
-  border-radius: var(--radius-control, 20px);
+  border-radius: var(--radius-control, 24px);
   corner-shape: squircle;
   background: var(--color-surface-raised, #242526);
   color: var(--color-text, #f0f0f0);
@@ -95,7 +95,7 @@
   overscroll-behavior: contain;
   background: var(--color-surface-raised, #242526);
   border: none !important;
-  border-radius: var(--radius-md, 24px);
+  border-radius: var(--radius-plate, 26px);
   corner-shape: squircle;
   z-index: 1000;
   box-shadow: 0 14px 36px -4px rgba(0, 0, 0, 0.55), 0 4px 14px rgba(0, 0, 0, 0.35);
@@ -160,7 +160,7 @@
   padding: 8px 12px;
   cursor: pointer;
   color: var(--color-text, #f0f0f0);
-  border-radius: var(--radius-xs, 13px);
+  border-radius: var(--radius-xs, 16px);
   corner-shape: squircle;
   transition: background-color 0.14s ease, color 0.14s ease;
   font-size: 13.5px;

@@ -38,9 +38,64 @@ export const DEFAULT_DURATIONS: Record<NotificationType, number | "persistent"> 
 
 type Listener = () => void;
 
+const NOTIFICATION_SYNC_CHANNEL = "iris_notification_sync_bus";
+
 class NotificationStore {
   private notifications: AppNotification[] = [];
   private listeners = new Set<Listener>();
+  private channel: BroadcastChannel | null = null;
+
+  constructor() {
+    if (typeof window !== "undefined" && typeof BroadcastChannel !== "undefined") {
+      try {
+        this.channel = new BroadcastChannel(NOTIFICATION_SYNC_CHANNEL);
+        this.channel.onmessage = (e) => {
+          const msg = e.data;
+          if (!msg || typeof msg !== "object") return;
+          if (msg.type === "show" && msg.notification) {
+            this.handleSyncShow(msg.notification);
+          } else if (msg.type === "dismiss" && msg.id) {
+            this.handleSyncDismiss(msg.id);
+          } else if (msg.type === "dismissAll") {
+            this.handleSyncDismissAll();
+          }
+        };
+      } catch {
+        // BroadcastChannel unavailable in this context
+      }
+    }
+  }
+
+  private handleSyncShow(full: AppNotification): void {
+    const existingIndex = this.notifications.findIndex(
+      (n) => n.id === full.id || (n.title === full.title && n.message === full.message && n.type === full.type)
+    );
+
+    if (existingIndex >= 0) {
+      const next = [...this.notifications];
+      next.splice(existingIndex, 1);
+      this.notifications = [full, ...next];
+    } else {
+      this.notifications = [full, ...this.notifications];
+    }
+
+    this.emitChange();
+  }
+
+  private handleSyncDismiss(id: string): void {
+    const next = this.notifications.filter((n) => n.id !== id);
+    if (next.length !== this.notifications.length) {
+      this.notifications = next;
+      this.emitChange();
+    }
+  }
+
+  private handleSyncDismissAll(): void {
+    if (this.notifications.length > 0) {
+      this.notifications = [];
+      this.emitChange();
+    }
+  }
 
   private emitChange(): void {
     for (const listener of this.listeners) {
@@ -82,6 +137,25 @@ class NotificationStore {
     }
 
     this.emitChange();
+
+    try {
+      this.channel?.postMessage({
+        type: "show",
+        notification: {
+          id: full.id,
+          type: full.type,
+          title: full.title,
+          message: full.message,
+          details: full.details,
+          navigateView: full.navigateView,
+          duration: full.duration,
+          createdAt: full.createdAt,
+        },
+      });
+    } catch {
+      // Ignore broadcast errors
+    }
+
     return id;
   };
 
@@ -136,6 +210,9 @@ class NotificationStore {
       this.notifications = next;
       this.emitChange();
     }
+    try {
+      this.channel?.postMessage({ type: "dismiss", id });
+    } catch {}
   };
 
   dismissAll = (): void => {
@@ -143,6 +220,9 @@ class NotificationStore {
       this.notifications = [];
       this.emitChange();
     }
+    try {
+      this.channel?.postMessage({ type: "dismissAll" });
+    } catch {}
   };
 }
 

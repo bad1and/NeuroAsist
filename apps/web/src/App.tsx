@@ -744,6 +744,11 @@ function MainApp() {
         try {
           const event = JSON.parse(message.data) as BackendEvent;
           setEvents((current) => dedupeEvents([...current, event]));
+          if (event.level === "error") {
+            notify.error(event.type ? `Ошибка: ${event.type}` : "Ошибка системы", event.message);
+          } else if (event.level === "warning") {
+            notify.warning(event.type ? `Предупреждение: ${event.type}` : "Внимание", event.message);
+          }
         } catch {
           // Ignore malformed event frames.
         }
@@ -3288,8 +3293,8 @@ export function SettingsPage({
             />
             <SettingsSwitch
               checked={Boolean(qaStudioEnabled)}
-              label="Окно тестирования аватара (QA Studio)"
-              description="Отдельное автономное окно для проверки всех 24 эмоций, жестов, сценариев речи и сброса. При включении открывается, при выключении — закрывается."
+              label="Окно тестирования (QA Studio)"
+              description="Отдельное окно для тестирования аватара, эмоций, жестов, речи и системных уведомлений. При включении открывается, при выключении — закрывается."
               onChange={(checked) => {
                 onToggleQaStudioEnabled?.(checked);
               }}
@@ -4413,10 +4418,10 @@ function AvatarControls({
         <div>
           <strong style={{ display: "flex", alignItems: "center", gap: 6, color: "#fff", fontSize: "13.5px" }}>
             <Sparkles size={15} style={{ color: "#a78bfa" }} />
-            Лаборатория тестирования аватара (QA Studio)
+            Окно тестирования (QA Studio)
           </strong>
           <span style={{ display: "block", color: "rgba(255, 255, 255, 0.65)", fontSize: "12px", marginTop: 2 }}>
-            Автономное отдельное окно тестировщика: мгновенный запуск всех 24 эмоций, 20 жестов, сценариев речи и сброс.
+            Автономный стенд тестировщика: проверка всех 24 эмоций, 20 жестов, сценариев речи и системных уведомлений.
           </span>
         </div>
         <button
@@ -4426,7 +4431,7 @@ function AvatarControls({
           style={{ padding: "8px 16px", borderRadius: "10px", fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "6px" }}
         >
           <Sparkles size={14} />
-          Открыть отдельное окно QA Studio
+          Открыть окно тестирования
         </button>
       </div>
       <details className="avatar-test-disclosure">
