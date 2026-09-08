@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Callable, Iterator, Protocol
 
 from .embedding import EmbeddingProvider
 
@@ -66,6 +67,7 @@ class SqliteVecIndex:
     def __init__(self, database_path: Path, provider: EmbeddingProvider, source: Callable[[str], list[tuple[str, str]]]) -> None:
         self._database_path = database_path
         self._provider = provider
+        self.embedding_provider = provider
         self._source = source
         self.available = True
         self.extension_available = self._detect_sqlite_vec()
@@ -121,15 +123,39 @@ class SqliteVecIndex:
         scored = [VectorSearchResult(row["item_id"], self._cosine(query_vector, json.loads(row["vector_json"]))) for row in rows]
         return sorted((item for item in scored if item.score > 0), key=lambda item: item.score, reverse=True)[:limit]
 
-    def search_source_sync(self, query: str, namespace: str, limit: int) -> list[VectorSearchResult]:
+    def search_source_sync(
+        self,
+        query: str,
+        namespace: str,
+        limit: int,
+        *,
+        item_ids: set[str] | None = None,
+    ) -> list[VectorSearchResult]:
         """Score SQLite source rows without mutating a lagging rebuildable index."""
         embed_query = getattr(self._provider, "embed_query", self._provider.embed)
         query_vector = embed_query(query)
         scored = [
             VectorSearchResult(item_id, self._cosine(query_vector, self._provider.embed(text)))
             for item_id, text in self._source(namespace)
+            if item_ids is None or item_id in item_ids
         ]
         return sorted((item for item in scored if item.score > 0), key=lambda item: item.score, reverse=True)[:limit]
+
+    def snapshot_sync(self, namespace: str) -> dict[str, object]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT item_id FROM semantic_vectors WHERE namespace = ? AND model_id = ? AND dimension = ? ORDER BY item_id",
+                (namespace, self._provider.model_id, self._provider.dimension),
+            ).fetchall()
+        ids = [str(row["item_id"]) for row in rows]
+        return {
+            "namespace": namespace,
+            "ids": ids,
+            "count": len(ids),
+            "model_id": self._provider.model_id,
+            "dimension": self._provider.dimension,
+            "backend": self.backend,
+        }
 
     def rebuild_sync(self, namespace: str) -> None:
         with self._connect() as connection:
@@ -138,10 +164,15 @@ class SqliteVecIndex:
         for item_id, text in self._source(namespace):
             self.upsert_sync(item_id, text, namespace)
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self._database_path)
-        connection.row_factory = sqlite3.Row
-        return connection
+        try:
+            connection.row_factory = sqlite3.Row
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     @staticmethod
     def _cosine(first: list[float], second: list[float]) -> float:

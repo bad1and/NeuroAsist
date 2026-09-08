@@ -1714,6 +1714,44 @@ class TimelineStore:
             connection.execute("UPDATE conversation_episodes SET summary_status = 'summarized', summary_version = ? WHERE id = ?", (version, episode_id))
             return {"id": summary_id, "episode_id": episode_id, "summary_text": summary_text, "topics": topics, "decisions": decisions, "open_loops": open_loops}
 
+    def get_episode_summary(self, summary_id: str) -> dict[str, object] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM episode_summaries WHERE id = ? AND superseded_at IS NULL",
+                (summary_id,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def list_episode_summaries(
+        self,
+        *,
+        query: str | None = None,
+        exclude_episode_id: str | None = None,
+        limit: int = 2,
+    ) -> list[dict[str, object]]:
+        with self._connect() as connection:
+            fts_query = self._fts_query(query or "")
+            if fts_query:
+                rows = connection.execute(
+                    """SELECT s.* FROM episode_summary_fts f
+                       JOIN episode_summaries s ON s.id = f.summary_id
+                       WHERE episode_summary_fts MATCH ?
+                         AND s.superseded_at IS NULL
+                         AND (? IS NULL OR s.episode_id != ?)
+                       ORDER BY bm25(episode_summary_fts), s.created_at DESC
+                       LIMIT ?""",
+                    (fts_query, exclude_episode_id, exclude_episode_id, limit),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """SELECT * FROM episode_summaries
+                       WHERE superseded_at IS NULL
+                         AND (? IS NULL OR episode_id != ?)
+                       ORDER BY created_at DESC LIMIT ?""",
+                    (exclude_episode_id, exclude_episode_id, limit),
+                ).fetchall()
+        return [dict(row) for row in rows]
+
     def get_message(self, message_id: str) -> StoredTimelineMessage | None:
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM conversation_messages WHERE id = ? AND timeline_id = ?", (message_id, PRIMARY_TIMELINE_ID)).fetchone()
@@ -1916,6 +1954,44 @@ class TimelineStore:
             row = connection.execute("SELECT * FROM memory_items WHERE id = ?", (memory_id,)).fetchone()
             return self._enrich_memory_row(connection, row) if row is not None else None
 
+    def purge_memory(self, memory_id: str) -> bool:
+        """Permanently remove one memory and all memory-layer provenance.
+
+        The source conversation is deliberately outside this scope; deleting
+        chat history is a separate explicit user action.  No value-bearing
+        audit JSON or semantic vector is retained after this operation.
+        """
+        with self._connect() as connection:
+            exists = connection.execute(
+                "SELECT 1 FROM memory_items WHERE id = ?", (memory_id,),
+            ).fetchone()
+            if exists is None:
+                return False
+            connection.execute("DELETE FROM memory_fts WHERE memory_id = ?", (memory_id,))
+            connection.execute(
+                "DELETE FROM semantic_vectors WHERE namespace = 'memory' AND item_id = ?",
+                (memory_id,),
+            )
+            connection.execute(
+                "DELETE FROM memory_evidence WHERE entity_type = 'fact' AND entity_id = ?",
+                (memory_id,),
+            )
+            connection.execute("DELETE FROM memory_audit WHERE memory_id = ?", (memory_id,))
+            connection.execute(
+                "DELETE FROM memory_conflicts WHERE existing_entity_id = ? OR proposed_entity_id = ?",
+                (memory_id, memory_id),
+            )
+            connection.execute(
+                "UPDATE memory_items SET supersedes_id = NULL WHERE supersedes_id = ?",
+                (memory_id,),
+            )
+            connection.execute(
+                "UPDATE memory_items SET superseded_by_id = NULL WHERE superseded_by_id = ?",
+                (memory_id,),
+            )
+            connection.execute("DELETE FROM memory_items WHERE id = ?", (memory_id,))
+        return True
+
     def memory_evidence(self, entity_type: str, entity_id: str) -> list[dict[str, object]]:
         with self._connect() as connection:
             rows = connection.execute(
@@ -2100,8 +2176,10 @@ class TimelineStore:
             if query and self._fts_query(query):
                 rows = connection.execute(
                     """SELECT t.* FROM memory_topic_fts f JOIN memory_topics t ON t.id = f.topic_id
-                       WHERE memory_topic_fts MATCH ? AND (? IS NULL OR t.status = ?) ORDER BY bm25(memory_topic_fts), t.updated_at DESC LIMIT ?""",
-                    (self._fts_query(query), status, status, limit),
+                       WHERE memory_topic_fts MATCH ? AND t.relationship_id = ?
+                         AND (? IS NULL OR t.status = ?)
+                       ORDER BY bm25(memory_topic_fts), t.updated_at DESC LIMIT ?""",
+                    (self._fts_query(query), PRIMARY_RELATIONSHIP_ID, status, status, limit),
                 ).fetchall()
             else:
                 rows = connection.execute("SELECT * FROM memory_topics WHERE relationship_id = ? AND (? IS NULL OR status = ?) ORDER BY updated_at DESC LIMIT ?", (PRIMARY_RELATIONSHIP_ID, status, status, limit)).fetchall()
@@ -2167,11 +2245,24 @@ class TimelineStore:
         self,
         *,
         status: str | None = None,
+        query: str | None = None,
         limit: int = 100,
         include_evidence: bool = True,
     ) -> list[dict[str, object]]:
         with self._connect() as connection:
-            rows = connection.execute("SELECT * FROM memory_commitments WHERE relationship_id = ? AND (? IS NULL OR status = ?) ORDER BY importance DESC, updated_at DESC LIMIT ?", (PRIMARY_RELATIONSHIP_ID, status, status, limit)).fetchall()
+            if query and self._fts_query(query):
+                rows = connection.execute(
+                    """SELECT c.* FROM memory_commitment_fts f
+                       JOIN memory_commitments c ON c.id = f.commitment_id
+                       WHERE memory_commitment_fts MATCH ?
+                         AND c.relationship_id = ?
+                         AND (? IS NULL OR c.status = ?)
+                       ORDER BY bm25(memory_commitment_fts), c.importance DESC, c.updated_at DESC
+                       LIMIT ?""",
+                    (self._fts_query(query), PRIMARY_RELATIONSHIP_ID, status, status, limit),
+                ).fetchall()
+            else:
+                rows = connection.execute("SELECT * FROM memory_commitments WHERE relationship_id = ? AND (? IS NULL OR status = ?) ORDER BY importance DESC, updated_at DESC LIMIT ?", (PRIMARY_RELATIONSHIP_ID, status, status, limit)).fetchall()
             if not include_evidence:
                 return [dict(row) | {"user_locked": bool(row["user_locked"]), "evidence": []} for row in rows]
             if not rows:
@@ -2341,7 +2432,15 @@ class TimelineStore:
         with self._immediate_connect() as connection:
             now = self._now()
             episode = self._current_episode_row(connection)
+            memory_jobs_flushed = 0
             if episode is not None:
+                memory_jobs_flushed = connection.execute(
+                    """UPDATE background_jobs
+                       SET available_at = ?, updated_at = ?
+                       WHERE type = 'memory_consolidation' AND status = 'pending'
+                         AND json_extract(payload_json, '$.episode_id') = ?""",
+                    (now, now, str(episode["id"])),
+                ).rowcount
                 self._close_episode(connection, episode, boundary_reason, now)
             connection.execute("DELETE FROM conversation_turn_state WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,))
             session_id = uuid4().hex
@@ -2357,7 +2456,12 @@ class TimelineStore:
             episodes = int(connection.execute(
                 "SELECT COUNT(*) FROM conversation_episodes WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,)
             ).fetchone()[0])
-        return {"session_id": session_id, "messages": messages, "episodes": episodes}
+        return {
+            "session_id": session_id,
+            "messages": messages,
+            "episodes": episodes,
+            "memory_jobs_flushed": int(memory_jobs_flushed),
+        }
 
     def ensure_active_session(self) -> dict[str, object]:
         """Return the active session or create the first one without clearing history."""
