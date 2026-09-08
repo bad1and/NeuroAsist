@@ -80,6 +80,12 @@ class RuntimeSettings:
     coding_project_root: str = ""
     coding_workspace_name: str = "default"
     coding_auto_delegate: bool = True
+    # Situational context preferences
+    location_mode: str = "auto"
+    location_city: str = ""
+    weather_enabled: bool = True
+    news_enabled: bool = True
+    news_category: str = "all"
 
 
 class RuntimeSettingsStore:

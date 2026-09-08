@@ -64,6 +64,11 @@ class PublicSettingsResponse(BaseModel):
     available_personalities: list[str]
     available_voice_languages: list[str]
     available_tts_voices: list[str]
+    location_mode: str = "auto"
+    location_city: str = ""
+    weather_enabled: bool = True
+    news_enabled: bool = True
+    news_category: str = "all"
 
 
 class RuntimeSettingsPatch(BaseModel):
@@ -102,6 +107,11 @@ class RuntimeSettingsPatch(BaseModel):
     coding_project_root: str | None = Field(default=None, max_length=4096)
     coding_workspace_name: str | None = Field(default=None, max_length=80)
     coding_auto_delegate: bool | None = None
+    location_mode: str | None = None
+    location_city: str | None = Field(default=None, max_length=100)
+    weather_enabled: bool | None = None
+    news_enabled: bool | None = None
+    news_category: str | None = None
 
 
 class VoiceStylePatch(BaseModel):

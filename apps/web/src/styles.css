@@ -3291,6 +3291,8 @@ textarea::placeholder {
 }
 
 .settings-group {
+  min-width: 0;
+  box-sizing: border-box;
   max-width: 680px;
   border-radius: var(--radius-md);
 }
@@ -8071,6 +8073,7 @@ pre,
     transform: rotate(360deg);
   }
 }
+
 
 
 
