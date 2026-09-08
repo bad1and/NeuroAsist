@@ -85,6 +85,39 @@ def test_chroma_rebuild_reconciles_missing_and_stale_ids_without_collection_rese
     assert index._collection("memory").id == collection_id
 
 
+def test_complete_chroma_snapshot_does_not_rescore_sqlite_source(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "complete.sqlite3")
+    store.init_db()
+    index = ChromaVectorIndex(
+        tmp_path / "complete-chroma",
+        HashEmbeddingProvider(dimension=64),
+        store.semantic_index_items,
+    )
+    service = MemoryService(
+        store,
+        RuntimeSettings(memory_mode="automatic"),
+        vector_index=index,
+        semantic_enabled=True,
+        semantic_limit=3,
+    )
+    source, _ = store.append_message(role="user", content="Источник", input_mode="text")
+    for number in range(10):
+        service.create_manual({
+            "kind": "preference",
+            "predicate": "likes",
+            "value_text": f"напиток {number}",
+            "source_message_ids": [source.id],
+        })
+    service.reindex()
+
+    def unexpected_source_scan(*_args, **_kwargs):
+        raise AssertionError("complete Chroma namespace must not rescore SQLite")
+
+    index.search_source_sync = unexpected_source_scan  # type: ignore[method-assign]
+
+    assert service.retrieve("напиток 7", limit=3)
+
+
 def test_legacy_chroma_cleanup_requires_only_neuroasist_collections(tmp_path: Path) -> None:
     legacy = tmp_path / "legacy"
     legacy.mkdir()

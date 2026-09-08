@@ -15,7 +15,7 @@ const api = vi.hoisted(() => ({
   installModel: vi.fn(), removeModel: vi.fn(), createBackup: vi.fn(),
   clearMemories: vi.fn(), reindexMemories: vi.fn(), resetAllCompanionData: vi.fn(),
   resetConversationSession: vi.fn(), getConversationSession: vi.fn(),
-  confirmMemory: vi.fn(), rejectMemory: vi.fn(), deleteMemory: vi.fn(), restoreMemory: vi.fn(), updateMemory: vi.fn(),
+  confirmMemory: vi.fn(), rejectMemory: vi.fn(), deleteMemory: vi.fn(), purgeMemory: vi.fn(), restoreMemory: vi.fn(), updateMemory: vi.fn(),
   deleteTimelineRange: vi.fn(), saveDesktopApiKey: vi.fn(), sendAvatarTestEmotion: vi.fn(),
   sendAvatarTestGesture: vi.fn(), sendAvatarTestPhrase: vi.fn(), stopAvatar: vi.fn(), updateAvatarOverlay: vi.fn(),
 }));
@@ -85,6 +85,10 @@ beforeEach(() => {
   api.getMemories.mockResolvedValue({ items: [] });
   api.createMemory.mockResolvedValue({ memory: {} });
   api.getMemoryAudit.mockResolvedValue({ items: [] });
+  api.deleteMemory.mockResolvedValue({ memory: {} });
+  api.purgeMemory.mockResolvedValue({ memory: { id: "memory-1", purged: true } });
+  api.restoreMemory.mockResolvedValue({ memory: {} });
+  api.updateMemory.mockResolvedValue({ memory: {} });
   api.updateRuntimeSettings.mockResolvedValue(settings);
 });
 
@@ -764,7 +768,7 @@ describe("русский интерфейс", () => {
     expect(await screen.findByRole("button", { name: "Начать" })).toBeInTheDocument();
   });
 
-  it("оставляет только историю и забывание записи", async () => {
+  it("даёт исправить, закрепить, архивировать и окончательно забыть запись", async () => {
     api.getMemories.mockResolvedValue({
       items: [{
         id: "memory-1", scope: "user", kind: "fact", subject: "user", predicate: "напиток",
@@ -777,10 +781,18 @@ describe("русский интерфейс", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Дополнительные действия" }));
     expect(screen.getByRole("button", { name: "История записи" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Забыть" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Изменить" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Закрепить" })).not.toBeInTheDocument();
-    expect(api.updateMemory).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Изменить" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Закрепить" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Архивировать" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Забыть навсегда" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    fireEvent.change(screen.getByLabelText("Значение"), { target: { value: "Кофе" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => expect(api.updateMemory).toHaveBeenCalledWith(
+      "memory-1", { value_text: "Кофе", user_locked: true },
+    ));
   });
 
   it("подтверждает удаление истории во встроенном диалоге", async () => {

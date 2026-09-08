@@ -28,6 +28,7 @@ import { useEffect, useRef, useState, type ComponentType } from "react";
 
 import {
   deleteMemory,
+  purgeMemory,
   getMemories,
   getMemoryAudit,
   getMemoryCommitments,
@@ -35,6 +36,8 @@ import {
   getMemoryDiagnostics,
   getMemoryTopics,
   closeMemoryCommitment,
+  restoreMemory,
+  updateMemory,
 } from "./api";
 import type {
   MemoryAuditItem,
@@ -47,7 +50,6 @@ import type {
 import { notify } from "./notifications";
 import {
   animateButtonPress,
-  animateCardRemove,
   animatePageEnter,
   animateStaggerCards,
   animateTabSwitch,
@@ -84,12 +86,21 @@ const MEMORY_LABELS: Record<string, string> = {
   "user.likes_category": "Любимый жанр",
   "user.likes_game": "Любимая игра",
   "user.preference": "Предпочтение",
+  "user.dislike": "Не нравится",
+  "user.interest": "Интерес",
+  "user.habit": "Привычка",
   "user.note": "Заметка",
   "user.relationship.friend": "Друг",
+  "user.pet": "Питомец",
   "user.game_detail": "Деталь игры",
   "user.current_mood": "Текущее настроение",
   "user.current_activity": "Текущее занятие",
   "user.current_goal": "Текущая цель",
+  "user.occupation": "Работа",
+  "user.skill": "Навык",
+  "user.learning": "Изучает",
+  "user.project": "Проект",
+  "user.location": "Местоположение",
   "user.prefers_response_length": "Стиль ответов",
   "user.health_constraint": "Ограничение здоровья",
   "user.constraint": "Ограничение",
@@ -183,6 +194,8 @@ export function MemoryPage() {
   const [audit, setAudit] = useState<Record<string, MemoryAuditItem[]>>({});
   const [message, setMessage] = useState<string | null>(null);
   const [pendingDeleteMemory, setPendingDeleteMemory] = useState<MemoryItem | null>(null);
+  const [pendingEditMemory, setPendingEditMemory] = useState<MemoryItem | null>(null);
+  const [editedValue, setEditedValue] = useState("");
 
   const containerRef = useAnimeScope<HTMLElement>((scope, root) => {
     animatePageEnter(root);
@@ -254,17 +267,6 @@ export function MemoryPage() {
       const err = error instanceof Error ? error.message : "Не удалось выполнить действие";
       setMessage(err);
       notify.error("Память", err);
-    }
-  };
-
-  const handleForget = async (e: React.MouseEvent<HTMLElement>, id: string) => {
-    const cardEl = (e.currentTarget.closest(".memory-card") as HTMLElement) || null;
-    if (cardEl) {
-      animateCardRemove(cardEl, () => {
-        void action(() => deleteMemory(id), "Запись удалена из памяти.");
-      });
-    } else {
-      void action(() => deleteMemory(id), "Запись удалена из памяти.");
     }
   };
 
@@ -502,6 +504,32 @@ export function MemoryPage() {
           {section === "diagnostics" && (
             <>
               <div className="memory-diagnostics-grid">
+                {diagnostics.capabilities && (
+                  <article className="memory-card">
+                    <div className="memory-card-main">
+                      <div className="memory-card-heading">
+                        <div className="memory-card-label">
+                          <IconComputerDatabase size={14} aria-hidden="true" />
+                          <strong>Возможности</strong>
+                        </div>
+                        <span className={`memory-status ${diagnostics.capabilities.semantic_enabled ? "active" : "deleted"}`}>
+                          {diagnostics.capabilities.retrieval}
+                        </span>
+                      </div>
+                      <strong>Активный контур памяти</strong>
+                      <p>
+                        Запись: {diagnostics.capabilities.writer} · поиск: {diagnostics.capabilities.backend} ·
+                        модель: {diagnostics.capabilities.embedding_provider}
+                      </p>
+                      <small>
+                        Реестр слотов v{diagnostics.capabilities.slot_registry_version}
+                        {diagnostics.capabilities.degraded_reason
+                          ? ` · ${diagnostics.capabilities.degraded_reason}`
+                          : " · без деградации"}
+                      </small>
+                    </div>
+                  </article>
+                )}
                 {diagnostics.integrity && (
                   <article className="memory-card">
                     <div className="memory-card-main">
@@ -727,19 +755,64 @@ export function MemoryPage() {
                               <IconInterfaceAlertAlarmBell2 size={16} aria-hidden="true" />
                               История записи
                             </button>
-                            {memory.status !== "deleted" && (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.currentTarget.closest("details")?.removeAttribute("open");
+                                setPendingEditMemory(memory);
+                                setEditedValue(memory.value_text);
+                              }}
+                            >
+                              <IconInterfaceTextFormattingTextStyle size={16} aria-hidden="true" />
+                              Изменить
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.currentTarget.closest("details")?.removeAttribute("open");
+                                void action(
+                                  () => updateMemory(memory.id, { user_locked: !memory.user_locked }),
+                                  memory.user_locked ? "Запись откреплена." : "Запись закреплена.",
+                                );
+                              }}
+                            >
+                              <IconInterfaceBookmark size={16} aria-hidden="true" />
+                              {memory.user_locked ? "Открепить" : "Закрепить"}
+                            </button>
+                            {memory.status === "active" ? (
                               <button
-                                className="is-danger"
                                 type="button"
-                                onClick={(e) => {
-                                  e.currentTarget.closest("details")?.removeAttribute("open");
-                                  setPendingDeleteMemory(memory);
+                                onClick={(event) => {
+                                  event.currentTarget.closest("details")?.removeAttribute("open");
+                                  void action(() => deleteMemory(memory.id), "Запись перемещена в архив.");
                                 }}
                               >
-                                <IconInterfaceDeleteBin3 size={16} aria-hidden="true" />
-                                Забыть
+                                <IconInterfaceContentArchive size={16} aria-hidden="true" />
+                                Архивировать
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.currentTarget.closest("details")?.removeAttribute("open");
+                                  void action(() => restoreMemory(memory.id), "Запись восстановлена.");
+                                }}
+                              >
+                                <IconInterfaceSpirals size={16} aria-hidden="true" />
+                                Восстановить
                               </button>
                             )}
+                            <button
+                              className="is-danger"
+                              type="button"
+                              onClick={(e) => {
+                                e.currentTarget.closest("details")?.removeAttribute("open");
+                                setPendingDeleteMemory(memory);
+                              }}
+                            >
+                              <IconInterfaceDeleteBin3 size={16} aria-hidden="true" />
+                              Забыть навсегда
+                            </button>
                           </div>
                         </details>
                       </div>
@@ -767,8 +840,8 @@ export function MemoryPage() {
 
       <AppDialog
         open={Boolean(pendingDeleteMemory)}
-        title="Забыть эту запись?"
-        description={`Iris удалит информацию: «${pendingDeleteMemory ? memoryLabel(pendingDeleteMemory) : ""}». Это действие изменит контекст будущих ответов помощника.`}
+        title="Забыть эту запись навсегда?"
+        description={`Запись «${pendingDeleteMemory ? memoryLabel(pendingDeleteMemory) : ""}» и её журнал памяти будут удалены без восстановления. Исходный текст останется в истории диалога, пока вы отдельно не удалите историю.`}
         onClose={() => setPendingDeleteMemory(null)}
       >
         <div className="dialog-actions">
@@ -782,10 +855,49 @@ export function MemoryPage() {
               if (!pendingDeleteMemory) return;
               const memId = pendingDeleteMemory.id;
               setPendingDeleteMemory(null);
-              void action(() => deleteMemory(memId), "Запись удалена из памяти.");
+              void action(() => purgeMemory(memId), "Запись забыта без возможности восстановления.");
             }}
           >
-            Забыть запись
+            Забыть навсегда
+          </button>
+        </div>
+      </AppDialog>
+
+      <AppDialog
+        open={Boolean(pendingEditMemory)}
+        title="Исправить запись памяти"
+        description="Исправление будет закреплено как явный выбор пользователя и сразу попадёт в поиск."
+        onClose={() => setPendingEditMemory(null)}
+      >
+        <label className="form-field">
+          <span>Значение</span>
+          <textarea
+            value={editedValue}
+            onChange={(event) => setEditedValue(event.target.value)}
+            rows={4}
+            maxLength={2000}
+            data-i18n-skip
+          />
+        </label>
+        <div className="dialog-actions">
+          <button className="secondary" type="button" onClick={() => setPendingEditMemory(null)}>
+            Отмена
+          </button>
+          <button
+            type="button"
+            disabled={!editedValue.trim()}
+            onClick={() => {
+              if (!pendingEditMemory || !editedValue.trim()) return;
+              const memoryId = pendingEditMemory.id;
+              const valueText = editedValue.trim();
+              setPendingEditMemory(null);
+              void action(
+                () => updateMemory(memoryId, { value_text: valueText, user_locked: true }),
+                "Запись исправлена и закреплена.",
+              );
+            }}
+          >
+            Сохранить
           </button>
         </div>
       </AppDialog>

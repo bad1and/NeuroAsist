@@ -29,6 +29,7 @@ class ChromaVectorIndex:
         self._directory = directory
         self._client = chromadb.PersistentClient(path=str(directory))
         self._provider = provider
+        self.embedding_provider = provider
         self._source = source
         self._last_successful_sync: str | None = None
 
@@ -65,11 +66,20 @@ class ChromaVectorIndex:
             raise VectorDimensionMismatch("Chroma returned inconsistent search result lengths")
         return [VectorSearchResult(str(item_id), max(0.0, 1.0 - float(distance))) for item_id, distance in zip(ids, distances)]
 
-    def search_source_sync(self, query: str, namespace: str, limit: int) -> list[VectorSearchResult]:
+    def search_source_sync(
+        self,
+        query: str,
+        namespace: str,
+        limit: int,
+        *,
+        item_ids: set[str] | None = None,
+    ) -> list[VectorSearchResult]:
         embed_query = getattr(self._provider, "embed_query", self._provider.embed)
         query_vector = embed_query(query)
         scored: list[VectorSearchResult] = []
         for item_id, text in self._source(namespace):
+            if item_ids is not None and item_id not in item_ids:
+                continue
             vector = self._provider.embed(text)
             denominator = math.sqrt(sum(value * value for value in query_vector)) * math.sqrt(sum(value * value for value in vector))
             score = sum(left * right for left, right in zip(query_vector, vector)) / denominator if denominator else 0.0

@@ -47,7 +47,7 @@ status="open|completed|cancelled",importance=.6,confidence=.7,source_message_ids
 conflicts<=4: {existing_id?,proposed_kind,reason,resolution="supersede|review|coexist"}
 decisions<=6: {action="accept|reject|clarify",reason,predicate?,clarification_id?}; диагностика,
 не память. Предпочитай predicates: name, assistant.developer, assistant.developer_count,
-likes_category, likes_game, game_detail, preference, note, relationship.friend, current_mood,
+occupation, skill, learning, project, pet, likes_category, relationship.friend, current_mood,
 current_activity, current_goal, prefers_response_length."""
 
 MEMORY_REPAIR_PROMPT = """Исправь JSON без пояснений. Разрешены только корневые массивы

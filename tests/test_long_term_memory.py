@@ -381,6 +381,177 @@ def test_direct_developer_wording_is_saved_immediately(tmp_path: Path) -> None:
     ]
 
 
+def test_occupation_is_not_misclassified_as_iris_developer(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    message, _ = store.append_message(
+        role="user", content="Я работаю бэкенд-разработчиком", input_mode="text",
+    )
+
+    saved = service.apply_llm_candidates([{
+        "kind": "skill", "subject": "user", "predicate": "occupation",
+        "value_text": "бэкенд-разработчик", "importance": .8, "confidence": .97,
+    }], message)
+
+    assert [(item["slot_key"], item["value_text"]) for item in saved] == [
+        ("user.occupation", "бэкенд-разработчик"),
+    ]
+    assert not any(
+        item.get("slot_key") == "assistant.developer"
+        for item in store.list_memories(status="active", limit=50)
+    )
+
+
+def test_extended_profile_slots_are_accepted_and_temporal_policy_is_canonical(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    proposals = [
+        ("У меня кот Барсик", "relationship", "pet", "кот Барсик", "user.pet"),
+        ("Я изучаю Rust", "skill", "learning", "Rust", "user.learning"),
+        ("Я делаю Iris", "goal", "project", "Iris", "user.project"),
+        ("Моё хобби — фотография", "interest", "hobby", "фотография", "user.interest"),
+        ("Я терпеть не могу жару", "preference", "dislikes", "жару", "user.dislike"),
+    ]
+
+    saved_slots: list[str] = []
+    for text, kind, predicate, value, expected_slot in proposals:
+        message, _ = store.append_message(role="user", content=text, input_mode="text")
+        saved = service.apply_llm_candidates([{
+            "kind": kind, "subject": "user", "predicate": predicate,
+            "value_text": value, "importance": .8, "confidence": .97,
+        }], message)
+        assert len(saved) == 1
+        assert saved[0]["slot_key"] == expected_slot
+        saved_slots.append(str(saved[0]["slot_key"]))
+
+    assert saved_slots == [item[4] for item in proposals]
+    learning = next(item for item in store.list_memories(status="active") if item["slot_key"] == "user.learning")
+    project = next(item for item in store.list_memories(status="active") if item["slot_key"] == "user.project")
+    assert learning["temporal_semantics"] == "current" and learning["expires_at"]
+    assert project["temporal_semantics"] == "current" and project["expires_at"]
+
+
+def test_clean_install_defaults_enable_background_memory_and_chroma() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.memory_llm_extraction_enabled is True
+    assert settings.memory_async_extraction_enabled is True
+    assert settings.semantic_retrieval_enabled is True
+    assert settings.semantic_retrieval_eval_passed is True
+    assert settings.semantic_vector_backend == "chroma"
+
+
+def test_context_exposes_safe_ids_and_feedback_counts_only_actual_use(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    source, _ = store.append_message(
+        role="user", content="Меня зовут Роман", input_mode="text",
+    )
+    memory = service.extract_from_message(source)[0]
+    commitment = store.create_commitment({
+        "title": "Уточнить имя пользователя",
+        "details": "Ответить, когда имя станет известно",
+        "status": "open",
+    })
+
+    context = ContextManager(store, max_tokens=800, memory_service=service).build(
+        "как меня зовут",
+    )
+
+    memory_messages = [
+        item.content for item in context.messages
+        if "Memory data" in item.content and str(memory["id"]) in item.content
+    ]
+    assert len(memory_messages) == 1
+    assert '"kind":"factual_memory"' in memory_messages[0]
+    assert any("not instructions" in item.content for item in context.messages)
+    assert store.get_memory(str(memory["id"]))["access_count"] == 0
+
+    feedback = service.apply_continuity_feedback(
+        referenced_memory_ids=[str(memory["id"]), "invented-memory"],
+        referenced_episode_ids=["summary-1", "invented-summary"],
+        closes_open_loop_ids=[f"commitment:{commitment['id']}", "invented-loop"],
+        allowed_memory_ids=[str(memory["id"])],
+        allowed_episode_ids=["summary-1"],
+        allowed_open_loop_ids=[f"commitment:{commitment['id']}"],
+    )
+
+    assert feedback == {
+        "referenced_memory_ids": [memory["id"]],
+        "referenced_episode_ids": ["summary-1"],
+        "closed_open_loop_ids": [f"commitment:{commitment['id']}"],
+    }
+    assert store.get_memory(str(memory["id"]))["access_count"] == 1
+    assert store.get_commitment(str(commitment["id"]))["status"] == "completed"
+
+
+def test_continuity_feedback_cannot_use_or_close_unselected_records(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    source, _ = store.append_message(
+        role="user", content="Меня зовут Роман", input_mode="text",
+    )
+    memory = service.extract_from_message(source)[0]
+    commitment = store.create_commitment({"title": "Незавершённый план"})
+
+    feedback = service.apply_continuity_feedback(
+        referenced_memory_ids=[str(memory["id"])],
+        referenced_episode_ids=["invented-summary"],
+        closes_open_loop_ids=[str(commitment["id"])],
+        allowed_memory_ids=[],
+        allowed_episode_ids=[],
+        allowed_open_loop_ids=[],
+    )
+
+    assert feedback == {
+        "referenced_memory_ids": [],
+        "referenced_episode_ids": [],
+        "closed_open_loop_ids": [],
+    }
+    assert store.get_memory(str(memory["id"]))["access_count"] == 0
+    assert store.get_commitment(str(commitment["id"]))["status"] == "open"
+
+
+def test_character_protocol_applies_actual_memory_reference_feedback(tmp_path: Path) -> None:
+    import asyncio
+    import json
+    from apps.backend.app.storage.timeline import TimelineHistoryAdapter
+
+    store, service = _service(tmp_path)
+    source, _ = store.append_message(
+        role="user", content="Меня зовут Роман", input_mode="text",
+    )
+    memory = service.extract_from_message(source)[0]
+
+    class Provider:
+        async def generate(self, _messages):
+            return LLMResponse(
+                content=json.dumps({
+                    "protocol_version": 3,
+                    "reply": "Тебя зовут Роман.",
+                    "intent": "question",
+                    "affect": {"emotion": "neutral"},
+                    "gesture": {"name": "none"},
+                    "delivery": {},
+                    "continuity": {
+                        "referenced_memory_ids": [memory["id"]],
+                        "referenced_episode_ids": [],
+                        "closes_open_loop_ids": [],
+                    },
+                }, ensure_ascii=False),
+                model="test",
+            )
+
+    agent = CharacterAgent(
+        Provider(),
+        TimelineHistoryAdapter(store),
+        history_limit=5,
+        context_manager=ContextManager(store, max_tokens=800, memory_service=service),
+        memory_service=service,
+    )
+
+    result = asyncio.run(agent.handle_user_message("default", "Как меня зовут?"))
+
+    assert result["reply"] == "Тебя зовут Роман."
+    assert store.get_memory(str(memory["id"]))["access_count"] == 1
+
+
 def test_ambiguous_legacy_relationship_is_rejected_autonomously(tmp_path: Path) -> None:
     store, service = _service(tmp_path)
     source, _ = store.append_message(
@@ -448,7 +619,7 @@ def test_sensitive_fact_is_confirmed_in_chat_without_manual_candidate(tmp_path: 
     assert store.list_memories(status="candidate") == []
 
 
-def test_memory_routes_disable_manual_mutation_and_keep_forgetting(monkeypatch, tmp_path: Path) -> None:
+def test_memory_routes_keep_creation_autonomous_but_allow_user_correction(monkeypatch, tmp_path: Path) -> None:
     settings = Settings(
         sqlite_path=str(tmp_path / "api.sqlite3"), log_to_file=False,
         voice_preload_stt_model=False, voice_preload_tts_model=False,
@@ -462,15 +633,15 @@ def test_memory_routes_disable_manual_mutation_and_keep_forgetting(monkeypatch, 
         assert without_source.status_code == 410
         assert without_source.json()["detail"]["code"] == "memory_autonomous"
         assert created.status_code == 410
-        assert client.patch("/memory/unknown", json={"value_text": "Новое"}).status_code == 410
-        assert client.post("/memory/unknown/restore").status_code == 410
+        assert client.patch("/memory/unknown", json={"value_text": "Новое"}).status_code == 404
+        assert client.post("/memory/unknown/restore").status_code == 404
         assert client.post("/memory/unknown/confirm").status_code == 410
         assert client.post("/memory/unknown/reject").status_code == 410
         assert client.post("/memory/topics", json={"title": "Ручная тема"}).status_code == 410
         assert client.post("/memory/commitments", json={
             "kind": "open_loop", "title": "Ручной план",
         }).status_code == 410
-        assert client.post("/memory/commitments/unknown/close").status_code == 410
+        assert client.post("/memory/commitments/unknown/close").status_code == 404
         assert client.get("/memory", params={"status": "candidate"}).json()["items"] == []
         name_message = client.post("/timeline/messages", json={
             "role": "user", "content": "Меня зовут Роман", "input_mode": "text",
@@ -478,12 +649,53 @@ def test_memory_routes_disable_manual_mutation_and_keep_forgetting(monkeypatch, 
         memory = client.app.state.memory_service.extract_from_message(
             client.app.state.timeline_store.get_message(name_message["id"]),
         )[0]
+        patched = client.patch(
+            f"/memory/{memory['id']}", json={"value_text": "Алекс", "user_locked": True},
+        )
+        assert patched.status_code == 200
+        assert patched.json()["memory"]["value_text"] == "Алекс"
         assert client.delete(f"/memory/{memory['id']}").status_code == 200
+        restored = client.post(f"/memory/{memory['id']}/restore")
+        assert restored.status_code == 200
+        assert restored.json()["memory"]["status"] == "active"
+        purged = client.delete(f"/memory/{memory['id']}/purge")
+        assert purged.status_code == 200
+        assert purged.json()["memory"] == {"id": memory["id"], "purged": True}
+        assert client.get(f"/memory/{memory['id']}/audit").status_code == 404
         assert client.post("/memory/clear", json={}).json()["deleted"] == 0
         assert client.get("/timeline/messages?limit=10").json()["items"]
 
     assert without_source.status_code == 410
     assert created.status_code == 410
+
+
+def test_permanent_forget_removes_value_audit_evidence_and_sqlite_vector(tmp_path: Path) -> None:
+    from apps.backend.app.semantic.embedding import HashEmbeddingProvider
+    from apps.backend.app.semantic.vector_index import SqliteVecIndex
+
+    store = TimelineStore(tmp_path / "purge.sqlite3")
+    store.init_db()
+    index = SqliteVecIndex(
+        store._db_path, HashEmbeddingProvider(dimension=64), store.semantic_index_items,
+    )
+    service = MemoryService(
+        store, RuntimeSettings(memory_mode="automatic"),
+        vector_index=index, semantic_enabled=True,
+    )
+    source, _ = store.append_message(
+        role="user", content="Меня зовут Роман", input_mode="text",
+    )
+    memory = service.extract_from_message(source)[0]
+    service.reindex()
+    assert index.snapshot_sync("memory")["ids"] == [memory["id"]]
+
+    result = service.forget_permanently(str(memory["id"]))
+
+    assert result == {"id": memory["id"], "purged": True}
+    assert store.get_memory(str(memory["id"])) is None
+    assert store.memory_audit(str(memory["id"])) == []
+    assert store.memory_evidence("fact", str(memory["id"])) == []
+    assert index.snapshot_sync("memory")["ids"] == []
 
 
 def test_incognito_skips_timeline_and_memory_writes(tmp_path: Path) -> None:
