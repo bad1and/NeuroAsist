@@ -232,6 +232,15 @@ class AvatarService:
             "avatar.overlay.configure", session_id, overlay.model_dump(mode="json"), protocol_version=2, min_protocol_version=2,
         )
 
+    async def set_sleep(self, sleep: bool, *, session_id: str = "default") -> BroadcastResult:
+        return await self._broadcast(
+            "avatar.sleep",
+            session_id,
+            {"sleep": sleep},
+            protocol_version=2,
+            min_protocol_version=2,
+        )
+
     async def set_audio_muted(self, muted: bool, *, session_id: str = "default") -> BroadcastResult:
         self.audio_muted = muted
         return await self._broadcast(

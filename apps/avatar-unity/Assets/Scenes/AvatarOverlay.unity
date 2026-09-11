@@ -331,6 +331,7 @@ GameObject:
   - component: {fileID: 975465928}
   - component: {fileID: 975465929}
   - component: {fileID: 975465930}
+  - component: {fileID: 975465931}
   m_Layer: 0
   m_Name: NeuroAsistAvatarRuntime
   m_TagString: Untagged
@@ -371,6 +372,7 @@ MonoBehaviour:
   state: {fileID: 975465921}
   motion: {fileID: 975465923}
   overlay: {fileID: 975465928}
+  sleepController: {fileID: 975465931}
 --- !u!114 &975465919
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -569,6 +571,21 @@ MonoBehaviour:
   state: {fileID: 975465921}
   emotionController: {fileID: 0}
   intensity: 1
+--- !u!114 &975465931
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 975465916}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 441725de861a87240a0fe94dad8a5d02, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  avatarCamera: {fileID: 963194227}
+  speech: {fileID: 975465919}
+  client: {fileID: 975465917}
 --- !u!1 &1594657433
 GameObject:
   m_ObjectHideFlags: 0

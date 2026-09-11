@@ -292,3 +292,8 @@ class AvatarOverlayPatch(ProtocolModel):
     y: float | None = None
     width: float | None = Field(default=None, ge=240.0, le=3840.0)
     height: float | None = Field(default=None, ge=240.0, le=2160.0)
+
+
+class AvatarSleepRequest(ProtocolModel):
+    sleep: bool = True
+    session_id: str = "default"
