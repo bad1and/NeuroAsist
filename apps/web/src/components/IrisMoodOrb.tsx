@@ -97,7 +97,6 @@ precision highp float;
 
 uniform vec2 u_resolution;
 uniform float u_time;
-uniform vec2 u_mouse;
 uniform vec2 u_center;
 
 uniform vec3 u_colorCore;
@@ -142,9 +141,6 @@ void main() {
     vec2 center = u_center;
     center.x *= aspect;
 
-    vec2 mouseOffset = (u_mouse - 0.5) * 0.03;
-    st += mouseOffset;
-
     // Organic breathing pulsation
     float dynRadius = u_radius + sin(u_time * 1.2) * 0.015;
     float dynWarp = u_warp;
@@ -174,7 +170,11 @@ void main() {
     finalColor += u_colorAccent * (wash * 0.95);
     finalColor += mix(u_colorFringe, irisBaseViolet, 0.22) * wash * (sin(u_time * 0.8) * 0.20 + 0.80);
 
-    float alpha = clamp((coreGlow * 1.6 + fringeGlow * 1.0 + wash * 0.9), 0.0, 1.0);
+    // Soft radial falloff towards edges so glow dissipates seamlessly without any visible borders
+    float edgeFalloff = smoothstep(0.49, 0.35, distToCenter);
+    finalColor *= edgeFalloff;
+
+    float alpha = clamp((coreGlow * 1.6 + fringeGlow * 1.0 + wash * 0.9), 0.0, 1.0) * edgeFalloff;
     vec3 toneMapped = vec3(1.0) - exp(-finalColor * (1.7 * dynIntensity));
 
     gl_FragColor = vec4(toneMapped, alpha);
@@ -266,7 +266,6 @@ export function IrisMoodOrb({
 
     const uResLoc = gl.getUniformLocation(program, "u_resolution");
     const uTimeLoc = gl.getUniformLocation(program, "u_time");
-    const uMouseLoc = gl.getUniformLocation(program, "u_mouse");
     const uCenterLoc = gl.getUniformLocation(program, "u_center");
     const uColorCoreLoc = gl.getUniformLocation(program, "u_colorCore");
     const uColorFringeLoc = gl.getUniformLocation(program, "u_colorFringe");
@@ -283,21 +282,6 @@ export function IrisMoodOrb({
     let currSpeed = visuals.speed;
     const currRadius = 0.28;
     let currIntensity = 1.0;
-
-    let targetMouseX = 0.5;
-    let targetMouseY = 0.5;
-    let currMouseX = 0.5;
-    let currMouseY = 0.5;
-
-    const handleMouseMove = (event: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        targetMouseX = (event.clientX - rect.left) / rect.width;
-        targetMouseY = 1.0 - (event.clientY - rect.top) / rect.height;
-      }
-    };
-
-    window.addEventListener("mousemove", handleMouseMove, { passive: true });
 
     let lastTime = performance.now();
     let accumulatedTime = 0;
@@ -349,14 +333,10 @@ export function IrisMoodOrb({
       currSpeed = lerp(currSpeed, targetSpeed, dynamicFactor);
       currIntensity = lerp(currIntensity, targetIntensity, dynamicFactor);
 
-      currMouseX = lerp(currMouseX, targetMouseX, Math.min(1.0, dt * 6.0));
-      currMouseY = lerp(currMouseY, targetMouseY, Math.min(1.0, dt * 6.0));
-
       accumulatedTime += dt * currSpeed;
 
       gl.uniform2f(uResLoc, canvas.width, canvas.height);
       gl.uniform1f(uTimeLoc, accumulatedTime);
-      gl.uniform2f(uMouseLoc, currMouseX, currMouseY);
       gl.uniform2f(uCenterLoc, 0.5, 0.5);
 
       gl.uniform3f(uColorCoreLoc, currCore[0], currCore[1], currCore[2]);
@@ -375,7 +355,6 @@ export function IrisMoodOrb({
     animationFrameRef.current = requestAnimationFrame(render);
 
     return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
       observer?.disconnect();
       if (animationFrameRef.current !== null) {
         cancelAnimationFrame(animationFrameRef.current);

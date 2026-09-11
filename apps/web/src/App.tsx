@@ -2284,52 +2284,6 @@ export function ChatPage({
     return "neutral";
   }, [avatarStatus?.emotion_engine?.current_emotion, liveVoiceEmotion, messages]);
 
-  const statusBadge = useMemo(() => {
-    if (!isDialogActive) {
-      return { text: "Ирис ждёт вас)", dotClass: "purple" };
-    }
-    if (voiceState === "speaking") {
-      return { text: "Ирис говорит", dotClass: "green" };
-    }
-    if (voiceState === "thinking" || loading) {
-      return { text: "Ирис думает", dotClass: "amber" };
-    }
-    if (voiceState === "recording") {
-      return { text: "Ирис слушает", dotClass: "green" };
-    }
-    if (voiceState === "transcribing") {
-      return { text: "Ирис распознаёт", dotClass: "amber" };
-    }
-    switch (currentEmotion) {
-      case "joy":
-      case "happy":
-        return { text: "Ирис радуется", dotClass: "green" };
-      case "hurt":
-        return { text: "Ирис обижается", dotClass: "rose" };
-      case "anger":
-      case "angry":
-        return { text: "Ирис сердится", dotClass: "rose" };
-      case "annoyed":
-      case "irritation":
-        return { text: "Ирис раздражена", dotClass: "amber" };
-      case "sadness":
-      case "sad":
-        return { text: "Ирис грустит", dotClass: "blue" };
-      case "smirk":
-      case "playfulness":
-        return { text: "Ирис подкалывает", dotClass: "purple" };
-      case "thinking":
-      case "interest":
-      case "curiosity":
-        return { text: "Ирис размышляет", dotClass: "amber" };
-      case "anxiety":
-      case "concerned":
-        return { text: "Ирис настороже", dotClass: "amber" };
-      default:
-        return { text: "Ирис на связи", dotClass: "purple" };
-    }
-  }, [currentEmotion, isDialogActive, loading, voiceState]);
-
   let lastAssistantIndex = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role === "assistant") {
@@ -2352,10 +2306,6 @@ export function ChatPage({
           isDialogActive={false}
           showInAppAvatar={showInAppAvatar && isActive}
         />
-        <div className="chat-status-pill">
-          <span>{statusBadge.text}</span>
-          <span className={`status-pill-dot ${statusBadge.dotClass}`} />
-        </div>
         <div className="chat-idle-stage">
           {showInAppAvatar && isActive && <InAppAvatarHost />}
           <div className="chat-start-banner">
@@ -2416,10 +2366,6 @@ export function ChatPage({
         isDialogActive={true}
         showInAppAvatar={showInAppAvatar && isActive}
       />
-      <div className="chat-status-pill">
-        <span>{statusBadge.text}</span>
-        <span className={`status-pill-dot ${statusBadge.dotClass}`} />
-      </div>
       {showInAppAvatar && isActive && <InAppAvatarHost />}
       <div className="chat-content">
         {memoryNotice && (
