@@ -11,11 +11,13 @@ namespace NeuroAsist.Avatar
         [SerializeField] private AvatarStateController state;
         [SerializeField] private AvatarMotionController motion;
         [SerializeField] private WindowsDesktopOverlay overlay;
+        [SerializeField] private AvatarSleepController sleepController;
         private readonly BoundedMessageCache received = new BoundedMessageCache(512);
 
         private void Awake()
         {
             if (overlay == null) overlay = GetComponent<WindowsDesktopOverlay>() ?? gameObject.AddComponent<WindowsDesktopOverlay>();
+            if (sleepController == null) sleepController = GetComponent<AvatarSleepController>() ?? gameObject.AddComponent<AvatarSleepController>();
         }
 
         public void Receive(string json)
@@ -65,6 +67,14 @@ namespace NeuroAsist.Avatar
                 case "avatar.overlay.configure":
                     client.SendAck(command.message_id, true);
                     if (overlay != null) overlay.Configure(payload.visible, payload.always_on_top, payload.locked, payload.scale, payload.monitor, payload.x, payload.y, payload.width, payload.height);
+                    break;
+                case "avatar.sleep":
+                    client.SendAck(command.message_id, true);
+                    if (sleepController != null) sleepController.SetSleeping(payload.sleep);
+                    break;
+                case "avatar.visibility":
+                    client.SendAck(command.message_id, true);
+                    if (sleepController != null) sleepController.SetSleeping(!payload.visible);
                     break;
                 case "avatar.ping": client.SendPong(command.message_id); break;
                 case "avatar.quit":

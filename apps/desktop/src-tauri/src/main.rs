@@ -620,6 +620,16 @@ impl DesktopState {
     /// Windows is dragging it. Move it natively from the latest DOM rectangle
     /// instead of waiting for React to re-render after a navigation change.
     fn move_in_app_avatar_with_parent(&self, app: &AppHandle) -> Result<(), String> {
+        let is_visible = self
+            .in_app_avatar_visible
+            .lock()
+            .map_err(|_| "in-app avatar visibility mutex poisoned")?
+            .as_ref()
+            .map(|request| request.visible)
+            .unwrap_or(false);
+        if !is_visible {
+            return Ok(());
+        }
         let _update = self
             .in_app_avatar_update
             .lock()
@@ -717,6 +727,12 @@ impl DesktopState {
         if !self.accept_in_app_avatar_revision(revision)? {
             return Ok(());
         }
+        let previous_visible = self
+            .in_app_avatar_visible
+            .lock()
+            .map_err(|_| "in-app avatar visibility mutex poisoned")?
+            .as_ref()
+            .map(|request| request.visible);
         *self
             .in_app_avatar_visible
             .lock()
@@ -737,7 +753,14 @@ impl DesktopState {
         // Calling this command before Unity finishes starting is valid: the
         // requested value remains queued and is applied by start_avatar. Once
         // the native popup exists, apply it immediately as well.
-        self.apply_in_app_avatar_host(app)
+        let result = self.apply_in_app_avatar_host(app);
+        if previous_visible != Some(visible) {
+            let runtime = self.runtime();
+            thread::spawn(move || {
+                let _ = avatar_sleep_request(&runtime, !visible);
+            });
+        }
+        result
     }
 
     fn toggle_avatar(&self, app: &AppHandle) -> Result<bool, String> {
@@ -1297,7 +1320,7 @@ fn attach_embedded_avatar_window(app: &AppHandle, process_id: u32) -> Result<usi
             0,
             1,
             1,
-            SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE | SWP_FRAMECHANGED,
         )
         .map_err(|error| format!("Could not initialize Unity avatar host bounds: {error}"))?;
         let _ = ShowWindow(window, SW_HIDE);
@@ -1335,7 +1358,7 @@ fn resize_embedded_avatar_window(
             position.y,
             bounds.width,
             bounds.height,
-            SWP_NOACTIVATE | SWP_NOZORDER,
+            SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE | SWP_NOZORDER,
         )
         .map_err(|error| format!("Could not resize Unity avatar host: {error}"))?;
     }
@@ -1714,4 +1737,25 @@ fn avatar_in_app_visibility_request(runtime: &DesktopRuntime, visible: bool) -> 
     }
 }
 
-// Trigger rebuild
+fn avatar_sleep_request(runtime: &DesktopRuntime, sleep: bool) -> Result<(), String> {
+    let address = runtime.api_base_url.trim_start_matches("http://");
+    let mut stream = TcpStream::connect(address).map_err(|error| error.to_string())?;
+    stream
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .map_err(|error| error.to_string())?;
+    let body = format!(r#"{{"sleep":{sleep}}}"#);
+    let request = format!("POST /avatar/sleep HTTP/1.1\r\nHost: {address}\r\nX-NeuroAsist-Token: {}\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}", runtime.api_token, body.len());
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|error| error.to_string())?;
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .map_err(|error| error.to_string())?;
+    if response.starts_with("HTTP/1.1 2") {
+        Ok(())
+    } else {
+        Err(response.lines().next().unwrap_or("No HTTP response").into())
+    }
+}
+

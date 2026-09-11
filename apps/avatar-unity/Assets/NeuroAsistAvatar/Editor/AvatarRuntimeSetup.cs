@@ -32,6 +32,7 @@ namespace NeuroAsist.AvatarEditor
                 EditorUtility.SetDirty(animator);
             }
             var state = Get<AvatarStateController>(root); var player = Get<AvatarAudioPlayer>(audio); var fallback = Get<VolumeLipSyncFallback>(audio); var emotion = Get<AvatarEmotionController>(root); var speech = Get<AvatarSpeechCoordinator>(root); var router = Get<AvatarCommandRouter>(root); var client = Get<AvatarWebSocketClient>(root); var performance = Get<AvatarPerformanceProfile>(root); var overlay = Get<WindowsDesktopOverlay>(root);
+            var sleep = Get<AvatarSleepController>(root);
             var presentation = Get<AvatarPresentationController>(root);
             var idle = Get<AvatarIdleScheduler>(root); var gesture = Get<AvatarGestureController>(root); var look = Get<AvatarLookController>(root); var motion = Get<AvatarMotionController>(root); var life = Get<AvatarLifeController>(root);
             var target = GameObject.Find("AvatarHeadLookTarget") ?? new GameObject("AvatarHeadLookTarget");
@@ -56,6 +57,8 @@ namespace NeuroAsist.AvatarEditor
             Link(state, "client", client); Link(emotion, "settings", settings); Link(emotion, "vrm", vrm); Link(speech, "client", client); Link(speech, "player", player); Link(speech, "emotion", emotion); Link(speech, "state", state); Link(speech, "fallback", fallback); Link(router, "client", client); Link(router, "speech", speech); Link(router, "emotion", emotion); Link(router, "state", state); Link(client, "settings", settings); Link(client, "router", router); Link(client, "state", state);
             Link(performance, "settings", settings);
             presentation.Configure(Camera.main, vrm);
+            sleep.Configure(Camera.main, speech, client);
+            Link(router, "sleepController", sleep); Link(sleep, "avatarCamera", Camera.main); Link(sleep, "speech", speech); Link(sleep, "client", client);
             Link(speech, "motion", motion); Link(router, "motion", motion); Link(router, "overlay", overlay);
             Link(idle, "settings", motionSettings); Link(gesture, "settings", motionSettings); Link(gesture, "animator", animator); Link(look, "animator", animator); Link(look, "target", target.transform);
             Link(motion, "settings", motionSettings); Link(motion, "animator", animator); Link(motion, "avatarRoot", vrm.transform); Link(motion, "state", state); Link(motion, "client", client); Link(motion, "idleScheduler", idle); Link(motion, "gestureController", gesture); Link(motion, "lookController", look);

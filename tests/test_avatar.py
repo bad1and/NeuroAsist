@@ -402,6 +402,7 @@ def test_avatar_http_status_and_test_commands(monkeypatch) -> None:
             assert status.json()["enabled"] is False
             assert client.post("/avatar/test/emotion", json={"emotion": "happy"}).json()["skipped"] is True
             assert client.post("/avatar/stop", json={}).json()["skipped"] is True
+            assert client.post("/avatar/sleep", json={"sleep": True}).json()["skipped"] is True
             assert client.post("/avatar/test/gesture", json={"gesture": "dance", "intensity": 0.4}).json() == {"gesture": "auto", "sent": 0, "skipped": True}
             assert client.post("/avatar/test/speak", json={"text": "test"}).json()["voice_request_id"] == "test-job"
     finally:
