@@ -183,13 +183,11 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
             <>
               <div className="state-hero-card mood-card">
                 <div className="mood-visual">
-                  <div className="mood-metaball-container">
-                    <IrisMoodOrb
-                      emotion={state.mood.primary_emotion}
-                      strength={state.mood.expression_strength}
-                      size={80}
-                    />
-                  </div>
+                  <IrisMoodOrb
+                    emotion={state.mood.primary_emotion}
+                    strength={state.mood.expression_strength}
+                    size={80}
+                  />
                   <div className="mood-info">
                     <h2>{getMoodVisuals(state.mood.primary_emotion).labelRu}</h2>
                     <span className="mood-strength">{getStrengthLabel(state.mood.expression_strength)}</span>
