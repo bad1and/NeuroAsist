@@ -2,7 +2,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import type { AvatarPlacement, InterfaceLocale } from "./types";
 
-export type CoreStatus = "starting" | "ready" | "failed" | "crashed";
+export type CoreStatus = "starting" | "ready" | "failed" | "crashed" | "closing";
 
 export type DesktopRuntime = {
   apiBaseUrl: string;
@@ -46,6 +46,13 @@ export async function listenForCoreStatus(
   return listen<CoreStatus>("desktop-core-status", ({ payload }) => listener(payload));
 }
 
+export async function listenForAppCloseRequest(
+  listener: () => void,
+): Promise<UnlistenFn> {
+  if (!isDesktopApp()) return () => undefined;
+  return listen("desktop-request-close", () => listener());
+}
+
 export async function listenForAvatarVisibility(
   listener: (visible: boolean) => void,
 ): Promise<UnlistenFn> {
@@ -70,6 +77,11 @@ export async function getDesktopRuntime(): Promise<DesktopRuntime> {
 
 export async function quitDesktopApp(): Promise<void> {
   return invoke<void>("quit_app");
+}
+
+export async function startGracefulShutdown(): Promise<void> {
+  if (!isDesktopApp()) return;
+  return invoke<void>("start_graceful_shutdown");
 }
 
 export async function setDesktopInterfaceLocale(locale: InterfaceLocale): Promise<void> {

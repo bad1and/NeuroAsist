@@ -36,8 +36,10 @@ use windows::Win32::{
     },
 };
 
-const CORE_STARTUP_ATTEMPTS: u8 = 60;
-const CORE_STARTUP_DELAY: Duration = Duration::from_millis(250);
+const CORE_STARTUP_ATTEMPTS: u16 = 120;
+const CORE_FAST_POLL_COUNT: u16 = 40;
+const CORE_STARTUP_FAST_DELAY: Duration = Duration::from_millis(50);
+const CORE_STARTUP_DELAY: Duration = Duration::from_millis(150);
 // A cold Unity start loads Mono, D3D and the VRM scene before it creates the
 // player HWND. On the target machine this takes about fourteen seconds; five
 // seconds caused the desktop shell to kill a healthy player before it could
@@ -256,7 +258,7 @@ impl DesktopState {
             };
         *self.core.lock().map_err(|_| "core mutex poisoned")? = Some(process);
 
-        for _ in 0..CORE_STARTUP_ATTEMPTS {
+        for attempt in 0..CORE_STARTUP_ATTEMPTS {
             if core_health_is_ready(&runtime) {
                 self.set_core_status(app, "ready");
                 self.watch_core(app.clone(), generation);
@@ -266,7 +268,12 @@ impl DesktopState {
                 self.set_core_status(app, "failed");
                 return Err("Neuro Core exited before its health check completed".into());
             }
-            thread::sleep(CORE_STARTUP_DELAY);
+            let delay = if attempt < CORE_FAST_POLL_COUNT {
+                CORE_STARTUP_FAST_DELAY
+            } else {
+                CORE_STARTUP_DELAY
+            };
+            thread::sleep(delay);
         }
         self.stop_core();
         self.set_core_status(app, "failed");
@@ -340,11 +347,11 @@ impl DesktopState {
         if let Some(child) = child {
             match child {
                 CoreProcess::Native(mut child) => {
-                    for _ in 0..12 {
+                    for _ in 0..50 {
                         if child.try_wait().ok().flatten().is_some() {
                             return;
                         }
-                        thread::sleep(Duration::from_millis(250));
+                        thread::sleep(Duration::from_millis(40));
                     }
                     let _ = child.kill();
                     let _ = child.wait();
@@ -848,9 +855,19 @@ fn restart_core(app: AppHandle) -> Result<DesktopRuntime, String> {
 }
 
 #[tauri::command]
+fn start_graceful_shutdown(app: AppHandle) {
+    thread::spawn(move || {
+        app.state::<DesktopState>().shutdown();
+        app.exit(0);
+    });
+}
+
+#[tauri::command]
 fn quit_app(app: AppHandle) {
-    app.state::<DesktopState>().shutdown();
-    app.exit(0);
+    thread::spawn(move || {
+        app.state::<DesktopState>().shutdown();
+        app.exit(0);
+    });
 }
 
 /// The web UI owns the saved preference; the native shell mirrors it so the
@@ -1014,6 +1031,10 @@ fn main() {
                 return;
             }
             match event {
+                WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    let _ = window.emit("desktop-request-close", ());
+                }
                 WindowEvent::Moved(_) => {
                     // Keep the transparent Unity popup in its chat slot while
                     // Iris is being dragged. This uses only a native position
@@ -1084,6 +1105,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             desktop_runtime,
             restart_core,
+            start_graceful_shutdown,
             quit_app,
             set_interface_locale,
             toggle_avatar,
@@ -1137,7 +1159,20 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
                 let _ = app.state::<DesktopState>().toggle_avatar(app);
             }
             "safe-mode" => restart_in_safe_mode(app),
-            "quit" => app.exit(0),
+            "quit" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                    let _ = window.emit("desktop-request-close", ());
+                } else {
+                    let shutdown_handle = app.clone();
+                    thread::spawn(move || {
+                        shutdown_handle.state::<DesktopState>().shutdown();
+                        shutdown_handle.exit(0);
+                    });
+                }
+            }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {

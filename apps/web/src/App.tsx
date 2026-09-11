@@ -132,10 +132,12 @@ import {
   configureAvatarPlacement,
   getDesktopRuntime,
   initialCoreStatus,
+  listenForAppCloseRequest,
   listenForAvatarVisibility,
   listenForCoreStatus,
   restartDesktopCore,
   setDesktopInterfaceLocale,
+  startGracefulShutdown,
   type CoreStatus,
   openQaStudioWindow,
   closeQaStudioWindow,
@@ -188,6 +190,13 @@ const StatePage = lazy(() => import("./state").then(({ StatePage }) => ({ defaul
 const CodingAgentPage = lazy(() => import("./coding").then(({ CodingAgentPage }) => ({ default: CodingAgentPage })));
 const LazyChatPage = lazy(() => Promise.resolve({ default: ChatPage }));
 const LazySettingsPage = lazy(() => Promise.resolve({ default: SettingsPage }));
+
+function preloadAppPages() {
+  void import("./journal");
+  void import("./memory");
+  void import("./state");
+  void import("./coding");
+}
 
 function LazyPageFallback() {
   return <div className="panel page-loading" role="status">Загружаю раздел…</div>;
@@ -447,9 +456,11 @@ function MainApp() {
   const desktopManaged = isDesktopManaged();
   const [coreStatus, setCoreStatus] = useState<CoreStatus>(initialCoreStatus);
   const [showStartup, setShowStartup] = useState(desktopManaged);
+  const [isClosing, setIsClosing] = useState(false);
   const [retryingCore, setRetryingCore] = useState(false);
   const startupStartedAt = useRef(Date.now());
   const [activeView, setActiveView] = useState<AppView>("overview");
+  const [visitedViews, setVisitedViews] = useState<Set<AppView>>(() => new Set<AppView>(["overview", "chat"]));
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSection | undefined>();
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -460,6 +471,35 @@ function MainApp() {
     }
   });
   const menuToggleRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    setVisitedViews((prev) => {
+      if (prev.has(activeView)) return prev;
+      const next = new Set(prev);
+      next.add(activeView);
+      return next;
+    });
+  }, [activeView]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(preloadAppPages, 400);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const handleAppClose = useCallback(() => {
+    setIsClosing(true);
+    void startGracefulShutdown();
+  }, []);
+
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    void listenForAppCloseRequest(() => {
+      handleAppClose();
+    }).then((unlisten) => {
+      stop = unlisten;
+    });
+    return () => stop?.();
+  }, [handleAppClose]);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [readiness, setReadiness] = useState<ReadinessResponse | null>(null);
   const [avatarStatus, setAvatarStatus] = useState<AvatarStatusResponse | null>(null);
@@ -569,7 +609,7 @@ function MainApp() {
   useEffect(() => {
     if (!desktopManaged || coreStatus !== "ready") return;
     const elapsed = Date.now() - startupStartedAt.current;
-    const timer = window.setTimeout(() => setShowStartup(false), Math.max(0, 2000 - elapsed));
+    const timer = window.setTimeout(() => setShowStartup(false), Math.max(0, 200 - elapsed));
     return () => window.clearTimeout(timer);
   }, [coreStatus, desktopManaged]);
 
@@ -778,6 +818,10 @@ function MainApp() {
     };
   }, [refreshEvents, servicesReady]);
 
+  if (isClosing) {
+    return <StartupScreen status="closing" />;
+  }
+
   if (showStartup) {
     return <StartupScreen status={coreStatus} retrying={retryingCore} onRetry={() => void retryCore()} />;
   }
@@ -816,10 +860,11 @@ function MainApp() {
         navigationOpen={navigationOpen}
         navigationButtonRef={menuToggleRef}
         onOpenNavigation={toggleNavigation}
+        onClose={handleAppClose}
       />
       <section className="app-content">
         <main className={`workspace workspace-${activeView}`}>
-          {activeView === "overview" && (
+          <div className="workspace-view-slot" hidden={activeView !== "overview"}>
             <OverviewPage
               status={status}
               avatarStatus={avatarStatus}
@@ -828,7 +873,7 @@ function MainApp() {
               onOpenMemory={() => switchView("memory")}
               onOpenSettings={() => switchView("settings")}
             />
-          )}
+          </div>
           <div className="chat-view" hidden={activeView !== "chat"}>
             <Suspense fallback={<LazyPageFallback />}>
               <LazyChatPage
@@ -847,27 +892,45 @@ function MainApp() {
               />
             </Suspense>
           </div>
-          <Suspense fallback={<LazyPageFallback />}>
-            {activeView === "journal" && <JournalPage onOpenChat={() => switchView("chat")} />}
-            {activeView === "memory" && <MemoryPage />}
-            {activeView === "state" && <StatePage events={events} />}
-          </Suspense>
-          {activeView === "coding" && (
-            <Suspense fallback={<LazyPageFallback />}>
-              <CodingAgentPage
-                settings={settings}
-                events={events}
-                sessionId={sessionId}
-                onOpenApiSettings={() => {
-                  setSettingsInitialSection("api-keys");
-                  switchView("settings");
-                }}
-                onSettingsChanged={(nextSettings) => {
-                  overviewRevision.current += 1;
-                  setSettings(nextSettings);
-                }}
-              />
-            </Suspense>
+          {visitedViews.has("journal") && (
+            <div className="workspace-view-slot" hidden={activeView !== "journal"}>
+              <Suspense fallback={<LazyPageFallback />}>
+                <JournalPage onOpenChat={() => switchView("chat")} />
+              </Suspense>
+            </div>
+          )}
+          {visitedViews.has("memory") && (
+            <div className="workspace-view-slot" hidden={activeView !== "memory"}>
+              <Suspense fallback={<LazyPageFallback />}>
+                <MemoryPage />
+              </Suspense>
+            </div>
+          )}
+          {visitedViews.has("state") && (
+            <div className="workspace-view-slot" hidden={activeView !== "state"}>
+              <Suspense fallback={<LazyPageFallback />}>
+                <StatePage events={events} />
+              </Suspense>
+            </div>
+          )}
+          {visitedViews.has("coding") && (
+            <div className="workspace-view-slot" hidden={activeView !== "coding"}>
+              <Suspense fallback={<LazyPageFallback />}>
+                <CodingAgentPage
+                  settings={settings}
+                  events={events}
+                  sessionId={sessionId}
+                  onOpenApiSettings={() => {
+                    setSettingsInitialSection("api-keys");
+                    switchView("settings");
+                  }}
+                  onSettingsChanged={(nextSettings) => {
+                    overviewRevision.current += 1;
+                    setSettings(nextSettings);
+                  }}
+                />
+              </Suspense>
+            </div>
           )}
           {activeView === "settings" && (
             <Suspense fallback={<LazyPageFallback />}>

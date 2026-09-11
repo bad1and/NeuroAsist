@@ -228,7 +228,7 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
   };
 
   return (
-    <section className="panel history-panel journal-panel" ref={containerRef}>
+    <section className="history-panel journal-panel" ref={containerRef}>
       <div className={`journal-layout ${selectedEpisode ? "has-selected" : ""}`}>
         <aside className="journal-sidebar journal-sidebar-new" aria-label="Список диалогов">
           <div className="journal-sidebar-header">

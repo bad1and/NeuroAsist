@@ -313,7 +313,7 @@ export function MemoryPage() {
   });
 
   return (
-    <section className="panel memory-panel" ref={containerRef}>
+    <section className="memory-panel" ref={containerRef}>
       <nav className="settings-navigation memory-navigation" aria-label="Разделы памяти">
         {MEMORY_SECTIONS.map(({ id, label, icon: Icon }) => (
           <button

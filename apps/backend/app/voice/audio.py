@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import wave
 from dataclasses import dataclass
-from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-import av
+if TYPE_CHECKING:
+    import av
 
 CANONICAL_SAMPLE_RATE = 16_000
 CANONICAL_CHANNELS = 1
@@ -53,11 +54,15 @@ class StreamingPcm16Normalizer:
             raise ValueError("PCM source sample rate must be between 8 and 96 kHz")
         self.source_sample_rate = source_sample_rate
         self._passthrough = source_sample_rate == CANONICAL_SAMPLE_RATE
-        self._resampler = None if self._passthrough else av.AudioResampler(
-            format="s16",
-            layout="mono",
-            rate=CANONICAL_SAMPLE_RATE,
-        )
+        if self._passthrough:
+            self._resampler = None
+        else:
+            import av
+            self._resampler = av.AudioResampler(
+                format="s16",
+                layout="mono",
+                rate=CANONICAL_SAMPLE_RATE,
+            )
         self._closed = False
 
     @property
@@ -73,6 +78,7 @@ class StreamingPcm16Normalizer:
             return b""
         if self._passthrough:
             return pcm16
+        import av
         frame = av.AudioFrame(
             format="s16",
             layout="mono",
@@ -93,6 +99,7 @@ class StreamingPcm16Normalizer:
 
 def decode_audio_file(path: Path) -> Pcm16Audio:
     """Decode an uploaded audio file and resample it exactly once."""
+    import av
     output = bytearray()
     resampler = av.AudioResampler(
         format="s16",
