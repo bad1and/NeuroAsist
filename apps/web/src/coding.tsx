@@ -317,7 +317,7 @@ export function CodingAgentPage({
   const dockerReady = Boolean(status?.docker_daemon_available && status?.docker_image_available);
 
   return (
-    <section className="panel coding-panel" ref={containerRef} aria-labelledby="coding-agent-title">
+    <section className="coding-panel" ref={containerRef} aria-labelledby="coding-agent-title">
       <nav className="settings-navigation coding-navigation" aria-label="Разделы Coding Agent">
         {CODING_SECTIONS.map(({ id, label, icon: Icon }) => (
           <button

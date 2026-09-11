@@ -11,6 +11,7 @@ import sys
 # backend/model code; changing the environment later is too late.
 os.environ.setdefault("PYTHONUTF8", "1")
 os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
 import uvicorn
 from fastapi import FastAPI
@@ -76,7 +77,13 @@ def main() -> None:
     load_runtime_credentials()
     port = int(os.getenv("NEUROASIST_PORT", "8000"))
     app = create_desktop_app()
-    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="info")
+    config = uvicorn.Config(
+        app,
+        host="127.0.0.1",
+        port=port,
+        log_level="info",
+        timeout_graceful_shutdown=1,
+    )
     server = uvicorn.Server(config)
     app.state.desktop_shutdown_callback = lambda: setattr(server, "should_exit", True)
     try:

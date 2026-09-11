@@ -18,16 +18,17 @@ const STATUS_COPY: Record<CoreStatus, { title: string; detail: string }> = {
   ready: { title: "Рада тебя видеть", detail: "Всё готово к разговору" },
   failed: { title: "Не удалось запустить ядро", detail: "Проверь журнал диагностики или попробуй ещё раз" },
   crashed: { title: "Ядро завершило работу", detail: "Iris сохранила данные и готова к повторному запуску" },
+  closing: { title: "Завершаю работу", detail: "Сохраняю состояние и закрываю сервисы. Пожалуйста, подождите…" },
 };
 
 export function StartupScreen({
   status,
-  retrying,
+  retrying = false,
   onRetry,
 }: {
   status: CoreStatus;
-  retrying: boolean;
-  onRetry: () => void;
+  retrying?: boolean;
+  onRetry?: () => void;
 }) {
   const [flora, setFlora] = useState<{ left: string; right: string; leftCompact: string; rightCompact: string } | null>(null);
   
@@ -103,7 +104,7 @@ export function StartupScreen({
       <WindowChrome title="" compact />
       <main className={`startup-content is-${status}`} aria-live="polite">
         <div className="startup-mark" aria-hidden="true">
-          <IrisLoader size="hero" active={status === "starting" || retrying} />
+          <IrisLoader size="hero" active={status === "starting" || status === "closing" || retrying} />
         </div>
         <div className="startup-copy" ref={copyRef}>
           <h1>{copy.title}</h1>

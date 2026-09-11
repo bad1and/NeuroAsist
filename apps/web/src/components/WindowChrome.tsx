@@ -11,12 +11,14 @@ export function WindowChrome({
   navigationOpen = false,
   navigationButtonRef,
   compact = false,
+  onClose,
 }: {
   title: string;
   onOpenNavigation?: () => void;
   navigationOpen?: boolean;
   navigationButtonRef?: RefObject<HTMLButtonElement | null>;
   compact?: boolean;
+  onClose?: () => void;
 }) {
   const desktop = isDesktopApp();
   const [maximized, setMaximized] = useState(false);
@@ -76,7 +78,20 @@ export function WindowChrome({
             <button onClick={(e) => { animateButtonPress(e.currentTarget); void toggleMaximize(); }} aria-label={maximized ? "Восстановить окно" : "Развернуть окно"}>
               {maximized ? <Copy size={12} /> : <Square size={12} />}
             </button>
-            <button className="window-close" onClick={(e) => { animateButtonPress(e.currentTarget); void quitDesktopApp(); }} aria-label="Закрыть Iris"><X size={15} /></button>
+            <button
+              className="window-close"
+              onClick={(e) => {
+                animateButtonPress(e.currentTarget);
+                if (onClose) {
+                  onClose();
+                } else {
+                  void quitDesktopApp();
+                }
+              }}
+              aria-label="Закрыть Iris"
+            >
+              <X size={15} />
+            </button>
           </div>
         )}
       </div>

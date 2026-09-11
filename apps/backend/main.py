@@ -1210,14 +1210,14 @@ def create_app() -> FastAPI:
     async def shutdown() -> None:
         for task in (storage_maintenance_task, voice_preload_task, avatar_start_task):
             if task is not None and not task.done():
-                try:
-                    await asyncio.wait_for(asyncio.shield(task), timeout=5)
-                except asyncio.TimeoutError:
-                    task.cancel()
-                    with contextlib.suppress(BaseException):
-                        await task
-                except Exception:
-                    logger.warning("Deferred startup task ended with an error", exc_info=True)
+                task.cancel()
+                with contextlib.suppress(BaseException):
+                    try:
+                        await asyncio.wait_for(task, timeout=0.25)
+                    except (asyncio.TimeoutError, asyncio.CancelledError):
+                        pass
+                    except Exception:
+                        logger.warning("Deferred startup task ended with an error", exc_info=True)
         worker_tasks = tuple(
             task for task in (
                 reflection_worker_task,
@@ -1252,7 +1252,7 @@ def create_app() -> FastAPI:
             await asyncio.to_thread(timeline_store.close_current_episode, "application_shutdown")
         if summary_worker is not None:
             try:
-                await asyncio.wait_for(summary_worker.run_once(), timeout=1)
+                await asyncio.wait_for(summary_worker.run_once(), timeout=0.3)
             except Exception:
                 logger.warning("Bounded shutdown summary pass did not complete", exc_info=True)
         if tts_audio_cleanup_task is not None:
