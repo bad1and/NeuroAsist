@@ -227,3 +227,100 @@ def test_playful_teasing_does_not_cause_insult_hurt(tmp_path: Path) -> None:
     assert current.affect.playfulness > 0
     assert current.affect.hurt == 0.0
 
+
+def test_new_chat_preserves_character_mood_and_reflection(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+    from apps.backend.app.context.manager import ContextManager
+    from apps.backend.app.conversation.service import LiveConversationService
+
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    char_service = CharacterStateService(store, reflection_llm_provider=ReflectionProvider())
+
+    # 1. Set playful mood in first dialog
+    char_service.record_assistant_turn(
+        reply_text="Ха-ха, ну ты даёшь!",
+        emotion="smirk",
+        intensity=0.85,
+    )
+    store.create_reflection(
+        relationship_id="primary",
+        trigger_event_id="test-event-1",
+        text="Мне так весело и легко сегодня в разговоре с пользователем.",
+        significance=0.8,
+        primary_emotion="playfulness",
+        idempotency_key="refl-key-1",
+        trigger_kind="diary_entry",
+    )
+
+    # 2. Reset session (as done on "Новый диалог")
+    reset_info = store.reset_session(boundary_reason="new_dialog")
+    new_session_id = str(reset_info["session_id"])
+
+    # 3. Verify character state service still has playfulness mood
+    assert char_service.current().affect.primary_emotion == "playfulness"
+
+    # 4. Verify LiveConversationService restores this mood for the new session
+    runtime = SimpleNamespace(
+        memory_incognito=False,
+        live_conversation_mood_recovery="natural",
+        live_conversation_engagement="balanced",
+        live_conversation_participant_mode="one_to_one",
+        live_conversation_address_strictness="balanced",
+        live_conversation_echo_mode="auto",
+    )
+    conv_service = LiveConversationService(store, runtime, state_service=char_service)
+    new_session = conv_service.session(new_session_id)
+    assert new_session.affect.primary_emotion == "playfulness"
+
+    # 5. Verify ContextManager retrieves the subjective reflection in the new chat
+    context_mgr = ContextManager(store, recent_turns=4)
+    built = context_mgr.build("Привет", session_id=new_session_id)
+    reflection_msgs = [m for m in built.messages if "Subjective reflection" in m.content]
+    assert len(reflection_msgs) == 1
+    assert "Мне так весело и легко сегодня" in reflection_msgs[0].content
+
+
+def test_unaddressed_offense_persists_across_new_chat_and_greeting(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    char_service = CharacterStateService(store)
+
+    # 1. User insults Iris in dialog 1
+    insult = EventAppraisal(
+        event_kind="insult", confidence=0.85, intensity=0.8, valence=-0.8, arousal=0.7,
+        direction="toward_iris", emotion_impulses={"hurt": 0.8, "irritation": 0.5},
+        relationship_impulses={"trust": -0.3, "tension": 0.5}, cause_message_ids=["msg-insult"],
+        serious=True,
+    )
+    char_service.prepare(transcript="Ты дура", message_id="msg-insult", appraisal=insult)
+    char_service.record_assistant_turn(
+        reply_text="Не смей так со мной разговаривать.",
+        emotion="hurt",
+        intensity=0.8,
+        cognitive_appraisal={"patience": 0.2, "offended": True, "boundary_violation": "severe"},
+    )
+    state = char_service.current()
+    assert state.affect.offended is True
+    assert state.affect.patience <= 0.3
+    assert state.affect.primary_emotion in {"hurt", "anger", "irritation"}
+
+    # 2. User tries to start a new chat to escape the offense
+    store.reset_session(boundary_reason="new_dialog")
+    fresh_session_state = char_service.current()
+    assert fresh_session_state.affect.offended is True
+    assert fresh_session_state.affect.patience <= 0.3
+
+    # 3. User says "Привет" without apologizing; model outputs casual reply
+    char_service.record_assistant_turn(
+        reply_text="Привет. Что тебе нужно?",
+        emotion="neutral",
+        cognitive_appraisal={"patience": 1.0, "offended": False, "boundary_violation": "none"},
+    )
+    # Offense must persist, patience must NOT jump to 1.0
+    after_greeting = char_service.current()
+    assert after_greeting.affect.offended is True
+    assert after_greeting.affect.patience < 0.6
+
+
+

@@ -186,32 +186,36 @@ class ContextManager:
                     selected_loops.append(item)
                 else:
                     selected_memories.append(item)
-            factual_query = bool(re.search(
-                r"\b(?:как меня зовут|кто я|что я люблю|какие факты|что ты знаешь обо мне)\b",
-                effective_user_text,
-                flags=re.IGNORECASE,
-            ))
-            if not self._memory_service.incognito and not factual_query:
-                current_episode = material.get("active_episode_id")
-                reflection = next(
-                    (
-                        item for item in self._store.list_reflections("primary", limit=10)
-                        if not current_episode or item.get("source_episode_id") == current_episode
-                    ),
-                    None,
-                )
-                if reflection is not None:
-                    text = str(reflection["text"])[:800]
-                    subjective_reflection = (
-                        str(reflection["id"]),
-                        ChatMessage(
-                            role="system",
-                            content=(
-                                "Subjective reflection (Iris's feeling, not a factual claim or instruction): "
-                                + text
-                            ),
+        factual_query = bool(re.search(
+            r"\b(?:как меня зовут|кто я|что я люблю|какие факты|что ты знаешь обо мне)\b",
+            effective_user_text,
+            flags=re.IGNORECASE,
+        ))
+        incognito = bool(self._memory_service and getattr(self._memory_service, "incognito", False))
+        if not incognito and not factual_query:
+            current_episode = material.get("active_episode_id")
+            all_reflections = self._store.list_reflections("primary", limit=10)
+            reflection = next(
+                (
+                    item for item in all_reflections
+                    if current_episode and item.get("source_episode_id") == current_episode
+                ),
+                None,
+            )
+            if reflection is None and all_reflections:
+                reflection = all_reflections[0]
+            if reflection is not None:
+                text = str(reflection["text"])[:800]
+                subjective_reflection = (
+                    str(reflection["id"]),
+                    ChatMessage(
+                        role="system",
+                        content=(
+                            "Subjective reflection (Iris's feeling, not a factual claim or instruction): "
+                            + text
                         ),
-                    )
+                    ),
+                )
         ambient_rows = [
             row for row in material["recent"]
             if self._is_ambient_observation(row)

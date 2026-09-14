@@ -5,6 +5,7 @@ import contextlib
 import re
 import time
 from collections import deque
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
@@ -1314,8 +1315,13 @@ class LiveConversationService:
     def _restore_state(self, session: ConversationSession) -> None:
         if self._runtime.memory_incognito:
             return
+        if self._state_service is not None:
+            context = self._state_service.current()
+            session.affect = deepcopy(context.affect)
+            session.participants = {"primary": deepcopy(context.relationship)}
+            return
         snapshot = self._store.load_character_state_snapshot(PRIMARY_RELATIONSHIP_ID)
-        if snapshot and snapshot.get("schema_version") == 1:
+        if snapshot and snapshot.get("schema_version") in (1, 2):
             values = dict(snapshot["state"])
             allowed = AffectState.__dataclass_fields__
             session.affect = AffectState(**{key: value for key, value in values.items() if key in allowed})

@@ -483,7 +483,7 @@ export function IrisPortalBackground({
   }, []);
 
   return (
-    <div className={`iris-portal-backdrop ${className}`} aria-hidden="true">
+    <div className={`iris-portal-backdrop ${className}`.trim()} data-emotion={emotion} aria-hidden="true">
       <canvas ref={canvasRef} className="iris-portal-canvas" />
     </div>
   );
