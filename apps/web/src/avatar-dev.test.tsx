@@ -27,6 +27,7 @@ vi.mock("./api", () => ({
   getPronunciations: vi.fn().mockResolvedValue({ pronunciations: {} }),
   getSttTerms: vi.fn().mockResolvedValue({ terms: {} }),
   getAvatarOverlay: vi.fn().mockResolvedValue(null),
+  getCharacterState: vi.fn().mockResolvedValue({ mood: { primary_emotion: "neutral" }, relationship: {}, causes: [] }),
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({

@@ -145,7 +145,13 @@ class CharacterStateService:
         with self._lock:
             self._ensure_loaded()
             has_repair_cause = any(
-                c.get("resolution_kind") == "apology_repair" or c.get("event_kind") in {"insult", "broken_promise", "important_negative_event"}
+                c.get("resolution_kind") == "apology_repair"
+                for c in self._affect.causes
+            )
+            has_active_conflict = any(
+                c.get("event_kind") in {"insult", "broken_promise", "important_negative_event"}
+                and c.get("status", "active") == "active"
+                and c.get("resolution_kind") != "apology_repair"
                 for c in self._affect.causes
             )
             now_iso = datetime.now(UTC).isoformat(timespec="milliseconds")
@@ -154,9 +160,24 @@ class CharacterStateService:
             is_boundary_violation = False
             if cognitive_appraisal:
                 if "patience" in cognitive_appraisal:
-                    self._affect.patience = max(0.0, min(1.0, float(cognitive_appraisal["patience"])))
+                    appraisal_patience = max(0.0, min(1.0, float(cognitive_appraisal["patience"])))
+                    if appraisal_patience < self._affect.patience:
+                        # Escalation or drop in patience is always respected
+                        self._affect.patience = appraisal_patience
+                    elif (self._affect.offended or has_active_conflict) and not has_repair_cause:
+                        # Without apology or repair, patience cannot instantly jump back up
+                        self._affect.patience = min(self._affect.patience + 0.05, 0.55)
+                    else:
+                        self._affect.patience = appraisal_patience
                 if "offended" in cognitive_appraisal:
-                    self._affect.offended = bool(cognitive_appraisal["offended"])
+                    appraisal_offended = bool(cognitive_appraisal["offended"])
+                    if appraisal_offended:
+                        self._affect.offended = True
+                    elif (self._affect.offended or has_active_conflict) and not has_repair_cause:
+                        # Keep offense until an apology or mutual repair
+                        pass
+                    else:
+                        self._affect.offended = False
                 if cognitive_appraisal.get("grievance_cause"):
                     self._affect.grievance_cause = str(cognitive_appraisal["grievance_cause"])[:200]
                 bv = str(cognitive_appraisal.get("boundary_violation", "")).lower()
@@ -265,7 +286,7 @@ class CharacterStateService:
                     logger.warning("Failed to save auto grievance reflection: %s", exc)
 
             # 3. Handle emotional transition and forgiveness
-            if is_positive and (has_repair_cause or self._affect.primary_emotion in {"irritation", "anger", "hurt"} or self._affect.offended):
+            if is_positive and has_repair_cause:
                 self._reducer.resolve_forgiveness(self._affect)
                 self._affect.offended = False
                 self._affect.patience = min(1.0, self._affect.patience + 0.35)
@@ -299,12 +320,13 @@ class CharacterStateService:
                     self._affect.valence = max(-1.0, min(-0.35, self._affect.valence - 0.40))
                     self._affect.offended = True
                 elif canonical in {"joy", "playfulness", "affection", "grateful"}:
-                    self._affect.cooling_down_turns = 0
-                    self._affect.irritation = 0.0
-                    self._affect.anger = 0.0
-                    self._affect.hurt = 0.0
-                    self._affect.offended = False
-                    self._affect.valence = min(1.0, max(0.2, self._affect.valence + 0.25))
+                    if not self._affect.offended and not has_active_conflict:
+                        self._affect.cooling_down_turns = 0
+                        self._affect.irritation = 0.0
+                        self._affect.anger = 0.0
+                        self._affect.hurt = 0.0
+                        self._affect.offended = False
+                        self._affect.valence = min(1.0, max(0.2, self._affect.valence + 0.25))
                 elif canonical in {"sadness", "sad"}:
                     self._affect.joy = 0.0
                     self._affect.cooling_down_turns = max(0, self._affect.cooling_down_turns - 1)
@@ -329,7 +351,7 @@ class CharacterStateService:
             self._emit("character.state.assistant_turn_recorded", "info", {
                 "emotion": emotion,
                 "primary_emotion": self._affect.primary_emotion,
-                "forgiven": is_positive and (has_repair_cause or self._affect.primary_emotion == "joy"),
+                "forgiven": is_positive and has_repair_cause,
                 "intensity": intensity,
                 "patience": self._affect.patience,
                 "offended": self._affect.offended,

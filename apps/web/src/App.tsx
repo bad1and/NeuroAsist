@@ -54,6 +54,7 @@ import {
   getTimelineJournal,
   getTimelineMessages,
   getConversationSession,
+  getCharacterState,
   getSettings,
   getConversationDebug,
   getStatus,
@@ -1143,6 +1144,29 @@ export function ChatPage({
   const liveAudioStartedRef = useRef(false);
   const liveMetadataRef = useRef({ emotion: "neutral", intent: "unknown" });
   const [liveVoiceEmotion, setLiveVoiceEmotion] = useState<string | null>(null);
+  const [persistentEmotion, setPersistentEmotion] = useState<string>("neutral");
+
+  const refreshCharacterState = useCallback(async () => {
+    try {
+      const state = await getCharacterState();
+      if (state?.mood?.primary_emotion) {
+        setPersistentEmotion(state.mood.primary_emotion);
+      }
+    } catch {
+      // The state service may be unavailable during startup
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshCharacterState();
+  }, [refreshCharacterState, sessionId]);
+
+  useEffect(() => {
+    const latest = events[events.length - 1]?.type ?? "";
+    if (latest.startsWith("character.state.") || latest.startsWith("character.state_reset") || latest.startsWith("character.reflection.")) {
+      void refreshCharacterState();
+    }
+  }, [events, refreshCharacterState]);
   const pendingSpeakerLabelRef = useRef("Вы");
   const latestPlaybackSegmentRef = useRef("");
   const playbackSegmentTextsRef = useRef<string[]>([]);
@@ -1700,6 +1724,9 @@ export function ChatPage({
             intent: event.intent ?? "unknown",
           };
           setLiveVoiceEmotion(nextEmotion);
+          if (nextEmotion && nextEmotion !== "neutral") {
+            setPersistentEmotion(nextEmotion);
+          }
           setMessages((current) => current.map((message) =>
             message.utteranceId === event.utterance_id
               ? { ...message, emotion: event.emotion, intent: event.intent }
@@ -2059,6 +2086,9 @@ export function ChatPage({
       }
       const response = await sendChatMessage(sessionId, text, userMessage.id);
       showMemoryUpdates(response.memory_updates);
+      if (response.emotion && response.emotion !== "neutral") {
+        setPersistentEmotion(response.emotion);
+      }
       setMessages((current) => [
         ...current.map((message) => message.id === userMessage.id && response.message_id
           ? { ...message, id: response.message_id }
@@ -2294,10 +2324,14 @@ export function ChatPage({
     interruptAssistantSpeech();
     stopVoicePlayback();
     setVoiceState("idle");
+    if (currentEmotion && currentEmotion !== "neutral") {
+      setPersistentEmotion(currentEmotion);
+    }
     try {
       await onStartNewDialog("manual_reset");
       setMessages([]);
       setIsStarted(false);
+      void refreshCharacterState();
     } catch (finishError) {
       setError(finishError instanceof Error ? finishError.message : "Не удалось завершить диалог.");
     }
@@ -2319,10 +2353,14 @@ export function ChatPage({
       setLiveConversation(false);
       setMicrophoneMuted(false);
       interruptAssistantSpeech();
+      if (currentEmotion && currentEmotion !== "neutral") {
+        setPersistentEmotion(currentEmotion);
+      }
       await onStartNewDialog("new_dialog");
       setMessages([]);
       setIsStarted(false);
       setNewDialogConfirmationOpen(false);
+      void refreshCharacterState();
     } catch (newDialogError) {
       setError(newDialogError instanceof Error ? newDialogError.message : "Не удалось начать новый диалог.");
     } finally {
@@ -2338,14 +2376,23 @@ export function ChatPage({
       return liveMetadataRef.current.emotion;
     }
     const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+    if (lastAssistant?.emotion && lastAssistant.emotion !== "neutral") {
+      return lastAssistant.emotion;
+    }
+    if (avatarStatus?.emotion_engine?.current_emotion && avatarStatus.emotion_engine.current_emotion !== "neutral") {
+      return avatarStatus.emotion_engine.current_emotion;
+    }
+    if (persistentEmotion && persistentEmotion !== "neutral") {
+      return persistentEmotion;
+    }
     if (lastAssistant?.emotion) {
       return lastAssistant.emotion;
     }
     if (avatarStatus?.emotion_engine?.current_emotion) {
       return avatarStatus.emotion_engine.current_emotion;
     }
-    return "neutral";
-  }, [avatarStatus?.emotion_engine?.current_emotion, liveVoiceEmotion, messages]);
+    return persistentEmotion || "neutral";
+  }, [avatarStatus?.emotion_engine?.current_emotion, liveVoiceEmotion, messages, persistentEmotion]);
 
   let lastAssistantIndex = -1;
   for (let i = messages.length - 1; i >= 0; i--) {

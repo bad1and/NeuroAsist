@@ -14,7 +14,7 @@ const api = vi.hoisted(() => ({
   getVoiceTtsStatus: vi.fn(), sendChatMessage: vi.fn(), interruptVoiceSession: vi.fn(),
   installModel: vi.fn(), removeModel: vi.fn(), createBackup: vi.fn(),
   clearMemories: vi.fn(), reindexMemories: vi.fn(), resetAllCompanionData: vi.fn(),
-  resetConversationSession: vi.fn(), getConversationSession: vi.fn(),
+  resetConversationSession: vi.fn(), getConversationSession: vi.fn(), getCharacterState: vi.fn(),
   confirmMemory: vi.fn(), rejectMemory: vi.fn(), deleteMemory: vi.fn(), purgeMemory: vi.fn(), restoreMemory: vi.fn(), updateMemory: vi.fn(),
   deleteTimelineRange: vi.fn(), saveDesktopApiKey: vi.fn(), sendAvatarTestEmotion: vi.fn(),
   sendAvatarTestGesture: vi.fn(), sendAvatarTestPhrase: vi.fn(), stopAvatar: vi.fn(), updateAvatarOverlay: vi.fn(),
@@ -90,6 +90,13 @@ beforeEach(() => {
   api.restoreMemory.mockResolvedValue({ memory: {} });
   api.updateMemory.mockResolvedValue({ memory: {} });
   api.updateRuntimeSettings.mockResolvedValue(settings);
+  api.getCharacterState.mockResolvedValue({
+    mood: { primary_emotion: "neutral", expression_strength: "subtle", secondary_emotions: [] },
+    relationship: {},
+    causes: [],
+    incognito: false,
+    updated_at: "2026-01-01T00:00:00Z",
+  });
 });
 
 afterEach(() => {
@@ -754,6 +761,34 @@ describe("русский интерфейс", () => {
     fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
     fireEvent.click(screen.getByRole("button", { name: "Живой разговор" }));
     expect(screen.queryByRole("button", { name: "Сбросить сессию" })).not.toBeInTheDocument();
+  });
+
+  it("сохраняет настроение персонажа в фоне при начале нового диалога", async () => {
+    api.getCharacterState.mockResolvedValue({
+      mood: { primary_emotion: "hurt", expression_strength: "noticeable", secondary_emotions: [] },
+      relationship: {},
+      causes: [{ label: "insult", status: "active" }],
+      incognito: false,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+
+    const { container } = render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
+    await waitFor(() => {
+      const backdrop = container.querySelector(".iris-portal-backdrop");
+      expect(backdrop).toHaveAttribute("data-emotion", "hurt");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Начать" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Новый диалог" })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "Новый диалог" }));
+    expect(await screen.findByRole("heading", { name: "Начать новый диалог?" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Начать новый диалог" }));
+
+    await waitFor(() => expect(api.resetConversationSession).toHaveBeenCalledWith("new_dialog"));
+    const backdrop = container.querySelector(".iris-portal-backdrop");
+    expect(backdrop).toHaveAttribute("data-emotion", "hurt");
   });
 
   it("завершает даже пустой диалог одним атомарным сбросом с правильной причиной", async () => {
