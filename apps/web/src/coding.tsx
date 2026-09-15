@@ -1,5 +1,6 @@
 import { CustomSelect } from "./components/CustomSelect";
 import { AppSwitch } from "./components/AppSwitch";
+import { AppDialog } from "./components/AppDialog";
 import { InfoRow } from "./components/InfoRow";
 import { ChevronLeft, X } from "lucide-react";
 import { notify } from "./notifications";
@@ -124,6 +125,7 @@ export function CodingAgentPage({
   const [workspaceName, setWorkspaceName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingClearTasks, setPendingClearTasks] = useState(false);
 
   const containerRef = useAnimeScope<HTMLElement>((scope, root) => {
     animatePageEnter(root);
@@ -287,17 +289,13 @@ export function CodingAgentPage({
     setInstruction("");
   };
 
-  const clearTaskList = async () => {
+  const requestClearTaskList = () => {
     if (active || tasks.length === 0) return;
-    if (
-      !window.confirm(
-        translateInterfaceText(
-          "Очистить список завершённых задач? Рабочие папки и созданные файлы сохранятся.",
-          currentInterfaceLocale(),
-        ),
-      )
-    )
-      return;
+    setPendingClearTasks(true);
+  };
+
+  const executeClearTaskList = async () => {
+    setPendingClearTasks(false);
     setBusy(true);
     try {
       await clearCodingTasks();
@@ -567,7 +565,7 @@ export function CodingAgentPage({
                       disabled={busy || tasks.length === 0 || Boolean(active)}
                       onClick={(e) => {
                         animateButtonPress(e.currentTarget);
-                        void clearTaskList();
+                        requestClearTaskList();
                       }}
                       title="Очистить завершённые задачи"
                     >
@@ -1082,6 +1080,37 @@ export function CodingAgentPage({
           </>
         )}
       </div>
+      <AppDialog
+        open={pendingClearTasks}
+        title={translateInterfaceText("Очистить список задач?", currentInterfaceLocale())}
+        description={translateInterfaceText(
+          "Очистить список завершённых задач? Рабочие папки и созданные файлы сохранятся.",
+          currentInterfaceLocale(),
+        )}
+        onClose={() => !busy && setPendingClearTasks(false)}
+        variant="danger"
+      >
+        <div className="dialog-actions">
+          <button
+            className="secondary"
+            type="button"
+            disabled={busy}
+            onClick={() => setPendingClearTasks(false)}
+          >
+            {translateInterfaceText("Отмена", currentInterfaceLocale())}
+          </button>
+          <button
+            className="danger-button"
+            type="button"
+            disabled={busy}
+            onClick={() => void executeClearTaskList()}
+          >
+            {busy
+              ? translateInterfaceText("Очищаю…", currentInterfaceLocale())
+              : translateInterfaceText("Очистить", currentInterfaceLocale())}
+          </button>
+        </div>
+      </AppDialog>
     </section>
   );
 }

@@ -3419,69 +3419,219 @@ textarea::placeholder {
   margin-block-start: 28px;
 }
 
-.app-dialog {
+/* ==========================================================================
+   App Dialog (Unified Top Notification Style)
+   ========================================================================== */
+
+.app-dialog-host {
   position: fixed;
-  inset: 0;
-  width: min(calc(100% - 32px), 480px);
-  height: fit-content;
-  max-height: min(80dvh, 40rem);
-  margin: auto;
-  padding: 20px;
-  overflow: auto;
-  border: 1px solid var(--color-rule-strong);
-  border-radius: var(--radius-dialog, 24px);
+  top: calc(var(--titlebar-height, 44px) + 16px);
+  right: 20px;
+  z-index: 100005;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  pointer-events: none;
+  max-width: min(440px, calc(100vw - 32px));
+}
+
+.app-dialog-card {
+  position: relative;
+  width: 420px;
+  max-width: 100%;
+  padding: 16px 18px 16px 18px;
+  border-radius: 28px !important;
   corner-shape: squircle;
-  color: var(--color-text);
-  background: var(--color-surface-raised);
-  box-shadow: var(--shadow-dialog);
+  background: var(--color-surface-raised, #13151D);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 18px 40px -4px rgba(0, 0, 0, 0.56), 0 6px 16px -2px rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: notificationSlideIn 220ms var(--ease-out, cubic-bezier(0.2, 0.8, 0.2, 1)) both;
+  transition: box-shadow var(--motion-fast) var(--ease-out), transform var(--motion-fast) var(--ease-out);
 }
 
-.app-dialog::backdrop {
-  background: var(--color-backdrop);
+.app-dialog-card.is-exiting {
+  animation: notificationSlideOut 190ms ease-in forwards;
 }
 
-.dialog-heading {
+.app-dialog-card .notification-card-header {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
+  gap: 12px;
 }
 
-.dialog-heading h2 {
-  margin: 3px 0 0;
-  font-size: 20px;
-  letter-spacing: -0.025em;
-}
-
-.dialog-heading p {
-  margin: 8px 0 0;
-  color: var(--color-text-soft);
-  font-size: 13px;
-  line-height: 1.55;
-}
-
-.dialog-form {
-  display: grid;
-  gap: 18px;
-  margin-block-start: 20px;
-}
-
-.dialog-form label {
-  display: grid;
-  gap: 7px;
-  color: var(--color-text-soft);
-  font-size: 13px;
-}
-
-.dialog-actions {
+.app-dialog-card .notification-icon-box {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
   display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-block-start: 24px;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
 }
 
-.dialog-form .dialog-actions {
-  margin-block-start: 0;
+.app-dialog-card.is-danger .notification-icon-box {
+  color: #D98A8C;
+}
+
+.app-dialog-card.is-warning .notification-icon-box {
+  color: #FFAE33;
+}
+
+.app-dialog-card.is-info .notification-icon-box {
+  color: #B9A7DC;
+}
+
+.app-dialog-card .notification-header-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.app-dialog-card .notification-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text, #ECEEF3);
+  letter-spacing: -0.015em;
+  line-height: 1.35;
+}
+
+.app-dialog-card .notification-message.is-dialog-message {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-soft, rgba(255, 255, 255, 0.75));
+  word-break: break-word;
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+
+.app-dialog-card .notification-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.app-dialog-card .notification-dialog-body .form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.app-dialog-card .notification-dialog-body .form-field span {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted, rgba(255, 255, 255, 0.45));
+}
+
+.app-dialog-card .notification-dialog-body textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  corner-shape: squircle;
+  color: var(--color-text, #ECEEF3);
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  resize: vertical;
+  min-height: 72px;
+  max-height: 180px;
+  font-family: inherit;
+  transition: border-color var(--motion-fast) var(--ease-out), background-color var(--motion-fast) var(--ease-out);
+}
+
+.app-dialog-card .notification-dialog-body textarea:focus {
+  outline: none;
+  border-color: rgba(185, 167, 220, 0.5);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 0 3px rgba(185, 167, 220, 0.12);
+}
+
+.app-dialog-card .dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.app-dialog-card .dialog-actions button {
+  height: 36px;
+  min-width: 90px;
+  padding: 0 18px;
+  border-radius: 14px;
+  corner-shape: squircle;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: none;
+  box-shadow: none;
+  transition: background-color 140ms ease, transform 100ms ease, color 140ms ease, opacity 140ms ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.app-dialog-card .dialog-actions button:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.app-dialog-card .dialog-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.app-dialog-card .dialog-actions button.secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text, #ECEEF3);
+}
+
+.app-dialog-card .dialog-actions button.secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+  color: #FFFFFF;
+}
+
+.app-dialog-card .dialog-actions button.danger-button {
+  background: #865B5C;
+  color: #FFFFFF;
+}
+
+.app-dialog-card .dialog-actions button.danger-button:hover:not(:disabled) {
+  background: #986768;
+  color: #FFFFFF;
+}
+
+.app-dialog-card .dialog-actions button:not(.secondary):not(.danger-button) {
+  background: #695B86;
+  color: #FFFFFF;
+}
+
+.app-dialog-card .dialog-actions button:not(.secondary):not(.danger-button):hover:not(:disabled) {
+  background: var(--color-accent-hover, #796b99);
+  color: #FFFFFF;
+}
+
+/* Offset regular notifications downward when an app dialog is active */
+body:has(.app-dialog-card) .notification-host {
+  top: calc(var(--titlebar-height, 44px) + 16px + 140px);
+  transition: top 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .is-spinning {
@@ -7243,11 +7393,6 @@ body {
 .coding-panel > .coding-content {
   corner-shape: squircle;
   border-radius: var(--radius-lg, 48px) !important;
-}
-
-.app-dialog {
-  corner-shape: squircle;
-  border-radius: var(--radius-dialog, 52px) !important;
 }
 
 /* Navigation Panels & Medium Plates */

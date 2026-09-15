@@ -2451,13 +2451,21 @@ export function ChatPage({
           title="Начать новый диалог?"
           description="Текущий диалог будет завершён и сохранён в истории. Начнётся новый разговор с Iris."
           onClose={() => !newDialogPending && setNewDialogConfirmationOpen(false)}
+          variant="danger"
         >
           <div className="dialog-actions">
             <button className="secondary" type="button" disabled={newDialogPending} onClick={() => setNewDialogConfirmationOpen(false)}>
               Отмена
             </button>
-            <button className="danger-button" type="button" disabled={newDialogPending} onClick={() => void startNewDialog()}>
-              {newDialogPending ? "Создаю…" : "Начать новый диалог"}
+            <button
+              className="danger-button"
+              type="button"
+              disabled={newDialogPending}
+              onClick={() => void startNewDialog()}
+              aria-label="Начать новый диалог"
+              title="Начать новый диалог"
+            >
+              {newDialogPending ? "Создаю…" : "Новый"}
             </button>
           </div>
         </AppDialog>
@@ -2675,13 +2683,21 @@ export function ChatPage({
         title="Начать новый диалог?"
         description="Текущий диалог будет завершён и сохранён в истории. Начнётся новый разговор с Iris."
         onClose={() => !newDialogPending && setNewDialogConfirmationOpen(false)}
+        variant="danger"
       >
         <div className="dialog-actions">
           <button className="secondary" type="button" disabled={newDialogPending} onClick={() => setNewDialogConfirmationOpen(false)}>
             Отмена
           </button>
-          <button className="danger-button" type="button" disabled={newDialogPending} onClick={() => void startNewDialog()}>
-            {newDialogPending ? "Создаю…" : "Начать новый диалог"}
+          <button
+            className="danger-button"
+            type="button"
+            disabled={newDialogPending}
+            onClick={() => void startNewDialog()}
+            aria-label="Начать новый диалог"
+            title="Начать новый диалог"
+          >
+            {newDialogPending ? "Создаю…" : "Новый"}
           </button>
         </div>
       </AppDialog>
@@ -4290,7 +4306,7 @@ function SystemMaintenance({
         <button className="danger-button" disabled={busy || !developerMode} onClick={(e) => { animateButtonPress(e.currentTarget); setPendingAction({ title: "Сбросить все данные Iris?", description: "История, сводки и долгосрочная память будут удалены без возможности восстановления.", action: resetAllCompanionData, success: "Все данные помощника удалены." }); }}>Сбросить все данные</button>
       </div>
       {message && <div className="notice" role="status">{message}</div>}
-      <AppDialog open={Boolean(pendingAction)} title={pendingAction?.title ?? ""} description={pendingAction?.description} onClose={() => !busy && setPendingAction(null)}>
+      <AppDialog open={Boolean(pendingAction)} title={pendingAction?.title ?? ""} description={pendingAction?.description} onClose={() => !busy && setPendingAction(null)} variant="danger">
         <div className="dialog-actions">
           <button className="secondary" type="button" disabled={busy} onClick={() => setPendingAction(null)}>Отмена</button>
           <button className="danger-button" type="button" disabled={busy || !developerMode} onClick={() => pendingAction && void run(pendingAction.action, pendingAction.success)}>{busy ? "Выполняю…" : "Подтвердить"}</button>

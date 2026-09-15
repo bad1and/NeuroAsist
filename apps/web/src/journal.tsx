@@ -514,6 +514,7 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
             : undefined
         }
         onClose={() => !deleting && setPendingDelete(null)}
+        variant="danger"
       >
         <div className="dialog-actions">
           <button

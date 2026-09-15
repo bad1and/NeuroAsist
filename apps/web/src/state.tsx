@@ -376,6 +376,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
         title={pendingReset?.title ?? ""}
         description={pendingReset?.description}
         onClose={() => !busy && setPendingReset(null)}
+        variant="danger"
       >
         <div className="dialog-actions">
           <button
@@ -415,6 +416,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
         title="Удалить заметку?"
         description="Удалить эту субъективную заметку Iris без возможности восстановления?"
         onClose={() => !busy && setPendingDeleteReflection(null)}
+        variant="danger"
       >
         <div className="dialog-actions">
           <button
