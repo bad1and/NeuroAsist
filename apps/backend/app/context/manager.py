@@ -107,18 +107,17 @@ class ContextManager:
         rolling_message = ChatMessage(role="system", content=f"Current episode earlier context: {rolling}") if rolling else None
         def summary_context_item(summary: dict[str, object]) -> tuple[str, ChatMessage]:
             text = summary["summary_text"]
+            is_prev = summary.get("is_previous_episode", False)
+            header = (
+                "Контекст недавнего прошлого разговора (что обсуждали до перерыва): "
+                if is_prev
+                else "Контекст предыдущего разговора: "
+            )
             return (
                 str(summary["id"]),
                 ChatMessage(
                     role="system",
-                    content=(
-                        "Episode data: "
-                        + json.dumps(
-                            {"id": str(summary["id"]), "summary": text},
-                            ensure_ascii=False,
-                            separators=(",", ":"),
-                        )
-                    ),
+                    content=f"{header}{text}",
                 ),
             )
 
