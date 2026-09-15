@@ -8,7 +8,7 @@ import {
   IconInterfaceCalendarMark,
   IconComputerRobotCyborg1,
 } from "./CustomIcons";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import { deleteTimelineRange, getTimelineJournal, getTimelineMessages, searchTimeline } from "./api";
 import type { TimelineJournalItem, TimelineMessage } from "./types";
@@ -39,6 +39,32 @@ function formatShortDate(value?: string | null): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat(interfaceIntlLocale(), { day: "numeric", month: "short" }).format(date);
+}
+
+function shouldShowDateSeparator(prevDate?: string | null, currDate?: string | null): boolean {
+  if (!currDate) return false;
+  if (!prevDate) return true;
+  const prev = new Date(prevDate);
+  const curr = new Date(currDate);
+  if (Number.isNaN(prev.getTime()) || Number.isNaN(curr.getTime())) return false;
+  return prev.toDateString() !== curr.toDateString();
+}
+
+function formatDateSeparatorLabel(value?: string | null): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const now = new Date();
+  const todayStr = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const dateDayTime = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const diffDays = Math.round((todayStr - dateDayTime) / 86400000);
+  if (diffDays === 0) return "Сегодня";
+  if (diffDays === 1) return "Вчера";
+  return new Intl.DateTimeFormat(interfaceIntlLocale(), {
+    day: "numeric",
+    month: "long",
+    year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
+  }).format(date);
 }
 
 type PeriodGroup = {
@@ -87,6 +113,9 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
   const [selectedEpisode, setSelectedEpisode] = useState<TimelineJournalItem | null>(null);
   const [messages, setMessages] = useState<TimelineMessage[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [loadingMoreMessages, setLoadingMoreMessages] = useState(false);
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const [messageOffset, setMessageOffset] = useState<number | null>(null);
   const [messagesError, setMessagesError] = useState<string | null>(null);
   const [results, setResults] = useState<TimelineMessage[] | null>(null);
   const [query, setQuery] = useState("");
@@ -136,10 +165,14 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
     setSelectedEpisode(episode);
     setLoadingMessages(true);
     setMessagesError(null);
+    setHasMoreMessages(false);
+    setMessageOffset(null);
     try {
       const response = await getTimelineMessages(200, undefined, episode.id);
       if (activeRequestIdRef.current === requestId) {
         setMessages(response.items);
+        setHasMoreMessages(response.next_offset !== null && response.next_offset !== undefined);
+        setMessageOffset(response.next_offset ?? null);
       }
     } catch (cause) {
       if (activeRequestIdRef.current === requestId) {
@@ -154,12 +187,30 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
     }
   };
 
+  const onLoadMoreMessages = async () => {
+    if (!selectedEpisode?.id || messageOffset === null || loadingMoreMessages) return;
+    setLoadingMoreMessages(true);
+    try {
+      const response = await getTimelineMessages(100, undefined, selectedEpisode.id, messageOffset);
+      setMessages((prev) => [...response.items, ...prev]);
+      setHasMoreMessages(response.next_offset !== null && response.next_offset !== undefined);
+      setMessageOffset(response.next_offset ?? null);
+    } catch (cause) {
+      const msg = cause instanceof Error ? cause.message : "Не удалось загрузить ранние сообщения";
+      notify.error("Журнал", msg);
+    } finally {
+      setLoadingMoreMessages(false);
+    }
+  };
+
   const onBack = () => {
     activeRequestIdRef.current++;
     setSelectedEpisode(null);
     setMessages([]);
     setMessagesError(null);
     setLoadingMessages(false);
+    setHasMoreMessages(false);
+    setMessageOffset(null);
   };
 
   const onSearch = async (event: FormEvent) => {
@@ -382,29 +433,48 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
                   <p className="error-text" role="alert">{messagesError}</p>
                 ) : messages.length ? (
                   <div className="journal-message-list">
-                    {messages.map((message) => {
+                    {hasMoreMessages && (
+                      <button
+                        className="journal-load-more-btn"
+                        type="button"
+                        disabled={loadingMoreMessages}
+                        onClick={() => void onLoadMoreMessages()}
+                      >
+                        {loadingMoreMessages ? "Загрузка…" : "Загрузить более ранние сообщения"}
+                      </button>
+                    )}
+                    {messages.map((message, idx) => {
                       const isUser = message.role === "user";
                       const isAssistant = message.role === "assistant";
                       const roleLabel = isUser ? "Вы" : isAssistant ? "Iris" : "Событие";
                       const roleClass = isUser ? "user" : isAssistant ? "assistant" : "system";
+                      const prevDate = idx > 0 ? messages[idx - 1].created_at : null;
+                      const showDateSep = shouldShowDateSeparator(prevDate, message.created_at);
+
                       return (
-                        <article
-                          className={`journal-message ${roleClass}`}
-                          key={message.id}
-                        >
-                          <div className="message-role">
-                            {isAssistant && (
-                              <span className="message-role-avatar assistant" aria-hidden="true">
-                                <IconComputerRobotCyborg1 size={11} />
-                              </span>
-                            )}
-                            <span>{roleLabel}</span>
-                          </div>
-                          <p data-i18n-skip>{message.content || message.corrected_content || message.original_content || ""}</p>
-                          {message.created_at && (
-                            <span className="message-time">{formatTime(message.created_at)}</span>
+                        <Fragment key={message.id}>
+                          {showDateSep && (
+                            <div className="journal-date-divider" role="separator">
+                              <span>{formatDateSeparatorLabel(message.created_at)}</span>
+                            </div>
                           )}
-                        </article>
+                          <article
+                            className={`journal-message ${roleClass}`}
+                          >
+                            <div className="message-role">
+                              {isAssistant && (
+                                <span className="message-role-avatar assistant" aria-hidden="true">
+                                  <IconComputerRobotCyborg1 size={11} />
+                                </span>
+                              )}
+                              <span>{roleLabel}</span>
+                            </div>
+                            <p data-i18n-skip>{message.content || message.corrected_content || message.original_content || ""}</p>
+                            {message.created_at && (
+                              <span className="message-time">{formatTime(message.created_at)}</span>
+                            )}
+                          </article>
+                        </Fragment>
                       );
                     })}
                   </div>

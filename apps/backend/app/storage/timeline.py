@@ -1691,25 +1691,63 @@ class TimelineStore:
                 if row["role"] == "user"
                 and row["decision_action"] in {"observe", "avatar_reaction", "defer"}
             ]
-            decisions = [text for text in user_texts if any(marker in text.lower() for marker in ("решил", "решили", "нужно", "не делать", "будем"))][:5]
-            open_loops = [text for text in user_texts if "?" in text][-3:]
-            topics = self._keywords(" ".join(user_texts))[:5]
-            direct_summary = " ".join(user_texts[:1] + user_texts[-1:]).strip()
-            ambient_summary = " ".join(ambient_texts[-2:]).strip()
+            decisions = [text for text in user_texts if any(marker in text.lower() for marker in ("решил", "решили", "нужно", "не делать", "будем", "договорились", "план"))][:6]
+            open_loops = [text for text in user_texts if "?" in text][-4:]
+            topics = self._keywords(" ".join(user_texts))[:8]
+
+            # Look up any significant emotional events during this episode
+            started_at = episode["started_at"] or ""
+            ended_at = episode["last_activity_at"] or started_at
+            event_rows = connection.execute(
+                """
+                SELECT event_kind, intensity FROM character_state_events
+                WHERE relationship_id = ? AND created_at >= ? AND created_at <= ?
+                ORDER BY created_at
+                """,
+                (PRIMARY_RELATIONSHIP_ID, started_at, ended_at),
+            ).fetchall() if started_at else []
+            emotion_labels = {
+                "insult": "обида / резкость в общении",
+                "apology": "примирение и искренние извинения",
+                "praise": "похвала и взаимное тепло",
+                "shared_success": "общий успех и радость",
+                "broken_promise": "нарушенное обещание и осадок",
+                "promise_made": "зафиксированное обещание",
+                "vulnerability": "личное раскрытие и доверие",
+                "user_frustration": "переживание и поддержка",
+            }
+            significant_emotions = list(dict.fromkeys(
+                emotion_labels[row["event_kind"]]
+                for row in event_rows
+                if row["event_kind"] in emotion_labels
+            ))
+
+            # Build comprehensive narrative summary without dropping middle turns
+            if len(user_texts) <= 3:
+                direct_body = " | ".join(user_texts)
+            else:
+                key_middle = [t for t in user_texts[1:-1] if any(m in t.lower() for m in ("решил", "нужно", "сделай", "почему", "как", "проблема", "ошибка", "важно"))][:3]
+                selected_turns = [user_texts[0]] + (key_middle if key_middle else user_texts[1:3]) + [user_texts[-1]]
+                direct_body = " ... ".join(dict.fromkeys(selected_turns))
+
             summary_parts = []
-            if direct_summary:
-                summary_parts.append(f"Прямой диалог с Iris: {direct_summary}")
-            if ambient_summary:
-                summary_parts.append(
-                    "Фоновая речь, услышанная Iris, но адресованная не ей: "
-                    f"{ambient_summary}"
-                )
-            summary_text = " ".join(summary_parts)[:900] or "Conversation episode"
+            if direct_body:
+                summary_parts.append(f"Диалог: {direct_body}")
+            if decisions:
+                summary_parts.append(f"Решения: {'; '.join(decisions[:3])}")
+            if open_loops:
+                summary_parts.append(f"Вопросы: {'; '.join(open_loops[:2])}")
+            if significant_emotions:
+                summary_parts.append(f"Эмоциональный фон: {', '.join(significant_emotions)}")
+            if ambient_texts:
+                summary_parts.append(f"Фоновый контекст: {' '.join(ambient_texts[-2:])}")
+
+            summary_text = " — ".join(summary_parts)[:1000] or "Conversation episode"
             version = connection.execute("SELECT COALESCE(MAX(version), 0) + 1 FROM episode_summaries WHERE episode_id = ?", (episode_id,)).fetchone()[0]
             now = self._now()
             connection.execute("UPDATE episode_summaries SET superseded_at = ? WHERE episode_id = ? AND superseded_at IS NULL", (now, episode_id))
             summary_id = uuid4().hex
-            connection.execute("""INSERT INTO episode_summaries (id, episode_id, version, summary_text, topics_json, decisions_json, open_loops_json, source_message_ids_json, prompt_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'deterministic-v2-address-aware', ?)""", (summary_id, episode_id, version, summary_text, json.dumps(topics, ensure_ascii=False), json.dumps(decisions, ensure_ascii=False), json.dumps(open_loops, ensure_ascii=False), json.dumps([row["id"] for row in rows]), now))
+            connection.execute("""INSERT INTO episode_summaries (id, episode_id, version, summary_text, topics_json, decisions_json, open_loops_json, source_message_ids_json, prompt_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'deterministic-v3-affect-aware', ?)""", (summary_id, episode_id, version, summary_text, json.dumps(topics, ensure_ascii=False), json.dumps(decisions, ensure_ascii=False), json.dumps(open_loops, ensure_ascii=False), json.dumps([row["id"] for row in rows]), now))
             connection.execute("INSERT INTO episode_summary_fts (summary_id, text) VALUES (?, ?)", (summary_id, summary_text))
             connection.execute("UPDATE conversation_episodes SET summary_status = 'summarized', summary_version = ? WHERE id = ?", (version, episode_id))
             return {"id": summary_id, "episode_id": episode_id, "summary_text": summary_text, "topics": topics, "decisions": decisions, "open_loops": open_loops}

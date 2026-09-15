@@ -278,6 +278,10 @@ class ContextManager:
                 ),
             )
 
+        selected_loops.sort(key=lambda x: x[0])
+        selected_memories.sort(key=lambda x: x[0])
+        selected_topics.sort(key=lambda x: x[0])
+
         def assemble() -> list[ChatMessage]:
             messages = [identity]
             if pending_followup_message is not None:

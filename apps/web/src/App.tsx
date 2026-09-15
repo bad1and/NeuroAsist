@@ -1376,15 +1376,17 @@ export function ChatPage({
   }, [flushPendingTextDeltas]);
 
   const refreshTimelineMessages = useCallback(() => {
-    if (!sessionId) return Promise.resolve();
-    return getTimelineMessages(50, sessionId).then((payload) => {
+    return getTimelineMessages(50).then((payload) => {
       setMessages(payload.items
         .filter((message) => message.role === "user" || message.role === "assistant")
         .map((message) => ({ id: message.id, role: message.role as "user" | "assistant", content: message.content })));
+      if (payload.items.length > 0) {
+        setIsStarted(true);
+      }
     }).catch(() => {
       // The V0.4 compatibility backend may intentionally keep Timeline V2 disabled.
     });
-  }, [sessionId]);
+  }, []);
 
   useEffect(() => { void refreshTimelineMessages(); }, [refreshTimelineMessages]);
 
