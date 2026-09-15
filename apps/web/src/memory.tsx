@@ -843,6 +843,7 @@ export function MemoryPage() {
         title="Забыть эту запись навсегда?"
         description={`Запись «${pendingDeleteMemory ? memoryLabel(pendingDeleteMemory) : ""}» и её журнал памяти будут удалены без восстановления. Исходный текст останется в истории диалога, пока вы отдельно не удалите историю.`}
         onClose={() => setPendingDeleteMemory(null)}
+        variant="danger"
       >
         <div className="dialog-actions">
           <button className="secondary" type="button" onClick={() => setPendingDeleteMemory(null)}>
@@ -868,6 +869,7 @@ export function MemoryPage() {
         title="Исправить запись памяти"
         description="Исправление будет закреплено как явный выбор пользователя и сразу попадёт в поиск."
         onClose={() => setPendingEditMemory(null)}
+        variant="info"
       >
         <label className="form-field">
           <span>Значение</span>
