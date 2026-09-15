@@ -1663,100 +1663,113 @@ class TimelineStore:
 
     def summarize_episode(self, episode_id: str) -> dict[str, object] | None:
         with self._connect() as connection:
-            episode = connection.execute("SELECT * FROM conversation_episodes WHERE id = ?", (episode_id,)).fetchone()
-            if episode is None or episode["message_count"] == 0:
-                return None
-            rows = connection.execute(
-                """
-                SELECT m.id, m.role, m.content, m.corrected_content,
-                       o.decision_action, o.decision_reason, o.speaker_role
-                FROM conversation_messages m
-                LEFT JOIN conversation_observations o ON o.message_id = m.id
-                WHERE m.episode_id = ?
-                ORDER BY m.created_at, m.id
-                """,
-                (episode_id,),
-            ).fetchall()
-            user_texts = [
-                (row["corrected_content"] or row["content"]).strip()
-                for row in rows
-                if row["role"] == "user"
-                and row["decision_action"] not in {
-                    "observe", "avatar_reaction", "defer", "wait_more"
-                }
-            ]
-            ambient_texts = [
-                (row["corrected_content"] or row["content"]).strip()
-                for row in rows
-                if row["role"] == "user"
-                and row["decision_action"] in {"observe", "avatar_reaction", "defer"}
-            ]
-            decisions = [text for text in user_texts if any(marker in text.lower() for marker in ("решил", "решили", "нужно", "не делать", "будем", "договорились", "план"))][:6]
-            open_loops = [text for text in user_texts if "?" in text][-4:]
-            topics = self._keywords(" ".join(user_texts))[:8]
+            return self._summarize_episode_conn(connection, episode_id)
 
-            # Look up any significant emotional events during this episode
-            started_at = episode["started_at"] or ""
-            ended_at = episode["last_activity_at"] or started_at
-            event_rows = connection.execute(
-                """
-                SELECT event_kind, intensity FROM character_state_events
-                WHERE relationship_id = ? AND created_at >= ? AND created_at <= ?
-                ORDER BY created_at
-                """,
-                (PRIMARY_RELATIONSHIP_ID, started_at, ended_at),
-            ).fetchall() if started_at else []
-            emotion_labels = {
-                "insult": "обида / резкость в общении",
-                "apology": "примирение и искренние извинения",
-                "praise": "похвала и взаимное тепло",
-                "shared_success": "общий успех и радость",
-                "broken_promise": "нарушенное обещание и осадок",
-                "promise_made": "зафиксированное обещание",
-                "vulnerability": "личное раскрытие и доверие",
-                "user_frustration": "переживание и поддержка",
+    def _summarize_episode_conn(
+        self, connection: sqlite3.Connection, episode_id: str, now: str | None = None,
+    ) -> dict[str, object] | None:
+        episode = connection.execute("SELECT * FROM conversation_episodes WHERE id = ?", (episode_id,)).fetchone()
+        if episode is None or episode["message_count"] == 0:
+            return None
+        rows = connection.execute(
+            """
+            SELECT m.id, m.role, m.content, m.corrected_content,
+                   o.decision_action, o.decision_reason, o.speaker_role
+            FROM conversation_messages m
+            LEFT JOIN conversation_observations o ON o.message_id = m.id
+            WHERE m.episode_id = ?
+            ORDER BY m.created_at, m.id
+            """,
+            (episode_id,),
+        ).fetchall()
+        user_texts = [
+            (row["corrected_content"] or row["content"]).strip()
+            for row in rows
+            if row["role"] == "user"
+            and row["decision_action"] not in {
+                "observe", "avatar_reaction", "defer", "wait_more"
             }
-            significant_emotions = list(dict.fromkeys(
-                emotion_labels[row["event_kind"]]
-                for row in event_rows
-                if row["event_kind"] in emotion_labels
-            ))
+        ]
+        ambient_texts = [
+            (row["corrected_content"] or row["content"]).strip()
+            for row in rows
+            if row["role"] == "user"
+            and row["decision_action"] in {"observe", "avatar_reaction", "defer"}
+        ]
+        decisions = [text for text in user_texts if any(marker in text.lower() for marker in ("решил", "решили", "нужно", "не делать", "будем", "договорились", "план"))][:6]
+        open_loops = [text for text in user_texts if "?" in text][-4:]
+        topics = self._keywords(" ".join(user_texts))[:8]
 
-            # Build comprehensive narrative summary without dropping middle turns
-            if len(user_texts) <= 3:
-                direct_body = " | ".join(user_texts)
-            else:
-                key_middle = [t for t in user_texts[1:-1] if any(m in t.lower() for m in ("решил", "нужно", "сделай", "почему", "как", "проблема", "ошибка", "важно"))][:3]
-                selected_turns = [user_texts[0]] + (key_middle if key_middle else user_texts[1:3]) + [user_texts[-1]]
-                direct_body = " ... ".join(dict.fromkeys(selected_turns))
+        # Look up any significant emotional events during this episode
+        started_at = episode["started_at"] or ""
+        ended_at = episode["last_activity_at"] or started_at
+        event_rows = connection.execute(
+            """
+            SELECT event_kind, intensity FROM character_state_events
+            WHERE relationship_id = ? AND created_at >= ? AND created_at <= ?
+            ORDER BY created_at
+            """,
+            (PRIMARY_RELATIONSHIP_ID, started_at, ended_at),
+        ).fetchall() if started_at else []
+        emotion_labels = {
+            "insult": "обида / резкость в общении",
+            "apology": "примирение и искренние извинения",
+            "praise": "похвала и взаимное тепло",
+            "shared_success": "общий успех и радость",
+            "broken_promise": "нарушенное обещание и осадок",
+            "promise_made": "зафиксированное обещание",
+            "vulnerability": "личное раскрытие и доверие",
+            "user_frustration": "переживание и поддержка",
+        }
+        significant_emotions = list(dict.fromkeys(
+            emotion_labels[row["event_kind"]]
+            for row in event_rows
+            if row["event_kind"] in emotion_labels
+        ))
 
-            summary_parts = []
-            if direct_body:
-                summary_parts.append(f"Диалог: {direct_body}")
-            if decisions:
-                summary_parts.append(f"Решения: {'; '.join(decisions[:3])}")
-            if open_loops:
-                summary_parts.append(f"Вопросы: {'; '.join(open_loops[:2])}")
-            if significant_emotions:
-                summary_parts.append(f"Эмоциональный фон: {', '.join(significant_emotions)}")
-            if ambient_texts:
-                summary_parts.append(f"Фоновый контекст: {' '.join(ambient_texts[-2:])}")
+        # Build comprehensive narrative summary without dropping middle turns
+        if len(user_texts) <= 3:
+            direct_body = " | ".join(user_texts)
+        else:
+            key_middle = [t for t in user_texts[1:-1] if any(m in t.lower() for m in ("решил", "нужно", "сделай", "почему", "как", "проблема", "ошибка", "важно"))][:3]
+            selected_turns = [user_texts[0]] + (key_middle if key_middle else user_texts[1:3]) + [user_texts[-1]]
+            direct_body = " ... ".join(dict.fromkeys(selected_turns))
 
-            summary_text = " — ".join(summary_parts)[:1000] or "Conversation episode"
-            version = connection.execute("SELECT COALESCE(MAX(version), 0) + 1 FROM episode_summaries WHERE episode_id = ?", (episode_id,)).fetchone()[0]
-            now = self._now()
-            connection.execute("UPDATE episode_summaries SET superseded_at = ? WHERE episode_id = ? AND superseded_at IS NULL", (now, episode_id))
-            summary_id = uuid4().hex
-            connection.execute("""INSERT INTO episode_summaries (id, episode_id, version, summary_text, topics_json, decisions_json, open_loops_json, source_message_ids_json, prompt_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'deterministic-v3-affect-aware', ?)""", (summary_id, episode_id, version, summary_text, json.dumps(topics, ensure_ascii=False), json.dumps(decisions, ensure_ascii=False), json.dumps(open_loops, ensure_ascii=False), json.dumps([row["id"] for row in rows]), now))
-            connection.execute("INSERT INTO episode_summary_fts (summary_id, text) VALUES (?, ?)", (summary_id, summary_text))
-            connection.execute("UPDATE conversation_episodes SET summary_status = 'summarized', summary_version = ? WHERE id = ?", (version, episode_id))
-            return {"id": summary_id, "episode_id": episode_id, "summary_text": summary_text, "topics": topics, "decisions": decisions, "open_loops": open_loops}
+        summary_parts = []
+        if direct_body:
+            summary_parts.append(f"Диалог: {direct_body}")
+        if decisions:
+            summary_parts.append(f"Решения: {'; '.join(decisions[:3])}")
+        if open_loops:
+            summary_parts.append(f"Вопросы: {'; '.join(open_loops[:2])}")
+        if significant_emotions:
+            summary_parts.append(f"Эмоциональный фон: {', '.join(significant_emotions)}")
+        if ambient_texts:
+            summary_parts.append(f"Фоновый контекст: {' '.join(ambient_texts[-2:])}")
+
+        summary_text = " — ".join(summary_parts)[:1000] or "Conversation episode"
+        version = connection.execute("SELECT COALESCE(MAX(version), 0) + 1 FROM episode_summaries WHERE episode_id = ?", (episode_id,)).fetchone()[0]
+        now_ts = now or self._now()
+        connection.execute("UPDATE episode_summaries SET superseded_at = ? WHERE episode_id = ? AND superseded_at IS NULL", (now_ts, episode_id))
+        summary_id = uuid4().hex
+        connection.execute("""INSERT INTO episode_summaries (id, episode_id, version, summary_text, topics_json, decisions_json, open_loops_json, source_message_ids_json, prompt_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'deterministic-v3-affect-aware', ?)""", (summary_id, episode_id, version, summary_text, json.dumps(topics, ensure_ascii=False), json.dumps(decisions, ensure_ascii=False), json.dumps(open_loops, ensure_ascii=False), json.dumps([row["id"] for row in rows]), now_ts))
+        connection.execute("INSERT INTO episode_summary_fts (summary_id, text) VALUES (?, ?)", (summary_id, summary_text))
+        connection.execute("UPDATE conversation_episodes SET summary_status = 'summarized', summary_version = ? WHERE id = ?", (version, episode_id))
+        return {"id": summary_id, "episode_id": episode_id, "summary_text": summary_text, "topics": topics, "decisions": decisions, "open_loops": open_loops}
 
     def get_episode_summary(self, summary_id: str) -> dict[str, object] | None:
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT * FROM episode_summaries WHERE id = ? AND superseded_at IS NULL",
                 (summary_id,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def get_episode_summary_for_episode(self, episode_id: str) -> dict[str, object] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM episode_summaries WHERE episode_id = ? AND superseded_at IS NULL",
+                (episode_id,),
             ).fetchone()
         return dict(row) if row is not None else None
 
@@ -2647,8 +2660,8 @@ class TimelineStore:
             current_created_at = None
             if current_message_id is not None:
                 current = connection.execute(
-                    "SELECT sequence_no, created_at FROM conversation_messages WHERE id = ? AND timeline_id = ? AND (? IS NULL OR session_id = ?)",
-                    (current_message_id, PRIMARY_TIMELINE_ID, session_id, session_id),
+                    "SELECT sequence_no, created_at FROM conversation_messages WHERE id = ? AND timeline_id = ?",
+                    (current_message_id, PRIMARY_TIMELINE_ID),
                 ).fetchone()
                 if current is not None:
                     current_sequence = int(current["sequence_no"])
@@ -2660,7 +2673,7 @@ class TimelineStore:
                        o.addressedness
                 FROM conversation_messages m
                 LEFT JOIN conversation_observations o ON o.message_id = m.id
-                WHERE m.timeline_id = ? AND (? IS NULL OR m.session_id = ?)
+                WHERE m.timeline_id = ?
                   AND (
                     (m.role = 'user' AND m.status = 'completed')
                     OR
@@ -2671,16 +2684,16 @@ class TimelineStore:
                 ORDER BY m.sequence_no DESC
                 LIMIT ?
                 """,
-                (PRIMARY_TIMELINE_ID, session_id, session_id, current_sequence, current_sequence, recent_turns * 2),
+                (PRIMARY_TIMELINE_ID, current_sequence, current_sequence, recent_turns * 2),
             ).fetchall()
             pending_user_rows: list[sqlite3.Row] = []
             if current_sequence is not None:
                 previous_assistant = connection.execute(
                     """SELECT MAX(sequence_no) AS sequence_no FROM conversation_messages
-                       WHERE timeline_id = ? AND (? IS NULL OR session_id = ?)
+                       WHERE timeline_id = ?
                          AND role = 'assistant' AND status IN ('completed', 'interrupted')
                          AND sequence_no < ?""",
-                    (PRIMARY_TIMELINE_ID, session_id, session_id, current_sequence),
+                    (PRIMARY_TIMELINE_ID, current_sequence),
                 ).fetchone()
                 lower = int(previous_assistant["sequence_no"] or 0) if previous_assistant else 0
                 pending_user_rows = connection.execute(
@@ -2688,20 +2701,66 @@ class TimelineStore:
                                o.decision_action, o.decision_reason, o.speaker_role, o.addressedness
                        FROM conversation_messages m
                        LEFT JOIN conversation_observations o ON o.message_id = m.id
-                       WHERE m.timeline_id = ? AND (? IS NULL OR m.session_id = ?)
+                       WHERE m.timeline_id = ?
                          AND m.role = 'user' AND m.status = 'completed'
                          AND m.sequence_no > ? AND m.sequence_no <= ?
                        ORDER BY m.sequence_no""",
-                    (PRIMARY_TIMELINE_ID, session_id, session_id, lower, current_sequence),
+                    (PRIMARY_TIMELINE_ID, lower, current_sequence),
                 ).fetchall()
+
+            # Ensure the immediately preceding closed episode summary is always available
+            last_closed = connection.execute(
+                """SELECT id FROM conversation_episodes
+                   WHERE timeline_id = ? AND status = 'closed' AND (? IS NULL OR id != ?)
+                   ORDER BY last_activity_at DESC, ended_at DESC LIMIT 1""",
+                (PRIMARY_TIMELINE_ID, active_id, active_id),
+            ).fetchone()
+            latest_closed_summary: dict[str, object] | None = None
+            if last_closed is not None:
+                prev_ep_id = last_closed["id"]
+                sum_row = connection.execute(
+                    "SELECT * FROM episode_summaries WHERE episode_id = ? AND superseded_at IS NULL",
+                    (prev_ep_id,),
+                ).fetchone()
+                if sum_row is None:
+                    # Summarize on the fly if closing missed or delayed
+                    self._summarize_episode_conn(connection, prev_ep_id)
+                    sum_row = connection.execute(
+                        "SELECT * FROM episode_summaries WHERE episode_id = ? AND superseded_at IS NULL",
+                        (prev_ep_id,),
+                    ).fetchone()
+                if sum_row is not None:
+                    latest_closed_summary = dict(sum_row)
+                    latest_closed_summary["is_previous_episode"] = True
+
             terms = self._keywords(user_text)
             if terms:
                 clauses = " OR ".join("s.summary_text LIKE ?" for _ in terms)
-                summaries = connection.execute(f"SELECT s.* FROM episode_summaries s WHERE s.superseded_at IS NULL AND s.episode_id != ? AND ({clauses}) ORDER BY s.created_at DESC LIMIT 2", (active_id, *(f"%{term}%" for term in terms))).fetchall()
+                summaries_rows = connection.execute(
+                    f"SELECT s.* FROM episode_summaries s WHERE s.superseded_at IS NULL AND s.episode_id != ? AND ({clauses}) ORDER BY s.created_at DESC LIMIT 2",
+                    (active_id, *(f"%{term}%" for term in terms)),
+                ).fetchall()
+                summaries = [dict(r) for r in summaries_rows]
             else:
                 summaries = []
             if not summaries:
-                summaries = connection.execute("SELECT s.* FROM episode_summaries s WHERE s.superseded_at IS NULL AND s.episode_id != ? ORDER BY s.created_at DESC LIMIT 2", (active_id,)).fetchall()
+                summaries_rows = connection.execute(
+                    "SELECT s.* FROM episode_summaries s WHERE s.superseded_at IS NULL AND s.episode_id != ? ORDER BY s.created_at DESC LIMIT 2",
+                    (active_id,),
+                ).fetchall()
+                summaries = [dict(r) for r in summaries_rows]
+
+            # Bridge previous episode summary to ensure continuity across breaks
+            if latest_closed_summary is not None:
+                existing_ids = {s["id"] for s in summaries}
+                if latest_closed_summary["id"] not in existing_ids:
+                    summaries.insert(0, latest_closed_summary)
+                else:
+                    for s in summaries:
+                        if s["id"] == latest_closed_summary["id"]:
+                            s["is_previous_episode"] = True
+                # Limit to 2 summaries to strictly adhere to the 300 token budget
+                summaries = summaries[:2]
             checkpoint = None
             if active_id:
                 recent_floor = min((int(row["sequence_no"] or 0) for row in recent), default=0)
@@ -4200,6 +4259,8 @@ class TimelineStore:
                 """,
                 (now, last_activity, reason, episode_id),
             )
+            # Summarize synchronously so previous conversation context is immediately available
+            self._summarize_episode_conn(connection, episode_id, now)
             connection.execute(
                 "INSERT INTO background_jobs (id, type, status, payload_json, available_at, created_at, updated_at) VALUES (?, 'episode_summary', 'pending', ?, ?, ?, ?)",
                 (uuid4().hex, json.dumps({"episode_id": episode_id}), now, now, now),
