@@ -147,17 +147,22 @@ def parse_turn(payload: dict[str, Any], *, user_text: str = "") -> tuple[Charact
 
 
 def legacy_result(
-    turn: CharacterTurn, *, include_metadata: bool = False, include_gesture: bool = True
+    turn: CharacterTurn,
+    *,
+    include_metadata: bool = False,
+    include_gesture: bool = True,
+    include_affect_metrics: bool = True,
 ) -> dict[str, Any]:
     """v1/v2 flat projection for existing REST, TTS and browser callers."""
     result: dict[str, Any] = {
         "reply": turn.reply,
         "emotion": turn.affect.emotion.value,
         "intent": turn.intent.value,
-        "intensity": turn.affect.intensity,
-        "valence": turn.affect.valence,
-        "arousal": turn.affect.arousal,
     }
+    if include_affect_metrics:
+        result["intensity"] = turn.affect.intensity
+        result["valence"] = turn.affect.valence
+        result["arousal"] = turn.affect.arousal
     if turn.cognitive_appraisal is not None:
         result["cognitive_appraisal"] = turn.cognitive_appraisal.model_dump(mode="json")
     if turn.diary_note is not None:

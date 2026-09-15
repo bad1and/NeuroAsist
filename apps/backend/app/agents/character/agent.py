@@ -235,8 +235,6 @@ class CharacterAgent:
         if coding_context:
             state_context = "\n\n".join(part for part in (state_context, f"CODING AGENT COORDINATION:\n{coding_context}") if part)
         situational_context = await self._resolve_situational_context(prompt_user_text)
-        if situational_context:
-            state_context = "\n\n".join(part for part in (state_context, situational_context) if part)
         model_routing_candidate = await self._should_request_model_delegation(effective_text)
         required_anchors = self._required_response_anchors(prompt_user_text)
         if built_context is not None:
@@ -290,7 +288,15 @@ class CharacterAgent:
                     content=character_state_prompt(state_context, live=False),
                 )
             )
-        messages.extend((*context, ChatMessage(role="user", content=prompt_user_text)))
+        messages.extend(context)
+        if situational_context:
+            messages.append(
+                ChatMessage(
+                    role="system",
+                    content=f"Текущая обстановка и время:\n{situational_context}",
+                )
+            )
+        messages.append(ChatMessage(role="user", content=prompt_user_text))
         empty_reply = self._empty_model_fallback(prompt_user_text)
 
         llm_response = await self._llm_provider.generate(messages)
@@ -552,8 +558,6 @@ class CharacterAgent:
         if coding_context:
             state_context = "\n\n".join(part for part in (state_context, f"CODING AGENT COORDINATION:\n{coding_context}") if part)
         situational_context = await self._resolve_situational_context(prompt_user_text)
-        if situational_context:
-            state_context = "\n\n".join(part for part in (state_context, situational_context) if part)
         model_routing_candidate = await self._should_request_model_delegation(effective_text)
         required_anchors = self._required_response_anchors(prompt_user_text)
         if built_context is not None:
@@ -598,7 +602,15 @@ class CharacterAgent:
                     content=character_state_prompt(state_context, live=True),
                 )
             )
-        messages.extend((*context, ChatMessage(role="user", content=prompt_user_text)))
+        messages.extend(context)
+        if situational_context:
+            messages.append(
+                ChatMessage(
+                    role="system",
+                    content=f"Окружение и текущее время:\n{situational_context}",
+                )
+            )
+        messages.append(ChatMessage(role="user", content=prompt_user_text))
         chunks: list[str] = []
         route_buffer = ""
         route_checked = not model_routing_candidate
@@ -982,11 +994,19 @@ class CharacterAgent:
             )
 
         legacy_without_gesture = "gesture" not in payload and "affect" not in payload
-        result_payload = legacy_result(turn, include_gesture=not legacy_without_gesture)
+        result_payload = legacy_result(
+            turn,
+            include_gesture=not legacy_without_gesture,
+            include_affect_metrics=not legacy_without_gesture,
+        )
         nested_reply = self._extract_nested_reply(result_payload["reply"])
         if nested_reply is not None:
             turn = turn.model_copy(update={"reply": nested_reply})
-            result_payload = legacy_result(turn, include_gesture=not legacy_without_gesture)
+            result_payload = legacy_result(
+                turn,
+                include_gesture=not legacy_without_gesture,
+                include_affect_metrics=not legacy_without_gesture,
+            )
 
         if not valid_metadata:
             self._report_invalid_metadata(raw_content, adapter_reason or "invalid_metadata", session_id, event_type)

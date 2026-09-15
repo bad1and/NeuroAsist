@@ -139,7 +139,7 @@ def test_representative_request_is_at_least_40_percent_smaller_and_hard_bounded(
     assert after_chars == 4_199
     assert after_chars <= MEMORY_EXTRACTION_INPUT_CHAR_BUDGET
     assert after_chars <= before_chars * 0.60
-    assert len(MEMORY_EXTRACTION_PROMPT) == 1_808
+    assert len(MEMORY_EXTRACTION_PROMPT) == 2_075
     assert "JSON_SCHEMA" not in submitted
     assert "latest-head" in submitted and "latest-tail" in submitted
     assert "very-old-marker" not in submitted

@@ -342,9 +342,11 @@ export function getTimelineMessages(
   limit = 50,
   sessionId?: string,
   episodeId?: string,
+  offset = 0,
 ): Promise<{ items: TimelineMessage[]; next_offset: number | null }> {
   const params = new URLSearchParams();
   params.set("limit", String(limit));
+  if (offset > 0) params.set("offset", String(offset));
   if (sessionId) params.set("session_id", sessionId);
   if (episodeId) params.set("episode_id", episodeId);
   return requestJson(`/timeline/messages?${params.toString()}`);
