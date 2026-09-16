@@ -61,8 +61,8 @@ class Settings(BaseSettings):
     app_name: str = "Iris"
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-v4-flash"
-    # Explicit output budgets for each LLM purpose. DeepSeek V4 supports very
+    deepseek_model: str = "deepseek-v4.1-flash"
+    # Explicit output budgets for each LLM purpose. DeepSeek V4.1 supports very
     # large completions, so relying on the provider default makes a malformed
     # or runaway response unnecessarily expensive. Non-coding thinking is
     # disabled in the provider independently of these caps.

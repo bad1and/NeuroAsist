@@ -39,7 +39,7 @@ MIN_PREBUFFER_MS = 0
 MAX_PREBUFFER_MS = 1500
 MEMORY_MODES = {"off", "balanced", "automatic", "ask"}
 AVATAR_PLACEMENTS = {"desktop_overlay", "in_app"}
-CODING_MODELS = {"deepseek-v4-flash", "deepseek-v4-pro"}
+CODING_MODELS = {"deepseek-v4.1-flash", "deepseek-v4.1-pro"}
 WORKSPACE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$")
 LIVE_SETTING_VALUES = {
     "live_conversation_participant_mode": {"one_to_one", "group"},

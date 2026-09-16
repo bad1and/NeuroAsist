@@ -66,6 +66,32 @@ def test_invalid_persisted_interface_locale_falls_back_to_russian(tmp_path: Path
     assert loaded.interface_locale == "ru"
 
 
+def test_legacy_deepseek_v4_coding_models_are_migrated_to_v4_1(tmp_path: Path) -> None:
+    path_flash = tmp_path / "settings_flash.json"
+    path_flash.write_text(
+        '{"schema_version": 1, "settings": {"coding_model": "deepseek-v4-flash"}}',
+        encoding="utf-8",
+    )
+    loaded_flash = RuntimeSettingsStore(path_flash).load(RuntimeSettings())
+    assert loaded_flash.coding_model == "deepseek-v4.1-flash"
+
+    path_pro = tmp_path / "settings_pro.json"
+    path_pro.write_text(
+        '{"schema_version": 1, "settings": {"coding_model": "deepseek-v4-pro"}}',
+        encoding="utf-8",
+    )
+    loaded_pro = RuntimeSettingsStore(path_pro).load(RuntimeSettings())
+    assert loaded_pro.coding_model == "deepseek-v4.1-pro"
+
+    path_invalid = tmp_path / "settings_invalid.json"
+    path_invalid.write_text(
+        '{"schema_version": 1, "settings": {"coding_model": "unsupported-model"}}',
+        encoding="utf-8",
+    )
+    loaded_invalid = RuntimeSettingsStore(path_invalid).load(RuntimeSettings())
+    assert loaded_invalid.coding_model == "deepseek-v4.1-flash"
+
+
 def test_model_manager_downloads_and_verifies_pinned_file(tmp_path: Path) -> None:
     source = tmp_path / "source.jit"
     source.write_bytes(b"silero fixture")
