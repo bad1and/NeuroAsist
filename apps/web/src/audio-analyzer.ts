@@ -72,22 +72,29 @@ class AudioAnalyzerService {
    * Samples the current frequency spectrum and returns smoothed band values.
    */
   getAudioBands(): AudioBands {
-    if (!this.analyser || !this.frequencyData) {
+    if (!this.analyser || !this.frequencyData || !this.audioContext || this.audioContext.state !== "running") {
       // Natural decay to 0 if no active audio
-      this.smoothedBands.low *= 0.85;
-      this.smoothedBands.mid *= 0.85;
-      this.smoothedBands.high *= 0.85;
-      this.smoothedBands.level *= 0.85;
-      return { ...this.smoothedBands };
+      if (this.smoothedBands.level > 0.0001) {
+        this.smoothedBands.low *= 0.85;
+        this.smoothedBands.mid *= 0.85;
+        this.smoothedBands.high *= 0.85;
+        this.smoothedBands.level *= 0.85;
+      } else if (this.smoothedBands.level !== 0) {
+        this.smoothedBands.low = 0;
+        this.smoothedBands.mid = 0;
+        this.smoothedBands.high = 0;
+        this.smoothedBands.level = 0;
+      }
+      return this.smoothedBands;
     }
 
     try {
       this.analyser.getByteFrequencyData(this.frequencyData);
       const binCount = this.frequencyData.length;
-      if (binCount === 0) return { ...this.smoothedBands };
+      if (binCount === 0) return this.smoothedBands;
 
       // Map bins based on sampleRate (typically 44100 or 48000, bin width ~170-190Hz)
-      const sampleRate = this.audioContext?.sampleRate ?? 44100;
+      const sampleRate = this.audioContext.sampleRate || 44100;
       const binHz = (sampleRate / 2) / binCount;
 
       let lowSum = 0;
@@ -115,10 +122,20 @@ class AudioAnalyzerService {
         }
       }
 
+      const targetLevel = totalSum / binCount;
+      if (targetLevel < 0.0001 && this.smoothedBands.level < 0.0001) {
+        if (this.smoothedBands.level !== 0) {
+          this.smoothedBands.low = 0;
+          this.smoothedBands.mid = 0;
+          this.smoothedBands.high = 0;
+          this.smoothedBands.level = 0;
+        }
+        return this.smoothedBands;
+      }
+
       const targetLow = lowCount > 0 ? (lowSum / lowCount) : 0;
       const targetMid = midCount > 0 ? (midSum / midCount) : 0;
       const targetHigh = highCount > 0 ? (highSum / highCount) : 0;
-      const targetLevel = totalSum / binCount;
 
       // Fast attack (~15ms), smooth release (~100ms)
       const attack = 0.65;
@@ -129,9 +146,9 @@ class AudioAnalyzerService {
       this.smoothedBands.high += (targetHigh - this.smoothedBands.high) * (targetHigh > this.smoothedBands.high ? attack : decay);
       this.smoothedBands.level += (targetLevel - this.smoothedBands.level) * (targetLevel > this.smoothedBands.level ? attack : decay);
 
-      return { ...this.smoothedBands };
+      return this.smoothedBands;
     } catch {
-      return { ...this.smoothedBands };
+      return this.smoothedBands;
     }
   }
 

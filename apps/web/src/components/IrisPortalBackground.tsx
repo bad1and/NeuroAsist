@@ -9,6 +9,7 @@ export interface IrisPortalBackgroundProps {
   loading?: boolean;
   isDialogActive?: boolean;
   showInAppAvatar?: boolean;
+  isActive?: boolean;
   className?: string;
 }
 
@@ -72,21 +73,6 @@ function oklabToRgb(L: number, a: number, b: number): [number, number, number] {
   return [linearToSrgb(lr), linearToSrgb(lg), linearToSrgb(lb)];
 }
 
-function lerpOklab(
-  c1: [number, number, number],
-  c2: [number, number, number],
-  t: number
-): [number, number, number] {
-  if (t <= 0) return c1;
-  if (t >= 1) return c2;
-  const lab1 = rgbToOklab(c1[0], c1[1], c1[2]);
-  const lab2 = rgbToOklab(c2[0], c2[1], c2[2]);
-  const L = lab1[0] + (lab2[0] - lab1[0]) * t;
-  const a = lab1[1] + (lab2[1] - lab1[1]) * t;
-  const b = lab1[2] + (lab2[2] - lab1[2]) * t;
-  return oklabToRgb(L, a, b);
-}
-
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
@@ -120,27 +106,11 @@ uniform float u_audioHigh;
 uniform float u_audioLevel;
 uniform float u_statusMode; // 0=idle, 1=listening, 2=thinking, 3=speaking
 
-vec2 hash( vec2 p ) {
-    p = vec2( dot(p,vec2(127.1,311.7)), dot(p,vec2(269.5,183.3)) );
-    return -1.0 + 2.0*fract(sin(p)*43758.5453123);
-}
-
-float noise( in vec2 p ) {
-    const float K1 = 0.366025404;
-    const float K2 = 0.211324865;
-    vec2 i = floor( p + (p.x+p.y)*K1 );
-    vec2 a = p - i + (i.x+i.y)*K2;
-    vec2 o = (a.x>a.y) ? vec2(1.0,0.0) : vec2(0.0,1.0);
-    vec2 b = a - o + K2;
-    vec2 c = a - 1.0 + 2.0*K2;
-    vec3 h = max( 0.5-vec3(dot(a,a), dot(b,b), dot(c,c) ), 0.0 );
-    vec3 n = h*h*h*h*vec3( dot(a,hash(i+0.0)), dot(b,hash(i+o)), dot(c,hash(i+1.0)));
-    return dot( n, vec3(70.0) );
-}
-
 float sdArc(vec2 p, vec2 center, float radius, float width, float warp) {
-    p.y += sin(p.x * 2.4 + u_time * 0.45) * warp;
-    p.x += noise(p * 1.8 + u_time * 0.2) * (warp * 0.85);
+    float w1 = sin(p.x * 2.4 + u_time * 0.45) * warp;
+    float w2 = (sin(p.y * 2.2 + u_time * 0.35) * cos(p.x * 1.7 - u_time * 0.25)) * (warp * 0.85);
+    p.y += w1;
+    p.x += w2;
     float d = length(p - center) - radius;
     return abs(d) - width;
 }
@@ -229,10 +199,12 @@ export function IrisPortalBackground({
   loading = false,
   isDialogActive = false,
   showInAppAvatar = false,
+  isActive = true,
   className = "",
 }: IrisPortalBackgroundProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const renderCallbackRef = useRef<((now: number) => void) | null>(null);
 
   // References for live smooth interpolation without re-binding WebGL
   const stateRef = useRef({
@@ -241,17 +213,23 @@ export function IrisPortalBackground({
     loading,
     isDialogActive,
     showInAppAvatar,
+    isActive,
   });
 
   useEffect(() => {
+    const wasActive = stateRef.current.isActive;
     stateRef.current = {
       emotion,
       voiceState,
       loading,
       isDialogActive,
       showInAppAvatar,
+      isActive,
     };
-  }, [emotion, voiceState, loading, isDialogActive, showInAppAvatar]);
+    if (isActive && !wasActive && animationFrameRef.current === null && renderCallbackRef.current) {
+      animationFrameRef.current = requestAnimationFrame(renderCallbackRef.current);
+    }
+  }, [emotion, voiceState, loading, isDialogActive, showInAppAvatar, isActive]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -305,13 +283,45 @@ export function IrisPortalBackground({
     const uAudioLevelLoc = gl.getUniformLocation(program, "u_audioLevel");
     const uStatusModeLoc = gl.getUniformLocation(program, "u_statusMode");
 
-    // Live state values for smooth lerping
-    const visuals = getMoodVisuals(emotion);
-    let currCore = hexToRgb(visuals.colors[0]);
-    let currFringe = hexToRgb(visuals.colors[1]);
-    let currAccent = hexToRgb(visuals.colors[2]);
-    let currWarp = visuals.warp;
-    let currSpeed = visuals.speed;
+    // Helper: convert hex to OKLab triple
+    const hexToOklab = (hex: string): [number, number, number] => {
+      const [r, g, b] = hexToRgb(hex);
+      return rgbToOklab(r, g, b);
+    };
+
+    const getMoodOklab = (emo: string) => {
+      const visuals = getMoodVisuals(emo);
+      return {
+        visuals,
+        coreLab: hexToOklab(visuals.colors[0]),
+        fringeLab: hexToOklab(visuals.colors[1]),
+        accentLab: hexToOklab(visuals.colors[2]),
+      };
+    };
+
+    // Pre-calculated fallback colors in OKLab
+    const errorCoreLab = rgbToOklab(0.98, 0.38, 0.42);
+    const errorFringeLab = rgbToOklab(0.86, 0.14, 0.28);
+    const errorAccentLab = rgbToOklab(0.42, 0.08, 0.38);
+
+    let cachedEmotion = emotion;
+    let cachedMood = getMoodOklab(emotion);
+
+    // Current OKLab coordinates maintained directly as scalars (zero array allocations per frame)
+    let currCoreL = cachedMood.coreLab[0];
+    let currCoreA = cachedMood.coreLab[1];
+    let currCoreB = cachedMood.coreLab[2];
+
+    let currFringeL = cachedMood.fringeLab[0];
+    let currFringeA = cachedMood.fringeLab[1];
+    let currFringeB = cachedMood.fringeLab[2];
+
+    let currAccentL = cachedMood.accentLab[0];
+    let currAccentA = cachedMood.accentLab[1];
+    let currAccentB = cachedMood.accentLab[2];
+
+    let currWarp = cachedMood.visuals.warp;
+    let currSpeed = cachedMood.visuals.speed;
     let currRadius = 0.54;
     let currIntensity = 1.0;
     let currStatusMode = 0.0;
@@ -323,11 +333,12 @@ export function IrisPortalBackground({
     let currMouseX = 0.50;
     let currMouseY = 0.50;
 
+    let cachedRect = { left: 0, top: 0, width: 1, height: 1 };
+
     const handleMouseMove = (event: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        targetMouseX = (event.clientX - rect.left) / rect.width;
-        targetMouseY = 1.0 - (event.clientY - rect.top) / rect.height;
+      if (cachedRect.width > 0 && cachedRect.height > 0) {
+        targetMouseX = Math.max(0, Math.min(1, (event.clientX - cachedRect.left) / cachedRect.width));
+        targetMouseY = Math.max(0, Math.min(1, 1.0 - (event.clientY - cachedRect.top) / cachedRect.height));
       }
     };
 
@@ -337,14 +348,36 @@ export function IrisPortalBackground({
     let accumulatedTime = 0;
 
     const resize = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const displayWidth = Math.max(1, Math.floor(canvas.clientWidth * dpr));
-      const displayHeight = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        cachedRect = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+      }
 
-      if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
-        canvas.width = displayWidth;
-        canvas.height = displayHeight;
-        gl.viewport(0, 0, canvas.width, canvas.height);
+      // Atmospheric background portal is an ambient glow; capping at max 1280x720 / DPR 1.0
+      // drastically cuts GPU fragment shader fill-rate on high-res displays while preserving visual fidelity
+      const clientW = canvas.clientWidth || window.innerWidth || 800;
+      const clientH = canvas.clientHeight || window.innerHeight || 600;
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.0);
+
+      let targetW = Math.max(1, Math.floor(clientW * dpr));
+      let targetH = Math.max(1, Math.floor(clientH * dpr));
+
+      const maxDim = 1280;
+      if (targetW > maxDim || targetH > maxDim) {
+        const aspect = targetW / targetH;
+        if (targetW >= targetH) {
+          targetW = maxDim;
+          targetH = Math.max(1, Math.floor(maxDim / aspect));
+        } else {
+          targetH = maxDim;
+          targetW = Math.max(1, Math.floor(maxDim * aspect));
+        }
+      }
+
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW;
+        canvas.height = targetH;
+        gl.viewport(0, 0, targetW, targetH);
       }
     };
 
@@ -356,15 +389,25 @@ export function IrisPortalBackground({
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
     const render = (now: number) => {
+      const state = stateRef.current;
+      if (!state.isActive || (typeof document !== "undefined" && document.hidden)) {
+        animationFrameRef.current = null;
+        return;
+      }
+
       const dt = Math.min(0.1, (now - lastTime) / 1000);
       lastTime = now;
 
-      const state = stateRef.current;
-      const currentVisuals = getMoodVisuals(state.emotion);
+      if (state.emotion !== cachedEmotion) {
+        cachedEmotion = state.emotion;
+        cachedMood = getMoodOklab(state.emotion);
+      }
 
-      let targetCore = hexToRgb(currentVisuals.colors[0]);
-      let targetFringe = hexToRgb(currentVisuals.colors[1]);
-      let targetAccent = hexToRgb(currentVisuals.colors[2]);
+      const currentVisuals = cachedMood.visuals;
+      let targetCoreLab = cachedMood.coreLab;
+      let targetFringeLab = cachedMood.fringeLab;
+      let targetAccentLab = cachedMood.accentLab;
+
       let targetWarp = currentVisuals.warp;
       let targetSpeed = currentVisuals.speed;
       let targetRadius = 0.54;
@@ -393,9 +436,9 @@ export function IrisPortalBackground({
         targetRadius = 0.52;
         targetSpeed = 1.6;
         targetIntensity = 1.4;
-        targetCore = [0.98, 0.38, 0.42]; // Rose crimson
-        targetFringe = [0.86, 0.14, 0.28]; // Ruby
-        targetAccent = [0.42, 0.08, 0.38]; // Deep plum violet
+        targetCoreLab = errorCoreLab;
+        targetFringeLab = errorFringeLab;
+        targetAccentLab = errorAccentLab;
       } else if (!state.isDialogActive) {
         targetStatus = 0.0;
         targetRadius = 0.52;
@@ -414,18 +457,24 @@ export function IrisPortalBackground({
         targetCenterY = 0.95;
       }
 
-      // Multi-stage / phase-staggered color transition in OKLab space:
-      // 1. Fringe/Halo wave reacts first with brisk speed (creates outer emotional propagation)
+      // Phase-staggered scalar color transition in OKLab space (zero array allocations):
+      // 1. Fringe/Halo wave reacts first
       const fringeFactor = Math.min(1.0, dt * 5.4);
-      currFringe = lerpOklab(currFringe, targetFringe, fringeFactor);
+      currFringeL = lerp(currFringeL, targetFringeLab[0], fringeFactor);
+      currFringeA = lerp(currFringeA, targetFringeLab[1], fringeFactor);
+      currFringeB = lerp(currFringeB, targetFringeLab[2], fringeFactor);
 
-      // 2. Core filament follows closely to crystallize the focal emotion
+      // 2. Core filament follows
       const coreFactor = Math.min(1.0, dt * 3.8);
-      currCore = lerpOklab(currCore, targetCore, coreFactor);
+      currCoreL = lerp(currCoreL, targetCoreLab[0], coreFactor);
+      currCoreA = lerp(currCoreA, targetCoreLab[1], coreFactor);
+      currCoreB = lerp(currCoreB, targetCoreLab[2], coreFactor);
 
-      // 3. Ambient atmospheric wash follows with soft, deep inertia
+      // 3. Ambient atmospheric wash follows
       const accentFactor = Math.min(1.0, dt * 2.4);
-      currAccent = lerpOklab(currAccent, targetAccent, accentFactor);
+      currAccentL = lerp(currAccentL, targetAccentLab[0], accentFactor);
+      currAccentA = lerp(currAccentA, targetAccentLab[1], accentFactor);
+      currAccentB = lerp(currAccentB, targetAccentLab[2], accentFactor);
 
       const dynamicFactor = Math.min(1.0, dt * 4.2);
       currWarp = lerp(currWarp, targetWarp, dynamicFactor);
@@ -450,9 +499,14 @@ export function IrisPortalBackground({
       gl.uniform2f(uMouseLoc, currMouseX, currMouseY);
       gl.uniform2f(uCenterLoc, currCenterX, currCenterY);
 
-      gl.uniform3f(uColorCoreLoc, currCore[0], currCore[1], currCore[2]);
-      gl.uniform3f(uColorFringeLoc, currFringe[0], currFringe[1], currFringe[2]);
-      gl.uniform3f(uColorAccentLoc, currAccent[0], currAccent[1], currAccent[2]);
+      // Convert OKLab to sRGB only once per uniform upload
+      const [rCore, gCore, bCore] = oklabToRgb(currCoreL, currCoreA, currCoreB);
+      const [rFringe, gFringe, bFringe] = oklabToRgb(currFringeL, currFringeA, currFringeB);
+      const [rAccent, gAccent, bAccent] = oklabToRgb(currAccentL, currAccentA, currAccentB);
+
+      gl.uniform3f(uColorCoreLoc, rCore, gCore, bCore);
+      gl.uniform3f(uColorFringeLoc, rFringe, gFringe, bFringe);
+      gl.uniform3f(uColorAccentLoc, rAccent, gAccent, bAccent);
 
       gl.uniform1f(uRadiusLoc, currRadius);
       gl.uniform1f(uWarpLoc, currWarp);
@@ -469,14 +523,35 @@ export function IrisPortalBackground({
       animationFrameRef.current = requestAnimationFrame(render);
     };
 
-    animationFrameRef.current = requestAnimationFrame(render);
+    renderCallbackRef.current = render;
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        if (animationFrameRef.current !== null) {
+          cancelAnimationFrame(animationFrameRef.current);
+          animationFrameRef.current = null;
+        }
+      } else if (stateRef.current.isActive && animationFrameRef.current === null) {
+        lastTime = performance.now();
+        animationFrameRef.current = requestAnimationFrame(render);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    if (stateRef.current.isActive) {
+      animationFrameRef.current = requestAnimationFrame(render);
+    }
 
     return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("mousemove", handleMouseMove);
       observer?.disconnect();
       if (animationFrameRef.current !== null) {
         cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
+      renderCallbackRef.current = null;
       gl.deleteBuffer(positionBuffer);
       gl.deleteProgram(program);
     };

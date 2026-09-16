@@ -62,6 +62,26 @@ def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, float(value)))
 
 
+@contextlib.contextmanager
+def _patch_pathlib_read_text_utf8():
+    """Ensure RUAccent/TeraTTS loads vocab.txt as UTF-8 on Windows regardless of launcher environment."""
+    orig_read_text = Path.read_text
+
+    def _safe_read_text(self: Path, encoding: str | None = None, errors: str | None = None) -> str:
+        if encoding is None:
+            try:
+                return orig_read_text(self, encoding="utf-8", errors=errors)
+            except UnicodeDecodeError:
+                return orig_read_text(self, encoding=encoding, errors=errors)
+        return orig_read_text(self, encoding=encoding, errors=errors)
+
+    Path.read_text = _safe_read_text  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        Path.read_text = orig_read_text  # type: ignore[assignment]
+
+
 class TeraTTSProvider(TTSProvider):
     """Lazy, deterministic TeraTTSv2 provider with a stable WAV contract."""
 
@@ -277,10 +297,18 @@ class TeraTTSProvider(TTSProvider):
             kwargs["revision"] = self.revision
             if self.cache_dir:
                 kwargs["cache_dir"] = str(self.cache_dir)
-        return AutoModel.from_pretrained(source, **kwargs)
+        with _patch_pathlib_read_text_utf8():
+            return AutoModel.from_pretrained(source, **kwargs)
 
     def _warmup_sync(self) -> None:
-        self._render_sync("Привет.", self.voice, VoiceStyle.NORMAL, 1.0)
+        try:
+            import torch
+            with torch.inference_mode():
+                self._render_sync("Привет.", self.voice, VoiceStyle.NORMAL, 1.0)
+        except Exception:
+            self._render_sync("Привет.", self.voice, VoiceStyle.NORMAL, 1.0)
+        finally:
+            gc.collect()
 
     @staticmethod
     def _friendly_load_error(exc: Exception) -> RuntimeError:

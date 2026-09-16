@@ -12,6 +12,8 @@ import sys
 os.environ.setdefault("PYTHONUTF8", "1")
 os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
+os.environ.setdefault("KMP_BLOCKTIME", "0")
 
 import uvicorn
 from fastapi import FastAPI

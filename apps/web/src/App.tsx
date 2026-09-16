@@ -639,10 +639,27 @@ function MainApp() {
 
   const refreshReadiness = useCallback(async () => {
     try {
-      setReadiness(await getReadiness());
+      const next = await getReadiness();
+      setReadiness((current) => {
+        if (
+          current &&
+          current.phase === next.phase &&
+          current.live_ready === next.live_ready &&
+          current.text_chat === next.text_chat &&
+          current.stt === next.stt &&
+          current.tts === next.tts &&
+          current.vad === next.vad &&
+          current.errors.length === next.errors.length
+        ) {
+          return current;
+        }
+        return next;
+      });
+      return next;
     } catch {
       // The core status indicator remains authoritative while the readiness
       // endpoint is unavailable during an older or restarting backend.
+      return null;
     }
   }, []);
 
@@ -683,7 +700,12 @@ function MainApp() {
     const timer = window.setInterval(() => {
       void refreshOverview();
     }, 10000);
-    const readinessTimer = window.setInterval(() => { void refreshReadiness(); }, 1200);
+    const readinessTimer = window.setInterval(async () => {
+      const result = await refreshReadiness();
+      if (result && (result.live_ready || result.phase === "ready" || result.phase === "degraded")) {
+        window.clearInterval(readinessTimer);
+      }
+    }, 1200);
     return () => {
       window.cancelAnimationFrame(firstFrame);
       window.clearInterval(timer);
@@ -2412,11 +2434,13 @@ export function ChatPage({
         style={{ "--dock-scale": dockScale } as React.CSSProperties}
       >
         <IrisPortalBackground
+          key="iris-portal-bg"
           emotion={currentEmotion}
           voiceState={voiceState}
           loading={loading}
           isDialogActive={false}
           showInAppAvatar={showInAppAvatar && isActive}
+          isActive={isActive}
         />
         <div className="chat-idle-stage">
           {showInAppAvatar && isActive && <InAppAvatarHost />}
@@ -2480,11 +2504,13 @@ export function ChatPage({
       style={{ "--dock-scale": dockScale } as React.CSSProperties}
     >
       <IrisPortalBackground
+        key="iris-portal-bg"
         emotion={currentEmotion}
         voiceState={voiceState}
         loading={loading}
         isDialogActive={true}
         showInAppAvatar={showInAppAvatar && isActive}
+        isActive={isActive}
       />
       {showInAppAvatar && isActive && <InAppAvatarHost />}
       <div className="chat-content">

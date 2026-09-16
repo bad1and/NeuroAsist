@@ -1,13 +1,19 @@
 import asyncio
+import contextlib
+import gc
 import logging
+import os
 import re
 import sqlite3
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-import contextlib
 from typing import Any
+
+# Prevent OpenMP / Intel MKL worker threads from busy-waiting/spinning when idle.
+os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
+os.environ.setdefault("KMP_BLOCKTIME", "0")
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -1094,17 +1100,18 @@ def create_app() -> FastAPI:
                 logger.warning("Voice Torch threading setup failed", exc_info=True)
                 readiness["errors"].append(f"torch: {type(exc).__name__}: {exc}")
 
-        # Keep all optional preparation off the critical startup path. The
-        # thread policy runs alongside provider preparation; providers also
-        # enforce their own bounded executors, so a slow model cannot starve
-        # the event loop or text API.
+        # Configure torch threading before heavy model initialization begins.
+        await configure_torch()
+        # Light models (VAD and Turn Detector) load quickly without high CPU strain.
         await asyncio.gather(
-            configure_torch(),
-            preload_stt(),
-            preload_tts(),
             preload_vad(),
             preload_turn_detector(),
         )
+        # Preload heavy neural models sequentially to avoid multi-thread CPU saturation
+        # and concurrent memory allocation spikes during initial JIT/ONNX graph compilation.
+        await preload_stt()
+        await preload_tts()
+        gc.collect()
 
     async def startup() -> None:
         nonlocal tts_audio_cleanup_task, storage_maintenance_task, voice_preload_task, avatar_start_task
