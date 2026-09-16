@@ -117,7 +117,7 @@ class CodingAgentService:
             "docker_image_available": docker.image_available,
             "docker_image_name": docker.image_name,
             "model": self.runtime_settings.coding_model,
-            "available_models": ["deepseek-v4-flash", "deepseek-v4-pro"],
+            "available_models": ["deepseek-v4.1-flash", "deepseek-v4.1-pro"],
             "project_root": str(project_root),
             "allowed_project_roots": [str(item) for item in self.settings.coding_allowed_project_paths],
             "workspace_name": self.runtime_settings.coding_workspace_name,

@@ -11,7 +11,7 @@ def test_llm_usage_endpoint_exposes_content_free_rolling_aggregates() -> None:
         timestamp=990.0,
         request_id="request-1",
         purpose="memory",
-        model="deepseek-v4-flash",
+        model="deepseek-v4.1-flash",
         streaming=False,
         thinking=False,
         max_tokens=1_000,

@@ -89,7 +89,7 @@ def test_public_settings_does_not_return_api_key(client: TestClient) -> None:
 def test_runtime_settings_rejects_model_patch(client: TestClient) -> None:
     response = client.patch(
         "/settings/runtime",
-        json={"model": "deepseek-v4-pro"},
+        json={"model": "deepseek-v4.1-pro"},
     )
 
     assert response.status_code == 422

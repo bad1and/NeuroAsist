@@ -248,11 +248,11 @@ export type PublicSettings = {
   api_key_configured: boolean;
   coding_api_key_configured: boolean;
   coding_agent_enabled: boolean;
-  coding_model: "deepseek-v4-flash" | "deepseek-v4-pro";
+  coding_model: "deepseek-v4.1-flash" | "deepseek-v4.1-pro";
   coding_project_root: string;
   coding_workspace_name: string;
   coding_auto_delegate: boolean;
-  coding_available_models: Array<"deepseek-v4-flash" | "deepseek-v4-pro">;
+  coding_available_models: Array<"deepseek-v4.1-flash" | "deepseek-v4.1-pro">;
   coding_allowed_project_roots: string[];
   available_personalities: string[];
   available_voice_languages: string[];

@@ -3953,7 +3953,7 @@ class TimelineStore:
                     (
                         str(legacy["id"]), legacy.get("session_id"), legacy.get("source_message_id"),
                         str(legacy.get("objective") or "Archived Coding Agent task"),
-                        str(task_json.get("model") or "deepseek-v4-flash"),
+                        str(task_json.get("model") or "deepseek-v4.1-flash"),
                         str(task_json.get("project_root") or ""),
                         str(task_json.get("workspace_name") or "default"),
                         legacy.get("workspace_dir") or task_json.get("workspace_path"),

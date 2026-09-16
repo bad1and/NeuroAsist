@@ -75,7 +75,7 @@ class RuntimeSettings:
     # Coding Agent preferences are deliberately non-secret.  The service
     # receives credentials only from static Settings / the desktop keyring.
     coding_agent_enabled: bool = False
-    coding_model: str = "deepseek-v4-flash"
+    coding_model: str = "deepseek-v4.1-flash"
     # Empty means the first server-configured allowed project root.
     coding_project_root: str = ""
     coding_workspace_name: str = "default"
@@ -133,7 +133,11 @@ class RuntimeSettingsStore:
                 values["interface_locale"] = defaults.interface_locale
             if values.get("avatar_placement") not in {None, "desktop_overlay", "in_app"}:
                 values["avatar_placement"] = defaults.avatar_placement
-            if values.get("coding_model") not in {None, "deepseek-v4-flash", "deepseek-v4-pro"}:
+            if values.get("coding_model") == "deepseek-v4-flash":
+                values["coding_model"] = "deepseek-v4.1-flash"
+            elif values.get("coding_model") == "deepseek-v4-pro":
+                values["coding_model"] = "deepseek-v4.1-pro"
+            elif values.get("coding_model") not in {None, "deepseek-v4.1-flash", "deepseek-v4.1-pro"}:
                 values["coding_model"] = defaults.coding_model
             workspace_name = values.get("coding_workspace_name")
             if workspace_name is not None and not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}", workspace_name):
