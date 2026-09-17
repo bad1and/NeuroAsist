@@ -146,10 +146,23 @@ export class BrowserVadRecorder {
       throw new Error("AudioWorklet VAD is unavailable in this browser");
     }
     const requestedConstraints = microphoneConstraints(profile, inputDeviceId);
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: requestedConstraints,
-    });
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        audio: requestedConstraints,
+      });
+    } catch (err) {
+      if (inputDeviceId) {
+        this.stream = await navigator.mediaDevices.getUserMedia({
+          audio: microphoneConstraints(profile, ""),
+        });
+      } else {
+        throw err;
+      }
+    }
     this.context = new AudioContext();
+    if (this.context.state === "suspended") {
+      await this.context.resume().catch(() => undefined);
+    }
     this.objectUrl = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: "text/javascript" }));
     await this.context.audioWorklet.addModule(this.objectUrl);
     const source = this.context.createMediaStreamSource(this.stream);
@@ -249,7 +262,21 @@ export class PcmInputClient {
     this.manuallyClosed = false;
     if (this.socket?.readyState === WebSocket.OPEN) return;
     if (this.connectionPromise) return this.connectionPromise;
-    this.connectionPromise = this.openSocket();
+    this.connectionPromise = (async () => {
+      try {
+        await this.openSocket();
+      } catch (firstErr) {
+        if (!this.manuallyClosed) {
+          // Quick retry before failing to absorb backend session transition delays
+          await new Promise((r) => globalThis.setTimeout(r, 250));
+          if (!this.manuallyClosed) {
+            await this.openSocket();
+            return;
+          }
+        }
+        throw firstErr;
+      }
+    })();
     try {
       await this.connectionPromise;
     } finally {
@@ -282,7 +309,11 @@ export class PcmInputClient {
       socket.onerror = () => {
         if (!settled) {
           settled = true;
-          reject(new Error("PCM input WebSocket failed"));
+          if (!this.manuallyClosed) {
+            reject(new Error("PCM input WebSocket failed"));
+          } else {
+            resolve();
+          }
         }
       };
       socket.onmessage = (message) => {
@@ -304,7 +335,14 @@ export class PcmInputClient {
           this.socket = null;
           this.ready = false;
         }
-        if (!settled) reject(new Error("PCM input WebSocket closed before ready"));
+        if (!settled) {
+          settled = true;
+          if (!this.manuallyClosed) {
+            reject(new Error("PCM input WebSocket closed before ready"));
+          } else {
+            resolve();
+          }
+        }
         if (isCurrent && !this.manuallyClosed) this.scheduleReconnect();
       };
     });

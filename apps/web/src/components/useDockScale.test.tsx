@@ -4,12 +4,13 @@ import "@testing-library/jest-dom/vitest";
 import { renderHook, act } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { useRef } from "react";
-import { useDockScale } from "./useDockScale";
+import { useDockScale, resetLastKnownScaleForTesting } from "./useDockScale";
 
 describe("useDockScale", () => {
   let mockElement: HTMLDivElement;
 
   beforeEach(() => {
+    resetLastKnownScaleForTesting();
     mockElement = document.createElement("div");
     document.body.appendChild(mockElement);
   });

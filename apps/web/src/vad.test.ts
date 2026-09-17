@@ -128,4 +128,23 @@ describe("VoiceActivityGate", () => {
       vi.useRealTimers();
     }
   });
+
+  it("resolves cleanly without throwing when closed before ready", async () => {
+    class FakeSocket {
+      static last: FakeSocket;
+      readyState = 0;
+      onopen: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      constructor(_url: string) { FakeSocket.last = this; }
+      send() {}
+      close() { this.onclose?.(); }
+    }
+    Object.assign(FakeSocket, { OPEN: 1 });
+    vi.stubGlobal("WebSocket", FakeSocket);
+    const client = new PcmInputClient("ws://voice", () => undefined);
+    const connecting = client.connect(16_000, "ru");
+    client.close();
+    await expect(connecting).resolves.toBeUndefined();
+  });
 });

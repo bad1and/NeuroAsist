@@ -1161,6 +1161,7 @@ export function ChatPage({
   const livePlayerRef = useRef<TTSStreamPlayer | null>(null);
   const vadRecorderRef = useRef<BrowserVadRecorder | null>(null);
   const pcmInputRef = useRef<PcmInputClient | null>(null);
+  const liveConnectingRef = useRef(false);
   const playbackCoordinatorRef = useRef(new PlaybackCoordinator());
   const avatarOwnsAudioRef = useRef(false);
   const liveAudioStartedRef = useRef(false);
@@ -2155,7 +2156,7 @@ export function ChatPage({
   };
 
   const toggleLive = async () => {
-    if (!sessionId || !liveReady) return;
+    if (!sessionId || !liveReady || liveConnectingRef.current) return;
     if (liveConversation) {
       cancelPendingBargeIn();
       vadRecorderRef.current?.stop();
@@ -2168,6 +2169,7 @@ export function ChatPage({
       updateConversationStatus("Live выключен");
       return;
     }
+    liveConnectingRef.current = true;
     cancelPendingBargeIn();
     vadRecorderRef.current?.stop();
     pcmInputRef.current?.close();
@@ -2298,8 +2300,19 @@ export function ChatPage({
       vadRecorderRef.current = null;
       pcmInputRef.current = null;
       setMicrophoneMuted(false);
-      setError(vadError instanceof Error ? vadError.message : "Live-режим недоступен");
+      const rawMsg = vadError instanceof Error ? vadError.message : "";
+      let userMsg = "Live-режим недоступен";
+      if (rawMsg.includes("WebSocket") || rawMsg.includes("closed before")) {
+        userMsg = "Не удалось подключиться к аудиосерверу диалога. Попробуйте ещё раз.";
+      } else if (rawMsg.includes("AudioWorklet") || rawMsg.includes("getUserMedia") || rawMsg.includes("Permission") || rawMsg.includes("NotAllowed")) {
+        userMsg = "Микрофон недоступен или заблокирован в браузере.";
+      } else if (rawMsg) {
+        userMsg = rawMsg;
+      }
+      setError(userMsg);
       setLiveConversation(false);
+    } finally {
+      liveConnectingRef.current = false;
     }
   };
 
@@ -2529,18 +2542,6 @@ export function ChatPage({
           containerRef={listRef}
           onOpenMemory={onOpenMemory}
         />
-
-        {error && (
-          <div className="error-banner" role="alert">
-            <IconInterfaceAlertAlarmBell2 size={18} aria-hidden="true" />
-            {error}
-            {retryText && (
-              <button className="text-button" type="button" onClick={() => { setDraft(retryText); setRetryText(null); }}>
-                Повторить
-              </button>
-            )}
-          </div>
-        )}
 
         <div
           className="chat-composer-container"
