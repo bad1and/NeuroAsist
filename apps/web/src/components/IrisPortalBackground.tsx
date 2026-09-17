@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import { getMoodVisuals } from "../mood-visuals";
 import { audioAnalyzer } from "../audio-analyzer";
 import type { VoiceState } from "../types";
@@ -140,8 +140,8 @@ void main() {
     float wash = smoothstep(dynRadius * 2.2, 0.0, distToCenter) * 0.22;
 
     // Glow distributions
-    float coreGlow = exp(-d1 * (26.0 - u_audioHigh * 7.0));
-    float fringeGlow = exp(-d2 * 8.8);
+    float coreGlow = exp(-max(0.0, d1) * (26.0 - u_audioHigh * 7.0));
+    float fringeGlow = exp(-max(0.0, d2) * 8.8);
 
     // Subtle multi-spectral dispersion along the organic arc
     float angle = atan(st.y - center.y, st.x - center.x);
@@ -193,7 +193,7 @@ function createProgram(gl: WebGLRenderingContext, vsSource: string, fsSource: st
   return program;
 }
 
-export function IrisPortalBackground({
+export const IrisPortalBackground = memo(function IrisPortalBackground({
   emotion = "neutral",
   voiceState = "idle",
   loading = false,
@@ -205,6 +205,7 @@ export function IrisPortalBackground({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const renderCallbackRef = useRef<((now: number) => void) | null>(null);
+  const resetTimeRef = useRef<(() => void) | null>(null);
 
   // References for live smooth interpolation without re-binding WebGL
   const stateRef = useRef({
@@ -226,8 +227,11 @@ export function IrisPortalBackground({
       showInAppAvatar,
       isActive,
     };
-    if (isActive && !wasActive && animationFrameRef.current === null && renderCallbackRef.current) {
-      animationFrameRef.current = requestAnimationFrame(renderCallbackRef.current);
+    if (isActive && !wasActive && renderCallbackRef.current) {
+      if (resetTimeRef.current) resetTimeRef.current();
+      if (animationFrameRef.current === null) {
+        animationFrameRef.current = requestAnimationFrame(renderCallbackRef.current);
+      }
     }
   }, [emotion, voiceState, loading, isDialogActive, showInAppAvatar, isActive]);
 
@@ -325,7 +329,8 @@ export function IrisPortalBackground({
     let currRadius = 0.54;
     let currIntensity = 1.0;
     let currStatusMode = 0.0;
-    let currCenterX = -0.08;
+    const initialDialogActive = stateRef.current.isDialogActive;
+    let currCenterX = (initialDialogActive && stateRef.current.showInAppAvatar) ? -0.08 : 0.0;
     let currCenterY = 0.95;
 
     let targetMouseX = 0.50;
@@ -346,23 +351,23 @@ export function IrisPortalBackground({
 
     let lastTime = performance.now();
     let accumulatedTime = 0;
+    resetTimeRef.current = () => {
+      lastTime = performance.now();
+    };
 
-    const resize = () => {
-      const rect = canvas.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        cachedRect = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
-      }
+    const resize = (width?: number, height?: number) => {
+      const clientW = width && width > 0 ? width : (canvas.clientWidth || window.innerWidth || 800);
+      const clientH = height && height > 0 ? height : (canvas.clientHeight || window.innerHeight || 600);
+      cachedRect = { left: 0, top: 0, width: clientW, height: clientH };
 
-      // Atmospheric background portal is an ambient glow; capping at max 1280x720 / DPR 1.0
-      // drastically cuts GPU fragment shader fill-rate on high-res displays while preserving visual fidelity
-      const clientW = canvas.clientWidth || window.innerWidth || 800;
-      const clientH = canvas.clientHeight || window.innerHeight || 600;
-      const dpr = Math.min(window.devicePixelRatio || 1, 1.0);
+      // Atmospheric background portal is an ambient glow; capping at max 800x450 / DPR 0.8
+      // drastically cuts GPU fragment shader fill-rate while preserving visual fidelity
+      const dpr = Math.min(window.devicePixelRatio || 1, 0.8);
 
       let targetW = Math.max(1, Math.floor(clientW * dpr));
       let targetH = Math.max(1, Math.floor(clientH * dpr));
 
-      const maxDim = 1280;
+      const maxDim = 800;
       if (targetW > maxDim || targetH > maxDim) {
         const aspect = targetW / targetH;
         if (targetW >= targetH) {
@@ -374,14 +379,23 @@ export function IrisPortalBackground({
         }
       }
 
-      if (canvas.width !== targetW || canvas.height !== targetH) {
+      if (Math.abs(canvas.width - targetW) > 2 || Math.abs(canvas.height - targetH) > 2) {
         canvas.width = targetW;
         canvas.height = targetH;
         gl.viewport(0, 0, targetW, targetH);
       }
     };
 
-    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
+    const observer = typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver((entries) => {
+          const entry = entries[0];
+          if (entry?.contentRect && entry.contentRect.width > 0 && entry.contentRect.height > 0) {
+            resize(entry.contentRect.width, entry.contentRect.height);
+          } else {
+            resize();
+          }
+        })
+      : null;
     observer?.observe(canvas);
     resize();
 
@@ -395,7 +409,7 @@ export function IrisPortalBackground({
         return;
       }
 
-      const dt = Math.min(0.1, (now - lastTime) / 1000);
+      const dt = Math.min(0.033, Math.max(0.001, (now - lastTime) / 1000));
       lastTime = now;
 
       if (state.emotion !== cachedEmotion) {
@@ -552,6 +566,7 @@ export function IrisPortalBackground({
         animationFrameRef.current = null;
       }
       renderCallbackRef.current = null;
+      resetTimeRef.current = null;
       gl.deleteBuffer(positionBuffer);
       gl.deleteProgram(program);
     };
@@ -562,5 +577,5 @@ export function IrisPortalBackground({
       <canvas ref={canvasRef} className="iris-portal-canvas" />
     </div>
   );
-}
+});
 

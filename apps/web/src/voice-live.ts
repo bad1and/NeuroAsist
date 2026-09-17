@@ -75,6 +75,7 @@ export class TTSStreamPlayer {
   private prebufferMs: number;
   private startLeadMs: number;
   private outputDeviceId: string;
+  private currentSinkId: string | null = null;
 
   constructor(
     private readonly onStarted: () => void,
@@ -96,18 +97,30 @@ export class TTSStreamPlayer {
     this.prebufferSegments = Math.max(1, options.prebufferSegments ?? this.prebufferSegments);
     this.prebufferMs = Math.max(0, options.prebufferMs ?? this.prebufferMs);
     this.startLeadMs = Math.max(0, options.startLeadMs ?? this.startLeadMs);
-    this.outputDeviceId = options.outputDeviceId ?? this.outputDeviceId;
+    const newOutputDeviceId = options.outputDeviceId ?? this.outputDeviceId;
+    if (newOutputDeviceId !== this.outputDeviceId) {
+      this.outputDeviceId = newOutputDeviceId;
+      if (this.context && this.currentSinkId !== newOutputDeviceId) {
+        void this.setOutputDevice(newOutputDeviceId).catch(() => undefined);
+      }
+    }
   }
 
   async unlock(): Promise<void> {
     this.context ??= new AudioContext();
-    if (this.outputDeviceId) await setAudioContextOutput(this.context, this.outputDeviceId);
+    if (this.outputDeviceId && this.currentSinkId !== this.outputDeviceId) {
+      this.currentSinkId = this.outputDeviceId;
+      await setAudioContextOutput(this.context, this.outputDeviceId);
+    }
     if (this.context.state === "suspended") await this.context.resume();
   }
 
   async setOutputDevice(deviceId: string): Promise<void> {
     this.outputDeviceId = deviceId;
-    if (this.context) await setAudioContextOutput(this.context, deviceId);
+    if (this.context && this.currentSinkId !== deviceId) {
+      this.currentSinkId = deviceId;
+      await setAudioContextOutput(this.context, deviceId);
+    }
   }
 
   begin(utteranceId: string): void {

@@ -2,6 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, VoiceState } from "../types";
 import { animateThinkingWave } from "../animations/transitions";
 
+const intlWithSegmenter = typeof Intl !== "undefined" && "Segmenter" in Intl
+  ? (Intl as unknown as { Segmenter: new (locale: string, options?: { granularity: "sentence" | "word" | "grapheme" }) => { segment: (input: string) => Iterable<{ segment: string }> } })
+  : null;
+const cachedSentenceSegmenter = intlWithSegmenter
+  ? new intlWithSegmenter.Segmenter("ru", { granularity: "sentence" })
+  : null;
+
 /**
  * Splits text into readable subtitle cues (1-2 sentences / max ~75-85 characters),
  * cleanly splitting on newlines, sentence boundaries, punctuation pauses, or word boundaries.
@@ -12,13 +19,7 @@ export function splitIntoSubtitleCues(text: string, maxChars = 45): string[] {
 
   const cues: string[] = [];
   const rawParagraphs = normalized.split(/\n+/);
-
-  const intlWithSegmenter = typeof Intl !== "undefined" && "Segmenter" in Intl
-    ? (Intl as unknown as { Segmenter: new (locale: string, options?: { granularity: "sentence" | "word" | "grapheme" }) => { segment: (input: string) => Iterable<{ segment: string }> } })
-    : null;
-  const sentenceSegmenter = intlWithSegmenter
-    ? new intlWithSegmenter.Segmenter("ru", { granularity: "sentence" })
-    : null;
+  const sentenceSegmenter = cachedSentenceSegmenter;
 
   for (const para of rawParagraphs) {
     const p = para.trim();

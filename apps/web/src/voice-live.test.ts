@@ -90,6 +90,13 @@ describe("TTSStreamPlayer", () => {
     expect(FakeAudioContext.instance.setSinkId).toHaveBeenCalledWith("headphones");
   });
 
+  it("does not re-invoke setSinkId if the output device has not changed", async () => {
+    const player = new TTSStreamPlayer(vi.fn(), vi.fn(), vi.fn(), { outputDeviceId: "headphones" });
+    await player.unlock();
+    await player.unlock();
+    expect(FakeAudioContext.instance.setSinkId).toHaveBeenCalledTimes(1);
+  });
+
   it("decodes and schedules segments strictly in sequence", async () => {
     const player = new TTSStreamPlayer(vi.fn(), vi.fn(), vi.fn());
     player.begin("utterance");
