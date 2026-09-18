@@ -147,7 +147,13 @@ class ConversationTurnCoordinator:
             task=task or asyncio.current_task(), assistant_message_id=lease.assistant_message_id,
         )
 
-    async def complete_assistant(self, session_id: str, lease: AssistantLease, content: str) -> StoredTimelineMessage:
+    async def complete_assistant(
+        self,
+        session_id: str,
+        lease: AssistantLease,
+        content: str,
+        metadata_update: dict[str, object] | None = None,
+    ) -> StoredTimelineMessage:
         message = await asyncio.to_thread(
             self._store.finish_assistant_turn,
             session_key=session_id,
@@ -155,6 +161,7 @@ class ConversationTurnCoordinator:
             generation=lease.generation,
             content=content,
             status="completed",
+            metadata_update=metadata_update,
         )
         self._tasks.pop((session_id, lease.generation), None)
         return message

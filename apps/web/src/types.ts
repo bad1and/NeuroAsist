@@ -34,6 +34,7 @@ export type ChatResponse = {
   assistant_message_id?: string | null;
   turn_id?: string | null;
   generation?: number | null;
+  usage?: TokenMetadata | null;
 };
 
 export type MemoryUpdate = {
@@ -424,6 +425,45 @@ export type ConversationDebug = {
   };
 };
 
+export type TokenMetadata = {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  reasoning_tokens?: number;
+  prompt_cache_hit_tokens?: number;
+  prompt_cache_miss_tokens?: number;
+  latency_ms?: number;
+  model?: string;
+  raw_usage?: Record<string, unknown>;
+};
+
+export type CompanionTurnMetadata = {
+  emotion?: string;
+  intensity?: number;
+  gesture?: string | null;
+  intent?: string;
+  cognitive_appraisal?: string | null;
+  diary_note?: string | null;
+};
+
+export type MemoryCandidateItem = {
+  id?: string;
+  kind?: string;
+  subject?: string;
+  predicate?: string;
+  value_text?: string;
+  importance?: number;
+  confidence?: number;
+  [key: string]: unknown;
+};
+
+export type MessageMetadata = {
+  tokens?: TokenMetadata;
+  companion?: CompanionTurnMetadata;
+  memory_updates?: Array<string | MemoryCandidateItem>;
+  [key: string]: unknown;
+};
+
 export type TimelineMessage = {
   id: string;
   role: "user" | "assistant" | "system_event";
@@ -433,6 +473,7 @@ export type TimelineMessage = {
   status: string;
   input_mode: "voice" | "text" | "system";
   created_at: string;
+  metadata?: MessageMetadata;
 };
 
 export type TimelineJournalItem = {
@@ -445,6 +486,7 @@ export type TimelineJournalItem = {
   status?: string;
   boundary_reason?: string | null;
   title?: string | null;
+  token_estimate?: number;
 };
 
 export type MemoryStatus = "active" | "superseded" | "rejected" | "deleted" | "expired";
@@ -595,3 +637,79 @@ export type MemoryDiagnostics = {
 };
 
 export type VoiceState = "idle" | "recording" | "transcribing" | "thinking" | "speaking" | "stopping" | "error";
+
+export type TokenUsageTimeseriesPoint = {
+  timestamp: number;
+  label: string;
+  total: number;
+  prompt: number;
+  completion: number;
+  cache_hit: number;
+  request_count: number;
+};
+
+export type TokenPurposeBreakdown = {
+  request_count: number;
+  prompt: number;
+  completion: number;
+  total: number;
+  cache_hit: number;
+};
+
+export type TokenModelBreakdown = {
+  request_count: number;
+  prompt: number;
+  completion: number;
+  total: number;
+};
+
+export type TokenUsageStats = {
+  timeframe: string;
+  total_tokens: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  reasoning_tokens: number;
+  cache_hit_tokens: number;
+  cache_miss_tokens: number;
+  cache_hit_rate: number;
+  request_count: number;
+  success_count: number;
+  error_count: number;
+  latency_avg_ms: number;
+  latency_p95_ms: number;
+  estimated_cost_usd: number;
+  by_purpose: Record<string, TokenPurposeBreakdown>;
+  by_model: Record<string, TokenModelBreakdown>;
+  timeseries: TokenUsageTimeseriesPoint[];
+};
+
+export type TokenRecordItem = {
+  timestamp: number;
+  request_id: string;
+  purpose: string;
+  model: string;
+  streaming: boolean;
+  thinking: boolean;
+  max_tokens?: number | null;
+  message_count: number;
+  input_chars: number;
+  usage_available: boolean;
+  prompt: number;
+  completion: number;
+  total: number;
+  reasoning: number;
+  cache_hit: number;
+  cache_miss: number;
+  latency_ms: number;
+  finish_reason?: string | null;
+  status: string;
+  error_type?: string | null;
+  logical_attempt: number;
+};
+
+export type TokenRecordsResponse = {
+  items: TokenRecordItem[];
+  total: number;
+  limit: number;
+  offset: number;
+};

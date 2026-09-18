@@ -157,6 +157,7 @@ import { InAppAvatarHost } from "./components/InAppAvatarHost";
 import { IrisPortalBackground } from "./components/IrisPortalBackground";
 import { IrisSubtitles } from "./components/IrisSubtitles";
 import { NotificationHost } from "./components/NotificationHost";
+import { TokenAnalyticsSettings } from "./components/TokenAnalyticsSettings";
 import { notify } from "./notifications";
 import { audioAnalyzer } from "./audio-analyzer";
 import {
@@ -215,6 +216,7 @@ type SettingsSection =
   | "memory"
   | "system-interface"
   | "api-keys"
+  | "token-usage"
   | "system-overview"
   | "models"
   | "backups"
@@ -3165,6 +3167,7 @@ export function SettingsPage({
     memory: { title: "Память", description: "Какие сведения Iris может сохранять между разговорами." },
     "system-interface": { title: "Интерфейс", description: "Общие настройки интерфейса." },
     "api-keys": { title: "API-ключи", description: "Защищённое локальное хранение ключей моделей." },
+    "token-usage": { title: "Токены и расходы", description: "Учет входящих и исходящих токенов API, кэширование и аналитика затрат." },
     "system-overview": { title: "Система", description: "Состояние подключения и компонентов Iris." },
     models: { title: "Модели", description: "Загрузка и обслуживание локальных моделей." },
     backups: { title: "Резервные копии", description: "Копии памяти и настроек профиля." },
@@ -3206,7 +3209,7 @@ export function SettingsPage({
     "Выбранное устройство вывода сейчас недоступно",
   );
 
-  const activeSettingsMeta = settingsSectionMeta[activeSection];
+  const activeSettingsMeta = settingsSectionMeta[activeSection] || { title: "", description: "" };
   const desktopCredentialStorageAvailable = isDesktopApp();
   const settingsContentRef = useRef<HTMLDivElement | null>(null);
 
@@ -3226,7 +3229,7 @@ export function SettingsPage({
       <SettingsNavigation current={activeSection} developerMode={developerModeEnabled} onChange={setActiveSection} />
 
       <div className="settings-content" ref={settingsContentRef}>
-        <header className="settings-heading">
+        <header className="settings-heading" hidden={activeSection === "token-usage"}>
           <div className="settings-heading-row">
             <div>
               <h2>{activeSettingsMeta.title}</h2>
@@ -3446,7 +3449,11 @@ export function SettingsPage({
           />
         </div>
 
-        <div className="form-grid settings-form" hidden={activeSection === "avatar" || activeSection === "environment" || activeSection === "system-interface" || activeSection === "api-keys" || activeSection === "system-overview" || ["models", "backups", "maintenance", "events"].includes(activeSection)}>
+        <div hidden={activeSection !== "token-usage"}>
+          <TokenAnalyticsSettings />
+        </div>
+
+        <div className="form-grid settings-form" hidden={activeSection === "token-usage" || activeSection === "avatar" || activeSection === "environment" || activeSection === "system-interface" || activeSection === "api-keys" || activeSection === "system-overview" || ["models", "backups", "maintenance", "events"].includes(activeSection)}>
         <fieldset className="settings-group" hidden={activeSection !== "voice"}>
           <legend>Основное</legend>
           <label>
@@ -4003,6 +4010,7 @@ const SETTINGS_NAVIGATION: Array<{
     items: [
       { section: "system-interface", label: "Интерфейс" },
       { section: "api-keys", label: "API-ключи" },
+      { section: "token-usage", label: "Токены и расходы" },
       { section: "system-overview", label: "Обзор" },
       { section: "models", label: "Модели", devOnly: true },
       { section: "backups", label: "Резервные копии" },
