@@ -15,9 +15,13 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
+    "@visx/responsive": "^4.0.0",
+    "@visx/scale": "^4.0.0",
+    "@visx/shape": "^4.0.0",
     "animejs": "^4.5.0",
     "lottie-web": "^5.13.0",
     "lucide-react": "^0.468.0",
+    "motion": "^13.4.0",
     "react": "19.2.3",
     "react-dom": "19.2.3"
   },

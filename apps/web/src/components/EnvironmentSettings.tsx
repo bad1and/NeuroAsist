@@ -80,18 +80,27 @@ export function EnvironmentSettings({
 
   return (
     <>
-      {/* Location Settings */}
-      <fieldset className="settings-group">
-        <legend>Местоположение</legend>
-
-        <div className="readonly-setting">
-          <span>Местное время</span>
-          <strong>{timeLabel}</strong>
+      {/* Location Settings Card */}
+      <div className="settings-card">
+        <div className="settings-card-header">
+          <div className="settings-card-header-main">
+            <div className="settings-card-title-group">
+              <h3 className="settings-card-title">Местоположение и время</h3>
+              <p className="settings-card-subtitle">Определение города и времени для прогноза погоды и контекста бесед</p>
+            </div>
+          </div>
         </div>
 
-        <div className="readonly-setting">
-          <span>Текущий город</span>
-          <strong>{locationLabel}</strong>
+        <div className="settings-card-grid">
+          <div className="readonly-setting">
+            <span>Местное время</span>
+            <strong>{timeLabel}</strong>
+          </div>
+
+          <div className="readonly-setting">
+            <span>Текущий город</span>
+            <strong>{locationLabel}</strong>
+          </div>
         </div>
 
         <label>
@@ -117,7 +126,7 @@ export function EnvironmentSettings({
         {locationMode === "manual" && (
           <label>
             Город
-            <div style={{ display: "flex", gap: "8px" }}>
+            <div className="settings-input-group">
               <input
                 type="text"
                 value={cityInput}
@@ -143,11 +152,18 @@ export function EnvironmentSettings({
             <small>Нажмите Enter или «Сохранить», чтобы применить город.</small>
           </label>
         )}
-      </fieldset>
+      </div>
 
-      {/* Weather & News Switches */}
-      <fieldset className="settings-group">
-        <legend>Данные и внешние источники</legend>
+      {/* Weather & News Switches Card */}
+      <div className="settings-card">
+        <div className="settings-card-header">
+          <div className="settings-card-header-main">
+            <div className="settings-card-title-group">
+              <h3 className="settings-card-title">Данные и внешние источники</h3>
+              <p className="settings-card-subtitle">Автономные сводки погоды и ленты новостей по открытым источникам</p>
+            </div>
+          </div>
+        </div>
 
         {weatherEnabled && (
           <div className="readonly-setting">
@@ -215,7 +231,7 @@ export function EnvironmentSettings({
             </small>
           </div>
         )}
-      </fieldset>
+      </div>
     </>
   );
 }
