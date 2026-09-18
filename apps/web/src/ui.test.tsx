@@ -18,6 +18,7 @@ const api = vi.hoisted(() => ({
   confirmMemory: vi.fn(), rejectMemory: vi.fn(), deleteMemory: vi.fn(), purgeMemory: vi.fn(), restoreMemory: vi.fn(), updateMemory: vi.fn(),
   deleteTimelineRange: vi.fn(), saveDesktopApiKey: vi.fn(), sendAvatarTestEmotion: vi.fn(),
   sendAvatarTestGesture: vi.fn(), sendAvatarTestPhrase: vi.fn(), stopAvatar: vi.fn(), updateAvatarOverlay: vi.fn(),
+  getLlmTokenStats: vi.fn(), getLlmTokenRecords: vi.fn(), resetLlmTokenStats: vi.fn(),
 }));
 
 vi.mock("./api", () => ({
@@ -97,6 +98,13 @@ beforeEach(() => {
     incognito: false,
     updated_at: "2026-01-01T00:00:00Z",
   });
+  api.getLlmTokenStats.mockResolvedValue({
+    timeframe: "24h", total_tokens: 0, prompt_tokens: 0, completion_tokens: 0, reasoning_tokens: 0,
+    cache_hit_tokens: 0, cache_miss_tokens: 0, cache_hit_rate: 0, request_count: 0, success_count: 0,
+    error_count: 0, latency_avg_ms: 0, latency_p95_ms: 0, estimated_cost_usd: 0,
+    by_purpose: {}, by_model: {}, timeseries: [],
+  });
+  api.getLlmTokenRecords.mockResolvedValue({ items: [], total: 0, limit: 20, offset: 0 });
 });
 
 afterEach(() => {
@@ -526,6 +534,22 @@ describe("русский интерфейс", () => {
     expect(memory).toHaveAttribute("aria-current", "page");
   });
 
+  it("открывает раздел Токены и расходы без ошибок", async () => {
+    render(<App />);
+    expect(await screen.findByRole("button", { name: "Диалог" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
+    const navigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
+    const systemGroup = within(navigation).getByRole("button", { name: "Система" });
+    if (systemGroup.getAttribute("aria-expanded") !== "true") {
+      fireEvent.click(systemGroup);
+    }
+    const tokenUsageBtn = within(navigation).getByRole("button", { name: "Токены и расходы" });
+    fireEvent.click(tokenUsageBtn);
+
+    expect(await screen.findByText("Токены и расходы LLM")).toBeVisible();
+  });
+
   it("автосохраняет отдельное поле и откатывает его при ошибке", async () => {
     render(<App />);
     expect(await screen.findByRole("button", { name: "Диалог" })).toBeInTheDocument();
@@ -855,7 +879,40 @@ describe("русский интерфейс", () => {
     api.getTimelineMessages.mockResolvedValue({
       items: [
         { id: "m-1", role: "user", content: "Привет, как дела?", original_content: "Привет, как дела?", status: "done", input_mode: "text", created_at: "2026-08-10T12:00:00Z" },
-        { id: "m-2", role: "assistant", content: "Привет! Всё отлично, готова помочь.", original_content: "Привет! Всё отлично, готова помочь.", status: "done", input_mode: "text", created_at: "2026-08-10T12:01:00Z" },
+        {
+          id: "m-2",
+          role: "assistant",
+          content: "Привет! Всё отлично, готова помочь.",
+          original_content: "Привет! Всё отлично, готова помочь.",
+          status: "done",
+          input_mode: "text",
+          created_at: "2026-08-10T12:01:00Z",
+          metadata: {
+            tokens: {
+              prompt_tokens: 150,
+              completion_tokens: 30,
+              total_tokens: 180,
+              latency_ms: 350,
+              model: "deepseek-chat",
+            },
+            companion: {
+              emotion: "happy",
+              intensity: 0.9,
+              gesture: "nod",
+              intent: "casual_chat",
+              cognitive_appraisal: "Пользователь настроен дружелюбно",
+              diary_note: "Приятно снова общаться",
+            },
+            memory_updates: [
+              {
+                subject: "Пользователь",
+                predicate: "настроение",
+                value_text: "позитивное",
+                confidence: 0.95,
+              },
+            ],
+          },
+        },
       ],
       next_offset: null,
     });
@@ -890,6 +947,37 @@ describe("русский интерфейс", () => {
     expect(screen.getByText("Привет! Всё отлично, готова помочь.")).toBeInTheDocument();
     expect(screen.getByText("Вы")).toBeInTheDocument();
     expect(screen.getByText("Iris")).toBeInTheDocument();
+
+    // Mode toggle presence
+    const simpleToggle = screen.getByRole("button", { name: /Простой/i });
+    const detailedToggle = screen.getByRole("button", { name: /Подробный/i });
+    expect(simpleToggle).toBeInTheDocument();
+    expect(detailedToggle).toBeInTheDocument();
+
+    // In simple mode (default), micro-pills are visible
+    expect(screen.getByText(/Радость/i)).toBeInTheDocument();
+    expect(screen.getByText(/🧠 1/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("journal-turn-details")).not.toBeInTheDocument();
+
+    // Toggle to detailed mode
+    fireEvent.click(detailedToggle);
+
+    // Detailed metrics and cues are now displayed
+    expect(screen.getByTestId("journal-turn-details")).toBeInTheDocument();
+    expect(screen.getByText("Параметры вызова LLM")).toBeInTheDocument();
+    expect(screen.getByText("Состояние и экспрессия Iris")).toBeInTheDocument();
+    expect(screen.getByText("Долгосрочная память хода")).toBeInTheDocument();
+    expect(screen.getByText("Пользователь настроен дружелюбно")).toBeInTheDocument();
+    expect(screen.getByText("Приятно снова общаться")).toBeInTheDocument();
+
+    // Open raw JSON dialog
+    const inspectBtn = screen.getByTitle("Просмотреть сырой JSON объект хода");
+    fireEvent.click(inspectBtn);
+    expect(screen.getByText("Сырой JSON токенов, эмоций и памяти:")).toBeInTheDocument();
+
+    // Switch back to simple mode
+    fireEvent.click(simpleToggle);
+    expect(screen.queryByTestId("journal-turn-details")).not.toBeInTheDocument();
 
     // Back button returns to list
     const backButton = screen.getByRole("button", { name: "Назад к списку" });

@@ -20,6 +20,8 @@ import type {
   CodingStatus,
   CodingTask,
   ReadinessResponse,
+  TokenUsageStats,
+  TokenRecordsResponse,
 } from "./types";
 
 const DESKTOP_RUNTIME =
@@ -487,4 +489,29 @@ export function stopAvatar(): Promise<{ sent: number; skipped: boolean }> {
 
 export function resolveApiUrl(path: string): string {
   return path.startsWith("http") ? path : `${API_BASE_URL}${path}`;
+}
+
+export function getLlmTokenStats(timeframe: string = "24h"): Promise<TokenUsageStats> {
+  return requestJson<TokenUsageStats>(`/debug/llm/stats?timeframe=${encodeURIComponent(timeframe)}`);
+}
+
+export function getLlmTokenRecords(
+  limit: number = 50,
+  offset: number = 0,
+  purpose?: string,
+): Promise<TokenRecordsResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  if (purpose) {
+    params.set("purpose", purpose);
+  }
+  return requestJson<TokenRecordsResponse>(`/debug/llm/records?${params.toString()}`);
+}
+
+export function resetLlmTokenStats(): Promise<{ status: string; cleared_records: number }> {
+  return requestJson<{ status: string; cleared_records: number }>("/debug/llm/reset", {
+    method: "POST",
+  });
 }

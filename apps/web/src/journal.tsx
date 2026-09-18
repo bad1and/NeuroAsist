@@ -13,7 +13,19 @@ import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from "react
 import { deleteTimelineRange, getTimelineJournal, getTimelineMessages, searchTimeline } from "./api";
 import type { TimelineJournalItem, TimelineMessage } from "./types";
 import { AppDialog } from "./components/AppDialog";
-import { ChevronLeft, X } from "lucide-react";
+import {
+  ChevronLeft,
+  X,
+  Zap,
+  Eye,
+  Sliders,
+  Sparkles,
+  Brain,
+  Terminal,
+  Copy,
+  Check,
+} from "lucide-react";
+import { TokenBadge } from "./components/TokenBadge";
 import { notify } from "./notifications";
 import { interfaceIntlLocale } from "./i18n";
 import { animateButtonPress, animatePageEnter, animateStaggerCards, useAnimeScope } from "./animations";
@@ -104,8 +116,267 @@ function groupTimelineItems(items: TimelineJournalItem[]): PeriodGroup[] {
   if (yesterdayItems.length) groups.push({ key: "yesterday", title: "Вчера", items: yesterdayItems });
   if (weekItems.length) groups.push({ key: "week", title: "На этой неделе", items: weekItems });
   if (olderItems.length) groups.push({ key: "older", title: "Ранее", items: olderItems });
-
   return groups;
+}
+
+const EMOTION_META: Record<string, { label: string; icon: string }> = {
+  neutral: { label: "Спокойствие", icon: "😐" },
+  happy: { label: "Радость", icon: "😊" },
+  sad: { label: "Грусть", icon: "😔" },
+  curious: { label: "Любопытство", icon: "🤔" },
+  thinking: { label: "Размышление", icon: "🧐" },
+  surprised: { label: "Удивление", icon: "😲" },
+  skeptical: { label: "Скепсис", icon: "🤨" },
+  teasing: { label: "Игривость", icon: "😜" },
+  pouting: { label: "Обида", icon: "😤" },
+  frustrated: { label: "Досада", icon: "😣" },
+  shy: { label: "Смущение", icon: "😳" },
+  excited: { label: "Восторг", icon: "🤩" },
+};
+
+const GESTURE_LABELS: Record<string, string> = {
+  talk: "Речь",
+  auto: "Авто",
+  greeting_right: "Приветствие рукой",
+  farewell_right: "Прощание рукой",
+  nod: "Кивок согласия",
+  disagreement: "Покачивание головой",
+  shrug: "Пожатие плечами",
+  surprise: "Всплеск руками",
+  frustration: "Разведение рук",
+  head_scratch: "Почесывание затылка",
+  clapping: "Аплодисменты",
+  laughing: "Смех",
+  thumbs_up: "Палец вверх",
+  facepalm: "Фейспалм",
+  pointing: "Указание",
+  bow: "Поклон",
+  explanation: "Объяснение",
+  question: "Вопросительный жест",
+  agreement: "Согласие",
+};
+
+const INTENT_LABELS: Record<string, string> = {
+  casual_chat: "Разговор",
+  task_request: "Выполнение задачи",
+  question: "Вопрос",
+  unknown: "Неопределенно",
+};
+
+function calcMessageCost(tokens?: { prompt_tokens?: number; prompt_cache_hit_tokens?: number; prompt_cache_miss_tokens?: number; completion_tokens?: number }): number {
+  if (!tokens) return 0;
+  const hit = tokens.prompt_cache_hit_tokens || 0;
+  const miss = tokens.prompt_cache_miss_tokens || (tokens.prompt_tokens ? Math.max(0, tokens.prompt_tokens - hit) : 0);
+  const out = tokens.completion_tokens || 0;
+  return (hit * 0.00000007) + (miss * 0.00000027) + (out * 0.0000011);
+}
+
+function formatCost(usd: number): string {
+  if (usd <= 0) return "$0.00";
+  if (usd < 0.0001) return "<$0.0001";
+  return `$${usd.toFixed(4)}`;
+}
+
+function JournalMessageDetails({
+  message,
+  onInspectJson,
+}: {
+  message: TimelineMessage;
+  onInspectJson: (data: Record<string, unknown>, title: string) => void;
+}) {
+  const isAssistant = message.role === "assistant";
+  const tokens = message.metadata?.tokens;
+  const companion = message.metadata?.companion;
+  const memoryUpdates = message.metadata?.memory_updates;
+
+  if (!tokens && !companion && (!memoryUpdates || memoryUpdates.length === 0)) {
+    return null;
+  }
+
+  const emotionInfo = companion?.emotion
+    ? EMOTION_META[companion.emotion] || { label: companion.emotion, icon: "✨" }
+    : null;
+  const gestureLabel = companion?.gesture
+    ? GESTURE_LABELS[companion.gesture] || companion.gesture
+    : null;
+  const intentLabel = companion?.intent
+    ? INTENT_LABELS[companion.intent] || companion.intent
+    : null;
+
+  return (
+    <div className="journal-turn-details" data-testid="journal-turn-details">
+      {/* 1. LLM Token & Cost Metrics */}
+      {tokens && (
+        <div className="details-section details-tokens-section">
+          <div className="details-section-title">
+            <Zap size={13} className="text-accent" />
+            <span>Параметры вызова LLM</span>
+            <span className="details-model-tag">{tokens.model || "deepseek"}</span>
+          </div>
+
+          <div className="details-metrics-grid">
+            <div className="metric-cell">
+              <span className="cell-label">Prompt (ввод)</span>
+              <span className="cell-val text-prompt">
+                {tokens.prompt_tokens?.toLocaleString() ?? 0}
+                {Boolean(tokens.prompt_cache_hit_tokens) && (
+                  <small className="cache-hit-ratio">
+                    {" "}(+{tokens.prompt_cache_hit_tokens?.toLocaleString()} кэш)
+                  </small>
+                )}
+              </span>
+            </div>
+
+            <div className="metric-cell">
+              <span className="cell-label">Output (генерация)</span>
+              <span className="cell-val text-completion">
+                {tokens.completion_tokens?.toLocaleString() ?? 0}
+              </span>
+            </div>
+
+            {Boolean(tokens.reasoning_tokens) && (
+              <div className="metric-cell">
+                <span className="cell-label">Reasoning</span>
+                <span className="cell-val text-reasoning">
+                  {tokens.reasoning_tokens?.toLocaleString()}
+                </span>
+              </div>
+            )}
+
+            <div className="metric-cell">
+              <span className="cell-label">Всего</span>
+              <span className="cell-val text-total">
+                {tokens.total_tokens?.toLocaleString() ?? 0}
+              </span>
+            </div>
+
+            {tokens.latency_ms !== undefined && (
+              <div className="metric-cell">
+                <span className="cell-label">Задержка</span>
+                <span className="cell-val">{tokens.latency_ms} мс</span>
+              </div>
+            )}
+
+            <div className="metric-cell">
+              <span className="cell-label">Расход</span>
+              <span className="cell-val text-cost">
+                {formatCost(calcMessageCost(tokens))}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2. Companion State & Acting Cues */}
+      {isAssistant && companion && (
+        <div className="details-section details-companion-section">
+          <div className="details-section-title">
+            <Sparkles size={13} className="text-purple" />
+            <span>Состояние и экспрессия Iris</span>
+          </div>
+
+          <div className="companion-cues-row">
+            {emotionInfo && (
+              <div className="cue-badge emotion-cue" title={`Эмоция: ${companion.emotion}`}>
+                <span className="cue-icon">{emotionInfo.icon}</span>
+                <span className="cue-text">
+                  <strong>{emotionInfo.label}</strong>
+                  {companion.intensity !== undefined && (
+                    <small> ({Math.round(companion.intensity * 100)}%)</small>
+                  )}
+                </span>
+              </div>
+            )}
+
+            {gestureLabel && (
+              <div className="cue-badge gesture-cue" title={`Жест: ${companion.gesture}`}>
+                <span className="cue-icon">👋</span>
+                <span className="cue-text">Жест: <strong>{gestureLabel}</strong></span>
+              </div>
+            )}
+
+            {intentLabel && (
+              <div className="cue-badge intent-cue" title={`Намерение: ${companion.intent}`}>
+                <span className="cue-icon">🎯</span>
+                <span className="cue-text">Режим: <strong>{intentLabel}</strong></span>
+              </div>
+            )}
+          </div>
+
+          {companion.cognitive_appraisal && (
+            <div className="companion-note-box appraisal">
+              <span className="note-label">Оценка ситуации:</span>
+              <p>{companion.cognitive_appraisal}</p>
+            </div>
+          )}
+
+          {companion.diary_note && (
+            <div className="companion-note-box diary">
+              <span className="note-label">Внутренний дневник:</span>
+              <p>{companion.diary_note}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 3. Memory Updates */}
+      <div className="details-section details-memory-section">
+        <div className="details-section-title">
+          <Brain size={13} className="text-cyan" />
+          <span>Долгосрочная память хода</span>
+        </div>
+
+        {memoryUpdates && memoryUpdates.length > 0 ? (
+          <div className="memory-updates-list">
+            {memoryUpdates.map((mem, i) => {
+              if (typeof mem === "string") {
+                return (
+                  <div key={i} className="memory-update-card">
+                    <span className="memory-card-icon">📌</span>
+                    <span className="memory-card-text">{mem}</span>
+                  </div>
+                );
+              }
+              return (
+                <div key={i} className="memory-update-card">
+                  <span className="memory-card-icon">📌</span>
+                  <div className="memory-card-content">
+                    <strong>{mem.subject || mem.kind || "Факт"}</strong>:{" "}
+                    {mem.predicate ? `${mem.predicate} → ` : ""}{mem.value_text || JSON.stringify(mem)}
+                    {mem.confidence !== undefined && (
+                      <small className="memory-conf"> ({Math.round(mem.confidence * 100)}% вер.)</small>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="memory-empty-note">
+            <span>В этом ходе новые факты в память не заносились</span>
+          </div>
+        )}
+      </div>
+
+      {/* 4. Raw JSON Inspection Button */}
+      <div className="details-footer-actions">
+        <button
+          type="button"
+          className="details-json-btn"
+          onClick={() =>
+            onInspectJson(
+              (message.metadata as Record<string, unknown>) || {},
+              `Метаданные сообщения #${message.id.slice(0, 8)}`,
+            )
+          }
+          title="Просмотреть сырой JSON объект хода"
+        >
+          <Terminal size={12} />
+          <span>Сырой JSON хода</span>
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
@@ -122,6 +393,32 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
   const [error, setError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<TimelineJournalItem | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const [detailMode, setDetailMode] = useState<"simple" | "detailed">(() => {
+    try {
+      return (
+        (window.localStorage.getItem("journal_detail_mode") as "simple" | "detailed") ||
+        "simple"
+      );
+    } catch {
+      return "simple";
+    }
+  });
+
+  const handleToggleDetailMode = (mode: "simple" | "detailed") => {
+    setDetailMode(mode);
+    try {
+      window.localStorage.setItem("journal_detail_mode", mode);
+    } catch {
+      // Ignored
+    }
+  };
+
+  const [inspectModalData, setInspectModalData] = useState<{
+    title: string;
+    json: Record<string, unknown>;
+  } | null>(null);
+  const [inspectCopied, setInspectCopied] = useState(false);
 
   const activeRequestIdRef = useRef(0);
 
@@ -272,6 +569,9 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
             {item.message_count} {item.message_count === 1 ? "сообщение" : "сообщений"}
             {item.last_activity_at && !isCurrent ? ` · ${formatTime(item.last_activity_at)}` : ""}
             {isCurrent ? " · сейчас" : ""}
+            {Boolean(item.token_estimate && item.token_estimate > 0) && (
+              <span> · {item.token_estimate! >= 1000 ? `${(item.token_estimate! / 1000).toFixed(1)}k` : item.token_estimate} токенов</span>
+            )}
           </div>
         </div>
       </article>
@@ -349,8 +649,36 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
                         <span>{roleLabel}</span>
                       </div>
                       <p data-i18n-skip>{message.content || message.corrected_content || message.original_content || ""}</p>
-                      {message.created_at && (
-                        <span className="message-time">{formatTime(message.created_at)}</span>
+                      <div className="journal-message-footer">
+                        {message.created_at && (
+                          <span className="message-time">{formatTime(message.created_at)}</span>
+                        )}
+                        {detailMode === "simple" && message.metadata?.companion?.emotion && (
+                          <span
+                            className="journal-emotion-micro-pill"
+                            title={`Эмоция: ${EMOTION_META[message.metadata.companion.emotion]?.label || message.metadata.companion.emotion}${message.metadata.companion.intensity !== undefined ? ` (${Math.round(message.metadata.companion.intensity * 100)}%)` : ""}`}
+                          >
+                            {EMOTION_META[message.metadata.companion.emotion]?.icon || "✨"}{" "}
+                            {EMOTION_META[message.metadata.companion.emotion]?.label || message.metadata.companion.emotion}
+                          </span>
+                        )}
+                        {detailMode === "simple" && Boolean(message.metadata?.memory_updates?.length) && (
+                          <span
+                            className="journal-memory-micro-pill"
+                            title={`Новых записей памяти: ${message.metadata?.memory_updates?.length}`}
+                          >
+                            🧠 {message.metadata?.memory_updates?.length}
+                          </span>
+                        )}
+                        {message.metadata?.tokens && (
+                          <TokenBadge tokens={message.metadata.tokens} role={message.role} />
+                        )}
+                      </div>
+                      {detailMode === "detailed" && (
+                        <JournalMessageDetails
+                          message={message}
+                          onInspectJson={(json, title) => setInspectModalData({ json, title })}
+                        />
                       )}
                     </article>
                   );
@@ -396,12 +724,39 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
                       ) : selectedEpisode.started_at ? (
                         <span>· {formatShortDate(selectedEpisode.started_at)}</span>
                       ) : null}
-
+                      {Boolean(selectedEpisode.token_estimate && selectedEpisode.token_estimate > 0) && (
+                        <span className="journal-header-tokens">
+                          · <Zap size={11} style={{ display: "inline-block", verticalAlign: "middle", marginRight: 2 }} />
+                          {selectedEpisode.token_estimate?.toLocaleString()} токенов
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
 
                 <div className="journal-header-actions">
+                  <div className="journal-view-toggle" role="group" aria-label="Режим детализации">
+                    <button
+                      type="button"
+                      className={`journal-view-toggle-btn ${detailMode === "simple" ? "active" : ""}`}
+                      onClick={() => handleToggleDetailMode("simple")}
+                      title="Простой режим (только сообщения и компактные бейджи)"
+                      aria-pressed={detailMode === "simple"}
+                    >
+                      <Eye size={13} />
+                      <span>Простой</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`journal-view-toggle-btn ${detailMode === "detailed" ? "active" : ""}`}
+                      onClick={() => handleToggleDetailMode("detailed")}
+                      title="Подробный режим (параметры LLM, эмоции, жесты, память и сырой JSON)"
+                      aria-pressed={detailMode === "detailed"}
+                    >
+                      <Sliders size={13} />
+                      <span>Подробный</span>
+                    </button>
+                  </div>
 
                   <button
                     className="secondary journal-delete-action"
@@ -470,8 +825,36 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
                               <span>{roleLabel}</span>
                             </div>
                             <p data-i18n-skip>{message.content || message.corrected_content || message.original_content || ""}</p>
-                            {message.created_at && (
-                              <span className="message-time">{formatTime(message.created_at)}</span>
+                            <div className="journal-message-footer">
+                              {message.created_at && (
+                                <span className="message-time">{formatTime(message.created_at)}</span>
+                              )}
+                              {detailMode === "simple" && message.metadata?.companion?.emotion && (
+                                <span
+                                  className="journal-emotion-micro-pill"
+                                  title={`Эмоция: ${EMOTION_META[message.metadata.companion.emotion]?.label || message.metadata.companion.emotion}${message.metadata.companion.intensity !== undefined ? ` (${Math.round(message.metadata.companion.intensity * 100)}%)` : ""}`}
+                                >
+                                  {EMOTION_META[message.metadata.companion.emotion]?.icon || "✨"}{" "}
+                                  {EMOTION_META[message.metadata.companion.emotion]?.label || message.metadata.companion.emotion}
+                                </span>
+                              )}
+                              {detailMode === "simple" && Boolean(message.metadata?.memory_updates?.length) && (
+                                <span
+                                  className="journal-memory-micro-pill"
+                                  title={`Новых записей памяти: ${message.metadata?.memory_updates?.length}`}
+                                >
+                                  🧠 {message.metadata?.memory_updates?.length}
+                                </span>
+                              )}
+                              {message.metadata?.tokens && (
+                                <TokenBadge tokens={message.metadata.tokens} role={message.role} />
+                              )}
+                            </div>
+                            {detailMode === "detailed" && (
+                              <JournalMessageDetails
+                                message={message}
+                                onInspectJson={(json, title) => setInspectModalData({ json, title })}
+                              />
                             )}
                           </article>
                         </Fragment>
@@ -554,6 +937,45 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
           >
             {deleting ? "Удаляю…" : "Удалить историю"}
           </button>
+        </div>
+      </AppDialog>
+
+      <AppDialog
+        open={Boolean(inspectModalData)}
+        title={inspectModalData?.title || "Метаданные хода"}
+        onClose={() => {
+          setInspectModalData(null);
+          setInspectCopied(false);
+        }}
+        variant="info"
+        icon={<Terminal size={18} />}
+      >
+        <div className="journal-inspect-dialog-content">
+          <div className="journal-inspect-actions">
+            <span className="inspect-subtitle">Сырой JSON токенов, эмоций и памяти:</span>
+            <button
+              type="button"
+              className="secondary btn-copy-json"
+              onClick={async () => {
+                if (!inspectModalData?.json) return;
+                try {
+                  await navigator.clipboard.writeText(
+                    JSON.stringify(inspectModalData.json, null, 2),
+                  );
+                  setInspectCopied(true);
+                  setTimeout(() => setInspectCopied(false), 2000);
+                } catch {
+                  // Fallback
+                }
+              }}
+            >
+              {inspectCopied ? <Check size={13} className="text-emerald" /> : <Copy size={13} />}
+              <span>{inspectCopied ? "Скопировано!" : "Копировать JSON"}</span>
+            </button>
+          </div>
+          <pre className="journal-raw-json-block">
+            <code>{inspectModalData ? JSON.stringify(inspectModalData.json, null, 2) : ""}</code>
+          </pre>
         </div>
       </AppDialog>
     </section>

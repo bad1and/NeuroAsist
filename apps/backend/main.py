@@ -1327,6 +1327,7 @@ def create_app() -> FastAPI:
     app.state.interrupt_voice_session = interrupt_voice_session
     app.state.avatar_service = avatar_service
     app.state.speech_orchestrator = speech_orchestrator
+    llm_telemetry.bind_database(settings.database_path)
     app.state.llm_telemetry = llm_telemetry
     app.include_router(chat_router)
     app.include_router(avatar_router)

@@ -108,7 +108,49 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
     async def complete_live_assistant(reply: str) -> None:
         if coordinator is None or lease is None:
             return
-        assistant_message = await coordinator.complete_assistant(payload.session_id, lease, reply)
+        tokens_meta = None
+        llm_prov = getattr(agent, "_llm_provider", None)
+        last_resp = getattr(llm_prov, "last_response", None) if llm_prov else None
+        metrics = getattr(llm_prov, "last_call_metrics", None) if llm_prov else None
+        usage_obj = (
+            last_resp.usage
+            if last_resp and last_resp.usage
+            else (metrics.usage if metrics and metrics.usage else None)
+        )
+        if usage_obj is not None:
+            tokens_meta = {
+                "prompt_tokens": usage_obj.prompt_tokens,
+                "completion_tokens": usage_obj.completion_tokens,
+                "total_tokens": usage_obj.total_tokens,
+                "reasoning_tokens": usage_obj.reasoning_tokens,
+                "prompt_cache_hit_tokens": usage_obj.prompt_cache_hit_tokens,
+                "prompt_cache_miss_tokens": usage_obj.prompt_cache_miss_tokens,
+                "model": last_resp.model if last_resp else (metrics.model if metrics else ""),
+                "latency_ms": round(
+                    last_resp.latency_ms
+                    if (last_resp and last_resp.latency_ms is not None)
+                    else (metrics.latency_ms if metrics else 0.0),
+                    1,
+                ),
+            }
+        last_turn = getattr(agent, "last_turn", None)
+        companion_meta = {
+            "emotion": getattr(getattr(last_turn, "affect", None), "emotion", None).value if getattr(getattr(last_turn, "affect", None), "emotion", None) else "neutral",
+            "intensity": getattr(getattr(last_turn, "affect", None), "intensity", 0.7),
+            "gesture": getattr(getattr(last_turn, "gesture", None), "name", None).value if getattr(getattr(last_turn, "gesture", None), "name", None) else None,
+            "intent": getattr(getattr(last_turn, "intent", None), "value", "casual_chat"),
+            "cognitive_appraisal": getattr(last_turn, "cognitive_appraisal", None),
+            "diary_note": getattr(last_turn, "diary_note", None),
+        }
+        memory_updates = getattr(agent, "last_memory_updates", [])
+        metadata_update = {
+            "tokens": tokens_meta,
+            "companion": companion_meta,
+            "memory_updates": memory_updates,
+        }
+        assistant_message = await coordinator.complete_assistant(
+            payload.session_id, lease, reply, metadata_update=metadata_update
+        )
         if state_service is not None:
             await asyncio.to_thread(
                 state_service.record_assistant_turn,
@@ -235,7 +277,48 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
                 state_context=state_context,
                 state_behavior=state_behavior,
             )
-            assistant_message = await coordinator.complete_assistant(payload.session_id, lease, result["reply"])
+            tokens_meta = None
+            last_resp = getattr(provider, "last_response", None)
+            metrics = getattr(provider, "last_call_metrics", None)
+            usage_obj = (
+                last_resp.usage
+                if last_resp and last_resp.usage
+                else (metrics.usage if metrics and metrics.usage else None)
+            )
+            if usage_obj is not None:
+                tokens_meta = {
+                    "prompt_tokens": usage_obj.prompt_tokens,
+                    "completion_tokens": usage_obj.completion_tokens,
+                    "total_tokens": usage_obj.total_tokens,
+                    "reasoning_tokens": usage_obj.reasoning_tokens,
+                    "prompt_cache_hit_tokens": usage_obj.prompt_cache_hit_tokens,
+                    "prompt_cache_miss_tokens": usage_obj.prompt_cache_miss_tokens,
+                    "model": last_resp.model if last_resp else (metrics.model if metrics else getattr(provider, "_model", "")),
+                    "latency_ms": round(
+                        last_resp.latency_ms
+                        if (last_resp and last_resp.latency_ms is not None)
+                        else (metrics.latency_ms if metrics else 0.0),
+                        1,
+                    ),
+                }
+            last_turn = getattr(agent, "last_turn", None)
+            companion_meta = {
+                "emotion": result.get("emotion") or (getattr(getattr(last_turn, "affect", None), "emotion", None).value if getattr(getattr(last_turn, "affect", None), "emotion", None) else "neutral"),
+                "intensity": result.get("intensity") if result.get("intensity") is not None else getattr(getattr(last_turn, "affect", None), "intensity", 0.7),
+                "gesture": result.get("gesture") or (getattr(getattr(last_turn, "gesture", None), "name", None).value if getattr(getattr(last_turn, "gesture", None), "name", None) else None),
+                "intent": result.get("intent") or (getattr(getattr(last_turn, "intent", None), "value", "casual_chat")),
+                "cognitive_appraisal": result.get("cognitive_appraisal") or getattr(last_turn, "cognitive_appraisal", None),
+                "diary_note": result.get("diary_note") or getattr(last_turn, "diary_note", None),
+            }
+            memory_updates = result.get("memory_updates") or getattr(agent, "last_memory_updates", []) or result.get("memory_candidates", [])
+            metadata_update = {
+                "tokens": tokens_meta,
+                "companion": companion_meta,
+                "memory_updates": memory_updates,
+            }
+            assistant_message = await coordinator.complete_assistant(
+                payload.session_id, lease, result["reply"], metadata_update=metadata_update
+            )
             if state_service is not None:
                 await asyncio.to_thread(
                     state_service.record_assistant_turn,
@@ -258,6 +341,7 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
                 "assistant_message_id": assistant_message.id,
                 "turn_id": accepted.turn_id,
                 "generation": accepted.generation,
+                "usage": tokens_meta,
             })
         else:
             result = await agent.handle_user_message(payload.session_id, payload.message)

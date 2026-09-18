@@ -420,6 +420,7 @@ class TimelineStore:
         generation: int,
         content: str = "",
         status: str = "completed",
+        metadata_update: dict[str, object] | None = None,
     ) -> StoredTimelineMessage:
         """Apply a terminal assistant state without ever changing its user turn."""
         if status not in {"completed", "interrupted", "failed"}:
@@ -442,11 +443,40 @@ class TimelineStore:
             now = self._now()
             terminal_at = now if status == "completed" else None
             cancelled_at = now if status in {"interrupted", "failed"} else None
+            metadata = json.loads(assistant["metadata_json"] or "{}")
+            if metadata_update:
+                metadata.update(metadata_update)
             connection.execute(
-                """UPDATE conversation_messages SET content = ?, status = ?, completed_at = ?, cancelled_at = ?
+                """UPDATE conversation_messages SET content = ?, status = ?, completed_at = ?, cancelled_at = ?, metadata_json = ?
                    WHERE id = ?""",
-                (content, status, terminal_at, cancelled_at, assistant_message_id),
+                (content, status, terminal_at, cancelled_at, json.dumps(metadata, ensure_ascii=False), assistant_message_id),
             )
+            if metadata_update and "tokens" in metadata_update:
+                tokens_info = metadata_update["tokens"]
+                if isinstance(tokens_info, dict) and assistant["reply_to_message_id"]:
+                    user_row = connection.execute(
+                        "SELECT metadata_json FROM conversation_messages WHERE id = ?",
+                        (assistant["reply_to_message_id"],),
+                    ).fetchone()
+                    if user_row:
+                        user_meta = json.loads(user_row["metadata_json"] or "{}")
+                        user_meta["tokens"] = {
+                            "prompt_tokens": tokens_info.get("prompt_tokens", 0),
+                            "prompt_cache_hit_tokens": tokens_info.get("prompt_cache_hit_tokens", 0),
+                            "prompt_cache_miss_tokens": tokens_info.get("prompt_cache_miss_tokens", 0),
+                            "model": tokens_info.get("model", ""),
+                        }
+                        connection.execute(
+                            "UPDATE conversation_messages SET metadata_json = ? WHERE id = ?",
+                            (json.dumps(user_meta, ensure_ascii=False), assistant["reply_to_message_id"]),
+                        )
+                if assistant["episode_id"] is not None and isinstance(tokens_info, dict):
+                    turn_total = int(tokens_info.get("total_tokens") or 0)
+                    if turn_total > 0:
+                        connection.execute(
+                            "UPDATE conversation_episodes SET token_estimate = token_estimate + ? WHERE id = ?",
+                            (turn_total, assistant["episode_id"]),
+                        )
             if content.strip() and status in {"completed", "interrupted"}:
                 self._index_timeline_message(connection, assistant_message_id, content)
             if status == "completed" and assistant["episode_id"] is not None:

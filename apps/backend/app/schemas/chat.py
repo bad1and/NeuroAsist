@@ -19,3 +19,4 @@ class ChatResponse(BaseModel):
     assistant_message_id: str | None = None
     turn_id: str | None = None
     generation: int | None = None
+    usage: dict[str, object] | None = None

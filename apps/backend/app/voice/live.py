@@ -759,11 +759,37 @@ class VoiceSessionManager:
                     context.generation,
                     completed_reply,
                 )
+            tokens_usage = None
+            llm_prov = getattr(agent, "_llm_provider", None)
+            last_resp = getattr(llm_prov, "last_response", None) if llm_prov else None
+            metrics = getattr(llm_prov, "last_call_metrics", None) if llm_prov else None
+            usage_obj = (
+                last_resp.usage
+                if last_resp and last_resp.usage
+                else (metrics.usage if metrics and metrics.usage else None)
+            )
+            if usage_obj is not None:
+                tokens_usage = {
+                    "prompt_tokens": usage_obj.prompt_tokens,
+                    "completion_tokens": usage_obj.completion_tokens,
+                    "total_tokens": usage_obj.total_tokens,
+                    "reasoning_tokens": usage_obj.reasoning_tokens,
+                    "prompt_cache_hit_tokens": usage_obj.prompt_cache_hit_tokens,
+                    "prompt_cache_miss_tokens": usage_obj.prompt_cache_miss_tokens,
+                    "model": last_resp.model if last_resp else (metrics.model if metrics else ""),
+                    "latency_ms": round(
+                        last_resp.latency_ms
+                        if (last_resp and last_resp.latency_ms is not None)
+                        else (metrics.latency_ms if metrics else 0.0),
+                        1,
+                    ),
+                }
             await self._send(
                 context,
                 "voice.text.completed",
                 reply=completed_reply,
                 memory_updates=getattr(agent, "last_memory_updates", ()),
+                usage=tokens_usage,
             )
             context.text_completed = True
             await self._enqueue(queue, worker, None)
