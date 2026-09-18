@@ -17,9 +17,35 @@ import {
   IconInterfaceSpirals,
   IconInterfaceUserQueenCrown,
   IconInterfaceLock,
+  IconInterfaceDeleteBin3,
+  IconInterfaceAlertTriangle,
+  IconInterfaceCheckCircle,
 } from "./CustomIcons";
 import { FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, SendHorizontal, Sparkles } from "lucide-react";
+import {
+  ChevronDown,
+  SendHorizontal,
+  Sparkles,
+  Key,
+  Terminal,
+  MessageSquare,
+  Timer,
+  Volume2,
+  Mic,
+  Headphones,
+  Activity,
+  BookOpen,
+  Sliders,
+  Brain,
+  Globe,
+  Code2,
+  HardDrive,
+  Database,
+  Archive,
+  Eye,
+  SlidersHorizontal,
+  RefreshCw,
+} from "lucide-react";
 import { AvatarDevStudioStandalonePage } from "./components/AvatarDevPanel";
 import { EnvironmentSettings } from "./components/EnvironmentSettings";
 import {
@@ -2767,15 +2793,38 @@ function EventsPage({
 
   return (
     <section className="panel events-panel">
-      {compact ? <div className="events-toolbar"><button className="icon-button" onClick={(e) => { animateButtonPress(e.currentTarget); void onRefreshEvents(); }} aria-label="Обновить журнал событий" title="Обновить журнал событий">
-          <IconInterfaceSpirals size={16} />
-        </button></div> : <div className="panel-header">
-        <div><h2>Журнал системы</h2><span>Технические события и диагностика</span></div>
-        <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void onRefreshEvents(); }}>
-          <IconInterfaceSpirals size={16} aria-hidden="true" />
-          Обновить
-        </button>
-      </div>}
+      {compact ? (
+        <div className="settings-card-header">
+          <div className="settings-card-header-main">
+            <div className="settings-card-title-group">
+              <h2 className="settings-card-title">Журнал событий</h2>
+              <p className="settings-card-subtitle">Технические события, ошибки и системная диагностика</p>
+            </div>
+          </div>
+          <div className="settings-card-header-actions">
+            <button
+              className="secondary"
+              onClick={(e) => {
+                animateButtonPress(e.currentTarget);
+                void onRefreshEvents();
+              }}
+              aria-label="Обновить журнал событий"
+              title="Обновить журнал событий"
+            >
+              <RefreshCw size={15} aria-hidden="true" />
+              Обновить
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="panel-header">
+          <div><h2>Журнал системы</h2><span>Технические события и диагностика</span></div>
+          <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void onRefreshEvents(); }}>
+            <IconInterfaceSpirals size={16} aria-hidden="true" />
+            Обновить
+          </button>
+        </div>
+      )}
 
       <div className="filters">
         {(["all", "info", "warning", "error", "critical"] as LevelFilter[]).map(
@@ -3258,12 +3307,26 @@ export function SettingsPage({
               </div>
             </div>
           )}
-          <fieldset className="settings-group">
-            <legend>DeepSeek API</legend>
-            <div className="readonly-setting">
-              <span>Состояние</span>
-              <strong>{settings.api_key_configured ? "Ключ настроен" : "Ключ не настроен"}</strong>
+
+          {/* DeepSeek API 3D Card */}
+          <div className="settings-card">
+            <div className="settings-card-header">
+              <div className="settings-card-header-main">
+                <div className="settings-card-title-group">
+                  <h3 className="settings-card-title">DeepSeek API</h3>
+                  <p className="settings-card-subtitle">
+                    Используется для диалога, памяти и фоновых ответов Iris
+                  </p>
+                </div>
+              </div>
+              <div className="settings-card-header-actions">
+                <span className={`settings-status-pill ${settings.api_key_configured ? "is-active" : "is-warning"}`}>
+                  <span className="settings-status-dot" />
+                  {settings.api_key_configured ? "Ключ настроен" : "Ключ не настроен"}
+                </span>
+              </div>
             </div>
+
             <label htmlFor="deepseek-api-key-input">
               API-ключ DeepSeek
               <input
@@ -3277,7 +3340,8 @@ export function SettingsPage({
               />
               <small>Используется для диалога, памяти и фоновых ответов Iris. Значение никогда не отображается обратно.</small>
             </label>
-            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+
+            <div className="settings-card-actions">
               <button
                 className="primary-button"
                 type="button"
@@ -3295,14 +3359,27 @@ export function SettingsPage({
                 Удалить
               </button>
             </div>
-          </fieldset>
+          </div>
 
-          <fieldset className="settings-group">
-            <legend>Coding API</legend>
-            <div className="readonly-setting">
-              <span>Состояние</span>
-              <strong>{settings.coding_api_key_configured ? "Ключ настроен" : "Ключ не настроен"}</strong>
+          {/* Coding Agent API 3D Card */}
+          <div className="settings-card">
+            <div className="settings-card-header">
+              <div className="settings-card-header-main">
+                <div className="settings-card-title-group">
+                  <h3 className="settings-card-title">Coding Agent API</h3>
+                  <p className="settings-card-subtitle">
+                    Отдельный ключ для автономных задач кодинга и рефакторинга
+                  </p>
+                </div>
+              </div>
+              <div className="settings-card-header-actions">
+                <span className={`settings-status-pill ${settings.coding_api_key_configured ? "is-active" : "is-warning"}`}>
+                  <span className="settings-status-dot" />
+                  {settings.coding_api_key_configured ? "Ключ настроен" : "Ключ не настроен"}
+                </span>
+              </div>
             </div>
+
             <label htmlFor="coding-api-key-input">
               API-ключ Coding Agent
               <input
@@ -3316,7 +3393,8 @@ export function SettingsPage({
               />
               <small>Отдельный ключ для задач Coding Agent. Основной DeepSeek-ключ автоматически не используется.</small>
             </label>
-            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+
+            <div className="settings-card-actions">
               <button
                 className="primary-button"
                 type="button"
@@ -3334,7 +3412,7 @@ export function SettingsPage({
                 Удалить
               </button>
             </div>
-          </fieldset>
+          </div>
 
           {!desktopCredentialStorageAvailable && (
             <div className="notice" role="status">
@@ -3357,8 +3435,17 @@ export function SettingsPage({
         </div>
 
         <div className="form-grid settings-form" hidden={activeSection !== "system-interface"}>
-          <fieldset className="settings-group">
-            <legend>Интерфейс</legend>
+          {/* Interface Language Card */}
+          <div className="settings-card">
+            <div className="settings-card-header">
+              <div className="settings-card-header-main">
+                <div className="settings-card-title-group">
+                  <h3 className="settings-card-title">Язык интерфейса</h3>
+                  <p className="settings-card-subtitle">Локализация элементов управления, кнопок и системных подсказок</p>
+                </div>
+              </div>
+            </div>
+
             <label>
               Язык приложения
               <CustomSelect
@@ -3382,6 +3469,19 @@ export function SettingsPage({
               </CustomSelect>
               <small>Выберите язык кнопок, меню и системных подсказок.</small>
             </label>
+          </div>
+
+          {/* Developer Tools & QA Studio Card */}
+          <div className="settings-card">
+            <div className="settings-card-header">
+              <div className="settings-card-header-main">
+                <div className="settings-card-title-group">
+                  <h3 className="settings-card-title">Инструменты разработки и QA</h3>
+                  <p className="settings-card-subtitle">Специальные режимы для отладки голоса, таймингов и аватара</p>
+                </div>
+              </div>
+            </div>
+
             <SettingsSwitch
               checked={developerModeEnabled}
               label="Режим разработчика"
@@ -3403,7 +3503,7 @@ export function SettingsPage({
                 onToggleQaStudioEnabled?.(checked);
               }}
             />
-          </fieldset>
+          </div>
         </div>
 
         <div className="system-stack" hidden={!(["models", "backups", "maintenance", "events"] as SettingsSection[]).includes(activeSection)}>
@@ -3454,506 +3554,630 @@ export function SettingsPage({
         </div>
 
         <div className="form-grid settings-form" hidden={activeSection === "token-usage" || activeSection === "avatar" || activeSection === "environment" || activeSection === "system-interface" || activeSection === "api-keys" || activeSection === "system-overview" || ["models", "backups", "maintenance", "events"].includes(activeSection)}>
-        <fieldset className="settings-group" hidden={activeSection !== "voice"}>
-          <legend>Основное</legend>
-          <label>
-            Язык голосового ввода
-            <CustomSelect
-              value={voiceLanguage}
-              onChange={(event) => {
-                const nextValue = event.target.value;
-                const previousValue = voiceLanguage;
-                setVoiceLanguage(nextValue);
-                saveRuntimeSetting({ voice_language: nextValue }, () => setVoiceLanguage(previousValue));
-              }}
-            >
-              {settings.available_voice_languages.map((availableLanguage) => (
-                <option key={availableLanguage} value={availableLanguage}>
-                  {availableLanguage === "ru" ? "Русский" : availableLanguage === "en" ? "Английский" : availableLanguage}
-                </option>
-              ))}
-            </CustomSelect>
-          </label>
-        </fieldset>
+          {/* VOICE: Language Card */}
+          <div className="settings-card" hidden={activeSection !== "voice"}>
+            <div className="settings-card-header">
+              <div className="settings-card-header-main">
+                <div className="settings-card-title-group">
+                  <h3 className="settings-card-title">Язык голосового ввода</h3>
+                  <p className="settings-card-subtitle">Основной язык распознавания речи в режиме Live</p>
+                </div>
+              </div>
+            </div>
 
-        <fieldset className="settings-group" hidden={activeSection !== "voice-devices"}>
-          <legend>Устройства</legend>
-          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
-            Профиль микрофона
-            <CustomSelect
-              value={voiceMicrophoneProfile}
-              disabled={!developerModeEnabled}
-              onChange={(event) => {
-                const nextValue = event.target.value as MicrophoneProfile;
-                const previousValue = voiceMicrophoneProfile;
-                setVoiceMicrophoneProfile(nextValue);
-                saveRuntimeSetting({ voice_microphone_profile: nextValue }, () => setVoiceMicrophoneProfile(previousValue));
-              }}
-            >
-              <option value="balanced">Сбалансированный — рекомендуется</option>
-              <option value="headset">Гарнитура</option>
-              <option value="speakers">Колонки</option>
-            </CustomSelect>
-            <small>
-              Управляет эхоподавлением и шумоподавлением браузера для записи и живого режима.
-              {!developerModeEnabled && " Доступно в режиме разработчика."}
-            </small>
-          </label>
-
-          <label>
-            Источник входа (микрофон)
-            <CustomSelect
-              value={voiceInputDeviceId}
-              onChange={(event) => {
-                const nextValue = event.target.value;
-                const previousValue = voiceInputDeviceId;
-                setVoiceInputDeviceId(nextValue);
-                saveRuntimeSetting({ voice_input_device_id: nextValue }, () => setVoiceInputDeviceId(previousValue));
-              }}
-              disabled={saving}
-            >
-              <option value="">Системный по умолчанию</option>
-              {inputDeviceOptions.map((device) => (
-                <option key={device.deviceId} value={device.deviceId} disabled={!audioDevices.canEnumerate}>
-                  {device.label}
-                </option>
-              ))}
-            </CustomSelect>
-            <small>Используется для единственного голосового режима Live.</small>
-          </label>
-
-          <label>
-            Источник вывода (наушники или колонки)
-            <CustomSelect
-              value={voiceOutputDeviceId}
-              onChange={(event) => {
-                const nextValue = event.target.value;
-                const previousValue = voiceOutputDeviceId;
-                setVoiceOutputDeviceId(nextValue);
-                saveRuntimeSetting({ voice_output_device_id: nextValue }, () => setVoiceOutputDeviceId(previousValue));
-              }}
-              disabled={saving}
-            >
-              <option value="">Системный по умолчанию</option>
-              {outputDeviceOptions.map((device) => (
-                <option key={device.deviceId} value={device.deviceId} disabled={!audioDevices.canSelectOutput}>
-                  {device.label}
-                </option>
-              ))}
-            </CustomSelect>
-            <small>
-              {audioDevices.canSelectOutput
-                ? "Выбранное устройство используется для синтезированных аудиофайлов и воспроизведения сообщений; запасной системный голос браузера следует настройке Windows."
-                : "Этот WebView не поддерживает выбор устройства вывода."}
-            </small>
-          </label>
-
-          <div className="readonly-setting audio-device-refresh">
-            <span>Аудиоустройства</span>
-            <button
-              className="secondary"
-              type="button"
-              onClick={() => void refreshAudioDevices(true)}
-              disabled={saving || audioDevicesLoading}
-            >
-              {audioDevicesLoading ? "Обновляем…" : "Разрешить доступ и обновить"}
-            </button>
-            {audioDevicesMessage && <small role="status">{audioDevicesMessage}</small>}
-          </div>
-        </fieldset>
-
-        <fieldset className="settings-group" hidden={activeSection !== "voice"}>
-          <legend style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
-            <span>Синтез речи</span>
-            <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
-          </legend>
-          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
-            Голос {ttsProviderLabel}
-            <CustomSelect
-              value={voiceTtsVoice}
-              disabled={saving || !developerModeEnabled}
-              onChange={(event) => {
-                const nextValue = event.target.value;
-                const previousValue = voiceTtsVoice;
-                setVoiceTtsVoice(nextValue);
-                saveRuntimeSetting({ voice_tts_voice: nextValue }, () => setVoiceTtsVoice(previousValue));
-              }}
-            >
-              {settings.available_tts_voices.map((availableVoice) => (
-                <option key={availableVoice} value={availableVoice}>
-                  {availableVoice}
-                </option>
-              ))}
-            </CustomSelect>
-          </label>
-
-          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
-            Скорость воспроизведения <strong>{voicePlaybackRate.toFixed(2)}×</strong>
-            <input
-              min="0.70"
-              max="1.30"
-              step="0.05"
-              type="range"
-              value={voicePlaybackRate}
-              disabled={saving || !developerModeEnabled}
-              onChange={(event) => {
-                const nextValue = Number(event.target.value);
-                const previousValue = voicePlaybackRate;
-                setVoicePlaybackRate(nextValue);
-                scheduleRuntimeSetting("voice", { voice_playback_rate: nextValue }, () => setVoicePlaybackRate(previousValue));
-              }}
-            />
-          </label>
-
-          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
-            Подача голоса
-            <CustomSelect value={voiceTtsStyle} onChange={(event) => void changeVoiceStyle(event.target.value)} disabled={saving || !developerModeEnabled}>
-              <option value="auto">Авто — по эмоции нейросети</option>
-              <option value="calm">Спокойно</option>
-              <option value="normal">Обычно</option>
-              <option value="energetic">Энергично</option>
-              <option value="thoughtful">Задумчиво</option>
-              <option value="assertive">Напористо</option>
-            </CustomSelect>
-            <small>Действует до перезапуска приложения.</small>
-          </label>
-
-          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
-            Выразительность
-            <CustomSelect value={voiceExpressionLevel} onChange={(event) => void changeVoiceExpression(event.target.value)} disabled={saving || !developerModeEnabled}>
-              <option value="minimal">Минимальная — почти нейтрально</option>
-              <option value="natural">Естественная — рекомендовано</option>
-              <option value="noticeable">Заметная — сильнее эмоции</option>
-            </CustomSelect>
-            <small>Усиливает или смягчает выбранную подачу; обычный профиль не меняется.</small>
-          </label>
-
-          <div className={`readonly-setting${!developerModeEnabled ? " dev-locked-field" : ""}`}>
-            <span>Движок синтеза</span>
-            <strong>
-              {ttsRuntimeLabel}
-              {" · активен"}
-            </strong>
-          </div>
-        </fieldset>
-
-        <fieldset className="settings-group" hidden={activeSection !== "voice-recognition"}>
-          <legend style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
-            <span>Детектор речи</span>
-            <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
-          </legend>
-          <div className={`readonly-setting${!developerModeEnabled ? " dev-locked-field" : ""}`}>
-            <span>Детектор речи</span>
-            <strong>
-              {settings.voice_vad?.active_provider ?? "energy"}
-              {settings.voice_vad?.model ? ` · ${settings.voice_vad.model}` : ""}
-              {settings.voice_vad?.ready ? " · готов" : " · fallback"}
-            </strong>
-            {settings.voice_vad?.fallback_reason && <small>{settings.voice_vad.fallback_reason}</small>}
-          </div>
-        </fieldset>
-
-        <fieldset className="settings-group" hidden={activeSection !== "voice-recognition"}>
-          <legend style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
-            <span>Словарь распознавания</span>
-            <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
-          </legend>
-          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
-            Канонический термин = точный вариант | точный вариант
-            <textarea
-              rows={9}
-              value={sttTermsText}
-              onChange={(event) => setSttTermsText(event.target.value)}
-              placeholder={"NeuroAsist = Нейро Асист | нейроасист\nGigaAM = Гига АМ | гигаэм"}
-              disabled={saving || !developerModeEnabled}
-            />
-            <small>Исправляются только перечисленные варианты. Нечёткий поиск и LLM не используются.</small>
-          </label>
-          <button className="secondary" type="button" onClick={() => void saveSttTerms()} disabled={saving || !developerModeEnabled}>
-            Сохранить словарь распознавания
-          </button>
-        </fieldset>
-
-        <fieldset className="settings-group" hidden={activeSection !== "voice-recognition"}>
-          <legend style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
-            <span>Словарь произношений</span>
-            <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
-          </legend>
-          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
-            Термин = как произносить
-            <textarea
-              rows={8}
-              value={pronunciationsText}
-              onChange={(event) => setPronunciationsText(event.target.value)}
-              placeholder={"OpenAI = Оупен Эй Ай\nКак-то = к+ак-то\nМука = му́ка"}
-              disabled={saving || !developerModeEnabled}
-            />
-            <small>
-              Одна пара на строку. Ударение можно задать как «к+ак-то» или «ка́к-то».
-              Изменения применяются к следующей фразе без перезапуска.
-            </small>
-          </label>
-          <button className="secondary" type="button" onClick={() => void savePronunciations()} disabled={saving || !developerModeEnabled}>
-            Сохранить словарь
-          </button>
-        </fieldset>
-
-        <fieldset className="settings-group" hidden={activeSection !== "voice-advanced"}>
-          <legend style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
-            <span>Дополнительно</span>
-            <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
-          </legend>
-          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
-            Сегментов в буфере
-            <input
-              min="1"
-              max="4"
-              step="1"
-              type="number"
-              value={prebufferSegments}
-              disabled={!developerModeEnabled}
-              onChange={(event) => {
-                const nextValue = Number(event.target.value);
-                const previousValue = prebufferSegments;
-                setPrebufferSegments(nextValue);
-                scheduleRuntimeSetting("voice-advanced", { voice_live_playback_prebuffer_segments: nextValue }, () => setPrebufferSegments(previousValue));
-              }}
-            />
-          </label>
-
-          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
-            Задержка буфера, мс
-            <input
-              min="0"
-              max="1500"
-              step="50"
-              type="number"
-              value={prebufferMs}
-              disabled={!developerModeEnabled}
-              onChange={(event) => {
-                const nextValue = Number(event.target.value);
-                const previousValue = prebufferMs;
-                setPrebufferMs(nextValue);
-                scheduleRuntimeSetting("voice-advanced", { voice_live_playback_prebuffer_ms: nextValue }, () => setPrebufferMs(previousValue));
-              }}
-            />
-          </label>
-          <button
-            className="secondary"
-            type="button"
-            aria-expanded={showSttCapture}
-            aria-controls="stt-guided-capture"
-            disabled={!developerModeEnabled}
-            onClick={() => setShowSttCapture((value) => !value)}
-          >
-            {showSttCapture ? "Скрыть сбор тестовых записей" : "Собрать приватный STT-корпус"}
-          </button>
-        </fieldset>
-
-        {showSttCapture && activeSection === "voice-advanced" && (
-          <GuidedSttCapture profile={voiceMicrophoneProfile} inputDeviceId={voiceInputDeviceId} />
-        )}
-
-        <fieldset className="settings-group live-conversation-settings" hidden={activeSection !== "conversation"}>
-          <legend>Живой разговор</legend>
-          <small>
-            Live — единственный голосовой режим. Реплики распознаются автоматически, без кнопки записи.
-          </small>
-
-          <label>
-            Участники
-            <CustomSelect
-              value={liveSettings.live_conversation_participant_mode}
-              onChange={(event) => updateLiveSetting(
-                "live_conversation_participant_mode",
-                event.target.value as LiveConversationSettings["live_conversation_participant_mode"],
-              )}
-            >
-              <option value="one_to_one">Один на один</option>
-              <option value="group">Несколько собеседников</option>
-            </CustomSelect>
-          </label>
-
-          <label>
-            Охотность вступать
-            <CustomSelect
-              value={liveSettings.live_conversation_engagement}
-              onChange={(event) => updateLiveSetting(
-                "live_conversation_engagement",
-                event.target.value as LiveConversationSettings["live_conversation_engagement"],
-              )}
-            >
-              <option value="low">Сдержанная</option>
-              <option value="balanced">Сбалансированная</option>
-              <option value="high">Разговорчивая</option>
-            </CustomSelect>
-          </label>
-
-          <label>
-            Инициативность
-            <CustomSelect
-              value={liveSettings.live_conversation_initiative}
-              onChange={(event) => updateLiveSetting(
-                "live_conversation_initiative",
-                event.target.value as LiveConversationSettings["live_conversation_initiative"],
-              )}
-            >
-              <option value="off">Выключена</option>
-              <option value="rare">Редкая</option>
-              <option value="balanced">Сбалансированная</option>
-            </CustomSelect>
-          </label>
-
-          <div className="dev-subgroup-header">
-            <span>Тонкие параметры и тайминги</span>
-            <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
+            <label>
+              Язык голосового ввода
+              <CustomSelect
+                value={voiceLanguage}
+                onChange={(event) => {
+                  const nextValue = event.target.value;
+                  const previousValue = voiceLanguage;
+                  setVoiceLanguage(nextValue);
+                  saveRuntimeSetting({ voice_language: nextValue }, () => setVoiceLanguage(previousValue));
+                }}
+              >
+                {settings.available_voice_languages.map((availableLanguage) => (
+                  <option key={availableLanguage} value={availableLanguage}>
+                    {availableLanguage === "ru" ? "Русский" : availableLanguage === "en" ? "Английский" : availableLanguage}
+                  </option>
+                ))}
+              </CustomSelect>
+            </label>
           </div>
 
-          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
-            Прямое обращение
-            <CustomSelect
-              value={liveSettings.live_conversation_address_strictness}
-              disabled={!developerModeEnabled}
-              onChange={(event) => updateLiveSetting(
-                "live_conversation_address_strictness",
-                event.target.value as LiveConversationSettings["live_conversation_address_strictness"],
-              )}
-            >
-              <option value="relaxed">Свободное</option>
-              <option value="balanced">Сбалансированное</option>
-              <option value="strict">Строгое</option>
-            </CustomSelect>
-          </label>
+          {/* VOICE: Synthesis Card */}
+          <div className="settings-card" hidden={activeSection !== "voice"}>
+            <div className="settings-card-header">
+              <div className="settings-card-header-main">
+                <div className="settings-card-title-group">
+                  <h3 className="settings-card-title">Синтез и характер речи</h3>
+                  <p className="settings-card-subtitle">Выбор голоса Iris, темп речи и эмоциональная подача</p>
+                </div>
+              </div>
+              <div className="settings-card-header-actions">
+                <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
+              </div>
+            </div>
 
-          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
-            Чувствительность к перебиванию
-            <CustomSelect
-              value={liveSettings.live_conversation_interruption_sensitivity}
-              disabled={!developerModeEnabled}
-              onChange={(event) => updateLiveSetting(
-                "live_conversation_interruption_sensitivity",
-                event.target.value as LiveConversationSettings["live_conversation_interruption_sensitivity"],
-              )}
-            >
-              <option value="low">Низкая</option>
-              <option value="balanced">Сбалансированная</option>
-              <option value="high">Высокая</option>
-            </CustomSelect>
-          </label>
+            <div className="settings-card-grid">
+              <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+                Голос {ttsProviderLabel}
+                <CustomSelect
+                  value={voiceTtsVoice}
+                  disabled={saving || !developerModeEnabled}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    const previousValue = voiceTtsVoice;
+                    setVoiceTtsVoice(nextValue);
+                    saveRuntimeSetting({ voice_tts_voice: nextValue }, () => setVoiceTtsVoice(previousValue));
+                  }}
+                >
+                  {settings.available_tts_voices.map((availableVoice) => (
+                    <option key={availableVoice} value={availableVoice}>
+                      {availableVoice}
+                    </option>
+                  ))}
+                </CustomSelect>
+              </label>
 
-          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
-            Терпимость к паузам
-            <CustomSelect
-              value={liveSettings.live_conversation_pause_tolerance}
-              disabled={!developerModeEnabled}
-              onChange={(event) => updateLiveSetting(
-                "live_conversation_pause_tolerance",
-                event.target.value as LiveConversationSettings["live_conversation_pause_tolerance"],
-              )}
-            >
-              <option value="short">Короткая</option>
-              <option value="natural">Естественная</option>
-              <option value="patient">Терпеливая</option>
-            </CustomSelect>
-          </label>
+              <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+                Скорость воспроизведения <strong>{voicePlaybackRate.toFixed(2)}×</strong>
+                <input
+                  min="0.70"
+                  max="1.30"
+                  step="0.05"
+                  type="range"
+                  value={voicePlaybackRate}
+                  disabled={saving || !developerModeEnabled}
+                  onChange={(event) => {
+                    const nextValue = Number(event.target.value);
+                    const previousValue = voicePlaybackRate;
+                    setVoicePlaybackRate(nextValue);
+                    scheduleRuntimeSetting("voice", { voice_playback_rate: nextValue }, () => setVoicePlaybackRate(previousValue));
+                  }}
+                />
+              </label>
 
-          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
-            Выраженность эмоций
-            <CustomSelect
-              value={liveSettings.live_conversation_emotion_expression}
-              disabled={!developerModeEnabled}
-              onChange={(event) => updateLiveSetting(
-                "live_conversation_emotion_expression",
-                event.target.value as LiveConversationSettings["live_conversation_emotion_expression"],
-              )}
-            >
-              <option value="subtle">Тонкая</option>
-              <option value="natural">Естественная</option>
-              <option value="strong">Яркая</option>
-            </CustomSelect>
-          </label>
+              <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+                Подача голоса
+                <CustomSelect value={voiceTtsStyle} onChange={(event) => void changeVoiceStyle(event.target.value)} disabled={saving || !developerModeEnabled}>
+                  <option value="auto">Авто — по эмоции нейросети</option>
+                  <option value="calm">Спокойно</option>
+                  <option value="normal">Обычно</option>
+                  <option value="energetic">Энергично</option>
+                  <option value="thoughtful">Задумчиво</option>
+                  <option value="assertive">Напористо</option>
+                </CustomSelect>
+                <small>Действует до перезапуска приложения.</small>
+              </label>
 
-          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
-            Восстановление настроения
-            <CustomSelect
-              value={liveSettings.live_conversation_mood_recovery}
-              disabled={!developerModeEnabled}
-              onChange={(event) => updateLiveSetting(
-                "live_conversation_mood_recovery",
-                event.target.value as LiveConversationSettings["live_conversation_mood_recovery"],
-              )}
-            >
-              <option value="slow">Медленное</option>
-              <option value="natural">Естественное</option>
-              <option value="fast">Быстрое</option>
-            </CustomSelect>
-          </label>
+              <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+                Выразительность
+                <CustomSelect value={voiceExpressionLevel} onChange={(event) => void changeVoiceExpression(event.target.value)} disabled={saving || !developerModeEnabled}>
+                  <option value="minimal">Минимальная — почти нейтрально</option>
+                  <option value="natural">Естественная — рекомендовано</option>
+                  <option value="noticeable">Заметная — сильнее эмоции</option>
+                </CustomSelect>
+                <small>Усиливает или смягчает выбранную подачу; обычный профиль не меняется.</small>
+              </label>
+            </div>
 
-          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
-            Влияние недавних событий
-            <CustomSelect
-              value={liveSettings.live_conversation_recent_event_weight}
-              disabled={!developerModeEnabled}
-              onChange={(event) => updateLiveSetting(
-                "live_conversation_recent_event_weight",
-                event.target.value as LiveConversationSettings["live_conversation_recent_event_weight"],
-              )}
-            >
-              <option value="light">Слабое</option>
-              <option value="balanced">Сбалансированное</option>
-              <option value="strong">Сильное</option>
-            </CustomSelect>
-          </label>
+            <div className={`readonly-setting${!developerModeEnabled ? " dev-locked-field" : ""}`}>
+              <span>Движок синтеза</span>
+              <strong>
+                {ttsRuntimeLabel}
+                {" · активен"}
+              </strong>
+            </div>
+          </div>
 
-          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
-            Защита от собственного голоса
-            <CustomSelect
-              value={liveSettings.live_conversation_echo_mode}
-              disabled={!developerModeEnabled}
-              onChange={(event) => updateLiveSetting(
-                "live_conversation_echo_mode",
-                event.target.value as LiveConversationSettings["live_conversation_echo_mode"],
-              )}
-            >
-              <option value="auto">Автоматически</option>
-              <option value="half_duplex">Не слушать во время ответа</option>
-            </CustomSelect>
-          </label>
-        </fieldset>
+          {/* VOICE-DEVICES: Devices Card */}
+          <div className="settings-card" hidden={activeSection !== "voice-devices"}>
+            <div className="settings-card-header">
+              <div className="settings-card-header-main">
+                <div className="settings-card-title-group">
+                  <h3 className="settings-card-title">Аудиоустройства и запись</h3>
+                  <p className="settings-card-subtitle">Микрофон, динамики/наушники и шумоподавление</p>
+                </div>
+              </div>
+            </div>
 
-        <fieldset className="settings-group" hidden={activeSection !== "memory"}>
-          <legend style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
-            <span>Память</span>
-            <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
-          </legend>
-          <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
-            Режим сохранения
-            <CustomSelect
-              value={memoryMode}
-              disabled={!developerModeEnabled}
-              onChange={(event) => {
-                const nextValue = event.target.value;
-                const previousValue = memoryMode;
-                setMemoryMode(nextValue);
-                saveRuntimeSetting({ memory_mode: nextValue }, () => setMemoryMode(previousValue));
+            <div className="settings-card-grid">
+              <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+                Профиль микрофона
+                <CustomSelect
+                  value={voiceMicrophoneProfile}
+                  disabled={!developerModeEnabled}
+                  onChange={(event) => {
+                    const nextValue = event.target.value as MicrophoneProfile;
+                    const previousValue = voiceMicrophoneProfile;
+                    setVoiceMicrophoneProfile(nextValue);
+                    saveRuntimeSetting({ voice_microphone_profile: nextValue }, () => setVoiceMicrophoneProfile(previousValue));
+                  }}
+                >
+                  <option value="balanced">Сбалансированный — рекомендуется</option>
+                  <option value="headset">Гарнитура</option>
+                  <option value="speakers">Колонки</option>
+                </CustomSelect>
+                <small>
+                  Управляет эхоподавлением и шумоподавлением браузера для записи и живого режима.
+                  {!developerModeEnabled && " Доступно в режиме разработчика."}
+                </small>
+              </label>
+
+              <label>
+                Источник входа (микрофон)
+                <CustomSelect
+                  value={voiceInputDeviceId}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    const previousValue = voiceInputDeviceId;
+                    setVoiceInputDeviceId(nextValue);
+                    saveRuntimeSetting({ voice_input_device_id: nextValue }, () => setVoiceInputDeviceId(previousValue));
+                  }}
+                  disabled={saving}
+                >
+                  <option value="">Системный по умолчанию</option>
+                  {inputDeviceOptions.map((device) => (
+                    <option key={device.deviceId} value={device.deviceId} disabled={!audioDevices.canEnumerate}>
+                      {device.label}
+                    </option>
+                  ))}
+                </CustomSelect>
+                <small>Используется для единственного голосового режима Live.</small>
+              </label>
+
+              <label className="settings-field-full">
+                Источник вывода (наушники или колонки)
+                <CustomSelect
+                  value={voiceOutputDeviceId}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    const previousValue = voiceOutputDeviceId;
+                    setVoiceOutputDeviceId(nextValue);
+                    saveRuntimeSetting({ voice_output_device_id: nextValue }, () => setVoiceOutputDeviceId(previousValue));
+                  }}
+                  disabled={saving}
+                >
+                  <option value="">Системный по умолчанию</option>
+                  {outputDeviceOptions.map((device) => (
+                    <option key={device.deviceId} value={device.deviceId} disabled={!audioDevices.canSelectOutput}>
+                      {device.label}
+                    </option>
+                  ))}
+                </CustomSelect>
+                <small>
+                  {audioDevices.canSelectOutput
+                    ? "Выбранное устройство используется для синтезированных аудиофайлов и воспроизведения сообщений; запасной системный голос браузера следует настройке Windows."
+                    : "Этот WebView не поддерживает выбор устройства вывода."}
+                </small>
+              </label>
+            </div>
+
+            <div className="readonly-setting audio-device-refresh">
+              <span>Аудиоустройства</span>
+              <button
+                className="secondary"
+                type="button"
+                onClick={() => void refreshAudioDevices(true)}
+                disabled={saving || audioDevicesLoading}
+              >
+                {audioDevicesLoading ? "Обновляем…" : "Разрешить доступ и обновить"}
+              </button>
+              {audioDevicesMessage && <small role="status">{audioDevicesMessage}</small>}
+            </div>
+          </div>
+
+          {/* VOICE-RECOGNITION: VAD Card */}
+          <div className="settings-card" hidden={activeSection !== "voice-recognition"}>
+            <div className="settings-card-header">
+              <div className="settings-card-header-main">
+                <div className="settings-card-title-group">
+                  <h3 className="settings-card-title">Детектор активности речи (VAD)</h3>
+                  <p className="settings-card-subtitle">Модель определения речи для старта и окончания реплик</p>
+                </div>
+              </div>
+              <div className="settings-card-header-actions">
+                <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
+              </div>
+            </div>
+
+            <div className={`readonly-setting${!developerModeEnabled ? " dev-locked-field" : ""}`}>
+              <span>Детектор речи</span>
+              <strong>
+                {settings.voice_vad?.active_provider ?? "energy"}
+                {settings.voice_vad?.model ? ` · ${settings.voice_vad.model}` : ""}
+                {settings.voice_vad?.ready ? " · готов" : " · fallback"}
+              </strong>
+              {settings.voice_vad?.fallback_reason && <small>{settings.voice_vad.fallback_reason}</small>}
+            </div>
+          </div>
+
+          {/* VOICE-RECOGNITION: STT Terms Card */}
+          <div className="settings-card" hidden={activeSection !== "voice-recognition"}>
+            <div className="settings-card-header">
+              <div className="settings-card-header-main">
+                <div className="settings-card-title-group">
+                  <h3 className="settings-card-title">Словарь распознавания (STT)</h3>
+                  <p className="settings-card-subtitle">Канонические термины и правила замены распознанных слов</p>
+                </div>
+              </div>
+              <div className="settings-card-header-actions">
+                <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
+              </div>
+            </div>
+
+            <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+              Канонический термин = точный вариант | точный вариант
+              <textarea
+                rows={7}
+                value={sttTermsText}
+                onChange={(event) => setSttTermsText(event.target.value)}
+                placeholder={"NeuroAsist = Нейро Асист | нейроасист\nGigaAM = Гига АМ | гигаэм"}
+                disabled={saving || !developerModeEnabled}
+              />
+              <small>Исправляются только перечисленные варианты. Нечёткий поиск и LLM не используются.</small>
+            </label>
+            <div className="settings-card-actions">
+              <button className="secondary" type="button" onClick={() => void saveSttTerms()} disabled={saving || !developerModeEnabled}>
+                Сохранить словарь распознавания
+              </button>
+            </div>
+          </div>
+
+          {/* VOICE-RECOGNITION: Pronunciations Card */}
+          <div className="settings-card" hidden={activeSection !== "voice-recognition"}>
+            <div className="settings-card-header">
+              <div className="settings-card-header-main">
+                <div className="settings-card-title-group">
+                  <h3 className="settings-card-title">Словарь произношений (TTS)</h3>
+                  <p className="settings-card-subtitle">Транскрипция и ударения для естественного синтеза речи</p>
+                </div>
+              </div>
+              <div className="settings-card-header-actions">
+                <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
+              </div>
+            </div>
+
+            <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+              Термин = как произносить
+              <textarea
+                rows={7}
+                value={pronunciationsText}
+                onChange={(event) => setPronunciationsText(event.target.value)}
+                placeholder={"OpenAI = Оупен Эй Ай\nКак-то = к+ак-то\nМука = му́ка"}
+                disabled={saving || !developerModeEnabled}
+              />
+              <small>
+                Одна пара на строку. Ударение можно задать как «к+ак-то» или «ка́к-то».
+                Изменения применяются к следующей фразе без перезапуска.
+              </small>
+            </label>
+            <div className="settings-card-actions">
+              <button className="secondary" type="button" onClick={() => void savePronunciations()} disabled={saving || !developerModeEnabled}>
+                Сохранить словарь
+              </button>
+            </div>
+          </div>
+
+          {/* VOICE-ADVANCED: Buffer & Guided STT Card */}
+          <div className="settings-card" hidden={activeSection !== "voice-advanced"}>
+            <div className="settings-card-header">
+              <div className="settings-card-header-main">
+                <div className="settings-card-title-group">
+                  <h3 className="settings-card-title">Буферизация и сбор данных</h3>
+                  <p className="settings-card-subtitle">Настройка задержек сетевого буфера и сбор контрольных аудиозаписей</p>
+                </div>
+              </div>
+              <div className="settings-card-header-actions">
+                <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
+              </div>
+            </div>
+
+            <div className="settings-card-grid">
+              <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+                Сегментов в буфере
+                <input
+                  min="1"
+                  max="4"
+                  step="1"
+                  type="number"
+                  value={prebufferSegments}
+                  disabled={!developerModeEnabled}
+                  onChange={(event) => {
+                    const nextValue = Number(event.target.value);
+                    const previousValue = prebufferSegments;
+                    setPrebufferSegments(nextValue);
+                    scheduleRuntimeSetting("voice-advanced", { voice_live_playback_prebuffer_segments: nextValue }, () => setPrebufferSegments(previousValue));
+                  }}
+                />
+              </label>
+
+              <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+                Задержка буфера, мс
+                <input
+                  min="0"
+                  max="1500"
+                  step="50"
+                  type="number"
+                  value={prebufferMs}
+                  disabled={!developerModeEnabled}
+                  onChange={(event) => {
+                    const nextValue = Number(event.target.value);
+                    const previousValue = prebufferMs;
+                    setPrebufferMs(nextValue);
+                    scheduleRuntimeSetting("voice-advanced", { voice_live_playback_prebuffer_ms: nextValue }, () => setPrebufferMs(previousValue));
+                  }}
+                />
+              </label>
+            </div>
+
+            <div className="settings-card-actions">
+              <button
+                className="secondary"
+                type="button"
+                aria-expanded={showSttCapture}
+                aria-controls="stt-guided-capture"
+                disabled={!developerModeEnabled}
+                onClick={() => setShowSttCapture((value) => !value)}
+              >
+                {showSttCapture ? "Скрыть сбор тестовых записей" : "Собрать приватный STT-корпус"}
+              </button>
+            </div>
+          </div>
+
+          {showSttCapture && activeSection === "voice-advanced" && (
+            <GuidedSttCapture profile={voiceMicrophoneProfile} inputDeviceId={voiceInputDeviceId} />
+          )}
+
+          {/* CONVERSATION: Card 1 - Format & Initiative */}
+          <div className="settings-card" hidden={activeSection !== "conversation"}>
+            <div className="settings-card-header">
+              <div className="settings-card-header-main">
+                <div className="settings-card-title-group">
+                  <h3 className="settings-card-title">Формат и инициатива диалога</h3>
+                  <p className="settings-card-subtitle">
+                    Live — единственный голосовой режим. Реплики распознаются автоматически, без кнопки записи
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="settings-card-grid">
+              <label>
+                Участники
+                <CustomSelect
+                  value={liveSettings.live_conversation_participant_mode}
+                  onChange={(event) => updateLiveSetting(
+                    "live_conversation_participant_mode",
+                    event.target.value as LiveConversationSettings["live_conversation_participant_mode"],
+                  )}
+                >
+                  <option value="one_to_one">Один на один</option>
+                  <option value="group">Несколько собеседников</option>
+                </CustomSelect>
+              </label>
+
+              <label>
+                Охотность вступать
+                <CustomSelect
+                  value={liveSettings.live_conversation_engagement}
+                  onChange={(event) => updateLiveSetting(
+                    "live_conversation_engagement",
+                    event.target.value as LiveConversationSettings["live_conversation_engagement"],
+                  )}
+                >
+                  <option value="low">Сдержанная</option>
+                  <option value="balanced">Сбалансированная</option>
+                  <option value="high">Разговорчивая</option>
+                </CustomSelect>
+              </label>
+
+              <label className="settings-field-full">
+                Инициативность
+                <CustomSelect
+                  value={liveSettings.live_conversation_initiative}
+                  onChange={(event) => updateLiveSetting(
+                    "live_conversation_initiative",
+                    event.target.value as LiveConversationSettings["live_conversation_initiative"],
+                  )}
+                >
+                  <option value="off">Выключена</option>
+                  <option value="rare">Редкая</option>
+                  <option value="balanced">Сбалансированная</option>
+                </CustomSelect>
+              </label>
+            </div>
+          </div>
+
+          {/* CONVERSATION: Card 2 - Speech Dynamics & Timings */}
+          <div className="settings-card" hidden={activeSection !== "conversation"}>
+            <div className="settings-card-header">
+              <div className="settings-card-header-main">
+                <div className="settings-card-title-group">
+                  <h3 className="settings-card-title">Тонкие параметры и тайминги</h3>
+                  <p className="settings-card-subtitle">Тонкая настройка пауз, перебивания и строгости обращения</p>
+                </div>
+              </div>
+              <div className="settings-card-header-actions">
+                <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
+              </div>
+            </div>
+
+            <div className="settings-card-grid">
+              <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+                Чувствительность к перебиванию
+                <CustomSelect
+                  value={liveSettings.live_conversation_interruption_sensitivity}
+                  disabled={!developerModeEnabled}
+                  onChange={(event) => updateLiveSetting(
+                    "live_conversation_interruption_sensitivity",
+                    event.target.value as LiveConversationSettings["live_conversation_interruption_sensitivity"],
+                  )}
+                >
+                  <option value="low">Низкая</option>
+                  <option value="balanced">Сбалансированная</option>
+                  <option value="high">Высокая</option>
+                </CustomSelect>
+              </label>
+
+              <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+                Прямое обращение
+                <CustomSelect
+                  value={liveSettings.live_conversation_address_strictness}
+                  disabled={!developerModeEnabled}
+                  onChange={(event) => updateLiveSetting(
+                    "live_conversation_address_strictness",
+                    event.target.value as LiveConversationSettings["live_conversation_address_strictness"],
+                  )}
+                >
+                  <option value="relaxed">Свободное</option>
+                  <option value="balanced">Сбалансированное</option>
+                  <option value="strict">Строгое</option>
+                </CustomSelect>
+              </label>
+
+              <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+                Терпимость к паузам
+                <CustomSelect
+                  value={liveSettings.live_conversation_pause_tolerance}
+                  disabled={!developerModeEnabled}
+                  onChange={(event) => updateLiveSetting(
+                    "live_conversation_pause_tolerance",
+                    event.target.value as LiveConversationSettings["live_conversation_pause_tolerance"],
+                  )}
+                >
+                  <option value="short">Короткая</option>
+                  <option value="natural">Естественная</option>
+                  <option value="patient">Терпеливая</option>
+                </CustomSelect>
+              </label>
+            </div>
+          </div>
+
+          {/* CONVERSATION: Card 3 - Emotions & Audio Balance */}
+          <div className="settings-card" hidden={activeSection !== "conversation"}>
+            <div className="settings-card-header">
+              <div className="settings-card-header-main">
+                <div className="settings-card-title-group">
+                  <h3 className="settings-card-title">Эмоции и аудио-баланс</h3>
+                  <p className="settings-card-subtitle">Выраженность эмоций, восстановление настроения и эхоподавление</p>
+                </div>
+              </div>
+              <div className="settings-card-header-actions">
+                <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
+              </div>
+            </div>
+
+            <div className="settings-card-grid">
+              <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+                Выраженность эмоций
+                <CustomSelect
+                  value={liveSettings.live_conversation_emotion_expression}
+                  disabled={!developerModeEnabled}
+                  onChange={(event) => updateLiveSetting(
+                    "live_conversation_emotion_expression",
+                    event.target.value as LiveConversationSettings["live_conversation_emotion_expression"],
+                  )}
+                >
+                  <option value="subtle">Тонкая</option>
+                  <option value="natural">Естественная</option>
+                  <option value="strong">Яркая</option>
+                </CustomSelect>
+              </label>
+
+              <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+                Восстановление настроения
+                <CustomSelect
+                  value={liveSettings.live_conversation_mood_recovery}
+                  disabled={!developerModeEnabled}
+                  onChange={(event) => updateLiveSetting(
+                    "live_conversation_mood_recovery",
+                    event.target.value as LiveConversationSettings["live_conversation_mood_recovery"],
+                  )}
+                >
+                  <option value="slow">Медленное</option>
+                  <option value="natural">Естественное</option>
+                  <option value="fast">Быстрое</option>
+                </CustomSelect>
+              </label>
+
+              <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+                Влияние недавних событий
+                <CustomSelect
+                  value={liveSettings.live_conversation_recent_event_weight}
+                  disabled={!developerModeEnabled}
+                  onChange={(event) => updateLiveSetting(
+                    "live_conversation_recent_event_weight",
+                    event.target.value as LiveConversationSettings["live_conversation_recent_event_weight"],
+                  )}
+                >
+                  <option value="light">Слабое</option>
+                  <option value="balanced">Сбалансированное</option>
+                  <option value="strong">Сильное</option>
+                </CustomSelect>
+              </label>
+
+              <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+                Защита от собственного голоса
+                <CustomSelect
+                  value={liveSettings.live_conversation_echo_mode}
+                  disabled={!developerModeEnabled}
+                  onChange={(event) => updateLiveSetting(
+                    "live_conversation_echo_mode",
+                    event.target.value as LiveConversationSettings["live_conversation_echo_mode"],
+                  )}
+                >
+                  <option value="auto">Автоматически</option>
+                  <option value="half_duplex">Не слушать во время ответа</option>
+                </CustomSelect>
+              </label>
+            </div>
+          </div>
+
+          {/* MEMORY: Long-term Memory Card */}
+          <div className="settings-card" hidden={activeSection !== "memory"}>
+            <div className="settings-card-header">
+              <div className="settings-card-header-main">
+                <div className="settings-card-title-group">
+                  <h3 className="settings-card-title">Долгосрочная память</h3>
+                  <p className="settings-card-subtitle">Сохранение важных фактов и предпочтений между диалогами</p>
+                </div>
+              </div>
+              <div className="settings-card-header-actions">
+                <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
+              </div>
+            </div>
+
+            <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+              Режим сохранения
+              <CustomSelect
+                value={memoryMode}
+                disabled={!developerModeEnabled}
+                onChange={(event) => {
+                  const nextValue = event.target.value;
+                  const previousValue = memoryMode;
+                  setMemoryMode(nextValue);
+                  saveRuntimeSetting({ memory_mode: nextValue }, () => setMemoryMode(previousValue));
+                }}
+              >
+                <option value="off">Не сохранять</option>
+                <option value="balanced">Умный — только важные устойчивые факты</option>
+                <option value="automatic">Автоматический — все обычные факты</option>
+              </CustomSelect>
+            </label>
+
+            <SettingsSwitch
+              checked={memoryIncognito}
+              label="Не сохранять текущий разговор"
+              description="Режим инкогнито не добавляет новые данные в долгосрочную память."
+              onChange={(checked) => {
+                const previousValue = memoryIncognito;
+                setMemoryIncognito(checked);
+                saveRuntimeSetting({ memory_incognito: checked }, () => setMemoryIncognito(previousValue));
               }}
-            >
-              <option value="off">Не сохранять</option>
-              <option value="balanced">Умный — только важные устойчивые факты</option>
-              <option value="automatic">Автоматический — все обычные факты</option>
-            </CustomSelect>
-          </label>
-          <SettingsSwitch
-            checked={memoryIncognito}
-            label="Не сохранять текущий разговор"
-            description="Режим инкогнито не добавляет новые данные в долгосрочную память."
-            onChange={(checked) => {
-              const previousValue = memoryIncognito;
-              setMemoryIncognito(checked);
-              saveRuntimeSetting({ memory_incognito: checked }, () => setMemoryIncognito(previousValue));
-            }}
-          />
-        </fieldset>
+            />
+          </div>
         </div>
 
         {message && <div className="notice" role="status">{message}</div>}
@@ -4157,7 +4381,7 @@ function ModelManager({
 
   useEffect(() => {
     if (listRef.current && models.length > 0) {
-      animateStaggerCards(listRef.current, ".settings-group", 40);
+      animateStaggerCards(listRef.current, ".model-item-card", 40);
     }
   }, [models.length]);
 
@@ -4184,25 +4408,34 @@ function ModelManager({
   };
 
   return (
-    <section className="system-card" aria-label="Управление моделями" ref={listRef}>
-      <div className="panel-header">
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <h2>Модели</h2>
-            <DevBadge active={developerMode} onClick={onUnlockRequest} />
+    <section className="settings-card" aria-label="Управление моделями" ref={listRef}>
+      <div className="settings-card-header">
+        <div className="settings-card-header-main">
+          <div className="settings-card-title-group">
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <h2 className="settings-card-title">Модели</h2>
+              <DevBadge active={developerMode} onClick={onUnlockRequest} />
+            </div>
+            <p className="settings-card-subtitle">Хранятся вне папки приложения</p>
           </div>
-          <span>Хранятся вне папки приложения</span>
         </div>
-        <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void refresh(); }}>
-          <IconInterfaceSpirals size={16} aria-hidden="true" />
-          Обновить
-        </button>
+        <div className="settings-card-header-actions">
+          <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void refresh(); }}>
+            <RefreshCw size={15} aria-hidden="true" />
+            Обновить
+          </button>
+        </div>
       </div>
       {models.map((model) => {
         const percent = model.total_bytes > 0 ? Math.min(100, Math.round((model.downloaded_bytes / model.total_bytes) * 100)) : 0;
-        return <div className="settings-group" key={model.id}>
-          <strong>{model.name} {model.version}</strong>
-          <span>{model.installed ? "Установлена и проверена" : model.status === "downloading" ? `Загружаем: ${percent}%` : "Не установлена"}</span>
+        return <div className="model-item-card" key={model.id}>
+          <div className="model-item-header">
+            <strong>{model.name} {model.version}</strong>
+            <span className={`settings-status-pill${model.installed ? " is-active" : ""}`}>
+              <span className="settings-status-dot" />
+              {model.installed ? "Установлена и проверена" : model.status === "downloading" ? `Загружаем: ${percent}%` : "Не установлена"}
+            </span>
+          </div>
           {model.status === "failed" && <span className="notice">{model.error}</span>}
           {model.status === "downloading" && <progress value={percent} max="100">{percent}%</progress>}
           <div className="model-actions">
@@ -4218,7 +4451,7 @@ function ModelManager({
             )}
             {model.installed && (
               <button
-                className="secondary"
+                className="secondary danger-button"
                 onClick={(e) => { animateButtonPress(e.currentTarget); void remove(model.id); }}
                 disabled={!developerMode}
                 title={!developerMode ? "Требуется режим разработчика" : undefined}
@@ -4270,10 +4503,22 @@ function BackupControls() {
     }
   };
   return (
-    <section className="system-card" aria-label="Резервные копии">
-      <div className="panel-header"><div><h2>Резервные копии</h2><span>Память и настройки, срок хранения — 30 дней</span></div><button className="primary-button" onClick={(e) => { animateButtonPress(e.currentTarget); void create(); }} disabled={busy}>{busy ? "Создаём…" : "Создать копию"}</button></div>
+    <section className="settings-card" aria-label="Резервные копии">
+      <div className="settings-card-header">
+        <div className="settings-card-header-main">
+          <div className="settings-card-title-group">
+            <h2 className="settings-card-title">Резервные копии</h2>
+            <p className="settings-card-subtitle">Память и настройки, срок хранения — 30 дней</p>
+          </div>
+        </div>
+        <div className="settings-card-header-actions">
+          <button className="primary-button" onClick={(e) => { animateButtonPress(e.currentTarget); void create(); }} disabled={busy}>
+            {busy ? "Создаём…" : "Создать копию"}
+          </button>
+        </div>
+      </div>
       {backups.length ? (
-        <div className="settings-grid" ref={listRef}>
+        <div className="settings-card-grid" ref={listRef}>
           {backups.slice(0, 3).map((backup) => (
             <InfoRow key={backup.name} label={backup.name} value={`${Math.ceil(backup.size_bytes / 1024)} КБ · ${formatTime(backup.created_at)}`} />
           ))}
@@ -4285,7 +4530,7 @@ function BackupControls() {
           <span>Создайте копию для сохранения памяти и настроек.</span>
         </div>
       )}
-      <small>Удаление Iris не удаляет эти данные из профиля Windows.</small>
+      <small style={{ color: "var(--color-text-muted)" }}>Удаление Iris не удаляет эти данные из профиля Windows.</small>
       {message && <div className="notice">{message}</div>}
     </section>
   );
@@ -4306,6 +4551,12 @@ function SystemMaintenance({
     action: () => Promise<unknown>;
     success: string;
   } | null>(null);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [confirmPhrase, setConfirmPhrase] = useState("");
+
+  const isPhraseMatched =
+    confirmPhrase.trim().toLowerCase() === "сбросить все данные" ||
+    confirmPhrase.trim().toLowerCase() === "reset all data";
 
   const run = async (action: () => Promise<unknown>, success: string) => {
     if (!developerMode) return;
@@ -4313,8 +4564,16 @@ function SystemMaintenance({
     setMessage(null);
     try {
       const result = await action();
-      const restartRequired = typeof result === "object" && result !== null && "chroma_cleanup_pending" in result && Boolean(result.chroma_cleanup_pending);
-      setMessage(restartRequired ? `${success} Перезапусти приложение: тогда папка ChromaDB будет удалена полностью.` : success);
+      const restartRequired =
+        typeof result === "object" &&
+        result !== null &&
+        "chroma_cleanup_pending" in result &&
+        Boolean(result.chroma_cleanup_pending);
+      setMessage(
+        restartRequired
+          ? `${success} Перезапусти приложение: тогда папка ChromaDB будет удалена полностью.`
+          : success
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Не удалось завершить обслуживание.");
     } finally {
@@ -4323,28 +4582,188 @@ function SystemMaintenance({
     }
   };
 
+  const handleResetConfirm = async () => {
+    if (!isPhraseMatched || busy || !developerMode) return;
+    setResetDialogOpen(false);
+    setConfirmPhrase("");
+    await run(resetAllCompanionData, "Все данные помощника удалены.");
+  };
+
   return (
-    <section className="system-card maintenance-card" aria-label="Обслуживание данных">
-      <div className="panel-header">
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <h2>Обслуживание данных</h2>
-            <DevBadge active={developerMode} onClick={onUnlockRequest} />
+    <section className="settings-card maintenance-card" aria-label="Обслуживание данных">
+      <div className="settings-card-header">
+        <div className="settings-card-header-main">
+          <div className="settings-card-title-group">
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <h2 className="settings-card-title">Обслуживание данных</h2>
+              <DevBadge active={developerMode} onClick={onUnlockRequest} />
+            </div>
+            <p className="settings-card-subtitle">Необратимые действия вынесены отдельно</p>
           </div>
-          <span>Необратимые действия вынесены отдельно</span>
         </div>
-        <IconComputerDatabase size={20} aria-hidden="true" />
       </div>
-      <div className={`maintenance-actions${!developerMode ? " dev-locked-field" : ""}`}>
-        <button className="secondary" disabled={busy || !developerMode} onClick={(e) => { animateButtonPress(e.currentTarget); setPendingAction({ title: "Перестроить индекс памяти?", description: "Сами записи останутся на месте. Iris заново подготовит их для поиска.", action: reindexMemories, success: "Индекс памяти перестроен." }); }}>Перестроить индекс памяти</button>
-        <button className="secondary danger-button" disabled={busy || !developerMode} onClick={(e) => { animateButtonPress(e.currentTarget); setPendingAction({ title: "Очистить долгосрочную память?", description: "История диалогов сохранится, но восстановить записи памяти будет нельзя.", action: clearMemories, success: "Долгосрочная память очищена." }); }}>Очистить память</button>
-        <button className="danger-button" disabled={busy || !developerMode} onClick={(e) => { animateButtonPress(e.currentTarget); setPendingAction({ title: "Сбросить все данные Iris?", description: "История, сводки и долгосрочная память будут удалены без возможности восстановления.", action: resetAllCompanionData, success: "Все данные помощника удалены." }); }}>Сбросить все данные</button>
+
+      <div className={`maintenance-body${!developerMode ? " dev-locked-field" : ""}`}>
+        {/* Зона 1: Оптимизация и поиск */}
+        <div className="maintenance-zone">
+          <div className="maintenance-zone-title">Оптимизация и поиск</div>
+
+          <div className="maintenance-row">
+            <IconComputerDatabase size={20} className="maintenance-icon" aria-hidden="true" />
+            <div className="maintenance-row-copy">
+              <strong className="maintenance-row-title">Перестроить индекс памяти</strong>
+              <p className="maintenance-row-desc">
+                Сами записи останутся на месте. Iris заново подготовит их для поиска.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="secondary"
+              disabled={busy || !developerMode}
+              onClick={(e) => {
+                animateButtonPress(e.currentTarget);
+                setPendingAction({
+                  title: "Перестроить индекс памяти?",
+                  description: "Сами записи останутся на месте. Iris заново подготовит их для поиска.",
+                  action: reindexMemories,
+                  success: "Индекс памяти перестроен.",
+                });
+              }}
+            >
+              Перестроить индекс памяти
+            </button>
+          </div>
+        </div>
+
+        {/* Зона 2: Опасная зона */}
+        <div className="maintenance-zone">
+          <div className="maintenance-zone-title is-danger">Опасная зона</div>
+
+          <div className="maintenance-row">
+            <IconInterfaceDeleteBin3 size={20} className="maintenance-icon is-danger" aria-hidden="true" />
+            <div className="maintenance-row-copy">
+              <strong className="maintenance-row-title">Очистить долгосрочную память</strong>
+              <p className="maintenance-row-desc">
+                История диалогов сохранится, но восстановить записи памяти будет нельзя.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="secondary danger-button"
+              disabled={busy || !developerMode}
+              onClick={(e) => {
+                animateButtonPress(e.currentTarget);
+                setPendingAction({
+                  title: "Очистить долгосрочную память?",
+                  description: "История диалогов сохранится, но восстановить записи памяти будет нельзя.",
+                  action: clearMemories,
+                  success: "Долгосрочная память очищена.",
+                });
+              }}
+            >
+              Очистить память
+            </button>
+          </div>
+
+          <div className="maintenance-row">
+            <IconInterfaceAlertTriangle size={20} className="maintenance-icon is-danger" aria-hidden="true" />
+            <div className="maintenance-row-copy">
+              <strong className="maintenance-row-title">Сбросить все данные Iris</strong>
+              <p className="maintenance-row-desc">
+                История, сводки и долгосрочная память будут удалены без возможности восстановления.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="danger-button"
+              disabled={busy || !developerMode}
+              onClick={(e) => {
+                animateButtonPress(e.currentTarget);
+                setConfirmPhrase("");
+                setResetDialogOpen(true);
+              }}
+            >
+              Сбросить все данные
+            </button>
+          </div>
+        </div>
       </div>
+
       {message && <div className="notice" role="status">{message}</div>}
-      <AppDialog open={Boolean(pendingAction)} title={pendingAction?.title ?? ""} description={pendingAction?.description} onClose={() => !busy && setPendingAction(null)} variant="danger">
+
+      {/* Стандартный диалог подтверждения для переиндексации / очистки памяти */}
+      <AppDialog
+        open={Boolean(pendingAction)}
+        title={pendingAction?.title ?? ""}
+        description={pendingAction?.description}
+        onClose={() => !busy && setPendingAction(null)}
+        variant="danger"
+      >
         <div className="dialog-actions">
-          <button className="secondary" type="button" disabled={busy} onClick={() => setPendingAction(null)}>Отмена</button>
-          <button className="danger-button" type="button" disabled={busy || !developerMode} onClick={() => pendingAction && void run(pendingAction.action, pendingAction.success)}>{busy ? "Выполняю…" : "Подтвердить"}</button>
+          <button className="secondary" type="button" disabled={busy} onClick={() => setPendingAction(null)}>
+            Отмена
+          </button>
+          <button
+            className="danger-button"
+            type="button"
+            disabled={busy || !developerMode}
+            onClick={() => pendingAction && void run(pendingAction.action, pendingAction.success)}
+          >
+            {busy ? "Выполняю…" : "Подтвердить"}
+          </button>
+        </div>
+      </AppDialog>
+
+      {/* Специальный модальный диалог со строгим ручным подтверждением фразы */}
+      <AppDialog
+        open={resetDialogOpen}
+        title="Сбросить все данные Iris?"
+        description="История, сводки и долгосрочная память будут удалены без возможности восстановления."
+        onClose={() => {
+          if (!busy) {
+            setResetDialogOpen(false);
+            setConfirmPhrase("");
+          }
+        }}
+        variant="danger"
+      >
+        <div className="maintenance-confirm-dialog">
+          <p className="maintenance-confirm-prompt">
+            Для подтверждения введите <strong>сбросить все данные</strong>:
+          </p>
+          <input
+            type="text"
+            className="maintenance-confirm-input"
+            value={confirmPhrase}
+            onChange={(e) => setConfirmPhrase(e.target.value)}
+            placeholder="сбросить все данные"
+            autoFocus
+            disabled={busy}
+            autoComplete="off"
+            spellCheck={false}
+          />
+
+          <div className="dialog-actions">
+            <button
+              className="secondary"
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setResetDialogOpen(false);
+                setConfirmPhrase("");
+              }}
+            >
+              Отмена
+            </button>
+            <button
+              className="danger-button"
+              type="button"
+              disabled={busy || !developerMode || !isPhraseMatched}
+              onClick={() => void handleResetConfirm()}
+            >
+              {busy ? "Выполняю…" : "Сбросить все данные"}
+            </button>
+          </div>
         </div>
       </AppDialog>
     </section>
@@ -4462,68 +4881,77 @@ function AvatarControls({
 
   return (
     <section className="avatar-controls" aria-label="Управление аватаром">
-      <div className="avatar-toolbar">
-        <span>{enabled ? `${avatarStatus?.client_count ?? 0} подключено` : "Интеграция отключена"}</span>
-        <button className="icon-button" onClick={() => void onRefresh()} disabled={busy} aria-label="Обновить статус аватара" title="Обновить статус аватара"><IconInterfaceSpirals size={16} /></button>
-      </div>
-      <fieldset className="avatar-placement" disabled={busy}>
-        <legend>Где показывать аватар</legend>
-        <label>
-          <input type="radio" name="avatar-placement" aria-label="Внутри Iris" checked={placement === "in_app"} onChange={() => void changePlacement("in_app")} />
-          <span><strong>Внутри Iris</strong><small>Внизу слева на экране диалога, без второго окна.</small></span>
-        </label>
-        <label>
-          <input type="radio" name="avatar-placement" aria-label="Отдельным оверлеем" checked={placement === "desktop_overlay"} onChange={() => void changePlacement("desktop_overlay")} />
-          <span><strong>Отдельным оверлеем</strong><small>Поверх рабочего стола, как сейчас.</small></span>
-        </label>
-      </fieldset>
-      <div className="avatar-summary-grid">
-        <InfoRow label="Клиент" value={client?.client_name ?? "не подключён"} />
-        <InfoRow label="Состояние" value={client?.state ?? "Отключён"} />
-        <InfoRow label="Последний сигнал" value={client ? formatTime(client.last_heartbeat_at) : "—"} />
-        <InfoRow label="Целевая эмоция" value={engine?.target_emotion ?? "нейтральная"} />
-      </div>
-      <details className="avatar-technical">
-        <summary style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span>Технические данные</span>
-          <DevBadge active={developerMode} onClick={onUnlockRequest} />
-        </summary>
-        <div className="avatar-grid">
-          <InfoRow label="Протокол" value={avatarStatus ? `v${avatarStatus.protocol_version}` : "недоступен"} />
-          <InfoRow label="Профиль движения" value={client?.current_motion_profile ?? "нет данных"} />
-          <InfoRow label="Текущий жест" value={client?.current_gesture ?? "нет"} />
-          <InfoRow label="Связь с движком" value={engine ? (engine.mapping_valid ? "настроена" : "резервная") : "недоступна"} />
-        </div>
-      </details>
-      <div className="avatar-options">
-        <SettingsSwitch
-          checked={placement === "in_app" ? inAppVisible : (overlay?.visible ?? true)}
-          label={placement === "in_app" ? "Показывать в диалоге" : "Показывать оверлей"}
-          disabled={!enabled || busy}
-          onChange={(checked) => void (placement === "in_app" ? updateInAppVisibility(checked) : updateOverlay({ visible: checked }))}
-        />
-        {placement === "desktop_overlay" && (
-          <div className={!developerMode ? "dev-locked-field" : ""} style={{ display: "grid", gap: 6, width: "100%" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <small style={{ color: "var(--color-text-muted)" }}>Опции оверлея</small>
-              <DevBadge active={developerMode} onClick={onUnlockRequest} />
+      <div className="settings-card">
+        <div className="settings-card-header">
+          <div className="settings-card-header-main">
+            <div className="settings-card-title-group">
+              <h2 className="settings-card-title">Управление аватаром</h2>
+              <p className="settings-card-subtitle">Интеграция с 3D-моделью компаньона и визуализация эмоций</p>
             </div>
-            <SettingsSwitch
-              checked={overlay?.always_on_top ?? true}
-              label="Поверх окон"
-              disabled={!enabled || busy || !developerMode}
-              onChange={(checked) => void updateOverlay({ always_on_top: checked })}
-            />
-            <SettingsSwitch
-              checked={overlay?.locked ?? true}
-              label="Заблокировать клики"
-              disabled={!enabled || busy || !developerMode}
-              onChange={(checked) => void updateOverlay({ locked: checked })}
-            />
           </div>
-        )}
+          <div className="settings-card-header-actions">
+            <span className={`settings-status-pill${enabled ? " is-active" : ""}`}>
+              <span className="settings-status-dot" />
+              {enabled ? `${avatarStatus?.client_count ?? 0} подключено` : "Интеграция отключена"}
+            </span>
+            <button className="icon-button" onClick={() => void onRefresh()} disabled={busy} aria-label="Обновить статус аватара" title="Обновить статус аватара">
+              <RefreshCw size={15} />
+            </button>
+          </div>
+        </div>
+
+        <fieldset className="avatar-placement" disabled={busy}>
+          <legend>Где показывать аватар</legend>
+          <div className="avatar-placement-grid">
+            <label className="avatar-placement-option">
+              <input type="radio" name="avatar-placement" aria-label="Внутри Iris" checked={placement === "in_app"} onChange={() => void changePlacement("in_app")} />
+              <span><strong>Внутри Iris</strong><small style={{ display: "block", color: "var(--color-text-muted)", marginTop: 2 }}>Внизу слева на экране диалога, без второго окна.</small></span>
+            </label>
+            <label className="avatar-placement-option">
+              <input type="radio" name="avatar-placement" aria-label="Отдельным оверлеем" checked={placement === "desktop_overlay"} onChange={() => void changePlacement("desktop_overlay")} />
+              <span><strong>Отдельным оверлеем</strong><small style={{ display: "block", color: "var(--color-text-muted)", marginTop: 2 }}>Поверх рабочего стола, как сейчас.</small></span>
+            </label>
+          </div>
+        </fieldset>
+
+        <div className="avatar-summary-grid">
+          <InfoRow label="Клиент" value={client?.client_name ?? "не подключён"} />
+          <InfoRow label="Состояние" value={client?.state ?? "Отключён"} />
+          <InfoRow label="Последний сигнал" value={client ? formatTime(client.last_heartbeat_at) : "—"} />
+          <InfoRow label="Целевая эмоция" value={engine?.target_emotion ?? "нейтральная"} />
+        </div>
+
+        <div className="avatar-options">
+          <SettingsSwitch
+            checked={placement === "in_app" ? inAppVisible : (overlay?.visible ?? true)}
+            label={placement === "in_app" ? "Показывать в диалоге" : "Показывать оверлей"}
+            disabled={!enabled || busy}
+            onChange={(checked) => void (placement === "in_app" ? updateInAppVisibility(checked) : updateOverlay({ visible: checked }))}
+          />
+          {placement === "desktop_overlay" && (
+            <div className={!developerMode ? "dev-locked-field" : ""} style={{ display: "grid", gap: 6, width: "100%" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <small style={{ color: "var(--color-text-muted)" }}>Опции оверлея</small>
+                <DevBadge active={developerMode} onClick={onUnlockRequest} />
+              </div>
+              <SettingsSwitch
+                checked={overlay?.always_on_top ?? true}
+                label="Поверх окон"
+                disabled={!enabled || busy || !developerMode}
+                onChange={(checked) => void updateOverlay({ always_on_top: checked })}
+              />
+              <SettingsSwitch
+                checked={overlay?.locked ?? true}
+                label="Заблокировать клики"
+                disabled={!enabled || busy || !developerMode}
+                onChange={(checked) => void updateOverlay({ locked: checked })}
+              />
+            </div>
+          )}
+        </div>
       </div>
-      <div className="avatar-qa-studio-callout" style={{ margin: "16px 0", padding: "16px 18px", borderRadius: "14px", background: "linear-gradient(135deg, rgba(139, 92, 246, 0.14), rgba(99, 102, 241, 0.08))", border: "1px solid rgba(139, 92, 246, 0.3)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "14px", flexWrap: "wrap" }}>
+
+      <div className="avatar-qa-studio-callout" style={{ padding: "18px 22px", borderRadius: "18px", background: "linear-gradient(135deg, rgba(139, 92, 246, 0.12), rgba(99, 102, 241, 0.06))", border: "1px solid rgba(139, 92, 246, 0.25)", boxShadow: "var(--shadow-surface)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px", flexWrap: "wrap" }}>
         <div>
           <strong style={{ display: "flex", alignItems: "center", gap: 6, color: "#fff", fontSize: "13.5px" }}>
             <Sparkles size={15} style={{ color: "#a78bfa" }} />
@@ -4543,6 +4971,20 @@ function AvatarControls({
           Открыть окно тестирования
         </button>
       </div>
+
+      <details className="avatar-technical">
+        <summary style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span>Технические данные</span>
+          <DevBadge active={developerMode} onClick={onUnlockRequest} />
+        </summary>
+        <div className="avatar-grid" style={{ marginTop: 14 }}>
+          <InfoRow label="Протокол" value={avatarStatus ? `v${avatarStatus.protocol_version}` : "недоступен"} />
+          <InfoRow label="Профиль движения" value={client?.current_motion_profile ?? "нет данных"} />
+          <InfoRow label="Текущий жест" value={client?.current_gesture ?? "нет"} />
+          <InfoRow label="Связь с движком" value={engine ? (engine.mapping_valid ? "настроена" : "резервная") : "недоступна"} />
+        </div>
+      </details>
+
       <details className="avatar-test-disclosure">
         <summary style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -4550,7 +4992,7 @@ function AvatarControls({
           </span>
           <DevBadge active={developerMode} onClick={onUnlockRequest} />
         </summary>
-        <div className={`avatar-test-grid${!developerMode ? " dev-locked-field" : ""}`}>
+        <div className={`avatar-test-grid${!developerMode ? " dev-locked-field" : ""}`} style={{ marginTop: 14 }}>
         {placement === "desktop_overlay" && <label>
           Масштаб оверлея {overlay?.scale?.toFixed(1) ?? "1.0"}
           <input min="0.5" max="2" step="0.1" type="range" value={overlay?.scale ?? 1} disabled={!enabled || busy || !developerMode} onChange={(event) => void updateOverlay({ scale: Number(event.target.value) })} />
@@ -4576,11 +5018,11 @@ function AvatarControls({
           <input min="0" max="1" step="0.1" type="range" value={motionIntensity} onChange={(event) => setMotionIntensity(Number(event.target.value))} disabled={!enabled || busy || !developerMode} />
         </label>
         </div>
-      <div className="avatar-test-actions">
-        <button className="primary-button" onClick={(e) => { animateButtonPress(e.currentTarget); void run(() => sendAvatarTestPhrase({ text: phrase, emotion }), "Тестовая фраза отправлена."); }} disabled={!enabled || busy || !developerMode || !phrase.trim()}>Отправить фразу</button>
-        <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void run(() => sendAvatarTestEmotion({ emotion, intensity: 1 }), "Эмоция отправлена."); }} disabled={!enabled || busy || !developerMode}>Отправить эмоцию</button>
-        <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void run(() => sendAvatarTestGesture({ gesture, intensity: motionIntensity, interrupt: true }), "Тестовый жест отправлен."); }} disabled={!enabled || busy || !developerMode}>Отправить жест</button>
-        <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void run(stopAvatar, "Движение сброшено."); }} disabled={!enabled || busy || !developerMode}>Сбросить движение</button>
+        <div className="avatar-test-actions" style={{ marginTop: 16 }}>
+          <button className="primary-button" onClick={(e) => { animateButtonPress(e.currentTarget); void run(() => sendAvatarTestPhrase({ text: phrase, emotion }), "Тестовая фраза отправлена."); }} disabled={!enabled || busy || !developerMode || !phrase.trim()}>Отправить фразу</button>
+          <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void run(() => sendAvatarTestEmotion({ emotion, intensity: 1 }), "Эмоция отправлена."); }} disabled={!enabled || busy || !developerMode}>Отправить эмоцию</button>
+          <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void run(() => sendAvatarTestGesture({ gesture, intensity: motionIntensity, interrupt: true }), "Тестовый жест отправлен."); }} disabled={!enabled || busy || !developerMode}>Отправить жест</button>
+          <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void run(stopAvatar, "Движение сброшено."); }} disabled={!enabled || busy || !developerMode}>Сбросить движение</button>
         </div>
       </details>
       {message && <div className="notice" role="status">{message}</div>}

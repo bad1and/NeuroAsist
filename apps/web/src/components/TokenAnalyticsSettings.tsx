@@ -5,18 +5,16 @@ import {
   Trash2,
   TrendingUp,
   Server,
-  DollarSign,
   ChevronLeft,
   ChevronRight,
-  Database,
   Check,
   Copy,
   Terminal,
-  Activity,
   Layers,
 } from "lucide-react";
 import { getLlmTokenStats, getLlmTokenRecords, resetLlmTokenStats } from "../api";
 import { AppDialog } from "./AppDialog";
+import { TokenUsageChart } from "./TokenUsageChart";
 import type { TokenUsageStats, TokenRecordItem, TokenRecordsResponse } from "../types";
 
 const PURPOSE_LABELS: Record<string, string> = {
@@ -88,9 +86,6 @@ export function TokenAnalyticsSettings() {
   const [resetting, setResetting] = useState(false);
   const [inspectRecord, setInspectRecord] = useState<TokenRecordItem | null>(null);
   const [copiedInspect, setCopiedInspect] = useState(false);
-
-  // Hovered timeseries bar for tooltip
-  const [hoveredPoint, setHoveredPoint] = useState<number | null>(null);
 
   const currentCategory = useMemo(
     () => CATEGORY_TABS.find((c) => c.id === selectedCategory),
@@ -169,12 +164,7 @@ export function TokenAnalyticsSettings() {
     }
   };
 
-  // Chart computation
   const timeseries = stats?.timeseries ?? [];
-  const maxTotalInSeries = useMemo(() => {
-    return Math.max(...timeseries.map((p) => p.total), 100);
-  }, [timeseries]);
-
   const totalPages = recordsResponse ? Math.ceil(recordsResponse.total / pageSize) : 1;
 
   return (
@@ -183,7 +173,7 @@ export function TokenAnalyticsSettings() {
       <div className="token-analytics-header">
         <div className="token-analytics-title-group">
           <div className="token-analytics-title-icon">
-            <Zap size={22} className="text-accent" />
+            <Zap size={20} />
           </div>
           <div>
             <h2>Токены и расходы LLM</h2>
@@ -231,7 +221,7 @@ export function TokenAnalyticsSettings() {
 
           <button
             type="button"
-            className="danger-button icon-btn-text"
+            className="secondary icon-btn-text token-reset-btn"
             onClick={() => setShowResetDialog(true)}
             title="Очистить журнал токенов"
           >
@@ -249,9 +239,6 @@ export function TokenAnalyticsSettings() {
         <div className="token-kpi-card">
           <div className="token-kpi-header">
             <span className="token-kpi-label">Всего токенов</span>
-            <span className="token-kpi-icon-pill">
-              <Zap size={15} />
-            </span>
           </div>
           <div className="token-kpi-value text-total" data-testid="kpi-total-tokens">
             {formatNum(stats?.total_tokens)}
@@ -267,9 +254,6 @@ export function TokenAnalyticsSettings() {
         <div className="token-kpi-card">
           <div className="token-kpi-header">
             <span className="token-kpi-label">Кэширование промптов</span>
-            <span className="token-kpi-icon-pill pill-cache">
-              <Database size={15} />
-            </span>
           </div>
           <div className="token-kpi-value text-cache" data-testid="kpi-cache-rate">
             {stats ? `${stats.cache_hit_rate.toFixed(1)}%` : "0.0%"}
@@ -285,9 +269,6 @@ export function TokenAnalyticsSettings() {
         <div className="token-kpi-card">
           <div className="token-kpi-header">
             <span className="token-kpi-label">Запросы и скорость</span>
-            <span className="token-kpi-icon-pill pill-activity">
-              <Activity size={15} />
-            </span>
           </div>
           <div className="token-kpi-value">
             {formatNum(stats?.request_count)} <span className="kpi-unit">вызовов</span>
@@ -303,9 +284,6 @@ export function TokenAnalyticsSettings() {
         <div className="token-kpi-card">
           <div className="token-kpi-header">
             <span className="token-kpi-label">Расходы (DeepSeek)</span>
-            <span className="token-kpi-icon-pill pill-cost">
-              <DollarSign size={15} />
-            </span>
           </div>
           <div className="token-kpi-value text-cost" data-testid="kpi-cost">
             {formatCost(stats?.estimated_cost_usd)}
@@ -316,11 +294,11 @@ export function TokenAnalyticsSettings() {
         </div>
       </div>
 
-      {/* Timeseries Chart Card */}
+      {/* Timeseries Chart Card (Bklit UI) */}
       <div className="token-chart-card">
         <div className="token-chart-header">
           <div className="token-chart-title-wrap">
-            <TrendingUp size={17} className="text-accent" />
+            <TrendingUp size={16} className="text-accent" />
             <h3>Динамика расхода токенов</h3>
           </div>
           <div className="token-chart-legend">
@@ -339,78 +317,7 @@ export function TokenAnalyticsSettings() {
           </div>
         </div>
 
-        <div className="token-chart-area-wrap">
-          {timeseries.length === 0 || maxTotalInSeries === 0 ? (
-            <div className="token-chart-empty">
-              <Activity size={24} className="empty-icon" />
-              <span>Нет данных за выбранный период</span>
-            </div>
-          ) : (
-            <div className="token-bar-chart-container">
-              {timeseries.map((pt, idx) => {
-                const heightPercent = Math.max(4, Math.round((pt.total / maxTotalInSeries) * 100));
-                const promptRatio = pt.total > 0 ? pt.prompt / pt.total : 0.8;
-                const completionRatio = pt.total > 0 ? pt.completion / pt.total : 0.2;
-                const isHovered = hoveredPoint === idx;
-
-                return (
-                  <div
-                    key={idx}
-                    className={`token-bar-column ${isHovered ? "hovered" : ""}`}
-                    onMouseEnter={() => setHoveredPoint(idx)}
-                    onMouseLeave={() => setHoveredPoint(null)}
-                  >
-                    {isHovered && (
-                      <div className="token-chart-tooltip">
-                        <div className="tooltip-header">{pt.label}</div>
-                        <div className="tooltip-row text-total">
-                          <span>Всего:</span>
-                          <strong>{formatNum(pt.total)}</strong>
-                        </div>
-                        <div className="tooltip-row text-prompt">
-                          <span>Prompt:</span>
-                          <span>{formatNum(pt.prompt)}</span>
-                        </div>
-                        <div className="tooltip-row text-completion">
-                          <span>Output:</span>
-                          <span>{formatNum(pt.completion)}</span>
-                        </div>
-                        {pt.cache_hit > 0 && (
-                          <div className="tooltip-row text-hit">
-                            <span>Cache Hit:</span>
-                            <span>{formatNum(pt.cache_hit)}</span>
-                          </div>
-                        )}
-                        <div className="tooltip-row text-muted">
-                          <span>Запросов:</span>
-                          <span>{pt.request_count}</span>
-                        </div>
-                      </div>
-                    )}
-                    <div className="token-bar-track">
-                      <div
-                        className="token-bar-fill"
-                        style={{ height: `${heightPercent}%` }}
-                      >
-                        <div
-                          className="bar-segment completion-segment"
-                          style={{ flex: completionRatio }}
-                          title={`Output: ${formatNum(pt.completion)}`}
-                        />
-                        <div
-                          className="bar-segment prompt-segment"
-                          style={{ flex: promptRatio }}
-                          title={`Prompt: ${formatNum(pt.prompt)}`}
-                        />
-                      </div>
-                    </div>
-                    <span className="token-bar-label">{pt.label}</span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        <TokenUsageChart timeseries={timeseries} timeframe={timeframe} />
       </div>
 
       {/* Breakdowns 2-Column Section */}
