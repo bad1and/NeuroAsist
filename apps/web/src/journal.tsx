@@ -11,7 +11,7 @@ import {
 import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import { deleteTimelineRange, getTimelineJournal, getTimelineMessages, searchTimeline } from "./api";
-import type { TimelineJournalItem, TimelineMessage } from "./types";
+import type { TimelineJournalItem, TimelineMessage, TokenMetadata } from "./types";
 import { AppDialog } from "./components/AppDialog";
 import {
   ChevronLeft,
@@ -25,7 +25,7 @@ import {
   Copy,
   Check,
 } from "lucide-react";
-import { TokenBadge } from "./components/TokenBadge";
+import { TokenBadge, TokenDialogContent } from "./components/TokenBadge";
 import { notify } from "./notifications";
 import { interfaceIntlLocale } from "./i18n";
 import { animateButtonPress, animatePageEnter, animateStaggerCards, useAnimeScope } from "./animations";
@@ -419,6 +419,10 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
     json: Record<string, unknown>;
   } | null>(null);
   const [inspectCopied, setInspectCopied] = useState(false);
+  const [tokenDialogData, setTokenDialogData] = useState<{
+    tokens: TokenMetadata;
+    role: "user" | "assistant" | "system_event";
+  } | null>(null);
 
   const activeRequestIdRef = useRef(0);
 
@@ -635,10 +639,46 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
                   const isAssistant = message.role === "assistant";
                   const roleLabel = isUser ? "Вы" : isAssistant ? "Iris" : "Событие";
                   const roleClass = isUser ? "user" : isAssistant ? "assistant" : "system";
+                  const messageTokens = message.metadata?.tokens;
+                  const hasTokens = Boolean(
+                    messageTokens &&
+                      ((messageTokens.prompt_tokens ?? 0) > 0 ||
+                        (messageTokens.completion_tokens ?? 0) > 0 ||
+                        (messageTokens.total_tokens ?? 0) > 0)
+                  );
+
+                  const handleMessageClick = (e: React.MouseEvent) => {
+                    const target = e.target as HTMLElement;
+                    if (target.closest("button") || target.closest("a") || target.closest("input")) {
+                      return;
+                    }
+                    const selection = window.getSelection()?.toString();
+                    if (selection && selection.trim().length > 0) {
+                      return;
+                    }
+                    if (hasTokens && messageTokens) {
+                      setTokenDialogData({ tokens: messageTokens, role: message.role });
+                    }
+                  };
+
                   return (
                     <article
-                      className={`journal-message ${roleClass}`}
+                      className={`journal-message ${roleClass} ${hasTokens ? "is-clickable has-tokens" : ""}`}
                       key={message.id}
+                      onClick={handleMessageClick}
+                      role={hasTokens ? "button" : undefined}
+                      tabIndex={hasTokens ? 0 : undefined}
+                      onKeyDown={
+                        hasTokens
+                          ? (e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                setTokenDialogData({ tokens: messageTokens!, role: message.role });
+                              }
+                            }
+                          : undefined
+                      }
+                      title={hasTokens ? "Нажмите для просмотра статистики токенов" : undefined}
                     >
                       <div className="message-role">
                         {isAssistant && (
@@ -670,8 +710,12 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
                             🧠 {message.metadata?.memory_updates?.length}
                           </span>
                         )}
-                        {message.metadata?.tokens && (
-                          <TokenBadge tokens={message.metadata.tokens} role={message.role} />
+                        {messageTokens && (
+                          <TokenBadge
+                            tokens={messageTokens}
+                            role={message.role}
+                            onOpen={() => setTokenDialogData({ tokens: messageTokens, role: message.role })}
+                          />
                         )}
                       </div>
                       {detailMode === "detailed" && (
@@ -708,9 +752,10 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
                     type="button"
                     onClick={onBack}
                     aria-label="Назад к списку"
+                    title="Назад к списку"
                   >
                     <ChevronLeft size={16} aria-hidden="true" />
-                    <span>Назад к списку</span>
+                    <span>Назад</span>
                   </button>
                   <div className="journal-header-title-group">
                     <h2>{selectedEpisode.title || formatDate(selectedEpisode.day)}</h2>
@@ -720,15 +765,38 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
                         {selectedEpisode.message_count === 1 ? "сообщение" : "сообщений"}
                       </span>
                       {selectedEpisode.last_activity_at ? (
-                        <span>· Активность в {formatTime(selectedEpisode.last_activity_at)}</span>
+                        <span>· {formatTime(selectedEpisode.last_activity_at)}</span>
                       ) : selectedEpisode.started_at ? (
                         <span>· {formatShortDate(selectedEpisode.started_at)}</span>
                       ) : null}
                       {Boolean(selectedEpisode.token_estimate && selectedEpisode.token_estimate > 0) && (
-                        <span className="journal-header-tokens">
+                        <button
+                          type="button"
+                          className="journal-header-tokens"
+                          title="Нажмите для просмотра статистики токенов диалога"
+                          onClick={() => {
+                            const lastMsgWithTokens = [...messages].reverse().find((m) => m.metadata?.tokens);
+                            if (lastMsgWithTokens?.metadata?.tokens) {
+                              setTokenDialogData({
+                                tokens: lastMsgWithTokens.metadata.tokens,
+                                role: lastMsgWithTokens.role,
+                              });
+                            } else {
+                              setTokenDialogData({
+                                tokens: {
+                                  total_tokens: selectedEpisode.token_estimate,
+                                  prompt_tokens: Math.round(selectedEpisode.token_estimate! * 0.75),
+                                  completion_tokens: Math.round(selectedEpisode.token_estimate! * 0.25),
+                                  model: "Оценка сессии",
+                                },
+                                role: "assistant",
+                              });
+                            }
+                          }}
+                        >
                           · <Zap size={11} style={{ display: "inline-block", verticalAlign: "middle", marginRight: 2 }} />
-                          {selectedEpisode.token_estimate?.toLocaleString()} токенов
-                        </span>
+                          {selectedEpisode.token_estimate?.toLocaleString()}
+                        </button>
                       )}
                     </div>
                   </div>
@@ -805,6 +873,27 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
                       const roleClass = isUser ? "user" : isAssistant ? "assistant" : "system";
                       const prevDate = idx > 0 ? messages[idx - 1].created_at : null;
                       const showDateSep = shouldShowDateSeparator(prevDate, message.created_at);
+                      const messageTokens = message.metadata?.tokens;
+                      const hasTokens = Boolean(
+                        messageTokens &&
+                          ((messageTokens.prompt_tokens ?? 0) > 0 ||
+                            (messageTokens.completion_tokens ?? 0) > 0 ||
+                            (messageTokens.total_tokens ?? 0) > 0)
+                      );
+
+                      const handleMessageClick = (e: React.MouseEvent) => {
+                        const target = e.target as HTMLElement;
+                        if (target.closest("button") || target.closest("a") || target.closest("input")) {
+                          return;
+                        }
+                        const selection = window.getSelection()?.toString();
+                        if (selection && selection.trim().length > 0) {
+                          return;
+                        }
+                        if (hasTokens && messageTokens) {
+                          setTokenDialogData({ tokens: messageTokens, role: message.role });
+                        }
+                      };
 
                       return (
                         <Fragment key={message.id}>
@@ -814,7 +903,21 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
                             </div>
                           )}
                           <article
-                            className={`journal-message ${roleClass}`}
+                            className={`journal-message ${roleClass} ${hasTokens ? "is-clickable has-tokens" : ""}`}
+                            onClick={handleMessageClick}
+                            role={hasTokens ? "button" : undefined}
+                            tabIndex={hasTokens ? 0 : undefined}
+                            onKeyDown={
+                              hasTokens
+                                ? (e) => {
+                                    if (e.key === "Enter" || e.key === " ") {
+                                      e.preventDefault();
+                                      setTokenDialogData({ tokens: messageTokens!, role: message.role });
+                                    }
+                                  }
+                                : undefined
+                            }
+                            title={hasTokens ? "Нажмите для просмотра статистики токенов" : undefined}
                           >
                             <div className="message-role">
                               {isAssistant && (
@@ -846,8 +949,12 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
                                   🧠 {message.metadata?.memory_updates?.length}
                                 </span>
                               )}
-                              {message.metadata?.tokens && (
-                                <TokenBadge tokens={message.metadata.tokens} role={message.role} />
+                              {messageTokens && (
+                                <TokenBadge
+                                  tokens={messageTokens}
+                                  role={message.role}
+                                  onOpen={() => setTokenDialogData({ tokens: messageTokens, role: message.role })}
+                                />
                               )}
                             </div>
                             {detailMode === "detailed" && (
@@ -977,6 +1084,23 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
             <code>{inspectModalData ? JSON.stringify(inspectModalData.json, null, 2) : ""}</code>
           </pre>
         </div>
+      </AppDialog>
+
+      <AppDialog
+        open={Boolean(tokenDialogData)}
+        title="Статистика токенов"
+        description={tokenDialogData?.tokens.model || "Детализация использования токенов"}
+        onClose={() => setTokenDialogData(null)}
+        variant="info"
+        icon={<Zap size={22} />}
+      >
+        {tokenDialogData && (
+          <TokenDialogContent
+            tokens={tokenDialogData.tokens}
+            role={tokenDialogData.role}
+            onClose={() => setTokenDialogData(null)}
+          />
+        )}
       </AppDialog>
     </section>
   );

@@ -10,6 +10,24 @@ namespace NeuroAsist.Avatar.Tests
         [Test] public void RejectsUnsupportedVersion() { Assert.That(AvatarProtocol.TryParse("{\"protocol_version\":3,\"type\":\"avatar.ping\",\"message_id\":\"id\",\"payload\":{}}", out _), Is.False); }
         [Test] public void ResolvesRelativeAudioUrl() { Assert.That(AvatarUrlResolver.Resolve("http://127.0.0.1:8000", "/voice/audio/a.wav"), Is.EqualTo("http://127.0.0.1:8000/voice/audio/a.wav")); }
         [Test] public void BuildsDesktopWebSocketFromDynamicPortAndEscapedToken() { Assert.That(AvatarEndpointResolver.BuildWebSocketUrl("http://127.0.0.1:43123", "a token&value"), Is.EqualTo("ws://127.0.0.1:43123/ws/avatar?version=2&token=a%20token%26value")); }
+
+        [Test]
+        public void RendererReadinessRequiresTwoFramesAndRepeatsForReconnect()
+        {
+            var gate = new AvatarReadinessGate();
+            var first = new object();
+            var second = new object();
+
+            Assert.That(gate.TryClaimAnnouncement(first), Is.False);
+            gate.MarkFrameComplete();
+            Assert.That(gate.TryClaimAnnouncement(first), Is.False);
+            gate.MarkFrameComplete();
+            Assert.That(gate.TryClaimAnnouncement(first), Is.True);
+            Assert.That(gate.TryClaimAnnouncement(first), Is.False);
+            gate.ReleaseAnnouncement(first);
+            Assert.That(gate.TryClaimAnnouncement(first), Is.True);
+            Assert.That(gate.TryClaimAnnouncement(second), Is.True);
+        }
         [Test] public void DedupCacheIsBounded() { var cache = new BoundedMessageCache(2); Assert.That(cache.Add("1"), Is.True); Assert.That(cache.Add("1"), Is.False); cache.Add("2"); cache.Add("3"); Assert.That(cache.Count, Is.EqualTo(2)); Assert.That(cache.Add("1"), Is.True); }
         [Test] public void BackoffCapsAtFifteenSeconds() { Assert.That(ReconnectBackoff.GetDelay(0), Is.EqualTo(1)); Assert.That(ReconnectBackoff.GetDelay(99), Is.EqualTo(15)); }
         [Test] public void DetectsEmbeddedDesktopHostOnly() { Assert.That(WindowsDesktopOverlay.IsEmbeddedHost("embedded"), Is.True); Assert.That(WindowsDesktopOverlay.IsEmbeddedHost("overlay"), Is.False); Assert.That(WindowsDesktopOverlay.IsEmbeddedHost(null), Is.False); }

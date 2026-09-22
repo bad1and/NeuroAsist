@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     env,
     io::{Read, Write},
     net::{TcpListener, TcpStream},
@@ -9,7 +10,7 @@ use std::{
         Mutex,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use keyring::Entry;
@@ -48,6 +49,10 @@ const CORE_STARTUP_DELAY: Duration = Duration::from_millis(150);
 const UNITY_WINDOW_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
 #[cfg(windows)]
 const UNITY_WINDOW_POLL_INTERVAL: Duration = Duration::from_millis(50);
+#[cfg(windows)]
+const UNITY_WARMUP_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(windows)]
+const UNITY_WARMUP_SIZE: i32 = 64;
 const KEYRING_SERVICE: &str = "NeuroAsist";
 const DEEPSEEK_KEYRING_ACCOUNT: &str = "deepseek_api_key";
 const CODING_KEYRING_ACCOUNT: &str = "coding_api_key";
@@ -68,6 +73,17 @@ impl Default for AvatarPlacement {
     fn default() -> Self {
         Self::DesktopOverlay
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum AvatarLifecyclePhase {
+    Disabled,
+    NotConfigured,
+    Starting,
+    Warming,
+    Ready,
+    Failed,
 }
 
 #[derive(Clone, Deserialize)]
@@ -93,6 +109,9 @@ struct AvatarHostStatus {
     running: bool,
     embedded: bool,
     visible: bool,
+    ready: bool,
+    phase: AvatarLifecyclePhase,
+    error: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -124,6 +143,8 @@ struct DesktopState {
     in_app_avatar_revision: Mutex<u64>,
     in_app_avatar_update: Mutex<()>,
     avatar_visible: Mutex<bool>,
+    avatar_phase: Mutex<AvatarLifecyclePhase>,
+    avatar_error: Mutex<Option<String>>,
     crash_restarts: Mutex<u8>,
     core_generation: AtomicU64,
 }
@@ -168,6 +189,12 @@ impl DesktopState {
             in_app_avatar_revision: Mutex::new(0),
             in_app_avatar_update: Mutex::new(()),
             avatar_visible: Mutex::new(true),
+            avatar_phase: Mutex::new(if env::args().any(|arg| arg == "--safe-mode") {
+                AvatarLifecyclePhase::Disabled
+            } else {
+                AvatarLifecyclePhase::Starting
+            }),
+            avatar_error: Mutex::new(None),
             crash_restarts: Mutex::new(0),
             core_generation: AtomicU64::new(0),
         }
@@ -175,6 +202,29 @@ impl DesktopState {
 
     fn runtime(&self) -> DesktopRuntime {
         self.runtime.lock().expect("runtime mutex poisoned").clone()
+    }
+
+    fn set_avatar_lifecycle(
+        &self,
+        app: &AppHandle,
+        phase: AvatarLifecyclePhase,
+        error: Option<String>,
+    ) {
+        if let Ok(mut current) = self.avatar_phase.lock() {
+            *current = phase;
+        }
+        if let Ok(mut current) = self.avatar_error.lock() {
+            *current = error;
+        }
+        if let Ok(status) = self.avatar_host_status() {
+            let _ = app.emit("desktop-avatar-status", status);
+        }
+    }
+
+    fn emit_avatar_status(&self, app: &AppHandle) {
+        if let Ok(status) = self.avatar_host_status() {
+            let _ = app.emit("desktop-avatar-status", status);
+        }
     }
 
     fn set_core_status(&self, app: &AppHandle, value: &str) {
@@ -395,20 +445,28 @@ impl DesktopState {
         app: &AppHandle,
         placement: AvatarPlacement,
     ) -> Result<bool, String> {
-        if self.safe_mode
-            || self
-                .avatar
-                .lock()
-                .map_err(|_| "avatar mutex poisoned")?
-                .is_some()
+        if self.safe_mode {
+            self.set_avatar_lifecycle(app, AvatarLifecyclePhase::Disabled, None);
+            return Ok(false);
+        }
+        if self
+            .avatar
+            .lock()
+            .map_err(|_| "avatar mutex poisoned")?
+            .is_some()
         {
             return Ok(false);
         }
         let Some(path) = self.avatar_executable(app) else {
-            let _ = app.emit("desktop-avatar-status", "not-configured");
+            self.set_avatar_lifecycle(app, AvatarLifecyclePhase::NotConfigured, None);
             return Ok(false);
         };
+        self.set_avatar_lifecycle(app, AvatarLifecyclePhase::Starting, None);
         let runtime = self.runtime();
+        // A killed player can remain in the backend status response for a
+        // fraction of a second. Read the current client IDs before the
+        // spawn so only this launch's new WebSocket can complete warmup.
+        let clients_before_launch = avatar_backend_client_ids(&runtime);
         let mut command = Command::new(path);
         command
             .current_dir(&self.root)
@@ -441,9 +499,9 @@ impl DesktopState {
                     "-screen-fullscreen",
                     "0",
                     "-screen-width",
-                    "1",
+                    "64",
                     "-screen-height",
-                    "1",
+                    "64",
                 ]);
             }
             #[cfg(not(windows))]
@@ -490,56 +548,176 @@ impl DesktopState {
             // background; bounds and visibility IPC are already queued in the
             // shared DesktopState and are applied as soon as it attaches.
             #[cfg(windows)]
-            self.attach_in_app_avatar_in_background(app.clone(), process_id);
+            self.attach_in_app_avatar_in_background(app.clone(), process_id, clients_before_launch);
+        } else {
+            self.set_avatar_lifecycle(app, AvatarLifecyclePhase::Ready, None);
+            self.watch_avatar_process(app.clone(), process_id);
         }
-        let _ = app.emit("desktop-avatar-status", "connecting");
+        self.emit_avatar_status(app);
         Ok(true)
     }
 
     #[cfg(windows)]
-    fn attach_in_app_avatar_in_background(&self, app: AppHandle, process_id: u32) {
+    fn attach_in_app_avatar_in_background(
+        &self,
+        app: AppHandle,
+        process_id: u32,
+        clients_before_launch: HashSet<String>,
+    ) {
         thread::spawn(move || {
-            let attached = attach_embedded_avatar_window(&app, process_id);
+            let started_at = Instant::now();
+            let discovered = discover_avatar_window(process_id, started_at);
             let state = app.state::<DesktopState>();
-            let Ok(_lifecycle) = state.avatar_lifecycle.lock() else {
-                return;
-            };
-            let Ok(mut avatar) = state.avatar.lock() else {
-                return;
-            };
-            let is_current_in_app_player = avatar.as_ref().is_some_and(|process| {
-                process.placement == AvatarPlacement::InApp && process.child.id() == process_id
-            });
-            if !is_current_in_app_player {
-                return;
-            }
-
-            match attached {
+            match discovered {
                 Ok(window) => {
-                    if let Some(process) = avatar.as_mut() {
-                        process.embedded_window = Some(window);
+                    if let Err(error) = prepare_avatar_warmup_window(window) {
+                        state.fail_avatar_process(&app, process_id, error);
+                        return;
                     }
-                    drop(avatar);
+                    {
+                        let Ok(mut avatar) = state.avatar.lock() else {
+                            return;
+                        };
+                        let is_current = avatar.as_ref().is_some_and(|process| {
+                            process.placement == AvatarPlacement::InApp
+                                && process.child.id() == process_id
+                        });
+                        if !is_current {
+                            return;
+                        }
+                        if let Some(process) = avatar.as_mut() {
+                            process.embedded_window = Some(window);
+                        }
+                    }
+                    state.set_avatar_lifecycle(&app, AvatarLifecyclePhase::Warming, None);
+
+                    let mut failure = None;
+                    let mut renderer_ready = false;
+                    while started_at.elapsed() < UNITY_WARMUP_TIMEOUT {
+                        let process_exited = {
+                            let Ok(mut avatar) = state.avatar.lock() else {
+                                return;
+                            };
+                            let Some(process) = avatar.as_mut() else {
+                                return;
+                            };
+                            if process.child.id() != process_id {
+                                return;
+                            }
+                            process.child.try_wait().ok().flatten().is_some()
+                        };
+                        if process_exited {
+                            failure = Some("Unity avatar exited during warmup".to_string());
+                            break;
+                        }
+                        if avatar_backend_has_new_ready_client(
+                            &state.runtime(),
+                            &clients_before_launch,
+                        ) {
+                            renderer_ready = true;
+                            break;
+                        }
+                        thread::sleep(Duration::from_millis(150));
+                    }
+
+                    if !renderer_ready {
+                        state.fail_avatar_process(
+                            &app,
+                            process_id,
+                            failure.unwrap_or_else(|| {
+                                "Unity avatar did not become ready within 30 seconds".to_string()
+                            }),
+                        );
+                        return;
+                    }
+
+                    let Ok(_lifecycle) = state.avatar_lifecycle.lock() else {
+                        return;
+                    };
+                    let current_window = {
+                        let Ok(avatar) = state.avatar.lock() else {
+                            return;
+                        };
+                        let Some(process) = avatar.as_ref() else {
+                            return;
+                        };
+                        if process.child.id() != process_id {
+                            return;
+                        }
+                        process.embedded_window
+                    };
+                    let Some(current_window) = current_window else {
+                        return;
+                    };
+                    if let Err(error) = attach_embedded_avatar_window(&app, current_window) {
+                        drop(_lifecycle);
+                        state.fail_avatar_process(&app, process_id, error);
+                        return;
+                    }
+                    state.set_avatar_lifecycle(&app, AvatarLifecyclePhase::Ready, None);
                     let _ = state.apply_in_app_avatar_host(&app);
-                    let _ = app.emit("desktop-avatar-status", "connected");
+                    let should_sleep = state
+                        .in_app_avatar_visible
+                        .lock()
+                        .ok()
+                        .and_then(|request| request.as_ref().map(|value| !value.visible))
+                        .unwrap_or(true);
+                    if should_sleep {
+                        let runtime = state.runtime();
+                        thread::spawn(move || {
+                            let _ = avatar_sleep_request(&runtime, true);
+                        });
+                    }
+                    drop(_lifecycle);
+                    state.watch_avatar_process(app.clone(), process_id);
                 }
                 Err(error) => {
-                    let failed = avatar.take();
-                    drop(avatar);
-                    if let Some(mut process) = failed {
-                        let _ = process.child.kill();
-                        let _ = process.child.wait();
-                    }
-                    let _ = app.emit("desktop-avatar-status", format!("failed: {error}"));
-                    // Unity can create its native window after the discovery
-                    // timeout on a cold graphics start. Retry the whole
-                    // player, but only if the user still wants in-app mode.
-                    let retry_app = app.clone();
-                    thread::spawn(move || {
-                        thread::sleep(Duration::from_secs(1));
-                        start_avatar_with_retries(retry_app, AvatarPlacement::InApp);
-                    });
+                    state.fail_avatar_process(&app, process_id, error);
                 }
+            }
+        });
+    }
+
+    fn fail_avatar_process(&self, app: &AppHandle, process_id: u32, error: String) {
+        let Ok(_lifecycle) = self.avatar_lifecycle.lock() else {
+            return;
+        };
+        let failed = self.avatar.lock().ok().and_then(|mut avatar| {
+            if avatar
+                .as_ref()
+                .is_some_and(|process| process.child.id() == process_id)
+            {
+                avatar.take()
+            } else {
+                None
+            }
+        });
+        if let Some(mut process) = failed {
+            let _ = process.child.kill();
+            let _ = process.child.wait();
+            self.set_avatar_lifecycle(app, AvatarLifecyclePhase::Failed, Some(error));
+        }
+    }
+
+    fn watch_avatar_process(&self, app: AppHandle, process_id: u32) {
+        thread::spawn(move || loop {
+            thread::sleep(Duration::from_millis(500));
+            let state = app.state::<DesktopState>();
+            let exited = {
+                let Ok(mut avatar) = state.avatar.lock() else {
+                    return;
+                };
+                let Some(process) = avatar.as_mut() else {
+                    return;
+                };
+                if process.child.id() != process_id {
+                    return;
+                }
+                process.child.try_wait().ok().flatten().is_some()
+            };
+            if exited {
+                state.fail_avatar_process(&app, process_id, "Unity avatar process stopped".into());
+                return;
             }
         });
     }
@@ -565,10 +743,19 @@ impl DesktopState {
             .avatar_visible
             .lock()
             .map_err(|_| "avatar visibility mutex poisoned")?;
+        let phase = *self
+            .avatar_phase
+            .lock()
+            .map_err(|_| "avatar phase mutex poisoned")?;
+        let error = self
+            .avatar_error
+            .lock()
+            .map_err(|_| "avatar error mutex poisoned")?
+            .clone();
         let placement = avatar
             .as_ref()
             .map(|process| process.placement)
-            .unwrap_or_default();
+            .unwrap_or_else(|| avatar_placement_from_settings(&desktop_data_root(&self.root)));
         Ok(AvatarHostStatus {
             placement,
             running: avatar.is_some(),
@@ -576,6 +763,9 @@ impl DesktopState {
                 .as_ref()
                 .is_some_and(|process| process.embedded_window.is_some()),
             visible,
+            ready: phase == AvatarLifecyclePhase::Ready,
+            phase,
+            error,
         })
     }
 
@@ -598,6 +788,17 @@ impl DesktopState {
             self.stop_avatar_locked();
             let _ = self.start_avatar_locked(app, placement)?;
         }
+        self.avatar_host_status()
+    }
+
+    fn restart_avatar(&self, app: &AppHandle) -> Result<AvatarHostStatus, String> {
+        let _lifecycle = self
+            .avatar_lifecycle
+            .lock()
+            .map_err(|_| "avatar lifecycle mutex poisoned")?;
+        let placement = avatar_placement_from_settings(&desktop_data_root(&self.root));
+        self.stop_avatar_locked();
+        let _ = self.start_avatar_locked(app, placement)?;
         self.avatar_host_status()
     }
 
@@ -661,6 +862,11 @@ impl DesktopState {
     }
 
     fn apply_in_app_avatar_host(&self, app: &AppHandle) -> Result<(), String> {
+        let is_ready = *self
+            .avatar_phase
+            .lock()
+            .map_err(|_| "avatar phase mutex poisoned")?
+            == AvatarLifecyclePhase::Ready;
         let bounds = self
             .in_app_avatar_bounds
             .lock()
@@ -696,11 +902,20 @@ impl DesktopState {
         if let Some(window) = embedded_window {
             #[cfg(windows)]
             {
-                if let Some(bounds) = bounds.as_ref() {
-                    resize_embedded_avatar_window(app, window, bounds)?;
+                // CRITICAL SAFETY GUARD:
+                // NEVER reveal or resize the window onto the screen if Unity is not ready.
+                // An unready Unity player has not cleared its backbuffer to EMBEDDED_AVATAR_COLOR_KEY
+                // and its main thread is blocked loading VRM/shaders, which causes an opaque black box
+                // and freezes the desktop message loop ("Iris (Не отвечает)").
+                let should_show = is_ready && requested_visible && has_current_bounds;
+                if should_show {
+                    if let Some(bounds) = bounds.as_ref() {
+                        resize_embedded_avatar_window(app, window, bounds)?;
+                    }
+                    set_embedded_avatar_visibility(window, true)?;
+                } else {
+                    set_embedded_avatar_visibility(window, false)?;
                 }
-                // Never reveal the owned popup at Unity's startup size.
-                set_embedded_avatar_visibility(window, requested_visible && has_current_bounds)?;
             }
         }
         Ok(())
@@ -810,10 +1025,7 @@ impl DesktopState {
                 *visible
             };
             avatar_overlay_visibility_request(&self.runtime(), next)?;
-            let _ = app.emit(
-                "desktop-avatar-status",
-                if next { "visible" } else { "hidden" },
-            );
+            self.emit_avatar_status(app);
             Ok(next)
         } else {
             self.start_avatar_locked(app, configured_placement)
@@ -840,7 +1052,7 @@ fn start_avatar_with_retries(app: AppHandle, placement: AvatarPlacement) {
                     attempt + 1,
                     error
                 );
-                let _ = app.emit("desktop-avatar-status", format!("failed: {error}"));
+                state.set_avatar_lifecycle(&app, AvatarLifecyclePhase::Failed, Some(error.clone()));
                 if attempt < 4 {
                     thread::sleep(Duration::from_secs(1));
                 }
@@ -903,6 +1115,16 @@ fn configure_avatar_placement(
 }
 
 #[tauri::command]
+fn get_avatar_host_status(app: AppHandle) -> Result<AvatarHostStatus, String> {
+    app.state::<DesktopState>().avatar_host_status()
+}
+
+#[tauri::command]
+fn restart_avatar(app: AppHandle) -> Result<AvatarHostStatus, String> {
+    app.state::<DesktopState>().restart_avatar(&app)
+}
+
+#[tauri::command]
 fn set_avatar_in_app_bounds(app: AppHandle, bounds: AvatarInAppBounds) -> Result<(), String> {
     app.state::<DesktopState>()
         .set_avatar_in_app_bounds(&app, bounds)
@@ -912,6 +1134,15 @@ fn set_avatar_in_app_bounds(app: AppHandle, bounds: AvatarInAppBounds) -> Result
 fn set_avatar_in_app_visible(app: AppHandle, visible: bool, revision: u64) -> Result<(), String> {
     app.state::<DesktopState>()
         .set_avatar_in_app_visible(&app, visible, revision)
+}
+
+#[tauri::command]
+fn is_avatar_ready(app: AppHandle) -> bool {
+    app.state::<DesktopState>()
+        .avatar_phase
+        .lock()
+        .map(|phase| *phase == AvatarLifecyclePhase::Ready)
+        .unwrap_or(false)
 }
 
 #[tauri::command]
@@ -1110,8 +1341,11 @@ fn main() {
             set_interface_locale,
             toggle_avatar,
             configure_avatar_placement,
+            get_avatar_host_status,
+            restart_avatar,
             set_avatar_in_app_bounds,
             set_avatar_in_app_visible,
+            is_avatar_ready,
             save_api_key,
             save_coding_api_key,
             remove_api_key,
@@ -1296,17 +1530,10 @@ fn avatar_in_app_visible_from_json(json: &str) -> bool {
 }
 
 #[cfg(windows)]
-fn attach_embedded_avatar_window(app: &AppHandle, process_id: u32) -> Result<usize, String> {
-    let parent = app
-        .get_webview_window("main")
-        .ok_or("Could not find Iris main window")?
-        .hwnd()
-        .map_err(|error| format!("Could not get Iris native window handle: {error}"))?;
-
-    let started_at = std::time::Instant::now();
-    let window = loop {
+fn discover_avatar_window(process_id: u32, started_at: Instant) -> Result<usize, String> {
+    loop {
         if let Some(window) = unity_window_for_process(process_id) {
-            break window;
+            return Ok(window.0 as usize);
         }
         if started_at.elapsed() >= UNITY_WINDOW_DISCOVERY_TIMEOUT {
             return Err(
@@ -1314,11 +1541,49 @@ fn attach_embedded_avatar_window(app: &AppHandle, process_id: u32) -> Result<usi
             );
         }
         thread::sleep(UNITY_WINDOW_POLL_INTERVAL);
-    };
+    }
+}
+
+#[cfg(windows)]
+fn prepare_avatar_warmup_window(window: usize) -> Result<(), String> {
+    let window = HWND(window as *mut core::ffi::c_void);
+    unsafe {
+        // Unity must remain renderable until it has presented real frames. Keep
+        // the tiny window active off-screen instead of hiding it during Mono,
+        // VRM and shader initialization.
+        let extended = GetWindowLongPtrW(window, GWL_EXSTYLE) as u32;
+        SetWindowLongPtrW(
+            window,
+            GWL_EXSTYLE,
+            (extended | WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0) as isize,
+        );
+        SetWindowPos(
+            window,
+            Some(HWND_TOP),
+            -32_000,
+            -32_000,
+            UNITY_WARMUP_SIZE,
+            UNITY_WARMUP_SIZE,
+            SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        )
+        .map_err(|error| format!("Could not prepare Unity warmup window: {error}"))?;
+        let _ = ShowWindow(window, SW_SHOWNA);
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn attach_embedded_avatar_window(app: &AppHandle, window: usize) -> Result<(), String> {
+    let parent = app
+        .get_webview_window("main")
+        .ok_or("Could not find Iris main window")?
+        .hwnd()
+        .map_err(|error| format!("Could not get Iris native window handle: {error}"))?;
+    let window = HWND(window as *mut core::ffi::c_void);
 
     unsafe {
-        // Unity starts at 1×1. Hide it before the final graphics startup and
-        // never expose its standalone player bounds to the desktop.
+        // Readiness has already been acknowledged after real rendered frames;
+        // hiding and converting the window can no longer stall cold startup.
         let _ = ShowWindow(window, SW_HIDE);
 
         // A layered Direct3D child window cannot reliably apply a colour key
@@ -1351,17 +1616,16 @@ fn attach_embedded_avatar_window(app: &AppHandle, process_id: u32) -> Result<usi
         SetWindowPos(
             window,
             Some(HWND_TOP),
-            0,
-            0,
-            1,
-            1,
+            -32_000,
+            -32_000,
+            UNITY_WARMUP_SIZE,
+            UNITY_WARMUP_SIZE,
             SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE | SWP_FRAMECHANGED,
         )
         .map_err(|error| format!("Could not initialize Unity avatar host bounds: {error}"))?;
         let _ = ShowWindow(window, SW_HIDE);
     }
-
-    Ok(window.0 as usize)
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -1592,6 +1856,44 @@ mod tests {
         assert!(state.accept_in_app_avatar_revision(42).unwrap());
         assert!(state.accept_in_app_avatar_revision(0).is_err());
     }
+
+    #[test]
+    fn avatar_ready_defaults_to_false_at_startup() {
+        let state = DesktopState::new();
+        let status = state.avatar_host_status().unwrap();
+        assert!(!status.ready);
+        assert_ne!(status.phase, AvatarLifecyclePhase::Ready);
+    }
+
+    #[test]
+    fn avatar_backend_requires_explicit_renderer_readiness() {
+        let ignored = HashSet::new();
+        assert!(!avatar_status_body_has_new_ready_client(
+            r#"{"client_count":1,"ready_client_count":0,"clients":[{"client_id":"new","renderer_ready":false}]}"#,
+            &ignored,
+        ));
+        assert!(avatar_status_body_has_new_ready_client(
+            r#"{"client_count":1,"ready_client_count":1,"clients":[{"client_id":"new","renderer_ready":true}]}"#,
+            &ignored,
+        ));
+        assert!(!avatar_status_body_has_new_ready_client(
+            r#"{"client_count":1}"#,
+            &ignored,
+        ));
+    }
+
+    #[test]
+    fn avatar_backend_ignores_ready_clients_from_an_older_process() {
+        let ignored = HashSet::from(["stale".to_string()]);
+        assert!(!avatar_status_body_has_new_ready_client(
+            r#"{"ready_client_count":1,"clients":[{"client_id":"stale","renderer_ready":true}]}"#,
+            &ignored,
+        ));
+        assert!(avatar_status_body_has_new_ready_client(
+            r#"{"ready_client_count":2,"clients":[{"client_id":"stale","renderer_ready":true},{"client_id":"fresh","renderer_ready":true}]}"#,
+            &ignored,
+        ));
+    }
 }
 
 fn read_api_key() -> Result<Option<String>, String> {
@@ -1700,6 +2002,105 @@ fn core_health_is_ready(runtime: &DesktopRuntime) -> bool {
     core_request(runtime, "GET", "/health").is_ok()
 }
 
+fn avatar_backend_status_body(runtime: &DesktopRuntime) -> Option<String> {
+    let address = runtime.api_base_url.trim_start_matches("http://");
+    let Ok(mut stream) = TcpStream::connect(address) else {
+        return None;
+    };
+    if stream
+        .set_read_timeout(Some(Duration::from_millis(600)))
+        .is_err()
+    {
+        return None;
+    }
+    let request = format!(
+        "GET /avatar/status HTTP/1.1\r\nHost: {address}\r\nX-NeuroAsist-Token: {}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+        runtime.api_token
+    );
+    if stream.write_all(request.as_bytes()).is_err() {
+        return None;
+    }
+    let mut response = String::new();
+    if stream.read_to_string(&mut response).is_err() {
+        return None;
+    }
+    if !response.starts_with("HTTP/1.1 2") {
+        return None;
+    }
+    response
+        .find("\r\n\r\n")
+        .map(|body_start| response[body_start + 4..].to_string())
+}
+
+fn avatar_backend_client_ids(runtime: &DesktopRuntime) -> HashSet<String> {
+    avatar_backend_status_body(runtime)
+        .map(|body| avatar_status_body_client_ids(&body))
+        .unwrap_or_default()
+}
+
+fn avatar_backend_has_new_ready_client(
+    runtime: &DesktopRuntime,
+    ignored_client_ids: &HashSet<String>,
+) -> bool {
+    avatar_backend_status_body(runtime)
+        .is_some_and(|body| avatar_status_body_has_new_ready_client(&body, ignored_client_ids))
+}
+
+fn avatar_status_body_ready_client_ids(body: &str) -> HashSet<String> {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("clients")
+                .and_then(|clients| clients.as_array())
+                .cloned()
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|client| {
+            client
+                .get("renderer_ready")
+                .and_then(|ready| ready.as_bool())
+                .unwrap_or(false)
+        })
+        .filter_map(|client| {
+            client
+                .get("client_id")
+                .and_then(|client_id| client_id.as_str())
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+fn avatar_status_body_client_ids(body: &str) -> HashSet<String> {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("clients")
+                .and_then(|clients| clients.as_array())
+                .cloned()
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|client| {
+            client
+                .get("client_id")
+                .and_then(|client_id| client_id.as_str())
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+fn avatar_status_body_has_new_ready_client(
+    body: &str,
+    ignored_client_ids: &HashSet<String>,
+) -> bool {
+    avatar_status_body_ready_client_ids(body)
+        .iter()
+        .any(|client_id| !ignored_client_ids.contains(client_id))
+}
+
 fn core_shutdown_request(runtime: &DesktopRuntime) -> Result<(), String> {
     core_request(runtime, "POST", "/internal/shutdown")
 }
@@ -1793,4 +2194,3 @@ fn avatar_sleep_request(runtime: &DesktopRuntime, sleep: bool) -> Result<(), Str
         Err(response.lines().next().unwrap_or("No HTTP response").into())
     }
 }
-

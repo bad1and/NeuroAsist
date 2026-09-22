@@ -12,6 +12,7 @@ from .schemas import (
     IncomingMessage,
     PlaybackPayload,
     PongPayload,
+    ReadyPayload,
     StreamReceiptPayload,
     SUPPORTED_PROTOCOL_VERSIONS,
 )
@@ -23,6 +24,7 @@ class AvatarProtocolError(ValueError):
 
 _PAYLOADS = {
     "avatar.hello": HelloPayload,
+    "avatar.ready": ReadyPayload,
     "avatar.pong": PongPayload,
     "avatar.ack": AckPayload,
     "avatar.playback.started": PlaybackPayload,

@@ -216,18 +216,18 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
                       </div>
                     ) : null
                   ))}
+                  {Boolean(state.relationship.current_dynamic) && (
+                    <div className="metric-row relationship-dynamic-cell">
+                      <span className="metric-label">Динамика</span>
+                      <span className="metric-value">{String(state.relationship.current_dynamic)}</span>
+                    </div>
+                  )}
                 </div>
-                {Boolean(state.relationship.current_dynamic) && (
-                  <div className="relationship-dynamic">
-                    <h4>Динамика</h4>
-                    <p>{String(state.relationship.current_dynamic)}</p>
-                  </div>
-                )}
               </div>
 
               <div className="state-sidebar-actions">
                 <button
-                  className="state-action-mood"
+                  className="secondary danger-button state-action-mood"
                   type="button"
                   disabled={busy}
                   onClick={(e) => {
@@ -242,7 +242,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
                   Сбросить настроение
                 </button>
                 <button
-                  className="state-action-relationship"
+                  className="secondary danger-button state-action-relationship"
                   type="button"
                   disabled={busy}
                   onClick={(e) => {

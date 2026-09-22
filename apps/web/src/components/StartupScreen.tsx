@@ -24,10 +24,14 @@ const STATUS_COPY: Record<CoreStatus, { title: string; detail: string }> = {
 export function StartupScreen({
   status,
   retrying = false,
+  subdetail,
+  customTitle,
   onRetry,
 }: {
   status: CoreStatus;
   retrying?: boolean;
+  subdetail?: string;
+  customTitle?: string;
   onRetry?: () => void;
 }) {
   const [flora, setFlora] = useState<{ left: string; right: string; leftCompact: string; rightCompact: string } | null>(null);
@@ -76,7 +80,7 @@ export function StartupScreen({
         },
       });
     }
-  }, [status]);
+  }, [status, subdetail, customTitle]);
 
   useEffect(() => {
     let active = true;
@@ -92,6 +96,8 @@ export function StartupScreen({
   }, []);
 
   const copy = STATUS_COPY[status];
+  const displayTitle = customTitle || copy.title;
+  const displayDetail = subdetail || copy.detail;
   const failed = status === "failed" || status === "crashed";
   return (
     <div className="startup-screen" ref={screenRef}>
@@ -107,8 +113,8 @@ export function StartupScreen({
           <IrisLoader size="hero" active={status === "starting" || status === "closing" || retrying} />
         </div>
         <div className="startup-copy" ref={copyRef}>
-          <h1>{copy.title}</h1>
-          <p>{copy.detail}</p>
+          <h1>{displayTitle}</h1>
+          <p>{displayDetail}</p>
         </div>
         {failed && (
           <button className="primary-button" type="button" onClick={onRetry} disabled={retrying}>

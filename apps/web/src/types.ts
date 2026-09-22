@@ -143,6 +143,7 @@ export type AvatarClientStatus = {
   client_name?: string | null;
   client_version?: string | null;
   platform?: string | null;
+  renderer_ready: boolean;
   state: string;
   current_utterance_id?: string | null;
   current_motion_profile?: string | null;
@@ -154,6 +155,7 @@ export type AvatarStatusResponse = {
   protocol_version: number;
   broadcast_policy: string;
   client_count: number;
+  ready_client_count: number;
   clients: AvatarClientStatus[];
   emotion_engine: {
     mapping_valid: boolean;

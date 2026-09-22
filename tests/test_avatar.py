@@ -185,6 +185,47 @@ async def test_hello_and_playback_events_update_client_status() -> None:
 
 
 @pytest.mark.anyio
+async def test_renderer_ready_requires_explicit_ready_frame() -> None:
+    events = EventBus()
+    manager = AvatarConnectionManager()
+    client = await manager.register(FakeSocket())
+    service = AvatarService(manager, events, enabled=True, heartbeat_interval_seconds=1, client_timeout_seconds=2)
+
+    hello, hello_payload = parse_incoming({
+        "protocol_version": 2,
+        "type": "avatar.hello",
+        "message_id": "hello-ready",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "session_id": "default",
+        "payload": {
+            "client_name": "Unity",
+            "client_version": "0.7",
+            "supported_protocol_versions": [1, 2],
+            "platform": "WindowsPlayer",
+        },
+    })
+    await service.inbound(client.client_id, hello, hello_payload)
+    connected = await service.status()
+    assert connected.client_count == 1
+    assert connected.ready_client_count == 0
+    assert connected.clients[0].renderer_ready is False
+
+    ready, ready_payload = parse_incoming({
+        "protocol_version": 2,
+        "type": "avatar.ready",
+        "message_id": "renderer-ready",
+        "timestamp": "2026-01-01T00:00:01Z",
+        "session_id": "default",
+        "payload": {},
+    })
+    await service.inbound(client.client_id, ready, ready_payload)
+    status = await service.status()
+    assert status.ready_client_count == 1
+    assert status.clients[0].renderer_ready is True
+    assert events.get_recent_events()[-1].type == "avatar.ready"
+
+
+@pytest.mark.anyio
 async def test_avatar_playback_finished_notifies_conversation_lifecycle() -> None:
     events = EventBus()
     manager = AvatarConnectionManager()

@@ -209,6 +209,10 @@ class ClientStatePayload(ProtocolModel):
     _normalize_state = field_validator("state", mode="before")(normalize_avatar_presence)
 
 
+class ReadyPayload(ProtocolModel):
+    """Renderer readiness is carried by the envelope; the payload is empty."""
+
+
 class MotionProfilePayload(ProtocolModel):
     profile: str = Field(min_length=1, max_length=64)
 
@@ -224,6 +228,7 @@ class AvatarStatusClient(ProtocolModel):
     client_name: str | None = None
     client_version: str | None = None
     platform: str | None = None
+    renderer_ready: bool = False
     state: str = "idle"
     current_utterance_id: str | None = None
     current_motion_profile: str | None = None
@@ -251,6 +256,7 @@ class AvatarStatusResponse(ProtocolModel):
     protocol_version: int = PROTOCOL_VERSION
     broadcast_policy: str = "all_connected_clients"
     client_count: int
+    ready_client_count: int = 0
     clients: list[AvatarStatusClient]
     emotion_engine: EmotionEngineStatus
 
