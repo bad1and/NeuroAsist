@@ -32,7 +32,7 @@ describe("TokenBadge component", () => {
       total_tokens: 1425,
       reasoning_tokens: 42,
       latency_ms: 350,
-      model: "deepseek-chat",
+      model: "deepseek-flash",
     };
     render(<TokenBadge tokens={tokens} role="assistant" />);
     expect(screen.getByText("185 out")).toBeInTheDocument();
@@ -47,7 +47,7 @@ describe("TokenBadge component", () => {
       prompt_cache_miss_tokens: 200,
       reasoning_tokens: 50,
       latency_ms: 420,
-      model: "deepseek-chat",
+      model: "deepseek-flash",
       raw_usage: {
         prompt_tokens: 1000,
         completion_tokens: 200,
@@ -60,7 +60,7 @@ describe("TokenBadge component", () => {
 
     // Popover is opened in portal
     expect(screen.getByText("Статистика токенов")).toBeInTheDocument();
-    expect(screen.getByText("deepseek-chat")).toBeInTheDocument();
+    expect(screen.getByText("deepseek-flash")).toBeInTheDocument();
     expect(screen.getByText("Входящие (Prompt)")).toBeInTheDocument();
     expect(screen.getByText(/1[\s\u00a0,.]?000/)).toBeInTheDocument();
     expect(screen.getByText(/Hit:\s*800/)).toBeInTheDocument();

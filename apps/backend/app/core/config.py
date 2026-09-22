@@ -5,6 +5,8 @@ from pathlib import Path
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
+from apps.backend.app.llm.models import DEEPSEEK_FLASH_MODEL, canonical_deepseek_model
+
 
 _SECRET_SETTING_NAMES = frozenset({"deepseek_api_key", "coding_api_key"})
 _runtime_deepseek_api_key: str | None = None
@@ -61,7 +63,7 @@ class Settings(BaseSettings):
     app_name: str = "Iris"
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-v4.1-flash"
+    deepseek_model: str = DEEPSEEK_FLASH_MODEL
     # Explicit output budgets for each LLM purpose. DeepSeek V4.1 supports very
     # large completions, so relying on the provider default makes a malformed
     # or runaway response unnecessarily expensive. Non-coding thinking is
@@ -247,6 +249,11 @@ class Settings(BaseSettings):
         if legacy in {"silero", "supertonic", "terattsv2", "tera"}:
             return "teratts"
         return legacy or "teratts"
+
+    @field_validator("deepseek_model", mode="before")
+    @classmethod
+    def migrate_deepseek_model_aliases(cls, value: object) -> str:
+        return canonical_deepseek_model(value)
 
     @property
     def llm_api_key(self) -> str | None:

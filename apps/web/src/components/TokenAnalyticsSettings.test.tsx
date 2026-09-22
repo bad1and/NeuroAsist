@@ -35,7 +35,7 @@ const mockStats: TokenUsageStats = {
     live: { request_count: 5, prompt: 3200, completion: 750, total: 3950, cache_hit: 2560 },
   },
   by_model: {
-    "deepseek-chat": { request_count: 15, prompt: 10200, completion: 2250, total: 12450 },
+    "deepseek-flash": { request_count: 15, prompt: 10200, completion: 2250, total: 12450 },
   },
   timeseries: [
     { timestamp: 1000, label: "12:00", total: 4500, prompt: 3500, completion: 1000, cache_hit: 2800, request_count: 5 },
@@ -49,7 +49,7 @@ const mockRecords: TokenRecordsResponse = {
       timestamp: 2000,
       request_id: "req-12345",
       purpose: "chat",
-      model: "deepseek-chat",
+      model: "deepseek-flash",
       streaming: true,
       thinking: false,
       max_tokens: 4096,
@@ -99,7 +99,7 @@ describe("TokenAnalyticsSettings component", () => {
     expect(screen.getByText("Распределение по назначению")).toBeInTheDocument();
     expect(screen.getAllByText("Чат / Диалог").length).toBeGreaterThan(0);
     expect(screen.getByText("Распределение по моделям")).toBeInTheDocument();
-    expect(screen.getAllByText("deepseek-chat").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("deepseek-flash").length).toBeGreaterThan(0);
   });
 
   it("changes timeframe and reloads stats", async () => {

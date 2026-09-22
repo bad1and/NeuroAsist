@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Zap, Copy, Check, X, ChevronDown, ChevronRight, Terminal } from "lucide-react";
 import type { TokenMetadata } from "../types";
+import { calculateDeepSeekCostUsd } from "../deepseek";
 
 export function formatTokens(count?: number): string {
   if (count === undefined || count === null || isNaN(count)) return "0";
@@ -11,11 +12,7 @@ export function formatTokens(count?: number): string {
 }
 
 export function calculateCostUsd(tokens: TokenMetadata): number {
-  const hit = tokens.prompt_cache_hit_tokens ?? 0;
-  const miss = tokens.prompt_cache_miss_tokens ?? (tokens.prompt_tokens ?? 0);
-  const completion = tokens.completion_tokens ?? 0;
-  // DeepSeek standard pricing: $0.07/M cached, $0.27/M uncached, $1.10/M completion
-  const cost = (hit * 0.00000007) + (miss * 0.00000027) + (completion * 0.0000011);
+  const cost = calculateDeepSeekCostUsd(tokens);
   return Math.round(cost * 1_000_000) / 1_000_000;
 }
 

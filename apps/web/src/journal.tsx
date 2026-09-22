@@ -12,6 +12,7 @@ import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from "react
 
 import { deleteTimelineRange, getTimelineJournal, getTimelineMessages, searchTimeline } from "./api";
 import type { TimelineJournalItem, TimelineMessage, TokenMetadata } from "./types";
+import { calculateDeepSeekCostUsd } from "./deepseek";
 import { AppDialog } from "./components/AppDialog";
 import {
   ChevronLeft,
@@ -163,14 +164,6 @@ const INTENT_LABELS: Record<string, string> = {
   unknown: "Неопределенно",
 };
 
-function calcMessageCost(tokens?: { prompt_tokens?: number; prompt_cache_hit_tokens?: number; prompt_cache_miss_tokens?: number; completion_tokens?: number }): number {
-  if (!tokens) return 0;
-  const hit = tokens.prompt_cache_hit_tokens || 0;
-  const miss = tokens.prompt_cache_miss_tokens || (tokens.prompt_tokens ? Math.max(0, tokens.prompt_tokens - hit) : 0);
-  const out = tokens.completion_tokens || 0;
-  return (hit * 0.00000007) + (miss * 0.00000027) + (out * 0.0000011);
-}
-
 function formatCost(usd: number): string {
   if (usd <= 0) return "$0.00";
   if (usd < 0.0001) return "<$0.0001";
@@ -260,7 +253,7 @@ function JournalMessageDetails({
             <div className="metric-cell">
               <span className="cell-label">Расход</span>
               <span className="cell-val text-cost">
-                {formatCost(calcMessageCost(tokens))}
+                {formatCost(calculateDeepSeekCostUsd(tokens))}
               </span>
             </div>
           </div>

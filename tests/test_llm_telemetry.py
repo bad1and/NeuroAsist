@@ -22,7 +22,7 @@ def _record(
         timestamp=timestamp,
         request_id=request_id,
         purpose=purpose,
-        model="deepseek-v4.1-flash",
+        model="deepseek-flash",
         streaming=purpose == "chat",
         thinking=False,
         max_tokens=512,

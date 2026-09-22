@@ -36,7 +36,7 @@ import { MemoryPage } from "./memory";
 
 const settings = {
   developer_mode_enabled: false,
-  provider: "deepseek", model: "deepseek-chat", personality: "default", interface_locale: "ru" as const, voice_language: "ru",
+  provider: "deepseek", model: "deepseek-flash", personality: "default", interface_locale: "ru" as const, voice_language: "ru",
   voice_microphone_profile: "balanced", voice_input_device_id: "", voice_output_device_id: "", voice_vad: { configured_provider: "silero", active_provider: "silero", ready: true, fallback: false },
   voice_input_diagnostic_audio_enabled: false,
   voice_stt_model: "small", voice_tts_enabled: true, avatar_enabled: false, avatar_placement: "desktop_overlay", avatar_in_app_visible: true, voice_tts_voice: "ru_f1",
@@ -70,7 +70,7 @@ beforeEach(() => {
   Object.defineProperty(HTMLElement.prototype, "scrollTo", { configurable: true, value: vi.fn() });
   Object.defineProperty(HTMLDialogElement.prototype, "showModal", { configurable: true, value() { this.setAttribute("open", ""); } });
   Object.defineProperty(HTMLDialogElement.prototype, "close", { configurable: true, value() { this.removeAttribute("open"); this.dispatchEvent(new Event("close")); } });
-  api.getStatus.mockResolvedValue({ app_name: "Iris", backend: "ok", database: "ok", version: "1.0.0", api_key_configured: true, llm_provider: "deepseek", llm_model: "deepseek-chat" });
+  api.getStatus.mockResolvedValue({ app_name: "Iris", backend: "ok", database: "ok", version: "1.0.0", api_key_configured: true, llm_provider: "deepseek", llm_model: "deepseek-flash" });
   api.getSettings.mockResolvedValue(settings);
   api.getAvatarStatus.mockResolvedValue({ enabled: false, protocol_version: 1, broadcast_policy: "", client_count: 0, clients: [], emotion_engine: { mapping_valid: true, current_emotion: "neutral", target_emotion: "neutral", intensity: 0, gesture: "", motion_profile: "", attack_ms: 0, minimum_hold_ms: 0, release_ms: 0, generation: 0, speaking: false } });
   api.getEvents.mockResolvedValue({ events: [] });
@@ -893,7 +893,7 @@ describe("русский интерфейс", () => {
               completion_tokens: 30,
               total_tokens: 180,
               latency_ms: 350,
-              model: "deepseek-chat",
+              model: "deepseek-flash",
             },
             companion: {
               emotion: "happy",

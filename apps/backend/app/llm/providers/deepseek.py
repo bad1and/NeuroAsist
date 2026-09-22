@@ -25,6 +25,7 @@ from apps.backend.app.llm.base import (
     LLMUsage,
     current_llm_call_purpose,
 )
+from apps.backend.app.llm.models import canonical_deepseek_model
 from apps.backend.app.llm.telemetry import llm_telemetry
 
 logger = logging.getLogger(__name__)
@@ -113,7 +114,7 @@ class DeepSeekProvider(LLMProvider):
         # Optional overrides let specialized agents use a separately scoped
         # credential without changing the main conversational provider.
         self._api_key = api_key if api_key is not None else settings.llm_api_key
-        self._model = model or settings.deepseek_model
+        self._model = canonical_deepseek_model(model or settings.deepseek_model)
         self._base_url = base_url or settings.deepseek_base_url
         # An unbounded request keeps the assistant lease open forever when the
         # provider stalls; voice_llm_timeout_seconds finally gets applied here.
@@ -370,8 +371,9 @@ class DeepSeekProvider(LLMProvider):
                 )
                 async for chunk in response:
                     model = _optional_string(getattr(chunk, "model", None)) or model
-                    # DeepSeek emits an extra final chunk with choices=[] when
-                    # include_usage is enabled. Capture it before reading choices.
+                    # Capture usage before reading choices. Current DeepSeek
+                    # responses attach it to the final choice; older compatible
+                    # streams used a separate chunk with an empty choices list.
                     chunk_usage = _extract_usage(getattr(chunk, "usage", None))
                     attempt_usage = _add_usage(attempt_usage, chunk_usage)
                     aggregate_usage = _add_usage(aggregate_usage, chunk_usage)
