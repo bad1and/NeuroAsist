@@ -157,20 +157,25 @@ import {
 import { OverviewPage } from "./overview";
 import {
   configureAvatarPlacement,
+  getAvatarHostStatus,
   getDesktopRuntime,
   initialCoreStatus,
+  isDesktopApp,
   listenForAppCloseRequest,
+  listenForAvatarStatus,
   listenForAvatarVisibility,
   listenForCoreStatus,
   restartDesktopCore,
+  restartAvatar,
   setDesktopInterfaceLocale,
+  shouldWaitForInAppAvatar,
   startGracefulShutdown,
   type CoreStatus,
+  type AvatarHostStatus,
   openQaStudioWindow,
   closeQaStudioWindow,
   isQaStudioWindowOpen,
   listenForQaStudioState,
-  isDesktopApp,
 } from "./desktop";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { StartupScreen } from "./components/StartupScreen";
@@ -485,6 +490,7 @@ function MainApp() {
   const desktopManaged = isDesktopManaged();
   const [coreStatus, setCoreStatus] = useState<CoreStatus>(initialCoreStatus);
   const [showStartup, setShowStartup] = useState(desktopManaged);
+  const [avatarHostStatus, setAvatarHostStatus] = useState<AvatarHostStatus | null>(null);
   const [isClosing, setIsClosing] = useState(false);
   const [retryingCore, setRetryingCore] = useState(false);
   const startupStartedAt = useRef(Date.now());
@@ -618,6 +624,34 @@ function MainApp() {
   }, [interfaceLocale]);
 
   useEffect(() => {
+    if (!desktopManaged) return;
+    let stop: (() => void) | undefined;
+    void listenForAvatarStatus((status) => {
+      setAvatarHostStatus(status);
+    }).then((unlisten) => {
+      stop = unlisten;
+      void getAvatarHostStatus().then((status) => {
+        if (status) setAvatarHostStatus(status);
+      });
+    });
+    return () => stop?.();
+  }, [desktopManaged]);
+
+  const isWaitingForAvatar = shouldWaitForInAppAvatar(desktopManaged, avatarHostStatus);
+
+  const startupSubdetail = useMemo(() => {
+    if (coreStatus !== "ready") {
+      return "Подготавливаю ядро, модель и сервисы…";
+    }
+    if (isWaitingForAvatar) {
+      return avatarHostStatus?.phase === "warming"
+        ? "Прогреваю сцену и первый кадр 3D-аватара…"
+        : "Запускаю 3D-аватар…";
+    }
+    return "Всё готово к разговору";
+  }, [avatarHostStatus?.phase, coreStatus, isWaitingForAvatar]);
+
+  useEffect(() => {
     let stop: (() => void) | undefined;
     void listenForCoreStatus((nextStatus) => {
       setCoreStatus(nextStatus);
@@ -636,11 +670,21 @@ function MainApp() {
   }, [desktopManaged]);
 
   useEffect(() => {
-    if (!desktopManaged || coreStatus !== "ready") return;
+    if (!desktopManaged) {
+      if (coreStatus === "ready") {
+        const elapsed = Date.now() - startupStartedAt.current;
+        const timer = window.setTimeout(() => setShowStartup(false), Math.max(0, 200 - elapsed));
+        return () => window.clearTimeout(timer);
+      }
+      return;
+    }
+    if (coreStatus !== "ready") return;
+    if (isWaitingForAvatar) return;
+
     const elapsed = Date.now() - startupStartedAt.current;
-    const timer = window.setTimeout(() => setShowStartup(false), Math.max(0, 200 - elapsed));
+    const timer = window.setTimeout(() => setShowStartup(false), Math.max(350, 400 - elapsed));
     return () => window.clearTimeout(timer);
-  }, [coreStatus, desktopManaged]);
+  }, [coreStatus, desktopManaged, isWaitingForAvatar]);
 
   const retryCore = async () => {
     setRetryingCore(true);
@@ -650,6 +694,8 @@ function MainApp() {
     try {
       const runtime = await restartDesktopCore();
       setCoreStatus(runtime.coreStatus);
+      const nextAvatarStatus = await restartAvatar();
+      if (nextAvatarStatus) setAvatarHostStatus(nextAvatarStatus);
     } catch {
       setCoreStatus("failed");
       setRetryingCore(false);
@@ -776,11 +822,20 @@ function MainApp() {
 
   useEffect(() => {
     if (!servicesReady || !settings) return;
-    void configureAvatarPlacement(settings.avatar_placement).catch(() => {
-      // Settings remain usable in a browser or when an optional avatar build
-      // is unavailable. Avatar diagnostics show the connection state.
-    });
+    void configureAvatarPlacement(settings.avatar_placement)
+      .then((status) => {
+        if (status) setAvatarHostStatus(status);
+      })
+      .catch(() => {
+        // Settings remain usable in a browser or when an optional avatar build
+        // is unavailable. Avatar diagnostics show the connection state.
+      });
   }, [servicesReady, settings?.avatar_placement]);
+
+  const retryAvatar = useCallback(async () => {
+    const status = await restartAvatar();
+    if (status) setAvatarHostStatus(status);
+  }, []);
 
   const startFreshSession = useCallback(async (
     boundaryReason: ConversationBoundaryReason = "new_dialog",
@@ -874,7 +929,14 @@ function MainApp() {
   }
 
   if (showStartup) {
-    return <StartupScreen status={coreStatus} retrying={retryingCore} onRetry={() => void retryCore()} />;
+    return (
+      <StartupScreen
+        status={coreStatus}
+        subdetail={startupSubdetail}
+        retrying={retryingCore}
+        onRetry={() => void retryCore()}
+      />
+    );
   }
 
   const closeNavigation = () => {
@@ -935,11 +997,13 @@ function MainApp() {
                 settings={settings}
                 readiness={readiness}
                 avatarStatus={avatarStatus}
+                avatarHostStatus={avatarHostStatus}
                 showInAppAvatar={settings?.avatar_placement === "in_app" && (settings.avatar_in_app_visible ?? true)}
                 onRefreshEvents={refreshEvents}
                 onOpenMemory={() => switchView("memory")}
                 onOpenSettings={() => switchView("settings")}
                 onStartNewDialog={startFreshSession}
+                onRetryAvatar={retryAvatar}
               />
             </Suspense>
           </div>
@@ -1136,11 +1200,13 @@ export function ChatPage({
   settings,
   readiness,
   avatarStatus,
+  avatarHostStatus,
   showInAppAvatar,
   onRefreshEvents,
   onOpenMemory,
   onOpenSettings,
   onStartNewDialog,
+  onRetryAvatar,
 }: {
   sessionId: string | null;
   sessionStarting: boolean;
@@ -1149,11 +1215,13 @@ export function ChatPage({
   settings: PublicSettings | null;
   readiness: ReadinessResponse | null;
   avatarStatus: AvatarStatusResponse | null;
+  avatarHostStatus: AvatarHostStatus | null;
   showInAppAvatar: boolean;
   onRefreshEvents: () => Promise<void>;
   onOpenMemory: () => void;
   onOpenSettings?: () => void;
   onStartNewDialog: (boundaryReason?: ConversationBoundaryReason) => Promise<void>;
+  onRetryAvatar: () => Promise<void>;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -2484,7 +2552,9 @@ export function ChatPage({
           isActive={isActive}
         />
         <div className="chat-idle-stage">
-          {showInAppAvatar && isActive && <InAppAvatarHost />}
+          {showInAppAvatar && isActive && (
+            <InAppAvatarHost status={avatarHostStatus} onRetry={onRetryAvatar} />
+          )}
           <div className="chat-start-banner">
             <div className="chat-start-banner-inner">
               <svg className="banner-bg-svg" width="829" height="121" viewBox="0 0 829 121" fill="none" preserveAspectRatio="none">
@@ -2553,7 +2623,9 @@ export function ChatPage({
         showInAppAvatar={showInAppAvatar && isActive}
         isActive={isActive}
       />
-      {showInAppAvatar && isActive && <InAppAvatarHost />}
+      {showInAppAvatar && isActive && (
+        <InAppAvatarHost status={avatarHostStatus} onRetry={onRetryAvatar} />
+      )}
       <div className="chat-content">
         {memoryNotice && (
           <div className="notice" role="status">

@@ -20,6 +20,7 @@ vi.mock("@tauri-apps/api/window", () => ({
 import { StartupScreen } from "./components/StartupScreen";
 import { IrisLoader } from "./components/IrisLoader";
 import { WindowChrome } from "./components/WindowChrome";
+import { shouldWaitForInAppAvatar, type AvatarHostStatus } from "./desktop";
 
 beforeEach(() => {
   Object.defineProperty(window, "__TAURI_INTERNALS__", {
@@ -69,5 +70,30 @@ describe("desktop chrome и запуск", () => {
       expect(windowApi.toggleMaximize).toHaveBeenCalledTimes(2);
       expect(tauriInvoke).toHaveBeenCalledWith("quit_app", {}, undefined);
     });
+  });
+});
+
+describe("avatar startup gate", () => {
+  const status = (
+    phase: AvatarHostStatus["phase"],
+    placement: AvatarHostStatus["placement"] = "in_app",
+  ): AvatarHostStatus => ({
+    placement,
+    running: phase !== "failed",
+    embedded: phase === "warming" || phase === "ready",
+    visible: true,
+    ready: phase === "ready",
+    phase,
+    error: phase === "failed" ? "timeout" : null,
+  });
+
+  it("ждёт только видимый in-app renderer в состоянии прогрева", () => {
+    expect(shouldWaitForInAppAvatar(true, null)).toBe(true);
+    expect(shouldWaitForInAppAvatar(true, status("starting"))).toBe(true);
+    expect(shouldWaitForInAppAvatar(true, status("warming"))).toBe(true);
+    expect(shouldWaitForInAppAvatar(true, status("ready"))).toBe(false);
+    expect(shouldWaitForInAppAvatar(true, status("failed"))).toBe(false);
+    expect(shouldWaitForInAppAvatar(true, status("starting", "desktop_overlay"))).toBe(false);
+    expect(shouldWaitForInAppAvatar(false, null)).toBe(false);
   });
 });

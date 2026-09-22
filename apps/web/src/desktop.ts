@@ -27,7 +27,21 @@ export type AvatarHostStatus = {
   running: boolean;
   embedded: boolean;
   visible: boolean;
+  ready: boolean;
+  phase: "disabled" | "not_configured" | "starting" | "warming" | "ready" | "failed";
+  error: string | null;
 };
+
+export function shouldWaitForInAppAvatar(
+  desktopManaged: boolean,
+  status: AvatarHostStatus | null,
+): boolean {
+  if (!desktopManaged) return false;
+  if (status === null) return true;
+  return status.placement === "in_app"
+    && status.visible
+    && (status.phase === "starting" || status.phase === "warming");
+}
 
 export function isDesktopApp(): boolean {
   return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
@@ -44,6 +58,32 @@ export async function listenForCoreStatus(
 ): Promise<UnlistenFn> {
   if (!isDesktopApp()) return () => undefined;
   return listen<CoreStatus>("desktop-core-status", ({ payload }) => listener(payload));
+}
+
+export async function listenForAvatarStatus(
+  listener: (status: AvatarHostStatus) => void,
+): Promise<UnlistenFn> {
+  if (!isDesktopApp()) return () => undefined;
+  return listen<AvatarHostStatus>("desktop-avatar-status", ({ payload }) => listener(payload));
+}
+
+export async function isAvatarReady(): Promise<boolean> {
+  if (!isDesktopApp()) return true;
+  try {
+    return (await getAvatarHostStatus())?.ready ?? false;
+  } catch {
+    return false;
+  }
+}
+
+export async function getAvatarHostStatus(): Promise<AvatarHostStatus | null> {
+  if (!isDesktopApp()) return null;
+  return invoke<AvatarHostStatus>("get_avatar_host_status");
+}
+
+export async function restartAvatar(): Promise<AvatarHostStatus | null> {
+  if (!isDesktopApp()) return null;
+  return invoke<AvatarHostStatus>("restart_avatar");
 }
 
 export async function listenForAppCloseRequest(
@@ -193,4 +233,3 @@ export async function listenForQaStudioState(
     channel?.close();
   };
 }
-

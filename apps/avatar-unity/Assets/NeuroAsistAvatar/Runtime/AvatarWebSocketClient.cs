@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections;
 using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
@@ -18,6 +19,9 @@ namespace NeuroAsist.Avatar
         private CancellationTokenSource cancellation;
         private Task loop;
         private bool manualShutdown;
+        private readonly AvatarReadinessGate readiness = new AvatarReadinessGate();
+        private readonly SemaphoreSlim sendGate = new SemaphoreSlim(1, 1);
+        private ClientWebSocket greetedSocket;
         public bool IsConnected => socket != null && socket.State == WebSocketState.Open;
 
         private int parentPid = -1;
@@ -33,7 +37,22 @@ namespace NeuroAsist.Avatar
             }
         }
 
-        private void Start() { if (settings == null) { Debug.LogError("[AvatarWS] Missing AvatarRuntimeSettings", this); return; } StartClient(); }
+        private void Start()
+        {
+            if (settings == null) { Debug.LogError("[AvatarWS] Missing AvatarRuntimeSettings", this); return; }
+            StartCoroutine(TrackRendererReadiness());
+            StartClient();
+        }
+
+        private IEnumerator TrackRendererReadiness()
+        {
+            for (var frame = 0; frame < AvatarReadinessGate.RequiredFrames; frame++)
+            {
+                yield return new WaitForEndOfFrame();
+                readiness.MarkFrameComplete();
+            }
+            AnnounceRendererReady();
+        }
 
         private void Update()
         {
@@ -96,15 +115,40 @@ namespace NeuroAsist.Avatar
                     }
                     attempt = 0;
                     mainThread.Enqueue(() => state.SetState(AvatarState.Idle, false));
-                    await SendTextAsync(AvatarProtocol.Serialize("avatar.hello", new AvatarHelloPayload { platform = Application.platform.ToString() }), token);
+                    var connectedSocket = socket;
+                    var helloSent = await SendTextAsync(AvatarProtocol.Serialize("avatar.hello", new AvatarHelloPayload { platform = Application.platform.ToString() }), token, connectedSocket);
+                    if (!helloSent) continue;
+                    Volatile.Write(ref greetedSocket, connectedSocket);
+                    AnnounceRendererReady();
                     await ReceiveAsync(token);
                 }
-                catch (OperationCanceledException) { break; }
+                catch (OperationCanceledException)
+                {
+                    if (token.IsCancellationRequested || manualShutdown) break;
+                    DebugLog("Connection attempt timed out; retrying.");
+                }
                 catch (Exception ex) { DebugLog("Connect/receive failed: " + ex.GetType().Name); }
                 finally { await CloseAsync(); mainThread.Enqueue(() => state.SetState(AvatarState.Disconnected, false)); }
                 if (!settings.ReconnectEnabled || manualShutdown || token.IsCancellationRequested) break;
                 await Task.Delay(TimeSpan.FromSeconds(ReconnectBackoff.GetDelay(attempt++)), token);
             }
+        }
+        private void AnnounceRendererReady()
+        {
+            var current = socket;
+            if (current == null
+                || current.State != WebSocketState.Open
+                || !ReferenceEquals(Volatile.Read(ref greetedSocket), current)
+                || !readiness.TryClaimAnnouncement(current)) return;
+            _ = SendRendererReadyAsync(current);
+        }
+        private async Task SendRendererReadyAsync(ClientWebSocket connection)
+        {
+            var sent = await SendTextAsync(
+                AvatarProtocol.Serialize("avatar.ready", new AvatarReadyPayload()),
+                cancellation.Token,
+                connection);
+            if (!sent) readiness.ReleaseAnnouncement(connection);
         }
 
         private async Task ReceiveAsync(CancellationToken token)
@@ -120,18 +164,37 @@ namespace NeuroAsist.Avatar
                 mainThread.Enqueue(() => router.Receive(raw));
             }
         }
-        private async Task SendTextAsync(string text, CancellationToken token)
+        private async Task<bool> SendTextAsync(string text, CancellationToken token, ClientWebSocket expectedSocket = null)
         {
-            try { await socket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(text)), WebSocketMessageType.Text, true, token); }
-            catch (Exception ex) { DebugLog("Send failed: " + ex.GetType().Name); }
+            try
+            {
+                await sendGate.WaitAsync(token);
+                try
+                {
+                    var current = socket;
+                    if (current == null
+                        || current.State != WebSocketState.Open
+                        || (expectedSocket != null && !ReferenceEquals(expectedSocket, current))) return false;
+                    await current.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(text)), WebSocketMessageType.Text, true, token);
+                    return true;
+                }
+                finally { sendGate.Release(); }
+            }
+            catch (Exception ex) { DebugLog("Send failed: " + ex.GetType().Name); return false; }
         }
         private async Task CloseAsync()
         {
             var current = socket; socket = null;
+            if (ReferenceEquals(Volatile.Read(ref greetedSocket), current)) Volatile.Write(ref greetedSocket, null);
             if (current == null) return;
-            try { if (current.State == WebSocketState.Open) await current.CloseAsync(WebSocketCloseStatus.NormalClosure, "shutdown", CancellationToken.None); }
-            catch (Exception) { }
-            current.Dispose();
+            await sendGate.WaitAsync(CancellationToken.None);
+            try
+            {
+                try { if (current.State == WebSocketState.Open) await current.CloseAsync(WebSocketCloseStatus.NormalClosure, "shutdown", CancellationToken.None); }
+                catch (Exception) { }
+                current.Dispose();
+            }
+            finally { sendGate.Release(); }
         }
         private void DebugLog(string message) { if (settings != null && settings.DebugLogging) Debug.Log("[AvatarWS] " + message, this); }
     }

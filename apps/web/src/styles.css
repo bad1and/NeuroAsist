@@ -1066,6 +1066,56 @@ select { appearance: auto; }
   z-index: 1;
 }
 
+.in-app-avatar-loader-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  height: 100%;
+  padding-bottom: 30px;
+  opacity: 0.82;
+  pointer-events: none;
+  transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.in-app-avatar-loader-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  letter-spacing: -0.01em;
+}
+
+.in-app-avatar-failure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: min(100%, 320px);
+  min-height: 180px;
+  margin: auto;
+  padding: 24px;
+  text-align: center;
+  pointer-events: auto;
+}
+
+.in-app-avatar-failure strong {
+  color: var(--color-text-primary);
+  font-size: 15px;
+}
+
+.in-app-avatar-failure span {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.in-app-avatar-failure .secondary {
+  margin-top: 6px;
+}
+
 .chat-panel.is-active .chat-content {
   position: relative;
   z-index: 2;
@@ -8312,39 +8362,62 @@ pre,
   top: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 8px !important;
+  gap: 5px;
+  padding: 12px 10px !important;
   border: 0 !important;
-  border-radius: var(--radius-md, 32px) !important;
+  border-radius: 36px !important;
   corner-shape: squircle;
-  background: var(--color-surface) !important;
+  background:
+    radial-gradient(145% 115% at 28% 10%, rgba(255, 255, 255, 0.032) 0%, rgba(255, 255, 255, 0.007) 52%, transparent 100%),
+    linear-gradient(175deg, rgba(255, 255, 255, 0.009) 0%, rgba(0, 0, 0, 0.046) 100%),
+    var(--color-surface) !important;
   box-sizing: border-box;
   height: fit-content;
   max-height: 85vh;
   overflow: hidden;
-  box-shadow: var(--shadow-surface) !important;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.045),
+    0 2px 4px 0 rgba(0, 0, 0, 0.22),
+    0 8px 16px -2px rgba(0, 0, 0, 0.32),
+    0 20px 40px -6px rgba(0, 0, 0, 0.42) !important;
 }
 
-/* Search bar inside sidebar - squircle, zero border, compact */
+/* Search bar inside sidebar - sunken 3D input, squircle */
 .journal-sidebar-header {
   flex: 0 0 auto;
   width: 100%;
   box-sizing: border-box;
-  padding: 2px 2px 4px 2px;
+  padding: 2px 2px 6px 2px;
 }
 
 .journal-search-form {
   display: flex;
   align-items: center;
   gap: 6px;
-  background: var(--color-surface-soft) !important;
-  border: 0 !important;
+  background: var(--color-base-deep) !important;
+  border: 1px solid rgba(0, 0, 0, 0.5) !important;
+  border-top-color: rgba(0, 0, 0, 0.7) !important;
+  border-bottom-color: rgba(255, 255, 255, 0.06) !important;
   border-radius: var(--radius-control, 24px) !important;
   corner-shape: squircle;
-  padding: 0 10px !important;
-  height: 38px !important;
-  min-height: 38px !important;
+  padding: 0 12px !important;
+  height: 40px !important;
+  min-height: 40px !important;
   box-sizing: border-box;
+  box-shadow:
+    inset 0 2px 4px 0 rgba(0, 0, 0, 0.65),
+    inset 0 1px 2px 0 rgba(0, 0, 0, 0.45),
+    0 1px 0 0 rgba(255, 255, 255, 0.05) !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+
+.journal-search-form:focus-within {
+  border-color: var(--color-accent) !important;
+  border-bottom-color: var(--color-accent) !important;
+  box-shadow:
+    inset 0 2px 4px 0 rgba(0, 0, 0, 0.45),
+    0 0 0 3px var(--color-accent-soft),
+    0 1px 0 0 rgba(255, 255, 255, 0.08) !important;
 }
 
 .journal-search-form input {
@@ -8352,6 +8425,7 @@ pre,
   min-width: 0;
   background: transparent !important;
   border: 0 !important;
+  box-shadow: none !important;
   outline: none !important;
   color: var(--color-text);
   font-size: 13px;
@@ -8385,14 +8459,22 @@ pre,
 }
 
 .journal-search-form .reset-search-button {
-  background: var(--color-surface-raised) !important;
+  background: var(--color-surface-soft) !important;
   border: 0 !important;
-  color: var(--color-text-muted);
-  border-radius: 8px;
-  padding: 3px 8px;
-  font-size: 11px;
+  color: var(--color-text-soft) !important;
+  border-radius: 12px !important;
+  corner-shape: squircle;
+  padding: 4px 10px !important;
+  font-size: 11.5px !important;
+  font-weight: 550 !important;
   cursor: pointer;
   flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.journal-search-form .reset-search-button:hover {
+  background: var(--color-surface-raised) !important;
+  color: var(--color-text) !important;
 }
 
 /* History items list inside sidebar */
@@ -8412,37 +8494,74 @@ pre,
   display: none;
 }
 
-/* Individual history item - looks exactly like Memory navigation item (.settings-nav-direct) */
+/* Individual history item - identical to .settings-nav-direct tactile 3D style */
 .history-item-minimal {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   width: 100%;
   min-height: 44px;
-  padding: 8px 10px !important;
+  padding: 8px 12px !important;
   border-radius: var(--radius-control, 24px) !important;
   corner-shape: squircle;
   cursor: pointer;
   user-select: none;
   background: transparent !important;
-  border: 0 !important;
+  border: 1px solid transparent !important;
   outline: none !important;
   text-align: left;
   box-sizing: border-box;
-  transition: background-color 0.16s ease, color 0.16s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
-.history-item-minimal:hover {
-  background: var(--color-surface-raised) !important;
-  color: var(--color-text);
+.history-item-minimal:hover:not(.is-active) {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.015) 100%), var(--color-surface-raised) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  border-top-color: rgba(255, 255, 255, 0.12) !important;
+  border-bottom-color: rgba(0, 0, 0, 0.15) !important;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.08),
+    0 2px 6px rgba(0, 0, 0, 0.2) !important;
+  color: #ffffff !important;
+  transform: none !important;
 }
 
 .history-item-minimal.is-active {
-  background: var(--color-accent) !important;
-  color: var(--color-accent-ink) !important;
-  border: 0 !important;
-  box-shadow: none !important;
+  background: linear-gradient(180deg, var(--color-accent-hover) 0%, var(--color-accent) 100%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-top-color: rgba(255, 255, 255, 0.22) !important;
+  border-bottom-color: rgba(0, 0, 0, 0.2) !important;
+  border-radius: var(--radius-control, 24px) !important;
+  corner-shape: squircle !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.01em !important;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.26),
+    0 2px 6px rgba(0, 0, 0, 0.25) !important;
+  transform: none !important;
+}
+
+.history-item-minimal.is-active:hover {
+  background: linear-gradient(180deg, var(--color-accent-visual) 0%, var(--color-accent-hover) 100%) !important;
+  border-top-color: rgba(255, 255, 255, 0.32) !important;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.34),
+    0 4px 12px rgba(0, 0, 0, 0.32) !important;
+  color: #ffffff !important;
+  transform: none !important;
+}
+
+.history-item-minimal:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98) !important;
+}
+
+.history-item-minimal.is-active:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98) !important;
+  box-shadow:
+    inset 0 2px 4px 0 rgba(0, 0, 0, 0.55),
+    0 1px 2px 0 rgba(0, 0, 0, 0.25) !important;
 }
 
 .history-item-minimal-icon {
@@ -8454,12 +8573,9 @@ pre,
   transition: color 0.16s ease;
 }
 
-.history-item-minimal:hover .history-item-minimal-icon {
-  color: var(--color-text);
-}
-
+.history-item-minimal:hover .history-item-minimal-icon,
 .history-item-minimal.is-active .history-item-minimal-icon {
-  color: var(--color-accent-ink) !important;
+  color: #ffffff !important;
 }
 
 .history-item-minimal-content {
@@ -8480,17 +8596,18 @@ pre,
 
 .history-item-minimal-header strong {
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 550;
   color: var(--color-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1 1 auto;
+  transition: color 0.16s ease;
 }
 
+.history-item-minimal:hover .history-item-minimal-header strong,
 .history-item-minimal.is-active .history-item-minimal-header strong {
-  color: var(--color-accent-ink) !important;
-  font-weight: 600;
+  color: #ffffff !important;
 }
 
 .history-item-minimal-meta {
@@ -8499,17 +8616,22 @@ pre,
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: color 0.16s ease;
+}
+
+.history-item-minimal:hover .history-item-minimal-meta {
+  color: rgba(255, 255, 255, 0.75) !important;
 }
 
 .history-item-minimal.is-active .history-item-minimal-meta {
-  color: rgba(255, 255, 255, 0.82) !important;
+  color: rgba(255, 255, 255, 0.88) !important;
 }
 
-/* Pulsating green dot */
+/* Pulsating green dot - hardware LED */
 .journal-pulse-dot {
   display: inline-block;
-  width: 6px;
-  height: 6px;
+  width: 6.5px;
+  height: 6.5px;
   border-radius: 50%;
   background: #22c55e;
   box-shadow: none !important;
@@ -8517,168 +8639,231 @@ pre,
   flex-shrink: 0;
 }
 
-/* Right Content Area - squircle rounding matching memory-content exactly (border-radius: var(--radius-lg, 48px)) */
+/* Right Content Area - elevated 3D tactile substrate */
 .journal-content.settings-content.memory-content {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 560px;
   overflow: hidden;
-  background: var(--color-surface) !important;
+  background:
+    radial-gradient(145% 115% at 28% 12%, rgba(255, 255, 255, 0.034) 0%, rgba(255, 255, 255, 0.007) 50%, transparent 100%),
+    linear-gradient(172deg, rgba(255, 255, 255, 0.009) 0%, rgba(0, 0, 0, 0.042) 100%),
+    var(--color-surface) !important;
   border: 0 !important;
-  border-radius: var(--radius-lg, 48px) !important;
+  border-radius: var(--radius-card, 40px) !important;
   corner-shape: squircle;
   padding: clamp(24px, 3vw, 36px) !important;
   box-sizing: border-box;
-  box-shadow: var(--shadow-surface) !important;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.045),
+    0 2px 4px 0 rgba(0, 0, 0, 0.25),
+    0 10px 24px -2px rgba(0, 0, 0, 0.35),
+    0 24px 48px -6px rgba(0, 0, 0, 0.45) !important;
 }
 
 /* Header ("Шапочка") redesign - clean, modern, zero borders */
 .journal-content-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding-bottom: 22px;
-  margin-bottom: 8px;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 16px !important;
+  padding-bottom: 12px !important;
+  margin-bottom: 6px !important;
   border: 0 !important;
   border-bottom: 0 !important;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
+  flex: 0 0 auto !important;
+  flex-wrap: nowrap !important;
 }
 
 .journal-header-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  min-width: 0;
-  flex: 1 1 auto;
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
 }
 
 .journal-header-title-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+  min-width: 0 !important;
 }
 
 .journal-header-title-group h2 {
-  margin: 0;
-  font-size: clamp(22px, 2.5vw, 28px);
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  color: var(--color-text);
-  line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  margin: 0 !important;
+  font-size: 18px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.025em !important;
+  color: var(--color-text) !important;
+  line-height: 1.25 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
 }
 
 .journal-header-meta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  color: var(--color-text-muted);
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  font-size: 12px !important;
+  color: var(--color-text-muted) !important;
+  line-height: 1.2 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
 }
 
-/* Status Pill in header - zero borders, soft pill with squircle */
+/* Status Pill in header - zero borders, hardware LED pill */
 .journal-active-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
-  border-radius: var(--radius-control, 24px) !important;
-  corner-shape: squircle;
-  background: rgba(34, 197, 94, 0.12) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 3px 10px !important;
+  border-radius: 9999px !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.01em !important;
+  background: linear-gradient(180deg, rgba(34, 197, 94, 0.14) 0%, rgba(34, 197, 94, 0.04) 100%), var(--color-surface) !important;
+  border: 1px solid rgba(34, 197, 94, 0.32) !important;
+  border-top-color: rgba(255, 255, 255, 0.2) !important;
   color: #4ade80 !important;
-  font-size: 11.5px;
-  font-weight: 600;
-  border: 0 !important;
-  white-space: nowrap;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 2px 6px rgba(0, 0, 0, 0.3) !important;
+  white-space: nowrap !important;
 }
 
-/* Actions in header - squircle, zero borders */
+/* Actions in header - tactile 3D buttons */
 .journal-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  flex-shrink: 0 !important;
 }
 
 .journal-primary-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 42px;
-  padding: 0 20px !important;
-  border: 0 !important;
-  border-radius: var(--radius-control, 24px) !important;
-  corner-shape: squircle;
-  background: var(--color-accent) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  min-height: 36px !important;
+  padding: 6px 16px !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-top-color: rgba(255, 255, 255, 0.22) !important;
+  border-bottom-color: rgba(0, 0, 0, 0.18) !important;
+  border-radius: var(--radius-control-sm, 16px) !important;
+  corner-shape: squircle !important;
+  background: linear-gradient(180deg, var(--color-accent-hover) 0%, var(--color-accent) 100%) !important;
   color: #ffffff !important;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: none !important;
-  transition: filter 0.16s ease, transform 0.16s ease;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.01em !important;
+  cursor: pointer !important;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.24),
+    0 2px 6px rgba(0, 0, 0, 0.25) !important;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  white-space: nowrap !important;
 }
 
 .journal-primary-action:hover {
-  filter: brightness(1.1);
+  background: linear-gradient(180deg, var(--color-accent-visual) 0%, var(--color-accent-hover) 100%) !important;
+  border-top-color: rgba(255, 255, 255, 0.32) !important;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.34),
+    0 4px 12px rgba(0, 0, 0, 0.32) !important;
 }
 
 .journal-primary-action:active {
-  transform: scale(0.98);
+  transform: translateY(1px) scale(0.98) !important;
+  box-shadow:
+    inset 0 2px 4px 0 rgba(0, 0, 0, 0.55),
+    0 1px 2px 0 rgba(0, 0, 0, 0.25) !important;
 }
 
 .journal-delete-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 42px;
-  padding: 0 16px !important;
-  border: 0 !important;
-  border-radius: var(--radius-control, 24px) !important;
-  corner-shape: squircle;
-  background: var(--color-surface-soft) !important;
-  color: var(--color-text-muted) !important;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  box-shadow: none !important;
-  transition: all 0.16s ease;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  padding: 6px 14px !important;
+  border: 1px solid rgba(152, 103, 104, 0.28) !important;
+  border-top-color: rgba(255, 255, 255, 0.14) !important;
+  border-bottom-color: rgba(0, 0, 0, 0.22) !important;
+  border-radius: var(--radius-control-sm, 16px) !important;
+  corner-shape: squircle !important;
+  background: linear-gradient(180deg, rgba(134, 91, 92, 0.18) 0%, rgba(134, 91, 92, 0.06) 100%), var(--color-surface-raised) !important;
+  color: #e5b9ba !important;
+  font-size: 12.5px !important;
+  font-weight: 550 !important;
+  letter-spacing: -0.01em !important;
+  cursor: pointer !important;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.08),
+    0 2px 6px rgba(0, 0, 0, 0.22) !important;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  white-space: nowrap !important;
 }
 
 .journal-delete-action:hover {
-  background: rgba(239, 68, 68, 0.14) !important;
-  color: #f87171 !important;
+  background: linear-gradient(180deg, rgba(152, 103, 104, 0.28) 0%, rgba(134, 91, 92, 0.14) 100%), var(--color-surface-raised) !important;
+  border-color: rgba(167, 114, 115, 0.42) !important;
+  border-top-color: rgba(255, 255, 255, 0.22) !important;
+  color: #ffffff !important;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.12),
+    0 4px 12px rgba(0, 0, 0, 0.25) !important;
 }
 
 .journal-delete-action:active {
-  transform: scale(0.98);
+  transform: translateY(1px) scale(0.98) !important;
+  background: rgba(134, 91, 92, 0.32) !important;
+  box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.45) !important;
 }
 
 .journal-back-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 38px;
-  padding: 0 14px !important;
-  border: 0 !important;
-  border-radius: var(--radius-control-sm, 18px) !important;
-  corner-shape: squircle;
-  background: var(--color-surface-soft) !important;
-  color: var(--color-text-muted) !important;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.16s ease;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  padding: 6px 14px !important;
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
+  border-top-color: rgba(255, 255, 255, 0.10) !important;
+  border-bottom-color: rgba(0, 0, 0, 0.15) !important;
+  border-radius: var(--radius-control-sm, 16px) !important;
+  corner-shape: squircle !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.065) 0%, rgba(255, 255, 255, 0.02) 100%), var(--color-surface-raised) !important;
+  color: var(--color-text) !important;
+  font-size: 13px !important;
+  font-weight: 550 !important;
+  letter-spacing: -0.01em !important;
+  cursor: pointer !important;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.08),
+    0 2px 6px rgba(0, 0, 0, 0.2) !important;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
 }
 
 .journal-back-button:hover {
-  color: var(--color-text);
-  background: var(--color-surface-raised) !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.04) 100%), var(--color-surface-soft) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.14),
+    0 4px 12px rgba(0, 0, 0, 0.28) !important;
+}
+
+.journal-back-button:active {
+  transform: translateY(1px) scale(0.98) !important;
+  box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.45) !important;
 }
 
 /* Chat Messages - zero borders, clean squircle cards */
@@ -10669,12 +10854,24 @@ pre,
 .settings-group input[type="text"],
 .settings-group input[type="password"],
 .settings-group textarea,
-.settings-group select {
+.settings-group select,
+.coding-content input:not([type="checkbox"]):not([type="radio"]):not(.search-form *),
+.coding-content textarea,
+.coding-content select,
+.coding-intervention-form textarea,
+.memory-content input:not([type="checkbox"]):not([type="radio"]):not(.search-form *),
+.memory-content textarea,
+.memory-content select,
+.memory-create-form input,
+.memory-create-form textarea,
+.state-dashboard input:not([type="checkbox"]):not([type="radio"]):not(.search-form *),
+.state-dashboard textarea {
   background: var(--color-base-deep) !important;
   border: 1px solid rgba(0, 0, 0, 0.5) !important;
   border-top-color: rgba(0, 0, 0, 0.7) !important;
   border-bottom-color: rgba(255, 255, 255, 0.06) !important;
-  border-radius: 12px !important;
+  border-radius: var(--radius-control-sm, 16px) !important;
+  corner-shape: squircle !important;
   box-shadow:
     inset 0 2px 4px 0 rgba(0, 0, 0, 0.65),
     inset 0 1px 2px 0 rgba(0, 0, 0, 0.45),
@@ -10693,7 +10890,18 @@ pre,
 .settings-card .custom-select:focus-within,
 .settings-group input:focus,
 .settings-group textarea:focus,
-.settings-group select:focus {
+.settings-group select:focus,
+.coding-content input:not(.search-form *):focus,
+.coding-content textarea:focus,
+.coding-content select:focus,
+.coding-intervention-form textarea:focus,
+.memory-content input:not(.search-form *):focus,
+.memory-content textarea:focus,
+.memory-content select:focus,
+.memory-create-form input:focus,
+.memory-create-form textarea:focus,
+.state-dashboard input:not(.search-form *):focus,
+.state-dashboard textarea:focus {
   background: var(--color-base-deep) !important;
   border-color: var(--color-accent) !important;
   border-bottom-color: var(--color-accent) !important;
@@ -10705,7 +10913,13 @@ pre,
 }
 
 .settings-card input::placeholder,
-.settings-card textarea::placeholder {
+.settings-card textarea::placeholder,
+.coding-content input::placeholder,
+.coding-content textarea::placeholder,
+.memory-content input::placeholder,
+.memory-content textarea::placeholder,
+.state-dashboard input::placeholder,
+.state-dashboard textarea::placeholder {
   color: var(--color-text-muted) !important;
   opacity: 0.6 !important;
 }
@@ -10740,7 +10954,13 @@ pre,
 .maintenance-actions .primary-button,
 .app-dialog-card .primary-button,
 .dialog-actions .primary-button,
-.settings-card-actions .primary-button {
+.settings-card-actions .primary-button,
+.journal-primary-action,
+.coding-content .primary-button,
+.coding-panel .primary-button,
+.memory-content .primary-button,
+.memory-panel .primary-button,
+.state-dashboard .primary-button {
   background: linear-gradient(180deg, var(--color-accent-hover) 0%, var(--color-accent) 100%) !important;
   border: 1px solid rgba(255, 255, 255, 0.12) !important;
   border-top-color: rgba(255, 255, 255, 0.22) !important;
@@ -10774,7 +10994,13 @@ pre,
 .maintenance-actions .primary-button:hover:not(:disabled),
 .app-dialog-card .primary-button:hover:not(:disabled),
 .dialog-actions .primary-button:hover:not(:disabled),
-.settings-card-actions .primary-button:hover:not(:disabled) {
+.settings-card-actions .primary-button:hover:not(:disabled),
+.journal-primary-action:hover:not(:disabled),
+.coding-content .primary-button:hover:not(:disabled),
+.coding-panel .primary-button:hover:not(:disabled),
+.memory-content .primary-button:hover:not(:disabled),
+.memory-panel .primary-button:hover:not(:disabled),
+.state-dashboard .primary-button:hover:not(:disabled) {
   background: linear-gradient(180deg, var(--color-accent-visual) 0%, var(--color-accent-hover) 100%) !important;
   border-top-color: rgba(255, 255, 255, 0.32) !important;
   box-shadow:
@@ -10791,7 +11017,13 @@ pre,
 .maintenance-actions .primary-button:active:not(:disabled),
 .app-dialog-card .primary-button:active:not(:disabled),
 .dialog-actions .primary-button:active:not(:disabled),
-.settings-card-actions .primary-button:active:not(:disabled) {
+.settings-card-actions .primary-button:active:not(:disabled),
+.journal-primary-action:active:not(:disabled),
+.coding-content .primary-button:active:not(:disabled),
+.coding-panel .primary-button:active:not(:disabled),
+.memory-content .primary-button:active:not(:disabled),
+.memory-panel .primary-button:active:not(:disabled),
+.state-dashboard .primary-button:active:not(:disabled) {
   transform: translateY(1px) scale(0.98) !important;
   box-shadow:
     inset 0 2px 4px 0 rgba(0, 0, 0, 0.55),
@@ -10823,7 +11055,22 @@ pre,
 .dialog-actions .secondary,
 .dialog-actions button:not(.primary-button):not(.danger-button),
 .settings-card-actions button.secondary,
-.settings-card-actions .secondary {
+.settings-card-actions .secondary,
+.journal-back-button,
+.coding-back-button,
+.coding-content button.secondary,
+.coding-content .secondary,
+.coding-content .secondary-button,
+.coding-panel button.secondary,
+.coding-panel .secondary,
+.coding-panel .secondary-button,
+.memory-content button.secondary,
+.memory-content .secondary,
+.memory-content .secondary-button,
+.memory-close-btn,
+.state-dashboard button.secondary,
+.state-dashboard .secondary,
+.state-dashboard .secondary-button {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.065) 0%, rgba(255, 255, 255, 0.02) 100%), var(--color-surface-raised) !important;
   border: 1px solid rgba(255, 255, 255, 0.05) !important;
   border-top-color: rgba(255, 255, 255, 0.10) !important;
@@ -10872,7 +11119,22 @@ pre,
 .dialog-actions .secondary:hover:not(:disabled),
 .dialog-actions button:not(.primary-button):not(.danger-button):hover:not(:disabled),
 .settings-card-actions button.secondary:hover:not(:disabled),
-.settings-card-actions .secondary:hover:not(:disabled) {
+.settings-card-actions .secondary:hover:not(:disabled),
+.journal-back-button:hover:not(:disabled),
+.coding-back-button:hover:not(:disabled),
+.coding-content button.secondary:hover:not(:disabled),
+.coding-content .secondary:hover:not(:disabled),
+.coding-content .secondary-button:hover:not(:disabled),
+.coding-panel button.secondary:hover:not(:disabled),
+.coding-panel .secondary:hover:not(:disabled),
+.coding-panel .secondary-button:hover:not(:disabled),
+.memory-content button.secondary:hover:not(:disabled),
+.memory-content .secondary:hover:not(:disabled),
+.memory-content .secondary-button:hover:not(:disabled),
+.memory-close-btn:hover:not(:disabled),
+.state-dashboard button.secondary:hover:not(:disabled),
+.state-dashboard .secondary:hover:not(:disabled),
+.state-dashboard .secondary-button:hover:not(:disabled) {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.04) 100%), var(--color-surface-soft) !important;
   border-color: rgba(255, 255, 255, 0.12) !important;
   color: #ffffff !important;
@@ -10901,13 +11163,28 @@ pre,
 .dialog-actions .secondary:active:not(:disabled),
 .dialog-actions button:not(.primary-button):not(.danger-button):active:not(:disabled),
 .settings-card-actions button.secondary:active:not(:disabled),
-.settings-card-actions .secondary:active:not(:disabled) {
+.settings-card-actions .secondary:active:not(:disabled),
+.journal-back-button:active:not(:disabled),
+.coding-back-button:active:not(:disabled),
+.coding-content button.secondary:active:not(:disabled),
+.coding-content .secondary:active:not(:disabled),
+.coding-content .secondary-button:active:not(:disabled),
+.coding-panel button.secondary:active:not(:disabled),
+.coding-panel .secondary:active:not(:disabled),
+.coding-panel .secondary-button:active:not(:disabled),
+.memory-content button.secondary:active:not(:disabled),
+.memory-content .secondary:active:not(:disabled),
+.memory-content .secondary-button:active:not(:disabled),
+.memory-close-btn:active:not(:disabled),
+.state-dashboard button.secondary:active:not(:disabled),
+.state-dashboard .secondary:active:not(:disabled),
+.state-dashboard .secondary-button:active:not(:disabled) {
   transform: translateY(1px) scale(0.98) !important;
   box-shadow:
     inset 0 2px 4px 0 rgba(0, 0, 0, 0.45) !important;
 }
 
-/* Secondary Danger Buttons (e.g. "Очистить память", "Удалить") */
+/* Secondary Danger Buttons (e.g. "Очистить память", "Удалить", "Сбросить настроение/отношения") */
 .settings-panel button.secondary.danger-button,
 .settings-panel .secondary.danger-button,
 .settings-card button.secondary.danger-button,
@@ -10922,7 +11199,19 @@ pre,
 .maintenance-actions button.secondary.danger-button,
 .maintenance-actions .secondary.danger-button,
 .maintenance-item button.secondary.danger-button,
-.dialog-actions button.secondary.danger-button {
+.dialog-actions button.secondary.danger-button,
+.state-action-mood,
+.state-action-relationship,
+.state-sidebar-actions button,
+.journal-delete-action,
+.coding-content button.secondary.danger-button,
+.coding-content .secondary.danger-button,
+.coding-panel button.secondary.danger-button,
+.coding-panel .secondary.danger-button,
+.memory-content button.secondary.danger-button,
+.memory-content .secondary.danger-button,
+.state-dashboard button.secondary.danger-button,
+.state-dashboard .secondary.danger-button {
   background: linear-gradient(180deg, rgba(134, 91, 92, 0.18) 0%, rgba(134, 91, 92, 0.06) 100%), var(--color-surface-raised) !important;
   border: 1px solid rgba(152, 103, 104, 0.28) !important;
   border-top-color: rgba(255, 255, 255, 0.14) !important;
@@ -10961,7 +11250,19 @@ pre,
 .maintenance-actions button.secondary.danger-button:hover:not(:disabled),
 .maintenance-actions .secondary.danger-button:hover:not(:disabled),
 .maintenance-item button.secondary.danger-button:hover:not(:disabled),
-.dialog-actions button.secondary.danger-button:hover:not(:disabled) {
+.dialog-actions button.secondary.danger-button:hover:not(:disabled),
+.state-action-mood:hover:not(:disabled),
+.state-action-relationship:hover:not(:disabled),
+.state-sidebar-actions button:hover:not(:disabled),
+.journal-delete-action:hover:not(:disabled),
+.coding-content button.secondary.danger-button:hover:not(:disabled),
+.coding-content .secondary.danger-button:hover:not(:disabled),
+.coding-panel button.secondary.danger-button:hover:not(:disabled),
+.coding-panel .secondary.danger-button:hover:not(:disabled),
+.memory-content button.secondary.danger-button:hover:not(:disabled),
+.memory-content .secondary.danger-button:hover:not(:disabled),
+.state-dashboard button.secondary.danger-button:hover:not(:disabled),
+.state-dashboard .secondary.danger-button:hover:not(:disabled) {
   background: linear-gradient(180deg, rgba(152, 103, 104, 0.28) 0%, rgba(134, 91, 92, 0.14) 100%), var(--color-surface-raised) !important;
   border-color: rgba(167, 114, 115, 0.42) !important;
   border-top-color: rgba(255, 255, 255, 0.22) !important;
@@ -10985,13 +11286,25 @@ pre,
 .maintenance-actions button.secondary.danger-button:active:not(:disabled),
 .maintenance-actions .secondary.danger-button:active:not(:disabled),
 .maintenance-item button.secondary.danger-button:active:not(:disabled),
-.dialog-actions button.secondary.danger-button:active:not(:disabled) {
+.dialog-actions button.secondary.danger-button:active:not(:disabled),
+.state-action-mood:active:not(:disabled),
+.state-action-relationship:active:not(:disabled),
+.state-sidebar-actions button:active:not(:disabled),
+.journal-delete-action:active:not(:disabled),
+.coding-content button.secondary.danger-button:active:not(:disabled),
+.coding-content .secondary.danger-button:active:not(:disabled),
+.coding-panel button.secondary.danger-button:active:not(:disabled),
+.coding-panel .secondary.danger-button:active:not(:disabled),
+.memory-content button.secondary.danger-button:active:not(:disabled),
+.memory-content .secondary.danger-button:active:not(:disabled),
+.state-dashboard button.secondary.danger-button:active:not(:disabled),
+.state-dashboard .secondary.danger-button:active:not(:disabled) {
   transform: translateY(1px) scale(0.98) !important;
   background: rgba(134, 91, 92, 0.32) !important;
   box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.45) !important;
 }
 
-/* Primary Danger Buttons (e.g. "Сбросить все данные") */
+/* Primary Danger Buttons (e.g. "Сбросить все данные", "Отменить задачу") */
 .settings-panel .danger-button:not(.secondary),
 .settings-panel button.danger-button:not(.secondary),
 .settings-card .danger-button:not(.secondary),
@@ -11007,6 +11320,14 @@ pre,
 .app-dialog-card button.danger-button:not(.secondary),
 .dialog-actions .danger-button:not(.secondary),
 .dialog-actions button.danger-button:not(.secondary),
+.coding-content .danger-button:not(.secondary),
+.coding-content button.danger-button:not(.secondary),
+.coding-panel .danger-button:not(.secondary),
+.coding-panel button.danger-button:not(.secondary),
+.memory-content .danger-button:not(.secondary),
+.memory-content button.danger-button:not(.secondary),
+.state-dashboard .danger-button:not(.secondary),
+.state-dashboard button.danger-button:not(.secondary),
 button.danger-button:not(.secondary) {
   background: linear-gradient(180deg, #986768 0%, #865B5C 100%) !important;
   border: 1px solid rgba(255, 255, 255, 0.14) !important;
@@ -11047,6 +11368,14 @@ button.danger-button:not(.secondary) {
 .app-dialog-card button.danger-button:not(.secondary):hover:not(:disabled),
 .dialog-actions .danger-button:not(.secondary):hover:not(:disabled),
 .dialog-actions button.danger-button:not(.secondary):hover:not(:disabled),
+.coding-content .danger-button:not(.secondary):hover:not(:disabled),
+.coding-content button.danger-button:not(.secondary):hover:not(:disabled),
+.coding-panel .danger-button:not(.secondary):hover:not(:disabled),
+.coding-panel button.danger-button:not(.secondary):hover:not(:disabled),
+.memory-content .danger-button:not(.secondary):hover:not(:disabled),
+.memory-content button.danger-button:not(.secondary):hover:not(:disabled),
+.state-dashboard .danger-button:not(.secondary):hover:not(:disabled),
+.state-dashboard button.danger-button:not(.secondary):hover:not(:disabled),
 button.danger-button:not(.secondary):hover:not(:disabled) {
   background: linear-gradient(180deg, #a77273 0%, #986768 100%) !important;
   border-top-color: rgba(255, 255, 255, 0.35) !important;
@@ -11070,6 +11399,14 @@ button.danger-button:not(.secondary):hover:not(:disabled) {
 .app-dialog-card button.danger-button:not(.secondary):active:not(:disabled),
 .dialog-actions .danger-button:not(.secondary):active:not(:disabled),
 .dialog-actions button.danger-button:not(.secondary):active:not(:disabled),
+.coding-content .danger-button:not(.secondary):active:not(:disabled),
+.coding-content button.danger-button:not(.secondary):active:not(:disabled),
+.coding-panel .danger-button:not(.secondary):active:not(:disabled),
+.coding-panel button.danger-button:not(.secondary):active:not(:disabled),
+.memory-content .danger-button:not(.secondary):active:not(:disabled),
+.memory-content button.danger-button:not(.secondary):active:not(:disabled),
+.state-dashboard .danger-button:not(.secondary):active:not(:disabled),
+.state-dashboard button.danger-button:not(.secondary):active:not(:disabled),
 button.danger-button:not(.secondary):active:not(:disabled) {
   background: linear-gradient(180deg, #784e4f 0%, #6b4445 100%) !important;
   transform: translateY(1px) scale(0.98) !important;
@@ -11077,7 +11414,7 @@ button.danger-button:not(.secondary):active:not(:disabled) {
     inset 0 2px 4px 0 rgba(0, 0, 0, 0.5) !important;
 }
 
-/* Generic disabled state for all settings buttons */
+/* Generic disabled state for all buttons across app panels */
 .settings-panel button:disabled,
 .settings-card button:disabled,
 .system-card button:disabled,
@@ -11086,7 +11423,15 @@ button.danger-button:not(.secondary):active:not(:disabled) {
 .model-actions button:disabled,
 .maintenance-actions button:disabled,
 .app-dialog-card button:disabled,
-.dialog-actions button:disabled {
+.dialog-actions button:disabled,
+.coding-content button:disabled,
+.coding-panel button:disabled,
+.memory-content button:disabled,
+.memory-panel button:disabled,
+.state-dashboard button:disabled,
+.journal-panel button:disabled,
+.journal-content button:disabled,
+.journal-sidebar button:disabled {
   opacity: 0.45 !important;
   cursor: not-allowed !important;
   transform: none !important;
@@ -11447,7 +11792,8 @@ button.danger-button:not(.secondary):active:not(:disabled) {
 /* Tactile 3D Navigation Sidebar & Left Menu System */
 .settings-panel > .settings-navigation,
 .memory-panel > .memory-navigation,
-.coding-panel > .coding-navigation {
+.coding-panel > .coding-navigation,
+.journal-sidebar.journal-sidebar-new {
   position: sticky !important;
   top: 0 !important;
   display: flex !important;
@@ -11473,7 +11819,8 @@ button.danger-button:not(.secondary):active:not(:disabled) {
 /* Base navigation items (Settings direct, groups, and Main App Rail) */
 .settings-nav-direct,
 .settings-nav-group-button,
-.navigation-button {
+.navigation-button,
+.history-item-minimal {
   position: relative !important;
   display: flex !important;
   align-items: center !important;
@@ -11539,7 +11886,8 @@ button.danger-button:not(.secondary):active:not(:disabled) {
 .settings-nav-direct:hover:not(.is-active),
 .settings-nav-group-button:hover,
 .settings-nav-button:hover:not(.is-active),
-.navigation-button:hover:not(.is-active) {
+.navigation-button:hover:not(.is-active),
+.history-item-minimal:hover:not(.is-active) {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.015) 100%), var(--color-surface-raised) !important;
   border: 1px solid rgba(255, 255, 255, 0.06) !important;
   border-top-color: rgba(255, 255, 255, 0.12) !important;
@@ -11554,14 +11902,16 @@ button.danger-button:not(.secondary):active:not(:disabled) {
 .settings-nav-direct:hover:not(.is-active) svg,
 .settings-nav-group-button:hover svg,
 .settings-nav-button:hover:not(.is-active) svg,
-.navigation-button:hover:not(.is-active) svg {
+.navigation-button:hover:not(.is-active) svg,
+.history-item-minimal:hover:not(.is-active) svg {
   color: #ffffff !important;
 }
 
 /* Active Nav Button Highlight - EXACT matching 3D accent button design */
 .settings-nav-direct.is-active,
 .settings-nav-button.is-active,
-.navigation-button.is-active {
+.navigation-button.is-active,
+.history-item-minimal.is-active {
   background: linear-gradient(180deg, var(--color-accent-hover) 0%, var(--color-accent) 100%) !important;
   border: 1px solid rgba(255, 255, 255, 0.12) !important;
   border-top-color: rgba(255, 255, 255, 0.22) !important;
@@ -11583,14 +11933,16 @@ button.danger-button:not(.secondary):active:not(:disabled) {
 
 .settings-nav-direct.is-active svg,
 .settings-nav-button.is-active svg,
-.navigation-button.is-active svg {
+.navigation-button.is-active svg,
+.history-item-minimal.is-active svg {
   color: #ffffff !important;
 }
 
 /* Active Nav Button Hover */
 .settings-nav-direct.is-active:hover,
 .settings-nav-button.is-active:hover,
-.navigation-button.is-active:hover {
+.navigation-button.is-active:hover,
+.history-item-minimal.is-active:hover {
   background: linear-gradient(180deg, var(--color-accent-visual) 0%, var(--color-accent-hover) 100%) !important;
   border-top-color: rgba(255, 255, 255, 0.32) !important;
   box-shadow:
@@ -11604,13 +11956,15 @@ button.danger-button:not(.secondary):active:not(:disabled) {
 .settings-nav-direct:active:not(:disabled),
 .settings-nav-group-button:active:not(:disabled),
 .settings-nav-button:active:not(:disabled),
-.navigation-button:active:not(:disabled) {
+.navigation-button:active:not(:disabled),
+.history-item-minimal:active:not(:disabled) {
   transform: translateY(1px) scale(0.98) !important;
 }
 
 .settings-nav-direct.is-active:active:not(:disabled),
 .settings-nav-button.is-active:active:not(:disabled),
-.navigation-button.is-active:active:not(:disabled) {
+.navigation-button.is-active:active:not(:disabled),
+.history-item-minimal.is-active:active:not(:disabled) {
   transform: translateY(1px) scale(0.98) !important;
   box-shadow:
     inset 0 2px 4px 0 rgba(0, 0, 0, 0.55),
@@ -11958,4 +12312,685 @@ button.danger-button:not(.secondary):active:not(:disabled) {
   gap: 10px !important;
 }
 
+/* ==========================================================================
+   Tactile 3D Coding, State, Memory & Journal Design Unification
+   ========================================================================== */
 
+/* 1. Substrates & Cards (4 Directional Light Angle Variations) */
+.coding-card,
+.coding-task-card,
+.coding-env-card,
+.coding-detail-panel,
+.coding-result-box,
+.coding-diff,
+.state-hero-card,
+.timeline-content,
+.memory-card,
+.memory-create-form {
+  position: relative !important;
+  background:
+    radial-gradient(145% 115% at 28% 12%, rgba(255, 255, 255, 0.034) 0%, rgba(255, 255, 255, 0.007) 50%, transparent 100%),
+    linear-gradient(172deg, rgba(255, 255, 255, 0.009) 0%, rgba(0, 0, 0, 0.042) 100%),
+    var(--color-surface) !important;
+  border: 0 !important;
+  corner-shape: squircle !important;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.045),
+    0 2px 4px 0 rgba(0, 0, 0, 0.25),
+    0 10px 24px -2px rgba(0, 0, 0, 0.35),
+    0 24px 48px -6px rgba(0, 0, 0, 0.45) !important;
+  transition: box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s ease !important;
+}
+
+.coding-card:nth-child(4n + 2),
+.coding-task-card:nth-child(4n + 2),
+.coding-env-card:nth-child(4n + 2),
+.state-hero-card:nth-child(4n + 2),
+.timeline-content:nth-child(4n + 2),
+.memory-card:nth-child(4n + 2),
+.memory-create-form:nth-child(4n + 2) {
+  background:
+    radial-gradient(160% 120% at 64% 10%, rgba(255, 255, 255, 0.032) 0%, rgba(255, 255, 255, 0.006) 52%, transparent 100%),
+    linear-gradient(185deg, rgba(255, 255, 255, 0.008) 0%, rgba(0, 0, 0, 0.046) 100%),
+    var(--color-surface) !important;
+}
+
+.coding-card:nth-child(4n + 3),
+.coding-task-card:nth-child(4n + 3),
+.coding-env-card:nth-child(4n + 3),
+.state-hero-card:nth-child(4n + 3),
+.timeline-content:nth-child(4n + 3),
+.memory-card:nth-child(4n + 3),
+.memory-create-form:nth-child(4n + 3) {
+  background:
+    radial-gradient(140% 110% at 38% 24%, rgba(255, 255, 255, 0.030) 0%, rgba(255, 255, 255, 0.006) 55%, transparent 100%),
+    linear-gradient(178deg, rgba(255, 255, 255, 0.009) 0%, rgba(0, 0, 0, 0.040) 100%),
+    var(--color-surface) !important;
+}
+
+.coding-card:nth-child(4n),
+.coding-task-card:nth-child(4n),
+.coding-env-card:nth-child(4n),
+.state-hero-card:nth-child(4n),
+.timeline-content:nth-child(4n),
+.memory-card:nth-child(4n),
+.memory-create-form:nth-child(4n) {
+  background:
+    radial-gradient(155% 120% at 72% 16%, rgba(255, 255, 255, 0.034) 0%, rgba(255, 255, 255, 0.007) 48%, transparent 100%),
+    linear-gradient(188deg, rgba(255, 255, 255, 0.008) 0%, rgba(0, 0, 0, 0.048) 100%),
+    var(--color-surface) !important;
+}
+
+.coding-card:hover,
+.coding-task-card:hover,
+.coding-env-card:hover,
+.state-hero-card:hover,
+.timeline-content:hover,
+.memory-card:hover,
+.memory-create-form:hover {
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.06),
+    0 4px 8px 0 rgba(0, 0, 0, 0.28),
+    0 12px 24px -3px rgba(0, 0, 0, 0.38),
+    0 28px 52px -8px rgba(0, 0, 0, 0.48) !important;
+}
+
+/* Card squircle corner radii and generous tactile padding (Screenshot 2 Archetype) */
+.coding-card,
+.coding-task-card,
+.coding-env-card,
+.state-hero-card,
+.timeline-content,
+.memory-card,
+.memory-create-form {
+  border-radius: var(--radius-card, 40px) !important;
+  corner-shape: squircle !important;
+  padding: 24px 26px !important;
+}
+
+.memory-list {
+  display: grid !important;
+  gap: 16px !important;
+}
+
+.coding-tasks-grid,
+.coding-overview-grid {
+  gap: 18px !important;
+}
+
+/* 2. Sunken 3D Search Forms & Transparent Inputs */
+.search-form.compact,
+.coding-search-form,
+.memory-toolbar .search-form,
+.workspace-journal .search-form {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  background: var(--color-base-deep) !important;
+  border: 1px solid rgba(0, 0, 0, 0.5) !important;
+  border-top-color: rgba(0, 0, 0, 0.7) !important;
+  border-bottom-color: rgba(255, 255, 255, 0.06) !important;
+  border-radius: var(--radius-control-sm, 16px) !important;
+  corner-shape: squircle !important;
+  padding: 0 8px 0 12px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  box-sizing: border-box !important;
+  box-shadow:
+    inset 0 2px 4px 0 rgba(0, 0, 0, 0.65),
+    inset 0 1px 2px 0 rgba(0, 0, 0, 0.45),
+    0 1px 0 0 rgba(255, 255, 255, 0.05) !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+
+.search-form.compact:focus-within,
+.coding-search-form:focus-within,
+.memory-toolbar .search-form:focus-within,
+.workspace-journal .search-form:focus-within {
+  border-color: var(--color-accent) !important;
+  border-bottom-color: var(--color-accent) !important;
+  box-shadow:
+    inset 0 2px 4px 0 rgba(0, 0, 0, 0.45),
+    0 0 0 3px var(--color-accent-soft),
+    0 1px 0 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+.search-form.compact input,
+.coding-search-form input,
+.memory-toolbar .search-form input,
+.memory-content .search-form input,
+.coding-content .search-form input,
+.workspace-journal .search-form input,
+.search-form input {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  width: auto !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+  color: var(--color-text) !important;
+  font-size: 13.5px !important;
+  font-family: var(--font-ui) !important;
+  padding: 0 6px 0 0 !important;
+  margin: 0 !important;
+}
+
+.search-form.compact input:focus,
+.coding-search-form input:focus,
+.memory-toolbar .search-form input:focus,
+.memory-content .search-form input:focus,
+.coding-content .search-form input:focus,
+.workspace-journal .search-form input:focus,
+.search-form input:focus {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.search-form.compact input::placeholder,
+.coding-search-form input::placeholder,
+.memory-toolbar .search-form input::placeholder,
+.workspace-journal .search-form input::placeholder {
+  color: var(--color-text-muted) !important;
+  opacity: 0.65 !important;
+}
+
+.search-form .icon-button,
+.search-form.compact .icon-button,
+.coding-search-form .icon-button,
+.memory-toolbar .search-form .icon-button {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  color: var(--color-text-muted) !important;
+  width: 28px !important;
+  height: 28px !important;
+  min-height: 28px !important;
+  min-width: 28px !important;
+  padding: 0 !important;
+  border-radius: 8px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  transition: color 0.15s ease, background 0.15s ease !important;
+}
+
+.search-form .icon-button:hover,
+.search-form.compact .icon-button:hover,
+.coding-search-form .icon-button:hover,
+.memory-toolbar .search-form .icon-button:hover {
+  color: var(--color-text) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+.search-form.compact .search-clear-btn,
+.coding-search-form .search-clear-btn {
+  flex: 0 0 20px !important;
+  width: 20px !important;
+  height: 20px !important;
+  min-height: 20px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 50% !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: var(--color-text-muted) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+
+.search-form.compact .search-clear-btn:hover,
+.coding-search-form .search-clear-btn:hover {
+  background: rgba(255, 255, 255, 0.16) !important;
+  color: #ffffff !important;
+}
+
+/* 3. Physical Recessed Filter Tracks & 3D Buttons */
+.coding-filters,
+.timeline-filter-pills,
+.journal-view-toggle {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  background: var(--color-base-deep) !important;
+  border: 1px solid rgba(0, 0, 0, 0.5) !important;
+  border-top-color: rgba(0, 0, 0, 0.7) !important;
+  border-bottom-color: rgba(255, 255, 255, 0.06) !important;
+  border-radius: var(--radius-control, 24px) !important;
+  corner-shape: squircle !important;
+  padding: 3px 4px !important;
+  box-shadow:
+    inset 0 2px 4px 0 rgba(0, 0, 0, 0.65),
+    inset 0 1px 2px 0 rgba(0, 0, 0, 0.45),
+    0 1px 0 0 rgba(255, 255, 255, 0.05) !important;
+  box-sizing: border-box !important;
+}
+
+.coding-filter-pill,
+.timeline-filter-pill,
+.journal-view-toggle-btn {
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  color: var(--color-text-muted) !important;
+  font-size: 12px !important;
+  font-weight: 550 !important;
+  padding: 5px 13px !important;
+  border-radius: var(--radius-control-sm, 18px) !important;
+  corner-shape: squircle !important;
+  cursor: pointer !important;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  user-select: none !important;
+}
+
+.coding-filter-pill:hover:not(.is-active),
+.timeline-filter-pill:hover:not(.active),
+.journal-view-toggle-btn:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: #ffffff !important;
+}
+
+.coding-filter-pill.is-active,
+.timeline-filter-pill.active,
+.journal-view-toggle-btn.active {
+  background: linear-gradient(180deg, var(--color-accent-hover) 0%, var(--color-accent) 100%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-top-color: rgba(255, 255, 255, 0.22) !important;
+  border-bottom-color: rgba(0, 0, 0, 0.2) !important;
+  border-radius: var(--radius-control-sm, 18px) !important;
+  corner-shape: squircle !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.26),
+    0 2px 6px rgba(0, 0, 0, 0.25) !important;
+}
+
+.coding-filter-pill:active:not(:disabled),
+.timeline-filter-pill:active:not(:disabled),
+.journal-view-toggle-btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98) !important;
+}
+
+/* 4. Hardware LED Status Pills */
+.coding-status-pill,
+.memory-status,
+.journal-active-pill {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 4px 10px !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.01em !important;
+  border-radius: var(--radius-control-sm, 16px) !important;
+  corner-shape: squircle !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  color: var(--color-text-soft) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+}
+
+.coding-status-pill.status-completed,
+.coding-status-pill.status-review_ready,
+.memory-status.active {
+  background: rgba(34, 197, 94, 0.12) !important;
+  border-color: rgba(34, 197, 94, 0.25) !important;
+  color: #86efac !important;
+}
+
+.coding-status-pill.status-running,
+.coding-status-pill.status-pending,
+.memory-status.candidate {
+  background: rgba(234, 179, 8, 0.12) !important;
+  border-color: rgba(234, 179, 8, 0.25) !important;
+  color: #fde047 !important;
+}
+
+.coding-status-pill.status-failed,
+.coding-status-pill.status-cancelled,
+.memory-status.deleted,
+.memory-status.rejected {
+  background: rgba(134, 91, 92, 0.2) !important;
+  border-color: rgba(152, 103, 104, 0.32) !important;
+  color: #e5b9ba !important;
+}
+
+.coding-status-pill.status-waiting_for_input,
+.coding-status-pill.status-conflicted {
+  background: rgba(168, 85, 247, 0.14) !important;
+  border-color: rgba(168, 85, 247, 0.28) !important;
+  color: #d8b4fe !important;
+}
+
+/* 5. Inner Recessed Tiles & Substrates */
+.state-dashboard .metric-row,
+.state-dashboard .mood-causes li,
+.state-dashboard .relationship-dynamic,
+.coding-event-item,
+.memory-audit {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.005) 100%), var(--color-base-deep) !important;
+  border: 0 !important;
+  border-radius: 18px !important;
+  corner-shape: squircle !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 2px 6px rgba(0, 0, 0, 0.2) !important;
+}
+
+.state-dashboard .metric-row,
+.state-dashboard .mood-causes li,
+.state-dashboard .relationship-dynamic {
+  padding: 10px 14px !important;
+}
+
+.coding-event-item {
+  padding: 12px 14px !important;
+}
+
+.memory-audit {
+  padding: 12px 14px !important;
+  margin-top: 10px !important;
+}
+
+/* 6. Settings & Coding Switches: Zero-Overflow Flex Layout */
+.settings-switch-row,
+.coding-card .settings-switch-row,
+.coding-switch-row {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 16px !important;
+  min-height: 58px !important;
+  padding: 16px 22px !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  border-radius: var(--radius-control, 24px) !important;
+  corner-shape: squircle !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.005) 100%), var(--color-base-deep) !important;
+  border: 0 !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 2px 5px rgba(0, 0, 0, 0.25) !important;
+}
+
+.coding-card .settings-switch-row .settings-switch,
+.coding-switch-row .settings-switch,
+.settings-switch-row .settings-switch {
+  flex-shrink: 0 !important;
+  margin-left: auto !important;
+}
+
+/* 7. State Dashboard Compact 2-Column Relationship Layout */
+.state-layout {
+  grid-template-columns: 290px minmax(0, 1fr) !important;
+  gap: 24px !important;
+}
+
+.relationship-metrics {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+}
+
+.relationship-card .metric-row {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 3px !important;
+  padding: 10px 12px !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.005) 100%), var(--color-base-deep) !important;
+  border-radius: var(--radius-plate, 18px) !important;
+  corner-shape: squircle !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 2px 6px rgba(0, 0, 0, 0.2) !important;
+}
+
+.relationship-card .metric-row:last-child:nth-child(odd) {
+  grid-column: span 2 !important;
+}
+
+.relationship-card .metric-label {
+  font-size: 11px !important;
+  font-weight: 550 !important;
+  color: var(--color-text-muted) !important;
+  text-transform: capitalize !important;
+  line-height: 1.2 !important;
+}
+
+.relationship-card .metric-value {
+  font-size: 13.5px !important;
+  font-weight: 650 !important;
+  color: var(--color-text) !important;
+  line-height: 1.3 !important;
+}
+
+/* 8. Token Dialog in Top-Right Notification Style (Screenshot 3 Format) */
+.token-dialog-host {
+  position: fixed !important;
+  top: calc(var(--titlebar-height, 44px) + 16px) !important;
+  right: 20px !important;
+  left: auto !important;
+  bottom: auto !important;
+  inset: auto !important;
+  width: auto !important;
+  height: auto !important;
+  max-width: min(440px, calc(100vw - 32px)) !important;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  z-index: 100005 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-end !important;
+  pointer-events: none !important;
+}
+
+.token-dialog-card {
+  position: relative !important;
+  width: 420px !important;
+  max-width: 100% !important;
+  padding: 16px 18px 18px 18px !important;
+  border-radius: 28px !important;
+  corner-shape: squircle !important;
+  background: var(--color-surface-raised, #13151D) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 18px 40px -4px rgba(0, 0, 0, 0.56), 0 6px 16px -2px rgba(0, 0, 0, 0.35) !important;
+  pointer-events: auto !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 12px !important;
+  animation: notificationSlideIn 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both !important;
+}
+
+.token-dialog-card .notification-card-header {
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 12px !important;
+}
+
+.token-dialog-card .notification-icon-box {
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  border-radius: 10px !important;
+  corner-shape: squircle !important;
+  background: rgba(105, 91, 134, 0.18) !important;
+  color: #c4b5fd !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+  margin-top: 1px !important;
+}
+
+.token-dialog-card .notification-header-content {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 3px !important;
+}
+
+.token-dialog-card .notification-title {
+  margin: 0 !important;
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  color: var(--color-text, #ECEEF3) !important;
+  letter-spacing: -0.015em !important;
+  line-height: 1.35 !important;
+}
+
+.token-dialog-card .notification-message.is-dialog-message {
+  margin: 0 !important;
+  font-size: 12.5px !important;
+  line-height: 1.4 !important;
+  color: var(--color-text-muted) !important;
+  word-break: break-word !important;
+  display: block !important;
+}
+
+.token-dialog-card .notification-side-actions {
+  display: flex !important;
+  align-items: center !important;
+  flex-shrink: 0 !important;
+}
+
+.token-dialog-card .notification-close-btn {
+  background: transparent !important;
+  border: 0 !important;
+  color: var(--color-text-muted) !important;
+  padding: 4px !important;
+  cursor: pointer !important;
+  border-radius: 6px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: all 0.15s ease !important;
+}
+
+.token-dialog-card .notification-close-btn:hover {
+  color: var(--color-text) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+.token-dialog-body {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+}
+
+.token-popover-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, 1fr) !important;
+  gap: 8px !important;
+  margin: 4px 0 0 !important;
+}
+
+.token-popover-grid .token-metric-card {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.005) 100%), var(--color-base-deep) !important;
+  border: 0 !important;
+  border-radius: 14px !important;
+  corner-shape: squircle !important;
+  padding: 10px 12px !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 2px 6px rgba(0, 0, 0, 0.2) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 3px !important;
+}
+
+.token-popover-grid .token-metric-label {
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.03em !important;
+  color: var(--color-text-muted) !important;
+}
+
+.token-popover-grid .token-metric-value {
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  font-variant-numeric: tabular-nums !important;
+  line-height: 1.2 !important;
+}
+
+.token-dialog-card .dialog-actions {
+  display: flex !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+  gap: 10px !important;
+  margin-top: 4px !important;
+}
+
+.token-dialog-card .dialog-actions button.secondary {
+  min-height: 36px !important;
+  padding: 8px 18px !important;
+  font-size: 13px !important;
+  font-weight: 550 !important;
+  border-radius: var(--radius-control-sm, 16px) !important;
+  corner-shape: squircle !important;
+}
+
+/* Interactive Journal Messages with Tokens */
+.journal-message.has-tokens {
+  cursor: pointer;
+  transition: transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1),
+              border-color 0.15s ease,
+              box-shadow 0.15s ease,
+              background 0.15s ease !important;
+}
+
+.journal-message.has-tokens:hover {
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  box-shadow: 0 6px 20px -2px rgba(0, 0, 0, 0.35) !important;
+}
+
+.journal-message.has-tokens:active {
+  transform: scale(0.996) !important;
+}
+
+.journal-message.has-tokens .journal-message-footer {
+  cursor: pointer;
+}
+
+/* Interactive Episode Header Token Estimate Button */
+button.journal-header-tokens {
+  background: transparent !important;
+  border: 0 !important;
+  padding: 0 4px !important;
+  margin: 0 !important;
+  font: inherit !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 3px !important;
+  color: #38bdf8 !important;
+  font-variant-numeric: tabular-nums !important;
+  font-weight: 500 !important;
+  font-size: 11.5px !important;
+  cursor: pointer !important;
+  border-radius: 6px !important;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease !important;
+}
+
+button.journal-header-tokens:hover {
+  color: #7dd3fc !important;
+  background: rgba(56, 189, 248, 0.1) !important;
+}
+
+/* Token dialog inside AppDialog */
+.app-dialog-card .token-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}

@@ -8,7 +8,8 @@ namespace NeuroAsist.Avatar
     [Serializable] public class AvatarCommand { public int protocol_version; public string type; public string message_id; public string timestamp; public string session_id; public AvatarCommandPayload payload; }
     [Serializable] public class AvatarMotionCuePayload { public string gesture = "auto"; public bool emphasized; public string emotion; public float intensity = 1f; }
     [Serializable] public class AvatarCommandPayload { public string utterance_id; public string text; public string audio_url; public string emotion; public string intent; public string gesture = "auto"; public float gesture_intensity = 1f; public bool interrupt; public float intensity = 1f; public string state; public string sent_at; public int sequence; public string audio_base64; public string format; public int sample_rate; public int channels; public float duration_seconds; public bool is_final; public AvatarMotionCuePayload motion; public bool muted; public bool visible; public bool sleep; public bool always_on_top; public bool locked; public float scale = 1f; public string monitor; public float x; public float y; public float width; public float height; }
-    [Serializable] public class AvatarHelloPayload { public string client_name = "Iris Unity Avatar"; public string client_version = "0.6"; public int[] supported_protocol_versions = { 1, 2 }; public string platform; }
+    [Serializable] public class AvatarHelloPayload { public string client_name = "Iris Unity Avatar"; public string client_version = "0.7"; public int[] supported_protocol_versions = { 1, 2 }; public string platform; }
+    [Serializable] public class AvatarReadyPayload { }
     [Serializable] public class AvatarPongPayload { public string reply_to; }
     [Serializable] public class AvatarAckPayload { public string reply_to; public bool accepted; public string error; }
     [Serializable] public class AvatarPlaybackPayload { public string utterance_id; public string reply_to; public string reason; public int client_latency_ms; }
@@ -66,5 +67,46 @@ namespace NeuroAsist.Avatar
     {
         private static readonly float[] Delays = { 1f, 2f, 5f, 10f, 15f };
         public static float GetDelay(int attempt) => Delays[Mathf.Clamp(attempt, 0, Delays.Length - 1)];
+    }
+
+    /// <summary>Tracks real rendered frames and emits readiness once per socket.</summary>
+    public sealed class AvatarReadinessGate
+    {
+        public const int RequiredFrames = 2;
+        private readonly object sync = new object();
+        private int renderedFrames;
+        private object announcedConnection;
+
+        public bool IsReady
+        {
+            get { lock (sync) return renderedFrames >= RequiredFrames; }
+        }
+
+        public void MarkFrameComplete()
+        {
+            lock (sync)
+            {
+                if (renderedFrames < RequiredFrames) renderedFrames++;
+            }
+        }
+
+        public bool TryClaimAnnouncement(object connection)
+        {
+            if (connection == null) return false;
+            lock (sync)
+            {
+                if (renderedFrames < RequiredFrames || ReferenceEquals(announcedConnection, connection)) return false;
+                announcedConnection = connection;
+                return true;
+            }
+        }
+
+        public void ReleaseAnnouncement(object connection)
+        {
+            lock (sync)
+            {
+                if (ReferenceEquals(announcedConnection, connection)) announcedConnection = null;
+            }
+        }
     }
 }

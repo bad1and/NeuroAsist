@@ -24,6 +24,7 @@ class AvatarClient:
     client_name: str | None = None
     client_version: str | None = None
     platform: str | None = None
+    renderer_ready: bool = False
     state: str = "idle"
     current_utterance_id: str | None = None
     current_motion_profile: str | None = None
@@ -38,6 +39,7 @@ class AvatarClient:
             client_name=self.client_name,
             client_version=self.client_version,
             platform=self.platform,
+            renderer_ready=self.renderer_ready,
             state=self.state,
             current_utterance_id=self.current_utterance_id,
             current_motion_profile=self.current_motion_profile,

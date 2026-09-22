@@ -85,6 +85,7 @@ class AvatarService:
         return AvatarStatusResponse(
             enabled=self.enabled,
             client_count=len(clients),
+            ready_client_count=sum(1 for client in clients if client.renderer_ready),
             clients=clients,
             emotion_engine=self.emotion_engine.status(),
         )
@@ -279,6 +280,14 @@ class AvatarService:
             # clients apply the last configuration frame they receive after a
             # reconnect; the mute notification must not mask overlay state.
             await self.manager.send_to(client_id, frame.model_dump(mode="json"))
+        elif envelope.type == "avatar.ready":
+            await self.manager.update(client_id, renderer_ready=True)
+            self.event_bus.publish(
+                "avatar.ready",
+                "info",
+                "Avatar renderer ready",
+                {"client_id": client_id},
+            )
         elif envelope.type == "avatar.pong":
             return
         elif envelope.type == "avatar.ack":

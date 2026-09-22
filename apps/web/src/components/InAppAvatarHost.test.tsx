@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { render } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const desktop = vi.hoisted(() => ({
+  isDesktopApp: vi.fn(() => true),
   listenForAvatarLayoutInvalidation: vi.fn(),
   setAvatarInAppBounds: vi.fn(),
   setAvatarInAppVisible: vi.fn(),
@@ -13,6 +14,22 @@ const desktop = vi.hoisted(() => ({
 vi.mock("../desktop", () => desktop);
 
 import { InAppAvatarHost } from "./InAppAvatarHost";
+import type { AvatarHostStatus } from "../desktop";
+
+function avatarStatus(
+  phase: AvatarHostStatus["phase"],
+  error: string | null = null,
+): AvatarHostStatus {
+  return {
+    placement: "in_app",
+    running: phase !== "failed" && phase !== "not_configured" && phase !== "disabled",
+    embedded: phase === "warming" || phase === "ready",
+    visible: true,
+    ready: phase === "ready",
+    phase,
+    error,
+  };
+}
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -32,6 +49,7 @@ describe("InAppAvatarHost", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.clearAllMocks();
   });
 
@@ -88,5 +106,21 @@ describe("InAppAvatarHost", () => {
     frameCallback?.(0);
     expect(desktop.setAvatarInAppBounds).toHaveBeenCalledTimes(1);
     requestFrame.mockRestore();
+  });
+
+  it("shows loader fallback when avatar is not ready", () => {
+    const { getByRole } = render(<InAppAvatarHost status={avatarStatus("warming")} />);
+    expect(getByRole("status")).toHaveTextContent("Прогреваю 3D-аватар…");
+  });
+
+  it("replaces an endless loader with a retryable failure", async () => {
+    const retry = vi.fn().mockResolvedValue(undefined);
+    const { getByRole } = render(
+      <InAppAvatarHost status={avatarStatus("failed", "warmup timeout")} onRetry={retry} />,
+    );
+
+    expect(getByRole("alert")).toHaveTextContent("Не удалось загрузить 3D-аватар");
+    fireEvent.click(getByRole("button", { name: "Повторить" }));
+    await vi.waitFor(() => expect(retry).toHaveBeenCalledTimes(1));
   });
 });
