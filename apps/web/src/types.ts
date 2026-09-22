@@ -1,4 +1,5 @@
 import type { CharacterMetadataFrame, Emotion } from "./generated/character-protocol";
+import type { DeepSeekModel } from "./deepseek";
 
 export type EventLevel = "debug" | "info" | "warning" | "error" | "critical";
 export type {
@@ -251,11 +252,11 @@ export type PublicSettings = {
   api_key_configured: boolean;
   coding_api_key_configured: boolean;
   coding_agent_enabled: boolean;
-  coding_model: "deepseek-v4.1-flash" | "deepseek-v4.1-pro";
+  coding_model: DeepSeekModel;
   coding_project_root: string;
   coding_workspace_name: string;
   coding_auto_delegate: boolean;
-  coding_available_models: Array<"deepseek-v4.1-flash" | "deepseek-v4.1-pro">;
+  coding_available_models: DeepSeekModel[];
   coding_allowed_project_roots: string[];
   available_personalities: string[];
   available_voice_languages: string[];
@@ -436,6 +437,7 @@ export type TokenMetadata = {
   prompt_cache_miss_tokens?: number;
   latency_ms?: number;
   model?: string;
+  timestamp?: number;
   raw_usage?: Record<string, unknown>;
 };
 

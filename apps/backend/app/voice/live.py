@@ -777,6 +777,7 @@ class VoiceSessionManager:
                     "prompt_cache_hit_tokens": usage_obj.prompt_cache_hit_tokens,
                     "prompt_cache_miss_tokens": usage_obj.prompt_cache_miss_tokens,
                     "model": last_resp.model if last_resp else (metrics.model if metrics else ""),
+                    "timestamp": time.time(),
                     "latency_ms": round(
                         last_resp.latency_ms
                         if (last_resp and last_resp.latency_ms is not None)

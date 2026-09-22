@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 from zipfile import ZipFile
 
+from apps.backend.app.core.config import Settings
 from apps.backend.app.model_manager.service import ModelManager, ModelSpec
 from apps.backend.app.runtime.settings import RuntimeSettings, RuntimeSettingsStore
 from apps.backend.app.storage.backups import BackupService
@@ -66,22 +67,24 @@ def test_invalid_persisted_interface_locale_falls_back_to_russian(tmp_path: Path
     assert loaded.interface_locale == "ru"
 
 
-def test_legacy_deepseek_v4_coding_models_are_migrated_to_v4_1(tmp_path: Path) -> None:
-    path_flash = tmp_path / "settings_flash.json"
-    path_flash.write_text(
-        '{"schema_version": 1, "settings": {"coding_model": "deepseek-v4-flash"}}',
-        encoding="utf-8",
-    )
-    loaded_flash = RuntimeSettingsStore(path_flash).load(RuntimeSettings())
-    assert loaded_flash.coding_model == "deepseek-v4.1-flash"
-
-    path_pro = tmp_path / "settings_pro.json"
-    path_pro.write_text(
-        '{"schema_version": 1, "settings": {"coding_model": "deepseek-v4-pro"}}',
-        encoding="utf-8",
-    )
-    loaded_pro = RuntimeSettingsStore(path_pro).load(RuntimeSettings())
-    assert loaded_pro.coding_model == "deepseek-v4.1-pro"
+def test_legacy_deepseek_coding_models_are_migrated_to_api_ids(tmp_path: Path) -> None:
+    aliases = {
+        "deepseek-v4-flash": "deepseek-flash",
+        "deepseek-v4.1-flash": "deepseek-flash",
+        "deepseek-v4-flash-vision-exp": "deepseek-flash",
+        "deepseek-chat": "deepseek-flash",
+        "deepseek-reasoner": "deepseek-flash",
+        "deepseek-v4.1-pro": "deepseek-v4-pro",
+    }
+    for index, (legacy, expected) in enumerate(aliases.items()):
+        path = tmp_path / f"settings_{index}.json"
+        path.write_text(
+            f'{{"schema_version": 1, "settings": {{"coding_model": "{legacy}"}}}}',
+            encoding="utf-8",
+        )
+        loaded = RuntimeSettingsStore(path).load(RuntimeSettings())
+        assert loaded.coding_model == expected
+        assert f'"coding_model": "{expected}"' in path.read_text(encoding="utf-8")
 
     path_invalid = tmp_path / "settings_invalid.json"
     path_invalid.write_text(
@@ -89,7 +92,13 @@ def test_legacy_deepseek_v4_coding_models_are_migrated_to_v4_1(tmp_path: Path) -
         encoding="utf-8",
     )
     loaded_invalid = RuntimeSettingsStore(path_invalid).load(RuntimeSettings())
-    assert loaded_invalid.coding_model == "deepseek-v4.1-flash"
+    assert loaded_invalid.coding_model == "deepseek-flash"
+
+
+def test_static_deepseek_model_alias_is_normalized() -> None:
+    settings = Settings(_env_file=None, deepseek_model="deepseek-v4.1-flash")
+
+    assert settings.deepseek_model == "deepseek-flash"
 
 
 def test_model_manager_downloads_and_verifies_pinned_file(tmp_path: Path) -> None:

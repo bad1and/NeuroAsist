@@ -10,6 +10,12 @@ from pathlib import Path
 from threading import Lock, RLock
 from typing import Iterator
 
+from apps.backend.app.llm.models import (
+    DEEPSEEK_FLASH_MODEL,
+    SUPPORTED_DEEPSEEK_MODELS,
+    canonical_deepseek_model,
+)
+
 
 _STORE_LOCKS_GUARD = Lock()
 _STORE_LOCKS: dict[str, RLock] = {}
@@ -75,7 +81,7 @@ class RuntimeSettings:
     # Coding Agent preferences are deliberately non-secret.  The service
     # receives credentials only from static Settings / the desktop keyring.
     coding_agent_enabled: bool = False
-    coding_model: str = "deepseek-v4.1-flash"
+    coding_model: str = DEEPSEEK_FLASH_MODEL
     # Empty means the first server-configured allowed project root.
     coding_project_root: str = ""
     coding_workspace_name: str = "default"
@@ -133,11 +139,10 @@ class RuntimeSettingsStore:
                 values["interface_locale"] = defaults.interface_locale
             if values.get("avatar_placement") not in {None, "desktop_overlay", "in_app"}:
                 values["avatar_placement"] = defaults.avatar_placement
-            if values.get("coding_model") == "deepseek-v4-flash":
-                values["coding_model"] = "deepseek-v4.1-flash"
-            elif values.get("coding_model") == "deepseek-v4-pro":
-                values["coding_model"] = "deepseek-v4.1-pro"
-            elif values.get("coding_model") not in {None, "deepseek-v4.1-flash", "deepseek-v4.1-pro"}:
+            persisted_coding_model = values.get("coding_model")
+            if persisted_coding_model is not None:
+                values["coding_model"] = canonical_deepseek_model(values["coding_model"])
+            if values.get("coding_model") not in {None, *SUPPORTED_DEEPSEEK_MODELS}:
                 values["coding_model"] = defaults.coding_model
             workspace_name = values.get("coding_workspace_name")
             if workspace_name is not None and not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}", workspace_name):
@@ -146,7 +151,13 @@ class RuntimeSettingsStore:
                 loaded = RuntimeSettings(**{**defaults_dict, **values})
             except TypeError:
                 return defaults
-            if payload["settings"].get("memory_mode") == "ask":
+            if (
+                payload["settings"].get("memory_mode") == "ask"
+                or (
+                    persisted_coding_model is not None
+                    and loaded.coding_model != persisted_coding_model
+                )
+            ):
                 try:
                     self.save(loaded)
                 except OSError:

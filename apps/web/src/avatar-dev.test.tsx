@@ -150,7 +150,7 @@ describe("AvatarDevStudioStandalonePage", () => {
       api_key_configured: true,
       coding_api_key_configured: false,
       provider: "deepseek",
-      model: "deepseek-v4.1-flash",
+      model: "deepseek-flash",
       chat_history_limit: 10,
       log_level: "info",
       voice_language: "ru",

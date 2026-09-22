@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import RLock
 
+from apps.backend.app.llm.pricing import estimate_deepseek_cost_usd
+
 
 TELEMETRY_WINDOWS: Mapping[str, float] = {
     "5m": 5 * 60,
@@ -499,11 +501,18 @@ class LLMTelemetryCollector:
         p95_index = max(0, math.ceil(len(latencies) * 0.95) - 1) if latencies else 0
         latency_p95_ms = round(latencies[p95_index] * 1000.0, 1) if latencies else 0.0
 
-        # DeepSeek pricing: $0.07/M cached in, $0.27/M uncached in, $1.10/M out
+        # Pricing depends on both the model and the request's UTC peak window.
         estimated_cost_usd = round(
-            (total_cache_hit * 0.00000007)
-            + (total_cache_miss * 0.00000027)
-            + (total_completion * 0.0000011),
+            sum(
+                estimate_deepseek_cost_usd(
+                    model=record.model,
+                    timestamp=record.timestamp,
+                    cache_hit=record.cache_hit,
+                    cache_miss=record.cache_miss,
+                    completion=record.completion,
+                )
+                for record in records
+            ),
             5,
         )
 

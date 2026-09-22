@@ -15,6 +15,7 @@ from apps.backend.app.coding.runner import CommandPolicyError, DockerAvailabilit
 from apps.backend.app.coding.sandbox import SnapshotLimitError, TaskSandbox
 from apps.backend.app.core.config import Settings
 from apps.backend.app.llm.base import ChatMessage, LLMProvider, LLMProviderError
+from apps.backend.app.llm.models import DEEPSEEK_FLASH_MODEL, DEEPSEEK_PRO_MODEL
 from apps.backend.app.llm.providers.deepseek import DeepSeekProvider
 from apps.backend.app.runtime.settings import RuntimeSettings
 from apps.backend.app.storage.timeline import TimelineStore
@@ -117,7 +118,7 @@ class CodingAgentService:
             "docker_image_available": docker.image_available,
             "docker_image_name": docker.image_name,
             "model": self.runtime_settings.coding_model,
-            "available_models": ["deepseek-v4.1-flash", "deepseek-v4.1-pro"],
+            "available_models": [DEEPSEEK_FLASH_MODEL, DEEPSEEK_PRO_MODEL],
             "project_root": str(project_root),
             "allowed_project_roots": [str(item) for item in self.settings.coding_allowed_project_paths],
             "workspace_name": self.runtime_settings.coding_workspace_name,

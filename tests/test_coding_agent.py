@@ -730,12 +730,12 @@ def test_coding_settings_and_task_api_contract(monkeypatch, tmp_path: Path) -> N
 
         patched = client.patch("/settings/runtime", json={
             "coding_agent_enabled": True,
-            "coding_model": "deepseek-v4.1-pro",
+            "coding_model": "deepseek-v4-pro",
             "coding_project_root": str(project),
             "coding_workspace_name": "qa-workspace",
         })
         assert patched.status_code == 200
-        assert patched.json()["coding_model"] == "deepseek-v4.1-pro"
+        assert patched.json()["coding_model"] == "deepseek-v4-pro"
 
         session = client.post("/conversation/session")
         assert session.status_code == 200
@@ -1015,7 +1015,7 @@ def test_v09_repairs_pre_release_coding_task_table_with_v20_marker(tmp_path: Pat
         connection.execute(
             """INSERT INTO coding_tasks VALUES (
                 'legacy-task', NULL, NULL, 'succeeded', 'old task',
-                '{"model":"deepseek-v4.1-pro"}', '{}', NULL, NULL, NULL, NULL,
+                '{"model":"deepseek-v4-pro"}', '{}', NULL, NULL, NULL, NULL,
                 '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', NULL, NULL
             )"""
         )
@@ -1024,7 +1024,7 @@ def test_v09_repairs_pre_release_coding_task_table_with_v20_marker(tmp_path: Pat
 
     task = store.get_coding_task("legacy-task")
     assert task is not None
-    assert task["model"] == "deepseek-v4.1-pro"
+    assert task["model"] == "deepseek-v4-pro"
     assert task["status"] == "review_ready"
     with sqlite3.connect(store._db_path) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(coding_tasks)")}
