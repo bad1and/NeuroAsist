@@ -1,4 +1,5 @@
 import asyncio
+import ssl
 from types import SimpleNamespace
 
 import httpx
@@ -325,10 +326,16 @@ def test_closing_stream_records_cancelled_usage_without_content(monkeypatch) -> 
 
 def test_shared_client_disables_sdk_retries(monkeypatch) -> None:
     captured: dict[str, object] = {}
+    captured_http: dict[str, object] = {}
+    fake_http_client = object()
 
     class StubAsyncOpenAI:
         def __init__(self, **kwargs) -> None:
             captured.update(kwargs)
+
+    def stub_http_client(**kwargs):
+        captured_http.update(kwargs)
+        return fake_http_client
 
     async def create_client() -> None:
         deepseek_module._CLIENTS.clear()
@@ -336,9 +343,13 @@ def test_shared_client_disables_sdk_retries(monkeypatch) -> None:
         deepseek_module._CLIENTS.clear()
 
     monkeypatch.setattr(deepseek_module, "AsyncOpenAI", StubAsyncOpenAI)
+    monkeypatch.setattr(deepseek_module, "DefaultAsyncHttpxClient", stub_http_client)
     asyncio.run(create_client())
 
     assert captured["max_retries"] == 0
+    assert captured["http_client"] is fake_http_client
+    assert isinstance(captured_http["verify"], ssl.SSLContext)
+    assert captured_http["timeout"] == 12.0
 
 
 def test_llm_response_remains_backwards_compatible() -> None:

@@ -1,9 +1,11 @@
 import asyncio
 import contextlib
 import logging
+import ssl
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 from uuid import uuid4
 
@@ -12,6 +14,7 @@ from openai import (
     APIStatusError,
     APITimeoutError,
     AsyncOpenAI,
+    DefaultAsyncHttpxClient,
     OpenAIError,
 )
 
@@ -66,6 +69,52 @@ _PROFILE_SETTINGS: dict[str, tuple[str, int]] = {
 }
 
 
+def _root_exception_detail(exc: BaseException) -> str:
+    current = exc
+    seen: set[int] = set()
+    while id(current) not in seen:
+        seen.add(id(current))
+        nested = current.__cause__ or current.__context__
+        if nested is None:
+            break
+        current = nested
+    message = str(current).strip()
+    return f"{type(current).__name__}: {message}" if message else type(current).__name__
+
+
+@lru_cache(maxsize=1)
+def _trusted_ssl_context() -> ssl.SSLContext:
+    """Use the OS trust store without disabling TLS verification.
+
+    OpenAI/httpx defaults to certifi. On Windows that excludes user-installed
+    roots used by legitimate HTTPS inspection products such as Kaspersky,
+    causing intermittent failures when only some VPN connections are scanned.
+    Python's default context includes the Windows stores; explicitly loading
+    them also keeps this working in the bundled sidecar runtime.
+    """
+    context = ssl.create_default_context()
+    enumerate_certificates = getattr(ssl, "enum_certificates", None)
+    if enumerate_certificates is None:
+        return context
+    for store_name in ("ROOT", "CA"):
+        try:
+            certificates = enumerate_certificates(store_name)
+        except OSError:
+            continue
+        for certificate, encoding, _trust in certificates:
+            if encoding != "x509_asn":
+                continue
+            try:
+                context.load_verify_locations(
+                    cadata=ssl.DER_cert_to_PEM_cert(certificate)
+                )
+            except (ValueError, ssl.SSLError):
+                # One malformed local entry must not prevent the backend from
+                # starting; the remaining system and OpenSSL roots still apply.
+                continue
+    return context
+
+
 def _shared_client(api_key: str, base_url: str, timeout: float) -> AsyncOpenAI:
     loop = asyncio.get_running_loop()
     for stale_key, (_, stale_loop) in list(_CLIENTS.items()):
@@ -81,6 +130,10 @@ def _shared_client(api_key: str, base_url: str, timeout: float) -> AsyncOpenAI:
         api_key=api_key,
         base_url=base_url,
         timeout=timeout,
+        http_client=DefaultAsyncHttpxClient(
+            verify=_trusted_ssl_context(),
+            timeout=timeout,
+        ),
         # Retrying is owned by this provider so SDK retries cannot multiply the
         # explicit request/empty-response retry budget below.
         max_retries=0,
@@ -243,11 +296,13 @@ class DeepSeekProvider(LLMProvider):
                 )
                 if attempt < _MAX_ATTEMPTS and _is_retryable(exc):
                     logger.warning(
-                        "Retrying DeepSeek request: model=%s purpose=%s attempt=%s exception_type=%s",
+                        "Retrying DeepSeek request: model=%s purpose=%s attempt=%s "
+                        "exception_type=%s root_error=%s",
                         self._model,
                         profile.purpose,
                         attempt,
                         type(exc).__name__,
+                        _root_exception_detail(exc),
                     )
                     continue
                 self._record_failure(
@@ -437,11 +492,13 @@ class DeepSeekProvider(LLMProvider):
                     and _is_retryable(exc)
                 ):
                     logger.warning(
-                        "Retrying DeepSeek stream: model=%s purpose=%s attempt=%s exception_type=%s",
+                        "Retrying DeepSeek stream: model=%s purpose=%s attempt=%s "
+                        "exception_type=%s root_error=%s",
                         self._model,
                         profile.purpose,
                         attempt,
                         type(exc).__name__,
+                        _root_exception_detail(exc),
                     )
                     continue
                 self._record_failure(
