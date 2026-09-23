@@ -512,6 +512,7 @@ def create_app() -> FastAPI:
         language,
         connection,
     ) -> None:
+        stt_started = time.perf_counter()
         # The VAD has already confirmed human speech. Only now do we leave the
         # attentive listening pose: processing an unconfirmed audio frame would
         # make the avatar twitch on room noise.
@@ -519,6 +520,21 @@ def create_app() -> FastAPI:
         if conversation_service is not None:
             await conversation_service.phase(session_id, ConversationPhase.TRANSCRIBING, connection.send)
         stt_result = await voice_service.transcribe_pcm16(audio, language)
+        event_bus.publish(
+            "voice.stt_completed",
+            "info",
+            "Voice transcription completed",
+            {
+                "session_id": session_id,
+                "generation": connection.generation,
+                "stt_ms": int((time.perf_counter() - stt_started) * 1000),
+                "pipeline_elapsed_ms": int(
+                    (time.perf_counter() - connection.pipeline_started_at) * 1000
+                ) if connection.pipeline_started_at else None,
+                "provider": stt_result.provider,
+                "fallback": stt_result.fallback,
+            },
+        )
         transcript = stt_result.text.strip()
         if not transcript:
             if conversation_service is not None:
@@ -557,6 +573,7 @@ def create_app() -> FastAPI:
             stt_result.confidence is not None and stt_result.confidence < 0.6
         )
         if conversation_service is not None:
+            decision_started = time.perf_counter()
             result = await conversation_service.ingest_observation(
                 session_id=session_id,
                 transcript=stt_result.raw_text or stt_result.text,
@@ -580,6 +597,21 @@ def create_app() -> FastAPI:
                     else 0.9
                 ),
                 stt_uncertain=stt_uncertain,
+            )
+            event_bus.publish(
+                "voice.decision_completed",
+                "info",
+                "Voice response decision completed",
+                {
+                    "session_id": session_id,
+                    "generation": result.generation,
+                    "decision_ms": int((time.perf_counter() - decision_started) * 1000),
+                    "pipeline_elapsed_ms": int(
+                        (time.perf_counter() - connection.pipeline_started_at) * 1000
+                    ) if connection.pipeline_started_at else None,
+                    "action": result.decision.action.value,
+                    "reason": result.decision.reason.value,
+                },
             )
             session = await conversation_service.ensure_session(session_id)
             if result.generation != session.generation:
@@ -677,13 +709,14 @@ def create_app() -> FastAPI:
     }.get(runtime_settings.live_conversation_pause_tolerance, (750, 1100, 2500))
     live_end_silence_ms, live_fallback_end_silence_ms, max_turn_silence_ms = pause_profile
     # Smart Turn is already the semantic guard for a candidate endpoint. Give
-    # it a candidate sooner, but keep the conservative fallback unchanged when
+    # it a candidate after 350 ms in the natural profile, but keep the
+    # conservative fallback unchanged when
     # the model is unavailable. An incomplete candidate remains in pending_turn
     # and continues accumulating audio; inference timeout/error still waits for
     # the existing max-turn-silence safeguard rather than speaking early.
     semantic_end_silence_ms = max(
-        450,
-        min(settings.voice_vad_live_end_silence_ms, live_end_silence_ms) - 250,
+        350,
+        min(settings.voice_vad_live_end_silence_ms, live_end_silence_ms) - 400,
     )
 
     voice_input_session_manager = VoiceInputSessionManager(

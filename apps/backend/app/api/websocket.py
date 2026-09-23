@@ -114,6 +114,7 @@ async def websocket_voice(websocket: WebSocket, session_id: str, version: int = 
                     },
                 )
             elif message.get("type") == "playback.started":
+                manager.playback_started(session_id, message.get("utterance_id"))
                 websocket.app.state.event_bus.publish(
                     "voice.playback_started",
                     "info",

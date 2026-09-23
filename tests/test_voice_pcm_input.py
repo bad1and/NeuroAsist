@@ -172,6 +172,43 @@ async def test_pcm_input_uses_ram_ring_and_removes_temp_stt_file(tmp_path: Path)
 
 
 @pytest.mark.anyio
+async def test_endpoint_stopwatch_starts_at_last_speech_frame(tmp_path: Path) -> None:
+    elapsed: list[float] = []
+    events: list[tuple[str, dict]] = []
+
+    async def on_utterance(session_id, path, language, connection) -> None:
+        elapsed.append((time.perf_counter() - connection.pipeline_started_at) * 1000)
+
+    import time
+
+    manager = VoiceInputSessionManager(
+        FakeVoiceService(tmp_path),
+        on_utterance,
+        vad=SequenceVad([.9, .9, *([0.0] * 10)]),
+        turn_detector=ControlledTurnDetector([True]),
+        semantic_end_silence_ms=100,
+        event_publisher=lambda event_type, _level, _message, metadata: events.append(
+            (event_type, metadata)
+        ),
+    )
+    socket = FakeSocket()
+    await manager.register("latency", socket, version=3)
+    await manager.start("latency", sample_rate=16000, channels=1, language="ru")
+    session = manager._sessions["latency"]
+    session.gate.start_ms = 0
+    frame = b"\x01\x00" * 160
+
+    for _ in range(12):
+        await manager.feed("latency", frame)
+    await anyio.sleep(.05)
+
+    assert elapsed and elapsed[0] >= 100
+    endpoint = next(metadata for event_type, metadata in events if event_type == "voice.endpoint_detected")
+    assert endpoint["endpoint_silence_ms"] == 100
+    assert endpoint["pipeline_elapsed_ms"] >= 100
+
+
+@pytest.mark.anyio
 async def test_stop_flushes_confirmed_active_utterance_before_returning(tmp_path: Path) -> None:
     handled: list[bytes] = []
 

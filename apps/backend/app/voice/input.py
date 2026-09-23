@@ -789,7 +789,15 @@ class VoiceInputSessionManager:
             session.ring_bytes = 0
             # Finalization is intentionally concurrent with continued PCM
             # ingestion. A new speech island can start while STT is running.
-            self._start_finalize_task(session, audio, candidate_id)
+            endpoint_silence_ms = (
+                session.gate.last_endpoint_silence_samples * 1000 / session.sample_rate
+            )
+            self._start_finalize_task(
+                session,
+                audio,
+                candidate_id,
+                endpoint_silence_ms=endpoint_silence_ms,
+            )
 
     async def _confirm_speech_started(self, session: InputSession) -> None:
         if session.speech_confirmed or session.utterance is None:
@@ -871,6 +879,8 @@ class VoiceInputSessionManager:
         session: InputSession,
         audio: bytes,
         candidate_id: int,
+        *,
+        endpoint_silence_ms: float = 0.0,
     ) -> asyncio.Task:
         session.finalizing = True
         task = asyncio.create_task(
@@ -880,6 +890,7 @@ class VoiceInputSessionManager:
                 session.connection.generation,
                 candidate_id,
                 time.monotonic(),
+                endpoint_silence_ms,
             ),
             name=f"voice-input-{session.session_id}-{session.connection.generation}",
         )
@@ -945,6 +956,7 @@ class VoiceInputSessionManager:
         generation: int,
         candidate_id: int,
         boundary_at: float,
+        endpoint_silence_ms: float,
     ) -> None:
         close_candidate = False
         connection = InputConnection(
@@ -952,7 +964,11 @@ class VoiceInputSessionManager:
             version=session.connection.version,
             generation=generation,
             replaced_owner=session.connection.replaced_owner,
-            pipeline_started_at=time.perf_counter(),
+            # The candidate is emitted only after VAD has accumulated silence.
+            # Backdate the stopwatch to the last audible speech frame so every
+            # downstream milestone measures the metric users actually feel:
+            # end-of-speech -> first audible assistant audio.
+            pipeline_started_at=time.perf_counter() - endpoint_silence_ms / 1000,
             lock=session.connection.lock,
             lease=session.connection.lease,
         )
@@ -975,6 +991,24 @@ class VoiceInputSessionManager:
                     "fallback": detection.fallback,
                     "phase": "transcribing" if detection.complete else "endpoint_pending",
                 })
+                self._event_publisher(
+                    "voice.endpoint_detected",
+                    "info",
+                    "Voice endpoint detected",
+                    {
+                        "session_id": session.session_id,
+                        "generation": generation,
+                        "endpoint_silence_ms": round(endpoint_silence_ms, 2),
+                        "turn_detection_ms": round(detection.latency_ms, 2),
+                        "pipeline_elapsed_ms": round(
+                            (time.perf_counter() - connection.pipeline_started_at) * 1000,
+                            2,
+                        ),
+                        "provider": detection.provider,
+                        "complete": detection.complete,
+                        "fallback": detection.fallback,
+                    },
+                )
                 if not detection.complete:
                     self._schedule_forced_endpoint(
                         session,
