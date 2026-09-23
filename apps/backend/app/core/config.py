@@ -167,9 +167,9 @@ class Settings(BaseSettings):
     voice_live_idle_flush_ms: int = 500
     # Safe chunk boundaries still require whitespace/punctuation; these only
     # bound a stalled LLM delta gap before the first/next TTS job is released.
-    voice_live_first_idle_flush_ms: int = 120
+    voice_live_first_idle_flush_ms: int = 80
     voice_live_next_idle_flush_ms: int = 250
-    voice_live_first_segment_chars: int = 32
+    voice_live_first_segment_chars: int = 24
     voice_live_next_segment_chars: int = 75
     voice_live_max_segment_chars: int = 110
     voice_live_max_segment_words: int = 18
@@ -180,7 +180,7 @@ class Settings(BaseSettings):
     voice_live_tts_concurrency_max: int = 2
     voice_live_playback_prebuffer_segments: int = 1
     voice_live_playback_prebuffer_ms: int = 0
-    voice_live_playback_start_lead_ms: int = 30
+    voice_live_playback_start_lead_ms: int = 10
     voice_vad_provider: str = "silero"
     voice_silero_vad_model_path: str | None = None
     voice_vad_threshold: float = 0.55  # legacy alias retained for existing .env files

@@ -75,6 +75,7 @@ class UtteranceContext:
     base_pace: SpeechPace = SpeechPace.NORMAL
     playback_rate: float = 1.0
     started_at: float = field(default_factory=time.perf_counter)
+    tracks_end_of_speech: bool = False
 
 
 @dataclass
@@ -137,6 +138,7 @@ class VoiceSessionManager:
         self._connections: dict[str, VoiceConnection] = {}
         self._connection_events: dict[str, asyncio.Event] = {}
         self._active: dict[str, UtteranceContext] = {}
+        self._playback_pending: dict[str, UtteranceContext] = {}
         self._avatar_service = avatar_service
         self._event_publisher = event_publisher
         self._character_state_service = character_state_service
@@ -169,6 +171,7 @@ class VoiceSessionManager:
             self._connections.pop(session_id, None)
             self._connection_events.setdefault(session_id, asyncio.Event()).clear()
             await self.cancel(session_id, notify=False)
+            self._playback_pending.pop(session_id, None)
 
     def connected(self, session_id: str) -> bool:
         return session_id in self._connections
@@ -193,6 +196,24 @@ class VoiceSessionManager:
                 await connection.websocket.close(code=1001)
         self._connections.clear()
         self._connection_events.clear()
+        self._playback_pending.clear()
+
+    def playback_started(self, session_id: str, utterance_id: str | None) -> None:
+        """Record the first audible browser frame against the EoS stopwatch."""
+        context = self._active.get(session_id) or self._playback_pending.get(session_id)
+        if (
+            context is None
+            or not context.tracks_end_of_speech
+            or (utterance_id and context.utterance_id != utterance_id)
+        ):
+            return
+        self._playback_pending.pop(session_id, None)
+        elapsed_ms = int((time.perf_counter() - context.started_at) * 1000)
+        self._publish_latency(
+            context,
+            "voice.end_of_speech_to_playback",
+            end_of_speech_to_playback_ms=elapsed_ms,
+        )
 
     async def start(
         self,
@@ -220,6 +241,7 @@ class VoiceSessionManager:
         if not self.connected(session_id):
             raise RuntimeError("Voice WebSocket is not connected")
         await self.cancel(session_id)
+        self._playback_pending.pop(session_id, None)
         context = UtteranceContext(
             session_id,
             utterance_id,
@@ -228,6 +250,7 @@ class VoiceSessionManager:
             base_pace=self._pace_for_style(style_override),
             playback_rate=max(MIN_SPEECH_TEMPO, min(MAX_SPEECH_TEMPO, float(playback_rate))),
             started_at=pipeline_started_at or time.perf_counter(),
+            tracks_end_of_speech=pipeline_started_at is not None,
         )
         self._active[session_id] = context
         context.task = asyncio.create_task(
@@ -313,6 +336,8 @@ class VoiceSessionManager:
                 await context.task
         if self._active.get(session_id) is context:
             self._active.pop(session_id, None)
+        if self._playback_pending.get(session_id) is context:
+            self._playback_pending.pop(session_id, None)
 
     async def _run_known_reply(
         self,
@@ -979,6 +1004,11 @@ class VoiceSessionManager:
             "synth_ms": synth_ms,
         }
         sent_started = time.perf_counter()
+        if segment_id == 0 and context.tracks_end_of_speech:
+            # Keep the latency origin alive until the browser confirms the
+            # scheduled first frame. Short replies can otherwise finish on the
+            # server before decodeAudioData sends playback.started back.
+            self._playback_pending[context.session_id] = context
         await connection.segment(started, audio, finished)
         websocket_send_ms = int((time.perf_counter() - sent_started) * 1000)
         if self._avatar_service is not None:

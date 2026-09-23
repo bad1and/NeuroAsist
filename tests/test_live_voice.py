@@ -61,6 +61,30 @@ async def test_live_output_waits_for_a_reconnecting_socket() -> None:
     assert await waiting is True
 
 
+def test_playback_started_publishes_end_of_speech_latency() -> None:
+    published: list[tuple[str, dict]] = []
+    manager = VoiceSessionManager(
+        MockTTSProvider(),
+        event_publisher=lambda event_type, _level, _message, metadata: published.append(
+            (event_type, metadata)
+        ),
+    )
+    context = UtteranceContext(
+        "session",
+        "utterance",
+        started_at=time.perf_counter() - .25,
+        tracks_end_of_speech=True,
+    )
+    manager._playback_pending["session"] = context
+
+    manager.playback_started("session", "utterance")
+
+    event_type, metadata = published[-1]
+    assert event_type == "voice.end_of_speech_to_playback"
+    assert metadata["end_of_speech_to_playback_ms"] >= 250
+    assert "session" not in manager._playback_pending
+
+
 @pytest.mark.anyio
 async def test_known_reply_uses_the_regular_live_websocket_protocol() -> None:
     manager = VoiceSessionManager(MockTTSProvider())
