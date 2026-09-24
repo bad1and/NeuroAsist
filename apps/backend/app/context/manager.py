@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 from apps.backend.app.conversation.decision import ConversationDecisionEngine
 from apps.backend.app.llm.base import ChatMessage
@@ -24,6 +24,14 @@ class BuiltContext:
 
 class ContextManager:
     _addressing = ConversationDecisionEngine()
+    _temporal_query_cue = re.compile(
+        r"(?iu)\b(?:когда|во\s+сколько|сколько\s+времени\s+назад|"
+        r"сегодня|вчера|позавчера|завтра|раньше|недавно|"
+        r"в\s+прошлый\s+раз|до\s+этого|после\s+этого|потом|"
+        r"утром|дн[её]м|вечером|ночью|"
+        r"when|what\s+time|yesterday|today|last\s+time|previously)\b"
+    )
+    _temporal_marker_gap_seconds = 20 * 60
 
     def __init__(self, store: TimelineStore, max_tokens: int = 3000, recent_turns: int = 8, memory_service=None) -> None:
         self._store = store
@@ -113,11 +121,19 @@ class ContextManager:
                 if is_prev
                 else "Контекст предыдущего разговора: "
             )
+            period = (
+                self._format_period(
+                    summary.get("episode_started_at"),
+                    summary.get("episode_ended_at"),
+                )
+                if self._max_tokens >= 200
+                else ""
+            )
             return (
                 str(summary["id"]),
                 ChatMessage(
                     role="system",
-                    content=f"{header}{text}",
+                    content=f"{header}{period}{text}",
                 ),
             )
 
@@ -159,7 +175,13 @@ class ContextManager:
                         limit=2,
                     )
                 ]
-            for memory in self._memory_service.retrieve(retrieval_query):
+            retrieved_memories = list(self._memory_service.retrieve(retrieval_query))
+            source_timestamps = self._store.message_timestamps([
+                str(source_id)
+                for memory in retrieved_memories
+                for source_id in memory.get("source_message_ids", [])
+            ])
+            for memory in retrieved_memories:
                 memory_id = str(memory["id"])
                 memory_retrieval[memory_id] = memory.get("retrieval", {"reasons": ["exact_profile"]})
                 namespace = str(memory.get("namespace", "factual_memory"))
@@ -169,6 +191,21 @@ class ContextManager:
                     "predicate": str(memory["predicate"]),
                     "value": str(memory["value_text"]),
                 }
+                observed = sorted(
+                    source_timestamps[str(source_id)]
+                    for source_id in memory.get("source_message_ids", [])
+                    if str(source_id) in source_timestamps
+                )
+                if observed:
+                    record["first_observed_at"] = observed[0]
+                    record["last_confirmed_at"] = observed[-1]
+                if memory.get("created_at"):
+                    record["recorded_at"] = str(memory["created_at"])
+                if memory.get("updated_at") and memory.get("updated_at") != memory.get("created_at"):
+                    record["last_updated_at"] = str(memory["updated_at"])
+                for field in ("valid_from", "valid_to", "expires_at"):
+                    if memory.get(field):
+                        record[field] = str(memory[field])
                 item = (
                     memory_id,
                     ChatMessage(
@@ -223,16 +260,14 @@ class ContextManager:
             1 for row in material["recent"]
             if row.get("decision_action") == "wait_more"
         )
-        recent = [
-            ChatMessage(
-                role=row["role"],
-                content=row["corrected_content"] or row["content"],
-            )
+        recent_rows = [
+            row
             for row in material["recent"]
             if not self._is_ambient_observation(row)
             and row.get("decision_action") != "wait_more"
             and str(row.get("id")) not in pending_user_id_set
         ]
+        temporal_query = self._is_temporal_query(effective_user_text)
         previous_assistant_row = next(
             (
                 row for row in reversed(material["recent"])
@@ -257,7 +292,11 @@ class ContextManager:
             if pending_direct_rows
             else None
         )
-        recent_turns = self._group_turns(recent)
+        recent_turns, temporal_marker_count = self._group_timed_turns(
+            recent_rows,
+            annotate_all=temporal_query,
+            current_created_at=material.get("current_created_at"),
+        )
         ambient_entries = [self._ambient_entry(row) for row in ambient_rows[-6:]]
         dropped_turn_count = 0
 
@@ -355,6 +394,11 @@ class ContextManager:
             remaining -= before - ambient_tokens()
             dropped_ambient_count += 1
         messages = assemble()
+        temporal_marker_count = sum(
+            1 for turn in recent_turns for message in turn
+            if message.role == "system"
+            and message.content.startswith("[Время следующей реплики ")
+        )
         built = BuiltContext(messages, remaining, {
             "active_episode_id": material["active_episode_id"],
             "current_message_id": current_message_id,
@@ -387,7 +431,12 @@ class ContextManager:
             "memory_clarification_requested": clarification_message is not None,
             "memory_retrieval": {memory_id: memory_retrieval[memory_id] for memory_id, _ in selected_memories},
             "rolling_summary_included": rolling_message is not None,
-            "recent_message_count": sum(len(turn) for turn in recent_turns),
+            "recent_message_count": sum(
+                1 for turn in recent_turns for message in turn
+                if message.role in {"user", "assistant"}
+            ),
+            "temporal_query": temporal_query,
+            "temporal_marker_count": temporal_marker_count,
             "ambient_observation_count": len(ambient_entries),
             "dropped_ambient_observation_count": dropped_ambient_count,
             "excluded_incomplete_observation_count": incomplete_count,
@@ -590,8 +639,136 @@ class ContextManager:
         addressing = ContextManager._addressing.analyze_addressing(text)
         return addressing.direct_iris or addressing.implicit_iris
 
+    @classmethod
+    def _is_temporal_query(cls, text: str) -> bool:
+        return cls._temporal_query_cue.search(text) is not None
+
     @staticmethod
-    def _ambient_entry(row: dict[str, object]) -> str:
+    def _parse_timestamp(value: object) -> datetime | None:
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed
+
+    @classmethod
+    def _format_timestamp(cls, value: object) -> str | None:
+        parsed = cls._parse_timestamp(value)
+        if parsed is None:
+            return None
+        offset = parsed.strftime("%z")
+        zone = "UTC" if offset == "+0000" else f"UTC{offset[:3]}:{offset[3:]}"
+        return f"{parsed.strftime('%Y-%m-%d %H:%M')} {zone}"
+
+    @staticmethod
+    def _row_timestamp(row: dict[str, object]) -> object:
+        if row.get("role") == "assistant" and row.get("completed_at"):
+            return row["completed_at"]
+        return row.get("created_at")
+
+    @classmethod
+    def _format_period(cls, start: object, end: object) -> str:
+        start_at = cls._parse_timestamp(start)
+        end_at = cls._parse_timestamp(end)
+        if start_at is None:
+            return ""
+        start_text = cls._format_timestamp(start_at)
+        if end_at is None or end_at == start_at:
+            return f"[Время: {start_text}]\n"
+        if start_at.date() == end_at.date() and start_at.utcoffset() == end_at.utcoffset():
+            offset = start_at.strftime("%z")
+            zone = "UTC" if offset == "+0000" else f"UTC{offset[:3]}:{offset[3:]}"
+            return (
+                f"[Время: {start_at.strftime('%Y-%m-%d %H:%M')}–"
+                f"{end_at.strftime('%H:%M')} {zone}]\n"
+            )
+        return f"[Период: {start_text} — {cls._format_timestamp(end_at)}]\n"
+
+    @classmethod
+    def _needs_temporal_marker(
+        cls,
+        previous: dict[str, object] | None,
+        current: dict[str, object],
+        *,
+        annotate_all: bool,
+        force_first: bool = False,
+    ) -> bool:
+        if annotate_all or (previous is None and force_first):
+            return True
+        if previous is None:
+            return False
+        previous_at = cls._parse_timestamp(cls._row_timestamp(previous))
+        current_at = cls._parse_timestamp(cls._row_timestamp(current))
+        if previous_at is None or current_at is None:
+            return False
+        return (
+            previous_at.date() != current_at.date()
+            or (current_at - previous_at).total_seconds()
+            >= cls._temporal_marker_gap_seconds
+        )
+
+    @classmethod
+    def _group_timed_turns(
+        cls,
+        rows: list[dict[str, object]],
+        *,
+        annotate_all: bool,
+        current_created_at: object = None,
+    ) -> tuple[list[list[ChatMessage]], int]:
+        """Group clean dialogue while adding sparse, trusted time boundaries."""
+        turns: list[list[ChatMessage]] = []
+        previous: dict[str, object] | None = None
+        marker_count = 0
+        force_first = False
+        if rows and current_created_at:
+            latest = cls._parse_timestamp(cls._row_timestamp(rows[-1]))
+            current = cls._parse_timestamp(current_created_at)
+            force_first = bool(
+                latest is not None
+                and current is not None
+                and (
+                    latest.date() != current.date()
+                    or (current - latest).total_seconds()
+                    >= cls._temporal_marker_gap_seconds
+                )
+            )
+        for row in rows:
+            role = str(row["role"])
+            message = ChatMessage(
+                role=role,
+                content=str(row.get("corrected_content") or row.get("content") or ""),
+            )
+            if role == "assistant" and turns and any(
+                item.role == "user" for item in turns[-1]
+            ) and not any(item.role == "assistant" for item in turns[-1]):
+                turn = turns[-1]
+            else:
+                turn = []
+                turns.append(turn)
+            if cls._needs_temporal_marker(
+                previous,
+                row,
+                annotate_all=annotate_all,
+                force_first=force_first,
+            ):
+                timestamp = cls._format_timestamp(cls._row_timestamp(row))
+                if timestamp:
+                    speaker = "пользователя" if role == "user" else "Iris"
+                    turn.append(ChatMessage(
+                        role="system",
+                        content=(
+                            f"[Время следующей реплики {speaker}: {timestamp}]"
+                        ),
+                    ))
+                    marker_count += 1
+            turn.append(message)
+            previous = row
+        return turns, marker_count
+
+    @classmethod
+    def _ambient_entry(cls, row: dict[str, object]) -> str:
         role = row.get("speaker_role")
         if role == "other":
             speaker = "вероятный собеседник"
@@ -606,7 +783,9 @@ class ContextManager:
             else "не Iris"
         )
         content = str(row.get("corrected_content") or row.get("content") or "").strip()
-        return f"- [{speaker} → {target}] {content[:500]}"
+        timestamp = cls._format_timestamp(cls._row_timestamp(row))
+        time_prefix = f"{timestamp} · " if timestamp else ""
+        return f"- [{time_prefix}{speaker} → {target}] {content[:500]}"
 
     @staticmethod
     def _group_turns(messages: list[ChatMessage]) -> list[list[ChatMessage]]:
