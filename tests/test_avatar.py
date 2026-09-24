@@ -168,6 +168,12 @@ async def test_hello_and_playback_events_update_client_status() -> None:
     manager = AvatarConnectionManager()
     client = await manager.register(FakeSocket())
     service = AvatarService(manager, events, enabled=True, heartbeat_interval_seconds=1, client_timeout_seconds=2)
+    started_utterances: list[str] = []
+
+    async def on_started(utterance_id: str) -> None:
+        started_utterances.append(utterance_id)
+
+    service.bind_playback_started_handler(on_started)
     hello, hello_payload = parse_incoming({
         "protocol_version": 1, "type": "avatar.hello", "message_id": "hello", "timestamp": "2026-01-01T00:00:00Z", "session_id": "s",
         "payload": {"client_name": "Unity", "client_version": "0.4", "supported_protocol_versions": [1], "platform": "WindowsPlayer"},
@@ -181,6 +187,7 @@ async def test_hello_and_playback_events_update_client_status() -> None:
     status = await service.status()
     assert status.clients[0].client_name == "Unity"
     assert status.clients[0].current_utterance_id == "utterance"
+    assert started_utterances == ["utterance"]
     assert [event.type for event in events.get_recent_events()] == ["avatar.hello", "avatar.speaking_started"]
 
 
@@ -254,6 +261,38 @@ async def test_avatar_playback_finished_notifies_conversation_lifecycle() -> Non
     await service.inbound(client.client_id, envelope, payload)
 
     assert finished_utterances == ["utterance"]
+
+
+@pytest.mark.anyio
+async def test_avatar_segment_start_notifies_at_actual_playback_boundary() -> None:
+    events = EventBus()
+    manager = AvatarConnectionManager()
+    client = await manager.register(FakeSocket())
+    service = AvatarService(
+        manager,
+        events,
+        enabled=True,
+        heartbeat_interval_seconds=1,
+        client_timeout_seconds=2,
+    )
+    started_segments: list[tuple[str, int]] = []
+
+    async def started(utterance_id: str, sequence: int) -> None:
+        started_segments.append((utterance_id, sequence))
+
+    service.bind_playback_segment_started_handler(started)
+    envelope, payload = parse_incoming({
+        "protocol_version": 2,
+        "type": "avatar.playback.segment_started",
+        "message_id": "segment-started",
+        "timestamp": "2026-01-01T00:00:01Z",
+        "session_id": "s",
+        "payload": {"utterance_id": "utterance", "sequence": 3},
+    })
+    await service.inbound(client.client_id, envelope, payload)
+
+    assert started_segments == [("utterance", 3)]
+    assert events.get_recent_events()[-1].type == "avatar.playback_segment_started"
 
 
 @pytest.mark.anyio

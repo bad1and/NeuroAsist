@@ -1243,6 +1243,8 @@ export function ChatPage({
   const [microphoneMuted, setMicrophoneMuted] = useState(false);
   const [activeAudioElement, setActiveAudioElement] = useState<HTMLAudioElement | null>(null);
   const [livePlaybackSegment, setLivePlaybackSegment] = useState("");
+  const [livePlaybackDurationSeconds, setLivePlaybackDurationSeconds] = useState(0);
+  const [livePlaybackRevision, setLivePlaybackRevision] = useState(0);
   const [conversationStatus, setConversationStatus] = useState("Микрофон включён");
   const [conversationDebug, setConversationDebug] = useState<ConversationDebug | null>(null);
   const [newDialogConfirmationOpen, setNewDialogConfirmationOpen] = useState(false);
@@ -1289,6 +1291,10 @@ export function ChatPage({
   const pendingSpeakerLabelRef = useRef("Вы");
   const latestPlaybackSegmentRef = useRef("");
   const playbackSegmentTextsRef = useRef<string[]>([]);
+  const playbackSegmentDurationsRef = useRef<number[]>([]);
+  const avatarSubtitleTimerRef = useRef<number | null>(null);
+  const avatarSubtitleSequenceRef = useRef(0);
+  const avatarSubtitleUsesBoundariesRef = useRef(false);
   const activeVoiceGenerationRef = useRef<number | undefined>(undefined);
   const conversationStatusTimerRef = useRef<number | null>(null);
   const bargeInTimerRef = useRef<number | null>(null);
@@ -1307,6 +1313,39 @@ export function ChatPage({
     }
     setLiveSttTranscript("");
   }, []);
+
+  const clearAvatarSubtitleTimer = useCallback(() => {
+    if (avatarSubtitleTimerRef.current !== null) {
+      window.clearTimeout(avatarSubtitleTimerRef.current);
+      avatarSubtitleTimerRef.current = null;
+    }
+  }, []);
+
+  const startAvatarSubtitleFallback = useCallback(() => {
+    clearAvatarSubtitleTimer();
+    avatarSubtitleUsesBoundariesRef.current = false;
+    avatarSubtitleSequenceRef.current = 0;
+
+    const advance = () => {
+      if (avatarSubtitleUsesBoundariesRef.current) return;
+      const sequence = avatarSubtitleSequenceRef.current;
+      const text = playbackSegmentTextsRef.current[sequence];
+      const durationSeconds = playbackSegmentDurationsRef.current[sequence];
+      if (!text || !durationSeconds) {
+        avatarSubtitleTimerRef.current = window.setTimeout(advance, 50);
+        return;
+      }
+      setLivePlaybackSegment(text);
+      setLivePlaybackDurationSeconds(durationSeconds);
+      setLivePlaybackRevision((revision) => revision + 1);
+      avatarSubtitleTimerRef.current = window.setTimeout(() => {
+        avatarSubtitleSequenceRef.current = sequence + 1;
+        advance();
+      }, Math.max(120, durationSeconds * 1000));
+    };
+
+    advance();
+  }, [clearAvatarSubtitleTimer]);
 
   const updateLiveSttTranscript = useCallback((text: string, autoClearMs = 5000) => {
     if (sttClearTimerRef.current !== null) {
@@ -1792,8 +1831,10 @@ export function ChatPage({
             decode_ms: decodeMs,
           });
         },
-        (text) => {
+        (text, durationSeconds) => {
           setLivePlaybackSegment(text);
+          setLivePlaybackDurationSeconds(durationSeconds);
+          setLivePlaybackRevision((revision) => revision + 1);
         },
       );
     }
@@ -1828,7 +1869,10 @@ export function ChatPage({
       const onEvent = (event: VoiceServerEvent) => {
         if (event.type === "voice.utterance.started") {
           clearLiveSttTranscript();
+          clearAvatarSubtitleTimer();
           playbackSegmentTextsRef.current = [];
+          playbackSegmentDurationsRef.current = [];
+          avatarSubtitleUsesBoundariesRef.current = false;
           activeVoiceGenerationRef.current = event.generation;
           playbackCoordinatorRef.current.acquire(
             avatarOwnsAudioRef.current ? "unity" : "desktop_ui",
@@ -1863,28 +1907,60 @@ export function ChatPage({
         } else if (event.type === "tts.segment.started") {
           clearLiveSttTranscript();
           latestPlaybackSegmentRef.current = event.text ?? "";
-          if (avatarOwnsAudioRef.current) {
-            setLivePlaybackSegment(event.text ?? "");
+          if (event.text && event.segment_id !== undefined) {
+            playbackSegmentTextsRef.current[event.segment_id] = event.text;
           }
-          if (event.text) playbackSegmentTextsRef.current.push(event.text);
           liveSocketRef.current?.send("playback.segment.started", {
             text: event.text ?? "",
             generation: event.generation,
           });
+        } else if (event.type === "tts.segment.finished") {
+          if (event.segment_id !== undefined && event.duration_seconds !== undefined) {
+            playbackSegmentDurationsRef.current[event.segment_id] = event.duration_seconds;
+          }
+        } else if (event.type === "avatar.playback.started") {
+          clearLiveSttTranscript();
+          setVoiceState("speaking");
+          startAvatarSubtitleFallback();
+        } else if (event.type === "avatar.playback.segment.started") {
+          clearLiveSttTranscript();
+          avatarSubtitleUsesBoundariesRef.current = true;
+          clearAvatarSubtitleTimer();
+          setLivePlaybackSegment(event.text ?? "");
+          setLivePlaybackDurationSeconds(
+            event.segment_id === undefined
+              ? 0
+              : (playbackSegmentDurationsRef.current[event.segment_id] ?? 0),
+          );
+          setLivePlaybackRevision((revision) => revision + 1);
           setVoiceState("speaking");
         } else if (event.type === "voice.utterance.finished") {
           clearLiveSttTranscript();
-          setLivePlaybackSegment("");
-          if (avatarOwnsAudioRef.current) {
-            playbackCoordinatorRef.current.release(playbackCoordinatorRef.current.snapshot());
-            liveSocketRef.current?.clearActive();
-            setLoading(false);
-            setVoiceState("idle");
-          } else {
+          if (!avatarOwnsAudioRef.current) {
             livePlayerRef.current?.finish(event.utterance_id);
           }
+        } else if (event.type === "avatar.playback.finished") {
+          clearLiveSttTranscript();
+          clearAvatarSubtitleTimer();
+          setLivePlaybackSegment("");
+          playbackSegmentTextsRef.current = [];
+          playbackCoordinatorRef.current.release(playbackCoordinatorRef.current.snapshot());
+          liveSocketRef.current?.clearActive();
+          setLoading(false);
+          setVoiceState("idle");
+        } else if (event.type === "avatar.playback.failed") {
+          clearLiveSttTranscript();
+          clearAvatarSubtitleTimer();
+          setLivePlaybackSegment("");
+          playbackSegmentTextsRef.current = [];
+          playbackCoordinatorRef.current.cancel();
+          liveSocketRef.current?.clearActive();
+          setError(event.message ?? "Не удалось воспроизвести голос Ирис");
+          setLoading(false);
+          setVoiceState("error");
         } else if (event.type === "voice.utterance.cancelled") {
           clearLiveSttTranscript();
+          clearAvatarSubtitleTimer();
           setLivePlaybackSegment("");
           flushPendingTextDeltas();
           livePlayerRef.current?.stop();
@@ -1929,7 +2005,7 @@ export function ChatPage({
     }
     await player.unlock();
     await liveSocketRef.current.connect();
-  }, [clearLiveSttTranscript, ensureLivePlayer, flushPendingTextDeltas, queueTextDelta, sessionId, showMemoryUpdates, speakTextInBrowser, stopVoicePlayback]);
+  }, [clearAvatarSubtitleTimer, clearLiveSttTranscript, ensureLivePlayer, flushPendingTextDeltas, queueTextDelta, sessionId, showMemoryUpdates, speakTextInBrowser, startAvatarSubtitleFallback, stopVoicePlayback]);
 
   useEffect(() => () => {
     livePlayerRef.current?.stop();
@@ -1941,7 +2017,8 @@ export function ChatPage({
     if (pendingTextDeltaTimerRef.current !== null) {
       window.clearTimeout(pendingTextDeltaTimerRef.current);
     }
-  }, []);
+    clearAvatarSubtitleTimer();
+  }, [clearAvatarSubtitleTimer]);
 
   useEffect(() => () => stopVoicePlayback(), [stopVoicePlayback]);
 
@@ -2639,6 +2716,8 @@ export function ChatPage({
           voiceState={voiceState}
           activeAudio={activeAudioElement}
           livePlaybackSegment={livePlaybackSegment}
+          livePlaybackDurationSeconds={livePlaybackDurationSeconds}
+          livePlaybackRevision={livePlaybackRevision}
           containerRef={listRef}
           onOpenMemory={onOpenMemory}
         />

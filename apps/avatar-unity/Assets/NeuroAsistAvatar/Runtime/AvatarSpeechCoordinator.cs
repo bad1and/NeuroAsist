@@ -88,6 +88,8 @@ namespace NeuroAsist.Avatar
 
         private void OnStreamClipStarted(int sequence)
         {
+            if (!string.IsNullOrEmpty(currentUtterance))
+                client?.SendPlaybackSegmentStarted(currentUtterance, sequence);
             if (segmentEmotions.TryGetValue(sequence, out var cue) && !string.IsNullOrEmpty(cue.Emotion))
             {
                 ApplyEmotion(cue.Emotion, cue.Intensity);

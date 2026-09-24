@@ -12,7 +12,7 @@ namespace NeuroAsist.Avatar
     [Serializable] public class AvatarReadyPayload { }
     [Serializable] public class AvatarPongPayload { public string reply_to; }
     [Serializable] public class AvatarAckPayload { public string reply_to; public bool accepted; public string error; }
-    [Serializable] public class AvatarPlaybackPayload { public string utterance_id; public string reply_to; public string reason; public int client_latency_ms; }
+    [Serializable] public class AvatarPlaybackPayload { public string utterance_id; public int sequence; public string reply_to; public string reason; public int client_latency_ms; }
     [Serializable] public class AvatarStreamReceiptPayload { public string utterance_id; public int sequence; public int client_latency_ms; }
     [Serializable] public class AvatarStatePayload { public string state; }
     [Serializable] public class AvatarMotionProfilePayload { public string profile; }

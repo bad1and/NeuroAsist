@@ -28,6 +28,7 @@ _PAYLOADS = {
     "avatar.pong": PongPayload,
     "avatar.ack": AckPayload,
     "avatar.playback.started": PlaybackPayload,
+    "avatar.playback.segment_started": PlaybackPayload,
     "avatar.playback.finished": PlaybackPayload,
     "avatar.playback.failed": PlaybackPayload,
     "avatar.state.changed": ClientStatePayload,

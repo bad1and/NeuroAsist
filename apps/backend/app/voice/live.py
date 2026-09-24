@@ -76,6 +76,7 @@ class UtteranceContext:
     playback_rate: float = 1.0
     started_at: float = field(default_factory=time.perf_counter)
     tracks_end_of_speech: bool = False
+    avatar_segment_texts: dict[int, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -139,6 +140,7 @@ class VoiceSessionManager:
         self._connection_events: dict[str, asyncio.Event] = {}
         self._active: dict[str, UtteranceContext] = {}
         self._playback_pending: dict[str, UtteranceContext] = {}
+        self._avatar_playback: dict[str, UtteranceContext] = {}
         self._avatar_service = avatar_service
         self._event_publisher = event_publisher
         self._character_state_service = character_state_service
@@ -172,6 +174,11 @@ class VoiceSessionManager:
             self._connection_events.setdefault(session_id, asyncio.Event()).clear()
             await self.cancel(session_id, notify=False)
             self._playback_pending.pop(session_id, None)
+            self._avatar_playback = {
+                utterance_id: context
+                for utterance_id, context in self._avatar_playback.items()
+                if context.session_id != session_id
+            }
 
     def connected(self, session_id: str) -> bool:
         return session_id in self._connections
@@ -197,6 +204,57 @@ class VoiceSessionManager:
         self._connections.clear()
         self._connection_events.clear()
         self._playback_pending.clear()
+        self._avatar_playback.clear()
+
+    async def avatar_playback_segment_started(self, utterance_id: str, sequence: int) -> None:
+        """Forward the renderer's real audio boundary to the browser subtitles."""
+        context = self._avatar_playback.get(utterance_id)
+        if context is None:
+            return
+        text = context.avatar_segment_texts.get(sequence)
+        connection = self._connections.get(context.session_id)
+        if connection is None or text is None:
+            return
+        await connection.json({
+            **self._event(context, segment_id=sequence, text=text),
+            "type": "avatar.playback.segment.started",
+        })
+
+    async def avatar_playback_started(self, utterance_id: str) -> None:
+        """Forward Unity's real stream start for legacy subtitle timing."""
+        context = self._avatar_playback.get(utterance_id)
+        if context is None:
+            return
+        connection = self._connections.get(context.session_id)
+        if connection is not None:
+            await connection.json({
+                **self._event(context),
+                "type": "avatar.playback.started",
+            })
+
+    async def avatar_playback_finished(self, utterance_id: str) -> None:
+        """Tell the browser when Unity has actually drained its audio queue."""
+        context = self._avatar_playback.pop(utterance_id, None)
+        if context is None:
+            return
+        connection = self._connections.get(context.session_id)
+        if connection is not None:
+            await connection.json({
+                **self._event(context),
+                "type": "avatar.playback.finished",
+            })
+
+    async def avatar_playback_failed(self, utterance_id: str, reason: str | None) -> None:
+        """Release browser playback state if the Unity audio queue fails."""
+        context = self._avatar_playback.pop(utterance_id, None)
+        if context is None:
+            return
+        connection = self._connections.get(context.session_id)
+        if connection is not None:
+            await connection.json({
+                **self._event(context, message=reason or "Avatar playback failed"),
+                "type": "avatar.playback.failed",
+            })
 
     def playback_started(self, session_id: str, utterance_id: str | None) -> None:
         """Record the first audible browser frame against the EoS stopwatch."""
@@ -242,6 +300,11 @@ class VoiceSessionManager:
             raise RuntimeError("Voice WebSocket is not connected")
         await self.cancel(session_id)
         self._playback_pending.pop(session_id, None)
+        self._avatar_playback = {
+            active_utterance_id: active_context
+            for active_utterance_id, active_context in self._avatar_playback.items()
+            if active_context.session_id != session_id
+        }
         context = UtteranceContext(
             session_id,
             utterance_id,
@@ -287,6 +350,11 @@ class VoiceSessionManager:
         text = reply.strip()
         if not text or not self.connected(session_id):
             return None
+        self._avatar_playback = {
+            active_utterance_id: active_context
+            for active_utterance_id, active_context in self._avatar_playback.items()
+            if active_context.session_id != session_id
+        }
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -324,6 +392,7 @@ class VoiceSessionManager:
         if context is None or (utterance_id and context.utterance_id != utterance_id):
             return
         context.cancelled = True
+        self._avatar_playback.pop(context.utterance_id, None)
         if notify:
             await self._send(context, "voice.utterance.cancelled")
             if self._avatar_service is not None:
@@ -976,6 +1045,8 @@ class VoiceSessionManager:
             part_text, audio, audio_format, duration, attempts, tempo_processing_ms = part
         if isinstance(part_text, str):
             part_text = make_speech_segment(part_text, sequence=segment_id)
+        context.avatar_segment_texts[segment_id] = part_text.text
+        self._avatar_playback[context.utterance_id] = context
         base = self._event(context, segment_id=segment_id, format=audio_format)
         started = {
             **base,

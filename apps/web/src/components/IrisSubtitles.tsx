@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, VoiceState } from "../types";
-import { animateThinkingWave } from "../animations/transitions";
+import { animateSubtitleCue, animateThinkingWave } from "../animations/transitions";
 
 const intlWithSegmenter = typeof Intl !== "undefined" && "Segmenter" in Intl
   ? (Intl as unknown as { Segmenter: new (locale: string, options?: { granularity: "sentence" | "word" | "grapheme" }) => { segment: (input: string) => Iterable<{ segment: string }> } })
@@ -110,6 +110,8 @@ export interface IrisSubtitlesProps {
   voiceState: VoiceState;
   activeAudio?: HTMLAudioElement | null;
   livePlaybackSegment?: string;
+  livePlaybackDurationSeconds?: number;
+  livePlaybackRevision?: number;
   onOpenMemory?: () => void;
   containerRef?: React.RefObject<HTMLDivElement | null>;
 }
@@ -120,9 +122,12 @@ export function IrisSubtitles({
   voiceState,
   activeAudio,
   livePlaybackSegment,
+  livePlaybackDurationSeconds = 0,
+  livePlaybackRevision = 0,
   containerRef,
 }: IrisSubtitlesProps) {
   const thinkingRef = useRef<HTMLDivElement | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
 
   // Find the latest assistant message
   const assistantMessages = useMemo(
@@ -133,7 +138,9 @@ export function IrisSubtitles({
   const messageContent = latestAssistantMessage?.content || "";
   const messageId = latestAssistantMessage?.id || "";
   const ttsStatus = latestAssistantMessage?.ttsStatus;
-  const hasVoicePending = latestAssistantMessage?.voiceRequestId && (ttsStatus === "queued" || ttsStatus === undefined);
+  const hasVoicePending = !latestAssistantMessage?.utteranceId
+    && latestAssistantMessage?.voiceRequestId
+    && (ttsStatus === "queued" || ttsStatus === undefined);
 
   // Split the latest message into subtitle cues
   const cues = useMemo(
@@ -143,9 +150,12 @@ export function IrisSubtitles({
 
   // Core synchronization state
   const isInitialMountRef = useRef(true);
-  const [activeCueIndex, setActiveCueIndex] = useState(() => (cues.length > 0 ? cues.length - 1 : 0));
-  const [targetCueIndex, setTargetCueIndex] = useState(() => (cues.length > 0 ? cues.length - 1 : 0));
+  const [activeCueIndex, setActiveCueIndex] = useState(() => (
+    voiceState === "speaking" ? 0 : (cues.length > 0 ? cues.length - 1 : 0)
+  ));
+  const [speechCompleted, setSpeechCompleted] = useState(false);
   const lastMessageIdRef = useRef<string>(messageId);
+  const wasSpeakingRef = useRef(false);
 
   // Thinking wave animation
   useEffect(() => {
@@ -163,20 +173,22 @@ export function IrisSubtitles({
     if (isInitialMountRef.current) {
       isInitialMountRef.current = false;
       lastMessageIdRef.current = messageId;
-      const endIdx = cues.length > 0 ? cues.length - 1 : 0;
-      setActiveCueIndex(endIdx);
-      setTargetCueIndex(endIdx);
+      setActiveCueIndex(voiceState === "speaking" ? 0 : (cues.length > 0 ? cues.length - 1 : 0));
       return;
     }
 
     if (messageId && messageId !== lastMessageIdRef.current) {
       lastMessageIdRef.current = messageId;
       setActiveCueIndex(0);
-      setTargetCueIndex(0);
+      setSpeechCompleted(false);
+      wasSpeakingRef.current = false;
     }
   }, [messageId, cues.length]);
 
-  // 1. Calculate Target Index (Live TTS & Silent Pacing)
+  // Move with the segment that has actually started playing. A single TTS
+  // segment can span several visual cues (commas are a common boundary), so
+  // schedule every covered cue inside the segment instead of showing only its
+  // first line until the next audio segment arrives.
   useEffect(() => {
     if (activeAudio) return; // HTML5 Audio controls exact index directly below
 
@@ -185,62 +197,65 @@ export function IrisSubtitles({
       const segText = livePlaybackSegment.trim();
       if (!segText) return;
 
-      // Find where this spoken segment is in the full text
       const startPos = fullText.indexOf(segText.substring(0, Math.min(30, segText.length)));
       if (startPos >= 0) {
-        const endPos = startPos + segText.length;
+        const cueStarts: number[] = [];
         let charsSoFar = 0;
-        let matchedEndIndex = 0;
-        
+        let matchedStartIndex = 0;
+
         for (let i = 0; i < cues.length; i++) {
-          charsSoFar += cues[i].length + 1; // +1 for assumed space
-          // generous margin for punctuation
-          if (charsSoFar >= endPos - 15) {
-            matchedEndIndex = i;
+          cueStarts.push(charsSoFar);
+          const cueEnd = charsSoFar + cues[i].length;
+          if (startPos <= cueEnd) {
+            matchedStartIndex = i;
             break;
           }
+          charsSoFar = cueEnd + 1;
         }
-        // Only ever move the target forward
-        setTargetCueIndex(prev => Math.max(prev, matchedEndIndex));
+        for (let i = cueStarts.length; i < cues.length; i++) {
+          cueStarts.push(cueStarts[i - 1] + cues[i - 1].length + 1);
+        }
+        setActiveCueIndex((previous) => Math.max(previous, matchedStartIndex));
+
+        if (livePlaybackDurationSeconds > 0 && segText.length > 0) {
+          const segmentEnd = startPos + segText.length;
+          const timers: number[] = [];
+          for (let i = matchedStartIndex + 1; i < cues.length; i++) {
+            const cueStart = cueStarts[i];
+            if (cueStart >= segmentEnd) break;
+            const progress = Math.min(0.96, Math.max(0, (cueStart - startPos) / segText.length));
+            timers.push(window.setTimeout(() => {
+              setActiveCueIndex((previous) => Math.max(previous, i));
+            }, progress * livePlaybackDurationSeconds * 1000));
+          }
+          return () => timers.forEach((timer) => window.clearTimeout(timer));
+        }
       }
-    } else if (voiceState === "idle" && !loading && !hasVoicePending) {
-      // In completely silent mode (or stream finished), target the very end
-      setTargetCueIndex(cues.length > 0 ? cues.length - 1 : 0);
     }
-  }, [livePlaybackSegment, voiceState, loading, hasVoicePending, cues, activeAudio]);
+  }, [livePlaybackSegment, livePlaybackDurationSeconds, livePlaybackRevision, voiceState, loading, hasVoicePending, cues, activeAudio]);
 
-  // 2. Smooth Auto-Advancer (Chases the target index)
+  // Once playback ends, keep only the final cue as the muted previous line.
+  // A newly generated but not-yet-spoken message remains current.
   useEffect(() => {
-    if (activeAudio) return; // Audio has its own continuous updates
-
-    if (activeCueIndex < targetCueIndex && activeCueIndex < cues.length - 1) {
-      const currentCue = cues[activeCueIndex] || "";
-      // Calculate comfortable reading time.
-      // Base time per cue + ~50ms per character. Bonus time if it ends with punctuation.
-      const hasPunctuation = /[.,:!?…]$/.test(currentCue.trim());
-      const punctuationBonus = hasPunctuation ? 400 : 0;
-      const baseDelay = 500;
-      const charDelay = currentCue.length * 50;
-      
-      const calculatedDelayMs = baseDelay + charDelay + punctuationBonus;
-      // Clamped to at least 1.2s, without a hard upper limit so long cues aren't rushed.
-      const delayMs = Math.max(1200, calculatedDelayMs);
-
-      const timer = setTimeout(() => {
-        setActiveCueIndex(prev => prev + 1);
-      }, delayMs);
-
-      return () => clearTimeout(timer);
+    if (voiceState === "speaking" || activeAudio) {
+      wasSpeakingRef.current = true;
+      setSpeechCompleted(false);
+      return;
     }
-  }, [activeCueIndex, targetCueIndex, cues, activeAudio]);
+    if (wasSpeakingRef.current && !loading && !hasVoicePending) {
+      wasSpeakingRef.current = false;
+      setActiveCueIndex(cues.length > 0 ? cues.length - 1 : 0);
+      setSpeechCompleted(true);
+    }
+  }, [voiceState, activeAudio, loading, hasVoicePending, cues.length]);
 
-  // 3. HTML5 Audio Sync (REST Mode)
+  // HTML5 Audio Sync (REST Mode)
   useEffect(() => {
     if (!activeAudio || cues.length <= 1) return;
 
     const handleTimeUpdate = () => {
       if (!activeAudio.duration || isNaN(activeAudio.duration) || activeAudio.duration <= 0) return;
-      const progress = Math.min(1, Math.max(0, activeAudio.currentTime / activeAudio.duration));
+      const progress = Math.min(1, Math.max(0, (activeAudio.currentTime + 0.12) / activeAudio.duration));
 
       const getCueWeight = (cue: string) => {
         const hasPunctuation = /[.,:!?…]$/.test(cue.trim());
@@ -281,13 +296,38 @@ export function IrisSubtitles({
     };
   }, [activeAudio, cues]);
 
+  useEffect(() => {
+    const cue = viewportRef.current?.querySelector<HTMLElement>(
+      speechCompleted ? '[data-completed-cue="true"]' : '[data-active-cue="true"]',
+    );
+    if (!cue) return;
+    const animation = animateSubtitleCue(cue, speechCompleted);
+    return () => {
+      animation?.cancel();
+    };
+  }, [activeCueIndex, messageId, speechCompleted]);
+
   // Build the visible cue stack
   const MAX_VISIBLE_CUES = 2;
   const effectiveIndex = Math.min(Math.max(0, activeCueIndex), Math.max(0, cues.length - 1));
 
   const visibleCues: { text: string; index: number; key: string; age: number }[] = [];
 
-  if (cues.length > 0) {
+  if (cues.length > 0 && speechCompleted) {
+    const finalIndex = cues.length - 1;
+    visibleCues.push({
+      text: cues[finalIndex],
+      index: finalIndex,
+      key: `cue-${messageId}-${finalIndex}`,
+      age: 1,
+    });
+    visibleCues.push({
+      text: "\u00A0",
+      index: -1,
+      key: `completed-space-${messageId}`,
+      age: 0,
+    });
+  } else if (cues.length > 0) {
     const startIdx = Math.max(0, effectiveIndex - MAX_VISIBLE_CUES + 1);
     
     // Pad with empty cues so we ALWAYS render exactly MAX_VISIBLE_CUES elements
@@ -324,7 +364,7 @@ export function IrisSubtitles({
 
   return (
     <div className="message-list subtitles-mode" ref={containerRef} role="region" aria-label="Субтитры Iris">
-      <div className="subtitles-viewport">
+      <div className="subtitles-viewport" ref={viewportRef}>
         {visibleCues.map((cue) => {
           const isActive = cue.age === 0;
           const ageClass = isActive
@@ -337,6 +377,8 @@ export function IrisSubtitles({
             <article
               key={cue.key}
               className={`message assistant subtitle-cue ${ageClass}`}
+              data-active-cue={isActive && cue.text.trim() ? "true" : undefined}
+              data-completed-cue={speechCompleted && cue.age === 1 ? "true" : undefined}
             >
               <p data-i18n-skip>{cue.text}</p>
             </article>

@@ -92,6 +92,7 @@ namespace NeuroAsist.Avatar
         public void SendPong(string replyTo) => Send("avatar.pong", new AvatarPongPayload { reply_to = replyTo });
         public void SendAck(string replyTo, bool accepted, string error = null) => Send("avatar.ack", new AvatarAckPayload { reply_to = replyTo, accepted = accepted, error = error });
         public void SendPlayback(string type, string utteranceId, string replyTo = null, string reason = null, int latencyMs = 0) => Send(type, new AvatarPlaybackPayload { utterance_id = utteranceId, reply_to = replyTo, reason = reason, client_latency_ms = latencyMs });
+        public void SendPlaybackSegmentStarted(string utteranceId, int sequence) => Send("avatar.playback.segment_started", new AvatarPlaybackPayload { utterance_id = utteranceId, sequence = sequence });
         public void SendStreamReceived(string utteranceId, int sequence, int latencyMs) => Send("avatar.stream.received", new AvatarStreamReceiptPayload { utterance_id = utteranceId, sequence = sequence, client_latency_ms = latencyMs });
         public void SendOverlayBounds(float x, float y, float width, float height) => Send("avatar.overlay.bounds_changed", new AvatarOverlayBoundsPayload { x = x, y = y, width = width, height = height });
         public void Send<T>(string type, T payload)

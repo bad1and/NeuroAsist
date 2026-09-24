@@ -86,6 +86,43 @@ def test_playback_started_publishes_end_of_speech_latency() -> None:
 
 
 @pytest.mark.anyio
+async def test_avatar_playback_boundaries_drive_subtitle_events() -> None:
+    manager = VoiceSessionManager(MockTTSProvider())
+    connection = FakeVoiceConnection()
+    context = UtteranceContext("session", "utterance", generation=4)
+    context.avatar_segment_texts[0] = "Первая фраза."
+    manager._connections["session"] = connection
+    manager._avatar_playback["utterance"] = context
+
+    await manager.avatar_playback_started("utterance")
+    await manager.avatar_playback_segment_started("utterance", 0)
+    await manager.avatar_playback_finished("utterance")
+
+    assert connection.events[0]["type"] == "avatar.playback.started"
+    assert connection.events[1]["type"] == "avatar.playback.segment.started"
+    assert connection.events[1]["text"] == "Первая фраза."
+    assert connection.events[1]["segment_id"] == 0
+    assert connection.events[2]["type"] == "avatar.playback.finished"
+    assert "utterance" not in manager._avatar_playback
+
+
+@pytest.mark.anyio
+async def test_avatar_playback_failure_releases_browser_state() -> None:
+    manager = VoiceSessionManager(MockTTSProvider())
+    connection = FakeVoiceConnection()
+    context = UtteranceContext("session", "utterance")
+    manager._connections["session"] = connection
+    manager._avatar_playback["utterance"] = context
+
+    await manager.avatar_playback_failed("utterance", "decoder failed")
+
+    assert connection.events[0]["type"] == "avatar.playback.failed"
+    assert connection.events[0]["utterance_id"] == "utterance"
+    assert connection.events[0]["message"] == "decoder failed"
+    assert "utterance" not in manager._avatar_playback
+
+
+@pytest.mark.anyio
 async def test_known_reply_uses_the_regular_live_websocket_protocol() -> None:
     manager = VoiceSessionManager(MockTTSProvider())
     connection = FakeVoiceConnection()

@@ -75,6 +75,7 @@ from apps.backend.app.conversation.state_service import CharacterStateService
 from apps.backend.app.conversation.turn_coordinator import ConversationTurnCoordinator
 from apps.backend.app.conversation.turn import SmartTurnDetector
 from apps.backend.app.llm.providers.deepseek import DeepSeekProvider, close_shared_clients
+from apps.backend.app.llm.metadata import token_metadata
 from apps.backend.app.llm.telemetry import llm_telemetry
 from apps.backend.app.coding.service import CodingAgentService, NotificationSpeechDelivery
 from apps.backend.app.coding.orchestration import CodingBridge
@@ -414,13 +415,44 @@ def create_app() -> FastAPI:
 
     coding_agent_service.bind_notification_speaker(speak_coding_notification)
 
+    async def avatar_playback_finished(utterance_id: str) -> None:
+        await voice_session_manager.avatar_playback_finished(utterance_id)
+        if conversation_service is not None:
+            await conversation_service.avatar_playback_finished(utterance_id)
+
+    avatar_service.bind_playback_finished_handler(avatar_playback_finished)
+    avatar_service.bind_playback_segment_started_handler(
+        voice_session_manager.avatar_playback_segment_started
+    )
+    avatar_service.bind_playback_started_handler(
+        voice_session_manager.avatar_playback_started
+    )
+    avatar_service.bind_playback_failed_handler(
+        voice_session_manager.avatar_playback_failed
+    )
+
     if conversation_service is not None:
         voice_session_manager.bind_text_completed_handler(
             conversation_service.assistant_text_generated
         )
-        avatar_service.bind_playback_finished_handler(
-            conversation_service.avatar_playback_finished
-        )
+
+        def persist_live_usage(
+            provider: DeepSeekProvider,
+            session_id: str,
+            utterance_id: str,
+            generation: int,
+        ):
+            async def persist(_reply: str) -> None:
+                tokens = token_metadata(provider)
+                if tokens is not None:
+                    await conversation_service.assistant_metadata_generated(
+                        session_id,
+                        utterance_id,
+                        generation,
+                        {"tokens": tokens},
+                    )
+
+            return persist
 
         async def conversation_avatar_reaction(
             session_id: str,
@@ -443,8 +475,9 @@ def create_app() -> FastAPI:
                 or not voice_session_manager.connected(session_id)
             ):
                 return
+            provider = DeepSeekProvider(settings)
             agent = CharacterAgent(
-                llm_provider=DeepSeekProvider(settings),
+                llm_provider=provider,
                 history=history,
                 history_limit=settings.chat_history_limit,
                 event_publisher=event_bus.publish,
@@ -477,6 +510,9 @@ def create_app() -> FastAPI:
                 generation=generation,
                 source_message=source_message,
                 state_context=reaction.state_context,
+                on_assistant_completed=persist_live_usage(
+                    provider, session_id, utterance_id, generation,
+                ),
             )
 
         conversation_service.bind_action_handlers(
@@ -559,8 +595,9 @@ def create_app() -> FastAPI:
             })
             await avatar_service.set_presence(session_id=session_id, state="listening")
             return
+        provider = DeepSeekProvider(settings)
         agent = CharacterAgent(
-            llm_provider=DeepSeekProvider(settings), history=history, history_limit=settings.chat_history_limit,
+            llm_provider=provider, history=history, history_limit=settings.chat_history_limit,
             event_publisher=event_bus.publish, context_manager=context_manager, memory_service=memory_service,
             persona_name=runtime_settings.personality,
             coding_bridge=coding_bridge,
@@ -654,6 +691,9 @@ def create_app() -> FastAPI:
                 pipeline_started_at=connection.pipeline_started_at or None,
                 raw_transcript=stt_result.raw_text,
                 transcript_corrections=stt_result.corrections,
+                on_assistant_completed=persist_live_usage(
+                    provider, session_id, utterance_id, result.generation,
+                ),
             )
             return
         await connection.send({
