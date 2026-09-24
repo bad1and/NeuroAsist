@@ -1300,29 +1300,16 @@ select { appearance: auto; }
 }
 
 .message.assistant.subtitle-cue {
-  animation: subtitle-slide-in 0.38s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   min-height: calc(1.35em * 2);
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
 }
 
-@keyframes subtitle-slide-in {
-  from {
-    opacity: 0;
-    transform: translateY(18px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 .message.assistant.is-latest,
 .message.assistant.is-active-cue {
   opacity: 1;
   color: #ffffff;
-  transition: opacity 0.5s ease, transform 0.5s ease;
 }
 
 .message.assistant.is-previous,
@@ -1333,7 +1320,6 @@ select { appearance: auto; }
   font-size: calc(26px * var(--dock-scale, 1));
   text-shadow: none;
   transform: translateY(0);
-  transition: opacity 0.5s ease, transform 0.5s ease, text-shadow 0.5s ease;
   -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 90%);
   mask-image: linear-gradient(to bottom, transparent 0%, black 90%);
 }
@@ -1342,7 +1328,6 @@ select { appearance: auto; }
   opacity: 0.12;
   color: #ffffff;
   font-size: calc(18px * var(--dock-scale, 1));
-  transition: opacity 0.4s ease, transform 0.4s ease, font-size 0.4s ease;
 }
 
 .message.assistant.is-past {
@@ -9059,7 +9044,7 @@ pre,
 .journal-header-tokens {
   display: inline-flex;
   align-items: center;
-  color: #38bdf8;
+  color: var(--color-text-soft);
   font-variant-numeric: tabular-nums;
   font-weight: 500;
   font-size: 11.5px;
@@ -10355,7 +10340,35 @@ pre,
   display: flex;
   flex-direction: column;
   gap: 10px;
-  animation: fadeIn 0.2s ease-out;
+}
+
+.journal-message-details-toggle {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 3px 9px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  corner-shape: squircle;
+  background: var(--color-surface-soft);
+  color: var(--color-text-soft);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-row);
+}
+
+.journal-message-details-toggle:hover {
+  background: var(--color-accent-soft);
+  color: var(--color-text);
+}
+
+.journal-message-details-toggle:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
 }
 
 .details-section {
@@ -10420,7 +10433,7 @@ pre,
 }
 
 .text-cost {
-  color: #38bdf8;
+  color: var(--color-text-soft);
 }
 
 .text-reasoning {
@@ -12974,7 +12987,7 @@ button.journal-header-tokens {
   display: inline-flex !important;
   align-items: center !important;
   gap: 3px !important;
-  color: #38bdf8 !important;
+  color: var(--color-text-soft) !important;
   font-variant-numeric: tabular-nums !important;
   font-weight: 500 !important;
   font-size: 11.5px !important;
@@ -12984,8 +12997,8 @@ button.journal-header-tokens {
 }
 
 button.journal-header-tokens:hover {
-  color: #7dd3fc !important;
-  background: rgba(56, 189, 248, 0.1) !important;
+  color: var(--color-text) !important;
+  background: var(--color-accent-soft) !important;
 }
 
 /* Token dialog inside AppDialog */

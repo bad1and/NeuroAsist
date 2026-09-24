@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { act, render, screen } from "@testing-library/react";
 import React from "react";
 import { IrisSubtitles, splitIntoSubtitleCues } from "./IrisSubtitles";
 import type { ChatMessage } from "../types";
@@ -133,6 +133,56 @@ describe("IrisSubtitles Component", () => {
         livePlaybackSegment="Вторая фраза ответа"
       />
     );
-    expect(screen.getByText(/Вторая фраза/)).toBeInTheDocument();
+    expect(screen.getByText(/Вторая фраза/).closest("article")).toHaveClass("is-active-cue");
+  });
+
+  it("показывает следующую строку после запятой внутри одного аудиосегмента", () => {
+    vi.useFakeTimers();
+    const text = "Первая достаточно длинная часть фразы, вторая часть обязательно должна появиться на экране.";
+    const messages: ChatMessage[] = [{ id: "a1", role: "assistant", content: text }];
+    const cues = splitIntoSubtitleCues(text);
+    expect(cues.length).toBeGreaterThan(1);
+
+    render(
+      <IrisSubtitles
+        messages={messages}
+        loading={false}
+        voiceState="speaking"
+        livePlaybackSegment={text}
+        livePlaybackDurationSeconds={2}
+        livePlaybackRevision={1}
+      />
+    );
+
+    act(() => vi.advanceTimersByTime(1200));
+    expect(screen.getByText(cues[1]).closest("article")).toHaveClass("is-active-cue");
+    vi.useRealTimers();
+  });
+
+  it("после завершения речи переносит последнюю строку вверх и делает её предыдущей", () => {
+    const messages: ChatMessage[] = [
+      { id: "a1", role: "assistant", content: "Ирис закончила эту реплику." },
+    ];
+    const { rerender } = render(
+      <IrisSubtitles
+        messages={messages}
+        loading={false}
+        voiceState="speaking"
+        livePlaybackSegment="Ирис закончила эту реплику."
+      />
+    );
+
+    rerender(
+      <IrisSubtitles
+        messages={messages}
+        loading={false}
+        voiceState="idle"
+        livePlaybackSegment=""
+      />
+    );
+
+    const completedCue = screen.getByText("Ирис закончила эту реплику.").closest("article");
+    expect(completedCue).toHaveClass("is-previous", "is-fading-cue");
+    expect(completedCue).toHaveAttribute("data-completed-cue", "true");
   });
 });

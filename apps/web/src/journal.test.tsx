@@ -66,6 +66,21 @@ afterEach(() => {
 });
 
 describe("JournalPage token dialog interaction", () => {
+  it("expands token details inline from an individual history message", async () => {
+    render(<JournalPage />);
+
+    const episodeCards = await screen.findAllByText("18 сентября 2026 г.");
+    fireEvent.click(episodeCards[0]);
+    expect(await screen.findByText("Привет! Чем могу помочь?")).toBeInTheDocument();
+
+    const detailButtons = screen.getAllByRole("button", { name: "Подробнее" });
+    fireEvent.click(detailButtons[1]);
+
+    expect(screen.getByText("Параметры вызова LLM")).toBeInTheDocument();
+    expect(screen.getByText("Output (генерация)")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Свернуть" })).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("opens token statistics dialog when clicking on a message with tokens", async () => {
     render(<JournalPage />);
 

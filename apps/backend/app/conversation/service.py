@@ -89,6 +89,7 @@ class ConversationSession:
     utterance_generations: dict[str, int] = field(default_factory=dict)
     acknowledged_prefixes: dict[str, list[str]] = field(default_factory=dict)
     generated_assistant_replies: dict[str, str] = field(default_factory=dict)
+    generated_assistant_metadata: dict[str, dict[str, object]] = field(default_factory=dict)
     last_generated_assistant_reply: str = ""
     initiative_timestamps: deque[float] = field(default_factory=lambda: deque(maxlen=20))
     backchannel_timestamps: deque[float] = field(default_factory=lambda: deque(maxlen=20))
@@ -190,7 +191,7 @@ class LiveConversationService:
         async with session.lock:
             if send is not None:
                 session.event_sender = send
-            interrupted: list[tuple[str, str, int, str]] = []
+            interrupted: list[tuple[str, str, int, str, dict[str, object]]] = []
             for utterance_id in session.live_utterance_ids:
                 if utterance_id in session.committed_assistant_utterances:
                     continue
@@ -210,8 +211,9 @@ class LiveConversationService:
                     content,
                     session.utterance_generations.get(utterance_id, session.generation),
                     status,
+                    session.generated_assistant_metadata.pop(utterance_id, {}),
                 ))
-            for utterance_id, _, _, _ in interrupted:
+            for utterance_id, _, _, _, _ in interrupted:
                 session.committed_assistant_utterances.add(utterance_id)
             session.generation += 1
             session.phase = ConversationPhase.LISTENING
@@ -234,7 +236,7 @@ class LiveConversationService:
                 "cancelled_tasks": cancelled_tasks,
                 "discarded_deferred": discarded_deferred,
             }
-        for utterance_id, prefix, utterance_generation, status in interrupted:
+        for utterance_id, prefix, utterance_generation, status, metadata in interrupted:
             await asyncio.to_thread(
                 self._commit_assistant,
                 session,
@@ -242,6 +244,7 @@ class LiveConversationService:
                 prefix,
                 utterance_generation,
                 status=status,
+                metadata=metadata,
             )
         if send is not None:
             await send(self._event(session, "conversation.phase", payload={"phase": session.phase.value}))
@@ -870,6 +873,28 @@ class LiveConversationService:
             session.generated_assistant_replies[utterance_id] = text
             session.last_generated_assistant_reply = text
 
+    async def assistant_metadata_generated(
+        self,
+        session_id: str,
+        utterance_id: str,
+        generation: int,
+        metadata: dict[str, object],
+    ) -> None:
+        """Keep LLM diagnostics attached until the spoken turn is committed."""
+
+        if not metadata:
+            return
+        session = await self.ensure_session(session_id)
+        async with session.lock:
+            if (
+                utterance_id not in session.live_utterance_ids
+                or generation != session.utterance_generations.get(utterance_id)
+                or utterance_id in session.committed_assistant_utterances
+            ):
+                return
+            current = session.generated_assistant_metadata.setdefault(utterance_id, {})
+            current.update(metadata)
+
     async def playback_segment_finished(
         self,
         session_id: str,
@@ -924,6 +949,7 @@ class LiveConversationService:
                 return
             session.committed_assistant_utterances.add(utterance_id)
             generation = session.utterance_generations.get(utterance_id, session.generation)
+            metadata = session.generated_assistant_metadata.pop(utterance_id, {})
         await asyncio.to_thread(
             self._commit_assistant,
             session,
@@ -931,6 +957,7 @@ class LiveConversationService:
             prefix,
             generation,
             status="completed",
+            metadata=metadata,
         )
 
     async def avatar_playback_finished(self, utterance_id: str) -> None:
@@ -1235,6 +1262,7 @@ class LiveConversationService:
         generation: int,
         *,
         status: str,
+        metadata: dict[str, object] | None = None,
     ) -> None:
         if self._runtime.memory_incognito or not content:
             return
@@ -1248,8 +1276,21 @@ class LiveConversationService:
             generation=generation,
             turn_id=source.turn_id if source is not None else None,
             reply_to_message_id=source.id if source is not None else None,
-            metadata={"playback_acknowledged": True},
+            metadata={"playback_acknowledged": True, **(metadata or {})},
         )
+        tokens = (metadata or {}).get("tokens")
+        if source is not None and isinstance(tokens, dict):
+            self._store.merge_message_metadata(
+                source.id,
+                {
+                    "tokens": {
+                        "prompt_tokens": tokens.get("prompt_tokens", 0),
+                        "prompt_cache_hit_tokens": tokens.get("prompt_cache_hit_tokens", 0),
+                        "prompt_cache_miss_tokens": tokens.get("prompt_cache_miss_tokens", 0),
+                        "model": tokens.get("model", ""),
+                    },
+                },
+            )
         if status == "completed" and self._memory_service is not None:
             self._memory_service.schedule_extraction(assistant)
 

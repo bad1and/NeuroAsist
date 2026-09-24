@@ -99,6 +99,7 @@ export type VoiceServerEvent = {
   emphasis?: "none" | "light";
   pause_after_ms?: number;
   provider?: string;
+  duration_seconds?: number;
   generation?: number;
   memory_updates?: MemoryUpdate[];
 };
@@ -438,6 +439,9 @@ export type TokenMetadata = {
   latency_ms?: number;
   model?: string;
   timestamp?: number;
+  purpose?: string;
+  finish_reason?: string;
+  attempts?: number;
   raw_usage?: Record<string, unknown>;
 };
 

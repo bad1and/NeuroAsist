@@ -198,6 +198,7 @@ class AckPayload(ProtocolModel):
 
 class PlaybackPayload(ProtocolModel):
     utterance_id: str
+    sequence: int | None = Field(default=None, ge=0)
     reply_to: str | None = None
     reason: str | None = Field(default=None, max_length=512)
     client_latency_ms: int | None = Field(default=None, ge=0, le=120_000)

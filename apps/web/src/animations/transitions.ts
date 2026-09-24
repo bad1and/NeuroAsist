@@ -81,6 +81,19 @@ export function animateMessagePop(element: HTMLElement): Animation | null {
   });
 }
 
+/** Subtitle cue transition used for both a new spoken cue and its completed state. */
+export function animateSubtitleCue(element: HTMLElement, completed = false): Animation | null {
+  if (typeof window === "undefined" || !element || isTestEnvironment()) return null;
+  const reduced = prefersReducedMotion();
+
+  return animate(element, {
+    opacity: completed ? [1, 0.18] : [0, 1],
+    translateY: reduced ? 0 : completed ? [12, 0] : [14, 0],
+    duration: reduced ? ANIMATION_TOKENS.duration.micro : ANIMATION_TOKENS.duration.standard,
+    ease: ANIMATION_TOKENS.ease.smooth,
+  });
+}
+
 /**
  * Legacy alias for animateMessagePop
  */

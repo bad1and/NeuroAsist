@@ -31,6 +31,9 @@ from apps.backend.app.schemas.character import Emotion, Gesture
 
 logger = logging.getLogger(__name__)
 PlaybackFinishedHandler = Callable[[str], Awaitable[None]]
+PlaybackSegmentStartedHandler = Callable[[str, int], Awaitable[None]]
+PlaybackFailedHandler = Callable[[str, str | None], Awaitable[None]]
+PlaybackStartedHandler = Callable[[str], Awaitable[None]]
 
 
 class AvatarService:
@@ -58,6 +61,9 @@ class AvatarService:
         self.on_overlay_bounds_changed = on_overlay_bounds_changed
         self._heartbeat_task: asyncio.Task[None] | None = None
         self._playback_finished_handler: PlaybackFinishedHandler | None = None
+        self._playback_segment_started_handler: PlaybackSegmentStartedHandler | None = None
+        self._playback_failed_handler: PlaybackFailedHandler | None = None
+        self._playback_started_handler: PlaybackStartedHandler | None = None
         self._presence_by_session: dict[str, str] = {}
 
     def bind_playback_finished_handler(
@@ -65,6 +71,24 @@ class AvatarService:
         handler: PlaybackFinishedHandler | None,
     ) -> None:
         self._playback_finished_handler = handler
+
+    def bind_playback_segment_started_handler(
+        self,
+        handler: PlaybackSegmentStartedHandler | None,
+    ) -> None:
+        self._playback_segment_started_handler = handler
+
+    def bind_playback_failed_handler(
+        self,
+        handler: PlaybackFailedHandler | None,
+    ) -> None:
+        self._playback_failed_handler = handler
+
+    def bind_playback_started_handler(
+        self,
+        handler: PlaybackStartedHandler | None,
+    ) -> None:
+        self._playback_started_handler = handler
 
     async def start(self) -> None:
         if self.enabled and self._heartbeat_task is None:
@@ -295,6 +319,17 @@ class AvatarService:
         elif envelope.type == "avatar.playback.started":
             await self.manager.update(client_id, current_utterance_id=payload.utterance_id, state="speaking")
             self.event_bus.publish("avatar.speaking_started", "info", "Avatar playback started", {"client_id": client_id, "utterance_id": payload.utterance_id, "client_latency_ms": payload.client_latency_ms})
+            if self._playback_started_handler is not None:
+                await self._playback_started_handler(payload.utterance_id)
+        elif envelope.type == "avatar.playback.segment_started":
+            self.event_bus.publish(
+                "avatar.playback_segment_started",
+                "info",
+                "Avatar playback segment started",
+                {"client_id": client_id, "utterance_id": payload.utterance_id, "sequence": payload.sequence},
+            )
+            if self._playback_segment_started_handler is not None and payload.sequence is not None:
+                await self._playback_segment_started_handler(payload.utterance_id, payload.sequence)
         elif envelope.type == "avatar.playback.finished":
             await self.manager.update(client_id, current_utterance_id=None, state="idle")
             self.emotion_engine.finish_speaking(payload.utterance_id)
@@ -305,6 +340,8 @@ class AvatarService:
             await self.manager.update(client_id, current_utterance_id=None, state="idle")
             self.emotion_engine.finish_speaking(payload.utterance_id)
             self.event_bus.publish("avatar.playback_failed", "warning", "Avatar playback failed", {"client_id": client_id, "utterance_id": payload.utterance_id, "reason": payload.reason})
+            if self._playback_failed_handler is not None:
+                await self._playback_failed_handler(payload.utterance_id, payload.reason)
         elif envelope.type == "avatar.state.changed":
             await self.manager.update(client_id, state=payload.state)
             # The renderer can move into a presence state on an audio boundary

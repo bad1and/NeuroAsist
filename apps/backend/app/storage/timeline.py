@@ -1838,6 +1838,32 @@ class TimelineStore:
             row = connection.execute("SELECT * FROM conversation_messages WHERE id = ? AND timeline_id = ?", (message_id, PRIMARY_TIMELINE_ID)).fetchone()
         return self._row_to_message(row) if row is not None else None
 
+    def merge_message_metadata(
+        self,
+        message_id: str,
+        metadata_update: dict[str, object],
+    ) -> StoredTimelineMessage:
+        """Merge durable diagnostics into one timeline message."""
+
+        with self._immediate_connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM conversation_messages WHERE id = ? AND timeline_id = ?",
+                (message_id, PRIMARY_TIMELINE_ID),
+            ).fetchone()
+            if row is None:
+                raise KeyError(message_id)
+            metadata = json.loads(row["metadata_json"] or "{}")
+            metadata.update(metadata_update)
+            connection.execute(
+                "UPDATE conversation_messages SET metadata_json = ? WHERE id = ?",
+                (json.dumps(metadata, ensure_ascii=False), message_id),
+            )
+            updated = connection.execute(
+                "SELECT * FROM conversation_messages WHERE id = ?",
+                (message_id,),
+            ).fetchone()
+        return self._row_to_message(updated)
+
     def message_for_utterance(self, utterance_id: str, *, role: str = "user") -> StoredTimelineMessage | None:
         with self._connect() as connection:
             row = connection.execute(

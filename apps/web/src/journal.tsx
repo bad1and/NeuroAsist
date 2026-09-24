@@ -16,6 +16,8 @@ import { calculateDeepSeekCostUsd } from "./deepseek";
 import { AppDialog } from "./components/AppDialog";
 import {
   ChevronLeft,
+  ChevronDown,
+  ChevronRight,
   X,
   Zap,
   Eye,
@@ -177,6 +179,9 @@ function JournalMessageDetails({
   message: TimelineMessage;
   onInspectJson: (data: Record<string, unknown>, title: string) => void;
 }) {
+  const detailsRef = useAnimeScope<HTMLDivElement>((_scope, element) => {
+    animatePageEnter(element);
+  }, []);
   const isAssistant = message.role === "assistant";
   const tokens = message.metadata?.tokens;
   const companion = message.metadata?.companion;
@@ -197,7 +202,7 @@ function JournalMessageDetails({
     : null;
 
   return (
-    <div className="journal-turn-details" data-testid="journal-turn-details">
+    <div ref={detailsRef} className="journal-turn-details" data-testid="journal-turn-details">
       {/* 1. LLM Token & Cost Metrics */}
       {tokens && (
         <div className="details-section details-tokens-section">
@@ -376,6 +381,7 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
   const [items, setItems] = useState<TimelineJournalItem[]>([]);
   const [selectedEpisode, setSelectedEpisode] = useState<TimelineJournalItem | null>(null);
   const [messages, setMessages] = useState<TimelineMessage[]>([]);
+  const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string>>(() => new Set());
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [loadingMoreMessages, setLoadingMoreMessages] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
@@ -457,6 +463,7 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
   const onSelectEpisode = async (episode: TimelineJournalItem) => {
     const requestId = ++activeRequestIdRef.current;
     setSelectedEpisode(episode);
+    setExpandedMessageIds(new Set());
     setLoadingMessages(true);
     setMessagesError(null);
     setHasMoreMessages(false);
@@ -501,6 +508,7 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
     activeRequestIdRef.current++;
     setSelectedEpisode(null);
     setMessages([]);
+    setExpandedMessageIds(new Set());
     setMessagesError(null);
     setLoadingMessages(false);
     setHasMoreMessages(false);
@@ -867,6 +875,12 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
                       const prevDate = idx > 0 ? messages[idx - 1].created_at : null;
                       const showDateSep = shouldShowDateSeparator(prevDate, message.created_at);
                       const messageTokens = message.metadata?.tokens;
+                      const hasDetails = Boolean(
+                        messageTokens ||
+                        message.metadata?.companion ||
+                        message.metadata?.memory_updates?.length
+                      );
+                      const isExpanded = detailMode === "detailed" || expandedMessageIds.has(message.id);
                       const hasTokens = Boolean(
                         messageTokens &&
                           ((messageTokens.prompt_tokens ?? 0) > 0 ||
@@ -949,12 +963,35 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
                                   onOpen={() => setTokenDialogData({ tokens: messageTokens, role: message.role })}
                                 />
                               )}
+                              {detailMode === "simple" && hasDetails && (
+                                <button
+                                  type="button"
+                                  className="journal-message-details-toggle"
+                                  aria-expanded={isExpanded}
+                                  aria-controls={`journal-message-details-${message.id}`}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    animateButtonPress(event.currentTarget);
+                                    setExpandedMessageIds((current) => {
+                                      const next = new Set(current);
+                                      if (next.has(message.id)) next.delete(message.id);
+                                      else next.add(message.id);
+                                      return next;
+                                    });
+                                  }}
+                                >
+                                  {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                                  <span>{isExpanded ? "Свернуть" : "Подробнее"}</span>
+                                </button>
+                              )}
                             </div>
-                            {detailMode === "detailed" && (
-                              <JournalMessageDetails
-                                message={message}
-                                onInspectJson={(json, title) => setInspectModalData({ json, title })}
-                              />
+                            {isExpanded && (
+                              <div id={`journal-message-details-${message.id}`}>
+                                <JournalMessageDetails
+                                  message={message}
+                                  onInspectJson={(json, title) => setInspectModalData({ json, title })}
+                                />
+                              </div>
                             )}
                           </article>
                         </Fragment>

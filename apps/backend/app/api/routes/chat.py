@@ -1,12 +1,11 @@
 import asyncio
 import logging
-import time
-
 from fastapi import APIRouter, HTTPException, Request, status
 
 from apps.backend.app.api.routes.conversation import require_active_session_async
 from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.llm.base import LLMProviderError
+from apps.backend.app.llm.metadata import token_metadata
 from apps.backend.app.llm.providers.deepseek import DeepSeekProvider
 from apps.backend.app.schemas.chat import ChatRequest, ChatResponse
 from apps.backend.app.schemas.voice import VoiceLiveResponse
@@ -109,32 +108,8 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
     async def complete_live_assistant(reply: str) -> None:
         if coordinator is None or lease is None:
             return
-        tokens_meta = None
         llm_prov = getattr(agent, "_llm_provider", None)
-        last_resp = getattr(llm_prov, "last_response", None) if llm_prov else None
-        metrics = getattr(llm_prov, "last_call_metrics", None) if llm_prov else None
-        usage_obj = (
-            last_resp.usage
-            if last_resp and last_resp.usage
-            else (metrics.usage if metrics and metrics.usage else None)
-        )
-        if usage_obj is not None:
-            tokens_meta = {
-                "prompt_tokens": usage_obj.prompt_tokens,
-                "completion_tokens": usage_obj.completion_tokens,
-                "total_tokens": usage_obj.total_tokens,
-                "reasoning_tokens": usage_obj.reasoning_tokens,
-                "prompt_cache_hit_tokens": usage_obj.prompt_cache_hit_tokens,
-                "prompt_cache_miss_tokens": usage_obj.prompt_cache_miss_tokens,
-                "model": last_resp.model if last_resp else (metrics.model if metrics else ""),
-                "timestamp": time.time(),
-                "latency_ms": round(
-                    last_resp.latency_ms
-                    if (last_resp and last_resp.latency_ms is not None)
-                    else (metrics.latency_ms if metrics else 0.0),
-                    1,
-                ),
-            }
+        tokens_meta = token_metadata(llm_prov) if llm_prov is not None else None
         last_turn = getattr(agent, "last_turn", None)
         companion_meta = {
             "emotion": getattr(getattr(last_turn, "affect", None), "emotion", None).value if getattr(getattr(last_turn, "affect", None), "emotion", None) else "neutral",
@@ -279,31 +254,7 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
                 state_context=state_context,
                 state_behavior=state_behavior,
             )
-            tokens_meta = None
-            last_resp = getattr(provider, "last_response", None)
-            metrics = getattr(provider, "last_call_metrics", None)
-            usage_obj = (
-                last_resp.usage
-                if last_resp and last_resp.usage
-                else (metrics.usage if metrics and metrics.usage else None)
-            )
-            if usage_obj is not None:
-                tokens_meta = {
-                    "prompt_tokens": usage_obj.prompt_tokens,
-                    "completion_tokens": usage_obj.completion_tokens,
-                    "total_tokens": usage_obj.total_tokens,
-                    "reasoning_tokens": usage_obj.reasoning_tokens,
-                    "prompt_cache_hit_tokens": usage_obj.prompt_cache_hit_tokens,
-                    "prompt_cache_miss_tokens": usage_obj.prompt_cache_miss_tokens,
-                    "model": last_resp.model if last_resp else (metrics.model if metrics else getattr(provider, "_model", "")),
-                    "timestamp": time.time(),
-                    "latency_ms": round(
-                        last_resp.latency_ms
-                        if (last_resp and last_resp.latency_ms is not None)
-                        else (metrics.latency_ms if metrics else 0.0),
-                        1,
-                    ),
-                }
+            tokens_meta = token_metadata(provider)
             last_turn = getattr(agent, "last_turn", None)
             companion_meta = {
                 "emotion": result.get("emotion") or (getattr(getattr(last_turn, "affect", None), "emotion", None).value if getattr(getattr(last_turn, "affect", None), "emotion", None) else "neutral"),

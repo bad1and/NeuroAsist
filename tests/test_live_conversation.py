@@ -684,6 +684,43 @@ async def test_avatar_ack_commits_generated_reply_and_keeps_it_for_correction_co
 
 
 @pytest.mark.anyio
+async def test_live_assistant_commits_token_metadata_with_acknowledged_reply(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "timeline-with-usage.sqlite3")
+    store.init_db()
+    service = LiveConversationService(store, runtime())
+    generation = await service.speech_started("session")
+    observation = await service.ingest_observation(
+        session_id="session",
+        transcript="Ирис, ответь с учётом контекста",
+        language="ru",
+        expected_generation=generation,
+    )
+    generated = "Да, отвечаю."
+    tokens = {
+        "prompt_tokens": 120,
+        "completion_tokens": 8,
+        "total_tokens": 128,
+        "model": "deepseek-flash",
+    }
+
+    await service.assistant_text_generated(
+        "session", observation.utterance_id, generation, generated,
+    )
+    await service.assistant_metadata_generated(
+        "session", observation.utterance_id, generation, {"tokens": tokens},
+    )
+    await service.playback_finished("session", observation.utterance_id)
+
+    messages, _ = store.list_messages(20)
+    user = messages[-2]
+    assistant = messages[-1]
+    assert user.role == "user"
+    assert user.metadata["tokens"]["prompt_tokens"] == 120
+    assert assistant.role == "assistant"
+    assert assistant.metadata["tokens"] == tokens
+
+
+@pytest.mark.anyio
 async def test_barge_in_commits_only_acknowledged_prefix_as_interrupted(tmp_path: Path) -> None:
     store = TimelineStore(tmp_path / "timeline.sqlite3")
     store.init_db()
