@@ -3,6 +3,7 @@ from pathlib import Path
 
 from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.llm.base import LLMProvider, LLMResponse
+from apps.backend.app.memory.extraction_worker import MemoryExtractionWorker
 from apps.backend.app.memory.service import MemoryService
 from apps.backend.app.runtime.settings import RuntimeSettings
 from apps.backend.app.storage.timeline import TimelineHistoryAdapter, TimelineStore
@@ -90,3 +91,22 @@ def test_explicit_memory_uses_fallback_when_model_omits_candidates(tmp_path: Pat
     asyncio.run(agent.handle_user_message("session", "Запомни: моих разработчиков зовут Фетя и Ален"))
 
     assert store.list_memories(status="active")[0]["value_text"] == "моих разработчиков зовут Фетя и Ален"
+
+
+def test_memory_extractor_receives_trusted_message_occurrence_time(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "memory-time.sqlite3")
+    store.init_db()
+    service = MemoryService(store, RuntimeSettings(memory_mode="automatic"))
+    source, _ = store.append_message(
+        role="user",
+        content="Сегодня я начал новый проект",
+        input_mode="text",
+        created_at="2026-09-24T07:30:00+00:00",
+    )
+    worker = MemoryExtractionWorker(store, service, NoCandidateProvider())
+
+    prompt, redacted = worker._format_input(source.content, [source])
+
+    assert redacted is False
+    assert "@time is trusted backend occurrence time" in prompt
+    assert f"[{source.id} @2026-09-24T07:30:00+00:00] U:" in prompt

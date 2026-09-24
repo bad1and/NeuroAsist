@@ -1790,7 +1790,11 @@ class TimelineStore:
     def get_episode_summary(self, summary_id: str) -> dict[str, object] | None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT * FROM episode_summaries WHERE id = ? AND superseded_at IS NULL",
+                """SELECT s.*, e.started_at AS episode_started_at,
+                          COALESCE(e.ended_at, e.last_activity_at) AS episode_ended_at
+                   FROM episode_summaries s
+                   LEFT JOIN conversation_episodes e ON e.id = s.episode_id
+                   WHERE s.id = ? AND s.superseded_at IS NULL""",
                 (summary_id,),
             ).fetchone()
         return dict(row) if row is not None else None
@@ -1798,7 +1802,11 @@ class TimelineStore:
     def get_episode_summary_for_episode(self, episode_id: str) -> dict[str, object] | None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT * FROM episode_summaries WHERE episode_id = ? AND superseded_at IS NULL",
+                """SELECT s.*, e.started_at AS episode_started_at,
+                          COALESCE(e.ended_at, e.last_activity_at) AS episode_ended_at
+                   FROM episode_summaries s
+                   LEFT JOIN conversation_episodes e ON e.id = s.episode_id
+                   WHERE s.episode_id = ? AND s.superseded_at IS NULL""",
                 (episode_id,),
             ).fetchone()
         return dict(row) if row is not None else None
@@ -1814,8 +1822,11 @@ class TimelineStore:
             fts_query = self._fts_query(query or "")
             if fts_query:
                 rows = connection.execute(
-                    """SELECT s.* FROM episode_summary_fts f
+                    """SELECT s.*, e.started_at AS episode_started_at,
+                              COALESCE(e.ended_at, e.last_activity_at) AS episode_ended_at
+                       FROM episode_summary_fts f
                        JOIN episode_summaries s ON s.id = f.summary_id
+                       LEFT JOIN conversation_episodes e ON e.id = s.episode_id
                        WHERE episode_summary_fts MATCH ?
                          AND s.superseded_at IS NULL
                          AND (? IS NULL OR s.episode_id != ?)
@@ -1825,10 +1836,13 @@ class TimelineStore:
                 ).fetchall()
             else:
                 rows = connection.execute(
-                    """SELECT * FROM episode_summaries
-                       WHERE superseded_at IS NULL
-                         AND (? IS NULL OR episode_id != ?)
-                       ORDER BY created_at DESC LIMIT ?""",
+                    """SELECT s.*, e.started_at AS episode_started_at,
+                              COALESCE(e.ended_at, e.last_activity_at) AS episode_ended_at
+                       FROM episode_summaries s
+                       LEFT JOIN conversation_episodes e ON e.id = s.episode_id
+                       WHERE s.superseded_at IS NULL
+                         AND (? IS NULL OR s.episode_id != ?)
+                       ORDER BY s.created_at DESC LIMIT ?""",
                     (exclude_episode_id, exclude_episode_id, limit),
                 ).fetchall()
         return [dict(row) for row in rows]
@@ -1837,6 +1851,24 @@ class TimelineStore:
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM conversation_messages WHERE id = ? AND timeline_id = ?", (message_id, PRIMARY_TIMELINE_ID)).fetchone()
         return self._row_to_message(row) if row is not None else None
+
+    def message_timestamps(self, message_ids: list[str]) -> dict[str, str]:
+        """Return canonical source times in one query for prompt enrichment."""
+        unique_ids = list(dict.fromkeys(str(item) for item in message_ids if item))[:500]
+        if not unique_ids:
+            return {}
+        placeholders = ",".join("?" for _ in unique_ids)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""SELECT id,
+                           CASE WHEN role = 'assistant'
+                                THEN COALESCE(completed_at, created_at)
+                                ELSE created_at END AS occurred_at
+                    FROM conversation_messages
+                    WHERE timeline_id = ? AND id IN ({placeholders})""",
+                (PRIMARY_TIMELINE_ID, *unique_ids),
+            ).fetchall()
+        return {str(row["id"]): str(row["occurred_at"]) for row in rows}
 
     def merge_message_metadata(
         self,
@@ -2724,7 +2756,8 @@ class TimelineStore:
                     current_created_at = str(current["created_at"])
             recent = connection.execute(
                 """
-                SELECT m.id, m.role, m.content, m.corrected_content, m.input_mode, m.sequence_no, m.created_at,
+                SELECT m.id, m.role, m.content, m.corrected_content, m.input_mode, m.sequence_no,
+                       m.created_at, m.completed_at,
                        o.decision_action, o.decision_reason, o.speaker_role,
                        o.addressedness
                 FROM conversation_messages m
@@ -2753,7 +2786,8 @@ class TimelineStore:
                 ).fetchone()
                 lower = int(previous_assistant["sequence_no"] or 0) if previous_assistant else 0
                 pending_user_rows = connection.execute(
-                    """SELECT m.id, m.role, m.content, m.corrected_content, m.input_mode, m.sequence_no, m.created_at,
+                    """SELECT m.id, m.role, m.content, m.corrected_content, m.input_mode, m.sequence_no,
+                               m.created_at, m.completed_at,
                                o.decision_action, o.decision_reason, o.speaker_role, o.addressedness
                        FROM conversation_messages m
                        LEFT JOIN conversation_observations o ON o.message_id = m.id
@@ -2775,14 +2809,22 @@ class TimelineStore:
             if last_closed is not None:
                 prev_ep_id = last_closed["id"]
                 sum_row = connection.execute(
-                    "SELECT * FROM episode_summaries WHERE episode_id = ? AND superseded_at IS NULL",
+                    """SELECT s.*, e.started_at AS episode_started_at,
+                              COALESCE(e.ended_at, e.last_activity_at) AS episode_ended_at
+                       FROM episode_summaries s
+                       LEFT JOIN conversation_episodes e ON e.id = s.episode_id
+                       WHERE s.episode_id = ? AND s.superseded_at IS NULL""",
                     (prev_ep_id,),
                 ).fetchone()
                 if sum_row is None:
                     # Summarize on the fly if closing missed or delayed
                     self._summarize_episode_conn(connection, prev_ep_id)
                     sum_row = connection.execute(
-                        "SELECT * FROM episode_summaries WHERE episode_id = ? AND superseded_at IS NULL",
+                        """SELECT s.*, e.started_at AS episode_started_at,
+                                  COALESCE(e.ended_at, e.last_activity_at) AS episode_ended_at
+                           FROM episode_summaries s
+                           LEFT JOIN conversation_episodes e ON e.id = s.episode_id
+                           WHERE s.episode_id = ? AND s.superseded_at IS NULL""",
                         (prev_ep_id,),
                     ).fetchone()
                 if sum_row is not None:
@@ -2793,7 +2835,13 @@ class TimelineStore:
             if terms:
                 clauses = " OR ".join("s.summary_text LIKE ?" for _ in terms)
                 summaries_rows = connection.execute(
-                    f"SELECT s.* FROM episode_summaries s WHERE s.superseded_at IS NULL AND s.episode_id != ? AND ({clauses}) ORDER BY s.created_at DESC LIMIT 2",
+                    f"""SELECT s.*, e.started_at AS episode_started_at,
+                               COALESCE(e.ended_at, e.last_activity_at) AS episode_ended_at
+                        FROM episode_summaries s
+                        LEFT JOIN conversation_episodes e ON e.id = s.episode_id
+                        WHERE s.superseded_at IS NULL AND s.episode_id != ?
+                          AND ({clauses})
+                        ORDER BY s.created_at DESC LIMIT 2""",
                     (active_id, *(f"%{term}%" for term in terms)),
                 ).fetchall()
                 summaries = [dict(r) for r in summaries_rows]
@@ -2801,7 +2849,12 @@ class TimelineStore:
                 summaries = []
             if not summaries:
                 summaries_rows = connection.execute(
-                    "SELECT s.* FROM episode_summaries s WHERE s.superseded_at IS NULL AND s.episode_id != ? ORDER BY s.created_at DESC LIMIT 2",
+                    """SELECT s.*, e.started_at AS episode_started_at,
+                              COALESCE(e.ended_at, e.last_activity_at) AS episode_ended_at
+                       FROM episode_summaries s
+                       LEFT JOIN conversation_episodes e ON e.id = s.episode_id
+                       WHERE s.superseded_at IS NULL AND s.episode_id != ?
+                       ORDER BY s.created_at DESC LIMIT 2""",
                     (active_id,),
                 ).fetchall()
                 summaries = [dict(r) for r in summaries_rows]

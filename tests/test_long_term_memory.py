@@ -37,6 +37,29 @@ def test_memory_has_user_source_and_deleted_memory_never_enters_context(tmp_path
     assert {item["action"] for item in store.memory_audit(str(memory["id"]))} >= {"autonomous_accepted", "deleted"}
 
 
+def test_memory_context_exposes_source_and_record_times(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    source, _ = store.append_message(
+        role="user",
+        content="Меня зовут Роман",
+        input_mode="text",
+        created_at="2026-09-24T18:45:00+00:00",
+    )
+    memory = service.extract_from_message(source)[0]
+
+    context = ContextManager(store, max_tokens=500, memory_service=service).build(
+        "как меня зовут",
+    )
+
+    memory_block = next(
+        item.content for item in context.messages
+        if item.role == "system" and "Memory data:" in item.content
+    )
+    assert '"first_observed_at":"2026-09-24T18:45:00+00:00"' in memory_block
+    assert '"last_confirmed_at":"2026-09-24T18:45:00+00:00"' in memory_block
+    assert f'"recorded_at":"{memory["created_at"]}"' in memory_block
+
+
 def test_ambient_live_speech_is_not_extracted_or_retrieved_as_memory(tmp_path: Path) -> None:
     store, service = _service(tmp_path)
     source, _ = store.append_message(

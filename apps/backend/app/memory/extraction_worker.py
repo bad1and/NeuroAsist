@@ -398,21 +398,30 @@ class MemoryExtractionWorker:
 
     def _format_input(self, current_text: str, context) -> tuple[str, bool]:
         redacted = False
-        safe_messages: list[tuple[str, str, str]] = []
+        safe_messages: list[tuple[str, str, str, str]] = []
         for item in context[-_CONTEXT_MESSAGE_LIMIT:]:
             safe, was_redacted = self._memory_service.sanitize_for_llm_extraction(item.effective_content)
             redacted = redacted or was_redacted
             if item.role in {"user", "assistant"}:
-                safe_messages.append((item.id, "U" if item.role == "user" else "I", safe))
+                safe_messages.append((
+                    item.id,
+                    "U" if item.role == "user" else "I",
+                    (
+                        item.completed_at
+                        if item.role == "assistant" and item.completed_at
+                        else item.created_at
+                    ),
+                    safe,
+                ))
         if not safe_messages:
             safe, was_redacted = self._memory_service.sanitize_for_llm_extraction(current_text)
             redacted = redacted or was_redacted
-            safe_messages.append(("unknown", "U", safe))
+            safe_messages.append(("unknown", "U", "unknown", safe))
 
         # Topic reuse should follow the new user delta, not lexical noise from
         # the overlap turn. The newest eligible user line is the job's source.
         topic_query = next(
-            (text for _, role, text in reversed(safe_messages) if role == "U"),
+            (text for _, role, _, text in reversed(safe_messages) if role == "U"),
             "",
         )
         topics = self._shortlist_topics(topic_query)
@@ -426,7 +435,7 @@ class MemoryExtractionWorker:
         header = (
             "TOPICS:"
             + json.dumps(topic_catalog, ensure_ascii=False, separators=(",", ":"))
-            + "\nDIALOGUE oldest->newest (U=user,I=Iris):\n"
+            + "\nDIALOGUE oldest->newest (U=user,I=Iris; @time is trusted backend occurrence time):\n"
         )
         dialogue_budget = (
             MEMORY_EXTRACTION_INPUT_CHAR_BUDGET
@@ -436,7 +445,7 @@ class MemoryExtractionWorker:
         if dialogue_budget < 80:
             # Topic titles are hints, never more important than source text.
             topic_catalog = []
-            header = "TOPICS:[]\nDIALOGUE oldest->newest (U=user,I=Iris):\n"
+            header = "TOPICS:[]\nDIALOGUE oldest->newest (U=user,I=Iris; @time is trusted backend occurrence time):\n"
             dialogue_budget = (
                 MEMORY_EXTRACTION_INPUT_CHAR_BUDGET
                 - len(MEMORY_EXTRACTION_PROMPT)
@@ -479,22 +488,28 @@ class MemoryExtractionWorker:
     @classmethod
     def _render_dialogue(
         cls,
-        messages: list[tuple[str, str, str]],
+        messages: list[tuple[str, str, str, str]],
         budget: int,
     ) -> str:
         selected = list(messages)
         while selected:
-            minimum = sum(len(f"[{message_id}] {role}: \n") + 24 for message_id, role, _ in selected)
+            minimum = sum(
+                len(f"[{message_id} @{created_at}] {role}: \n") + 24
+                for message_id, role, created_at, _ in selected
+            )
             if minimum <= budget or len(selected) == 1:
                 break
             selected.pop(0)
         if not selected or budget <= 0:
             return ""
 
-        prefixes = [f"[{message_id}] {role}: " for message_id, role, _ in selected]
+        prefixes = [
+            f"[{message_id} @{created_at}] {role}: "
+            for message_id, role, created_at, _ in selected
+        ]
         content_budget = max(budget - sum(len(prefix) + 1 for prefix in prefixes), 0)
         rendered: list[str] = []
-        for index, ((_, _, text), prefix) in enumerate(zip(selected, prefixes, strict=True)):
+        for index, ((_, _, _, text), prefix) in enumerate(zip(selected, prefixes, strict=True)):
             remaining_items = len(selected) - index
             allowance = content_budget // remaining_items if remaining_items else 0
             clipped = cls._clip_text(text, allowance)

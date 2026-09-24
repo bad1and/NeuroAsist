@@ -69,6 +69,7 @@ def test_cross_episode_continuity_after_break(tmp_path: Path):
     # Verify built messages contain the previous conversation context header
     system_contents = [m.content for m in built.messages if m.role == "system"]
     assert any("Контекст недавнего прошлого разговора (что обсуждали до перерыва):" in c for c in system_contents)
+    assert any("[Время:" in c or "[Период:" in c for c in system_contents)
 
     # Verify token budget is strictly respected
     assert built.token_estimate <= 3000

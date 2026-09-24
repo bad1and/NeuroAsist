@@ -433,7 +433,7 @@ class MemoryService:
             if overlap or lexical_score or semantic_score:
                 score = .50 * semantic_score + .28 * lexical_score + .08 * min(overlap, 2) + .07
                 reasons = (["topic_semantic"] if semantic_score else []) + (["topic_fts"] if lexical_score or overlap else [])
-                memories.append({"id": f"topic:{topic_id}", "namespace": "topic_memory", "predicate": str(topic["title"]), "value_text": str(topic["summary_text"]), "importance": .7, "confidence": 1.0, "status": "active", "source_message_ids": [], "retrieval": {"score": round(score, 4), "components": {"exact": 0, "fts": round(lexical_score, 4), "semantic": round(semantic_score, 4), "importance": .7}, "reasons": reasons}})
+                memories.append({"id": f"topic:{topic_id}", "namespace": "topic_memory", "predicate": str(topic["title"]), "value_text": str(topic["summary_text"]), "importance": .7, "confidence": 1.0, "status": "active", "source_message_ids": [], "created_at": topic.get("created_at"), "updated_at": topic.get("updated_at"), "retrieval": {"score": round(score, 4), "components": {"exact": 0, "fts": round(lexical_score, 4), "semantic": round(semantic_score, 4), "importance": .7}, "reasons": reasons}})
         for commitment in commitment_candidates.values():
             text = f"{commitment['title']} {commitment['details']}"
             overlap = len(query_terms & set(re.findall(r"[^\W_]+", self._normalize(text), flags=re.UNICODE)))
@@ -445,7 +445,7 @@ class MemoryService:
                 importance = float(commitment["importance"])
                 score = .45 * semantic_score + .25 * lexical_score + .08 * min(overlap, 2) + .12 * importance + (.10 if explicit_loop_query else 0)
                 reasons = ["open_commitment"] + (["commitment_semantic"] if semantic_score else []) + (["commitment_fts"] if lexical_score or overlap else [])
-                memories.append({"id": f"commitment:{commitment_id}", "namespace": "commitment_memory", "predicate": str(commitment["title"]), "value_text": str(commitment["details"] or commitment["title"]), "importance": importance, "confidence": float(commitment["confidence"]), "status": "active", "source_message_ids": [], "retrieval": {"score": round(score, 4), "components": {"open_loop": 1, "fts": round(lexical_score, 4), "semantic": round(semantic_score, 4), "importance": importance}, "reasons": reasons}})
+                memories.append({"id": f"commitment:{commitment_id}", "namespace": "commitment_memory", "predicate": str(commitment["title"]), "value_text": str(commitment["details"] or commitment["title"]), "importance": importance, "confidence": float(commitment["confidence"]), "status": "active", "source_message_ids": [], "created_at": commitment.get("created_at"), "updated_at": commitment.get("updated_at"), "retrieval": {"score": round(score, 4), "components": {"open_loop": 1, "fts": round(lexical_score, 4), "semantic": round(semantic_score, 4), "importance": importance}, "reasons": reasons}})
         eligibility = None
         source_eligibility = getattr(self._store, "memory_source_eligibility", None)
         factual_ids = [

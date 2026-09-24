@@ -602,3 +602,67 @@ def test_context_debug_routes_expose_budget_diagnostics(monkeypatch, tmp_path: P
     assert preview.status_code == 200
     assert preview.json()["diagnostics"]["budget"] == 100
     assert last.status_code == 200
+
+
+def test_context_adds_one_time_marker_after_a_long_gap(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "temporal-gap.sqlite3")
+    store.init_db()
+    user, _ = store.append_message(
+        role="user", content="Вернёмся к плану", input_mode="text",
+        created_at="2026-09-24T10:00:00+00:00",
+    )
+    store.append_message(
+        role="assistant", content="Хорошо", input_mode="text",
+        turn_id=user.turn_id, reply_to_message_id=user.id,
+        created_at="2026-09-24T10:00:05+00:00",
+    )
+    current, _ = store.append_message(
+        role="user", content="Продолжим", input_mode="text",
+        created_at="2026-09-24T10:30:00+00:00",
+    )
+
+    context = ContextManager(store, max_tokens=500, recent_turns=8).build(
+        current.content, current_message_id=current.id,
+    )
+
+    markers = [
+        item.content for item in context.messages
+        if item.role == "system" and "Время следующей реплики" in item.content
+    ]
+    assert markers == [
+        "[Время следующей реплики пользователя: 2026-09-24 10:00 UTC]",
+    ]
+    assert context.diagnostics["temporal_marker_count"] == 1
+    assert context.diagnostics["temporal_query"] is False
+
+
+def test_temporal_query_marks_each_retained_dialogue_message(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "temporal-query.sqlite3")
+    store.init_db()
+    user, _ = store.append_message(
+        role="user", content="Мы обсуждали релиз", input_mode="text",
+        created_at="2026-09-24T10:00:00+00:00",
+    )
+    store.append_message(
+        role="assistant", content="Да, на пятницу", input_mode="text",
+        turn_id=user.turn_id, reply_to_message_id=user.id,
+        created_at="2026-09-24T10:01:00+00:00",
+    )
+    current, _ = store.append_message(
+        role="user", content="Когда мы это обсуждали?", input_mode="text",
+        created_at="2026-09-24T10:02:00+00:00",
+    )
+
+    context = ContextManager(store, max_tokens=500, recent_turns=8).build(
+        current.content, current_message_id=current.id,
+    )
+
+    markers = [
+        item.content for item in context.messages
+        if item.role == "system" and "Время следующей реплики" in item.content
+    ]
+    assert len(markers) == 2
+    assert any("пользователя" in item and "10:00 UTC" in item for item in markers)
+    assert any("Iris" in item and "10:01 UTC" in item for item in markers)
+    assert context.diagnostics["temporal_query"] is True
+    assert context.diagnostics["temporal_marker_count"] == 2
