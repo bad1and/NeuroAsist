@@ -246,7 +246,7 @@ async def reset_session(
     boundary_reason = payload.boundary_reason if payload is not None else "new_dialog"
     result = await asyncio.to_thread(store.reset_session, boundary_reason)
     request.app.state.event_bus.publish(
-        "conversation.session_reset", "warning", "Conversation session reset", result,
+        "conversation.session_reset", "info", "Conversation session reset", result,
     )
     return result
 

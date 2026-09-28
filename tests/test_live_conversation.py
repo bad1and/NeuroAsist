@@ -947,3 +947,55 @@ async def test_new_speech_cancels_registered_decision_task(tmp_path: Path) -> No
         await ingest
     assert service.debug("session")["active_tasks"] == []
     assert len(store.recent_conversation_observations("session")) == 1
+
+
+@pytest.mark.anyio
+async def test_playback_finished_falls_back_to_active_utterance_when_id_is_omitted(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "playback_fallback.sqlite3")
+    store.init_db()
+    service = LiveConversationService(store, runtime())
+    generation = await service.speech_started("session")
+    observation = await service.ingest_observation(
+        session_id="session",
+        transcript="ирис ответь на это",
+        language="ru",
+        expected_generation=generation,
+    )
+    generated = "Тестовый ответ для фоллбэка."
+    await service.assistant_text_generated(
+        "session", observation.utterance_id, generation, generated,
+    )
+
+    # Call playback_finished without utterance_id
+    await service.playback_finished("session", None)
+
+    messages, _ = store.list_messages(20)
+    assert messages[-1].role == "assistant"
+    assert messages[-1].content == generated
+    assert messages[-1].status == "completed"
+
+
+@pytest.mark.anyio
+async def test_close_session_commits_uncommitted_generated_assistant_turn(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "close_session_commit.sqlite3")
+    store.init_db()
+    service = LiveConversationService(store, runtime())
+    generation = await service.speech_started("session")
+    observation = await service.ingest_observation(
+        session_id="session",
+        transcript="ирис ответь на это",
+        language="ru",
+        expected_generation=generation,
+    )
+    generated = "Ответ до закрытия сокета."
+    await service.assistant_text_generated(
+        "session", observation.utterance_id, generation, generated,
+    )
+
+    # Session closes abruptly (e.g. WebSocket disconnect / reload)
+    await service.close_session("session")
+
+    messages, _ = store.list_messages(20)
+    assert messages[-1].role == "assistant"
+    assert messages[-1].content == generated
+    assert messages[-1].status == "completed"

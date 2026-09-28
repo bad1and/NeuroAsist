@@ -18,8 +18,9 @@ class TextNormalizer:
 
 class TextChunker:
     _HARD_BOUNDARY = re.compile(r"[.!?…](?:[\"'»)]*)(?:\s+|$)")
-    _SOFT_BOUNDARY = re.compile(r"[;:](?:[\"'»)]*)(?:\s+|$)")
-    _FIRST_CLAUSE_BOUNDARY = re.compile(r"[,;:](?:[\"'»)]*)(?:\s+|$)")
+    _SOFT_BOUNDARY = re.compile(r"(?:[;:]|[—–])(?:[\"'»)]*)(?:\s+|$)")
+    _FIRST_CLAUSE_BOUNDARY = re.compile(r"(?:[,;:]|[—–])(?:[\"'»)]*)(?:\s+|$)")
+    _DASH_BOUNDARY = re.compile(r"[—–](?:[\"'»)]*)(?:\s+|$)")
     _ABBREVIATIONS = (
         "т. д.", "т. п.", "т. е.", "т. к.", "г.", "ул.", "рис.", "стр.",
         "им.", "руб.", "коп.",
@@ -102,6 +103,14 @@ class TextChunker:
         protected = re.sub(r"(?<=\d)\.(?=\d)", "∯", protected)
         target = self._first_target if not self._emitted else self._next_target
         hard = self._HARD_BOUNDARY.search(protected, pos=start)
+        dash = self._DASH_BOUNDARY.search(protected, pos=start)
+        if (
+            dash
+            and (hard is None or dash.end() < hard.end())
+            and dash.end() >= min(target, 28)
+            and len(re.findall(r"\w+", protected[: dash.end()], flags=re.UNICODE)) >= 5
+        ):
+            return dash.end()
         if hard:
             return hard.end()
         if not self._emitted:
@@ -126,7 +135,7 @@ class TextChunker:
             return len(text)
         char_limit = min(self._max_chars, self._word_limit_index(text))
         prefix = text[: char_limit + 1]
-        for separator in (";", ":", ",", " "):
+        for separator in ("—", "–", ";", ":", ",", " "):
             index = prefix.rfind(separator)
             if index >= max(1, char_limit // 2):
                 return index + (1 if separator != " " else 0)

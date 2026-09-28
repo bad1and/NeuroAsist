@@ -197,6 +197,7 @@ export function updateRuntimeSettings(payload: {
   location_city?: PublicSettings["location_city"];
   weather_enabled?: PublicSettings["weather_enabled"];
   news_enabled?: PublicSettings["news_enabled"];
+  web_search_enabled?: PublicSettings["web_search_enabled"];
   news_category?: PublicSettings["news_category"];
 }): Promise<PublicSettings> {
   return requestJson<PublicSettings>("/settings/runtime", {

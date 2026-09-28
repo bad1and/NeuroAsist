@@ -8,7 +8,7 @@ import {
   IconInterfaceCalendarMark,
   IconComputerRobotCyborg1,
 } from "./CustomIcons";
-import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { deleteTimelineRange, getTimelineJournal, getTimelineMessages, searchTimeline } from "./api";
 import type { TimelineJournalItem, TimelineMessage, TokenMetadata } from "./types";
@@ -27,6 +27,7 @@ import {
   Terminal,
   Copy,
   Check,
+  ExternalLink,
 } from "lucide-react";
 import { TokenBadge, TokenDialogContent } from "./components/TokenBadge";
 import { notify } from "./notifications";
@@ -186,8 +187,9 @@ function JournalMessageDetails({
   const tokens = message.metadata?.tokens;
   const companion = message.metadata?.companion;
   const memoryUpdates = message.metadata?.memory_updates;
+  const webSearch = message.metadata?.web_search;
 
-  if (!tokens && !companion && (!memoryUpdates || memoryUpdates.length === 0)) {
+  if (!tokens && !companion && !webSearch && (!memoryUpdates || memoryUpdates.length === 0)) {
     return null;
   }
 
@@ -317,6 +319,41 @@ function JournalMessageDetails({
         </div>
       )}
 
+      {isAssistant && webSearch && (
+        <div className="details-section details-web-search-section">
+          <div className="details-section-title">
+            <IconInterfaceSearch size={13} />
+            <span>Поиск в интернете</span>
+            <span className={`details-search-status status-${webSearch.status}`}>
+              {webSearch.status === "ok" ? "Найдено" : "Без результатов"}
+            </span>
+          </div>
+          <div className="web-search-query">
+            <span>Запрос</span>
+            <strong>{webSearch.query || "Некорректный поисковый запрос"}</strong>
+            {webSearch.cached && <small>из кэша</small>}
+          </div>
+          {webSearch.sources.length > 0 ? (
+            <div className="web-search-sources">
+              {webSearch.sources.map((source, index) => (
+                <a
+                  key={`${source.url}-${index}`}
+                  href={source.url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="web-search-source"
+                >
+                  <span>{source.title || source.url}</span>
+                  <ExternalLink size={13} aria-hidden="true" />
+                </a>
+              ))}
+            </div>
+          ) : (
+            <div className="memory-empty-note">Подтверждённые источники не получены</div>
+          )}
+        </div>
+      )}
+
       {/* 3. Memory Updates */}
       <div className="details-section details-memory-section">
         <div className="details-section-title">
@@ -377,7 +414,13 @@ function JournalMessageDetails({
   );
 }
 
-export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
+export function JournalPage({
+  onOpenChat,
+  isActive = true,
+}: {
+  onOpenChat?: () => void;
+  isActive?: boolean;
+} = {}) {
   const [items, setItems] = useState<TimelineJournalItem[]>([]);
   const [selectedEpisode, setSelectedEpisode] = useState<TimelineJournalItem | null>(null);
   const [messages, setMessages] = useState<TimelineMessage[]>([]);
@@ -446,21 +489,7 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
     }
   }, [selectedEpisode]);
 
-  const refresh = async () => {
-    try {
-      const response = await getTimelineJournal();
-      setItems(response.items);
-      setError(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "История недоступна");
-    }
-  };
-
-  useEffect(() => {
-    void refresh();
-  }, []);
-
-  const onSelectEpisode = async (episode: TimelineJournalItem) => {
+  const onSelectEpisode = useCallback(async (episode: TimelineJournalItem) => {
     const requestId = ++activeRequestIdRef.current;
     setSelectedEpisode(episode);
     setExpandedMessageIds(new Set());
@@ -486,7 +515,37 @@ export function JournalPage({ onOpenChat }: { onOpenChat?: () => void } = {}) {
         setLoadingMessages(false);
       }
     }
-  };
+  }, []);
+
+  const refresh = useCallback(async () => {
+    try {
+      const response = await getTimelineJournal();
+      setItems(response.items);
+      setError(null);
+      setSelectedEpisode((current) => {
+        if (current && response.items.length > 0) {
+          const updated = response.items.find(
+            (item) => (item.id && item.id === current.id) || (!item.id && item.day === current.day),
+          );
+          if (updated) {
+            if (updated.message_count !== current.message_count || !updated.ended_at) {
+              void onSelectEpisode(updated);
+            }
+            return updated;
+          }
+        }
+        return current;
+      });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "История недоступна");
+    }
+  }, [onSelectEpisode]);
+
+  useEffect(() => {
+    if (isActive) {
+      void refresh();
+    }
+  }, [isActive, refresh]);
 
   const onLoadMoreMessages = async () => {
     if (!selectedEpisode?.id || messageOffset === null || loadingMoreMessages) return;

@@ -162,7 +162,19 @@ class DeliveryOverride(ProtocolModel):
         le=1.30,
         description="Optional pitch-preserving speed multiplier for this sentence (0.70–1.30).",
     )
-    emphasis: str = Field(default="none", pattern="^(none|light)$")
+    emphasis: str = Field(default="none", pattern="^(none|light|strong)$")
+    pause_before_ms: int | None = Field(
+        default=None,
+        ge=0,
+        le=1200,
+        description="Optional silence before this sentence.",
+    )
+    pause_after_ms: int | None = Field(
+        default=None,
+        ge=0,
+        le=1200,
+        description="Optional silence after this sentence.",
+    )
 
 
 class DeliveryCue(ProtocolModel):

@@ -32,7 +32,7 @@ def test_delivery_overrides_apply_to_one_1_based_sentence_only() -> None:
         SpeechPace.SLOW,
         SpeechPace.FAST,
     ]
-    assert [segment.tempo for segment in segments] == [1.0, 0.95, 1.05]
+    assert [segment.tempo for segment in segments] == [1.0, 0.9215, 1.05]
     assert segments[1].emphasis is SpeechEmphasis.LIGHT
     assert segments[1].pause_before_ms == 35
     assert segments[2].emphasis is SpeechEmphasis.NONE
@@ -49,6 +49,33 @@ def test_delivery_override_can_set_precise_sentence_speed() -> None:
     segments = plan_speech("Медленнее. Быстрее.", delivery)
 
     assert [segment.tempo for segment in segments] == [0.82, 1.17]
+
+
+def test_delivery_override_controls_poetic_pause_and_strong_emphasis() -> None:
+    delivery = DeliveryCue(
+        overrides=[
+            DeliveryOverride(
+                segment=2,
+                pace="slow",
+                emphasis="strong",
+                pause_before_ms=350,
+                pause_after_ms=650,
+            ),
+        ],
+    )
+
+    segments = plan_speech("Первая строка. Вторая строка.", delivery)
+
+    assert segments[1].emphasis is SpeechEmphasis.STRONG
+    assert segments[1].tempo == 0.874
+    assert segments[1].pause_before_ms == 350
+    assert segments[1].pause_after_ms == 650
+
+
+def test_poem_lines_without_terminal_punctuation_remain_separate_segments() -> None:
+    segments = plan_speech("Тихий вечер\nМедленный снег\nИ тишина")
+
+    assert [segment.text for segment in segments] == ["Тихий вечер", "Медленный снег", "И тишина"]
 
 
 def test_v3_turn_keeps_reply_when_only_metadata_is_invalid() -> None:

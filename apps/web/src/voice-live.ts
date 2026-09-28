@@ -78,8 +78,8 @@ export class TTSStreamPlayer {
   private currentSinkId: string | null = null;
 
   constructor(
-    private readonly onStarted: () => void,
-    private readonly onFinished: () => void,
+    private readonly onStarted: (utteranceId?: string | null) => void,
+    private readonly onFinished: (utteranceId?: string | null) => void,
     private readonly onError: (error: Error) => void,
     options: TTSStreamPlayerOptions = {},
     private readonly onUnderrun: (gapMs: number) => void = () => undefined,
@@ -215,7 +215,8 @@ export class TTSStreamPlayer {
       && this.decodedBySegment.size === 0
     ) {
       this.serverFinished = false;
-      this.onFinished();
+      const finishedUtteranceId = this.activeUtteranceId;
+      this.onFinished(finishedUtteranceId);
     }
   }
 
@@ -311,7 +312,8 @@ export class TTSStreamPlayer {
     }, segmentStartDelay);
     if (!this.started) {
       this.started = true;
-      globalThis.setTimeout(this.onStarted, Math.max(0, (startAt - context.currentTime) * 1000));
+      const startedUtteranceId = utterance;
+      globalThis.setTimeout(() => this.onStarted(startedUtteranceId), Math.max(0, (startAt - context.currentTime) * 1000));
     }
   }
 

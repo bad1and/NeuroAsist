@@ -5,7 +5,6 @@ from fastapi import APIRouter, HTTPException, Request, status
 from apps.backend.app.api.routes.conversation import require_active_session_async
 from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.llm.base import LLMProviderError
-from apps.backend.app.llm.metadata import token_metadata
 from apps.backend.app.llm.providers.deepseek import DeepSeekProvider
 from apps.backend.app.schemas.chat import ChatRequest, ChatResponse
 from apps.backend.app.schemas.voice import VoiceLiveResponse
@@ -109,7 +108,7 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
         if coordinator is None or lease is None:
             return
         llm_prov = getattr(agent, "_llm_provider", None)
-        tokens_meta = token_metadata(llm_prov) if llm_prov is not None else None
+        tokens_meta = agent.token_metadata() if llm_prov is not None else None
         last_turn = getattr(agent, "last_turn", None)
         companion_meta = {
             "emotion": getattr(getattr(last_turn, "affect", None), "emotion", None).value if getattr(getattr(last_turn, "affect", None), "emotion", None) else "neutral",
@@ -125,6 +124,8 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
             "companion": companion_meta,
             "memory_updates": memory_updates,
         }
+        if agent.last_web_search_metadata is not None:
+            metadata_update["web_search"] = agent.last_web_search_metadata
         assistant_message = await coordinator.complete_assistant(
             payload.session_id, lease, reply, metadata_update=metadata_update
         )
@@ -254,7 +255,7 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
                 state_context=state_context,
                 state_behavior=state_behavior,
             )
-            tokens_meta = token_metadata(provider)
+            tokens_meta = agent.token_metadata()
             last_turn = getattr(agent, "last_turn", None)
             companion_meta = {
                 "emotion": result.get("emotion") or (getattr(getattr(last_turn, "affect", None), "emotion", None).value if getattr(getattr(last_turn, "affect", None), "emotion", None) else "neutral"),
@@ -270,6 +271,8 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
                 "companion": companion_meta,
                 "memory_updates": memory_updates,
             }
+            if agent.last_web_search_metadata is not None:
+                metadata_update["web_search"] = agent.last_web_search_metadata
             assistant_message = await coordinator.complete_assistant(
                 payload.session_id, lease, result["reply"], metadata_update=metadata_update
             )
@@ -443,6 +446,7 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             gesture_intensity=result.get("intensity", 1.0),
             voice=voice,
             style=resolve_turn_voice_style(getattr(request.app.state, "voice_tts_style", "auto"), agent.last_turn),
+            delivery=agent.last_turn.delivery if agent.last_turn is not None else None,
         )
         response.tts_status = "queued"
     return response

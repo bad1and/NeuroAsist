@@ -40,3 +40,32 @@ def test_desktop_credentials_reject_non_string_values(monkeypatch) -> None:
 
     with pytest.raises(RuntimeError, match="must be strings"):
         desktop_entry.load_runtime_credentials()
+
+
+def test_desktop_server_allows_background_tasks_to_shutdown(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    app = SimpleNamespace(state=SimpleNamespace())
+
+    def config_factory(_app, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace()
+
+    class Server:
+        should_exit = False
+
+        def __init__(self, _config) -> None:
+            pass
+
+        def run(self) -> None:
+            captured["ran"] = True
+
+    monkeypatch.setattr(desktop_entry, "configure_safe_mode", lambda: None)
+    monkeypatch.setattr(desktop_entry, "load_runtime_credentials", lambda: None)
+    monkeypatch.setattr(desktop_entry, "create_desktop_app", lambda: app)
+    monkeypatch.setattr(desktop_entry.uvicorn, "Config", config_factory)
+    monkeypatch.setattr(desktop_entry.uvicorn, "Server", Server)
+
+    desktop_entry.main()
+
+    assert captured["timeout_graceful_shutdown"] == 5
+    assert captured["ran"] is True

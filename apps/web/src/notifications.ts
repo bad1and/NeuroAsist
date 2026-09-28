@@ -17,6 +17,8 @@ export interface AppNotification {
   actions?: NotificationAction[];
   navigateView?: string;
   duration?: number | "persistent";
+  /** Determinate task progress in the inclusive 0..1 range. */
+  progress?: number;
   createdAt: number;
 }
 
@@ -26,6 +28,7 @@ export interface NotificationOptions {
   actions?: NotificationAction[];
   navigateView?: string;
   duration?: number | "persistent";
+  progress?: number;
 }
 
 export const DEFAULT_DURATIONS: Record<NotificationType, number | "persistent"> = {
@@ -149,6 +152,7 @@ class NotificationStore {
           details: full.details,
           navigateView: full.navigateView,
           duration: full.duration,
+          progress: full.progress,
           createdAt: full.createdAt,
         },
       });

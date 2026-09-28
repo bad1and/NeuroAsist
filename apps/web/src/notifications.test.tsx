@@ -71,6 +71,22 @@ describe("Unified Notification System", () => {
       expect(screen.getByRole("status")).toBeInTheDocument();
     });
 
+    it("renders determinate task progress for a persistent startup notification", () => {
+      act(() => {
+        notify.info("Подготавливаю микрофон", "Загружаю голосовые сервисы · 36%", {
+          id: "voice-microphone-startup",
+          duration: "persistent",
+          progress: 0.36,
+        });
+      });
+
+      render(<NotificationHost />);
+
+      const progress = screen.getByRole("progressbar", { name: "Прогресс" });
+      expect(progress).toHaveAttribute("aria-valuenow", "36");
+      expect(progress.querySelector("span")).toHaveStyle({ width: "36%" });
+    });
+
     it("renders and handles action button click", () => {
       const actionFn = vi.fn();
       act(() => {
@@ -187,4 +203,3 @@ describe("Unified Notification System", () => {
     });
   });
 });
-

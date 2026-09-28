@@ -24,6 +24,7 @@ export function EnvironmentSettings({
   );
   const [weatherEnabled, setWeatherEnabled] = useState(settings.weather_enabled ?? true);
   const [newsEnabled, setNewsEnabled] = useState(settings.news_enabled ?? true);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(settings.web_search_enabled ?? true);
   const [newsCategory, setNewsCategory] = useState<"all" | "general" | "tech">(
     (settings.news_category as "all" | "general" | "tech") ?? "all"
   );
@@ -160,7 +161,7 @@ export function EnvironmentSettings({
           <div className="settings-card-header-main">
             <div className="settings-card-title-group">
               <h3 className="settings-card-title">Данные и внешние источники</h3>
-              <p className="settings-card-subtitle">Автономные сводки погоды и ленты новостей по открытым источникам</p>
+              <p className="settings-card-subtitle">Погода, новости и самостоятельная проверка информации по открытым источникам</p>
             </div>
           </div>
         </div>
@@ -179,6 +180,16 @@ export function EnvironmentSettings({
           onChange={(checked) => {
             setWeatherEnabled(checked);
             void saveSetting({ weather_enabled: checked });
+          }}
+        />
+
+        <AppSwitch
+          checked={webSearchEnabled}
+          label="Самостоятельный поиск в интернете"
+          description="Iris может незаметно проверить актуальные сведения во время ответа. Запросы и источники сохраняются только в истории диалога."
+          onChange={(checked) => {
+            setWebSearchEnabled(checked);
+            void saveSetting({ web_search_enabled: checked });
           }}
         />
 
@@ -235,4 +246,3 @@ export function EnvironmentSettings({
     </>
   );
 }
-

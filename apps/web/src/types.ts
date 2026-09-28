@@ -267,6 +267,7 @@ export type PublicSettings = {
   weather_enabled?: boolean;
   news_enabled?: boolean;
   news_category?: "all" | "general" | "tech";
+  web_search_enabled?: boolean;
 };
 
 export type EnvironmentStatus = {
@@ -305,6 +306,7 @@ export type EnvironmentStatus = {
     weather_enabled: boolean;
     news_enabled: boolean;
     news_category: string;
+    web_search_enabled: boolean;
   };
 };
 
@@ -469,6 +471,14 @@ export type MessageMetadata = {
   tokens?: TokenMetadata;
   companion?: CompanionTurnMetadata;
   memory_updates?: Array<string | MemoryCandidateItem>;
+  web_search?: {
+    query: string;
+    searched_at?: string;
+    provider: string;
+    status: string;
+    cached: boolean;
+    sources: Array<{ title: string; url: string }>;
+  };
   [key: string]: unknown;
 };
 

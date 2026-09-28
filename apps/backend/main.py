@@ -75,7 +75,6 @@ from apps.backend.app.conversation.state_service import CharacterStateService
 from apps.backend.app.conversation.turn_coordinator import ConversationTurnCoordinator
 from apps.backend.app.conversation.turn import SmartTurnDetector
 from apps.backend.app.llm.providers.deepseek import DeepSeekProvider, close_shared_clients
-from apps.backend.app.llm.metadata import token_metadata
 from apps.backend.app.llm.telemetry import llm_telemetry
 from apps.backend.app.coding.service import CodingAgentService, NotificationSpeechDelivery
 from apps.backend.app.coding.orchestration import CodingBridge
@@ -437,19 +436,24 @@ def create_app() -> FastAPI:
         )
 
         def persist_live_usage(
-            provider: DeepSeekProvider,
+            agent: CharacterAgent,
             session_id: str,
             utterance_id: str,
             generation: int,
         ):
             async def persist(_reply: str) -> None:
-                tokens = token_metadata(provider)
+                tokens = agent.token_metadata()
+                metadata: dict[str, object] = {}
                 if tokens is not None:
+                    metadata["tokens"] = tokens
+                if agent.last_web_search_metadata is not None:
+                    metadata["web_search"] = agent.last_web_search_metadata
+                if metadata:
                     await conversation_service.assistant_metadata_generated(
                         session_id,
                         utterance_id,
                         generation,
-                        {"tokens": tokens},
+                        metadata,
                     )
 
             return persist
@@ -511,7 +515,7 @@ def create_app() -> FastAPI:
                 source_message=source_message,
                 state_context=reaction.state_context,
                 on_assistant_completed=persist_live_usage(
-                    provider, session_id, utterance_id, generation,
+                    agent, session_id, utterance_id, generation,
                 ),
             )
 
@@ -692,7 +696,7 @@ def create_app() -> FastAPI:
                 raw_transcript=stt_result.raw_text,
                 transcript_corrections=stt_result.corrections,
                 on_assistant_completed=persist_live_usage(
-                    provider, session_id, utterance_id, result.generation,
+                    agent, session_id, utterance_id, result.generation,
                 ),
             )
             return

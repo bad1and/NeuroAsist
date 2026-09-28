@@ -178,10 +178,17 @@ def test_session_reset_endpoint_issues_new_id_and_rejects_stale_requests(monkeyp
             json={"boundary_reason": "manual_reset"},
         )
         stale = client.post("/chat", json={"session_id": first.json()["session_id"], "message": "устарело"})
+        reset_events = [
+            event
+            for event in client.app.state.event_bus.get_recent_events()
+            if event.type == "conversation.session_reset"
+        ]
 
     assert first.status_code == 200 and second.status_code == 200
     assert first.json()["session_id"] != second.json()["session_id"]
     assert stale.status_code == 409
+    assert reset_events
+    assert {event.level for event in reset_events} == {"info"}
 
 
 def test_open_session_resumes_without_erasing_messages(monkeypatch, tmp_path: Path) -> None:

@@ -92,6 +92,7 @@ class RuntimeSettings:
     weather_enabled: bool = True
     news_enabled: bool = True
     news_category: str = "all"
+    web_search_enabled: bool = True
 
 
 class RuntimeSettingsStore:

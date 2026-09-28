@@ -1,7 +1,12 @@
+from types import SimpleNamespace
+
+import anyio
 from fastapi.testclient import TestClient
 import pytest
 
+from apps.backend.app.api.websocket import websocket_events
 from apps.backend.app.api.routes import chat as chat_route
+from apps.backend.app.events.bus import EventBus
 from apps.backend.app.llm.base import LLMProviderError, LLMResponse
 from apps.backend.main import app
 
@@ -321,6 +326,37 @@ def test_websocket_events_receives_backend_event(client: TestClient) -> None:
 
     assert event["type"] == "backend.status"
     assert event["message"] == "WebSocket client connected"
+
+
+def test_websocket_events_stops_when_client_disconnects() -> None:
+    event_bus = EventBus()
+
+    class DisconnectingWebSocket:
+        app = SimpleNamespace(
+            state=SimpleNamespace(
+                event_bus=event_bus,
+                settings=SimpleNamespace(desktop_auth_token=None),
+            )
+        )
+        accepted = False
+        sent: list[dict] = []
+
+        async def accept(self) -> None:
+            self.accepted = True
+
+        async def receive(self) -> dict[str, object]:
+            return {"type": "websocket.disconnect", "code": 1001}
+
+        async def send_json(self, payload: dict) -> None:
+            self.sent.append(payload)
+
+    websocket = DisconnectingWebSocket()
+
+    anyio.run(websocket_events, websocket)
+
+    assert websocket.accepted is True
+    assert websocket.sent == []
+    assert event_bus._subscribers == {}
 
 
 def test_cors_allows_localhost_dev_ports(client: TestClient) -> None:

@@ -414,6 +414,18 @@ function boolLabel(value: boolean): string {
   return value ? "Да" : "Нет";
 }
 
+function voiceReadinessProgress(readiness: ReadinessResponse | null): number {
+  if (!readiness) return 0.08;
+  if (readiness.live_ready) return 0.72;
+  const readyParts = [
+    readiness.text_chat === "ready",
+    readiness.stt === "ready",
+    readiness.tts === "ready",
+    readiness.vad === "ready" || readiness.vad === "fallback",
+  ].filter(Boolean).length;
+  return 0.08 + readyParts * 0.14;
+}
+
 function isLiveVoiceTransportError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   return (
@@ -1010,7 +1022,7 @@ function MainApp() {
           {visitedViews.has("journal") && (
             <div className="workspace-view-slot" hidden={activeView !== "journal"}>
               <Suspense fallback={<LazyPageFallback />}>
-                <JournalPage onOpenChat={() => switchView("chat")} />
+                <JournalPage onOpenChat={() => switchView("chat")} isActive={activeView === "journal"} />
               </Suspense>
             </div>
           )}
@@ -1241,6 +1253,7 @@ export function ChatPage({
   const [memoryNotice, setMemoryNotice] = useState<string | null>(null);
   const [liveConversation, setLiveConversation] = useState(false);
   const [microphoneMuted, setMicrophoneMuted] = useState(false);
+  const [microphoneStarting, setMicrophoneStarting] = useState(false);
   const [activeAudioElement, setActiveAudioElement] = useState<HTMLAudioElement | null>(null);
   const [livePlaybackSegment, setLivePlaybackSegment] = useState("");
   const [livePlaybackDurationSeconds, setLivePlaybackDurationSeconds] = useState(0);
@@ -1783,16 +1796,21 @@ export function ChatPage({
   const ensureLivePlayer = useCallback(() => {
     if (!livePlayerRef.current) {
       livePlayerRef.current = new TTSStreamPlayer(
-        () => {
+        (startedUtteranceId) => {
           clearLiveSttTranscript();
           liveAudioStartedRef.current = true;
-          liveSocketRef.current?.send("playback.started");
+          liveSocketRef.current?.send("playback.started", {
+            utterance_id: startedUtteranceId || liveSocketRef.current?.activeUtteranceId,
+          });
           setVoiceState("speaking");
         },
-        () => {
+        (finishedUtteranceId) => {
           clearLiveSttTranscript();
           setLivePlaybackSegment("");
-          liveSocketRef.current?.send("playback.finished");
+          const resolvedUtteranceId = finishedUtteranceId || liveSocketRef.current?.activeUtteranceId;
+          liveSocketRef.current?.send("playback.finished", {
+            utterance_id: resolvedUtteranceId,
+          });
           playbackSegmentTextsRef.current = [];
           playbackCoordinatorRef.current.release(playbackCoordinatorRef.current.snapshot());
           liveSocketRef.current?.clearActive();
@@ -2329,7 +2347,7 @@ export function ChatPage({
   };
 
   const toggleLive = async () => {
-    if (!sessionId || !liveReady || liveConnectingRef.current) return;
+    if (!sessionId || liveConnectingRef.current || microphoneStarting) return;
     if (liveConversation) {
       cancelPendingBargeIn();
       vadRecorderRef.current?.stop();
@@ -2342,7 +2360,12 @@ export function ChatPage({
       updateConversationStatus("Live выключен");
       return;
     }
+    if (!liveVoiceSupported) {
+      notify.error("Микрофон недоступен", "Браузер не поддерживает необходимый аудиорежим.");
+      return;
+    }
     liveConnectingRef.current = true;
+    setMicrophoneStarting(true);
     cancelPendingBargeIn();
     vadRecorderRef.current?.stop();
     pcmInputRef.current?.close();
@@ -2351,6 +2374,33 @@ export function ChatPage({
     setMicrophoneMuted(false);
     setLiveConversation(false);
     try {
+      let nextReadiness = readiness;
+      const readinessDeadline = Date.now() + 90_000;
+      while (!nextReadiness?.live_ready) {
+        const voiceUnavailable = nextReadiness?.stt === "failed"
+          || nextReadiness?.stt === "disabled"
+          || nextReadiness?.tts === "failed"
+          || nextReadiness?.tts === "disabled";
+        if (voiceUnavailable) {
+          throw new Error(nextReadiness?.errors[0] ?? "Голосовые сервисы не запустились");
+        }
+        if (Date.now() >= readinessDeadline) {
+          throw new Error("Голосовые сервисы загружаются слишком долго. Попробуйте ещё раз.");
+        }
+        const progress = voiceReadinessProgress(nextReadiness);
+        notify.info(
+          "Подготавливаю микрофон",
+          `Загружаю голосовые сервисы · ${Math.round(progress * 100)}%`,
+          { id: "voice-microphone-startup", duration: "persistent", progress },
+        );
+        await new Promise((resolve) => window.setTimeout(resolve, 650));
+        nextReadiness = await getReadiness().catch(() => nextReadiness);
+      }
+      notify.info(
+        "Подготавливаю микрофон",
+        "Запрашиваю доступ к устройству · 78%",
+        { id: "voice-microphone-startup", duration: "persistent", progress: 0.78 },
+      );
       await ensureLiveVoice();
       const input = new PcmInputClient(voiceInputWebSocketUrl(sessionId, 3), (event) => {
         if (event.type === "voice.input.transcript" && event.transcript) {
@@ -2458,6 +2508,11 @@ export function ChatPage({
         "live",
         selectedInputDeviceId,
       );
+      notify.info(
+        "Подготавливаю микрофон",
+        "Подключаю поток распознавания · 92%",
+        { id: "voice-microphone-startup", duration: "persistent", progress: 0.92 },
+      );
       await input.connect(
         capture.sampleRate,
         settings?.voice_language ?? "ru",
@@ -2466,6 +2521,11 @@ export function ChatPage({
       setLiveConversation(true);
       setMicrophoneMuted(false);
       updateConversationStatus("Микрофон включён");
+      notify.success(
+        "Микрофон готов",
+        "Можно говорить — повторное нажатие не требуется.",
+        { id: "voice-microphone-startup", duration: 2600, progress: 1 },
+      );
     } catch (vadError) {
       cancelPendingBargeIn();
       vadRecorderRef.current?.stop();
@@ -2483,9 +2543,15 @@ export function ChatPage({
         userMsg = rawMsg;
       }
       setError(userMsg);
+      notify.error(
+        "Не удалось включить микрофон",
+        userMsg,
+        { id: "voice-microphone-startup", duration: "persistent" },
+      );
       setLiveConversation(false);
     } finally {
       liveConnectingRef.current = false;
+      setMicrophoneStarting(false);
     }
   };
 
@@ -2783,8 +2849,8 @@ export function ChatPage({
                 <div className="dock-dual-pill">
                   <FigmaDualMediaButtonBg className="dual-pill-bg" preserveAspectRatio="none" />
                   <button
-                    className={`dock-dual-btn ${microphoneMuted ? "is-muted" : ""}`}
-                    disabled={!liveVoiceSupported || !liveReady || voiceState === "stopping"}
+                    className={`dock-dual-btn ${microphoneMuted ? "is-muted" : ""}${microphoneStarting ? " is-loading" : ""}`}
+                    disabled={!liveVoiceSupported || !sessionId || microphoneStarting || voiceState === "stopping"}
                     onClick={(e) => {
                       animateButtonPress(e.currentTarget);
                       if (!liveConversation) {
@@ -2794,11 +2860,18 @@ export function ChatPage({
                       }
                     }}
                     title={
-                      microphoneMuted
+                      microphoneStarting
+                        ? "Микрофон подключается"
+                        : microphoneMuted
                         ? "Микрофон выключен (нажмите, чтобы включить)"
-                        : "Микрофон включён (нажмите, чтобы выключить)"
+                        : liveConversation
+                          ? "Микрофон включён (нажмите, чтобы выключить)"
+                          : liveReady
+                            ? "Включить микрофон"
+                            : "Включить после загрузки голосовых сервисов"
                     }
-                    aria-label="Live"
+                    aria-label={microphoneStarting ? "Микрофон подключается" : "Live"}
+                    aria-busy={microphoneStarting}
                     type="button"
                   >
                     <FigmaMicIcon width={24} height={26} />
