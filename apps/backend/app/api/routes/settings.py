@@ -150,6 +150,7 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         weather_enabled=runtime_settings.weather_enabled,
         news_enabled=runtime_settings.news_enabled,
         news_category=runtime_settings.news_category,
+        web_search_enabled=runtime_settings.web_search_enabled,
     )
 
 
@@ -312,6 +313,9 @@ async def patch_runtime_settings(
         if payload.news_category not in ("all", "general", "tech"):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported news category")
         runtime_settings.news_category = payload.news_category
+
+    if payload.web_search_enabled is not None:
+        runtime_settings.web_search_enabled = bool(payload.web_search_enabled)
 
     for field_name, allowed_values in LIVE_SETTING_VALUES.items():
         value = getattr(payload, field_name)

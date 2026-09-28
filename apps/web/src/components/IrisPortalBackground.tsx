@@ -431,9 +431,9 @@ export const IrisPortalBackground = memo(function IrisPortalBackground({
       // Determine status target
       if (state.voiceState === "speaking") {
         targetStatus = 3.0;
-        targetRadius = 0.58;
-        targetSpeed *= 1.3;
-        targetIntensity = 1.25;
+        targetRadius = 0.56;
+        targetSpeed *= 1.08;
+        targetIntensity = 1.08;
       } else if (state.voiceState === "thinking" || state.voiceState === "transcribing" || state.loading) {
         targetStatus = 2.0;
         targetRadius = 0.54;
@@ -506,7 +506,21 @@ export const IrisPortalBackground = memo(function IrisPortalBackground({
       accumulatedTime += dt * currSpeed;
 
       // Audio frequency spectrum from analyzer
-      const bands = audioAnalyzer.getAudioBands();
+      const isSpeaking = state.voiceState === "speaking";
+      if (!isSpeaking) audioAnalyzer.reset();
+      const measuredBands = isSpeaking
+        ? audioAnalyzer.getAudioBands()
+        : { low: 0, mid: 0, high: 0, level: 0 };
+      // The portal follows real browser playback when available. Unity-owned
+      // playback has no browser signal, so keep only a restrained presence
+      // pulse instead of letting the generic speaking state overdrive it.
+      const presence = isSpeaking ? 0.045 : 0;
+      const bands = {
+        low: Math.min(0.32, measuredBands.low * 0.55 + presence),
+        mid: Math.min(0.32, measuredBands.mid * 0.55 + presence),
+        high: Math.min(0.26, measuredBands.high * 0.45 + presence * 0.65),
+        level: Math.min(0.28, measuredBands.level * 0.55 + presence),
+      };
 
       gl.uniform2f(uResLoc, canvas.width, canvas.height);
       gl.uniform1f(uTimeLoc, accumulatedTime);
@@ -578,4 +592,3 @@ export const IrisPortalBackground = memo(function IrisPortalBackground({
     </div>
   );
 });
-

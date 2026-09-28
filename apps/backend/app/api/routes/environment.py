@@ -79,6 +79,7 @@ async def get_environment_status(request: Request) -> dict[str, Any]:
             "weather_enabled": runtime_settings.weather_enabled,
             "news_enabled": runtime_settings.news_enabled,
             "news_category": runtime_settings.news_category,
+            "web_search_enabled": runtime_settings.web_search_enabled,
         },
     }
 

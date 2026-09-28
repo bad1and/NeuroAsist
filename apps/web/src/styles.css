@@ -1669,6 +1669,14 @@ select { appearance: auto; }
   color: #986768;
 }
 
+.dock-dual-btn.is-loading,
+.dock-dual-btn.is-loading:disabled {
+  color: var(--color-accent-visual, #9887be);
+  background: rgba(105, 91, 134, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(152, 135, 190, 0.22);
+  opacity: 1;
+}
+
 .dock-icon-btn {
   position: relative;
   width: 66px;
@@ -7228,6 +7236,22 @@ body {
   animation-play-state: paused;
 }
 
+.notification-task-progress {
+  position: absolute;
+  inset: auto 14px 7px 14px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.notification-task-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-accent-visual, #9887be);
+}
+
 @keyframes notificationProgress {
   from {
     transform: scaleX(1);
@@ -10340,6 +10364,74 @@ pre,
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.details-web-search-section {
+  gap: 10px;
+}
+
+.details-search-status {
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.details-search-status.status-ok {
+  color: var(--success, #87a98f);
+}
+
+.web-search-query {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.web-search-query strong {
+  color: var(--text-primary);
+  font-weight: 550;
+}
+
+.web-search-query small {
+  color: var(--text-tertiary);
+}
+
+.web-search-sources {
+  display: grid;
+  gap: 6px;
+}
+
+.web-search-source {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--surface-raised) 72%, transparent);
+  color: var(--text-primary);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.web-search-source:hover {
+  border-color: color-mix(in oklch, var(--accent) 42%, var(--border-subtle));
+  background: color-mix(in oklch, var(--surface-raised) 88%, var(--accent) 12%);
+}
+
+.web-search-source span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.web-search-source svg {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
 }
 
 .journal-message-details-toggle {

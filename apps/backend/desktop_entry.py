@@ -19,6 +19,9 @@ import uvicorn
 from fastapi import FastAPI
 
 
+GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 5
+
+
 def load_runtime_credentials() -> None:
     """Read one credential payload from the desktop shell's anonymous pipe."""
     if os.getenv("NEUROASIST_CREDENTIALS_STDIN") != "1":
@@ -84,7 +87,7 @@ def main() -> None:
         host="127.0.0.1",
         port=port,
         log_level="info",
-        timeout_graceful_shutdown=1,
+        timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS,
     )
     server = uvicorn.Server(config)
     app.state.desktop_shutdown_callback = lambda: setattr(server, "should_exit", True)

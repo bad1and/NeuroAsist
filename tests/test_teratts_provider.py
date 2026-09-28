@@ -40,14 +40,54 @@ def test_normalizer_emits_one_balanced_ru_span() -> None:
     assert "<en>" not in normalized
     assert "восемнадцатое августа" in normalized
     assert "Фаст+АПИ" in normalized
-    assert "версия два точка пять точка один" in normalized
+    assert "версии два точка пять точка один" in normalized
 
 
 def test_normalizer_converts_editor_stress_and_unicode_dash() -> None:
     normalized = normalize_for_teratts("Мука́ — это продукт…")
 
-    assert normalized == "<ru>Мук+а - это продукт…</ru>"
+    assert normalized == "<ru>Мук+а; это продукт…</ru>"
     assert "\u0301" not in normalized
+
+
+def test_normalizer_preserves_deliberate_homograph_stress_for_wordplay() -> None:
+    assert normalize_for_teratts("за́мок и замо́к") == "<ru>з+амок и зам+ок</ru>"
+
+
+@pytest.mark.parametrize(
+    ("source", "spoken"),
+    [
+        ("В 2024 году", "в две тысячи двадцать четвёртом году"),
+        ("К 2027 году", "к две тысячи двадцать седьмому году"),
+        ("С 2020 по 2024 годы", "с две тысячи двадцатого по две тысячи двадцать четвёртый год"),
+        ("Она заняла 1-е место, затем 2 место", "первое место, затем второе место"),
+        ("Она была на 3 месте", "на третьем месте"),
+        ("Поднялась с 5 места", "с пятого места"),
+        ("Диапазон 5–10 минут", "от пяти до десяти минут"),
+        ("От 20 до 30 секунд", "от двадцати до тридцати секунд"),
+        ("Рост 15–20%", "от пятнадцати до двадцати процентов"),
+        ("Вероятность 3,14%", "три целых четырнадцать сотых процента"),
+        ("Встреча 28.09.2026", "двадцать восьмого сентября две тысячи двадцать шестого года"),
+        ("Встреча 2026-09-28", "двадцать восьмого сентября две тысячи двадцать шестого года"),
+        ("Встреча 28/09/2026", "двадцать восьмого сентября две тысячи двадцать шестого года"),
+        ("Сейчас 1:01", "один час одна минута"),
+        ("Перенеси на 3 сентября", "на третье сентября"),
+        ("Перенеси на 23 сентября", "на двадцать третье сентября"),
+    ],
+)
+def test_normalizer_expands_contextual_numbers(source: str, spoken: str) -> None:
+    assert spoken.lower() in normalize_for_teratts(source).lower()
+
+
+def test_normalizer_turns_prose_punctuation_into_stable_prosody() -> None:
+    normalized = normalize_for_teratts("Я проверила — всё работает... Правда?!")
+
+    assert normalized == "<ru>Я проверила; всё работает… Правда?</ru>"
+
+
+def test_normalizer_speaks_arithmetic_operators_without_confusing_stress_marks() -> None:
+    assert normalize_for_teratts("2 + 2 = 4") == "<ru>два плюс два равно четыре</ru>"
+    assert normalize_for_teratts("5 - 3 = 2") == "<ru>пять минус три равно два</ru>"
 
 
 def test_teratts_provider_maps_style_and_tempo_and_writes_44100_wav() -> None:
@@ -56,6 +96,8 @@ def test_teratts_provider_maps_style_and_tempo_and_writes_44100_wav() -> None:
     def loader(**kwargs):
         assert kwargs["revision"] == TERATTS_REVISION
         assert kwargs["provider"] == "CPUExecutionProvider"
+        assert kwargs["ruaccent_mode"] == "full"
+        assert kwargs["russian_stress"] is True
         return model
 
     provider = TeraTTSProvider(

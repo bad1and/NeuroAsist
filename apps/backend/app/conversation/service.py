@@ -933,27 +933,39 @@ class LiveConversationService:
                 session.acknowledged_prefixes.setdefault(utterance_id, []).append(str(text))
 
     async def playback_finished(self, session_id: str, utterance_id: str | None) -> None:
-        if not utterance_id:
-            return
         session = await self.ensure_session(session_id)
         async with session.lock:
+            resolved_id = utterance_id
+            if not resolved_id or resolved_id not in session.live_utterance_ids:
+                if (
+                    session.active_utterance_id
+                    and session.active_utterance_id in session.live_utterance_ids
+                    and session.active_utterance_id not in session.committed_assistant_utterances
+                ):
+                    resolved_id = session.active_utterance_id
+                else:
+                    for cand_id in reversed(list(session.live_utterance_ids)):
+                        if cand_id not in session.committed_assistant_utterances:
+                            resolved_id = cand_id
+                            break
             if (
-                utterance_id not in session.live_utterance_ids
-                or utterance_id in session.committed_assistant_utterances
+                not resolved_id
+                or resolved_id not in session.live_utterance_ids
+                or resolved_id in session.committed_assistant_utterances
             ):
                 return
-            prefix = " ".join(session.acknowledged_prefixes.get(utterance_id, [])).strip()
+            prefix = " ".join(session.acknowledged_prefixes.get(resolved_id, [])).strip()
             if not prefix:
-                prefix = session.generated_assistant_replies.get(utterance_id, "").strip()
+                prefix = session.generated_assistant_replies.get(resolved_id, "").strip()
             if not prefix:
                 return
-            session.committed_assistant_utterances.add(utterance_id)
-            generation = session.utterance_generations.get(utterance_id, session.generation)
-            metadata = session.generated_assistant_metadata.pop(utterance_id, {})
+            session.committed_assistant_utterances.add(resolved_id)
+            generation = session.utterance_generations.get(resolved_id, session.generation)
+            metadata = session.generated_assistant_metadata.pop(resolved_id, {})
         await asyncio.to_thread(
             self._commit_assistant,
             session,
-            utterance_id,
+            resolved_id,
             prefix,
             generation,
             status="completed",
@@ -970,11 +982,43 @@ class LiveConversationService:
         session = self._sessions.pop(session_id, None)
         if session is None:
             return
-        for task in tuple(session.active_tasks):
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-        session.phase = ConversationPhase.CLOSED
+        uncommitted: list[tuple[str, str, int, str, dict[str, object]]] = []
+        async with session.lock:
+            for utterance_id in session.live_utterance_ids:
+                if utterance_id in session.committed_assistant_utterances:
+                    continue
+                generated = session.generated_assistant_replies.get(utterance_id, "").strip()
+                acknowledged = " ".join(
+                    session.acknowledged_prefixes.get(utterance_id, [])
+                ).strip()
+                content = generated or acknowledged
+                if not content:
+                    continue
+                status = "completed" if generated else "interrupted"
+                uncommitted.append((
+                    utterance_id,
+                    content,
+                    session.utterance_generations.get(utterance_id, session.generation),
+                    status,
+                    session.generated_assistant_metadata.pop(utterance_id, {}),
+                ))
+            for utterance_id, _, _, _, _ in uncommitted:
+                session.committed_assistant_utterances.add(utterance_id)
+            for task in tuple(session.active_tasks):
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+            session.phase = ConversationPhase.CLOSED
+        for utterance_id, prefix, utterance_generation, status, metadata in uncommitted:
+            await asyncio.to_thread(
+                self._commit_assistant,
+                session,
+                utterance_id,
+                prefix,
+                utterance_generation,
+                status=status,
+                metadata=metadata,
+            )
 
     async def close(self) -> None:
         for session_id in tuple(self._sessions):

@@ -43,14 +43,6 @@ _TECH_NEWS_SUBPATTERN = re.compile(
     re.IGNORECASE,
 )
 
-_SEARCH_QUERY_PATTERN = re.compile(
-    r"(?:найди\s+(?:в\s+интернете|инфу|информацию)|погугли|загугли|проверь\s+в\s+сети|"
-    r"курс\s+(?:доллара|евро|юаня|биткоина|btc|usd|eur|rub)|"
-    r"кто\s+(?:выиграл|победил|чемпион)|search|lookup)",
-    re.IGNORECASE,
-)
-
-
 class SituationalCoordinator:
     """Manages environmental services and dynamically provides context to the agent."""
 
@@ -154,12 +146,6 @@ class SituationalCoordinator:
             if news_block:
                 enrichment_parts.append(news_block)
 
-        # 3. Search / Fact Lookup Intent
-        if _SEARCH_QUERY_PATTERN.search(clean_text):
-            search_block = await self._handle_search_intent(clean_text)
-            if search_block:
-                enrichment_parts.append(search_block)
-
         if not enrichment_parts:
             return None
 
@@ -211,19 +197,3 @@ class SituationalCoordinator:
             return "[СВЕЖИЕ НОВОСТИ ДЛЯ IRIS: Ленты новостей сейчас недоступны.]"
 
         return f"[СВЕЖИЙ ДАЙДЖЕСТ НОВОСТЕЙ ДЛЯ IRIS]\n{digest.compact_summary(max_items=5)}"
-
-    async def _handle_search_intent(self, user_text: str) -> str | None:
-        # Extract the core query after search verbs
-        match = _SEARCH_QUERY_PATTERN.search(user_text)
-        query = user_text
-        if match:
-            pos = match.end()
-            remainder = user_text[pos:].strip(" :?.,")
-            if len(remainder) >= 3:
-                query = remainder
-
-        snapshot = await self.search_service.search(query)
-        if not snapshot or (not snapshot.answer and not snapshot.results):
-            return None
-
-        return f"[СПРАВКА ВЕБ-ПОИСКА ДЛЯ IRIS]\n{snapshot.compact_summary(max_items=3)}"

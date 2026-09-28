@@ -53,6 +53,14 @@ beforeEach(() => {
             total_tokens: 408,
             model: "deepseek-flash",
           },
+          web_search: {
+            query: "актуальная версия Python",
+            searched_at: "2026-09-18T03:00:30Z",
+            provider: "duckduckgo",
+            status: "ok",
+            cached: false,
+            sources: [{ title: "Python.org", url: "https://www.python.org/" }],
+          },
         },
       },
     ],
@@ -79,6 +87,8 @@ describe("JournalPage token dialog interaction", () => {
     expect(screen.getByText("Параметры вызова LLM")).toBeInTheDocument();
     expect(screen.getByText("Output (генерация)")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Свернуть" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Поиск в интернете")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Python.org/ })).toHaveAttribute("href", "https://www.python.org/");
   });
 
   it("opens token statistics dialog when clicking on a message with tokens", async () => {

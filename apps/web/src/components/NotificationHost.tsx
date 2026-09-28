@@ -90,6 +90,9 @@ function NotificationCard({
   }, [notification.duration, isPaused, isExiting, handleDismiss]);
 
   const isAutoDismiss = notification.duration !== "persistent" && typeof notification.duration === "number";
+  const taskProgress = notification.progress === undefined
+    ? null
+    : Math.min(1, Math.max(0, notification.progress));
   const hasDetails = Boolean(notification.details);
   const isLongMessage = (notification.message?.length ?? 0) > 90 || notification.message?.includes("\n");
   const canExpand = hasDetails || isLongMessage;
@@ -257,7 +260,18 @@ function NotificationCard({
         </div>
       )}
 
-      {isAutoDismiss && (
+      {taskProgress !== null ? (
+        <div
+          className="notification-task-progress"
+          role="progressbar"
+          aria-label="Прогресс"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(taskProgress * 100)}
+        >
+          <span style={{ width: `${taskProgress * 100}%` }} />
+        </div>
+      ) : isAutoDismiss && (
         <div
           className={`notification-progress-bar${isPaused ? " is-paused" : ""}`}
           style={{ animationDuration: `${notification.duration}ms` }}

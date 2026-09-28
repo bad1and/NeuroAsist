@@ -44,7 +44,7 @@ try {
     if (-not $unauthorized) { throw "Desktop core accepted an unauthenticated request." }
 
     Invoke-RestMethod "http://127.0.0.1:$Port/internal/shutdown" -Method Post -Headers $headers -TimeoutSec 2 | Out-Null
-    if (-not $core.WaitForExit(5000)) { throw "Desktop core did not exit gracefully." }
+    if (-not $core.WaitForExit(8000)) { throw "Desktop core did not exit gracefully." }
     Write-Host "Desktop core smoke passed: authenticated startup and graceful shutdown."
 } finally {
     if ($null -ne $core -and -not $core.HasExited) { & taskkill.exe /PID $core.Id /T /F *> $null }

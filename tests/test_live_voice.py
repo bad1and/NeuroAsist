@@ -183,6 +183,33 @@ def test_voice_directive_parser_is_fragment_safe_fail_closed_and_limited() -> No
     assert len(directives) == 3
 
 
+def test_voice_directive_controls_precise_pauses_speed_and_strong_emphasis() -> None:
+    parser = LiveVoiceDirectiveParser()
+
+    output = parser.feed(
+        "До. [[voice pace=slow emphasis=strong speed=0.82 "
+        "pause_before=medium pause_after=650]]После."
+    )
+    output.extend(parser.finish())
+
+    directive = next(item for item in output if isinstance(item, VoiceDirective))
+    assert directive.pace is SpeechPace.SLOW
+    assert directive.emphasis is SpeechEmphasis.STRONG
+    assert directive.speed == 0.82
+    assert directive.pause_before_ms == 350
+    assert directive.pause_after_ms == 650
+    assert "[[voice" not in "".join(item for item in output if isinstance(item, str))
+
+
+def test_voice_directive_clamps_generated_pause_to_safe_limit() -> None:
+    parser = LiveVoiceDirectiveParser()
+
+    output = [*parser.feed("[[voice pause=9999]]Тише."), *parser.finish()]
+
+    directive = next(item for item in output if isinstance(item, VoiceDirective))
+    assert directive.pause_before_ms == 1200
+
+
 def test_overlong_voice_directive_never_leaks_visible_text() -> None:
     value = "До. [[voice " + ("x" * 200) + "]] После."
     assert clean_voice_directives(value) == "До.  После."
@@ -302,6 +329,14 @@ def test_live_chunker_does_not_merge_multiple_sentences() -> None:
         "Нормально, всё как обычно — копчусь потихоньку.",
         "А у тебя как?",
     ]
+
+
+def test_chunker_can_release_a_long_dash_clause_for_natural_pause() -> None:
+    chunker = TextChunker(first_target=30, next_target=80, max_chars=90, max_words=18)
+
+    chunks = chunker.feed("Я сначала всё внимательно проверю — потом спокойно объясню результат. ")
+
+    assert chunks == ["Я сначала всё внимательно проверю —", "потом спокойно объясню результат."]
 
 
 def test_live_tts_safe_jobs_keep_short_sentence_whole() -> None:

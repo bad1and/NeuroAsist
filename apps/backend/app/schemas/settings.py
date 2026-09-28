@@ -69,6 +69,7 @@ class PublicSettingsResponse(BaseModel):
     weather_enabled: bool = True
     news_enabled: bool = True
     news_category: str = "all"
+    web_search_enabled: bool = True
 
 
 class RuntimeSettingsPatch(BaseModel):
@@ -112,6 +113,7 @@ class RuntimeSettingsPatch(BaseModel):
     weather_enabled: bool | None = None
     news_enabled: bool | None = None
     news_category: str | None = None
+    web_search_enabled: bool | None = None
 
 
 class VoiceStylePatch(BaseModel):

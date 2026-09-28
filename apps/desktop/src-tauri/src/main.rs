@@ -41,6 +41,11 @@ const CORE_STARTUP_ATTEMPTS: u16 = 120;
 const CORE_FAST_POLL_COUNT: u16 = 40;
 const CORE_STARTUP_FAST_DELAY: Duration = Duration::from_millis(50);
 const CORE_STARTUP_DELAY: Duration = Duration::from_millis(150);
+// The Python sidecar allows five seconds for Uvicorn connections and lifespan
+// hooks to finish. Keep the shell alive slightly longer so it does not kill a
+// healthy graceful shutdown while the backend is still flushing state.
+const CORE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(7);
+const CORE_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(40);
 // A cold Unity start loads Mono, D3D and the VRM scene before it creates the
 // player HWND. On the target machine this takes about fourteen seconds; five
 // seconds caused the desktop shell to kill a healthy player before it could
@@ -397,11 +402,12 @@ impl DesktopState {
         if let Some(child) = child {
             match child {
                 CoreProcess::Native(mut child) => {
-                    for _ in 0..50 {
+                    let deadline = Instant::now() + CORE_SHUTDOWN_TIMEOUT;
+                    while Instant::now() < deadline {
                         if child.try_wait().ok().flatten().is_some() {
                             return;
                         }
-                        thread::sleep(Duration::from_millis(40));
+                        thread::sleep(CORE_SHUTDOWN_POLL_INTERVAL);
                     }
                     let _ = child.kill();
                     let _ = child.wait();

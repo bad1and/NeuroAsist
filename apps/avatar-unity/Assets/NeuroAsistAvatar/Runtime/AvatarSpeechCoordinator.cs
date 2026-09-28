@@ -98,7 +98,14 @@ namespace NeuroAsist.Avatar
             motion?.OnSpeechSegmentStarted(sequence);
         }
 
-        public void SetAudioMuted(bool muted) { player?.SetMuted(muted); }
+        public void SetAudioMuted(bool muted)
+        {
+            player?.SetMuted(muted);
+            // Muting Unity is used when the browser owns the audible output.
+            // The ordinary uLipSync path then receives silence, so switch to
+            // clip-driven analysis for the duration of desktop-routed audio.
+            fallback?.SetMutedPlayback(muted);
+        }
 
         public void Speak(AvatarCommand command, AvatarCommandPayload payload)
         {

@@ -546,6 +546,40 @@ def test_handle_user_message_retries_stale_previous_assistant_reply() -> None:
     assert any(event["reason"] == "stale_duplicate" and event["previous_assistant_message_id"] == "assistant-old" for event in events)
 
 
+def test_relevance_guard_diagnostic_is_not_a_user_warning() -> None:
+    events: list[tuple] = []
+    agent = CharacterAgent(
+        None,
+        InMemoryHistory(),
+        history_limit=0,
+        event_publisher=lambda *args: events.append(args),
+    )
+
+    agent._publish_relevance_guard(
+        "detected",
+        "assistant-old",
+        {"similarity": 1.0, "reason": "exact"},
+        False,
+        "stale_duplicate",
+    )
+
+    assert events == [
+        (
+            "llm.relevance_guard",
+            "info",
+            "LLM response relevance guard evaluated",
+            {
+                "outcome": "detected",
+                "reason": "stale_duplicate",
+                "previous_assistant_message_id": "assistant-old",
+                "similarity": 1.0,
+                "similarity_reason": "exact",
+                "pending_followup": False,
+            },
+        )
+    ]
+
+
 def test_explicit_request_to_repeat_does_not_trigger_stale_guard() -> None:
     previous = "Горячим — это уже другой разговор. Ты каждый раз делаешь новую заварку?"
 

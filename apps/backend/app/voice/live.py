@@ -273,6 +273,10 @@ class VoiceSessionManager:
             end_of_speech_to_playback_ms=elapsed_ms,
         )
 
+    def active_utterance_id(self, session_id: str) -> str | None:
+        context = self._active.get(session_id) or self._playback_pending.get(session_id)
+        return context.utterance_id if context is not None else None
+
     async def start(
         self,
         *,
@@ -689,7 +693,7 @@ class VoiceSessionManager:
                 directive=pending_voice_directive,
                 forced_clause_split=segment_text.rstrip().endswith((",", ";", ":")),
             )
-            paragraph_pause = 180 if "\n\n" in raw_segment else segment.pause_after_ms
+            paragraph_pause = max(180, segment.pause_after_ms) if "\n\n" in raw_segment else segment.pause_after_ms
             effective_emotion = segment.emotion or active_emotion
             effective_intensity = segment.emotion_intensity if segment.emotion_intensity is not None else active_emotion_intensity
             segment = SpeechSegment(
@@ -853,32 +857,8 @@ class VoiceSessionManager:
                     context.generation,
                     completed_reply,
                 )
-            tokens_usage = None
-            llm_prov = getattr(agent, "_llm_provider", None)
-            last_resp = getattr(llm_prov, "last_response", None) if llm_prov else None
-            metrics = getattr(llm_prov, "last_call_metrics", None) if llm_prov else None
-            usage_obj = (
-                last_resp.usage
-                if last_resp and last_resp.usage
-                else (metrics.usage if metrics and metrics.usage else None)
-            )
-            if usage_obj is not None:
-                tokens_usage = {
-                    "prompt_tokens": usage_obj.prompt_tokens,
-                    "completion_tokens": usage_obj.completion_tokens,
-                    "total_tokens": usage_obj.total_tokens,
-                    "reasoning_tokens": usage_obj.reasoning_tokens,
-                    "prompt_cache_hit_tokens": usage_obj.prompt_cache_hit_tokens,
-                    "prompt_cache_miss_tokens": usage_obj.prompt_cache_miss_tokens,
-                    "model": last_resp.model if last_resp else (metrics.model if metrics else ""),
-                    "timestamp": time.time(),
-                    "latency_ms": round(
-                        last_resp.latency_ms
-                        if (last_resp and last_resp.latency_ms is not None)
-                        else (metrics.latency_ms if metrics else 0.0),
-                        1,
-                    ),
-                }
+            token_reader = getattr(agent, "token_metadata", None)
+            tokens_usage = token_reader() if callable(token_reader) else None
             await self._send(
                 context,
                 "voice.text.completed",
@@ -1095,7 +1075,7 @@ class VoiceSessionManager:
                 is_final=False,
                 motion=StreamMotionCuePayload(
                     gesture=part_text.motion_gesture,
-                    emphasized=part_text.emphasis is SpeechEmphasis.LIGHT,
+                emphasized=part_text.emphasis is not SpeechEmphasis.NONE,
                     emotion=part_text.emotion,
                     intensity=part_text.emotion_intensity,
                 ),

@@ -17,6 +17,7 @@ class SpeechPace(StrEnum):
 class SpeechEmphasis(StrEnum):
     NONE = "none"
     LIGHT = "light"
+    STRONG = "strong"
 
 
 BASE_TEMPO = {
@@ -52,6 +53,8 @@ class VoiceDirective:
     pace: SpeechPace = SpeechPace.NORMAL
     emphasis: SpeechEmphasis = SpeechEmphasis.NONE
     speed: float | None = None
+    pause_before_ms: int | None = None
+    pause_after_ms: int | None = None
     gesture: str = "auto"
     emotion: str | None = None
     emotion_intensity: float | None = None
@@ -85,17 +88,27 @@ class SpeechSegment:
         )
 
 
-_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?…])(?:[\"'»)]*)\s+")
+_SENTENCE_BOUNDARY_RE = re.compile(r"(?:(?<=[.!?…])(?:[\"'»)]*)[ \t]+|\n+)")
+_MAX_EXPLICIT_PAUSE_MS = 1_200
+_NAMED_PAUSES_MS = {"none": 0, "short": 180, "medium": 350, "long": 650}
 
 
 def pause_after_ms(text: str, *, forced_clause_split: bool = False) -> int:
     stripped = text.rstrip()
-    if forced_clause_split or stripped.endswith((",", ";", ":")):
-        return 60
-    if stripped.endswith("…") or stripped.endswith("..."):
-        return 160
     if "\n\n" in text:
-        return 180
+        return 220
+    if stripped.endswith(("…", "...")):
+        return 220
+    if stripped.endswith(("—", "–", ";")):
+        return 130
+    if stripped.endswith(":"):
+        return 105
+    if forced_clause_split or stripped.endswith(","):
+        return 75
+    if stripped.endswith(("?", "!")):
+        return 145
+    if stripped.endswith("."):
+        return 120
     return 100
 
 
@@ -122,6 +135,12 @@ def make_speech_segment(
         if directive is not None and directive.speed is not None
         else OVERRIDE_TEMPO[pace] if directive is not None else BASE_TEMPO[pace]
     )
+    if directive is not None and directive.speed is None:
+        if emphasis is SpeechEmphasis.LIGHT:
+            tempo *= 0.97
+        elif emphasis is SpeechEmphasis.STRONG:
+            tempo *= 0.92
+    tempo = max(MIN_SPEECH_TEMPO, min(MAX_SPEECH_TEMPO, tempo))
     motion_gesture = directive.gesture if directive is not None and directive.gesture and directive.gesture != "auto" else None
     if motion_gesture is None:
         if directive is not None and directive.emotion in ("pouting", "wink", "wink_left", "teasing", "sleepy"):
@@ -139,8 +158,16 @@ def make_speech_segment(
         pace=pace,
         tempo=tempo,
         emphasis=emphasis,
-        pause_before_ms=35 if emphasis is SpeechEmphasis.LIGHT else 0,
-        pause_after_ms=pause_after_ms(text, forced_clause_split=forced_clause_split),
+        pause_before_ms=(
+            directive.pause_before_ms
+            if directive is not None and directive.pause_before_ms is not None
+            else 80 if emphasis is SpeechEmphasis.STRONG else 35 if emphasis is SpeechEmphasis.LIGHT else 0
+        ),
+        pause_after_ms=(
+            directive.pause_after_ms
+            if directive is not None and directive.pause_after_ms is not None
+            else pause_after_ms(text, forced_clause_split=forced_clause_split)
+        ),
         sequence=sequence,
         motion_gesture=motion_gesture,
         emotion=directive.emotion if directive is not None else None,
@@ -179,6 +206,8 @@ def plan_speech(text: str, delivery=None) -> list[SpeechSegment]:
             coerce_speech_pace(item.pace),
             coerce_speech_emphasis(item.emphasis),
             getattr(item, "speed", None),
+            getattr(item, "pause_before_ms", None),
+            getattr(item, "pause_after_ms", None),
         )
         for item in list(getattr(delivery, "overrides", ()) or ())[:3]
         if 1 <= int(item.segment) <= len(sentences_with_directives)
@@ -193,6 +222,8 @@ def plan_speech(text: str, delivery=None) -> list[SpeechSegment]:
                 pace=override.pace,
                 emphasis=override.emphasis,
                 speed=override.speed,
+                pause_before_ms=override.pause_before_ms,
+                pause_after_ms=override.pause_after_ms,
                 gesture=directive.gesture if directive is not None else "auto",
                 emotion=directive.emotion if directive is not None else None,
                 emotion_intensity=directive.emotion_intensity if directive is not None else None,
@@ -213,10 +244,11 @@ class LiveVoiceDirectiveParser:
 
     _START = "[["
     _MAX_TAG = 192
-    _VOICE_TAG_RE = re.compile(
-        r"^\[\[voice\s+pace=(?P<pace>[a-z_]+)\s+emphasis=(?P<emphasis>[a-z_]+)(?:\s+gesture=(?P<gesture>[a-z_]+))?\s*\]\]$",
-        re.IGNORECASE,
-    )
+    _VOICE_TAG_RE = re.compile(r"^\[\[voice(?P<body>(?:\s+[a-z_]+=[a-z0-9_.-]+)*)\s*\]\]$", re.IGNORECASE)
+    _VOICE_ATTR_RE = re.compile(r"(?P<key>[a-z_]+)=(?P<value>[a-z0-9_.-]+)", re.IGNORECASE)
+    _VOICE_KEYS = frozenset({
+        "pace", "emphasis", "speed", "pause", "pause_before", "pause_after", "gesture",
+    })
 
     def __init__(self, max_directives: int = 16, max_motion_directives: int = 16) -> None:
         self._buffer = ""
@@ -225,6 +257,53 @@ class LiveVoiceDirectiveParser:
         self._max_motion_directives = max(0, max_motion_directives)
         self._accepted = 0
         self._accepted_motion = 0
+
+    @staticmethod
+    def _parse_speed(value: str | None) -> float | None:
+        if value is None:
+            return None
+        try:
+            speed = float(value)
+        except ValueError:
+            return None
+        return max(MIN_SPEECH_TEMPO, min(MAX_SPEECH_TEMPO, speed))
+
+    @staticmethod
+    def _parse_pause(value: str | None) -> int | None:
+        if value is None:
+            return None
+        named = _NAMED_PAUSES_MS.get(value.lower())
+        if named is not None:
+            return named
+        try:
+            milliseconds = int(value)
+        except ValueError:
+            return None
+        return max(0, min(_MAX_EXPLICIT_PAUSE_MS, milliseconds))
+
+    @classmethod
+    def _parse_voice_tag(cls, raw_tag: str) -> VoiceDirective:
+        match = cls._VOICE_TAG_RE.match(raw_tag)
+        if match is None:
+            return VoiceDirective()
+        body = match.group("body").strip()
+        pairs = list(cls._VOICE_ATTR_RE.finditer(body))
+        if body and " ".join(item.group(0) for item in pairs) != " ".join(body.split()):
+            return VoiceDirective()
+        attributes = {item.group("key").lower(): item.group("value") for item in pairs}
+        if not set(attributes).issubset(cls._VOICE_KEYS):
+            return VoiceDirective()
+        pause_before = cls._parse_pause(attributes.get("pause_before"))
+        if pause_before is None:
+            pause_before = cls._parse_pause(attributes.get("pause"))
+        return VoiceDirective(
+            pace=coerce_speech_pace(attributes.get("pace")),
+            emphasis=coerce_speech_emphasis(attributes.get("emphasis")),
+            speed=cls._parse_speed(attributes.get("speed")),
+            pause_before_ms=pause_before,
+            pause_after_ms=cls._parse_pause(attributes.get("pause_after")),
+            gesture=(attributes.get("gesture") or "auto").lower(),
+        )
 
     def feed(self, delta: str) -> list[str | VoiceDirective]:
         if not delta:
@@ -305,20 +384,20 @@ class LiveVoiceDirectiveParser:
             if raw_tag_lower.startswith("[[voice") or raw_tag_lower.startswith("[voice"):
                 if self._accepted >= self._max_directives:
                     continue
-                match = self._VOICE_TAG_RE.match(raw_tag)
                 self._accepted += 1
-                if match is None:
-                    output.append(VoiceDirective())
-                    continue
-                gesture = (match.group("gesture") or "auto").lower()
+                directive = self._parse_voice_tag(raw_tag)
+                gesture = directive.gesture
                 if gesture != "auto":
                     if self._accepted_motion >= self._max_motion_directives:
                         gesture = "auto"
                     else:
                         self._accepted_motion += 1
                 output.append(VoiceDirective(
-                    coerce_speech_pace(match.group("pace").lower()),
-                    coerce_speech_emphasis(match.group("emphasis").lower()),
+                    pace=directive.pace,
+                    emphasis=directive.emphasis,
+                    speed=directive.speed,
+                    pause_before_ms=directive.pause_before_ms,
+                    pause_after_ms=directive.pause_after_ms,
                     gesture=gesture,
                 ))
                 continue

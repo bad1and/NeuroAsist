@@ -145,7 +145,10 @@ async def websocket_voice(websocket: WebSocket, session_id: str, version: int = 
             elif message.get("type") == "playback.finished":
                 service = getattr(websocket.app.state, "conversation_service", None)
                 if service is not None:
-                    await service.playback_finished(session_id, message.get("utterance_id"))
+                    utterance_id = message.get("utterance_id")
+                    if not utterance_id and manager is not None:
+                        utterance_id = manager.active_utterance_id(session_id)
+                    await service.playback_finished(session_id, utterance_id)
     except asyncio.CancelledError:
         shutdown_cancelled = True
         logger.info("Voice WebSocket closed during backend shutdown")
@@ -262,13 +265,35 @@ async def websocket_events(websocket: WebSocket, token: str | None = None) -> No
         {},
     )
 
+    disconnect_task = asyncio.create_task(websocket.receive())
+    event_task: asyncio.Task | None = None
     try:
         while True:
-            event = await queue.get()
-            await websocket.send_json(event.model_dump())
+            event_task = asyncio.create_task(queue.get())
+            done, _ = await asyncio.wait(
+                {event_task, disconnect_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if disconnect_task in done:
+                message = disconnect_task.result()
+                if message["type"] == "websocket.disconnect":
+                    event_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await event_task
+                    break
+                disconnect_task = asyncio.create_task(websocket.receive())
+            if event_task in done:
+                await websocket.send_json(event_task.result().model_dump())
     except asyncio.CancelledError:
         logger.info("Events WebSocket closed during backend shutdown")
     except WebSocketDisconnect:
         pass
     finally:
+        if event_task is not None:
+            event_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await event_task
+        disconnect_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await disconnect_task
         event_bus.unsubscribe(queue)
