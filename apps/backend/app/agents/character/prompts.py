@@ -86,6 +86,15 @@ WEB_SEARCH_LIVE_RULES = """
 пользователь запретил обращаться к интернету, не ищи.
 """
 
+WEB_SEARCH_EVIDENCE_RULES = """
+Релизы/версии проверяй по свежему первоисточнику; query: точное имя и факт.
+Опционально: fallback_query и preferred_domains (до 3 официальных доменов).
+В live допустим JSON: [[web_search: {"query":"...","preferred_domains":["example.com"]}]].
+Учитывай дату объявления; слухи и догадки не выдавай за подтверждение.
+Не заменяй поиск обещанием «сейчас посмотрю» и не жди «ну что там».
+Команда запускает проверку и ответ в том же ходе; состояние инструмента известно только из результата.
+"""
+
 
 LEGACY_MEMORY_PROTOCOL = """Добавь "memory_candidates": [] и "memory_decisions": []. До 3 фактов:
 {"kind":"preference|identity|goal|skill","subject":"user","predicate":"...","value_text":"...","importance":0.7,"confidence":0.95,"sensitivity":"normal|sensitive"}. Секреты лучше опускай."""
@@ -127,7 +136,7 @@ def character_coding_routing_prompt(*, live: bool) -> str:
 
 def character_web_search_prompt(*, live: bool) -> str:
     """Return the optional one-step search protocol for this turn."""
-    return WEB_SEARCH_LIVE_RULES if live else WEB_SEARCH_JSON_RULES
+    return (WEB_SEARCH_LIVE_RULES if live else WEB_SEARCH_JSON_RULES) + WEB_SEARCH_EVIDENCE_RULES
 
 
 def character_state_prompt(state_context: str, *, live: bool) -> str:

@@ -17,6 +17,17 @@ from apps.backend.app.runtime.settings import RuntimeSettings, RuntimeSettingsSt
 from apps.backend.app.schemas.settings import RuntimeSettingsPatch
 
 
+@pytest.mark.parametrize("category", ["science", "games"])
+def test_new_news_categories_are_validated_and_persisted(monkeypatch, tmp_path, category):
+    runtime = RuntimeSettings()
+    store = RuntimeSettingsStore(tmp_path / "settings.json")
+    request = _request(runtime, store, tmp_path)
+    monkeypatch.setattr(settings_route, "get_public_settings", lambda _request: {"news_category": runtime.news_category})
+    result = asyncio.run(settings_route.patch_runtime_settings(RuntimeSettingsPatch(news_category=category), request))
+    assert result["news_category"] == category
+    assert store.load(RuntimeSettings()).news_category == category
+
+
 class EventBusStub:
     def __init__(self) -> None:
         self.events: list[tuple] = []

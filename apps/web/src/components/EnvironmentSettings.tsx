@@ -25,8 +25,8 @@ export function EnvironmentSettings({
   const [weatherEnabled, setWeatherEnabled] = useState(settings.weather_enabled ?? true);
   const [newsEnabled, setNewsEnabled] = useState(settings.news_enabled ?? true);
   const [webSearchEnabled, setWebSearchEnabled] = useState(settings.web_search_enabled ?? true);
-  const [newsCategory, setNewsCategory] = useState<"all" | "general" | "tech">(
-    (settings.news_category as "all" | "general" | "tech") ?? "all"
+  const [newsCategory, setNewsCategory] = useState<NonNullable<PublicSettings["news_category"]>>(
+    settings.news_category ?? "all"
   );
 
   const refreshStatus = useCallback(async () => {
@@ -196,7 +196,7 @@ export function EnvironmentSettings({
         <AppSwitch
           checked={newsEnabled}
           label="Сводка новостей"
-          description="Позволяет Iris отвечать на вопросы о главных событиях в мире и сфере технологий по свежим открытым RSS-лентам."
+          description="Свежие события России и мира, технологии, наука и игры из открытых RSS-лент."
           onChange={(checked) => {
             setNewsEnabled(checked);
             void saveSetting({ news_enabled: checked });
@@ -209,16 +209,18 @@ export function EnvironmentSettings({
             <CustomSelect
               value={newsCategory}
               onChange={(e) => {
-                const next = e.target.value as "all" | "general" | "tech";
+                const next = e.target.value as NonNullable<PublicSettings["news_category"]>;
                 setNewsCategory(next);
                 void saveSetting({ news_category: next });
               }}
             >
-              <option value="all">Все (Общие + Технологии)</option>
-              <option value="tech">Технологии и IT (Хабр, 3DNews)</option>
-              <option value="general">Общие мировые новости (РБК, Google News)</option>
+              <option value="all">Все категории</option>
+              <option value="tech">Технологии и IT</option>
+              <option value="general">Россия и мир</option>
+              <option value="science">Наука и космос</option>
+              <option value="games">Игры</option>
             </CustomSelect>
-            <small>Новости передаются только тогда, когда вы сами спрашиваете о них в диалоге.</small>
+            <small>Ленты обновляются в фоне. В диалог попадают только новости по теме вашего вопроса.</small>
           </label>
         )}
 

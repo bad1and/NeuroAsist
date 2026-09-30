@@ -98,6 +98,9 @@ async def get_environment_news(request: Request, category: str | None = None) ->
 
     return {
         "category": digest.category,
+        "updated_at": digest.updated_at,
+        "stale": digest.stale,
+        "cached": digest.cached,
         "articles": [
             {
                 "title": a.title,
@@ -105,6 +108,8 @@ async def get_environment_news(request: Request, category: str | None = None) ->
                 "snippet": a.snippet,
                 "published": a.published,
                 "category": a.category,
+                "url": a.url,
+                "stale": a.stale,
             }
             for a in digest.articles
         ],
