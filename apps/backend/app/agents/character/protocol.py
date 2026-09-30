@@ -105,6 +105,7 @@ def parse_turn(payload: dict[str, Any], *, user_text: str = "") -> tuple[Charact
         or "delivery" in payload_copy
         or "memory_candidates" in payload_copy
         or "coding_delegation" in payload_copy
+        or "dialogue_style" in payload_copy
         or "cognitive_appraisal" in payload_copy
         or "diary_note" in payload_copy
         or isinstance(payload_copy.get("gesture"), dict)

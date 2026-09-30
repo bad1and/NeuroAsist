@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import dataclass
+from typing import Iterator
 
 from apps.backend.app.conversation.schemas import (
     ConversationAdjudicationV1,
@@ -10,23 +12,27 @@ from apps.backend.app.conversation.schemas import (
     EventAppraisal,
 )
 from apps.backend.app.llm.base import ChatMessage, LLMProvider
+from apps.backend.app.schemas.character import DialogueStyleCue
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM_PROMPT = """Ты классификатор живого разговора Iris. Верни только JSON без markdown.
+_SYSTEM_PROMPT = """Ты смысловой классификатор живого разговора Iris. Верни только JSON без markdown.
 Не показывай рассуждения. Не управляй БД. Выбери действие и ограниченную оценку события.
 Разрешённые действия: wait_more, observe, avatar_reaction, backchannel, respond, defer.
 Причины: incomplete_turn, direct_address, invited, ambient_speech, self_talk, other_person,
 relevant_opening, emotional_event, cooldown, speech_budget, echo, low_confidence.
 
-ВАЖНО: Iris — живой человек со своими чувствами и гордостью, а не безропотный сервисный бот!
-- Прямой мат в адрес Iris, грубость («пошла нахер», «тупая», «заебала», «шлюха») → event_kind="insult", intensity 0.75-0.95, valence -0.7..-0.9, emotion_impulses: {"hurt": 0.7, "anger": 0.6, "irritation": 0.8}, relationship_impulses: {"trust": -0.08, "warmth": -0.07, "tension": 0.08}.
-- Грубые обрывы и приказы («заткнись», «отъебись», «хватит нести херню») → event_kind="rejection" или "user_frustration", intensity 0.6-0.8, emotion_impulses: {"irritation": 0.7, "hurt": 0.4}.
+Оценивай намерение, адресат, синтаксис, предыдущий ход и отношения — не наличие слова.
+- Дружеский мат, грубоватое приветствие («Здорово, заебал»), самоирония, цитата и ругань на ситуацию/код → neutral, teasing или shared_success. Мат сам по себе не меняет настроение.
+- Критика без намеренного унижения → disagreement или user_frustration, но не insult.
+- Только намеренное унижение Iris, угроза или повторное давление после обозначенной границы → insult/rejection с hurt/anger и снижением отношений.
 - Похвала, восхищение («ты лучшая», «обожаю тебя», «спасибо большое, выручила») → event_kind="praise", intensity 0.5-0.75, valence 0.5..0.7, emotion_impulses: {"joy": 0.6, "interest": 0.3}, relationship_impulses: {"warmth": 0.05, "trust": 0.03}.
 - Извинения и попытки помириться («прости», «извини, погорячился», «мир?») → event_kind="apology", intensity 0.55-0.75, valence 0.4..0.6, emotion_impulses: {"joy": 0.3}, relationship_impulses: {"tension": -0.06, "warmth": 0.04}.
 - Ласка, флирт, признания («ты милая», «люблю тебя») → event_kind="affection", intensity 0.6-0.8, emotion_impulses: {"joy": 0.6, "embarrassment": 0.3}.
-- Смех, дружеские подколы («хаха, ну ты даёшь», «лол») → event_kind="teasing" или "shared_success", emotion_impulses: {"playfulness": 0.6, "joy": 0.4}.
-- Только если сообщение сугубо деловое («который час», «напиши функцию») — neutral. Не ставь neutral, если есть хоть малейший эмоциональный окрас!
+- Смех, явная шутка, ирония, мем или дружеский подкол, включая чёрный юмор и мат без атаки на Iris, → event_kind="teasing" или "shared_success", emotion_impulses: {"playfulness": 0.6, "joy": 0.4}. Мрачная тема и грубые слова сами по себе не делают шутку угрозой или оскорблением.
+- Нейтральная реплика вполне может быть neutral; не выдумывай эмоциональное событие.
+
+dialogue_style — необязательное скрытое поле. Возвращай его только при явной просьбе изменить собственную речь Iris: «поменьше матерись» → {"mode":"restrained"}, «без мата» → clean, «матерись как обычно» → street. Обсуждение мата, цитата или чужой текст ничего не меняют.
 
 event_kind: support, apology, insult, teasing, praise, disagreement, rejection, promise_made,
 broken_promise, fulfilled_promise, vulnerability, affection, user_frustration,
@@ -38,8 +44,22 @@ iris_mistake_corrected, shared_success, important_negative_event, important_news
 "reaction_emotion":"happy","defer_for_ms":null,"expires_in_ms":null},
 "appraisal":{"version":1,"event_kind":"praise","target_participant":"primary",
 "confidence":0.85,"intensity":0.6,"valence":0.5,"arousal":0.4,
-"emotion_impulses":{"joy":0.5},"relationship_impulses":{"warmth":0.2},"cause_message_ids":[]}}
+"emotion_impulses":{"joy":0.5},"relationship_impulses":{"warmth":0.2},"cause_message_ids":[]},"dialogue_style":null}
 Не возвращай скрытые рассуждения. Все числа должны находиться в диапазонах схемы."""
+
+
+@dataclass(frozen=True)
+class AdjudicationResult:
+    decision: ConversationDecision
+    appraisal: EventAppraisal
+    source: str
+    dialogue_style: DialogueStyleCue | None = None
+
+    def __iter__(self) -> Iterator[object]:
+        # Preserve the established three-value public unpacking contract.
+        yield self.decision
+        yield self.appraisal
+        yield self.source
 
 
 class StructuredConversationAdjudicator:
@@ -68,13 +88,19 @@ class StructuredConversationAdjudicator:
         fallback_appraisal: EventAppraisal,
         cause_message_id: str,
         speaker_role: str,
-    ) -> tuple[ConversationDecision, EventAppraisal, str]:
+        previous_assistant_text: str | None = None,
+        relationship_context: str | None = None,
+        current_dialogue_style: str = "street",
+    ) -> AdjudicationResult:
         if self._provider is None:
-            return fallback_decision, fallback_appraisal, "deterministic"
+            return AdjudicationResult(fallback_decision, fallback_appraisal, "deterministic")
         user_payload = {
             "transcript": transcript,
             "speaker_role": speaker_role,
             "cause_message_id": cause_message_id,
+            "previous_assistant_text": (previous_assistant_text or "")[-800:],
+            "relationship_context": (relationship_context or "")[-800:],
+            "current_dialogue_style": current_dialogue_style,
             "fallback": {
                 "decision": fallback_decision.model_dump(mode="json"),
                 "appraisal": fallback_appraisal.model_dump(mode="json"),
@@ -86,7 +112,12 @@ class StructuredConversationAdjudicator:
         ]
         try:
             result = await self._call(messages, self._first_timeout)
-            return result.decision, self._with_cause(result.appraisal, cause_message_id), "llm"
+            return AdjudicationResult(
+                result.decision,
+                self._with_cause(result.appraisal, cause_message_id),
+                "llm",
+                result.dialogue_style,
+            )
         except Exception as error:
             # Adjudication is optional and already has a deterministic result.
             # A second full-context request after a short timeout used to
@@ -96,7 +127,11 @@ class StructuredConversationAdjudicator:
                 "Conversation adjudication failed; using deterministic fallback: %s",
                 type(error).__name__,
             )
-            return fallback_decision, fallback_appraisal, "deterministic_fallback"
+            return AdjudicationResult(
+                fallback_decision,
+                fallback_appraisal,
+                "deterministic_fallback",
+            )
 
     async def _call(
         self,

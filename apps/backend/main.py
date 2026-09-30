@@ -69,6 +69,7 @@ from apps.backend.app.voice.input import SileroVadProvider, VadProvider, VoiceIn
 from apps.backend.app.voice.runtime import configure_torch_threads
 from apps.backend.app.voice.orchestrator import SpeechOrchestrator
 from apps.backend.app.agents.character.agent import CharacterAgent
+from apps.backend.app.agents.character.dialogue_style import DialogueStyleService
 from apps.backend.app.conversation.schemas import ConversationAction, ConversationPhase, SpeakerRole
 from apps.backend.app.conversation.service import LiveConversationService
 from apps.backend.app.conversation.state_service import CharacterStateService
@@ -301,6 +302,7 @@ def create_app() -> FastAPI:
             else None
         ),
     ) if timeline_store is not None else None
+    dialogue_style_service = DialogueStyleService(timeline_store) if timeline_store is not None else None
     if memory_service is not None and semantic_init_error:
         memory_service._semantic_degraded_reason = semantic_init_error
     conversation_service = LiveConversationService(
@@ -314,6 +316,7 @@ def create_app() -> FastAPI:
             else None
         ),
         state_service=character_state_service,
+        dialogue_style_service=dialogue_style_service,
     ) if timeline_store is not None else None
     turn_coordinator = ConversationTurnCoordinator(timeline_store, event_bus.publish) if timeline_store is not None else None
     voice_service = VoiceService(settings)
@@ -491,6 +494,7 @@ def create_app() -> FastAPI:
                 coding_bridge=coding_bridge,
                 situational_coordinator=situational_coordinator,
                 runtime_settings=runtime_settings,
+                dialogue_style_service=dialogue_style_service,
             )
             source_message = (
                 await asyncio.to_thread(
@@ -607,6 +611,7 @@ def create_app() -> FastAPI:
             coding_bridge=coding_bridge,
             situational_coordinator=situational_coordinator,
             runtime_settings=runtime_settings,
+            dialogue_style_service=dialogue_style_service,
         )
         utterance_id = uuid.uuid4().hex
         voice = voice_service.resolve_tts_voice(language, runtime_settings.voice_tts_voice)
@@ -1390,6 +1395,7 @@ def create_app() -> FastAPI:
     app.state.memory_service = memory_service
     app.state.conversation_service = conversation_service
     app.state.character_state_service = character_state_service
+    app.state.dialogue_style_service = dialogue_style_service
     app.state.event_bus = event_bus
     app.state.runtime_settings = runtime_settings
     app.state.runtime_settings_store = runtime_settings_store

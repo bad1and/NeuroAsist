@@ -108,25 +108,6 @@ class ConversationDecisionEngine:
         "которая", "которое", "которые", "которую", "которого", "которому",
         "которым", "котором", "которых", "которыми", "сколько", "чем",
     }
-    _safety_insult = re.compile(
-        r"(?iu)(?:"
-        r"\b(?:ты\s+)?(?:глупая|тупая|дура|дурочка|шлюха|шлюшка|сука|сучка|мразь|мразота|тварь|хуесоска|хуесос|ебанутая|ебанутый|конченая|конченый|дебилка|дебил|идиотка|идиот|уродка|урод|у[её]бище|у[её]бок|чмо|чмошница|пизда|пиздища|блядина|шалава|гнида|падла|скотина|стерва|долбо[её]б\w*|пидор\w*|пидорас\w*|гандон|гондон|хуила|хуйло|заебала|заебал|бесполезная|бесполезный)\b|"
-        r"\b(?:злоебуч\w*|ебан\w*|охуевш\w*|охреневш\w*|выебист\w*|выебон\w*)\b|"
-        r"\b(?:пошла|пош[её]л|иди|пошли)(?:\s+(?:ты|вы|уже|ка|бы|к|в|нахер|нахуй)){0,3}\s+(?:нахер|нахуй|в\s+пизду|в\s+жопу|к\s+ч[её]рту|лесом|отсюда)\b|"
-        r"\b(?:заткнись|отъебись|съебись|отвали|закрой\s+рот|закрой\s+пасть|херню\s+несешь|херню\s+неси)\b"
-        r")"
-    )
-    _safety_praise = re.compile(
-        r"(?iu)(?:"
-        r"\b(?:ты\s+)?(?:лучшая|умница|молодец|красотка|прелесть|обожаю\s+тебя)\b|"
-        r"\bспасибо(?:\s+(?:огромное|большое|тебе))?\b|"
-        r"\bвыручила|ты\s+супер|люблю\s+тебя\b"
-        r")"
-    )
-    _safety_apology = re.compile(
-        r"(?iu)\b(?:прости|прости\s+меня|извини|извини\s+меня|извиняюсь|сорян|сорри|я\s+был\s+неправ|я\s+была\s+неправа|мир\?)\b"
-    )
-
     def decide(
         self,
         transcript: str,
@@ -334,70 +315,20 @@ class ConversationDecisionEngine:
             "ambiguous", False, False, False, ("insufficient_addressing_evidence",),
         )
 
-    @classmethod
+    @staticmethod
     def appraise(
-        cls,
         transcript: str,
         message_id: str,
         participant: str = "primary",
         previous_assistant_text: str | None = None,
     ) -> EventAppraisal:
-        text = transcript.casefold()
-        correction = re.search(r"\bне\s+([\w.ё-]+)\s*,?\s+а\s+([\w.ё-]+)\b", text)
-        if correction and previous_assistant_text:
-            old_value = correction.group(1).strip(".").casefold()
-            if old_value and old_value in previous_assistant_text.casefold():
-                return EventAppraisal(
-                    event_kind="iris_mistake_corrected", confidence=.93, intensity=.58,
-                    valence=0.0, arousal=0.0, direction="toward_iris",
-                    target_participant=participant,
-                    emotion_impulses={},
-                    relationship_impulses={}, cause_message_ids=[message_id],
-                )
-        if cls._safety_insult.search(text):
-            return EventAppraisal(
-                event_kind="insult",
-                confidence=0.85,
-                intensity=0.8,
-                valence=-0.8,
-                arousal=0.6,
-                direction="toward_iris",
-                target_participant=participant,
-                emotion_impulses={"hurt": 0.75, "anger": 0.65, "irritation": 0.8},
-                relationship_impulses={"trust": -0.08, "warmth": -0.07, "tension": 0.08},
-                cause_message_ids=[message_id],
-                serious=True,
-            )
-        if cls._safety_apology.search(text):
-            return EventAppraisal(
-                event_kind="apology",
-                confidence=0.8,
-                intensity=0.6,
-                valence=0.45,
-                arousal=0.2,
-                direction="toward_iris",
-                target_participant=participant,
-                emotion_impulses={"joy": 0.3},
-                relationship_impulses={"tension": -0.06, "warmth": 0.04},
-                cause_message_ids=[message_id],
-            )
-        if cls._safety_praise.search(text):
-            return EventAppraisal(
-                event_kind="praise",
-                confidence=0.8,
-                intensity=0.6,
-                valence=0.55,
-                arousal=0.35,
-                direction="toward_iris",
-                target_participant=participant,
-                emotion_impulses={"joy": 0.6, "interest": 0.25},
-                relationship_impulses={"warmth": 0.05, "trust": 0.03},
-                cause_message_ids=[message_id],
-            )
+        # Emotional meaning is model-only.  The deterministic path is a safe
+        # neutral fallback, never a word-list classifier.
+        _ = transcript, previous_assistant_text
         return EventAppraisal(
             event_kind="neutral",
-            confidence=0.7,
-            intensity=0.1,
+            confidence=0.0,
+            intensity=0.0,
             target_participant=participant,
             direction="unknown",
             cause_message_ids=[message_id],

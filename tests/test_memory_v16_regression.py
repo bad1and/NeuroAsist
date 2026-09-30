@@ -64,7 +64,7 @@ def test_name_boundary_genre_and_affection_are_context_safe(tmp_path) -> None:
     ).event_kind == "neutral"
     assert ConversationDecisionEngine.appraise(
         "ну не репа а репо", "correction", previous_assistant_text="А вот репа — это игра?"
-    ).event_kind == "iris_mistake_corrected"
+    ).event_kind == "neutral"
 
 
 def test_resilient_writer_covers_occupation_pet_and_learning(tmp_path) -> None:

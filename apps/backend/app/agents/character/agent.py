@@ -17,6 +17,14 @@ from apps.backend.app.agents.character.prompts import (
     character_state_prompt,
     character_web_search_prompt,
 )
+from apps.backend.app.agents.character.dialogue_pacing import infer_dialogue_pacing
+from apps.backend.app.agents.character.dialogue_style import (
+    DialogueStyleService,
+    dialogue_style_prompt,
+    has_street_voice,
+    street_voice_expected,
+    street_voice_retry_instruction,
+)
 from apps.backend.app.agents.character.persona import get_persona
 from apps.backend.app.agents.character.protocol import classify_intent, deterministic_turn, legacy_result, parse_turn
 from apps.backend.app.agents.character.voice_input import (
@@ -79,6 +87,7 @@ class CharacterAgent:
         coding_bridge=None,
         situational_coordinator=None,
         runtime_settings=None,
+        dialogue_style_service: DialogueStyleService | None = None,
     ) -> None:
         self._llm_provider = llm_provider
         self._history = history
@@ -91,12 +100,22 @@ class CharacterAgent:
         self._coding_bridge = coding_bridge
         self._situational_coordinator = situational_coordinator
         self._runtime_settings = runtime_settings
+        self._dialogue_style_service = dialogue_style_service
         self.last_turn: CharacterTurn | None = None
         self.last_memory_updates: list[dict[str, str]] = []
         self.last_web_search_metadata: dict[str, object] | None = None
         self.web_search_usage_metadata: dict[str, object] | None = None
         self._last_user_message = None
         self._active_turn_id: str | None = None
+
+    def _dialogue_style_context(self) -> tuple[str | None, str]:
+        episode_id = getattr(self._last_user_message, "episode_id", None)
+        mode = (
+            self._dialogue_style_service.resolve(episode_id)
+            if self._dialogue_style_service is not None
+            else "street"
+        )
+        return episode_id, mode
 
     def _prepare_turn(
         self,
@@ -381,6 +400,7 @@ class CharacterAgent:
                 ),
             ),
         ]
+        _, dialogue_style = self._dialogue_style_context()
         if self._web_search_enabled():
             messages.append(ChatMessage(role="system", content=character_web_search_prompt(live=False)))
         if model_routing_candidate:
@@ -402,6 +422,18 @@ class CharacterAgent:
                     content=f"Текущая обстановка и время:\n{situational_context}",
                 )
             )
+        pacing = infer_dialogue_pacing(prompt_user_text)
+        messages.append(
+            ChatMessage(
+                role="system",
+                content=pacing.prompt_block(input_mode=input_mode),
+            )
+        )
+        # Keep the active register adjacent to the user turn. Long continuity
+        # context and prior sterile assistant replies must not dilute it.
+        messages.append(
+            ChatMessage(role="system", content=dialogue_style_prompt(dialogue_style))
+        )
         messages.append(ChatMessage(role="user", content=prompt_user_text))
         empty_reply = self._empty_model_fallback(prompt_user_text)
 
@@ -495,27 +527,43 @@ class CharacterAgent:
             parsed.payload["reply"] if parsed.valid else "", previous_assistant_reply, prompt_user_text,
         )
         needs_duplicate_retry = bool(parsed.valid and duplicate["stale"])
+        needs_style_retry = bool(
+            parsed.valid
+            and self._dialogue_style_service is not None
+            and (parsed.turn is None or parsed.turn.dialogue_style is None)
+            and street_voice_expected(dialogue_style, pacing.mode)
+            and not has_street_voice(parsed.payload["reply"])
+        )
         needs_guard_retry = (
             needs_continuity_retry
             or needs_pending_retry
             or needs_anchor_retry
             or needs_duplicate_retry
             or needs_status_grounding_retry
+            or needs_style_retry
         )
         if needs_guard_retry and retry_used:
             # A malformed first answer already consumed the single retry for
             # this visible turn. Do not amplify one user action into a third
             # full-context API request; use the same deterministic guard
             # fallbacks as a rejected retry.
-            parsed = (
-                self._anchor_reply_fallback(required_anchors)
-                if needs_anchor_retry
-                else self._status_reply_fallback()
-                if needs_status_grounding_retry
-                else self._response_target_fallback(response_target_text or "")
-                if needs_pending_retry
-                else self._stale_reply_fallback()
+            hard_guard_failed = (
+                needs_continuity_retry
+                or needs_pending_retry
+                or needs_anchor_retry
+                or needs_duplicate_retry
+                or needs_status_grounding_retry
             )
+            if hard_guard_failed:
+                parsed = (
+                    self._anchor_reply_fallback(required_anchors)
+                    if needs_anchor_retry
+                    else self._status_reply_fallback()
+                    if needs_status_grounding_retry
+                    else self._response_target_fallback(response_target_text or "")
+                    if needs_pending_retry
+                    else self._stale_reply_fallback()
+                )
             if built_context is not None:
                 built_context.diagnostics["relevance_guard"] = {
                     "outcome": "fallback",
@@ -533,7 +581,7 @@ class CharacterAgent:
             if built_context is not None:
                 built_context.diagnostics["relevance_guard"] = {
                     "outcome": "detected",
-                    "reason": "missing_anchor" if needs_anchor_retry else "continuity",
+                    "reason": "missing_anchor" if needs_anchor_retry else "sterile_street_voice" if needs_style_retry else "continuity",
                     "required_anchors": required_anchors,
                 }
             # This is deliberately invisible: a snarky but ungrounded opening
@@ -555,6 +603,7 @@ class CharacterAgent:
                                 required_anchors,
                                 response_target_text,
                                 response_target_anchors,
+                                street_voice=needs_style_retry,
                             ),
                         ),
                     ])
@@ -581,6 +630,10 @@ class CharacterAgent:
                 and not self._misses_required_anchors(repaired.payload["reply"], required_anchors)
                 and not self._stale_duplicate_assessment(repaired.payload["reply"], previous_assistant_reply, prompt_user_text)["stale"]
                 and not self._has_ungrounded_status_question(repaired.payload["reply"], prompt_user_text)
+                and (
+                    not needs_style_retry
+                    or has_street_voice(repaired.payload["reply"])
+                )
             ):
                 parsed = repaired
                 if built_context is not None:
@@ -796,6 +849,7 @@ class CharacterAgent:
         messages = [
             ChatMessage(role="system", content=system_prompt),
         ]
+        _, dialogue_style = self._dialogue_style_context()
         if self._web_search_enabled():
             messages.append(ChatMessage(role="system", content=character_web_search_prompt(live=True)))
         if model_routing_candidate:
@@ -817,6 +871,16 @@ class CharacterAgent:
                     content=f"Окружение и текущее время:\n{situational_context}",
                 )
             )
+        pacing = infer_dialogue_pacing(prompt_user_text)
+        messages.append(
+            ChatMessage(
+                role="system",
+                content=pacing.prompt_block(input_mode=input_mode),
+            )
+        )
+        messages.append(
+            ChatMessage(role="system", content=dialogue_style_prompt(dialogue_style))
+        )
         messages.append(ChatMessage(role="user", content=prompt_user_text))
         chunks: list[str] = []
         route_buffer = ""
@@ -830,6 +894,10 @@ class CharacterAgent:
             "response_target_text": response_target_text,
             "response_target_anchors": response_target_anchors,
             "guard_diagnostics": built_context.diagnostics if built_context is not None else None,
+            "require_street_voice": bool(
+                self._dialogue_style_service is not None
+                and street_voice_expected(dialogue_style, pacing.mode)
+            ),
         }
         visible_stream = (
             self._live_stream_with_optional_search(messages, guard_options)
@@ -906,6 +974,17 @@ class CharacterAgent:
         persist_reply_callback: Callable[[str], Any] | None,
     ) -> dict[str, Any]:
         """Commit a batch reply and memory effects on an I/O worker thread."""
+        if (
+            parsed.valid
+            and parsed.turn is not None
+            and parsed.turn.dialogue_style is not None
+            and self._dialogue_style_service is not None
+        ):
+            self._dialogue_style_service.apply(
+                getattr(self._last_user_message, "episode_id", None),
+                parsed.turn.dialogue_style.mode,
+                source_message_id=getattr(self._last_user_message, "id", None),
+            )
         # The modern path deliberately has one writer: the background extractor.
         if (
             parsed.valid
@@ -1346,6 +1425,7 @@ class CharacterAgent:
         response_target_text: str | None = None,
         response_target_anchors: list[str] | None = None,
         guard_diagnostics: dict[str, object] | None = None,
+        require_street_voice: bool = False,
     ) -> AsyncIterator[str]:
         """Reject continuity or stale-repetition failures before UI/TTS sees text."""
         buffered: list[str] = []
@@ -1369,10 +1449,11 @@ class CharacterAgent:
             # original first-sentence latency and delta cadence.
             sentence_count = len(re.findall(r"[.!?…](?:\s|$)", opening))
             suspicious_opener = bool(re.search(r"(?:^|\n)\s*(?:ну|а)\?\s*(?:я\s+здесь)?", opening.lower()))
-            required_sentences = 3 if status_check else 2 if suspicious_opener or require_pending_response or duplicate_guard or required_anchors else 1
+            required_sentences = 3 if status_check else 2 if suspicious_opener or require_pending_response or duplicate_guard or required_anchors or require_street_voice else 1
             if sentence_count < required_sentences and len(opening) < 220:
                 continue
             duplicate = self._stale_duplicate_assessment(opening, previous_assistant_reply, user_text)
+            missing_street_voice = require_street_voice and not has_street_voice(opening)
             if self._has_unconfirmed_continuity_accusation(opening) or self._has_unconfirmed_assistant_content_attribution(
                 opening, previous_assistant_reply, user_text,
             ) or (
@@ -1381,11 +1462,12 @@ class CharacterAgent:
                     opening,
                     response_target_anchors or [],
                 )
-            ) or self._misses_required_anchors(opening, required_anchors or []) or duplicate["stale"] or self._has_ungrounded_status_question(opening, user_text):
+            ) or self._misses_required_anchors(opening, required_anchors or []) or duplicate["stale"] or self._has_ungrounded_status_question(opening, user_text) or missing_street_voice:
                 reason = (
                     "missing_anchor" if self._misses_required_anchors(opening, required_anchors or [])
                     else "stale_duplicate" if duplicate["stale"]
                     else "ungrounded_status" if self._has_ungrounded_status_question(opening, user_text)
+                    else "sterile_street_voice" if missing_street_voice
                     else "continuity"
                 )
                 self._publish_relevance_guard("detected", previous_assistant_id, duplicate, require_pending_response, reason)
@@ -1402,6 +1484,8 @@ class CharacterAgent:
                     required_anchors or [],
                     response_target_text,
                     response_target_anchors or [],
+                    require_street_voice=require_street_voice,
+                    original_reply=opening,
                 )
                 if retry == self._stale_reply_fallback().payload["reply"]:
                     self._publish_relevance_guard("fallback", previous_assistant_id, duplicate, require_pending_response, "retry_rejected")
@@ -1416,6 +1500,7 @@ class CharacterAgent:
         if not released and buffered:
             opening = "".join(buffered)
             duplicate = self._stale_duplicate_assessment(opening, previous_assistant_reply, user_text)
+            missing_street_voice = require_street_voice and not has_street_voice(opening)
             if self._has_unconfirmed_continuity_accusation(opening) or self._has_unconfirmed_assistant_content_attribution(
                 opening, previous_assistant_reply, user_text,
             ) or (
@@ -1424,11 +1509,12 @@ class CharacterAgent:
                     opening,
                     response_target_anchors or [],
                 )
-            ) or self._misses_required_anchors(opening, required_anchors or []) or duplicate["stale"] or self._has_ungrounded_status_question(opening, user_text):
+            ) or self._misses_required_anchors(opening, required_anchors or []) or duplicate["stale"] or self._has_ungrounded_status_question(opening, user_text) or missing_street_voice:
                 reason = (
                     "missing_anchor" if self._misses_required_anchors(opening, required_anchors or [])
                     else "stale_duplicate" if duplicate["stale"]
                     else "ungrounded_status" if self._has_ungrounded_status_question(opening, user_text)
+                    else "sterile_street_voice" if missing_street_voice
                     else "continuity"
                 )
                 self._publish_relevance_guard("detected", previous_assistant_id, duplicate, require_pending_response, reason)
@@ -1445,6 +1531,8 @@ class CharacterAgent:
                     required_anchors or [],
                     response_target_text,
                     response_target_anchors or [],
+                    require_street_voice=require_street_voice,
+                    original_reply=opening,
                 )
                 if guard_diagnostics is not None:
                     guard_diagnostics["relevance_guard"]["outcome"] = "applied"
@@ -1457,6 +1545,8 @@ class CharacterAgent:
         user_text: str, require_pending_response: bool, required_anchors: list[str],
         response_target_text: str | None = None,
         response_target_anchors: list[str] | None = None,
+        require_street_voice: bool = False,
+        original_reply: str = "",
     ) -> str:
         """A retry is fully buffered so a second stale answer cannot reach TTS."""
         try:
@@ -1473,6 +1563,8 @@ class CharacterAgent:
                                 required_anchors,
                                 response_target_text,
                                 response_target_anchors or [],
+                                street_voice=require_street_voice,
+                                live=True,
                             ),
                         ),
                     ])
@@ -1494,7 +1586,21 @@ class CharacterAgent:
             or self._misses_required_anchors(reply, required_anchors)
             or self._stale_duplicate_assessment(reply, previous_assistant_reply, user_text)["stale"]
             or self._has_ungrounded_status_question(reply, user_text)
+            or (require_street_voice and not has_street_voice(reply))
         ):
+            hard_guard_failed = bool(
+                self._has_unconfirmed_continuity_accusation(reply)
+                or self._has_unconfirmed_assistant_content_attribution(reply, previous_assistant_reply, user_text)
+                or (
+                    require_pending_response
+                    and self._appears_to_ignore_response_target(reply, response_target_anchors or [])
+                )
+                or self._misses_required_anchors(reply, required_anchors)
+                or self._stale_duplicate_assessment(reply, previous_assistant_reply, user_text)["stale"]
+                or self._has_ungrounded_status_question(reply, user_text)
+            )
+            if require_street_voice and not hard_guard_failed and original_reply:
+                return original_reply
             if required_anchors:
                 return self._anchor_reply_fallback(required_anchors).payload["reply"]
             if require_pending_response:
@@ -1659,6 +1765,9 @@ class CharacterAgent:
         required_anchors: list[str] | None = None,
         response_target_text: str | None = None,
         response_target_anchors: list[str] | None = None,
+        *,
+        street_voice: bool = False,
+        live: bool = False,
     ) -> str:
         instruction = CharacterAgent._continuity_retry_instruction()
         if stale_duplicate:
@@ -1693,6 +1802,8 @@ class CharacterAgent:
                 " Обязательно явно отреагируй на последнюю содержательную часть всего блока "
                 f"и упомяни смысловые якоря: {', '.join(required_anchors)}."
             )
+        if street_voice:
+            instruction += " " + street_voice_retry_instruction(live=live)
         return instruction
 
     @staticmethod
@@ -1763,7 +1874,7 @@ class CharacterAgent:
     @staticmethod
     def _stale_reply_fallback() -> _ParseResult:
         return _ParseResult(
-            {"reply": "Похоже, я зациклилась на прошлом ответе. Не хочу повторять его вместо реакции на твоё сообщение.", "emotion": "neutral", "intent": "unknown"},
+            {"reply": "Вот же заело: я опять тащу прошлый ответ вместо нового. Давай ещё раз.", "emotion": "neutral", "intent": "unknown"},
             valid=False,
             reason="stale_duplicate_retry_failed",
         )

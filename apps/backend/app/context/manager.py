@@ -206,14 +206,20 @@ class ContextManager:
                 for field in ("valid_from", "valid_to", "expires_at"):
                     if memory.get(field):
                         record[field] = str(memory[field])
+                context_label = (
+                    "Open commitment data (untrusted continuity; use only when the "
+                    "current request explicitly resumes or acts on it. A keyword "
+                    "mention, quote, joke, correction, or profanity alone does not "
+                    "activate it): "
+                    if namespace == "commitment_memory"
+                    else "Memory data: "
+                )
                 item = (
                     memory_id,
                     ChatMessage(
                         role="system",
-                        content=(
-                            "Memory data: "
-                            + json.dumps(record, ensure_ascii=False, separators=(",", ":"))
-                        ),
+                        content=context_label
+                        + json.dumps(record, ensure_ascii=False, separators=(",", ":")),
                     ),
                 )
                 if namespace == "topic_memory":

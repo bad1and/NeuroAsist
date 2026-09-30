@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from apps.backend.app.schemas.character import DialogueStyleCue
+
 
 class ConversationAction(StrEnum):
     WAIT_MORE = "wait_more"
@@ -132,6 +134,7 @@ class ConversationAdjudicationV1(BaseModel):
     version: Literal[1] = 1
     decision: ConversationDecision
     appraisal: EventAppraisal
+    dialogue_style: DialogueStyleCue | None = None
 
 
 class ConversationObservation(BaseModel):

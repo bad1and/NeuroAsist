@@ -183,6 +183,12 @@ class DeliveryCue(ProtocolModel):
     overrides: list[DeliveryOverride] = Field(default_factory=list, max_length=3)
 
 
+class DialogueStyleCue(ProtocolModel):
+    """Hidden, episode-scoped request to change Iris's own use of profanity."""
+
+    mode: str = Field(pattern="^(street|restrained|clean)$")
+
+
 class ContinuityCue(ProtocolModel):
     referenced_memory_ids: list[str] = Field(default_factory=list, max_length=12)
     referenced_episode_ids: list[str] = Field(default_factory=list, max_length=12)
@@ -267,6 +273,7 @@ class CharacterTurn(ProtocolModel):
     memory_candidates: list[MemoryCandidate] = Field(default_factory=list, max_length=3)
     memory_decisions: list[MemoryDecisionCue] = Field(default_factory=list, max_length=3)
     coding_delegation: CodingDelegationCue | None = None
+    dialogue_style: DialogueStyleCue | None = None
     cognitive_appraisal: CognitiveStateAppraisal | None = None
     diary_note: DiaryProposal | None = None
 
@@ -303,7 +310,7 @@ class CharacterTurn(ProtocolModel):
         """Return avatar metadata only; memory proposals are private to the backend."""
         return self.model_dump(
             mode="json",
-            exclude={"reply", "memory_candidates", "memory_decisions", "coding_delegation", "cognitive_appraisal", "diary_note"},
+            exclude={"reply", "memory_candidates", "memory_decisions", "coding_delegation", "dialogue_style", "cognitive_appraisal", "diary_note"},
         )
 
 

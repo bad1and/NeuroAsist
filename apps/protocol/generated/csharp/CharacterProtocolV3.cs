@@ -20,6 +20,7 @@ public sealed class CharacterTurn
     public AffectCue affect { get; set; } = new();
     public GestureCue gesture { get; set; } = new();
     public DeliveryCue delivery { get; set; } = new();
+    public DialogueStyleCue? dialogue_style { get; set; }
     public ContinuityCue? continuity { get; set; }
 }
 
@@ -27,4 +28,5 @@ public sealed class AffectCue { public string emotion { get; set; } = "neutral";
 public sealed class GestureCue { public string name { get; set; } = "auto"; public float intensity { get; set; } = 1; public bool interrupt { get; set; } = true; }
 public sealed class DeliveryOverride { public int segment { get; set; } = 1; public string pace { get; set; } = "normal"; public float? speed { get; set; }; public string emphasis { get; set; } = "none"; }
 public sealed class DeliveryCue { public string pace { get; set; } = "normal"; public float emphasis { get; set; }; public List<DeliveryOverride> overrides { get; set; } = new(); }
+public sealed class DialogueStyleCue { public string mode { get; set; } = "street"; }
 public sealed class ContinuityCue { public List<string> referenced_memory_ids { get; set; } = new(); public List<string> referenced_episode_ids { get; set; } = new(); public List<string> closes_open_loop_ids { get; set; } = new(); }

@@ -193,15 +193,61 @@
         },
         "emphasis": {
           "default": "none",
-          "pattern": "^(none|light)$",
+          "pattern": "^(none|light|strong)$",
           "title": "Emphasis",
           "type": "string"
+        },
+        "pause_before_ms": {
+          "anyOf": [
+            {
+              "maximum": 1200,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional silence before this sentence.",
+          "title": "Pause Before Ms"
+        },
+        "pause_after_ms": {
+          "anyOf": [
+            {
+              "maximum": 1200,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional silence after this sentence.",
+          "title": "Pause After Ms"
         }
       },
       "required": [
         "segment"
       ],
       "title": "DeliveryOverride",
+      "type": "object"
+    },
+    "DialogueStyleCue": {
+      "additionalProperties": false,
+      "description": "Hidden, episode-scoped request to change Iris's own use of profanity.",
+      "properties": {
+        "mode": {
+          "pattern": "^(street|restrained|clean)$",
+          "title": "Mode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "title": "DialogueStyleCue",
       "type": "object"
     },
     "DiaryProposal": {
@@ -515,6 +561,17 @@
       "anyOf": [
         {
           "$ref": "#/$defs/CodingDelegationCue"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "dialogue_style": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DialogueStyleCue"
         },
         {
           "type": "null"

@@ -157,7 +157,8 @@ class CharacterStateService:
             now_iso = datetime.now(UTC).isoformat(timespec="milliseconds")
 
             # 1. Apply cognitive appraisal from AI model
-            is_boundary_violation = False
+            current_offense = False
+            current_boundary_violation = False
             if cognitive_appraisal:
                 if "patience" in cognitive_appraisal:
                     appraisal_patience = max(0.0, min(1.0, float(cognitive_appraisal["patience"])))
@@ -171,6 +172,7 @@ class CharacterStateService:
                         self._affect.patience = appraisal_patience
                 if "offended" in cognitive_appraisal:
                     appraisal_offended = bool(cognitive_appraisal["offended"])
+                    current_offense = appraisal_offended
                     if appraisal_offended:
                         self._affect.offended = True
                     elif (self._affect.offended or has_active_conflict) and not has_repair_cause:
@@ -181,16 +183,15 @@ class CharacterStateService:
                 if cognitive_appraisal.get("grievance_cause"):
                     self._affect.grievance_cause = str(cognitive_appraisal["grievance_cause"])[:200]
                 bv = str(cognitive_appraisal.get("boundary_violation", "")).lower()
-                is_boundary_violation = bv in ("mild", "severe") or self._affect.offended
+                current_boundary_violation = bv in ("mild", "severe")
 
-            is_insult = (
-                self._affect.offended
-                or is_boundary_violation
-                or canonical in {"hurt", "anger", "indignant"}
-                or self._affect.patience < 0.6
-            )
+            # A new grievance belongs only to this message's semantic
+            # appraisal.  Persisted offense, low patience and the reply's
+            # acting emotion describe continuity; they are not fresh evidence
+            # that the user insulted Iris again.
+            is_current_violation = current_offense or current_boundary_violation
 
-            if is_insult:
+            if is_current_violation:
                 cause_label = (
                     (cognitive_appraisal.get("grievance_cause") if cognitive_appraisal else None)
                     or self._affect.grievance_cause
@@ -251,7 +252,7 @@ class CharacterStateService:
                     except Exception as exc:
                         logger.warning("Failed to save in-turn diary reflection: %s", exc)
 
-            if not note_recorded and is_insult:
+            if not note_recorded and is_current_violation:
                 cause_label = (
                     (cognitive_appraisal.get("grievance_cause") if cognitive_appraisal else None)
                     or self._affect.grievance_cause
