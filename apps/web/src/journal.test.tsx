@@ -74,6 +74,22 @@ afterEach(() => {
 });
 
 describe("JournalPage token dialog interaction", () => {
+  it("shows news sources and stale dates even without token metadata", async () => {
+    api.getTimelineMessages.mockResolvedValueOnce({ items: [{
+      id: "news-1", role: "assistant", content: "Новости науки", created_at: "2026-09-18T03:01:00Z",
+      metadata: { news: { query: "Новости: science", provider: "rss", status: "ok", cached: true,
+        stale: true, sources: [{ title: "NASA discovery", url: "https://www.nasa.gov/discovery/", published_at: "2026-09-18T00:00:00Z" }] } },
+    }], next_offset: null });
+    render(<JournalPage />);
+    fireEvent.click((await screen.findAllByText("18 сентября 2026 г."))[0]);
+    await screen.findByText("Новости науки");
+    fireEvent.click(screen.getByRole("button", { name: "Подробнее" }));
+    expect(screen.getByText("Новости")).toBeInTheDocument();
+    expect(screen.getByText(/данные могут устареть/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /NASA discovery/ })).toHaveAttribute("href", "https://www.nasa.gov/discovery/");
+    expect(screen.getByText(/2026-09-18/)).toBeInTheDocument();
+  });
+
   it("expands token details inline from an individual history message", async () => {
     render(<JournalPage />);
 

@@ -266,7 +266,7 @@ export type PublicSettings = {
   location_city?: string;
   weather_enabled?: boolean;
   news_enabled?: boolean;
-  news_category?: "all" | "general" | "tech";
+  news_category?: "all" | "general" | "tech" | "science" | "games";
   web_search_enabled?: boolean;
 };
 
@@ -471,15 +471,22 @@ export type MessageMetadata = {
   tokens?: TokenMetadata;
   companion?: CompanionTurnMetadata;
   memory_updates?: Array<string | MemoryCandidateItem>;
-  web_search?: {
+  web_search?: ExternalSourceMetadata;
+  news?: ExternalSourceMetadata;
+  [key: string]: unknown;
+};
+
+export type ExternalSourceMetadata = {
     query: string;
     searched_at?: string;
     provider: string;
     status: string;
     cached: boolean;
-    sources: Array<{ title: string; url: string }>;
-  };
-  [key: string]: unknown;
+    stale?: boolean;
+    updated_at?: string;
+    latency_ms?: number;
+    attempts?: Array<{ provider: string; query: string; status: string; accepted: number; latency_ms: number }>;
+    sources: Array<{ title: string; url: string; published_at?: string; source?: string; stale?: boolean; page_status?: string; provider?: string }>;
 };
 
 export type TimelineMessage = {

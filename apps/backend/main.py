@@ -451,6 +451,8 @@ def create_app() -> FastAPI:
                     metadata["tokens"] = tokens
                 if agent.last_web_search_metadata is not None:
                     metadata["web_search"] = agent.last_web_search_metadata
+                if getattr(agent, "last_news_metadata", None) is not None:
+                    metadata["news"] = agent.last_news_metadata
                 if metadata:
                     await conversation_service.assistant_metadata_generated(
                         session_id,
@@ -1295,6 +1297,7 @@ def create_app() -> FastAPI:
         # Let zero-cost preload failures/events be observed by the first
         # request without waiting for model downloads or Torch import.
         await asyncio.sleep(0)
+        situational_coordinator.news_service.start_background(lambda: runtime_settings.news_enabled)
 
     async def shutdown() -> None:
         for task in (storage_maintenance_task, voice_preload_task, avatar_start_task):

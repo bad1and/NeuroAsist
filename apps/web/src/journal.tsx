@@ -188,8 +188,13 @@ function JournalMessageDetails({
   const companion = message.metadata?.companion;
   const memoryUpdates = message.metadata?.memory_updates;
   const webSearch = message.metadata?.web_search;
+  const news = message.metadata?.news;
+  const sourceBlocks = [
+    ...(webSearch ? [{ label: "Поиск в интернете", data: webSearch }] : []),
+    ...(news ? [{ label: "Новости", data: news }] : []),
+  ];
 
-  if (!tokens && !companion && !webSearch && (!memoryUpdates || memoryUpdates.length === 0)) {
+  if (!tokens && !companion && sourceBlocks.length === 0 && (!memoryUpdates || memoryUpdates.length === 0)) {
     return null;
   }
 
@@ -319,11 +324,11 @@ function JournalMessageDetails({
         </div>
       )}
 
-      {isAssistant && webSearch && (
-        <div className="details-section details-web-search-section">
+      {isAssistant && sourceBlocks.map(({ label, data: webSearch }) => (
+        <div key={label} className="details-section details-web-search-section">
           <div className="details-section-title">
             <IconInterfaceSearch size={13} />
-            <span>Поиск в интернете</span>
+            <span>{label}</span>
             <span className={`details-search-status status-${webSearch.status}`}>
               {webSearch.status === "ok" ? "Найдено" : "Без результатов"}
             </span>
@@ -332,6 +337,8 @@ function JournalMessageDetails({
             <span>Запрос</span>
             <strong>{webSearch.query || "Некорректный поисковый запрос"}</strong>
             {webSearch.cached && <small>из кэша</small>}
+            {webSearch.stale && <small>обновление не удалось; данные могут устареть</small>}
+            {webSearch.latency_ms !== undefined && <small>{(webSearch.latency_ms / 1000).toFixed(1)} с</small>}
           </div>
           {webSearch.sources.length > 0 ? (
             <div className="web-search-sources">
@@ -343,7 +350,7 @@ function JournalMessageDetails({
                   rel="noreferrer noopener"
                   className="web-search-source"
                 >
-                  <span>{source.title || source.url}</span>
+                  <span>{source.title || source.url}{source.published_at && <small> · {source.published_at.slice(0, 10)}</small>}</span>
                   <ExternalLink size={13} aria-hidden="true" />
                 </a>
               ))}
@@ -352,7 +359,7 @@ function JournalMessageDetails({
             <div className="memory-empty-note">Подтверждённые источники не получены</div>
           )}
         </div>
-      )}
+      ))}
 
       {/* 3. Memory Updates */}
       <div className="details-section details-memory-section">
@@ -937,6 +944,8 @@ export function JournalPage({
                       const hasDetails = Boolean(
                         messageTokens ||
                         message.metadata?.companion ||
+                        message.metadata?.web_search ||
+                        message.metadata?.news ||
                         message.metadata?.memory_updates?.length
                       );
                       const isExpanded = detailMode === "detailed" || expandedMessageIds.has(message.id);

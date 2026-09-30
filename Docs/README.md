@@ -16,6 +16,7 @@
 - [Текущий статус](MILESTONES.md) — что уже реализовано и что остаётся до публичной версии.
 - [Coding Agent](coding-agent.md) — Docker sandbox и границы безопасности.
 - [Live conversation](live-conversation.md) — PCM/VAD/Smart Turn/voice lifecycle.
+- [Поиск и новости](awareness.md) — источники, фоновое обновление и бюджет контекста.
 - [Memory и semantic retrieval](chroma-memory.md) — каноническая память и перестраиваемый индекс.
 - [Дизайн-система](../design.md) — визуальные токены и правила интерфейса.
 - [Desktop shell](../apps/desktop/README.md) и [Unity avatar](../apps/avatar-unity/README.md).

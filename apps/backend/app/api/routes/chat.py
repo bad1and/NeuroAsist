@@ -127,6 +127,8 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
         }
         if agent.last_web_search_metadata is not None:
             metadata_update["web_search"] = agent.last_web_search_metadata
+        if getattr(agent, "last_news_metadata", None) is not None:
+            metadata_update["news"] = agent.last_news_metadata
         assistant_message = await coordinator.complete_assistant(
             payload.session_id, lease, reply, metadata_update=metadata_update
         )
@@ -275,6 +277,8 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             }
             if agent.last_web_search_metadata is not None:
                 metadata_update["web_search"] = agent.last_web_search_metadata
+            if getattr(agent, "last_news_metadata", None) is not None:
+                metadata_update["news"] = agent.last_news_metadata
             assistant_message = await coordinator.complete_assistant(
                 payload.session_id, lease, result["reply"], metadata_update=metadata_update
             )

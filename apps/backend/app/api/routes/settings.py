@@ -14,6 +14,7 @@ from apps.backend.app.schemas.settings import (
     VoiceStylePatch,
 )
 from apps.backend.app.llm.models import SUPPORTED_DEEPSEEK_MODELS
+from apps.backend.app.environment.news_service import NEWS_CATEGORIES
 
 router = APIRouter()
 
@@ -310,7 +311,7 @@ async def patch_runtime_settings(
         runtime_settings.news_enabled = bool(payload.news_enabled)
 
     if payload.news_category is not None:
-        if payload.news_category not in ("all", "general", "tech"):
+        if payload.news_category not in NEWS_CATEGORIES:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported news category")
         runtime_settings.news_category = payload.news_category
 
