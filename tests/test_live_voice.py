@@ -645,6 +645,8 @@ async def test_streaming_agent_uses_character_persona_prompt(tmp_path: Path) -> 
     assert marker not in system_prompt
     assert provider.messages[1].role == "system"
     assert marker in provider.messages[1].content
+    assert "Режим street" in provider.messages[-2].content
+    assert provider.messages[-1] == ChatMessage(role="user", content="Привет")
     assert "Ты — Iris" in system_prompt
     assert "NeuroAsist" not in system_prompt
     assert "дружелюбный персонаж" not in system_prompt
@@ -654,7 +656,7 @@ async def test_streaming_agent_uses_character_persona_prompt(tmp_path: Path) -> 
     assert "[[avatar emotion=smirk gesture=shrug intensity=0.7]]" in system_prompt
     assert "Не пиши скобочные ремарки действий" in system_prompt
     assert "Не выдумывай биографии" in system_prompt
-    assert "ты не про того" in system_prompt
+    assert "явное уточнение важнее памяти и догадок" in system_prompt
     assert "Не упоминай тесты" in system_prompt
 
 

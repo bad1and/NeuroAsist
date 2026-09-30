@@ -13,6 +13,7 @@ from typing import Awaitable, Callable
 from uuid import uuid4
 
 from apps.backend.app.conversation.adjudicator import StructuredConversationAdjudicator
+from apps.backend.app.agents.character.dialogue_style import DialogueStyleService
 from apps.backend.app.conversation.behavior import StateToBehaviorRenderer
 from apps.backend.app.conversation.decision import ConversationDecisionEngine, DecisionContext
 from apps.backend.app.conversation.schemas import (
@@ -134,6 +135,7 @@ class LiveConversationService:
         event_publisher=None,
         llm_provider=None,
         state_service: CharacterStateService | None = None,
+        dialogue_style_service: DialogueStyleService | None = None,
     ) -> None:
         self._store = store
         self._runtime = runtime_settings
@@ -145,6 +147,7 @@ class LiveConversationService:
         self._speaker = SpeakerRoleEstimator()
         self._reducer = CharacterStateReducer()
         self._state_service = state_service
+        self._dialogue_style_service = dialogue_style_service
         self._turn_detector = None
         self._stt_semaphore = asyncio.Semaphore(2)
         self._decision_semaphore = asyncio.Semaphore(4)
@@ -516,7 +519,21 @@ class LiveConversationService:
         decision = fallback_decision
         appraisal = fallback_appraisal
         decision_source = "deterministic"
-        if fallback_decision.reason not in hard_reasons:
+        dialogue_style_cue = None
+        semantic_skip_reasons = {
+            DecisionReason.INCOMPLETE_TURN,
+            DecisionReason.OTHER_PERSON,
+            DecisionReason.SELF_TALK,
+            DecisionReason.AMBIENT_SPEECH,
+            DecisionReason.ECHO,
+        }
+        if fallback_decision.reason not in semantic_skip_reasons:
+            episode_id = getattr(message, "episode_id", None)
+            current_dialogue_style = (
+                self._dialogue_style_service.resolve(episode_id)
+                if self._dialogue_style_service is not None
+                else "street"
+            )
             adjudication_task = self._register_task(
                 session,
                 self._run_adjudication(
@@ -525,12 +542,27 @@ class LiveConversationService:
                     fallback_appraisal=fallback_appraisal,
                     cause_message_id=cause_message_id,
                     speaker_role=speaker_role.value,
+                    previous_assistant_text=session.last_generated_assistant_reply,
+                    relationship_context=self._state_context(session, fallback_decision),
+                    current_dialogue_style=current_dialogue_style,
                 ),
                 name=f"decision-{turn_id}",
                 generation=generation,
                 reason="ambiguous_observation",
             )
-            decision, appraisal, decision_source = await adjudication_task
+            adjudicated = await adjudication_task
+            model_decision, appraisal, decision_source = adjudicated
+            dialogue_style_cue = adjudicated.dialogue_style
+            # Addressing, echo, completeness and conversational permission are
+            # technical facts.  The model owns meaning, not these gates.
+            decision = fallback_decision if fallback_decision.reason in hard_reasons else model_decision
+            if dialogue_style_cue is not None and self._dialogue_style_service is not None:
+                await asyncio.to_thread(
+                    self._dialogue_style_service.apply,
+                    episode_id,
+                    dialogue_style_cue.mode,
+                    source_message_id=getattr(message, "id", None),
+                )
         has_addressing_evidence = bool(
             explicitly_addressed_to_iris
             or implicit_address
@@ -614,6 +646,7 @@ class LiveConversationService:
                     addressedness=addressedness,
                     stt_uncertain=stt_uncertain,
                     serious=appraisal.serious,
+                    appraisal=appraisal,
                 )
                 session.affect = shared.affect
                 session.participants[appraisal.target_participant] = shared.relationship

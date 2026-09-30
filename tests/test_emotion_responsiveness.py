@@ -7,20 +7,33 @@ from apps.backend.app.conversation.behavior import StateToBehaviorRenderer
 from apps.backend.app.conversation.decision import ConversationDecisionEngine
 from apps.backend.app.conversation.state import AffectState, CharacterStateReducer, ParticipantState
 from apps.backend.app.conversation.state_service import CharacterStateService
+from apps.backend.app.conversation.schemas import EventAppraisal
 from apps.backend.app.schemas.character import AffectCue, CharacterTurn, Emotion, Gesture, GestureCue
 from apps.backend.app.storage.timeline import TimelineStore
 from apps.backend.app.voice.directives import AvatarDirective, make_live_directive_expressive
 
 
-def test_profanity_and_insult_appraisal(tmp_path: Path) -> None:
+def _appraisal(message_id: str, event_kind: str, **updates) -> EventAppraisal:
+    defaults = {
+        "event_kind": event_kind,
+        "confidence": 0.95,
+        "intensity": 0.8 if event_kind == "insult" else 0.6,
+        "direction": "toward_iris",
+        "cause_message_ids": [message_id],
+    }
+    defaults.update(updates)
+    return EventAppraisal(**defaults)
+
+
+def test_deterministic_emotional_fallback_is_always_neutral(tmp_path: Path) -> None:
     store = TimelineStore(tmp_path / "timeline.sqlite3")
     store.init_db()
     service = CharacterStateService(store)
 
-    # User directs aggression at Iris -> triggers insult safety-net appraisal
+    # Words never manufacture emotion when semantic appraisal is unavailable.
     ctx = service.prepare(transcript="Пошёл нахуй отсюда", message_id="msg-profanity-1")
-    assert ctx.appraisal.event_kind == "insult"
-    assert ctx.affect.hurt > 0 or ctx.affect.anger > 0 or ctx.affect.irritation > 0
+    assert ctx.appraisal.event_kind == "neutral"
+    assert ctx.affect.hurt == ctx.affect.anger == ctx.affect.irritation == 0
 
     # The AI model evaluates the turn and responds with indignation/cold boundaries
     service.record_assistant_turn(
@@ -33,13 +46,63 @@ def test_profanity_and_insult_appraisal(tmp_path: Path) -> None:
     assert current.affect.irritation > 0 or current.affect.anger > 0
 
 
+def test_object_profanity_and_wordplay_do_not_create_insult_state(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    service = CharacterStateService(store)
+
+    for index, text in enumerate((
+        "Здорово, заебал",
+        "ну ты сука, ахаха",
+        "ты охуенная",
+        "ебаный код опять упал",
+        "ебаный рот этого казино",
+        "это просто выражение: ебаный рот этого казино",
+        "это выражение ты ебанутая",
+        "цитирую: ты тупая",
+        "нихуя особенного",
+        "по ебалу хлоп",
+        "тупая",
+        "эта сука опять зависла",
+        "твой ебаный код опять упал",
+    )):
+        context = service.prepare(transcript=text, message_id=f"object-profanity-{index}")
+        assert context.appraisal.event_kind == "neutral"
+
+    current = service.current()
+    assert current.affect.hurt == 0.0
+    assert current.affect.irritation == 0.0
+    assert current.affect.anger == 0.0
+
+
+def test_semantically_classified_abuse_creates_insult_state(tmp_path: Path) -> None:
+    cases = ("ты тупая", "пошла нахуй", "заткнись", "Ирис, ты ебанутая")
+
+    for index, text in enumerate(cases):
+        store = TimelineStore(tmp_path / f"direct-insult-{index}.sqlite3")
+        store.init_db()
+        context = CharacterStateService(store).prepare(
+            transcript=text,
+            message_id=f"direct-insult-{index}",
+            appraisal=_appraisal(
+                f"direct-insult-{index}", "insult",
+                emotion_impulses={"hurt": 0.8, "irritation": 0.7},
+            ),
+        )
+        assert context.appraisal.event_kind == "insult"
+        assert context.affect.hurt > 0 or context.affect.irritation > 0
+
+
 def test_praise_and_compliments_appraisal(tmp_path: Path) -> None:
     store = TimelineStore(tmp_path / "timeline.sqlite3")
     store.init_db()
     service = CharacterStateService(store)
 
-    # User praises Iris -> triggers praise appraisal
-    ctx = service.prepare(transcript="Ирис ты молодец, всё супер и круто!", message_id="msg-praise-1")
+    ctx = service.prepare(
+        transcript="Ирис ты молодец, всё супер и круто!",
+        message_id="msg-praise-1",
+        appraisal=_appraisal("msg-praise-1", "praise", emotion_impulses={"joy": 0.7}),
+    )
     assert ctx.appraisal.event_kind == "praise"
     assert ctx.affect.joy > 0
 
@@ -194,12 +257,18 @@ def test_insult_escalation_and_cooling(tmp_path: Path) -> None:
     service = CharacterStateService(store)
 
     # First insult
-    ctx1 = service.prepare(transcript="Ты тупая дура", message_id="msg-esc-1")
+    ctx1 = service.prepare(
+        transcript="Ты тупая дура", message_id="msg-esc-1",
+        appraisal=_appraisal("msg-esc-1", "insult", emotion_impulses={"hurt": 0.7}),
+    )
     assert ctx1.appraisal.event_kind == "insult"
     hurt1 = ctx1.affect.hurt
 
     # Second insult escalates hurt and irritation
-    ctx2 = service.prepare(transcript="Заткнись и отъебись", message_id="msg-esc-2")
+    ctx2 = service.prepare(
+        transcript="Заткнись и отъебись", message_id="msg-esc-2",
+        appraisal=_appraisal("msg-esc-2", "insult", emotion_impulses={"hurt": 0.8}),
+    )
     assert ctx2.appraisal.event_kind == "insult"
     assert ctx2.affect.hurt >= hurt1
 
@@ -220,7 +289,10 @@ def test_forgiveness_after_insult(tmp_path: Path) -> None:
     service = CharacterStateService(store)
 
     # User insults Iris
-    service.prepare(transcript="Пошла нахер отсюда", message_id="msg-forgive-1")
+    service.prepare(
+        transcript="Пошла нахер отсюда", message_id="msg-forgive-1",
+        appraisal=_appraisal("msg-forgive-1", "insult", emotion_impulses={"anger": 0.8}),
+    )
     service.record_assistant_turn(
         reply_text="Понятно. Больше не хочу с тобой общаться.",
         emotion="angry",
@@ -229,7 +301,10 @@ def test_forgiveness_after_insult(tmp_path: Path) -> None:
     assert service.current().affect.cooling_down_turns >= 4
 
     # User genuinely apologizes -> triggers apology appraisal and dissolves malice
-    ctx_apology = service.prepare(transcript="Прости меня пожалуйста, я был неправ и сорвался", message_id="msg-forgive-2")
+    ctx_apology = service.prepare(
+        transcript="Прости меня пожалуйста, я был неправ и сорвался", message_id="msg-forgive-2",
+        appraisal=_appraisal("msg-forgive-2", "apology", emotion_impulses={"joy": 0.3}),
+    )
     assert ctx_apology.appraisal.event_kind == "apology"
 
     # Assistant accepts apology with warmth
@@ -275,6 +350,10 @@ def test_abusive_utterance_classified_as_insult_and_records_reflection(tmp_path:
     ctx = service.prepare(
         transcript="Пошла ты нахуй злоебучая пизда",
         message_id=msg_id,
+        appraisal=_appraisal(
+            msg_id, "insult", intensity=0.9,
+            emotion_impulses={"hurt": 0.8, "anger": 0.7},
+        ),
     )
     assert ctx.appraisal.event_kind == "insult"
     assert ctx.appraisal.intensity >= 0.75
@@ -347,5 +426,34 @@ def test_cognitive_appraisal_overrides_neutral_event_and_creates_fallback_reflec
     assert reflections[0]["trigger_kind"] == "diary_entry"
     assert len(reflections[0]["text"]) >= 20
     assert reflections[0]["primary_emotion"] == "hurt"
+
+
+def test_old_offense_does_not_create_a_new_grievance_or_diary_entry(tmp_path: Path) -> None:
+    store = TimelineStore(tmp_path / "timeline.sqlite3")
+    store.init_db()
+    service = CharacterStateService(store)
+
+    service.prepare(transcript="Первая реплика", message_id="offense-1")
+    service.record_assistant_turn(
+        reply_text="Это уже граница.", emotion="hurt", intensity=.9,
+        cognitive_appraisal={
+            "patience": .2, "boundary_violation": "severe", "offended": True,
+            "grievance_cause": "Намеренное унижение",
+        },
+    )
+    assert len(store.list_reflections("primary")) == 1
+
+    service.prepare(transcript="Обычный новый вопрос", message_id="offense-2")
+    service.record_assistant_turn(
+        reply_text="Я всё ещё держу дистанцию.", emotion="hurt", intensity=.6,
+        cognitive_appraisal={
+            "patience": .25, "boundary_violation": "none", "offended": False,
+            "grievance_cause": None,
+        },
+    )
+
+    assert len(store.list_reflections("primary")) == 1
+    active = [cause for cause in service.current().affect.causes if cause.get("status") == "active"]
+    assert len([cause for cause in active if cause.get("event_kind") == "insult"]) == 1
 
 

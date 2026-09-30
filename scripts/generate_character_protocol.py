@@ -47,9 +47,10 @@ export type AffectCue = {{ emotion: Emotion; intensity: number; valence: number;
 export type GestureCue = {{ name: Gesture; intensity: number; interrupt: boolean }};
 export type DeliveryOverride = {{ segment: number; pace: "slow" | "normal" | "fast"; speed?: number | null; emphasis: "none" | "light" }};
 export type DeliveryCue = {{ pace: "slow" | "normal" | "fast"; emphasis: number; overrides: DeliveryOverride[] }};
+export type DialogueStyleCue = {{ mode: "street" | "restrained" | "clean" }};
 export type ContinuityCue = {{ referenced_memory_ids: string[]; referenced_episode_ids: string[]; closes_open_loop_ids: string[] }};
-export type CharacterTurn = {{ protocol_version: 3; reply: string; intent: Intent; affect: AffectCue; gesture: GestureCue; delivery: DeliveryCue; continuity?: ContinuityCue | null }};
-export type CharacterMetadataFrame = Omit<CharacterTurn, "reply">;
+export type CharacterTurn = {{ protocol_version: 3; reply: string; intent: Intent; affect: AffectCue; gesture: GestureCue; delivery: DeliveryCue; dialogue_style?: DialogueStyleCue | null; continuity?: ContinuityCue | null }};
+export type CharacterMetadataFrame = Omit<CharacterTurn, "reply" | "dialogue_style">;
 ''')
 
     emotion_values = ", ".join(f'"{item.value}"' for item in Emotion)
@@ -77,6 +78,7 @@ public sealed class CharacterTurn
     public AffectCue affect {{ get; set; }} = new();
     public GestureCue gesture {{ get; set; }} = new();
     public DeliveryCue delivery {{ get; set; }} = new();
+    public DialogueStyleCue? dialogue_style {{ get; set; }}
     public ContinuityCue? continuity {{ get; set; }}
 }}
 
@@ -84,6 +86,7 @@ public sealed class AffectCue {{ public string emotion {{ get; set; }} = "neutra
 public sealed class GestureCue {{ public string name {{ get; set; }} = "auto"; public float intensity {{ get; set; }} = 1; public bool interrupt {{ get; set; }} = true; }}
 public sealed class DeliveryOverride {{ public int segment {{ get; set; }} = 1; public string pace {{ get; set; }} = "normal"; public float? speed {{ get; set; }}; public string emphasis {{ get; set; }} = "none"; }}
 public sealed class DeliveryCue {{ public string pace {{ get; set; }} = "normal"; public float emphasis {{ get; set; }}; public List<DeliveryOverride> overrides {{ get; set; }} = new(); }}
+public sealed class DialogueStyleCue {{ public string mode {{ get; set; }} = "street"; }}
 public sealed class ContinuityCue {{ public List<string> referenced_memory_ids {{ get; set; }} = new(); public List<string> referenced_episode_ids {{ get; set; }} = new(); public List<string> closes_open_loop_ids {{ get; set; }} = new(); }}
 ''')
 

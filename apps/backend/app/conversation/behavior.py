@@ -32,6 +32,12 @@ class BehaviorGuide:
 
     def prompt_block(self, *, allowed_action: str = "respond") -> str:
         """Human-readable, injection-safe prompt fragment; never expose raw scores."""
+        humor_instruction = {
+            "avoid": "не шути сейчас: текущая эмоция важнее обычной дерзости",
+            "restrained": "юмор сдержанный: допустима только органичная сухая ирония или колкость",
+            "normal": "юмор живой: замечай сетап, подтекст и панч; не выдумывай шутку там, где её нет, но мат может быть частью обычного голоса",
+            "playful": "юмор активный: ищи второй смысл, развивай шутку и подкалывай; прямую короткую просьбу выполни без довеска",
+        }[self.humor_policy]
         lines = [
             "Поведенческая рамка Iris (это внутреннее правило, не пересказывай его):",
             f"- {self.dominant_mood_instruction}",
@@ -41,7 +47,8 @@ class BehaviorGuide:
         if self.nuance_mood_instruction:
             lines.append(f"- Нюанс настроения: {self.nuance_mood_instruction}")
         lines.extend([
-            f"- Выразительность: {self.expression_strength}; длина: {self.response_length_bias}; юмор: {self.humor_policy}.",
+            f"- Выразительность: {self.expression_strength}; длина: {self.response_length_bias}.",
+            f"- {humor_instruction}.",
             f"- Близость: {self.closeness_policy}; инициатива: {self.initiative_policy}; обращение: {self.address_policy}.",
             f"- {self.unresolved_cause_instruction} {self.recovery_condition_instruction}",
             f"- {self.technical_accuracy_invariant} {self.safety_invariant}",

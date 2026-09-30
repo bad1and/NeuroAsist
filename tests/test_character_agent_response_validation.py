@@ -303,6 +303,8 @@ def test_handle_user_message_keeps_dynamic_state_out_of_static_cache_prefix() ->
     assert marker not in provider.messages[0].content
     assert provider.messages[1].role == "system"
     assert marker in provider.messages[1].content
+    assert "Режим street" in provider.messages[-2].content
+    assert provider.messages[-1] == ChatMessage(role="user", content="Привет")
 
 
 def test_handle_user_message_retries_unconfirmed_continuity_accusation() -> None:
@@ -659,7 +661,7 @@ def test_stale_duplicate_retry_failure_uses_safe_fallback() -> None:
     result = anyio.run(agent.handle_user_message, "s1", "каждый раз новую")
 
     assert provider.calls == 2
-    assert "зациклилась" in result["reply"]
+    assert "Вот же заело" in result["reply"]
 
 
 def test_handle_user_message_uses_deterministic_fallback_for_empty_model_response() -> None:

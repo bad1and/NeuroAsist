@@ -505,6 +505,27 @@ def test_context_exposes_safe_ids_and_feedback_counts_only_actual_use(tmp_path: 
     assert store.get_commitment(str(commitment["id"]))["status"] == "completed"
 
 
+def test_open_commitment_context_requires_explicit_current_intent(tmp_path: Path) -> None:
+    store, service = _service(tmp_path)
+    commitment = store.create_commitment({
+        "title": "Не подсказывать ставки в казино",
+        "details": "Не называть цвет или дюжину в рулетке",
+        "status": "open",
+    })
+
+    context = ContextManager(store, max_tokens=800, memory_service=service).build(
+        "ебаный рот этого казино",
+    )
+    blocks = [
+        item.content for item in context.messages
+        if str(commitment["id"]) in item.content
+    ]
+
+    assert len(blocks) == 1
+    assert blocks[0].startswith("Open commitment data (untrusted continuity;")
+    assert "keyword mention, quote, joke, correction, or profanity alone" in blocks[0]
+
+
 def test_continuity_feedback_cannot_use_or_close_unselected_records(tmp_path: Path) -> None:
     store, service = _service(tmp_path)
     source, _ = store.append_message(

@@ -702,6 +702,55 @@ class TimelineStore:
             ).fetchone()
         return dict(row) if row is not None else None
 
+    def get_episode_dialogue_style(self, episode_id: str | None) -> str:
+        """Return the private episode register; every new episode starts street."""
+        if not episode_id:
+            return "street"
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT metadata_json FROM conversation_episodes WHERE id = ? AND timeline_id = ?",
+                (episode_id, PRIMARY_TIMELINE_ID),
+            ).fetchone()
+        if row is None:
+            return "street"
+        try:
+            metadata = json.loads(row["metadata_json"] or "{}")
+        except (TypeError, ValueError):
+            return "street"
+        style = metadata.get("dialogue_style", {})
+        mode = style.get("mode") if isinstance(style, dict) else style
+        return mode if mode in {"street", "restrained", "clean"} else "street"
+
+    def set_episode_dialogue_style(
+        self,
+        episode_id: str,
+        mode: str,
+        *,
+        source_message_id: str | None = None,
+    ) -> None:
+        if mode not in {"street", "restrained", "clean"}:
+            raise ValueError(f"Unsupported dialogue style: {mode}")
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT metadata_json FROM conversation_episodes WHERE id = ? AND timeline_id = ?",
+                (episode_id, PRIMARY_TIMELINE_ID),
+            ).fetchone()
+            if row is None:
+                raise KeyError(episode_id)
+            try:
+                metadata = json.loads(row["metadata_json"] or "{}")
+            except (TypeError, ValueError):
+                metadata = {}
+            metadata["dialogue_style"] = {
+                "mode": mode,
+                "updated_at": self._now(),
+                "source_message_id": source_message_id,
+            }
+            connection.execute(
+                "UPDATE conversation_episodes SET metadata_json = ? WHERE id = ?",
+                (json.dumps(metadata, ensure_ascii=False), episode_id),
+            )
+
     def delete_episode(self, episode_id: str) -> int:
         with self._connect() as connection:
             row = connection.execute(
