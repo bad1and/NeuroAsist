@@ -6871,7 +6871,7 @@ body {
 }
 
 /* ==========================================================================
-   Unified Notification System (Iris Flat Style)
+   Unified Notification System (shared graphite materials)
    ========================================================================== */
 
 .notification-host {
@@ -6894,15 +6894,15 @@ body {
   padding: 12px 14px 12px 14px;
   border-radius: 28px !important;
   corner-shape: squircle;
-  background: var(--color-surface-raised);
+  background: var(--surface-notification);
   border: none;
-  box-shadow: 0 14px 32px -4px rgba(0, 0, 0, 0.48), 0 4px 12px -2px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--depth-notification);
   pointer-events: auto;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  transition: box-shadow var(--motion-fast) var(--ease-out);
+  transition: none;
 }
 
 .notification-card.is-clickable {
@@ -6910,7 +6910,7 @@ body {
 }
 
 .notification-card.is-clickable:hover {
-  box-shadow: 0 18px 40px -4px rgba(0, 0, 0, 0.58), 0 6px 16px -2px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--depth-notification-hover);
 }
 
 .notification-card.is-exiting {
@@ -11025,10 +11025,12 @@ pre,
 .settings-card textarea,
 .settings-card select,
 .settings-card .custom-select,
+.settings-card .custom-select-trigger,
 .settings-group input[type="text"],
 .settings-group input[type="password"],
 .settings-group textarea,
 .settings-group select,
+.settings-group .custom-select-trigger,
 .coding-content input:not([type="checkbox"]):not([type="radio"]):not(.search-form *),
 .coding-content textarea,
 .coding-content select,
@@ -11062,9 +11064,11 @@ pre,
 .settings-card textarea:focus,
 .settings-card select:focus,
 .settings-card .custom-select:focus-within,
+.settings-card .custom-select-trigger:focus-visible,
 .settings-group input:focus,
 .settings-group textarea:focus,
 .settings-group select:focus,
+.settings-group .custom-select-trigger:focus-visible,
 .coding-content input:not(.search-form *):focus,
 .coding-content textarea:focus,
 .coding-content select:focus,
@@ -12975,9 +12979,9 @@ button.danger-button:not(.secondary):active:not(:disabled) {
   padding: 16px 18px 18px 18px !important;
   border-radius: 28px !important;
   corner-shape: squircle !important;
-  background: var(--color-surface-raised, #13151D) !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  box-shadow: 0 18px 40px -4px rgba(0, 0, 0, 0.56), 0 6px 16px -2px rgba(0, 0, 0, 0.35) !important;
+  background: var(--surface-notification) !important;
+  border: 0 !important;
+  box-shadow: var(--depth-notification) !important;
   pointer-events: auto !important;
   overflow: hidden !important;
   display: flex !important;
@@ -13167,4 +13171,162 @@ button.journal-header-tokens:hover {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+
+/* A single body silhouette carries its material and contour lighting. */
+.app-shell:not(.setup-shell) {
+  position: relative;
+  background: var(--color-base);
+}
+.corpus-surface {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: visible;
+  pointer-events: none;
+  filter: var(--depth-corpus-shadow);
+}
+.corpus-surface-material {
+  width: 100%;
+  height: 100%;
+  background: var(--surface-corpus);
+}
+.corpus-surface-rim {
+  stroke-opacity: var(--corpus-bevel-opacity);
+}
+.app-shell:not(.setup-shell) > .window-chrome,
+.app-shell:not(.setup-shell) > .app-content {
+  background: transparent;
+  box-shadow: none;
+}
+.app-shell:not(.setup-shell) > .app-content {
+  z-index: 1;
+}
+@media (min-width: 1024px) {
+  .app-shell > .sidebar { background: transparent; }
+}
+@media (max-width: 1023px) {
+  .app-shell > .sidebar { background: var(--surface-corpus); }
+}
+.tactile-plate-focus {
+  opacity: 0;
+}
+
+.chat-composer-bg {
+  color: var(--color-accent);
+  --plate-light-strength: 0.065;
+  --plate-edge-strength: 0.13;
+  filter: var(--depth-composer);
+}
+
+.chat-composer .tactile-plate-focus {
+  stroke-width: 2;
+}
+
+.chat-composer:has(textarea:focus-visible) .tactile-plate-focus {
+  opacity: 0.6;
+}
+
+.dock-bg-svg {
+  color: var(--color-dock);
+  filter: var(--depth-dock);
+}
+
+.dock-dual-pill,
+.dock-icon-btn,
+.dock-finish-btn,
+.dock-new-dialog-btn {
+  filter: none;
+  transition: none;
+}
+
+.dual-pill-bg,
+.dock-icon-btn .btn-shape-bg,
+.dock-new-dialog-btn .btn-shape-bg {
+  color: var(--color-dock-control);
+  filter: var(--depth-control);
+  transition: none;
+}
+
+.dock-finish-btn .btn-shape-bg {
+  color: var(--color-danger);
+  --plate-light-strength: 0.065;
+  --plate-edge-strength: 0.13;
+  filter: var(--depth-control);
+  transition: none;
+}
+
+.dock-icon-btn:hover:not(:disabled) .btn-shape-bg,
+.dock-new-dialog-btn:hover:not(:disabled) .btn-shape-bg,
+.dock-dual-pill:has(.dock-dual-btn:hover:not(:disabled)) .dual-pill-bg {
+  color: var(--color-dock-control-hover);
+  filter: var(--depth-control-hover);
+}
+
+.dock-finish-btn:hover:not(:disabled) .btn-shape-bg {
+  color: var(--color-danger-hover);
+  filter: var(--depth-control-hover);
+}
+
+.dock-icon-btn:active:not(:disabled) .btn-shape-bg,
+.dock-new-dialog-btn:active:not(:disabled) .btn-shape-bg,
+.dock-finish-btn:active:not(:disabled) .btn-shape-bg {
+  --plate-light-strength: 0.015;
+  --plate-edge-strength: 0.06;
+  --plate-shade-strength: 0.14;
+  filter: var(--depth-control-pressed);
+}
+
+.dock-icon-btn:focus-visible .tactile-plate-focus,
+.dock-new-dialog-btn:focus-visible .tactile-plate-focus,
+.dock-finish-btn:focus-visible .tactile-plate-focus {
+  opacity: 1;
+}
+
+.dock-dual-btn:disabled,
+.dock-icon-btn:disabled,
+.dock-new-dialog-btn:disabled,
+.dock-finish-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.dock-dual-btn.is-loading:disabled {
+  opacity: 1;
+}
+
+.dock-dual-btn,
+.dock-dual-btn.is-muted {
+  transition: none;
+}
+
+.dock-dual-btn:active:not(:disabled) {
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.chat-composer-inner textarea {
+  color: var(--color-accent-ink);
+}
+
+.chat-composer-inner textarea::placeholder {
+  color: var(--color-text-soft);
+}
+
+.chat-composer-inner .send-button {
+  color: var(--color-accent-ink);
+  opacity: 0.9;
+}
+
+.chat-composer-inner .send-button:focus-visible {
+  outline: 2px solid var(--color-accent-ink) !important;
+  outline-offset: 2px;
+  opacity: 1;
+}
+
+/* The actual CustomSelect trigger matches the recessed native settings inputs.
+   Its floating menu uses the same neutral lighting as other raised surfaces. */
+.custom-select-dropdown {
+  background: linear-gradient(172deg, rgba(255, 255, 255, 0.034), rgba(0, 0, 0, 0.042)), var(--color-surface-raised);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045), 0 14px 36px -4px rgba(0, 0, 0, 0.55), 0 4px 14px rgba(0, 0, 0, 0.35);
 }
