@@ -15,6 +15,10 @@ namespace NeuroAsist.AvatarEditor
             AssetDatabase.SaveAssets();
             AvatarRuntimeSetup.Setup();
             var output = Path.GetFullPath(Path.Combine("Builds", "NeuroAsistAvatar", "NeuroAsistAvatar.exe"));
+            // Allow verification builds beside an avatar currently owned by Tauri.
+            var args = System.Environment.GetCommandLineArgs();
+            for (var i = 0; i + 1 < args.Length; i++)
+                if (args[i] == "-avatarOutput") output = Path.GetFullPath(args[i + 1]);
             Directory.CreateDirectory(Path.GetDirectoryName(output));
             if (File.Exists(output))
             {

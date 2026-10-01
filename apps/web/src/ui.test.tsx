@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
   getStatus: vi.fn(), getSettings: vi.fn(), getAvatarStatus: vi.fn(), getEvents: vi.fn(),
+  getReadiness: vi.fn(),
   getTimelineMessages: vi.fn(), getModels: vi.fn(), getBackups: vi.fn(), getAvatarOverlay: vi.fn(),
   getMemories: vi.fn(), createMemory: vi.fn(), getMemoryAudit: vi.fn(),
   getPronunciations: vi.fn(), updatePronunciations: vi.fn(), updateVoiceExpression: vi.fn(), updateVoiceStyle: vi.fn(),
@@ -33,6 +34,8 @@ vi.mock("./api", () => ({
 import App from "./App";
 import { JournalPage } from "./journal";
 import { MemoryPage } from "./memory";
+import { BrowserVadRecorder, PcmInputClient } from "./vad";
+import { TTSStreamPlayer, VoiceSocketClient } from "./voice-live";
 
 const settings = {
   developer_mode_enabled: false,
@@ -72,6 +75,7 @@ beforeEach(() => {
   Object.defineProperty(HTMLDialogElement.prototype, "close", { configurable: true, value() { this.removeAttribute("open"); this.dispatchEvent(new Event("close")); } });
   api.getStatus.mockResolvedValue({ app_name: "Iris", backend: "ok", database: "ok", version: "1.0.0", api_key_configured: true, llm_provider: "deepseek", llm_model: "deepseek-flash" });
   api.getSettings.mockResolvedValue(settings);
+  api.getReadiness.mockResolvedValue({ live_ready: false, text_chat: "ready", stt: "loading", tts: "loading", vad: "ready", errors: [] });
   api.getAvatarStatus.mockResolvedValue({ enabled: false, protocol_version: 1, broadcast_policy: "", client_count: 0, clients: [], emotion_engine: { mapping_valid: true, current_emotion: "neutral", target_emotion: "neutral", intensity: 0, gesture: "", motion_profile: "", attack_ms: 0, minimum_hold_ms: 0, release_ms: 0, generation: 0, speaking: false } });
   api.getEvents.mockResolvedValue({ events: [] });
   api.getTimelineMessages.mockResolvedValue({ items: [], next_offset: null });
@@ -185,6 +189,7 @@ describe("русский интерфейс", () => {
 
   it("озвучивает готовое уведомление Coding Agent через фоновой TTS-запрос", async () => {
     const play = vi.fn(async () => undefined);
+    const pause = vi.fn();
     const previousAudio = globalThis.Audio;
 
     class TestAudio {
@@ -194,7 +199,7 @@ describe("русский интерфейс", () => {
 
       constructor(_url: string) {}
 
-      pause() {}
+      pause() { pause(); }
 
       play() {
         return play();
@@ -230,6 +235,22 @@ describe("русский интерфейс", () => {
 
       await waitFor(() => expect(api.getVoiceTtsStatus).toHaveBeenCalledWith("coding-review-voice"));
       await waitFor(() => expect(play).toHaveBeenCalledOnce());
+      const subtitles = screen.getByRole("region", { name: "Субтитры Iris" });
+      pause.mockClear();
+      fireEvent.click(screen.getByRole("button", { name: "Обзор" }));
+      expect(screen.getByText("Coding Agent закончил задачу.")).toBeVisible();
+      expect(screen.getByRole("region", { name: "Субтитры Iris" })).toBe(subtitles);
+      expect(screen.getByRole("button", { name: "Включить микрофон" })).toBeVisible();
+      const notificationHost = screen.getByRole("complementary", { name: "Уведомления приложения" });
+      expect(notificationHost.firstElementChild).toHaveClass("notification-pinned-slot");
+      expect(notificationHost.firstElementChild).toContainElement(subtitles);
+      expect(document.querySelector(".background-conversation-host")).toBeNull();
+      expect(pause).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Диалог" }));
+      expect(screen.getByRole("region", { name: "Субтитры Iris" })).toBe(subtitles);
+      expect(screen.getByText("Coding Agent закончил задачу.")).toBeVisible();
+      expect(play).toHaveBeenCalledOnce();
+      expect(pause).not.toHaveBeenCalled();
     } finally {
       vi.stubGlobal("Audio", previousAudio);
     }
@@ -366,6 +387,94 @@ describe("русский интерфейс", () => {
     expect(api.getTimelineMessages).toHaveBeenCalledTimes(1);
   });
 
+  it("продолжает передавать микрофон в памяти и обзоре и управляет mute из общей панели", async () => {
+    const mediaDescriptor = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
+    const previousWorklet = globalThis.AudioWorkletNode;
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: vi.fn() } });
+    vi.stubGlobal("AudioWorkletNode", class {});
+    api.getReadiness.mockResolvedValue({ live_ready: true, text_chat: "ready", stt: "ready", tts: "ready", vad: "ready", errors: [] });
+    let capturePcm: ((pcm: ArrayBuffer, rate: number) => void) | undefined;
+    const start = vi.spyOn(BrowserVadRecorder.prototype, "start").mockImplementation(async (onPcm) => {
+      capturePcm = onPcm;
+      return { sampleRate: 48000, channels: 1, profile: "live", settings: {}, constraints: {}, supportedConstraints: {} };
+    });
+    const stop = vi.spyOn(BrowserVadRecorder.prototype, "stop").mockImplementation(() => {});
+    const mute = vi.spyOn(BrowserVadRecorder.prototype, "setMuted").mockImplementation(() => {});
+    const close = vi.spyOn(PcmInputClient.prototype, "close").mockImplementation(() => {});
+    const sendPcm = vi.spyOn(PcmInputClient.prototype, "sendPcm").mockImplementation(() => {});
+    vi.spyOn(PcmInputClient.prototype, "connect").mockResolvedValue();
+    vi.spyOn(VoiceSocketClient.prototype, "connect").mockResolvedValue();
+    vi.spyOn(TTSStreamPlayer.prototype, "unlock").mockResolvedValue();
+    try {
+      render(<App />);
+      await waitFor(() => expect(api.getReadiness).toHaveBeenCalled());
+      fireEvent.click(screen.getByRole("button", { name: "Диалог" }));
+      const startButton = await screen.findByRole("button", { name: "Начать" });
+      await waitFor(() => expect(startButton).toBeEnabled());
+      fireEvent.click(startButton);
+      await waitFor(() => expect(start).toHaveBeenCalledOnce());
+      stop.mockClear(); close.mockClear();
+      fireEvent.click(screen.getByRole("button", { name: "Обзор" }));
+      expect(await screen.findByRole("button", { name: "Выключить микрофон" })).toHaveAttribute("aria-pressed", "true");
+      capturePcm!(new ArrayBuffer(32), 48000);
+      expect(sendPcm).toHaveBeenCalledOnce();
+      fireEvent.click(within(screen.getByRole("navigation", { name: "Разделы приложения" })).getByRole("button", { name: "Память" }));
+      expect(await screen.findByTitle("Обновить память")).toBeVisible();
+      capturePcm!(new ArrayBuffer(32), 48000);
+      expect(sendPcm).toHaveBeenCalledTimes(2);
+      fireEvent.click(screen.getByRole("button", { name: "Выключить микрофон" }));
+      expect(mute).toHaveBeenLastCalledWith(true);
+      fireEvent.click(screen.getByRole("button", { name: "Включить микрофон" }));
+      expect(mute).toHaveBeenLastCalledWith(false);
+      api.updateRuntimeSettings.mockImplementation(async (patch) => {
+        const nextSettings = { ...settings, ...patch };
+        api.getSettings.mockResolvedValue(nextSettings);
+        return nextSettings;
+      });
+      const subtitles = screen.getByRole("region", { name: "Субтитры Iris" });
+      fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
+      fireEvent.click(screen.getByRole("button", { name: "Свернуть панель разговора" }));
+      expect(subtitles).not.toBeVisible();
+      expect(subtitles).toBeInTheDocument();
+      expect(document.querySelector(".conversation-surface.is-background")).toHaveClass("is-minimized");
+      expect(screen.queryByRole("button", { name: "Выключить микрофон" })).toBeNull();
+      expect(stop).not.toHaveBeenCalled();
+      expect(close).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Развернуть панель разговора" }));
+      expect(screen.getByRole("region", { name: "Субтитры Iris" })).toBe(subtitles);
+      expect(subtitles).toBeVisible();
+      expect(document.querySelector(".conversation-surface.is-background")).not.toHaveClass("is-minimized");
+      const settingsNavigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
+      fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Система" }));
+      fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Интерфейс" }));
+      const preference = await screen.findByRole("switch", { name: /Разговор в уведомлениях/ });
+      expect(preference).toBeChecked();
+      fireEvent.click(preference);
+      await waitFor(() => expect(api.updateRuntimeSettings).toHaveBeenCalledWith({ background_conversation_notifications_enabled: false }));
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Выключить микрофон" })).toBeNull());
+      expect(document.querySelector(".notification-pinned-slot")).toBeEmptyDOMElement();
+      capturePcm!(new ArrayBuffer(32), 48000);
+      expect(sendPcm).toHaveBeenCalledTimes(3);
+      fireEvent.click(preference);
+      await waitFor(() => expect(screen.getByRole("button", { name: "Выключить микрофон" })).toBeVisible());
+      expect(screen.getByRole("region", { name: "Субтитры Iris" })).toBe(subtitles);
+      fireEvent.click(screen.getByRole("button", { name: "Диалог" }));
+      capturePcm!(new ArrayBuffer(32), 48000);
+      expect(sendPcm).toHaveBeenCalledTimes(4);
+      expect(document.querySelector(".notification-pinned-slot")).toBeEmptyDOMElement();
+      expect(start).toHaveBeenCalledOnce();
+      expect(stop).not.toHaveBeenCalled();
+      expect(close).not.toHaveBeenCalled();
+      expect(api.resetConversationSession).not.toHaveBeenCalled();
+    } finally {
+      cleanup();
+      vi.restoreAllMocks();
+      vi.stubGlobal("AudioWorkletNode", previousWorklet);
+      if (mediaDescriptor) Object.defineProperty(navigator, "mediaDevices", mediaDescriptor);
+      else Reflect.deleteProperty(navigator, "mediaDevices");
+    }
+  });
+
   it("открывает сохранённый диалог на последнем сообщении", async () => {
     api.getTimelineMessages.mockResolvedValue({
       items: [{ id: "last-message", role: "assistant", content: "Последнее сообщение", metadata: {} }],
@@ -374,7 +483,7 @@ describe("русский интерфейс", () => {
     const { container } = render(<App />);
 
     await screen.findByText("Последнее сообщение");
-    const list = container.querySelector<HTMLElement>(".chat-panel .message-list");
+    const list = container.querySelector<HTMLElement>(".message-list");
     expect(list).not.toBeNull();
     Object.defineProperty(list!, "scrollHeight", { configurable: true, value: 640 });
     fireEvent.click(screen.getByRole("button", { name: "Диалог" }));

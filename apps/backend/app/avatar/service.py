@@ -396,10 +396,16 @@ class AvatarService:
             frame.model_dump(mode="json"), min_protocol_version=min_protocol_version
         )
         event_data = {"message_id": frame.message_id, "command_type": message_type, "utterance_id": utterance_id, "attempted": result.attempted, "sent": result.sent, "failed": result.failed}
+        # A stale renderer can be removed during a heartbeat or visibility
+        # update. Only a command lost by every renderer affects user speech.
+        speech_failed = result.failed > 0 and result.sent == 0 and message_type in {
+            "avatar.speak", "avatar.stream.start", "avatar.stream.segment", "avatar.stream.end",
+        }
         self.event_bus.publish(
             "avatar.command_failed" if result.failed else "avatar.command_sent",
-            "warning" if result.failed else "info",
-            "Avatar command dispatched",
+            "warning" if speech_failed else "info",
+            "Не удалось передать речь аватару. Проверьте подключение аватара."
+            if speech_failed else "Avatar command delivery failed" if result.failed else "Avatar command dispatched",
             event_data,
         )
         return result

@@ -164,6 +164,7 @@ export function getConversationSession(): Promise<{ session_id: string; created:
 export function updateRuntimeSettings(payload: {
   personality?: string;
   interface_locale?: PublicSettings["interface_locale"];
+  background_conversation_notifications_enabled?: boolean;
   developer_mode_enabled?: boolean;
   voice_language?: string;
   voice_microphone_profile?: PublicSettings["voice_microphone_profile"];
