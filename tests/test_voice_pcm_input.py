@@ -100,6 +100,77 @@ class ControlledTurnDetector:
         )
 
 
+class FakeLiveSTT:
+    def __init__(self):
+        self.updates = []
+        self.closed = False
+
+    def update(self, audio):
+        assert not self.closed
+        self.updates.append(bytes(audio))
+
+    async def close(self):
+        self.closed = True
+
+
+class PrecomputingVoiceService(FakeVoiceService):
+    def __init__(self, root):
+        super().__init__(root)
+        self.streams = []
+
+    def start_live_stt(self):
+        stream = FakeLiveSTT()
+        self.streams.append(stream)
+        return stream
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("resume", [False, True])
+async def test_live_stt_is_shared_with_final_candidate_and_survives_continuation(tmp_path, resume):
+    service = PrecomputingVoiceService(tmp_path)
+    handled = []
+    detector = ControlledTurnDetector([False, True] if resume else [True], block_first=resume)
+
+    async def on_utterance(session_id, path, language, connection):
+        assert connection.live_stt is service.streams[0]
+        assert not connection.live_stt.closed
+        handled.append(path.read_bytes())
+
+    manager = VoiceInputSessionManager(
+        service, on_utterance, vad=SequenceVad([.9, .9, 0, 0] * (2 if resume else 1)),
+        turn_detector=detector,
+    )
+    await manager.register("precompute", FakeSocket(), version=3)
+    await manager.start("precompute", sample_rate=16000, channels=1, language="ru")
+    session = manager._sessions["precompute"]
+    session.gate.start_ms = session.gate.end_ms = 0
+    for _ in range(4):
+        await manager.feed("precompute", b"\1\0" * 160)
+    if resume:
+        await detector.first_started.wait()
+        for _ in range(4):
+            await manager.feed("precompute", b"\2\0" * 160)
+        detector.release_first.set()
+    await manager._settle_session_tasks(session, cancel=False)
+    assert len(service.streams) == 1
+    assert service.streams[0].closed
+    assert service.streams[0].updates
+    assert len(handled) == 1
+    await manager.close()
+
+
+@pytest.mark.anyio
+async def test_disconnect_closes_active_live_stt(tmp_path):
+    service = PrecomputingVoiceService(tmp_path)
+    manager = VoiceInputSessionManager(service, lambda *_: None, vad=SequenceVad([.9]))
+    connection = await manager.register("precompute", FakeSocket(), version=3)
+    await manager.start("precompute", sample_rate=16000, channels=1, language="ru")
+    manager._sessions["precompute"].gate.start_ms = 0
+    await manager.feed("precompute", b"\1\0" * 160)
+    await manager.unregister("precompute", connection, finalize_active=False)
+    assert service.streams[0].closed
+
+
 def test_vad_gate_debounces_transitions() -> None:
     gate = VadGate(threshold=.5, start_ms=100, end_ms=200)
     assert gate.feed(.8, 0) is None

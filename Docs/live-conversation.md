@@ -17,14 +17,19 @@ Live Conversation — единственный голосовой режим Iri
 flowchart TD
     PCM["PCM16 stream"] --> VAD["Silero или energy VAD"]
     VAD --> TURN["Turn assembler"]
+    TURN -. "stable chunks during speech" .-> STT
     TURN --> SMART["Smart Turn v3.2"]
     SMART -->|"incomplete"| TURN
     SMART -->|"complete/fallback"| STT["STT"]
     STT --> ECHO["Echo и speaker-role gates"]
     ECHO --> OBS["Observation commit"]
-    OBS --> STATE["Affect + relationship reducer"]
+    OBS --> GATE["Hard gates"]
+    GATE -->|"confident private reply"| AGENT
+    GATE --> APPRAISAL["Structured semantic appraisal"]
+    APPRAISAL --> STATE["Affect + relationship reducer"]
     OBS --> MEMORY["Memory provenance policy"]
-    STATE --> DECISION["Hard gates + structured adjudicator"]
+    GATE --> DECISION["Conversation decision"]
+    STATE -->|"group, uncertainty, style change"| DECISION
     DECISION -->|"observe/wait"| LISTEN["Продолжить слушать"]
     DECISION -->|"avatar"| AVATAR["Nonverbal avatar reaction"]
     DECISION -->|"defer"| DEFER["Event-driven deferred queue"]
@@ -73,7 +78,7 @@ license: BSD-2-Clause
 VAD считает endpoint только после непрерывной тишины: тихий, но всё ещё
 речевой фрейм сбрасывает pending-паузу. При готовом Smart Turn кандидат
 передаётся на семантическую проверку раньше (для `natural` примерно через
-500 мс); неполный кандидат остаётся в `pending_turn` и продолжает накапливать
+350 мс); неполный кандидат остаётся в `pending_turn` и продолжает накапливать
 аудио. Если Smart Turn недоступен при старте, сохраняется консервативная
 граница 1100 мс для `natural`; при timeout/error модель не выпускает ответ на
 кандидате и действует прежний timeout ожидания продолжения. `short` и
@@ -101,7 +106,8 @@ manifest и regression expectations.
 2. безопасная интерпретация может храниться отдельно в `corrected_content`;
 3. speaker/address/EOT/STT/echo provenance записывается в metadata и
    `conversation_observations`;
-4. применяются bounded affect/relationship deltas;
+4. применяются bounded affect/relationship deltas; для уверенной private-реплики
+   при включённом parallel appraisal этот шаг выполняется параллельно ответу;
 5. eligible primary-speaker observation проходит novelty/cue gate и при
    необходимости обновляет один coalesced `memory_consolidation` job;
 6. conversation policy выбирает действие.
@@ -222,10 +228,13 @@ endpoint не возвращает.
 ## Decision, роли и инициатива
 
 Echo, incomplete turn, direct address, explicit invitation, speaker gate,
-cooldown и speech budget проверяются локально. Прямое обращение не вызывает
-decision LLM. Для неоднозначного primary observation используется единый
-decision+appraisal JSON: timeout 1,5 секунды, одна repair-попытка до 1 секунды,
-после чего применяется deterministic fallback.
+cooldown и speech budget проверяются локально. Семантическая оценка события
+остаётся модельной: один decision+appraisal JSON, timeout 3,5 секунды, без
+repair-запроса. Для уверенного обращения primary-speaker в `one_to_one`
+hard gate уже разрешает ответ, поэтому этот запрос выполняется параллельно
+генерации. Групповой разговор, неуверенный STT и признаки просьбы изменить
+регистр речи сохраняют последовательную проверку. При сбое действует
+deterministic fallback, эмоциональная классификация по словам не добавляется.
 
 Speaker-role estimator не использует биометрию. В `one_to_one` действует prior
 `primary`; в `group` базовый результат `unknown`, а повышение confidence
@@ -280,3 +289,59 @@ npm run build
 Обе команды создают JSON и Markdown report. Синтетические fixtures и soak не
 заменяют ручную проверку конкретного микрофона, колонок, браузерного AEC и
 акустики помещения.
+
+## Сокращение задержки ответа, 1 октября 2026
+
+По умолчанию включены две backend-настройки (применяются при перезапуске):
+
+```env
+VOICE_STT_PROCESS_WHILE_SPEAKING=true
+VOICE_LIVE_PARALLEL_APPRAISAL=true
+```
+
+GigaAM ONNX распознаёт стабильные участки длинной реплики ещё во время речи.
+Тихий разрез между 16 и 23 секундами становится независимым от будущего
+аудио после накопления 28 секунд. Используются те же FP32-модель, overlap
+0,75 секунды и объединение текста. При endpoint каждый сохранённый участок
+сравнивается с финальным PCM байт в байт; изменённый участок распознаётся
+заново. Ошибка фоновой обработки возвращает полный batch-путь. Короткие
+реплики обрабатываются прежним способом. Кеш — только RAM, промежуточный
+текст не публикуется. Disconnect и закрытие кандидата освобождают его.
+
+Распознавание на GTX 1660 SUPER через реальный `VoiceService`, после прогрева:
+
+| Длина записи | Полный batch, медиана 3 повторов | STT после остановки при precompute | Участков готово заранее |
+| --- | ---: | ---: | ---: |
+| 33,1 с | 762 мс | 235 мс | 1 |
+| 61,2 с | 1171 мс | 476 мс | 2 |
+| 130,1 с | 2898 мс | 288 мс | 6 |
+
+Сырые тексты совпали с предыдущим GPU-baseline во всех 35 случаях. Это
+PCM replay с виртуальным поступлением кадров раз в секунду: отдельный
+precompute занимал 298–442 мс и укладывался между кадрами. Время хвоста
+измерено одним прогоном, без микрофона, сетевой модели и playback. Отчёт:
+`output/stt-comparison/iris-overlap-gpu.json`. Воспроизведение на подготовленном
+корпусе из [сравнения STT](stt-comparison.md):
+
+```powershell
+.\.venv\Scripts\python.exe scripts/benchmark_voice_stt_overlap.py --manifest .cache/stt-lab/corpus/manifest.json --baseline output/stt-comparison/iris-integrated-gpu.json --output output/stt-comparison/iris-overlap-gpu.json
+```
+
+Parallel appraisal убирает отдельный сетевой запрос из последовательного
+пути до первого ответа. В локальной LLM telemetry недавние adjudication
+занимали 1,05–1,56 секунды; это длительность всего запроса, не TTFT и не
+измерение полного выигрыша в динамиках. Новый ответ получает последний
+готовый snapshot состояния и полную текущую реплику. Оценка текущей реплики
+применяется в фоне один раз, без предварительного neutral-события; новая
+generation отменяет устаревшие задачи. После постановки аудио в очередь
+завершение ответа дожидается appraisal, чтобы сохранить порядок
+«состояние пользователя → итоговое состояние ответа Iris». Бюджеты отношений,
+semantic ownership, incognito и скрытый регистр речи сохраняются.
+
+Smart Turn ограничен четырьмя CPU-потоками, idle spinning выключен. На девяти
+аудиофикстурах медианы inference уменьшились с 46–65 до 24–25 мс; вероятности
+совпали. Паузы endpoint, проверки завершённости речи, защитные проверки
+генерации и TeraTTSv2 / ru_f1 сохранены. Оставшаяся задержка включает сеть/LLM,
+проверку начала ответа, синтез первого сегмента и реальный playback.
+Для полной задержки ориентир — событие `voice.end_of_speech_to_playback`
+после фактического подтверждения начала воспроизведения, а не только STT.

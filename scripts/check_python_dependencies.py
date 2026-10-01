@@ -46,13 +46,15 @@ def installed_distributions() -> dict[str, metadata.Distribution]:
 
 
 def resolved_closure(
-    roots: set[str], installed: dict[str, metadata.Distribution]
+    roots: set[str], installed: dict[str, metadata.Distribution],
+    aliases: dict[str, str] | None = None,
 ) -> tuple[set[str], list[str]]:
     closure: set[str] = set()
     missing: list[str] = []
     pending = list(roots)
     while pending:
         name = pending.pop()
+        name = (aliases or {}).get(name, name)
         if name in closure:
             continue
         closure.add(name)
@@ -67,7 +69,7 @@ def resolved_closure(
     return closure, sorted(missing)
 
 
-def validate(*, strict: bool, profiles: list[str]) -> list[str]:
+def validate(*, strict: bool, profiles: list[str], stt_cuda: bool = False) -> list[str]:
     errors: list[str] = []
     installed = installed_distributions()
     direct_requirements = [
@@ -77,8 +79,17 @@ def validate(*, strict: bool, profiles: list[str]) -> list[str]:
         for line in requirement_lines(path)
         if (requirement := active_requirement(line)) is not None
     ]
+    if stt_cuda:
+        direct_requirements = [req for req in direct_requirements
+                               if canonicalize_name(req.name) != "onnxruntime"]
+        direct_requirements.extend(
+            req for line in requirement_lines(ROOT / "requirements/stt-cuda.txt")
+            if (req := active_requirement(line)) is not None
+        )
     roots = {canonicalize_name(requirement.name) for requirement in direct_requirements}
-    closure, missing_installed = resolved_closure(roots, installed)
+    closure, missing_installed = resolved_closure(
+        roots, installed, {"onnxruntime": "onnxruntime-gpu"} if stt_cuda else None,
+    )
     if missing_installed:
         errors.append("required packages are not installed: " + ", ".join(missing_installed))
 
@@ -87,6 +98,11 @@ def validate(*, strict: bool, profiles: list[str]) -> list[str]:
         for line in requirement_lines(CONSTRAINTS_PATH)
         if (requirement := active_requirement(line)) is not None
     }
+    if stt_cuda:
+        constraints.pop("onnxruntime", None)
+        constraints.update({canonicalize_name(req.name): req
+                            for line in requirement_lines(ROOT / "requirements/stt-cuda.txt")
+                            if (req := active_requirement(line)) is not None})
     missing_constraints = sorted(closure - constraints.keys())
     stale_constraints = (
         sorted(constraints.keys() - closure)
@@ -128,6 +144,10 @@ def main() -> int:
         help="Fail when the environment contains packages outside the resolved graph.",
     )
     parser.add_argument(
+        "--stt-cuda", action="store_true",
+        help="Validate the optional STT CUDA runtime instead of CPU ONNX Runtime.",
+    )
+    parser.add_argument(
         "--profile",
         action="append",
         choices=tuple(PROFILE_PATHS),
@@ -135,7 +155,7 @@ def main() -> int:
     )
     args = parser.parse_args()
     profiles = list(dict.fromkeys(args.profile or PROFILE_PATHS.keys()))
-    errors = validate(strict=args.strict, profiles=profiles)
+    errors = validate(strict=args.strict, profiles=profiles, stt_cuda=args.stt_cuda)
     if not errors:
         return 0
     print("Dependency check failed:")

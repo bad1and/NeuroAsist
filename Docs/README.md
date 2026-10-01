@@ -24,6 +24,7 @@
 ## Специализированные материалы
 
 - [Live Voice milestone report](milestone-9-live-voice.md) — подробности barge-in и latency gate.
+- [Сравнение локального STT](stt-comparison.md) — измерения CPU/GPU, точность и выбор конфигурации.
 - [Qwen3-TTS quality pack](qwen-tts-quality-gate.md) — изолированный исторический эксперимент, не production provider.
 - [Third-party assets](../THIRD_PARTY_ASSETS.md) — происхождение и ограничения сторонних ассетов.
 - [Privacy](../PRIVACY.md), [Security](../SECURITY.md), [Changelog](../CHANGELOG.md) и [Contributing](../CONTRIBUTING.md).

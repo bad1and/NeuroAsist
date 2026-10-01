@@ -15,6 +15,7 @@ from fastapi import HTTPException, UploadFile, status
 
 from apps.backend.app.core.config import Settings
 from apps.backend.app.voice.audio import Pcm16Audio, decode_audio_file, write_pcm16_wav
+from apps.backend.app.voice.gigaam_onnx import GigaAMOnnxSTTProvider
 from apps.backend.app.voice.providers import (
     FasterWhisperSTTProvider,
     FallbackSTTProvider,
@@ -124,10 +125,17 @@ class VoiceService:
         audio = await asyncio.to_thread(decode_audio_file, path)
         return await self.transcribe_pcm16(audio, language)
 
-    async def transcribe_pcm16(self, audio: Pcm16Audio, language: str):
+    def start_live_stt(self):
+        factory = getattr(self._stt_provider, "start_live", None)
+        if self._settings.voice_stt_process_while_speaking and callable(factory):
+            return factory()
+        return None
+
+    async def transcribe_pcm16(self, audio: Pcm16Audio, language: str, *, live_stt=None):
         if self._settings.voice_input_diagnostic_audio:
             await asyncio.to_thread(self._save_diagnostic_audio, audio, {"language": language})
-        result = await self._stt_provider.transcribe_pcm16(audio, language)
+        result = (await live_stt.finish(audio, language) if live_stt is not None
+                  else await self._stt_provider.transcribe_pcm16(audio, language))
         return self._correct_transcript(result)
 
     def _correct_transcript(self, result):
@@ -365,6 +373,12 @@ class VoiceService:
             return GigaAMSTTProvider(
                 model,
                 settings.voice_stt_device,
+            )
+        if provider == "gigaam_onnx":
+            return GigaAMOnnxSTTProvider(
+                model, settings.voice_stt_device, settings.voice_stt_onnx_model_directory,
+                threads=settings.voice_stt_onnx_threads,
+                cpu_threads=settings.voice_stt_onnx_cpu_threads,
             )
         if provider == "qwen3_asr":
             return Qwen3ASRProvider(model, settings.voice_stt_device)

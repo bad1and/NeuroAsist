@@ -9,6 +9,12 @@ entry point.
 profile is installed. The release script always selects `torch-cpu.txt`; CUDA
 is a separate artifact, never an accidental property of the build machine.
 
+`stt-cuda.txt` is an optional Windows development add-on for GigaAM ONNX FP32.
+After installing the base profile, uninstall CPU `onnxruntime`, then install
+this add-on and validate with `check_python_dependencies.py --stt-cuda`.
+CPU and GPU ONNX Runtime wheels must not coexist: they share one module.
+This add-on does not change PyTorch/TeraTTS and is not bundled in the CPU release.
+
 Only direct dependencies belong in the three profiles. `constraints.txt` pins
 the tested transitive graph without installing anything by itself. Resolve and
 review that graph in a clean CPython 3.12 environment; copying `pip freeze` from
