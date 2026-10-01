@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import {
   IconInterfaceCross,
   IconInterfaceCheckCircle,
@@ -12,9 +12,10 @@ import {
   IconInterfaceFilesFolderCopy2,
 } from "../CustomIcons";
 import { useNotifications, notify, type AppNotification, type NotificationType } from "../notifications";
-import { animateButtonPress } from "../animations";
+import { animateButtonPress, animateNotification, NOTIFICATION_EXIT_DURATION } from "../animations";
 
 interface NotificationHostProps {
+  pinnedContentRef?: React.RefObject<HTMLDivElement | null>;
   onNavigate?: (view: string) => void;
   maxVisible?: number;
 }
@@ -53,25 +54,27 @@ function NotificationCard({
   const [isPaused, setIsPaused] = useState(false);
   const [copied, setCopied] = useState(false);
   const exitingTimerRef = useRef<number | null>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
 
   const handleDismiss = useCallback(() => {
     if (isExiting) return;
     setIsExiting(true);
-    if (exitingTimerRef.current !== null) {
-      window.clearTimeout(exitingTimerRef.current);
-    }
-    exitingTimerRef.current = window.setTimeout(() => {
-      onDismiss(notification.id);
-    }, 190);
-  }, [notification.id, isExiting, onDismiss]);
+    // The effect plays the same exit used by the pinned conversation card.
+  }, [isExiting]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (!cardRef.current) return;
+    const motion = animateNotification(cardRef.current, isExiting ? "exit" : "enter", () => {
+      if (isExiting) onDismiss(notification.id);
+    });
+    if (isExiting && !motion) {
+      exitingTimerRef.current = window.setTimeout(() => onDismiss(notification.id), NOTIFICATION_EXIT_DURATION);
+    }
     return () => {
-      if (exitingTimerRef.current !== null) {
-        window.clearTimeout(exitingTimerRef.current);
-      }
+      motion?.cancel();
+      if (exitingTimerRef.current !== null) window.clearTimeout(exitingTimerRef.current);
     };
-  }, []);
+  }, [isExiting, notification.id, onDismiss]);
 
   // Smart auto-dismiss timer
   useEffect(() => {
@@ -123,6 +126,7 @@ function NotificationCard({
 
   return (
     <div
+      ref={cardRef}
       className={`notification-card notification-type-${notification.type}${
         isExiting ? " is-exiting" : ""
       }${isExpanded ? " is-expanded" : ""}${notification.navigateView ? " is-clickable" : ""}`}
@@ -281,10 +285,10 @@ function NotificationCard({
   );
 }
 
-export function NotificationHost({ onNavigate, maxVisible = 3 }: NotificationHostProps) {
+export function NotificationHost({ onNavigate, maxVisible = 3, pinnedContentRef }: NotificationHostProps) {
   const notifications = useNotifications();
 
-  if (notifications.length === 0) {
+  if (notifications.length === 0 && !pinnedContentRef) {
     return null;
   }
 
@@ -297,6 +301,7 @@ export function NotificationHost({ onNavigate, maxVisible = 3 }: NotificationHos
       aria-label="Уведомления приложения"
       aria-live="polite"
     >
+      {pinnedContentRef && <div ref={pinnedContentRef} className="notification-pinned-slot" />}
       {visibleNotifications.map((notif, index) => (
         <NotificationCard
           key={notif.id}

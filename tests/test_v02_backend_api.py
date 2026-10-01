@@ -115,6 +115,20 @@ def test_runtime_interface_locale_can_be_updated_without_affecting_voice(client:
         client.patch("/settings/runtime", json={"interface_locale": original["interface_locale"]})
 
 
+def test_background_conversation_notification_preference_can_be_updated(client: TestClient) -> None:
+    original = client.get("/settings/public").json()
+    key = "background_conversation_notifications_enabled"
+    try:
+        for enabled in (False, True):
+            response = client.patch("/settings/runtime", json={key: enabled})
+            assert response.status_code == 200
+            assert response.json()[key] is enabled
+            assert client.get("/settings/public").json()[key] is enabled
+            assert response.json()["live_conversation_enabled"] == original["live_conversation_enabled"]
+    finally:
+        client.patch("/settings/runtime", json={key: original[key]})
+
+
 def test_runtime_avatar_placement_can_be_updated_and_validated(client: TestClient) -> None:
     original = client.get("/settings/public").json()["avatar_placement"]
     try:

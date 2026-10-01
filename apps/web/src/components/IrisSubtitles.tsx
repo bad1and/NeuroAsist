@@ -114,6 +114,7 @@ export interface IrisSubtitlesProps {
   livePlaybackRevision?: number;
   onOpenMemory?: () => void;
   containerRef?: React.RefObject<HTMLDivElement | null>;
+  compact?: boolean;
 }
 
 export function IrisSubtitles({
@@ -125,6 +126,7 @@ export function IrisSubtitles({
   livePlaybackDurationSeconds = 0,
   livePlaybackRevision = 0,
   containerRef,
+  compact = false,
 }: IrisSubtitlesProps) {
   const thinkingRef = useRef<HTMLDivElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -365,7 +367,7 @@ export function IrisSubtitles({
   return (
     <div className="message-list subtitles-mode" ref={containerRef} role="region" aria-label="Субтитры Iris">
       <div className="subtitles-viewport" ref={viewportRef}>
-        {visibleCues.map((cue) => {
+        {visibleCues.filter((cue) => !compact || (cue.age === (speechCompleted ? 1 : 0) && cue.text.trim())).map((cue) => {
           const isActive = cue.age === 0;
           const ageClass = isActive
             ? "is-latest is-active-cue"

@@ -1,3 +1,4 @@
+import { BackgroundConversationControls, BackgroundConversationExpandButton } from "./components/BackgroundConversationControls";
 import { CustomSelect } from "./components/CustomSelect";
 import { useDockScale } from "./components/useDockScale";
 import {
@@ -187,9 +188,10 @@ import { GuidedSttCapture } from "./stt-capture";
 import { InAppAvatarHost } from "./components/InAppAvatarHost";
 import { IrisPortalBackground } from "./components/IrisPortalBackground";
 import { IrisSubtitles } from "./components/IrisSubtitles";
+import { ConversationSurface } from "./components/ConversationSurface";
 import { NotificationHost } from "./components/NotificationHost";
 import { TokenAnalyticsSettings } from "./components/TokenAnalyticsSettings";
-import { notify } from "./notifications";
+import { notify, notifyBackendEvent } from "./notifications";
 import { audioAnalyzer } from "./audio-analyzer";
 import {
   initialInterfaceLocale,
@@ -518,6 +520,7 @@ function MainApp() {
     }
   });
   const menuToggleRef = useRef<HTMLButtonElement>(null);
+  const backgroundConversationRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setVisitedViews((prev) => {
@@ -902,11 +905,7 @@ function MainApp() {
         try {
           const event = JSON.parse(message.data) as BackendEvent;
           setEvents((current) => dedupeEvents([...current, event]));
-          if (event.level === "error") {
-            notify.error(event.type ? `Ошибка: ${event.type}` : "Ошибка системы", event.message);
-          } else if (event.level === "warning") {
-            notify.warning(event.type ? `Предупреждение: ${event.type}` : "Внимание", event.message);
-          }
+          notifyBackendEvent(event);
         } catch {
           // Ignore malformed event frames.
         }
@@ -1005,6 +1004,7 @@ function MainApp() {
                 sessionId={sessionId}
                 sessionStarting={startingSession}
                 isActive={activeView === "chat"}
+                backgroundConversationHost={backgroundConversationRef}
                 events={events}
                 settings={settings}
                 readiness={readiness}
@@ -1013,6 +1013,7 @@ function MainApp() {
                 showInAppAvatar={settings?.avatar_placement === "in_app" && (settings.avatar_in_app_visible ?? true)}
                 onRefreshEvents={refreshEvents}
                 onOpenMemory={() => switchView("memory")}
+                onOpenChat={() => switchView("chat")}
                 onOpenSettings={() => switchView("settings")}
                 onStartNewDialog={startFreshSession}
                 onRetryAvatar={retryAvatar}
@@ -1090,7 +1091,7 @@ function MainApp() {
             </Suspense>
           )}
         </main>
-        <NotificationHost onNavigate={(view) => switchView(view as AppView)} />
+        <NotificationHost pinnedContentRef={backgroundConversationRef} onNavigate={(view) => switchView(view as AppView)} />
       </section>
     </div>
   );
@@ -1208,6 +1209,7 @@ export function ChatPage({
   sessionId,
   sessionStarting,
   isActive,
+  backgroundConversationHost,
   events,
   settings,
   readiness,
@@ -1216,6 +1218,7 @@ export function ChatPage({
   showInAppAvatar,
   onRefreshEvents,
   onOpenMemory,
+  onOpenChat,
   onOpenSettings,
   onStartNewDialog,
   onRetryAvatar,
@@ -1223,6 +1226,7 @@ export function ChatPage({
   sessionId: string | null;
   sessionStarting: boolean;
   isActive: boolean;
+  backgroundConversationHost?: React.RefObject<HTMLDivElement | null>;
   events: BackendEvent[];
   settings: PublicSettings | null;
   readiness: ReadinessResponse | null;
@@ -1231,6 +1235,7 @@ export function ChatPage({
   showInAppAvatar: boolean;
   onRefreshEvents: () => Promise<void>;
   onOpenMemory: () => void;
+  onOpenChat?: () => void;
   onOpenSettings?: () => void;
   onStartNewDialog: (boundaryReason?: ConversationBoundaryReason) => Promise<void>;
   onRetryAvatar: () => Promise<void>;
@@ -2776,17 +2781,40 @@ export function ChatPage({
             <button className="text-button" onClick={onOpenMemory}>Открыть память</button>
           </div>
         )}
-        <IrisSubtitles
-          messages={messages}
-          loading={loading}
-          voiceState={voiceState}
-          activeAudio={activeAudioElement}
-          livePlaybackSegment={livePlaybackSegment}
-          livePlaybackDurationSeconds={livePlaybackDurationSeconds}
-          livePlaybackRevision={livePlaybackRevision}
-          containerRef={listRef}
-          onOpenMemory={onOpenMemory}
-        />
+        <ConversationSurface
+          active={isActive}
+          backgroundVisible={(settings?.background_conversation_notifications_enabled ?? true) && (isStarted || liveConversation || microphoneStarting || loading || voiceState !== "idle")}
+          backgroundHost={backgroundConversationHost}
+        >
+          {(inBackground, minimized, toggleMinimized) => <>
+          {inBackground && minimized && <BackgroundConversationExpandButton onExpand={toggleMinimized} />}
+          <div className="background-conversation-body" hidden={inBackground && minimized}>
+          {inBackground && (
+            <BackgroundConversationControls
+              microphoneActive={liveConversation && !microphoneMuted}
+              microphoneStarting={microphoneStarting}
+              microphoneDisabled={!liveVoiceSupported || microphoneStarting || !sessionId || voiceState === "stopping"}
+              soundMuted={soundMuted}
+              onMicrophone={() => { liveConversation ? toggleMicrophoneMute() : void toggleLive(); }}
+              onSound={toggleSoundMute}
+              onMinimize={toggleMinimized}
+            />
+          )}
+          <IrisSubtitles
+            messages={messages}
+            loading={loading}
+            voiceState={voiceState}
+            activeAudio={activeAudioElement}
+            livePlaybackSegment={livePlaybackSegment}
+            livePlaybackDurationSeconds={livePlaybackDurationSeconds}
+            livePlaybackRevision={livePlaybackRevision}
+            containerRef={listRef}
+            onOpenMemory={onOpenMemory}
+            compact={inBackground}
+          />
+          </div>
+          </>}
+        </ConversationSurface>
 
         <div
           className="chat-composer-container"
@@ -3166,6 +3194,7 @@ export function SettingsPage({
   const [activeSection, setActiveSection] = useState<SettingsSection>("conversation");
   const [interfaceLocale, setInterfaceLocale] = useState<InterfaceLocale>("ru");
   const [developerModeEnabled, setDeveloperModeEnabled] = useState(false);
+  const [backgroundConversationNotificationsEnabled, setBackgroundConversationNotificationsEnabled] = useState(true);
   const [voiceLanguage, setVoiceLanguage] = useState("ru");
   const [voiceMicrophoneProfile, setVoiceMicrophoneProfile] = useState<MicrophoneProfile>("balanced");
   const [voiceInputDeviceId, setVoiceInputDeviceId] = useState("");
@@ -3220,6 +3249,7 @@ export function SettingsPage({
   const applySettingsToForm = useCallback((nextSettings: PublicSettings) => {
     setInterfaceLocale(nextSettings.interface_locale === "en" ? "en" : "ru");
     setDeveloperModeEnabled(Boolean(nextSettings.developer_mode_enabled));
+    setBackgroundConversationNotificationsEnabled(nextSettings.background_conversation_notifications_enabled ?? true);
     setVoiceLanguage(nextSettings.voice_language);
     setVoiceMicrophoneProfile(nextSettings.voice_microphone_profile ?? "balanced");
     setVoiceInputDeviceId(nextSettings.voice_input_device_id ?? "");
@@ -3693,6 +3723,22 @@ export function SettingsPage({
               </CustomSelect>
               <small>Выберите язык кнопок, меню и системных подсказок.</small>
             </label>
+          </div>
+
+          <div className="settings-card">
+            <SettingsSwitch
+              checked={backgroundConversationNotificationsEnabled}
+              label="Разговор в уведомлениях"
+              description="Показывать субтитры и управление микрофоном сверху уведомлений вне диалога. Если выключить, разговор продолжится без панели."
+              onChange={(checked) => {
+                const previousValue = backgroundConversationNotificationsEnabled;
+                setBackgroundConversationNotificationsEnabled(checked);
+                saveRuntimeSetting(
+                  { background_conversation_notifications_enabled: checked },
+                  () => setBackgroundConversationNotificationsEnabled(previousValue),
+                );
+              }}
+            />
           </div>
 
           {/* Developer Tools & QA Studio Card */}

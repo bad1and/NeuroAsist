@@ -6,7 +6,7 @@ namespace NeuroAsist.Avatar
     /// Manages the avatar sleep/wake lifecycle.
     /// When inactive (not visible in the chat tab, or when navigating away to other tabs):
     /// - Disables camera rendering (0 draw calls, 0% GPU usage).
-    /// - Sets Time.timeScale to 0 (pauses animations, physics, and procedural motion).
+    /// - Keeps speech, lip-sync and stream processing running while hidden.
     /// - Sets targetFrameRate to 30 FPS (avoids starving the Win32 message pump, guarantees instant <33ms response).
     /// When waking up:
     /// - Instantly restores 60 FPS, Time.timeScale to 1, and re-enables camera rendering with 0 reload latency.
@@ -81,14 +81,11 @@ namespace NeuroAsist.Avatar
             {
                 avatarCamera.enabled = false;
             }
-            Time.timeScale = 0f;
+            // Visibility is independent of the conversation. Freezing scaled
+            // time also freezes stream prebuffering and mouth smoothing.
+            Time.timeScale = 1f;
             QualitySettings.vSyncCount = 0;
             Application.targetFrameRate = SleepFrameRate;
-
-            if (speech != null)
-            {
-                speech.Stop(null);
-            }
 
             Debug.Log("[AvatarSleep] Avatar entered sleep mode (Camera disabled, targetFrameRate = " + SleepFrameRate + ")");
         }

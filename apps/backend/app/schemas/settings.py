@@ -6,6 +6,7 @@ class PublicSettingsResponse(BaseModel):
     model: str
     personality: str
     interface_locale: str
+    background_conversation_notifications_enabled: bool = True
     developer_mode_enabled: bool = False
     voice_language: str
     voice_microphone_profile: str
@@ -77,6 +78,7 @@ class RuntimeSettingsPatch(BaseModel):
 
     personality: str | None = None
     interface_locale: str | None = None
+    background_conversation_notifications_enabled: bool | None = None
     developer_mode_enabled: bool | None = None
     voice_language: str | None = None
     voice_microphone_profile: str | None = None

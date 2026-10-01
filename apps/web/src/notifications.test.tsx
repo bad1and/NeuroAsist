@@ -4,8 +4,10 @@ import "@testing-library/jest-dom/vitest";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, act } from "@testing-library/react";
 import React from "react";
-import { notify, notificationStore } from "./notifications";
+import { notify, notificationStore, notifyBackendEvent } from "./notifications";
+import type { BackendEvent } from "./types";
 import { NotificationHost } from "./components/NotificationHost";
+import * as animations from "./animations";
 
 describe("Unified Notification System", () => {
   beforeEach(() => {
@@ -23,6 +25,35 @@ describe("Unified Notification System", () => {
   });
 
   describe("notificationStore / notify helper", () => {
+    it("keeps avatar dispatch diagnostics out of toasts while showing playback failures", () => {
+      const event = { id: "delivery", type: "avatar.command_failed", level: "warning", message: "Avatar command dispatched", metadata: {}, created_at: "2026-10-01T00:00:00Z" } as BackendEvent;
+      notifyBackendEvent(event);
+      notify.warning("Предупреждение: avatar.command_failed", event.message);
+      notify.warning("Предупреждение: avatar.command_ошибка", event.message);
+      expect(notificationStore.getSnapshot()).toHaveLength(0);
+      notifyBackendEvent({ ...event, type: "avatar.playback.failed", message: "WAV playback failed" });
+      expect(notificationStore.getSnapshot()).toHaveLength(1);
+      expect(notificationStore.getSnapshot()[0].message).toBe("WAV playback failed");
+    });
+
+    it("ignores a legacy avatar warning synchronized from another window", () => {
+      const previousChannel = globalThis.BroadcastChannel;
+      let receive: ((event: { data: unknown }) => void) | null = null;
+      class TestChannel {
+        set onmessage(callback: (event: { data: unknown }) => void) { receive = callback; }
+        postMessage() {}
+      }
+      vi.stubGlobal("BroadcastChannel", TestChannel);
+      try {
+        const Store = notificationStore.constructor as new () => typeof notificationStore;
+        const store = new Store();
+        const oldWarning = { id: "old-warning", type: "warning", title: "Предупреждение: avatar.command_failed", message: "Avatar command dispatched", createdAt: 1 };
+        receive!({ data: { type: "show", notification: oldWarning } });
+        expect(store.getSnapshot()).toHaveLength(0);
+        receive!({ data: { type: "show", notification: { ...oldWarning, title: "Другая ошибка" } } });
+        expect(store.getSnapshot()).toHaveLength(1);
+      } finally { vi.stubGlobal("BroadcastChannel", previousChannel); }
+    });
     it("adds and dismisses notifications with appropriate default durations", () => {
       const errorId = notify.error("Ошибка сети", "Не удалось связаться с сервером");
       const notifs = notificationStore.getSnapshot();
@@ -54,6 +85,37 @@ describe("Unified Notification System", () => {
   });
 
   describe("NotificationHost component", () => {
+    it("uses shared entrance and waits for the shared exit before removing a toast", () => {
+      let finishExit: (() => void) | undefined;
+      const motion = vi.spyOn(animations, "animateNotification").mockImplementation((_card, phase, finish) => {
+        if (phase === "exit") finishExit = finish;
+        return { cancel: vi.fn() } as unknown as animations.Animation;
+      });
+      try {
+        act(() => { notify.info("Анимация", "Проверка", { duration: "persistent" }); });
+        render(<NotificationHost />);
+        expect(motion.mock.calls[0][1]).toBe("enter");
+        fireEvent.click(screen.getByRole("button", { name: "Закрыть уведомление" }));
+        expect(motion.mock.calls[1][1]).toBe("exit");
+        expect(screen.getByText("Анимация")).toBeInTheDocument();
+        act(() => finishExit?.());
+        expect(screen.queryByText("Анимация")).toBeNull();
+      } finally { motion.mockRestore(); }
+    });
+    it("keeps the conversation slot above notifications after timers and dismiss-all", () => {
+      const pinnedContentRef = React.createRef<HTMLDivElement>();
+      render(<NotificationHost pinnedContentRef={pinnedContentRef} />);
+      const conversation = document.createElement("div");
+      conversation.textContent = "Разговор продолжается";
+      pinnedContentRef.current!.appendChild(conversation);
+      act(() => { notify.info("Новое уведомление", "Сообщение"); });
+      const host = screen.getByRole("complementary", { name: "Уведомления приложения" });
+      expect(host.firstElementChild).toBe(pinnedContentRef.current);
+      act(() => { vi.advanceTimersByTime(5000); });
+      expect(screen.getByText("Разговор продолжается")).toBeVisible();
+      act(() => { notify.dismissAll(); });
+      expect(host.firstElementChild).toContainElement(conversation);
+    });
     it("renders nothing when there are no notifications", () => {
       const { container } = render(<NotificationHost />);
       expect(container.firstChild).toBeNull();

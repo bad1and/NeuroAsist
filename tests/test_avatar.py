@@ -64,6 +64,30 @@ async def test_avatar_manager_removes_stale_clients() -> None:
     assert await manager.status_clients() == []
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize("command,alive,level", [
+    ("avatar.ping", False, "info"),
+    ("avatar.sleep", False, "info"),
+    ("avatar.stream.segment", True, "info"),
+    ("avatar.stream.segment", False, "warning"),
+    ("avatar.speak", False, "warning"),
+])
+async def test_avatar_delivery_warns_only_when_speech_is_lost(command, alive, level) -> None:
+    manager = AvatarConnectionManager()
+    events = EventBus()
+    service = AvatarService(manager, events, enabled=True, heartbeat_interval_seconds=5, client_timeout_seconds=10)
+    await manager.register(FakeSocket(fail=True))
+    if alive:
+        await manager.register(FakeSocket())
+    result = await service._broadcast(command, "test", {})
+    event = events.get_recent_events()[-1]
+    assert result.failed == 1
+    assert event.type == "avatar.command_failed"
+    assert event.level == level
+    assert event.metadata["command_type"] == command
+    assert event.message != "Avatar command dispatched"
+
+
 def test_avatar_protocol_validates_type_and_version() -> None:
     envelope, payload = parse_incoming({
         "protocol_version": 1,

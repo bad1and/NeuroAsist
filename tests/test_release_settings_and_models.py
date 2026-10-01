@@ -14,6 +14,7 @@ def test_runtime_settings_survive_restart_without_secrets(tmp_path: Path) -> Non
     store = RuntimeSettingsStore(tmp_path / "settings.json")
     values = RuntimeSettings(
         interface_locale="en",
+        background_conversation_notifications_enabled=False,
         voice_language="en",
         memory_mode="automatic",
         avatar_placement="in_app",
@@ -24,6 +25,7 @@ def test_runtime_settings_survive_restart_without_secrets(tmp_path: Path) -> Non
     loaded = store.load(RuntimeSettings())
 
     assert loaded.interface_locale == "en"
+    assert loaded.background_conversation_notifications_enabled is False
     assert loaded.voice_language == "en"
     assert loaded.memory_mode == "automatic"
     assert loaded.avatar_placement == "in_app"
@@ -53,6 +55,7 @@ def test_existing_avatar_settings_default_to_visible_in_iris(tmp_path: Path) -> 
     assert loaded.avatar_placement == "in_app"
     assert loaded.avatar_in_app_visible is True
     assert loaded.interface_locale == "ru"
+    assert loaded.background_conversation_notifications_enabled is True
 
 
 def test_invalid_persisted_interface_locale_falls_back_to_russian(tmp_path: Path) -> None:

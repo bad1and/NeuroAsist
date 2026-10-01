@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import type { BackendEvent } from "./types";
 
 export type NotificationType = "error" | "warning" | "success" | "info" | "reminder";
 
@@ -43,6 +44,11 @@ type Listener = () => void;
 
 const NOTIFICATION_SYNC_CHANNEL = "iris_notification_sync_bus";
 
+function isAvatarCommandDiagnostic(notification: Pick<AppNotification, "title">): boolean {
+  // Compatibility with a QA window still broadcasting the old warning copy.
+  return /avatar\.command_(?:failed|ошибка|sent)/i.test(notification.title);
+}
+
 class NotificationStore {
   private notifications: AppNotification[] = [];
   private listeners = new Set<Listener>();
@@ -70,6 +76,7 @@ class NotificationStore {
   }
 
   private handleSyncShow(full: AppNotification): void {
+    if (isAvatarCommandDiagnostic(full)) return;
     const existingIndex = this.notifications.findIndex(
       (n) => n.id === full.id || (n.title === full.title && n.message === full.message && n.type === full.type)
     );
@@ -119,6 +126,7 @@ class NotificationStore {
 
   show = (notification: Omit<AppNotification, "id" | "createdAt"> & { id?: string; createdAt?: number }): string => {
     const id = notification.id || `notif-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    if (isAvatarCommandDiagnostic(notification)) return id;
     const full: AppNotification = {
       ...notification,
       id,
@@ -242,6 +250,17 @@ export const notify = {
   dismiss: notificationStore.dismiss,
   dismissAll: notificationStore.dismissAll,
 };
+
+export function notifyBackendEvent(event: BackendEvent): void {
+  // Transport diagnostics remain in Events. Playback failures have their own
+  // events and UI, so a low-level dispatch message should never become a toast.
+  if (event.type === "avatar.command_failed" || event.type === "avatar.command_sent") return;
+  if (event.level === "error") {
+    notify.error(event.type ? `Ошибка: ${event.type}` : "Ошибка системы", event.message);
+  } else if (event.level === "warning") {
+    notify.warning(event.type ? `Предупреждение: ${event.type}` : "Внимание", event.message);
+  }
+}
 
 export function useNotifications(): AppNotification[] {
   return useSyncExternalStore(notificationStore.subscribe, notificationStore.getSnapshot);
