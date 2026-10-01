@@ -21,6 +21,7 @@ from apps.backend.app.conversation.schemas import (
     ConversationDecision,
     ConversationPhase,
     DecisionReason,
+    EventAppraisal,
     SpeakerRole,
     SpeakerRoleEstimate,
 )
@@ -136,6 +137,7 @@ class LiveConversationService:
         llm_provider=None,
         state_service: CharacterStateService | None = None,
         dialogue_style_service: DialogueStyleService | None = None,
+        parallel_appraisal: bool = False,
     ) -> None:
         self._store = store
         self._runtime = runtime_settings
@@ -148,6 +150,7 @@ class LiveConversationService:
         self._reducer = CharacterStateReducer()
         self._state_service = state_service
         self._dialogue_style_service = dialogue_style_service
+        self._parallel_appraisal = parallel_appraisal
         self._turn_detector = None
         self._stt_semaphore = asyncio.Semaphore(2)
         self._decision_semaphore = asyncio.Semaphore(4)
@@ -520,6 +523,7 @@ class LiveConversationService:
         appraisal = fallback_appraisal
         decision_source = "deterministic"
         dialogue_style_cue = None
+        background_appraisal = None
         semantic_skip_reasons = {
             DecisionReason.INCOMPLETE_TURN,
             DecisionReason.OTHER_PERSON,
@@ -550,9 +554,33 @@ class LiveConversationService:
                 generation=generation,
                 reason="ambiguous_observation",
             )
-            adjudicated = await adjudication_task
-            model_decision, appraisal, decision_source = adjudicated
-            dialogue_style_cue = adjudicated.dialogue_style
+            # Permission is already fixed by the deterministic gate here.
+            # Keep meaning model-owned, but do not make an unambiguous private
+            # reply wait for a second network round trip before generating it.
+            parallel = bool(
+                self._parallel_appraisal and self._adjudicator.available
+                and one_to_one and speaker_role is SpeakerRole.PRIMARY
+                and speaker_confidence >= .85 and not stt_uncertain
+                and fallback_decision.action is ConversationAction.RESPOND
+                and fallback_decision.reason in {DecisionReason.DIRECT_ADDRESS, DecisionReason.INVITED}
+                and not re.search(
+                    r"(?iu)\b(?:мат\w*|руг\w*|стил\w*|регистр\w*|режим\w*|"
+                    r"вежлив\w*|официаль\w*|\w*цензур\w*|говори|общай\w*|бран\w*|"
+                    r"лексик\w*|ненорматив\w*|обсцен\w*|сдержан\w*|груб\w*|"
+                    r"помягче|поспокойнее|swear\w*|profan\w*|tone|speak\w*|formal\w*)\b",
+                    corrected_content or transcript,
+                )
+            )
+            if parallel:
+                background_appraisal = adjudication_task
+                model_decision = fallback_decision
+                decision_source = "deterministic_parallel_appraisal"
+                if self._state_service is not None and message is not None:
+                    await asyncio.to_thread(self._state_service.begin_observation, message.id)
+            else:
+                adjudicated = await adjudication_task
+                model_decision, appraisal, decision_source = adjudicated
+                dialogue_style_cue = adjudicated.dialogue_style
             # Addressing, echo, completeness and conversational permission are
             # technical facts.  The model owns meaning, not these gates.
             decision = fallback_decision if fallback_decision.reason in hard_reasons else model_decision
@@ -628,65 +656,18 @@ class LiveConversationService:
             DecisionReason.INCOMPLETE_TURN,
         }
         state_applied = bool(
-            not stale
+            not stale and background_appraisal is None
             and not echo
             and decision.reason not in ambient_reasons
             and speaker_role in {SpeakerRole.PRIMARY, SpeakerRole.OTHER}
             and speaker_confidence >= 0.7
         )
         if state_applied:
-            if self._state_service is not None and message is not None:
-                shared = await asyncio.to_thread(
-                    self._state_service.prepare,
-                    transcript=corrected_content or transcript,
-                    message_id=message.id,
-                    participant_key=appraisal.target_participant,
-                    speaker_role=speaker_role,
-                    speaker_confidence=speaker_confidence,
-                    addressedness=addressedness,
-                    stt_uncertain=stt_uncertain,
-                    serious=appraisal.serious,
-                    appraisal=appraisal,
-                )
-                session.affect = shared.affect
-                session.participants[appraisal.target_participant] = shared.relationship
-                relationship_delta = {}
-                state_applied = shared.state_applied
-            else:
-                session.affect = self._reducer.decay(
-                    session.affect,
-                    recovery=self._runtime.live_conversation_mood_recovery,
-                )
-                self._reducer.apply_affect(session.affect, appraisal)
-        if state_applied and self._state_service is None:
-            participant = session.participants.setdefault(
-                appraisal.target_participant,
-                ParticipantState(
-                    participant_key=appraisal.target_participant,
-                    role=speaker_role.value,
-                ),
+            state_applied, relationship_delta = await self._apply_observation_appraisal(
+                session, message=message, transcript=corrected_content or transcript,
+                speaker_role=speaker_role, speaker_confidence=speaker_confidence,
+                addressedness=addressedness, stt_uncertain=stt_uncertain, appraisal=appraisal,
             )
-            today = datetime.now(UTC).date().isoformat()
-            if session.relationship_budget_day != today:
-                session.relationship_budget_day = today
-                session.daily_relationship_deltas.clear()
-                session.recent_event_counts.clear()
-            repeated_events = session.recent_event_counts.get(appraisal.event_kind, 0)
-            participant, relationship_delta = self._reducer.apply_relationship(
-                participant,
-                appraisal,
-                repeated_events=repeated_events,
-                daily_delta_used=session.daily_relationship_deltas,
-            )
-            session.recent_event_counts[appraisal.event_kind] = min(
-                8,
-                repeated_events + 1,
-            )
-            for facet, delta in relationship_delta.items():
-                session.daily_relationship_deltas[facet] = (
-                    session.daily_relationship_deltas.get(facet, 0.0) + abs(delta)
-                )
-            session.participants[participant.participant_key] = participant
 
         async with session.lock:
             if generation != session.generation:
@@ -853,6 +834,18 @@ class LiveConversationService:
                 name=f"deferred-{deferred.id}",
                 generation=generation,
                 reason="event_driven_deferred_reaction",
+            )
+        if background_appraisal is not None:
+            self._register_task(
+                session,
+                self._finish_parallel_appraisal(
+                    session, background_appraisal, generation=generation,
+                    message=message, transcript=corrected_content or transcript,
+                    speaker_role=speaker_role, speaker_confidence=speaker_confidence,
+                    addressedness=addressedness, stt_uncertain=stt_uncertain,
+                ),
+                name=f"appraisal-{turn_id}", generation=generation,
+                reason="parallel_semantic_appraisal",
             )
         return ObservationResult(
             message=message,
@@ -1129,6 +1122,107 @@ class LiveConversationService:
 
         task.add_done_callback(finished)
         return task
+
+    async def _apply_observation_appraisal(
+        self, session: ConversationSession, *, message: StoredTimelineMessage | None,
+        transcript: str, speaker_role: SpeakerRole, speaker_confidence: float,
+        addressedness: float, stt_uncertain: bool, appraisal: EventAppraisal,
+    ) -> tuple[bool, dict[str, float]]:
+        state_applied = True
+        relationship_delta = {}
+        if self._state_service is not None and message is not None:
+            shared = await asyncio.to_thread(
+                self._state_service.prepare,
+                transcript=transcript,
+                message_id=message.id,
+                participant_key=appraisal.target_participant,
+                speaker_role=speaker_role,
+                speaker_confidence=speaker_confidence,
+                addressedness=addressedness,
+                stt_uncertain=stt_uncertain,
+                serious=appraisal.serious,
+                appraisal=appraisal,
+            )
+            session.affect = shared.affect
+            session.participants[appraisal.target_participant] = shared.relationship
+            state_applied = shared.state_applied
+        else:
+            session.affect = self._reducer.decay(
+                session.affect,
+                recovery=self._runtime.live_conversation_mood_recovery,
+            )
+            self._reducer.apply_affect(session.affect, appraisal)
+        if state_applied and self._state_service is None:
+            participant = session.participants.setdefault(
+                appraisal.target_participant,
+                ParticipantState(
+                    participant_key=appraisal.target_participant,
+                    role=speaker_role.value,
+                ),
+            )
+            today = datetime.now(UTC).date().isoformat()
+            if session.relationship_budget_day != today:
+                session.relationship_budget_day = today
+                session.daily_relationship_deltas.clear()
+                session.recent_event_counts.clear()
+            repeated_events = session.recent_event_counts.get(appraisal.event_kind, 0)
+            participant, relationship_delta = self._reducer.apply_relationship(
+                participant,
+                appraisal,
+                repeated_events=repeated_events,
+                daily_delta_used=session.daily_relationship_deltas,
+            )
+            session.recent_event_counts[appraisal.event_kind] = min(
+                8,
+                repeated_events + 1,
+            )
+            for facet, delta in relationship_delta.items():
+                session.daily_relationship_deltas[facet] = (
+                    session.daily_relationship_deltas.get(facet, 0.0) + abs(delta)
+                )
+            session.participants[participant.participant_key] = participant
+
+        return state_applied, relationship_delta
+
+    async def finish_appraisal(self, session_id: str, generation: int) -> None:
+        """Preserve user-appraisal -> assistant-state ordering after audio is queued."""
+        session = self._sessions.get(session_id)
+        if session is None:
+            return
+        tasks = [task for task in session.active_tasks
+                 if session.task_details.get(task, {}).get("reason") == "parallel_semantic_appraisal"
+                 and session.task_details[task]["generation"] == generation]
+        if tasks:
+            await asyncio.gather(*(asyncio.shield(task) for task in tasks), return_exceptions=True)
+
+    async def _finish_parallel_appraisal(
+        self, session, task, *, generation, message, transcript, speaker_role,
+        speaker_confidence, addressedness, stt_uncertain,
+    ) -> None:
+        adjudicated = await task
+        async with session.lock:
+            if generation != session.generation:
+                return
+            appraisal = adjudicated.appraisal
+            applied, relationship_delta = await self._apply_observation_appraisal(
+                session, message=message, transcript=transcript,
+                speaker_role=speaker_role, speaker_confidence=speaker_confidence,
+                addressedness=addressedness, stt_uncertain=stt_uncertain, appraisal=appraisal,
+            )
+            if message is not None:
+                if adjudicated.dialogue_style is not None and self._dialogue_style_service is not None:
+                    await asyncio.to_thread(
+                        self._dialogue_style_service.apply, message.episode_id,
+                        adjudicated.dialogue_style.mode, source_message_id=message.id,
+                    )
+                if applied and self._state_service is None:
+                    payload = self._state_persistence_payload(session, appraisal, relationship_delta)
+                    await asyncio.to_thread(self._persist_state, payload)
+            if self._publish is not None:
+                self._publish("conversation.parallel_appraisal_completed", "info",
+                              "Semantic appraisal completed",
+                              {"session_id": session.session_id, "generation": generation,
+                               "source": adjudicated.source, "state_applied": applied})
 
     async def _run_adjudication(self, transcript: str, **kwargs):
         async with self._decision_semaphore:

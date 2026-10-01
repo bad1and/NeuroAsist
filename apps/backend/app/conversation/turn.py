@@ -35,7 +35,10 @@ class SmartTurnDetector:
 
             options = ort.SessionOptions()
             options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+            options.intra_op_num_threads = 4
             options.inter_op_num_threads = 1
+            options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+            options.add_session_config_entry("session.inter_op.allow_spinning", "0")
             options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
             self._session = ort.InferenceSession(
                 str(model_path),

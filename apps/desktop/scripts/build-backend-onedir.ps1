@@ -42,6 +42,7 @@ if (-not (Test-Path -LiteralPath $Python)) {
     --collect-all num2words `
     --collect-all silero_vad `
     --collect-all onnxruntime `
+    --collect-all onnx_asr `
     --collect-all torchaudio `
     --collect-all faster_whisper `
     --collect-all ctranslate2 `

@@ -333,6 +333,7 @@ class InputConnection:
     replaced_owner: bool = False
     # Captured at the candidate endpoint for end-to-end latency diagnostics.
     pipeline_started_at: float = 0.0
+    live_stt: object | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     lease: _InputConnectionLease = field(default_factory=_InputConnectionLease)
 
@@ -380,6 +381,7 @@ class InputSession:
     finalize_tasks: set[asyncio.Task] = field(default_factory=set)
     endpoint_tasks: set[asyncio.Task] = field(default_factory=set)
     closed: bool = False
+    live_stt: object | None = None
 
 
 UtteranceHandler = Callable[[str, Pcm16Audio, str, InputConnection], Awaitable[None]]
@@ -507,6 +509,9 @@ class VoiceInputSessionManager:
         session.connection.invalidate()
         self._sessions.pop(session_id, None)
         await self._settle_session_tasks(session, cancel=True)
+        if session.live_stt is not None:
+            await session.live_stt.close()
+            session.live_stt = None
         session.utterance = None
         session.pending_turn.clear()
         session.pending_candidate_id = None
@@ -571,6 +576,9 @@ class VoiceInputSessionManager:
             session.utterance = None
             session.pending_turn.clear()
             session.pending_candidate_id = None
+        if session.live_stt is not None:
+            await session.live_stt.close()
+            session.live_stt = None
         if session.vad_stream is not None:
             session.vad_stream.reset()
 
@@ -725,6 +733,11 @@ class VoiceInputSessionManager:
             if event is not None:
                 break
         if event == "speech_started":
+            if not session.pending_turn:
+                if session.live_stt is not None:
+                    await session.live_stt.close()
+                factory = getattr(self._voice_service, "start_live_stt", None)
+                session.live_stt = factory() if callable(factory) else None
             session.utterance = bytearray(session.pending_turn)
             session.utterance.extend(bytearray().join(session.ring))
             guarded = bool(
@@ -758,6 +771,8 @@ class VoiceInputSessionManager:
                 await self._confirm_speech_started(session)
             if len(session.utterance) > session.sample_rate * 2 * self._max_utterance_seconds:
                 event = "speech_ended"
+        if session.utterance is not None and session.speech_confirmed and session.live_stt is not None:
+            session.live_stt.update(session.utterance)
         if event == "speech_ended" and session.utterance is not None:
             if not session.speech_confirmed:
                 session.utterance = None
@@ -969,6 +984,7 @@ class VoiceInputSessionManager:
             # downstream milestone measures the metric users actually feel:
             # end-of-speech -> first audible assistant audio.
             pipeline_started_at=time.perf_counter() - endpoint_silence_ms / 1000,
+            live_stt=session.live_stt,
             lock=session.connection.lock,
             lease=session.connection.lease,
         )
@@ -1030,6 +1046,9 @@ class VoiceInputSessionManager:
             if close_candidate and self._candidate_is_current(session, generation, candidate_id):
                 session.pending_turn.clear()
                 session.pending_candidate_id = None
+                if session.live_stt is not None:
+                    await session.live_stt.close()
+                    session.live_stt = None
             session.finalizing = False
 
     def _candidate_is_current(
@@ -1110,6 +1129,9 @@ class VoiceInputSessionManager:
             if self._candidate_is_current(session, generation, candidate_id):
                 session.pending_turn.clear()
                 session.pending_candidate_id = None
+                if session.live_stt is not None:
+                    await session.live_stt.close()
+                    session.live_stt = None
 
     @staticmethod
     def _clear_endpoint_task(session: InputSession, task: asyncio.Task) -> None:

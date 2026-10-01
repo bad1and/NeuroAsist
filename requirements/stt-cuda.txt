@@ -1,0 +1,10 @@
+# Optional Windows development runtime. Install the base profile first, then
+# uninstall onnxruntime (CPU) before this profile: both wheels own one module.
+# PyTorch and TeraTTS stay on CPU. This is not part of the CPU installer.
+onnxruntime-gpu==1.23.2
+nvidia-cuda-runtime-cu12==12.9.79
+nvidia-cuda-nvrtc-cu12==12.9.86
+nvidia-cublas-cu12==12.9.2.10
+nvidia-cufft-cu12==11.4.1.4
+nvidia-nvjitlink-cu12==12.9.86
+nvidia-cudnn-cu12==9.10.2.21

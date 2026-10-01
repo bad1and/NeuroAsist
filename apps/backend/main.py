@@ -317,6 +317,7 @@ def create_app() -> FastAPI:
         ),
         state_service=character_state_service,
         dialogue_style_service=dialogue_style_service,
+        parallel_appraisal=settings.voice_live_parallel_appraisal,
     ) if timeline_store is not None else None
     turn_coordinator = ConversationTurnCoordinator(timeline_store, event_bus.publish) if timeline_store is not None else None
     voice_service = VoiceService(settings)
@@ -445,6 +446,9 @@ def create_app() -> FastAPI:
             generation: int,
         ):
             async def persist(_reply: str) -> None:
+                # The audio worker already has the spoken segments. Joining
+                # here preserves semantic state order without holding first audio.
+                await conversation_service.finish_appraisal(session_id, generation)
                 tokens = agent.token_metadata()
                 metadata: dict[str, object] = {}
                 if tokens is not None:
@@ -565,7 +569,7 @@ def create_app() -> FastAPI:
         await avatar_service.set_presence(session_id=session_id, state="thinking")
         if conversation_service is not None:
             await conversation_service.phase(session_id, ConversationPhase.TRANSCRIBING, connection.send)
-        stt_result = await voice_service.transcribe_pcm16(audio, language)
+        stt_result = await voice_service.transcribe_pcm16(audio, language, live_stt=connection.live_stt)
         event_bus.publish(
             "voice.stt_completed",
             "info",
@@ -578,6 +582,7 @@ def create_app() -> FastAPI:
                     (time.perf_counter() - connection.pipeline_started_at) * 1000
                 ) if connection.pipeline_started_at else None,
                 "provider": stt_result.provider,
+                "precomputed_chunks": getattr(connection.live_stt, "reused_chunks", 0),
                 "fallback": stt_result.fallback,
             },
         )

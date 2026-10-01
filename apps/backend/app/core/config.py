@@ -118,7 +118,7 @@ class Settings(BaseSettings):
     log_file_path: str = "logs/app.log"
     cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173,http://tauri.localhost,tauri://localhost"
     cors_origin_regex: str = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
-    voice_stt_provider: str = "gigaam"
+    voice_stt_provider: str = "gigaam_onnx"
     voice_stt_model: str = "v3_rnnt"
     # Optional second local model. It is lazy-loaded and called only for an
     # empty/low-confidence/low-SNR primary result.
@@ -126,8 +126,14 @@ class Settings(BaseSettings):
     voice_stt_fallback_model: str = ""
     voice_stt_fallback_confidence_threshold: float = 0.60
     voice_stt_fallback_min_rms: float = 0.008
-    voice_stt_device: str = "cpu"
+    voice_stt_device: str = "auto"
+    # FasterWhisper only; gigaam_onnx always uses the validated FP32 export.
     voice_stt_compute_type: str = "int8"
+    voice_stt_onnx_model_path: str | None = None
+    voice_stt_onnx_threads: int = Field(default=4, ge=1, le=16)
+    voice_stt_onnx_cpu_threads: int = Field(default=8, ge=1, le=16)
+    voice_stt_process_while_speaking: bool = True
+    voice_live_parallel_appraisal: bool = True
     voice_torch_cpu_threads: int = 4
     voice_torch_interop_threads: int = 1
     voice_default_language: str = "ru"
@@ -363,6 +369,13 @@ class Settings(BaseSettings):
             path = Path(self.voice_teratts_cache_dir).expanduser()
             return path if path.is_absolute() else (ROOT_DIR / path).resolve()
         return self.app_data_path / "models" / "huggingface"
+
+    @property
+    def voice_stt_onnx_model_directory(self) -> Path:
+        if self.voice_stt_onnx_model_path:
+            path = Path(self.voice_stt_onnx_model_path).expanduser()
+            return path if path.is_absolute() else (ROOT_DIR / path).resolve()
+        return self.app_data_path / "models" / "gigaam-v3-rnnt-onnx" / "322c3b29492673eb7d0b434bfa9dfb8653e34d02"
 
     @property
     def voice_stt_terms_file(self) -> Path:

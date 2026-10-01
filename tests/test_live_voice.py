@@ -51,6 +51,42 @@ class FakeVoiceWebSocket:
 
 
 @pytest.mark.anyio
+async def test_terminal_appraisal_join_does_not_hold_first_audio():
+    audio_sent, completion_started, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    class ImmediateAgent:
+        def classify_intent(self, transcript):
+            return "casual_chat"
+
+        async def stream_user_message(self, *args, **kwargs):
+            yield "[[avatar emotion=happy]]Готово, всё работает."
+
+    class Connection(FakeVoiceConnection):
+        async def segment(self, *args):
+            await super().segment(*args)
+            audio_sent.set()
+
+    async def complete(_reply):
+        completion_started.set()
+        await release.wait()
+
+    manager = VoiceSessionManager(MockTTSProvider())
+    connection = Connection()
+    manager._connections["parallel"] = connection
+    task = await manager.start(session_id="parallel", utterance_id="utterance",
+                               transcript="Ирис, что получилось?", language="ru", voice="ru_f1",
+                               agent=ImmediateAgent(), on_assistant_completed=complete)
+    try:
+        await asyncio.wait_for(completion_started.wait(), .5)
+        await asyncio.wait_for(audio_sent.wait(), .5)
+        assert not task.done()
+        assert connection.segments[0][1]
+    finally:
+        release.set()
+        await task
+
+
+@pytest.mark.anyio
 async def test_live_output_waits_for_a_reconnecting_socket() -> None:
     manager = VoiceSessionManager(MockTTSProvider())
     waiting = asyncio.create_task(manager.wait_for_connection("reconnect", timeout=0.1))

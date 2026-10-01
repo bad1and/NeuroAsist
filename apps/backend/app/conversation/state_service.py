@@ -63,6 +63,13 @@ class CharacterStateService:
         self._affect, self._participants = AffectState(), {"primary": ParticipantState()}
         self._loaded = False
 
+    def begin_observation(self, message_id: str) -> None:
+        """Bind reply bookkeeping without applying a provisional neutral event."""
+        with self._lock:
+            self._ensure_loaded()
+            self._last_message_id = message_id
+            self._last_event_id = None
+
     def current(self, participant_key: str = "primary") -> StateTurnContext:
         with self._lock:
             self._ensure_loaded()

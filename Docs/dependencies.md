@@ -55,6 +55,50 @@ py -3.12 -m venv .venv
 отдельно тестируемый installer/add-on: его нельзя собирать из developer `.venv`
 или добавлять в CPU-sidecar постфактум.
 
+### GigaAM ONNX и локальное ускорение STT
+
+Основной STT — `gigaam_onnx`, модель `v3_rnnt`, FP32. Базовый runtime включает
+`onnx-asr==0.12.0` и CPU ONNX Runtime; `VOICE_STT_DEVICE=auto` выбирает CUDA при
+наличии совместимого runtime, иначе CPU. TeraTTS/PyTorch остаются на CPU.
+ONNX-пакет включён в оба PyInstaller build entrypoints; CUDA-библиотеки
+в базовую CPU-сборку не добавлены.
+
+Для Windows development после установки основного профиля:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip uninstall -y onnxruntime
+.\.venv\Scripts\python.exe -m pip install -r requirements/stt-cuda.txt
+.\.venv\Scripts\python.exe scripts/check_python_dependencies.py --stt-cuda
+.\.venv\Scripts\python.exe -m pip check
+```
+
+Не устанавливать CPU `onnxruntime` и `onnxruntime-gpu` одновременно: они
+используют один Python module. После повторной установки основного профиля
+нужно заново выбрать один runtime. Опциональный CUDA-профиль фиксирует
+проверенные версии, включая cuDNN 9.10.2.21 для GTX 1660 SUPER.
+Возврат к CPU: удалить `onnxruntime-gpu`, установить `onnxruntime==1.23.2`
+и задать `VOICE_STT_DEVICE=cpu`. NVIDIA wheels можно оставить до отдельной
+очистки окружения; они не используются CPU-режимом.
+Некоторые зависимости декларируют именно имя CPU distribution `onnxruntime`:
+`pip check` сообщает его отсутствие даже при рабочем GPU runtime.
+`check_python_dependencies.py --stt-cuda` учитывает эту замену при обходе графа;
+остальные сообщения `pip check` требуют отдельной проверки окружения.
+
+Модель хранится вне репозитория: `%LOCALAPPDATA%/NeuroAsist/models/` /
+`gigaam-v3-rnnt-onnx/322c3b29492673eb7d0b434bfa9dfb8653e34d02`.
+`VOICE_STT_ONNX_MODEL_PATH` позволяет выбрать готовую локальную папку.
+При отсутствии файлов preload скачивает только FP32 RNNT-файлы по закреплённой
+Hugging Face revision. Это загрузка весов, записи речи не передаются.
+Первое включение микрофона использует существующий readiness/loading flow.
+
+Настройки: `VOICE_STT_ONNX_THREADS=4` для CUDA preprocessing/CPU work и
+`VOICE_STT_ONNX_CPU_THREADS=8` для CPU-сессий. При ошибке инициализации CUDA
+или CUDA inference/OOM режим `auto` загружает CPU-модель и повторяет целую
+реплику; выбранное устройство и причина перехода доступны в STT metadata.
+Явное `VOICE_STT_DEVICE=cuda` означает строгий GPU-режим без CPU-перехода.
+Не относящиеся к CUDA ошибки inference не скрываются повторным запуском.
+Прежний PyTorch-провайдер доступен через `VOICE_STT_PROVIDER=gigaam`.
+
 ## Граница Windows installer
 
 Пользователю готовой сборки не нужны Python, Node или Rust: PyInstaller

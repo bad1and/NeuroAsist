@@ -131,6 +131,7 @@ if ($ReuseCore) {
         --collect-all num2words `
         --hidden-import transformers.dynamic_module_utils `
         --collect-all onnxruntime `
+        --collect-all onnx_asr `
         --collect-all torchaudio `
         --collect-all faster_whisper `
         --collect-all ctranslate2 `
