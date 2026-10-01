@@ -1,4 +1,46 @@
-import type { SVGProps } from "react";
+import { useId, type SVGProps } from "react";
+
+/** Light and an inner bevel follow the exported contour, including concave corners. */
+function TactilePlatePaths({ paths, rimPath, graphite = false }: { paths: string[]; rimPath?: string; graphite?: boolean }) {
+  const id = `iris-plate-${useId().replace(/:/g, "")}`;
+  return <>
+    <defs>
+      {graphite && <linearGradient id={`${id}-material`} x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stopColor="var(--color-graphite-top)" />
+        <stop offset=".3" stopColor="var(--color-graphite-upper)" />
+        <stop offset=".6" stopColor="var(--color-graphite-lower)" />
+        <stop offset="1" stopColor="var(--color-graphite-bottom)" />
+      </linearGradient>}
+      <linearGradient id={`${id}-light`} x1="0" y1="0" x2="0.15" y2="1">
+        <stop offset="0" stopColor="var(--plate-light-color)" stopOpacity="var(--plate-light-strength)" />
+        <stop offset="0.45" stopColor="var(--plate-light-color)" stopOpacity="0.01" />
+        <stop offset="1" stopColor="var(--plate-shade-color)" stopOpacity="var(--plate-shade-strength)" />
+      </linearGradient>
+      <linearGradient id={`${id}-edge`} x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stopColor="var(--plate-light-color)" stopOpacity="var(--plate-edge-strength)" />
+        <stop offset="0.48" stopColor="var(--plate-light-color)" stopOpacity="0.025" />
+        <stop offset="1" stopColor="var(--plate-shade-color)" stopOpacity="0.24" />
+      </linearGradient>
+      <clipPath id={`${id}-clip`}>
+        {paths.map((_, index) => <use key={index} href={`#${id}-${index}`} />)}
+      </clipPath>
+    </defs>
+    <g className="tactile-plate-paths">
+      {paths.map((d, index) => <path key={index} id={`${id}-${index}`} d={d} fill={graphite ? `url(#${id}-material)` : "currentColor"} />)}
+      {!graphite && paths.map((_, index) => <use key={index} href={`#${id}-${index}`} fill={`url(#${id}-light)`} />)}
+      {!graphite && <g className="tactile-plate-edge" clipPath={`url(#${id}-clip)`} fill="none" strokeWidth="1.5">
+        {rimPath
+          ? <path d={rimPath} stroke={`url(#${id}-edge)`} />
+          : paths.map((_, index) => <use key={index} href={`#${id}-${index}`} stroke={`url(#${id}-edge)`} />)}
+      </g>}
+      <g className="tactile-plate-focus" clipPath={`url(#${id}-clip)`} fill="none" stroke="var(--color-focus)" strokeWidth="4">
+        {rimPath
+          ? <path d={rimPath} />
+          : paths.map((_, index) => <use key={index} href={`#${id}-${index}`} />)}
+      </g>
+    </g>
+  </>;
+}
 
 export function FigmaStartFlowerIcon(props: SVGProps<SVGSVGElement>) {
   return (
@@ -53,7 +95,7 @@ export function FigmaNewChatIcon(props: SVGProps<SVGSVGElement>) {
 export function FigmaSquareButtonBg(props: SVGProps<SVGSVGElement>) {
   return (
     <svg width="66" height="66" viewBox="0 0 66 66" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
-      <path d="M18.7828 65.2146C21.8418 66 25.5612 66 33 66C40.4388 66 44.1582 66 47.2172 65.2146C56.0497 62.9468 62.9468 56.0497 65.2146 47.2172C66 44.1582 66 43.6606 66 42.6655C66 28.783 66 21.8418 65.2146 18.7828C62.9468 9.9503 56.0497 3.0532 47.2172 0.7854C44.1582 0 40.4388 0 33 0C25.5612 0 21.8418 0 18.7828 0.7854C9.9503 3.0532 3.0532 9.9503 0.7854 18.7828C0 21.8418 0 25.5612 0 33C0 40.4388 0 44.1582 0.7854 47.2172C3.0532 56.0497 9.9503 62.9468 18.7828 65.2146Z" fill="currentColor" />
+      <TactilePlatePaths paths={["M18.7828 65.2146C21.8418 66 25.5612 66 33 66C40.4388 66 44.1582 66 47.2172 65.2146C56.0497 62.9468 62.9468 56.0497 65.2146 47.2172C66 44.1582 66 43.6606 66 42.6655C66 28.783 66 21.8418 65.2146 18.7828C62.9468 9.9503 56.0497 3.0532 47.2172 0.7854C44.1582 0 40.4388 0 33 0C25.5612 0 21.8418 0 18.7828 0.7854C9.9503 3.0532 3.0532 9.9503 0.7854 18.7828C0 21.8418 0 25.5612 0 33C0 40.4388 0 44.1582 0.7854 47.2172C3.0532 56.0497 9.9503 62.9468 18.7828 65.2146Z"]} />
     </svg>
   );
 }
@@ -61,7 +103,7 @@ export function FigmaSquareButtonBg(props: SVGProps<SVGSVGElement>) {
 export function FigmaFinishButtonBg(props: SVGProps<SVGSVGElement>) {
   return (
     <svg width="223" height="81" viewBox="0 0 223.05 81" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
-      <path d="M40.5 81H182.55C197.023 81 204.26 81 209.748 78.0941C214.177 75.749 217.799 72.127 220.144 67.698C223.05 62.2098 223.05 58.9273 223.05 52.3622C223.05 29.9809 223.05 18.7902 220.144 13.302C217.799 8.87302 214.177 5.25102 209.748 2.906C204.26 0 197.023 0 182.55 0H40.5C26.0268 0 18.7902 0 13.302 2.906C8.87302 5.25102 5.25102 8.87302 2.906 13.302C0 18.7902 0 26.0268 0 40.5C0 54.9732 0 62.2098 2.906 67.698C5.25102 72.127 8.87302 75.749 13.302 78.0941C18.7902 81 26.0268 81 40.5 81Z" fill="currentColor" />
+      <TactilePlatePaths paths={["M40.5 81H182.55C197.023 81 204.26 81 209.748 78.0941C214.177 75.749 217.799 72.127 220.144 67.698C223.05 62.2098 223.05 58.9273 223.05 52.3622C223.05 29.9809 223.05 18.7902 220.144 13.302C217.799 8.87302 214.177 5.25102 209.748 2.906C204.26 0 197.023 0 182.55 0H40.5C26.0268 0 18.7902 0 13.302 2.906C8.87302 5.25102 5.25102 8.87302 2.906 13.302C0 18.7902 0 26.0268 0 40.5C0 54.9732 0 62.2098 2.906 67.698C5.25102 72.127 8.87302 75.749 13.302 78.0941C18.7902 81 26.0268 81 40.5 81Z"]} />
     </svg>
   );
 }
@@ -69,7 +111,7 @@ export function FigmaFinishButtonBg(props: SVGProps<SVGSVGElement>) {
 export function FigmaNewChatButtonBg(props: SVGProps<SVGSVGElement>) {
   return (
     <svg width="198" height="66" viewBox="0 0 198 66" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
-      <path d="M33 66H165C172.439 66 176.158 66 179.217 65.2146C188.05 62.9468 194.947 56.0497 197.215 47.2172C198 44.1582 198 43.6606 198 42.6655C198 28.783 198 21.8418 197.215 18.7828C194.947 9.9503 188.05 3.0532 179.217 0.7854C176.158 0 172.439 0 165 0H33C25.5612 0 21.8418 0 18.7828 0.7854C9.9503 3.0532 3.0532 9.9503 0.7854 18.7828C0 21.8418 0 25.5612 0 33C0 40.4388 0 44.1582 0.7854 47.2172C3.0532 56.0497 9.9503 62.9468 18.7828 65.2146Z" fill="currentColor" />
+      <TactilePlatePaths paths={["M33 66H165C172.439 66 176.158 66 179.217 65.2146C188.05 62.9468 194.947 56.0497 197.215 47.2172C198 44.1582 198 43.6606 198 42.6655C198 28.783 198 21.8418 197.215 18.7828C194.947 9.9503 188.05 3.0532 179.217 0.7854C176.158 0 172.439 0 165 0H33C25.5612 0 21.8418 0 18.7828 0.7854C9.9503 3.0532 3.0532 9.9503 0.7854 18.7828C0 21.8418 0 25.5612 0 33C0 40.4388 0 44.1582 0.7854 47.2172C3.0532 56.0497 9.9503 62.9468 18.7828 65.2146Z"]} />
     </svg>
   );
 }
@@ -77,7 +119,7 @@ export function FigmaNewChatButtonBg(props: SVGProps<SVGSVGElement>) {
 export function FigmaDockBg(props: SVGProps<SVGSVGElement>) {
   return (
     <svg width="829" height="121" viewBox="0 0 829 121" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
-      <path d="M0 60.5C0 31.8824 0 17.5736 8.7868 8.7868C17.5736 0 31.7157 0 60 0H769C797.284 0 811.426 0 820.213 8.7868C829 17.5736 829 31.8824 829 60.5C829 89.1176 829 103.426 820.213 112.213C811.426 121 797.284 121 769 121H60C31.7157 121 17.5736 121 8.7868 112.213C0 103.426 0 89.1176 0 60.5Z" fill="currentColor" />
+      <TactilePlatePaths graphite paths={["M0 60.5C0 31.8824 0 17.5736 8.7868 8.7868C17.5736 0 31.7157 0 60 0H769C797.284 0 811.426 0 820.213 8.7868C829 17.5736 829 31.8824 829 60.5C829 89.1176 829 103.426 820.213 112.213C811.426 121 797.284 121 769 121H60C31.7157 121 17.5736 121 8.7868 112.213C0 103.426 0 89.1176 0 60.5Z"]} />
     </svg>
   );
 }
@@ -85,7 +127,7 @@ export function FigmaDockBg(props: SVGProps<SVGSVGElement>) {
 export function FigmaDualMediaButtonBg(props: SVGProps<SVGSVGElement>) {
   return (
     <svg width="132" height="66" viewBox="24 27.5 132 66" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
-      <path d="M57 93.5H123C130.439 93.5 134.158 93.5 137.217 92.7146C146.05 90.4468 152.947 83.5497 155.215 74.7172C156 71.6582 156 71.1606 156 70.1655C156 56.283 156 49.3418 155.215 46.2828C152.947 37.4503 146.05 30.5532 137.217 28.2854C134.158 27.5 130.439 27.5 123 27.5H57C49.5612 27.5 45.8418 27.5 42.7828 28.2854C33.9503 30.5532 27.0532 37.4503 24.7854 46.2828C24 49.3418 24 53.0612 24 60.5C24 67.9388 24 71.6582 24.7854 74.7172C27.0532 83.5497 33.9503 90.4468 42.7828 92.7146C45.8418 93.5 49.5612 93.5 57 93.5Z" fill="currentColor" />
+      <TactilePlatePaths paths={["M57 93.5H123C130.439 93.5 134.158 93.5 137.217 92.7146C146.05 90.4468 152.947 83.5497 155.215 74.7172C156 71.6582 156 71.1606 156 70.1655C156 56.283 156 49.3418 155.215 46.2828C152.947 37.4503 146.05 30.5532 137.217 28.2854C134.158 27.5 130.439 27.5 123 27.5H57C49.5612 27.5 45.8418 27.5 42.7828 28.2854C33.9503 30.5532 27.0532 37.4503 24.7854 46.2828C24 49.3418 24 53.0612 24 60.5C24 67.9388 24 71.6582 24.7854 74.7172C27.0532 83.5497 33.9503 90.4468 42.7828 92.7146C45.8418 93.5 49.5612 93.5 57 93.5Z"]} />
     </svg>
   );
 }
@@ -114,6 +156,9 @@ export function FigmaInputPlateFullBg({
   const h = Math.max(0, extraHeight);
   const pathD = `M392.75 ${73.5 + h}H839V70C839 41.7157 839 27.5736 830.213 18.7868C821.426 10 807.284 10 779 10H456.25C454.625 10 453.813 10 453.126 10.0315C437.637 10.7416 425.242 23.1374 424.531 38.626C424.5 39.3127 424.5 40.1251 424.5 41.75${h > 0 ? `V${41.75 + h}` : ""}C424.5 ${43.3749 + h} 424.5 ${44.1873 + h} 424.469 ${44.874 + h}C423.758 ${60.3626 + h} 411.363 ${72.7584 + h} 395.874 ${73.4685 + h}C395.187 ${73.5 + h} 394.375 ${73.5 + h} 392.75 ${73.5 + h}Z`;
   const tailD = `M779 ${73 + h}H839C839 ${73 + h} 839 ${109.873 + h} 839 ${133.5 + h}L830.213 ${81.7868 + h}L779 ${73 + h}Z`;
+  // Open contour: omit the horizontal docking seam and the tail behind the dock.
+  // Reuse the fill's curved edge so resizing cannot separate the focus from it.
+  const rimD = `M839 ${73.5 + h}${pathD.slice(pathD.indexOf("V70"), -1)}`;
 
   return (
     <svg
@@ -123,9 +168,9 @@ export function FigmaInputPlateFullBg({
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       {...props}
+      style={{ color: "var(--color-accent, #695B86)", ...props.style }}
     >
-      <path d={pathD} fill="#695B86" />
-      <path d={tailD} fill="#695B86" />
+      <TactilePlatePaths paths={[pathD, tailD]} rimPath={rimD} />
     </svg>
   );
 }

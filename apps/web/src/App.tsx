@@ -1,5 +1,6 @@
 import { BackgroundConversationControls, BackgroundConversationExpandButton } from "./components/BackgroundConversationControls";
 import { CustomSelect } from "./components/CustomSelect";
+import { CorpusSurface } from "./components/CorpusSurface";
 import { useDockScale } from "./components/useDockScale";
 import {
   IconInterfaceHome2,
@@ -971,6 +972,7 @@ function MainApp() {
   };
   return (
     <div className={`app-shell${sidebarCollapsed ? " is-sidebar-collapsed" : ""}`}>
+      <CorpusSurface />
       <Sidebar
         activeView={activeView}
         isOpen={navigationOpen}

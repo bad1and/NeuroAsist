@@ -54,6 +54,34 @@
   --shadow-startup: 0 28px 80px oklch(7% 0.004 265 / 0.42);
   --shadow-dialog: 0 24px 80px oklch(7% 0.004 265 / 0.56);
 
+  /* Shared static lighting for the exported dialogue contours and window body. */
+  --plate-light-color: #fff;
+  --plate-shade-color: #000;
+  --plate-light-strength: 0.045;
+  --plate-shade-strength: 0.04;
+  --plate-edge-strength: 0.09;
+  --color-dock: var(--color-graphite-top);
+  --color-dock-control: #2b2e33;
+  --color-dock-control-hover: #363940;
+  --depth-dock: drop-shadow(0 3px 7px rgba(0, 0, 0, 0.18)) drop-shadow(0 12px 26px rgba(0, 0, 0, 0.26));
+  --depth-control: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.18)) drop-shadow(0 6px 11px rgba(0, 0, 0, 0.16));
+  --depth-control-hover: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.2)) drop-shadow(0 8px 13px rgba(0, 0, 0, 0.19));
+  --depth-control-pressed: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.25));
+  --depth-composer: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.16)) drop-shadow(0 9px 18px rgba(0, 0, 0, 0.22));
+  /* Match the settings backing's rendered tones without stacking extra white light. */
+  --color-graphite-top: #222327;
+  --color-graphite-upper: #202125;
+  --color-graphite-lower: #1d1e22;
+  --color-graphite-bottom: #1b1c1f;
+  --surface-graphite: linear-gradient(180deg, var(--color-graphite-top) 0%, var(--color-graphite-upper) 30%, var(--color-graphite-lower) 60%, var(--color-graphite-bottom) 100%);
+  --color-corpus: var(--color-graphite-bottom);
+  --surface-corpus: linear-gradient(rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.05)), var(--surface-graphite);
+  --corpus-bevel-opacity: 0.024;
+  --depth-corpus-shadow: drop-shadow(5px 6px 14px rgba(0, 0, 0, 0.36));
+  --surface-notification: radial-gradient(145% 115% at 28% 12%, rgba(255, 255, 255, 0.045), transparent 65%), linear-gradient(172deg, rgba(255, 255, 255, 0.012), rgba(0, 0, 0, 0.045)), var(--color-surface-raised);
+  --depth-notification: inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 -1px 0 rgba(0, 0, 0, 0.18), 0 2px 4px rgba(0, 0, 0, 0.25), 0 10px 24px -2px rgba(0, 0, 0, 0.35), 0 24px 48px -6px rgba(0, 0, 0, 0.45);
+  --depth-notification-hover: inset 0 1px 0 rgba(255, 255, 255, 0.13), inset 0 -1px 0 rgba(0, 0, 0, 0.18), 0 4px 8px rgba(0, 0, 0, 0.28), 0 12px 24px -3px rgba(0, 0, 0, 0.38), 0 28px 52px -8px rgba(0, 0, 0, 0.48);
+
   --font-ui: "Proxima Nova", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-subtitles: "Shantell Sans", cursive, sans-serif;
   --font-mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
