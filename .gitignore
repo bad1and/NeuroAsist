@@ -240,3 +240,6 @@ promo/
 
 from iris/
 output/
+
+# Local source materials; production brand assets live in apps/web/public/brand.
+/Для мусора (не удалять)/

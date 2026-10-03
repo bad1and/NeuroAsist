@@ -172,8 +172,57 @@ select { appearance: auto; }
   z-index: 20;
 }
 
-.sidebar-brand { display: flex; align-items: center; min-height: 92px; padding: 0 6px 12px; }
-.brand-logo { display: block; width: 120px; height: 88px; object-fit: contain; object-position: left center; }
+.sidebar-brand { display: flex; align-items: center; justify-content: flex-start; min-height: 92px; padding: 0 0 12px; }
+.brand-logo { display: block; width: 144px; height: 61px; object-fit: contain; object-position: center; }
+.brand-lockup {
+  position: relative;
+  display: block;
+  flex: none;
+  width: 144px;
+  height: 61px;
+  isolation: isolate;
+  --brand-contour: url("/brand/iris-wordmark-light.svg");
+}
+.brand-lockup-wordmark {
+  position: relative;
+  /* Account for SVG padding while keeping a small inset from navigation edges. */
+  inset-inline-start: 7px;
+  inset-block-start: -5px;
+}
+.brand-lockup > .brand-logo {
+  width: 100%;
+  height: 100%;
+  object-position: center;
+  filter: drop-shadow(0 1px 0 rgb(75 49 105 / .9))
+    drop-shadow(0 1px 0 rgb(35 23 47 / .65))
+    drop-shadow(0 4px 4px rgb(0 0 0 / .5));
+}
+/* A lit face, upper bevel and short solid side give the artwork material depth. */
+.brand-lockup::before,
+.brand-lockup::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  mask-size: 100% 100%;
+  mask-repeat: no-repeat;
+}
+.brand-lockup::before {
+  background: linear-gradient(180deg,
+    rgb(255 255 255 / .28) 10%,
+    rgb(255 255 255 / .08) 40%,
+    transparent 52%,
+    rgb(0 0 0 / .2) 90%);
+  mask-image: var(--brand-contour);
+  mask-position: center;
+}
+.brand-lockup::after {
+  background: rgb(255 255 255 / .42);
+  mask-image: var(--brand-contour), var(--brand-contour);
+  mask-composite: subtract;
+  mask-position: 0 0, 0 1.1px;
+}
 .sidebar-nav { display: grid; gap: 4px; }
 .sidebar-footer { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border); }
 
@@ -2874,12 +2923,12 @@ textarea::placeholder {
 
 .sidebar-brand {
   min-height: 72px;
-  padding: 0 10px 12px;
+  padding: 0 0 12px;
 }
 
 .brand-logo {
-  width: 104px;
-  height: 58px;
+  width: 144px;
+  height: 61px;
 }
 
 .sidebar-nav {
@@ -4011,27 +4060,7 @@ body {
 
 .sidebar-brand {
   min-height: 78px;
-  padding-inline: 12px;
-}
-
-.brand-alias {
-  position: relative;
-  left: 6px;
-  margin-inline-start: 0;
-  color: var(--color-text-muted);
-  font-size: 16px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-  opacity: 0.72;
-  transform: translateY(11px);
-  white-space: nowrap;
-}
-
-.brand-alias sup {
-  position: relative;
-  top: -0.2em;
-  margin-inline-start: 1px;
-  font-size: 0.72em;
+  padding-inline: 0;
 }
 
 .sidebar-footer {
@@ -6065,8 +6094,9 @@ body {
 }
 
 /* Sidebar modes: persistent rail on desktop, drawer below the desktop breakpoint. */
-.brand-logo-mark {
+.brand-lockup-mark {
   display: none;
+  --brand-contour: url("/brand/iris-mark-light.svg");
 }
 
 .sidebar-footer-row {
@@ -6149,19 +6179,15 @@ body {
     gap: 0;
   }
 
-  .app-shell.is-sidebar-collapsed .brand-logo-wordmark {
+  .app-shell.is-sidebar-collapsed .brand-lockup-wordmark {
     display: none;
   }
 
-  .app-shell.is-sidebar-collapsed .brand-logo-mark {
+  .app-shell.is-sidebar-collapsed .brand-lockup-mark {
     display: block;
-    width: 36px;
-    height: 36px;
+    width: 42px;
+    height: 42px;
     object-fit: contain;
-  }
-
-  .app-shell.is-sidebar-collapsed .brand-alias {
-    display: none;
   }
 
   .app-shell.is-sidebar-collapsed .navigation-button {
@@ -6276,18 +6302,18 @@ body {
   .app-shell > .sidebar .sidebar-brand {
     position: relative;
     min-height: 92px;
-    padding: 0 6px 12px;
+    padding: 0 0 12px;
     align-items: center;
     justify-content: flex-start;
   }
 
-  .app-shell > .sidebar .brand-logo-wordmark {
+  .app-shell > .sidebar .brand-lockup-wordmark {
     display: block;
-    width: 104px;
-    height: 58px;
+    width: 144px;
+    height: 61px;
   }
 
-  .app-shell > .sidebar .brand-logo-mark {
+  .app-shell > .sidebar .brand-lockup-mark {
     display: none;
   }
 
