@@ -31,7 +31,7 @@ vi.mock("./api", () => ({
   WS_EVENTS_URL: "ws://test/events",
 }));
 
-import App from "./App";
+import App, { SettingsPage } from "./App";
 import { JournalPage } from "./journal";
 import { MemoryPage } from "./memory";
 import { BrowserVadRecorder, PcmInputClient } from "./vad";
@@ -118,6 +118,28 @@ afterEach(() => {
 });
 
 describe("русский интерфейс", () => {
+  it("оставляет раздел окна доступным без подключения к ядру", () => {
+    render(<SettingsPage
+      settings={null} avatarStatus={null} avatarOverlay={null} events={[]}
+      onRefreshEvents={vi.fn()} onRefreshAvatar={vi.fn()} onAvatarOverlayChanged={vi.fn()}
+      onInterfaceLocaleChange={vi.fn()} onSettingsChanged={vi.fn()}
+    />);
+    const navigation = screen.getByRole("navigation", { name: "Разделы настроек" });
+    fireEvent.click(within(navigation).getByRole("button", { name: "Система" }));
+    fireEvent.click(within(navigation).getByRole("button", { name: "Окно приложения" }));
+    expect(screen.getByRole("heading", { name: "Окно приложения" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Вернуть эталонный размер" })).toBeVisible();
+  });
+  it("открывает отдельный раздел эталонного окна в системных настройках", async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
+    const navigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
+    fireEvent.click(within(navigation).getByRole("button", { name: "Система" }));
+    fireEvent.click(within(navigation).getByRole("button", { name: "Окно приложения" }));
+    expect(screen.getByRole("heading", { name: "Окно приложения" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Вернуть эталонный размер" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: /Запретить изменение размера окна/ })).toBeDisabled();
+  });
   it("собирает диалог в отдельную рабочую область с закреплённым композером", async () => {
     const { container } = render(<App />);
 

@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { isDesktopApp, quitDesktopApp } from "../desktop";
 import { animateButtonPress } from "../animations";
+import { useDesktopWindowPreferences } from "../useDesktopWindowPreferences";
 
 export function WindowChrome({
   title,
@@ -22,6 +23,8 @@ export function WindowChrome({
   onClose?: () => void;
 }) {
   const desktop = isDesktopApp();
+  const { available: mainWindow, preferences } = useDesktopWindowPreferences();
+  const resizeLocked = mainWindow && (!preferences || preferences.locked);
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
@@ -36,6 +39,7 @@ export function WindowChrome({
   }, [desktop]);
 
   const toggleMaximize = async () => {
+    if (resizeLocked) return;
     const window = getCurrentWindow();
     await window.toggleMaximize();
     setMaximized(await window.isMaximized());
@@ -76,7 +80,7 @@ export function WindowChrome({
         {desktop && (
           <div className="window-controls" aria-label="Управление окном">
             <MaterialButton materialKey={"WindowChrome.button-2"} appearance="quiet" tone="success" onClick={(e) => { animateButtonPress(e.currentTarget); void getCurrentWindow().minimize(); }} aria-label="Свернуть окно"><Minus size={14} /></MaterialButton>
-            <MaterialButton materialKey={"WindowChrome.button-3"} appearance="quiet" tone="warning" onClick={(e) => { animateButtonPress(e.currentTarget); void toggleMaximize(); }} aria-label={maximized ? "Восстановить окно" : "Развернуть окно"}>
+            <MaterialButton materialKey={"WindowChrome.button-3"} appearance="quiet" tone="warning" disabled={resizeLocked} title={resizeLocked ? "Размер окна зафиксирован" : undefined} onClick={(e) => { animateButtonPress(e.currentTarget); void toggleMaximize(); }} aria-label={maximized ? "Восстановить окно" : "Развернуть окно"}>
               {maximized ? <Copy size={12} /> : <Square size={12} />}
             </MaterialButton>
             <MaterialButton materialKey={"WindowChrome.button-4"}

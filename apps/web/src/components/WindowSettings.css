@@ -1,0 +1,23 @@
+.window-size-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px 24px;
+  margin: 0;
+}
+
+.window-size-summary > div {
+  display: grid;
+  gap: 6px;
+}
+
+.window-size-summary dt {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.window-size-summary dd {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 16px;
+  font-weight: 600;
+}
