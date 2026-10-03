@@ -27,6 +27,48 @@ if ($logo.DocumentElement.GetAttribute("viewBox") -ne "0 0 344 144" -or $mainPat
     throw "Expected the Iris V3 SVG with eight contours and viewBox 0 0 344 144."
 }
 
+# Share the original petal geometry/palette with the lightweight Anime.js loader.
+$petals = @(foreach ($index in @(0, 6, 7)) {
+    $gradient = $logo.SelectSingleNode("/s:svg/s:defs/s:linearGradient[@id='paint${index}_linear_118_271']", $ns)
+    [ordered]@{
+        d = $mainPaths[$index].GetAttribute("d")
+        x1 = $gradient.GetAttribute("x1"); y1 = $gradient.GetAttribute("y1")
+        x2 = $gradient.GetAttribute("x2"); y2 = $gradient.GetAttribute("y2")
+        stops = @($gradient.ChildNodes | ForEach-Object {
+            [ordered]@{
+                offset = $(if ($_.HasAttribute("offset")) { $_.GetAttribute("offset") } else { "0" })
+                color = $_.GetAttribute("stop-color")
+            }
+        })
+    }
+})
+$petalJson = ConvertTo-Json -InputObject $petals -Depth 5
+[IO.File]::WriteAllText((Join-Path $root "apps\web\src\brand\iris-petals.json"), $petalJson + "`n", $utf8)
+# Lettering stays vector artwork: retain the supplied Iris letterforms exactly.
+$lettering = @(foreach ($index in @(1, 4, 5, 2, 3)) {
+    $gradient = $logo.SelectSingleNode("/s:svg/s:defs/s:linearGradient[@id='paint${index}_linear_118_271']", $ns)
+    [ordered]@{
+        d = $mainPaths[$index].GetAttribute("d")
+        letter = $(switch ($index) { 1 { 0 }; 4 { 1 }; 5 { 2 }; 2 { 2 }; 3 { 3 } })
+        x1 = $gradient.GetAttribute("x1"); y1 = $gradient.GetAttribute("y1")
+        x2 = $gradient.GetAttribute("x2"); y2 = $gradient.GetAttribute("y2")
+        stops = @($gradient.ChildNodes | ForEach-Object {
+            [ordered]@{
+                offset = $(if ($_.HasAttribute("offset")) { $_.GetAttribute("offset") } else { "0" })
+                color = $_.GetAttribute("stop-color")
+            }
+        })
+    }
+})
+[IO.File]::WriteAllText((Join-Path $root "apps\web\src\brand\iris-lettering.json"),
+    (ConvertTo-Json -InputObject $lettering -Depth 5) + "`n", $utf8)
+$seedGradients = ($logo.SelectNodes('/s:svg/s:defs/s:linearGradient', $ns) | ForEach-Object { $_.OuterXml }) -join ''
+$seedLetters = (@(1, 2, 3, 4, 5) | ForEach-Object { $mainPaths[$_].OuterXml }) -join ''
+$seed = '<svg viewBox="0 0 344 144" fill="none" xmlns="http://www.w3.org/2000/svg"><defs>' +
+    $seedGradients + '</defs><g opacity="0.25" transform="translate(76 120) scale(0.1 0.38) translate(-76 -120)">' +
+    $mainPaths[0].OuterXml + '</g><g opacity="0.18">' + $seedLetters + '</g></svg>'
+[IO.File]::WriteAllText((Join-Path $brand "iris-startup-seed.svg"), $seed + "`n", $utf8)
+
 function Save-Svg([xml]$Document, [string]$Path) {
     $settings = New-Object System.Xml.XmlWriterSettings
     $settings.Encoding = $utf8
@@ -113,4 +155,4 @@ if (-not $SkipIcons) {
     Remove-Item -LiteralPath $resolvedStaging -Recurse -Force
 }
 
-Write-Host "Updated Iris static brand assets. The animated loader is unchanged."
+Write-Host "Updated Iris brand assets, animated petals, vector lettering and startup seed."

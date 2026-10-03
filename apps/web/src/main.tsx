@@ -6,6 +6,7 @@ import { MaterialButtonContours } from "./components/MaterialButtonContours";
 import "./fonts/proxima-nova.css";
 import "./tokens.css";
 import "./styles.css";
+import "./components/StartupScreen.css";
 import "./components/MaterialButton.css";
 import "./components/FieldMaterial.css";
 
@@ -16,6 +17,5 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   </React.StrictMode>,
 );
 
-// The inline splash covers the parsing gap before React mounts. Remove it
-// after handing the root to React so it cannot remain underneath the app.
-document.querySelector(".iris-static-splash")?.remove();
+// React replaces the static seed during its first commit. Keep it visible
+// until then, including while the initial module graph is being parsed.

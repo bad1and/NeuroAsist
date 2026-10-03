@@ -178,6 +178,7 @@ import {
 } from "./desktop";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { StartupScreen } from "./components/StartupScreen";
+import { getStartupStage } from "./startup";
 import { WindowChrome } from "./components/WindowChrome";
 import { AppDialog } from "./components/AppDialog";
 import { AppSwitch } from "./components/AppSwitch";
@@ -502,10 +503,13 @@ function MainApp() {
   const desktopManaged = isDesktopManaged();
   const [coreStatus, setCoreStatus] = useState<CoreStatus>(initialCoreStatus);
   const [showStartup, setShowStartup] = useState(desktopManaged);
+  const [startupRevealRequested, setStartupRevealRequested] = useState(false);
   const [avatarHostStatus, setAvatarHostStatus] = useState<AvatarHostStatus | null>(null);
   const [isClosing, setIsClosing] = useState(false);
   const [retryingCore, setRetryingCore] = useState(false);
-  const startupStartedAt = useRef(Date.now());
+  const [startupAttempt, setStartupAttempt] = useState(0);
+  const appShellRef = useRef<HTMLDivElement>(null);
+  const readinessEpoch = useRef(0);
   const [activeView, setActiveView] = useState<AppView>("overview");
   const [visitedViews, setVisitedViews] = useState<Set<AppView>>(() => new Set<AppView>(["overview", "chat"]));
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSection | undefined>();
@@ -550,6 +554,7 @@ function MainApp() {
   }, [handleAppClose]);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [readiness, setReadiness] = useState<ReadinessResponse | null>(null);
+  const [readinessUnavailable, setReadinessUnavailable] = useState(false);
   const [avatarStatus, setAvatarStatus] = useState<AvatarStatusResponse | null>(null);
   const [avatarOverlay, setAvatarOverlay] = useState<AvatarOverlaySettings | null>(null);
   const [settings, setSettings] = useState<PublicSettings | null>(null);
@@ -651,18 +656,24 @@ function MainApp() {
   }, [desktopManaged]);
 
   const isWaitingForAvatar = shouldWaitForInAppAvatar(desktopManaged, avatarHostStatus);
+  const startupStage = getStartupStage(coreStatus, readiness, isWaitingForAvatar, readinessUnavailable);
+  const startupReady = coreStatus === "ready" && startupStage === 3;
 
   const startupSubdetail = useMemo(() => {
+    if (coreStatus === "failed" || coreStatus === "crashed") return undefined;
     if (coreStatus !== "ready") {
-      return "Подготавливаю ядро, модель и сервисы…";
+      return "Подготавливаю ядро";
     }
-    if (isWaitingForAvatar) {
+    if (startupStage === 1) return "Подготавливаю модель диалога";
+    if (startupStage === 2 && isWaitingForAvatar) {
       return avatarHostStatus?.phase === "warming"
-        ? "Прогреваю сцену и первый кадр 3D-аватара…"
-        : "Запускаю 3D-аватар…";
+        ? "Подготавливаю первый кадр аватара"
+        : "Запускаю 3D-аватар";
     }
+    if (startupStage === 2) return "Подготавливаю голосовые сервисы";
+    if (readiness?.phase === "degraded") return "Iris готова · часть сервисов недоступна";
     return "Всё готово к разговору";
-  }, [avatarHostStatus?.phase, coreStatus, isWaitingForAvatar]);
+  }, [avatarHostStatus?.phase, coreStatus, isWaitingForAvatar, readiness?.phase, startupStage]);
 
   useEffect(() => {
     let stop: (() => void) | undefined;
@@ -670,6 +681,13 @@ function MainApp() {
       setCoreStatus(nextStatus);
       setRetryingCore(false);
       if (nextStatus !== "ready") setShowStartup(true);
+      if (nextStatus === "starting") {
+        setStartupRevealRequested(false);
+        readinessEpoch.current += 1;
+        setReadiness(null);
+        setReadinessUnavailable(false);
+        setStartupAttempt((value) => value + 1);
+      }
     }).then((unlisten) => {
       stop = unlisten;
       if (desktopManaged) {
@@ -682,28 +700,16 @@ function MainApp() {
     return () => stop?.();
   }, [desktopManaged]);
 
-  useEffect(() => {
-    if (!desktopManaged) {
-      if (coreStatus === "ready") {
-        const elapsed = Date.now() - startupStartedAt.current;
-        const timer = window.setTimeout(() => setShowStartup(false), Math.max(0, 200 - elapsed));
-        return () => window.clearTimeout(timer);
-      }
-      return;
-    }
-    if (coreStatus !== "ready") return;
-    if (isWaitingForAvatar) return;
-
-    const elapsed = Date.now() - startupStartedAt.current;
-    const timer = window.setTimeout(() => setShowStartup(false), Math.max(350, 400 - elapsed));
-    return () => window.clearTimeout(timer);
-  }, [coreStatus, desktopManaged, isWaitingForAvatar]);
-
   const retryCore = async () => {
     setRetryingCore(true);
     setCoreStatus("starting");
     setShowStartup(true);
-    startupStartedAt.current = Date.now();
+    setStartupRevealRequested(false);
+    setAvatarHostStatus(null);
+    readinessEpoch.current += 1;
+    setReadiness(null);
+    setReadinessUnavailable(false);
+    setStartupAttempt((value) => value + 1);
     try {
       const runtime = await restartDesktopCore();
       setCoreStatus(runtime.coreStatus);
@@ -725,8 +731,11 @@ function MainApp() {
   }, []);
 
   const refreshReadiness = useCallback(async () => {
+    const epoch = readinessEpoch.current;
     try {
       const next = await getReadiness();
+      if (epoch !== readinessEpoch.current) return null;
+      setReadinessUnavailable(false);
       setReadiness((current) => {
         if (
           current &&
@@ -744,8 +753,10 @@ function MainApp() {
       });
       return next;
     } catch {
+      if (epoch !== readinessEpoch.current) return null;
       // The core status indicator remains authoritative while the readiness
       // endpoint is unavailable during an older or restarting backend.
+      setReadinessUnavailable(true);
       return null;
     }
   }, []);
@@ -789,7 +800,7 @@ function MainApp() {
     }, 10000);
     const readinessTimer = window.setInterval(async () => {
       const result = await refreshReadiness();
-      if (result && (result.live_ready || result.phase === "ready" || result.phase === "degraded")) {
+      if (result && ![result.text_chat, result.stt, result.tts, result.vad].includes("loading")) {
         window.clearInterval(readinessTimer);
       }
     }, 1200);
@@ -934,18 +945,7 @@ function MainApp() {
   }, [refreshEvents, servicesReady]);
 
   if (isClosing) {
-    return <StartupScreen status="closing" />;
-  }
-
-  if (showStartup) {
-    return (
-      <StartupScreen
-        status={coreStatus}
-        subdetail={startupSubdetail}
-        retrying={retryingCore}
-        onRetry={() => void retryCore()}
-      />
-    );
+    return <StartupScreen key="closing" status="closing" onClose={handleAppClose} />;
   }
 
   const closeNavigation = () => {
@@ -968,7 +968,11 @@ function MainApp() {
     closeNavigation();
   };
   return (
-    <div className={`app-shell${sidebarCollapsed ? " is-sidebar-collapsed" : ""}`}>
+    <>
+    {(!showStartup || (startupReady && startupRevealRequested)) && (
+    <div ref={appShellRef} className={`app-shell${sidebarCollapsed ? " is-sidebar-collapsed" : ""}`}
+      inert={showStartup || undefined} aria-hidden={showStartup || undefined}
+      style={showStartup ? { opacity: 0 } : undefined}>
       <CorpusSurface />
       <Sidebar
         activeView={activeView}
@@ -1093,6 +1097,15 @@ function MainApp() {
         <NotificationHost pinnedContentRef={backgroundConversationRef} onNavigate={(view) => switchView(view as AppView)} />
       </section>
     </div>
+    )}
+    {showStartup && (
+      <StartupScreen key={startupAttempt} status={startupReady ? "ready" : coreStatus}
+        stage={startupStage} subdetail={startupSubdetail} retrying={retryingCore}
+        onRetry={() => void retryCore()} onClose={handleAppClose} revealTarget={appShellRef}
+        onReveal={() => setStartupRevealRequested(true)}
+        onComplete={() => setShowStartup(false)} />
+    )}
+    </>
   );
 }
 

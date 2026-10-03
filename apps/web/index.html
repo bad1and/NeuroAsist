@@ -1,20 +1,19 @@
 <!doctype html>
-<html lang="en">
+<html lang="ru">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/brand/iris-mark-backed-dark.svg" />
     <title>Iris</title>
     <style>
-      html, body { margin: 0; min-height: 100%; background: #101215; }
+      html, body { margin: 0; min-height: 100%; background: oklch(22% 0.008 265); }
       #root { min-height: 100vh; }
-      .iris-static-splash { min-height: 100vh; display: grid; place-items: center; background: #101215; }
-      .iris-static-splash::before { content: ""; width: 42px; height: 42px; border: 3px solid rgba(235, 178, 104, .25); border-top-color: #ebb268; border-radius: 50%; animation: iris-static-spin .8s linear infinite; }
-      @keyframes iris-static-spin { to { transform: rotate(360deg); } }
+      .iris-static-splash { min-height: 100dvh; display: grid; place-content: center; justify-items: center; padding: 64px 24px 44px; box-sizing: border-box; }
+      .iris-static-splash img { width: clamp(280px, 31vw, 390px); margin-bottom: 176px; }
     </style>
   </head>
   <body>
-    <div id="root"><div class="iris-static-splash" aria-label="Загрузка Iris"></div></div>
+    <div id="root"><div class="iris-static-splash" role="status" aria-label="Загрузка Iris"><img src="/brand/iris-startup-seed.svg" alt="" /></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
