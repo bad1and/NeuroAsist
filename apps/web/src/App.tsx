@@ -2370,6 +2370,7 @@ export function ChatPage({
       notify.error("Микрофон недоступен", "Браузер не поддерживает необходимый аудиорежим.");
       return;
     }
+    const startupNotificationId = `voice-microphone-startup-${crypto.randomUUID()}`;
     liveConnectingRef.current = true;
     setMicrophoneStarting(true);
     cancelPendingBargeIn();
@@ -2397,7 +2398,7 @@ export function ChatPage({
         notify.info(
           "Подготавливаю микрофон",
           `Загружаю голосовые сервисы · ${Math.round(progress * 100)}%`,
-          { id: "voice-microphone-startup", duration: "persistent", progress },
+          { id: startupNotificationId, duration: "persistent", progress },
         );
         await new Promise((resolve) => window.setTimeout(resolve, 650));
         nextReadiness = await getReadiness().catch(() => nextReadiness);
@@ -2405,7 +2406,7 @@ export function ChatPage({
       notify.info(
         "Подготавливаю микрофон",
         "Запрашиваю доступ к устройству · 78%",
-        { id: "voice-microphone-startup", duration: "persistent", progress: 0.78 },
+        { id: startupNotificationId, duration: "persistent", progress: 0.78 },
       );
       await ensureLiveVoice();
       const input = new PcmInputClient(voiceInputWebSocketUrl(sessionId, 3), (event) => {
@@ -2517,7 +2518,7 @@ export function ChatPage({
       notify.info(
         "Подготавливаю микрофон",
         "Подключаю поток распознавания · 92%",
-        { id: "voice-microphone-startup", duration: "persistent", progress: 0.92 },
+        { id: startupNotificationId, duration: "persistent", progress: 0.92 },
       );
       await input.connect(
         capture.sampleRate,
@@ -2527,10 +2528,15 @@ export function ChatPage({
       setLiveConversation(true);
       setMicrophoneMuted(false);
       updateConversationStatus("Микрофон включён");
+      notify.info(
+        "Подготавливаю микрофон",
+        "Голосовые сервисы загружены, поток подключён · 100%",
+        { id: startupNotificationId, duration: 3000, progress: 1 },
+      );
       notify.success(
         "Микрофон готов",
         "Можно говорить — повторное нажатие не требуется.",
-        { id: "voice-microphone-startup", duration: 2600, progress: 1 },
+        { duration: 4500 },
       );
     } catch (vadError) {
       cancelPendingBargeIn();
@@ -2552,7 +2558,7 @@ export function ChatPage({
       notify.error(
         "Не удалось включить микрофон",
         userMsg,
-        { id: "voice-microphone-startup", duration: "persistent" },
+        { id: startupNotificationId, duration: "persistent" },
       );
       setLiveConversation(false);
     } finally {

@@ -107,9 +107,11 @@ export function StartupScreen({ status, stage = status === "ready" || status ===
     const root = screenRef.current;
     const petal = root?.querySelector<SVGGElement>(`[data-petal="${revealed}"]`);
     const path = root?.querySelector<SVGPathElement>(`[data-petal-shape="${revealed}"]`);
+    const silhouette = root?.querySelector<SVGPathElement>(`[data-petal-silhouette="${revealed}"]`);
     if (!petal || !path) return;
     const original = petals[revealed].d;
     if (isTestEnvironment()) {
+      if (silhouette) silhouette.style.opacity = "0";
       petal.style.opacity = "1";
       path.setAttribute("d", original);
       root?.querySelector("[data-letter-reveal]")?.setAttribute("x1", "344");
@@ -118,12 +120,18 @@ export function StartupScreen({ status, stage = status === "ready" || status ===
       return;
     }
     const reduced = prefersReducedMotion();
-    if (reduced) path.setAttribute("d", original);
+    const fadeOnly = revealed === 0;
+    const unfoldDuration = reduced ? 140 : fadeOnly ? 1300 : 1100;
+    if (reduced || fadeOnly) path.setAttribute("d", original);
     const timeline = createTimeline({ onComplete: () => {
       path.setAttribute("d", original);
       setRevealed(revealed + 1);
     } });
-    if (!reduced) timeline.add(path, {
+    // Keep the silhouette above the petal until its full contour has settled.
+    if (silhouette) timeline.add(silhouette, {
+      opacity: 0, duration: reduced ? 60 : 240, ease: "outCubic",
+    }, unfoldDuration);
+    if (!reduced && !fadeOnly) timeline.add(path, {
       d: [
         { from: shapePetal(original, 0, revealed), to: shapePetal(original, 1.035, revealed), duration: 820, ease: "outCubic" },
         { to: original, duration: 280, ease: "inOutSine" },
@@ -131,8 +139,8 @@ export function StartupScreen({ status, stage = status === "ready" || status ===
     }, 0);
     timeline.add(petal, {
       opacity: [0, 1],
-      rotate: reduced ? 0 : [revealed === 1 ? 7 : revealed === 2 ? -7 : -2, 0],
-      duration: reduced ? 140 : 900, ease: "outCubic",
+      rotate: reduced || fadeOnly ? 0 : [revealed === 1 ? 7 : -7, 0],
+      duration: reduced ? 140 : fadeOnly ? unfoldDuration : 900, ease: "outCubic",
     }, 0);
     return () => { timeline.cancel(); };
   }, [canReveal, revealed]);
@@ -274,7 +282,7 @@ export function StartupScreen({ status, stage = status === "ready" || status ===
       </div>
       <WindowChrome title="" compact onClose={onClose} />
       <main className={`startup-content is-${status}`}>
-        <div className="startup-mark"><IrisPetals unfolding withWordmark idlePetals={failed || canFinish ? 0 : revealed} settling={canFinish} /></div>
+        <div className="startup-mark"><IrisPetals unfolding withWordmark withSilhouettes={!failed} idlePetals={failed || canFinish ? 0 : revealed} settling={canFinish} /></div>
         <div className="startup-copy" role="status" aria-live="polite" aria-atomic="true">
           <h1>{customTitle || (waiting ? "Запускаю Iris" : copy.title)}</h1>
           <p>{subdetail || (waiting ? STAGES[stage - 1] : copy.detail)}</p>
