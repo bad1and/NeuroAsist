@@ -1,3 +1,4 @@
+import { MaterialButton } from "./components/MaterialButton";
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { deleteCharacterReflection, getCharacterReflections, getCharacterState, getCharacterStateEvents, getReflectionSettings, resetCharacterState, updateReflectionSettings } from "./api";
 import type { CharacterReflection, CharacterStateEvent, CharacterStateView } from "./types";
@@ -226,7 +227,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
               </div>
 
               <div className="state-sidebar-actions">
-                <button
+                <MaterialButton materialKey={"state.button-1"}
                   className="secondary danger-button state-action-mood"
                   type="button"
                   disabled={busy}
@@ -240,8 +241,8 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
                   }}
                 >
                   Сбросить настроение
-                </button>
-                <button
+                </MaterialButton>
+                <MaterialButton materialKey={"state.button-2"}
                   className="secondary danger-button state-action-relationship"
                   type="button"
                   disabled={busy}
@@ -255,7 +256,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
                   }}
                 >
                   Сбросить отношения
-                </button>
+                </MaterialButton>
               </div>
             </>
           ) : (
@@ -268,20 +269,20 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
             <h2>Живая история</h2>
             <div className="timeline-header-controls">
               <div className="timeline-filter-pills">
-                <button
+                <MaterialButton materialKey={"state.button-3"}
                   type="button"
                   className={`timeline-filter-pill ${filterOnlyImportant ? "active" : ""}`}
                   onClick={() => setFilterOnlyImportant(true)}
                 >
                   Только важные
-                </button>
-                <button
+                </MaterialButton>
+                <MaterialButton materialKey={"state.button-4"}
                   type="button"
                   className={`timeline-filter-pill ${!filterOnlyImportant ? "active" : ""}`}
                   onClick={() => setFilterOnlyImportant(false)}
                 >
                   Все ({events.length + reflections.length})
-                </button>
+                </MaterialButton>
               </div>
               <label className="toggle-notes">
                 <div className="custom-checkbox-wrapper">
@@ -359,7 +360,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
                         <p data-i18n-skip>{r.text}</p>
                         <div className="timeline-footer">
                           <span className="reflection-emotion">{r.primary_emotion}</span>
-                          <button className="text-button" onClick={(e) => handleRemoveReflectionClick(e, r.id)}>Удалить</button>
+                          <MaterialButton materialKey={["state.button-5", item.key].join(":")} className="text-button" onClick={(e) => handleRemoveReflectionClick(e, r.id)}>Удалить</MaterialButton>
                         </div>
                       </div>
                     </article>
@@ -379,15 +380,15 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
         variant="danger"
       >
         <div className="dialog-actions">
-          <button
+          <MaterialButton materialKey={"state.button-6"}
             className="secondary"
             type="button"
             disabled={busy}
             onClick={() => setPendingReset(null)}
           >
             Отмена
-          </button>
-          <button
+          </MaterialButton>
+          <MaterialButton materialKey={"state.button-7"}
             className="danger-button"
             type="button"
             disabled={busy}
@@ -407,7 +408,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
             }}
           >
             {busy ? "Сбрасываю…" : "Сбросить"}
-          </button>
+          </MaterialButton>
         </div>
       </AppDialog>
 
@@ -419,15 +420,15 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
         variant="danger"
       >
         <div className="dialog-actions">
-          <button
+          <MaterialButton materialKey={"state.button-8"}
             className="secondary"
             type="button"
             disabled={busy}
             onClick={() => setPendingDeleteReflection(null)}
           >
             Отмена
-          </button>
-          <button
+          </MaterialButton>
+          <MaterialButton materialKey={"state.button-9"}
             className="danger-button"
             type="button"
             disabled={busy}
@@ -456,7 +457,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
             }}
           >
             {busy ? "Удаляю…" : "Удалить"}
-          </button>
+          </MaterialButton>
         </div>
       </AppDialog>
     </section>

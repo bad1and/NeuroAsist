@@ -5,6 +5,49 @@
   font: inherit;
 }
 
+.custom-select-container.open { z-index: 1000; }
+.custom-select-trigger { position: relative; z-index: 2; }
+
+/* One shell surrounds the header and list; the header's hit area stays put. */
+#root .custom-select-container.open > .custom-select-trigger {
+  --field-surface: linear-gradient(transparent, transparent) !important;
+  --field-edge: linear-gradient(transparent, transparent) !important;
+  --field-depth: 0 0 0 transparent !important;
+  --rim-halo: 0 0 0 transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border-color: transparent !important;
+  outline: none;
+}
+.custom-select-popup {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  isolation: isolate;
+  --select-shell-top: calc(1px - var(--select-header-height, 38px));
+  --select-shell-bottom: 0px;
+}
+.custom-select-popup.placement-bottom { top: calc(100% - 1px); }
+.custom-select-popup.placement-top {
+  bottom: calc(100% - 1px);
+  --select-shell-top: 0px;
+  --select-shell-bottom: calc(1px - var(--select-header-height, 38px));
+}
+.custom-select-popup::before {
+  content: "";
+  position: absolute;
+  inset: var(--select-shell-top) 0 var(--select-shell-bottom);
+  border-radius: var(--select-shell-radius, var(--radius-control));
+  corner-shape: var(--corner-shape);
+  pointer-events: none;
+}
+.custom-select-popup::before {
+  z-index: -1;
+  background: var(--surface-select-menu);
+  box-shadow: var(--depth-select-menu);
+}
+
 /* Hidden native select for accessibility & automated tests */
 .custom-select-native-hidden {
   position: absolute !important;
@@ -20,8 +63,15 @@
   pointer-events: none !important;
 }
 
-/* 1. Trigger button (скругление 12px, цвет кнопки-подложки) */
+/* Preserve the field geometry; depth comes from the shared graphite material. */
 .custom-select-trigger {
+  --field-surface: var(--surface-select-field);
+  /* Use one continuous face; move the old border space into padding. */
+  --field-border-width: 0px;
+  --field-padding: calc(6px + var(--rim-width)) calc(10px + var(--rim-width));
+  --field-edge: linear-gradient(transparent, transparent) !important;
+  --rim-halo: 0 0 0 transparent !important;
+  --field-depth: var(--depth-select-field);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -31,32 +81,27 @@
   border: none;
   border-radius: var(--radius-control, 24px);
   corner-shape: squircle;
-  background: var(--color-surface-raised, #242526);
+  background: var(--surface-select-field);
+  box-shadow: var(--depth-select-field);
   color: var(--color-text, #f0f0f0);
   cursor: pointer;
   text-align: left;
   gap: 10px;
   font: inherit;
   font-size: 13.5px;
-  transition: background-color 0.18s ease, transform 0.12s ease;
+  transition: none;
+  transform: none;
   box-sizing: border-box;
 }
 
-.custom-select-trigger:hover:not(:disabled) {
-  background: var(--color-surface-soft, #2c2d2e);
-}
-
-.custom-select-trigger:active:not(:disabled) {
-  transform: scale(0.99);
+/* Keep the joined header stationary instead of inheriting the global button press. */
+.custom-select-container > .custom-select-trigger:active:not(:disabled) {
+  transform: none;
 }
 
 .custom-select-trigger:focus-visible {
   outline: 2px solid var(--color-focus, #8a2be2);
   outline-offset: 2px;
-}
-
-.custom-select-container.open .custom-select-icon {
-  transform: rotate(180deg);
 }
 
 .custom-select-container.disabled .custom-select-trigger {
@@ -81,40 +126,31 @@
 .custom-select-icon {
   color: var(--color-text-soft, #a0a0a0);
   flex-shrink: 0;
-  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: none;
 }
 
-/* 2. Floating Dropdown Menu (безрамочный, цвет в тон кнопки, скругление 12px, глубокая тень) */
+/* Only the inner list scrolls; the shell stays continuous around the header. */
 .custom-select-dropdown {
-  position: absolute;
-  left: 0;
-  right: 0;
+  position: relative;
   width: 100%;
-  max-height: 240px;
+  max-height: var(--select-menu-max-height, 240px);
   overflow-y: auto;
   overscroll-behavior: contain;
-  background: var(--color-surface-raised, #242526);
+  background: transparent;
   border: none !important;
-  border-radius: var(--radius-plate, 26px);
+  border-radius: var(--select-shell-radius, var(--radius-control));
   corner-shape: squircle;
-  z-index: 1000;
-  box-shadow: 0 14px 36px -4px rgba(0, 0, 0, 0.55), 0 4px 14px rgba(0, 0, 0, 0.35);
-  padding: 5px;
+  box-shadow: none;
+  animation: none;
+  padding: 7px 5px 5px;
   display: flex;
   flex-direction: column;
   gap: 2px;
   box-sizing: border-box;
 }
 
-.custom-select-dropdown.placement-bottom {
-  top: calc(100% + 6px);
-  animation: customSelectFadeSlideDown 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.custom-select-dropdown.placement-top {
-  bottom: calc(100% + 6px);
-  animation: customSelectFadeSlideUp 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-}
+.placement-bottom .custom-select-dropdown { border-top-left-radius: 0; border-top-right-radius: 0; }
+.placement-top .custom-select-dropdown { padding: 5px 5px 7px; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 
 @keyframes customSelectFadeSlideDown {
   from {
@@ -153,50 +189,93 @@
   background: rgba(255, 255, 255, 0.28);
 }
 
-/* 3. Options (скругление 13px, спокойный hover и выделение плашкой без галочек) */
-.custom-select-option {
+/* Selection has a dark inset bevel; hover gently reveals the menu surface. */
+.custom-select-option.dp-lens {
+  position: relative;
+  --dp-tone: var(--color-graphite-upper);
+  --dp-intensity: .55;
+  --dp-effect-scale: .55;
+  min-height: 38px;
   display: flex;
   align-items: center;
   padding: 8px 12px;
   cursor: pointer;
-  color: var(--color-text, #f0f0f0);
+  color: var(--color-text);
   border-radius: var(--radius-xs, 16px);
   corner-shape: squircle;
-  transition: background-color 0.14s ease, color 0.14s ease;
+  transition: none;
+  flex-shrink: 0;
   font-size: 13.5px;
   line-height: 1.4;
   user-select: none;
 }
 
 .custom-select-option-label {
+  position: relative;
+  z-index: 1;
   flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.custom-select-option:hover,
-.custom-select-option.highlighted {
-  background: var(--color-surface-soft, rgba(255, 255, 255, 0.05));
+.custom-select-option:hover:not(.disabled),
+.custom-select-option.highlighted:not(.disabled) {
+  background: transparent;
   color: var(--color-text, #ffffff);
 }
 
-/* Выбранный пункт — спокойная мягкая плашка без кричащих цветов и без галочек */
 .custom-select-option.selected {
-  background: var(--color-surface-soft, rgba(255, 255, 255, 0.09));
-  color: var(--color-text, #ffffff);
+  background: var(--surface-select-selected);
+  box-shadow: var(--depth-select-selected);
+  color: var(--color-accent-ink);
   font-weight: 500;
 }
 
-.custom-select-option.selected.highlighted,
-.custom-select-option.selected:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: var(--color-text, #ffffff);
+/* Keyboard focus is local to the label, without a frame around the field. */
+.custom-select-trigger:focus-visible .custom-select-value {
+  text-decoration: underline;
+  text-decoration-color: var(--color-focus);
+  text-underline-offset: 4px;
+}
+
+.custom-select-option.dp-lens.selected { --dp-tone: var(--color-accent); }
+
+.custom-select-option.selected.highlighted:not(.disabled),
+.custom-select-option.selected:hover:not(.disabled) {
+  background: var(--surface-select-selected);
+  color: var(--color-accent-ink);
 }
 
 .custom-select-option.disabled {
   opacity: 0.45;
   cursor: not-allowed;
   background: transparent;
+  box-shadow: none;
+}
+
+/* Shared button layers are dimmed for compact rows in a near-black menu. */
+.custom-select-option > .dp-hover-surface { opacity: 0; pointer-events: none; }
+.custom-select-option.selected > .dp-hover-surface { opacity: 1; }
+.custom-select-option.highlighted:not(.disabled) > .dp-hover-surface { opacity: 1; }
+.custom-select-option .dp-depth { box-shadow: 0 2px 3px rgb(0 0 0 / .2); }
+.custom-select-option .dp-bloom { opacity: .07; }
+.custom-select-option > .dp-rim { display: none; }
+.custom-select-option.disabled > .dp-hover-surface { display: none; }
+.custom-select-option .dp-hover-light { opacity: 0; }
+.custom-select-option .dp-hover-surface, .custom-select-option .dp-material,
+.custom-select-option .dp-depth, .custom-select-option .dp-inner-top,
+.custom-select-option .dp-inner-bottom, .custom-select-option .dp-inner-edge,
+.custom-select-option .dp-bevel, .custom-select-option .dp-noise,
+.custom-select-option .dp-hover-light, .custom-select-option .dp-hover-spot,
+.custom-select-option .dp-bloom { margin: 0; padding: 0; }
+
+@media (forced-colors: active) {
+  .custom-select-dropdown { border: 1px solid CanvasText !important; }
+  #root .custom-select-container.open > .custom-select-trigger:focus-visible { outline: 2px solid Highlight !important; }
+  .custom-select-popup::before { background: Canvas; border: 1px solid CanvasText; }
+  .custom-select-option > .dp-hover-surface { display: none; }
+  .custom-select-option.highlighted { outline: 1px solid Highlight; outline-offset: -1px; }
+  .custom-select-option.selected { outline: 1px solid Highlight; outline-offset: -1px; }
 }
 

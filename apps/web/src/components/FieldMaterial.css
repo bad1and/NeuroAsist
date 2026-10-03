@@ -1,0 +1,63 @@
+/* Native fields use the same gradient and halo as the design-pack rim.
+   Reserve its width at rest so focus never changes the control's size. */
+#root :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]):not([type="file"]):not([type="color"]):not([type="button"]):not([type="submit"]), textarea, select:not(.custom-select-native-hidden), .custom-select-trigger):not(.search-form *):not(.coding-search-form *):not(.chat-composer *) {
+  --field-fill: var(--color-base-deep);
+  border: var(--field-border-width, var(--rim-width)) solid transparent !important;
+  background: var(--field-surface, linear-gradient(var(--field-fill), var(--field-fill))) padding-box, var(--field-edge, linear-gradient(transparent, transparent)) border-box !important;
+  padding: var(--field-padding, 6px 10px) !important;
+  box-shadow: var(--field-depth, inset 0 2px 4px rgb(0 0 0 / .65), inset 0 1px 2px rgb(0 0 0 / .45), 0 1px 0 rgb(255 255 255 / .05)) !important;
+  outline: none !important;
+  transition: none !important;
+}
+#root :is(.settings-card, .settings-group, .coding-content, .coding-intervention-form, .memory-content, .memory-create-form, .state-dashboard) :is(input, textarea, select, .custom-select-trigger):not(.search-form *):not(.coding-search-form *):not(.chat-composer *):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(.custom-select-native-hidden) {
+  padding: var(--field-padding, 9px 12px) !important;
+}
+#root :is(input, textarea, select, .custom-select-trigger):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]):not([type="file"]):not([type="color"]):not([type="button"]):not([type="submit"]):not(.search-form *):not(.coding-search-form *):not(.chat-composer *):not(.custom-select-native-hidden):is(:hover, :focus, :focus-visible, [aria-expanded="true"]):not(:disabled) {
+  --field-edge: var(--rim-gradient);
+  box-shadow: var(--rim-halo), var(--field-depth, inset 0 2px 4px rgb(0 0 0 / .45)) !important;
+  outline: none !important;
+}
+#root :is(input, textarea, select, .custom-select-trigger)[aria-invalid="true"] {
+  --rim-gradient: linear-gradient(145deg, #e5b9ba, #986768 42%, #865b5c 68%, #e5b9ba);
+  --rim-halo: 0 0 7px rgb(152 103 104 / .38), inset 0 0 5px rgb(152 103 104 / .18);
+  --field-edge: var(--rim-gradient);
+}
+
+/* Search fields keep one frame around the complete input/icon surface. */
+#root :is(.search-form, .coding-search-form) {
+  position: relative;
+  isolation: isolate;
+}
+#root :is(.search-form, .coding-search-form):has(input:not(:disabled)):is(:hover, :focus-within) {
+  border-color: transparent !important;
+  box-shadow: var(--rim-halo), inset 0 2px 4px rgb(0 0 0 / .45) !important;
+  outline: none !important;
+}
+#root :is(.search-form, .coding-search-form):has(input:not(:disabled)):is(:hover, :focus-within)::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  padding: var(--rim-width);
+  border-radius: inherit;
+  corner-shape: inherit;
+  background: var(--rim-gradient);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+#root :is(.search-form, .coding-search-form) input:is(:hover, :focus, :focus-visible) {
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+/* The message plate's SVG follows its existing concave silhouette. */
+.chat-composer .tactile-plate-focus { stroke-width: 6; }
+.chat-composer:has(textarea:not(:disabled)):is(:hover, :focus-within) .tactile-plate-focus { opacity: 1; }
+
+@media (forced-colors: active) {
+  #root :is(input, textarea, select, .custom-select-trigger):focus-visible,
+  button.iris-button[data-material]:not([data-material="plain"]):focus-visible {
+    outline: 2px solid Highlight !important;
+    outline-offset: 2px;
+  }
+}

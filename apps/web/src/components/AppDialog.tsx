@@ -1,7 +1,10 @@
-import { useEffect, useState, useRef, type ReactNode } from "react";
+import { MaterialButton } from "./MaterialButton";
+import { useEffect, useLayoutEffect, useState, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { IconInterfaceCross, IconInterfaceAlertTriangle } from "../CustomIcons";
-import { animateButtonPress } from "../animations";
+import { animateButtonPress, animateNotification } from "../animations";
+import { ConfirmationRim } from "./ConfirmationRim";
+import { buttonSeed } from "./buttonMaterial";
 
 export interface AppDialogProps {
   open: boolean;
@@ -25,6 +28,12 @@ export function AppDialog({
   const [isExiting, setIsExiting] = useState(false);
   const [rendered, setRendered] = useState(open);
   const exitTimerRef = useRef<number | null>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!rendered || !cardRef.current) return;
+    const motion = animateNotification(cardRef.current, isExiting ? "exit" : "enter");
+    return () => { motion?.cancel(); };
+  }, [rendered, isExiting]);
 
   const cachedContentRef = useRef({
     title,
@@ -118,7 +127,8 @@ export function AppDialog({
   const content = (
     <aside className="app-dialog-host" aria-label="Диалог подтверждения" aria-live="assertive">
       <div
-        className={`notification-card app-dialog-card is-${currentVariant}${isExiting ? " is-exiting" : ""}`}
+        ref={cardRef}
+        className={`notification-card app-dialog-card confirmation-surface is-${currentVariant}${isExiting ? " is-exiting" : ""}`}
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="app-dialog-title"
@@ -144,9 +154,10 @@ export function AppDialog({
           </div>
 
           <div className="notification-side-actions">
-            <button
+            <MaterialButton materialKey={"dialog.close." + title}
+              appearance="quiet"
               type="button"
-              className="notification-control-btn notification-close-btn"
+              className="notification-control-btn notification-close-btn confirmation-close"
               aria-label="Закрыть диалог"
               title="Закрыть"
               onClick={(e) => {
@@ -156,7 +167,7 @@ export function AppDialog({
               }}
             >
               <IconInterfaceCross size={16} aria-hidden="true" />
-            </button>
+            </MaterialButton>
           </div>
         </div>
 
@@ -165,6 +176,7 @@ export function AppDialog({
             {currentChildren}
           </div>
         )}
+        <ConfirmationRim cardRef={cardRef} seed={buttonSeed(`confirmation.${currentTitle}`)} active={open && !isExiting} />
       </div>
     </aside>
   );

@@ -67,6 +67,17 @@ describe("AppDialog (Top Notification Format)", () => {
     expect(screen.getByRole("button", { name: "Начать" })).toBeInTheDocument();
   });
 
+  it("сохраняет полный контур и ждёт решения без автоматического закрытия", () => {
+    const onClose = vi.fn();
+    render(<AppDialog open title="Начать новый диалог?" onClose={onClose} variant="danger" />);
+    const path = screen.getByRole("alertdialog").querySelector(".confirmation-rim path")!;
+    expect(path).toHaveAttribute("stroke-dashoffset", "0");
+    act(() => { vi.advanceTimersByTime(30000); });
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    expect(path).toHaveAttribute("stroke-dashoffset", "0");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("вызывает onClose по нажатию на кнопку закрытия (крестик) с плавной анимацией", () => {
     const onClose = vi.fn();
     render(

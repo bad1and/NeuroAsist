@@ -1,3 +1,4 @@
+import { MaterialButton } from "./components/MaterialButton";
 import {
   IconComputerRobotCyborg1,
   IconMailChatBubbleTextSquare,
@@ -143,9 +144,9 @@ export function OverviewPage({
           <p>{greeting()}</p>
           <h2>О чём поговорим?</h2>
           <span>Iris рядом, когда хочется обсудить идею, разобрать задачу или просто выговориться.</span>
-          <button className="primary-button overview-cta" onClick={handleCtaClick}>
+          <MaterialButton materialKey={"overview.button-1"} className="primary-button overview-cta" onClick={handleCtaClick}>
             Начать диалог <IconInterfaceCursorArrow2 size={18} aria-hidden="true" />
-          </button>
+          </MaterialButton>
         </div>
         <figure className="overview-visual" aria-hidden="true">
           <div className="overview-visual-inner" />
@@ -153,7 +154,7 @@ export function OverviewPage({
         </figure>
       </div>
 
-      {error && <div className="notice" role="alert">{error}<button className="text-button" onClick={() => void refresh()}>Повторить</button></div>}
+      {error && <div className="notice" role="alert">{error}<MaterialButton materialKey={"overview.button-2"} className="text-button" onClick={() => void refresh()}>Повторить</MaterialButton></div>}
 
       <div className={`overview-grid${loading ? " is-loading" : ""}`} ref={gridRef} aria-busy={loading}>
         <article className="overview-card">
@@ -163,9 +164,9 @@ export function OverviewPage({
             <h3 data-i18n-skip={latest?.title && latest.title !== "Разговор с Iris" ? "" : undefined}>{latest?.title || (latest ? "Разговор с Iris" : "История пока пуста")}</h3>
             <p>{latest ? `${latest.message_count} сообщ. · ${formatRelative(latest.last_activity_at)}` : "Начни диалог — он появится здесь."}</p>
           </div>
-          <button className="card-link" onClick={(e) => { animateButtonPress(e.currentTarget); if (latest) onOpenHistory(); else onOpenChat(); }}>
+          <MaterialButton materialKey={"overview.button-3"} className="card-link" onClick={(e) => { animateButtonPress(e.currentTarget); if (latest) onOpenHistory(); else onOpenChat(); }}>
             {latest ? "Открыть историю" : "Начать разговор"}<IconInterfaceCursorArrow2 size={15} />
-          </button>
+          </MaterialButton>
         </article>
 
         <article className="overview-card">
@@ -183,9 +184,9 @@ export function OverviewPage({
             </h3>
             <p>Iris самостоятельно поддерживает актуальность фактов.</p>
           </div>
-          <button className="card-link" onClick={(e) => { animateButtonPress(e.currentTarget); onOpenMemory(); }}>
+          <MaterialButton materialKey={"overview.button-4"} className="card-link" onClick={(e) => { animateButtonPress(e.currentTarget); onOpenMemory(); }}>
             Открыть память<IconInterfaceCursorArrow2 size={15} />
-          </button>
+          </MaterialButton>
         </article>
 
         <article className="overview-card">
@@ -195,9 +196,9 @@ export function OverviewPage({
             <h3>{backendReady ? `${status?.llm_provider} · ${status?.llm_model}` : "Backend недоступен"}</h3>
             <p>{avatarStatus?.enabled ? (avatarConnected ? `Аватар подключён: ${avatarStatus.client_count}` : "Аватар ожидает подключения") : "Аватар отключён"}</p>
           </div>
-          <button className="card-link" onClick={(e) => { animateButtonPress(e.currentTarget); onOpenSettings(); }}>
+          <MaterialButton materialKey={"overview.button-5"} className="card-link" onClick={(e) => { animateButtonPress(e.currentTarget); onOpenSettings(); }}>
             Диагностика<IconInterfaceCursorArrow2 size={15} />
-          </button>
+          </MaterialButton>
         </article>
       </div>
 

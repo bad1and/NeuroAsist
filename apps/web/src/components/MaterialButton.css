@@ -1,0 +1,155 @@
+/* Accepted lens layers, shared by the sheet and application. */
+.dp-lens { --dp-tone: var(--lens-graphite); --dp-light: var(--lens-light); --dp-edge: var(--lens-edge); --dp-shade: var(--lens-shade); --dp-intensity: 1; --dp-effect-scale: 1; --dp-light-color: var(--dp-tone); --dp-fill-tone: color-mix(in srgb, var(--dp-tone) calc(var(--lens-fill-center-share) * var(--dp-fill-factor, 1)), black); isolation: isolate; perspective: 700px; }
+.dp-lens .dp-depth, .dp-lens .dp-material { position: absolute; inset: 0; border-radius: inherit; corner-shape: inherit; pointer-events: none; }
+.dp-lens .dp-hover-surface { position: absolute; inset: 0; border-radius: inherit; corner-shape: inherit; pointer-events: none; }
+.dp-lens .dp-depth { box-shadow: var(--lens-depth); }
+.dp-lens .dp-material { container-type: size; container-name: lens-material; isolation: isolate; overflow: hidden; background: radial-gradient(ellipse at var(--dp-light-x, 50%) var(--dp-light-y, 42%), var(--dp-fill-tone) 0%, var(--dp-fill-tone) 28%, color-mix(in srgb, var(--dp-tone) var(--dp-edge-share, var(--lens-fill-edge-share)), black) 100%); }
+.dp-lens .dp-inner-top, .dp-lens .dp-inner-bottom, .dp-lens .dp-inner-edge, .dp-lens .dp-bevel, .dp-lens .dp-noise { position: absolute; inset: 0; border-radius: inherit; corner-shape: inherit; pointer-events: none; }
+.dp-lens .dp-inner-top { mix-blend-mode: plus-lighter; opacity: calc(var(--lens-inner-top-alpha) * var(--dp-intensity)); box-shadow: inset 0 calc(var(--lens-inner-top-y) * var(--dp-effect-scale)) calc(var(--lens-inner-top-blur) * var(--dp-effect-scale)) calc(var(--lens-inner-top-spread) * var(--dp-effect-scale)) var(--dp-light-color); }
+.dp-lens .dp-inner-bottom { mix-blend-mode: plus-lighter; opacity: calc(var(--lens-inner-bottom-alpha) * var(--dp-intensity)); box-shadow: inset 0 calc(var(--lens-inner-bottom-y) * var(--dp-effect-scale)) calc(var(--lens-inner-bottom-blur) * var(--dp-effect-scale)) 0 var(--dp-light-color); }
+.dp-lens .dp-inner-edge { opacity: var(--dp-intensity); box-shadow: inset 0 0 calc(var(--lens-inner-edge-blur) * var(--dp-effect-scale)) color-mix(in srgb, var(--dp-tone) 80%, white); }
+.dp-lens .dp-bevel {
+  opacity: var(--dp-intensity);
+  /* Paint the bright lip as a field clipped by the face, avoiding a second
+     inset-shadow curve and its bright fragments at squircle corners. */
+  background: linear-gradient(to bottom, rgb(255 255 255 / var(--lens-bevel-top)), transparent calc(5px * var(--dp-effect-scale))),
+    radial-gradient(ellipse at var(--dp-light-x, 50%) 0%, rgb(255 255 255 / .1), transparent 56%),
+    linear-gradient(180deg, transparent 48%, rgb(0 0 0 / .12));
+  box-shadow: inset 0 calc(-3px * var(--dp-effect-scale)) calc(4px * var(--dp-effect-scale)) rgb(0 0 0 / var(--lens-bevel-bottom)),
+    inset calc(2px * var(--dp-effect-scale)) 0 calc(7px * var(--dp-effect-scale)) rgb(0 0 0 / var(--lens-bevel-side)),
+    inset calc(-2px * var(--dp-effect-scale)) 0 calc(7px * var(--dp-effect-scale)) rgb(0 0 0 / var(--lens-bevel-side));
+}
+/* Smooth subpixel shadow edges without offsetting the face or its contour. */
+.dp-lens .dp-bevel { filter: blur(.35px); }
+.dp-lens .dp-material::after {
+  content: ""; position: absolute; inset: 0; padding: 1px; border-radius: inherit; corner-shape: inherit;
+  background: radial-gradient(ellipse at var(--dp-light-x, 50%) 0%, rgb(255 255 255 / .44), rgb(255 255 255 / .1) 46%, transparent 78%);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  opacity: var(--dp-intensity);
+}
+.dp-lens .dp-bloom { position: absolute; left: var(--dp-bloom-x, 50%); bottom: calc(-32px * var(--dp-effect-scale)); width: min(var(--dp-bloom-width, 38%), 140px); height: calc(48px * var(--dp-effect-scale)); border-radius: 50%; background: color-mix(in srgb, var(--dp-tone) 55%, white); filter: blur(calc(var(--lens-bloom-blur) * .5 * var(--dp-effect-scale))); mix-blend-mode: plus-lighter; opacity: calc(var(--lens-bloom-alpha) * var(--dp-intensity)); transform: translateX(-50%); }
+.dp-lens .dp-noise { background: url("./lens-noise.svg") repeat; background-size: 128px 128px; background-position: var(--dp-noise-position, 0 0); mix-blend-mode: overlay; opacity: calc(var(--lens-noise-alpha) * var(--dp-intensity)); }
+.dp-lens.dp-accent { --dp-tone: var(--lens-accent); color: var(--color-accent-ink); }
+.dp-lens.dp-danger { --dp-tone: var(--color-danger); --lens-fill-center-share: 86%; }
+.dp-lens.dp-warning { --dp-tone: var(--color-warning); }
+.dp-lens.dp-success { --dp-tone: var(--color-success); }
+.dp-lens .dp-hover-light { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; corner-shape: inherit; pointer-events: none; opacity: 0; mix-blend-mode: plus-lighter; }
+.dp-lens .dp-hover-spot { position: absolute; inset: -60%; background: radial-gradient(ellipse var(--dp-hover-width, 28%) 48% at center, rgb(255 255 255 / var(--dp-hover-strength, .1)), transparent 100%); }
+.dp-rim { position: absolute; inset: -1px; border-radius: inherit; corner-shape: inherit; pointer-events: none; opacity: 0; box-shadow: var(--rim-halo); }
+.dp-rim::before { content: ""; position: absolute; inset: 0; padding: var(--rim-width); border-radius: inherit; corner-shape: inherit; background: var(--rim-gradient); mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); mask-composite: exclude; }
+/* Compact materials share the wide button's continuous light field. Multiple
+   inset shadows make a nested square at this scale, so illuminate the face
+   with gradients clipped once by its existing contour instead. */
+@container lens-material (height <= 80px) and (aspect-ratio <= 3/1) {
+  .dp-lens .dp-inner-top {
+    box-shadow: none;
+    background: radial-gradient(ellipse 145% 120% at var(--dp-light-x, 50%) 28%, rgb(255 255 255 / .16), transparent 78%);
+    opacity: var(--dp-intensity);
+    mix-blend-mode: normal;
+  }
+  .dp-lens .dp-inner-bottom {
+    box-shadow: none;
+    background: radial-gradient(ellipse 120% 75% at var(--dp-bloom-x, 50%) 95%, color-mix(in srgb, var(--dp-tone) 75%, white), transparent 82%);
+  }
+  .dp-lens .dp-inner-edge {
+    box-shadow: none;
+    background: radial-gradient(ellipse 125% 115% at 50% 30%, transparent 36%, rgb(0 0 0 / .24) 100%);
+  }
+  .dp-lens .dp-bevel {
+    box-shadow: inset 0 -2px 5px rgb(0 0 0 / .28);
+    background: linear-gradient(to bottom, rgb(255 255 255 / .06), transparent 8px),
+      linear-gradient(180deg, rgb(255 255 255 / .02), transparent 35%, transparent 62%, rgb(0 0 0 / .16));
+  }
+  .dp-lens .dp-material::after { opacity: calc(var(--dp-intensity) * .4); }
+  .dp-lens .dp-bloom {
+    width: min(calc(var(--dp-bloom-width, 38%) * 2), 84%);
+    bottom: -28px;
+    filter: blur(calc(var(--lens-bloom-blur) * .375));
+    opacity: calc(var(--lens-bloom-alpha) * var(--dp-intensity) * .6);
+  }
+}
+
+
+/* Layout stays with each existing control; the shared layers own its finish. */
+button.iris-button[data-material]:not([data-material="plain"]) {
+  background: transparent !important;
+  box-shadow: none !important;
+  border-color: transparent !important;
+  filter: none !important;
+  overflow: visible !important;
+  clip-path: none !important;
+  transition: none !important;
+  animation: none !important;
+  transform: none !important;
+  color: var(--color-text) !important;
+  isolation: isolate;
+}
+button.iris-button[data-material]:not([data-material="plain"])::before,
+button.iris-button[data-material]:not([data-material="plain"])::after { content: none !important; }
+button.iris-button.dp-accent { color: var(--color-accent-ink) !important; }
+button.iris-button[data-material]:not([data-material="plain"]):focus-visible { outline: none !important; }
+/* The material rim is also the keyboard focus indicator. */
+button.iris-button[data-material]:not([data-material="plain"]):focus-visible > .dp-rim { opacity: 1 !important; }
+/* Bare actions and joined hit targets have no individual material layers. */
+button.iris-button[data-material="plain"]:focus-visible { position: relative; outline: none !important; }
+button.iris-button:is([data-material="plain"], [data-material="joined"]):focus-visible::after {
+  content: "" !important; position: absolute; inset: -1px; padding: var(--rim-width);
+  border-radius: inherit; corner-shape: inherit; background: var(--rim-gradient);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude; pointer-events: none; box-shadow: var(--rim-halo);
+}
+button.iris-button[data-material]:not([data-material="plain"]):disabled { opacity: .42 !important; cursor: not-allowed; }
+.iris-button > .dp-hover-surface { z-index: -1; }
+.iris-button .dp-hover-surface, .iris-button .dp-depth, .iris-button .dp-material,
+.iris-button .dp-inner-top, .iris-button .dp-inner-bottom, .iris-button .dp-inner-edge,
+.iris-button .dp-bevel, .iris-button .dp-bloom, .iris-button .dp-noise,
+.iris-button .dp-hover-light, .iris-button .dp-hover-spot, .iris-button > .dp-rim { display: block !important; }
+.iris-button[data-material="quiet"] > .dp-hover-surface { opacity: 0; }
+.iris-button[data-material-compact="true"] { --dp-effect-scale: .65; }
+.iris-button[data-material-square="true"] .dp-material,
+.iris-button[data-material-square="true"] .dp-hover-light { clip-path: url(#apple-squircle-square); }
+.iris-button[data-material-square="true"] .dp-depth { box-shadow: none; filter: drop-shadow(0 2px 1px rgb(0 0 0 / .3)) drop-shadow(0 6px 8px rgb(0 0 0 / .3)); }
+.iris-button[data-material-square="true"] .dp-depth::before { content: ""; position: absolute; inset: 0; background: var(--dp-tone); clip-path: url(#apple-squircle-square); }
+.iris-button-group { position: relative; border-radius: 33px; corner-shape: var(--corner-shape); --dp-effect-scale: .65; }
+.dock-dual-pill:has(.iris-button) { filter: none; }
+.dock-dual-pill > button.iris-button { border-radius: 33px; corner-shape: var(--corner-shape); }
+/* Muted overlays share the group's seed, texture position and moving surface. */
+.iris-button-group .dp-joined-half { position: absolute; top: 0; bottom: 0; width: 50%; pointer-events: none; }
+.iris-button-group .dp-joined-half { border-radius: 33px; corner-shape: inherit; }
+.iris-button-group .dp-joined-half[data-side="0"] { left: 0; }
+.iris-button-group .dp-joined-half[data-side="1"] { right: 0; }
+.iris-button-group .dp-joined-half .dp-material { clip-path: url(#apple-squircle-square); }
+.iris-button-group .dp-joined-half .dp-material::after { content: none; }
+.dock-dual-pill button.iris-button.is-muted { color: var(--color-text) !important; }
+.dock-finish-btn.iris-button { border-radius: 40.5px; corner-shape: var(--corner-shape); }
+.dock-new-dialog-btn.iris-button { border-radius: 33px; corner-shape: var(--corner-shape); }
+button.iris-button.is-muted { color: var(--color-danger) !important; }
+button.iris-button.is-loading { color: var(--color-accent-visual) !important; }
+button.iris-button.is-loading:disabled { opacity: 1 !important; }
+/* Navigation labels retain the existing collapse/expand layout. */
+.iris-button > .dp-hover-surface { width: auto !important; height: auto !important; flex: none !important; }
+.iris-button .btn-content > span { width: auto; flex: none; }
+.iris-button .btn-content > svg { flex: none; }
+.dp-lens .dp-hover-spot { width: auto; height: auto; }
+
+/* Decorative spans must not inherit screen-specific label spacing or hiding. */
+.iris-button .dp-hover-surface, .iris-button .dp-depth, .iris-button .dp-material,
+.iris-button .dp-inner-top, .iris-button .dp-inner-bottom, .iris-button .dp-inner-edge,
+.iris-button .dp-bevel, .iris-button .dp-bloom, .iris-button .dp-noise,
+.iris-button .dp-hover-light, .iris-button .dp-hover-spot, .iris-button > .dp-rim {
+  margin: 0 !important; padding: 0 !important; min-width: 0 !important; min-height: 0 !important;
+  max-width: none !important; max-height: none !important; border: 0 !important;
+  clip: auto !important; text-indent: 0 !important;
+}
+.iris-button > .dp-hover-surface { clip-path: none !important; opacity: 1; }
+.iris-button[data-material="quiet"] > .dp-hover-surface { opacity: 0; }
+.iris-button .dp-depth, .iris-button .dp-material { opacity: 1; }
+.iris-button[data-material-contour] > .dp-hover-surface > .dp-material,
+.iris-button[data-material-contour] > .dp-hover-surface > .dp-hover-light { clip-path: var(--button-contour); }
+.iris-button[data-material-contour] > .dp-hover-surface > .dp-depth { box-shadow: none; filter: drop-shadow(0 2px 1px rgb(0 0 0 / .3)) drop-shadow(0 6px 8px rgb(0 0 0 / .3)); }
+.iris-button[data-material-contour] > .dp-hover-surface > .dp-depth::before { content: ""; position: absolute; inset: 0; background: var(--dp-tone); clip-path: var(--button-contour); }
+
+@media (forced-colors: active) {
+  .dp-lens:focus-visible { outline: 2px solid Highlight !important; outline-offset: 2px; }
+}

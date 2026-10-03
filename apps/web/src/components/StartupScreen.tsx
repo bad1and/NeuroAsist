@@ -1,3 +1,4 @@
+import { MaterialButton } from "./MaterialButton";
 import { useEffect, useRef, useState } from "react";
 import { IconInterfaceSpirals } from "../CustomIcons";
 
@@ -117,10 +118,10 @@ export function StartupScreen({
           <p>{displayDetail}</p>
         </div>
         {failed && (
-          <button className="primary-button" type="button" onClick={onRetry} disabled={retrying}>
+          <MaterialButton materialKey={"StartupScreen.button-1"} className="primary-button" type="button" onClick={onRetry} disabled={retrying}>
             <IconInterfaceSpirals size={17} className={retrying ? "is-spinning" : ""} aria-hidden="true" />
             {retrying ? "Перезапускаю…" : "Попробовать снова"}
-          </button>
+          </MaterialButton>
         )}
       </main>
     </div>

@@ -151,6 +151,7 @@ export function animateModalEnter(dialog: HTMLElement): Animation | null {
  * Tactile button click spring micro-interaction
  */
 export function animateButtonPress(element: HTMLElement): Animation | null {
+  if (element?.classList.contains("dp-lens")) return null;
   if (typeof window === "undefined" || !element || prefersReducedMotion() || isTestEnvironment()) return null;
 
   return animate(element, {
@@ -167,6 +168,7 @@ export function animateButtonPress(element: HTMLElement): Animation | null {
  * Active tab / filter pill switch bounce
  */
 export function animateTabSwitch(element: HTMLElement): Animation | null {
+  if (element?.classList.contains("dp-lens")) return null;
   if (typeof window === "undefined" || !element || prefersReducedMotion() || isTestEnvironment()) return null;
 
   return animate(element, {

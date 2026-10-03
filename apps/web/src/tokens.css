@@ -81,6 +81,16 @@
   --surface-notification: radial-gradient(145% 115% at 28% 12%, rgba(255, 255, 255, 0.045), transparent 65%), linear-gradient(172deg, rgba(255, 255, 255, 0.012), rgba(0, 0, 0, 0.045)), var(--color-surface-raised);
   --depth-notification: inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 -1px 0 rgba(0, 0, 0, 0.18), 0 2px 4px rgba(0, 0, 0, 0.25), 0 10px 24px -2px rgba(0, 0, 0, 0.35), 0 24px 48px -6px rgba(0, 0, 0, 0.45);
   --depth-notification-hover: inset 0 1px 0 rgba(255, 255, 255, 0.13), inset 0 -1px 0 rgba(0, 0, 0, 0.18), 0 4px 8px rgba(0, 0, 0, 0.28), 0 12px 24px -3px rgba(0, 0, 0, 0.38), 0 28px 52px -8px rgba(0, 0, 0, 0.48);
+  --surface-toast: linear-gradient(180deg, rgba(255, 255, 255, .035), transparent 28%, rgba(0, 0, 0, .04)), var(--surface-notification);
+  --depth-toast: 0 1px 2px rgba(0, 0, 0, .24), 0 8px 18px -4px rgba(0, 0, 0, .28), 0 18px 32px -10px rgba(0, 0, 0, .24);
+
+  /* Original near-black field; the menu uses the same dark base with soft depth. */
+  --surface-select-field: linear-gradient(var(--color-base-deep), var(--color-base-deep));
+  --depth-select-field: inset 0 5px 8px rgb(0 0 0 / .8), inset 0 1px 2px rgb(0 0 0 / .7), inset 3px 0 7px rgb(0 0 0 / .3), inset -3px 0 7px rgb(0 0 0 / .3);
+  --surface-select-menu: radial-gradient(ellipse at 50% 100%, rgb(255 255 255 / .02), transparent 75%), linear-gradient(180deg, color-mix(in srgb, var(--color-base-deep) 82%, var(--color-graphite-upper)), var(--color-base-deep));
+  --depth-select-menu: inset 0 5px 10px rgb(0 0 0 / .55), inset 3px 0 8px rgb(0 0 0 / .22), inset -3px 0 8px rgb(0 0 0 / .22), 0 4px 8px -2px rgb(0 0 0 / .32), 0 16px 28px -8px rgb(0 0 0 / .5);
+  --surface-select-selected: linear-gradient(var(--color-accent), var(--color-accent));
+  --depth-select-selected: inset 0 2px 4px rgb(0 0 0 / .35), inset 0 1px 1px rgb(0 0 0 / .28), 0 1px 0 rgb(255 255 255 / .055);
 
   --font-ui: "Proxima Nova", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-subtitles: "Shantell Sans", cursive, sans-serif;
@@ -109,4 +119,43 @@
   --motion-fast: 180ms;
   --motion-standard: 220ms;
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* Approved button lens shared by the app and design-pack; field rim remains a preview. */
+  --lens-graphite: #303138;
+  --lens-tone-share: 94%;
+  --lens-light: 0.22;
+  --lens-edge: 0.12;
+  --lens-shade: 0.4;
+  /* marina_uiux C8Cl-Y4ofuL: effect geometry retained, light adapted to Iris. */
+  --lens-accent: var(--color-accent-hover);
+  --lens-fill-center-share: 96%;
+  --lens-fill-edge-share: 68%;
+  --lens-inner-top-y: 8px;
+  --lens-inner-top-blur: 24px;
+  --lens-inner-top-spread: -16px;
+  --lens-inner-top-alpha: .18;
+  --lens-inner-bottom-y: -24px;
+  --lens-inner-bottom-blur: 32px;
+  --lens-inner-bottom-alpha: .12;
+  --lens-inner-edge-blur: 12px;
+  --lens-bloom-blur: 48px;
+  --lens-bloom-alpha: .24;
+  --lens-noise-alpha: .16;
+  --lens-bevel-top: .22;
+  --lens-bevel-bottom: .38;
+  --lens-bevel-side: .18;
+  --lens-depth: 0 3px 0 -1px rgb(0 0 0 / .35), 0 8px 12px -3px rgb(0 0 0 / .38), 0 18px 26px -7px rgb(0 0 0 / .25);
+  --rim-width: 3px;
+  --rim-light-start: #ddc8fa;
+  --rim-light-mid: #ad89de;
+  --rim-tone: #695b86;
+  --rim-light-lower: #9875c9;
+  --rim-light-end: #decafa;
+  --rim-glow: rgb(157 116 214);
+  --rim-glow-soft: rgb(133 96 188);
+  --rim-gradient: linear-gradient(145deg, var(--rim-light-start) 0%, var(--rim-light-mid) 21%, var(--rim-tone) 45%, var(--rim-light-lower) 72%, var(--rim-light-end) 100%);
+  --rim-halo: 0 0 7px color-mix(in srgb, var(--rim-glow) 52%, transparent), 0 0 8px color-mix(in srgb, var(--rim-glow-soft) 22%, transparent), inset 0 0 6px rgba(177, 141, 228, 0.22);
+  --notification-rim-width: 1.5px;
+  --notification-task-height: 8px;
+  --notification-rim-gradient: linear-gradient(90deg, var(--rim-light-start) 0%, var(--rim-light-mid) 21%, var(--rim-tone) 45%, var(--rim-light-lower) 72%, var(--rim-light-end) 100%);
 }

@@ -1,3 +1,4 @@
+import { MaterialButton } from "./MaterialButton";
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Zap, Copy, Check, X, ChevronDown, ChevronRight, Terminal } from "lucide-react";
@@ -110,7 +111,7 @@ export function TokenDialogContent({ tokens, role, onClose }: TokenDialogContent
 
       {/* Raw JSON toggle */}
       <div className="token-raw-section">
-        <button
+        <MaterialButton materialKey={"TokenBadge.button-1"}
           type="button"
           className="token-raw-toggle-btn"
           onClick={() => setShowRawJson((prev) => !prev)}
@@ -120,12 +121,12 @@ export function TokenDialogContent({ tokens, role, onClose }: TokenDialogContent
             <span>Сырой JSON ответа</span>
           </div>
           {showRawJson ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        </button>
+        </MaterialButton>
 
         {showRawJson && (
           <div className="token-raw-content">
             <div className="token-raw-actions">
-              <button
+              <MaterialButton materialKey={"TokenBadge.button-2"}
                 type="button"
                 className="token-copy-btn secondary"
                 onClick={handleCopyJson}
@@ -133,7 +134,7 @@ export function TokenDialogContent({ tokens, role, onClose }: TokenDialogContent
               >
                 {copied ? <Check size={12} /> : <Copy size={12} />}
                 <span>{copied ? "Скопировано!" : "Копировать"}</span>
-              </button>
+              </MaterialButton>
             </div>
             <pre className="token-json-viewer">
               <code>
@@ -145,13 +146,13 @@ export function TokenDialogContent({ tokens, role, onClose }: TokenDialogContent
       </div>
 
       <div className="dialog-actions" style={{ marginTop: "14px", display: "flex", justifyContent: "flex-end" }}>
-        <button
+        <MaterialButton materialKey={"TokenBadge.button-3"}
           type="button"
           className="secondary"
           onClick={onClose}
         >
           Понятно
-        </button>
+        </MaterialButton>
       </div>
     </div>
   );
@@ -222,7 +223,7 @@ export function TokenBadge({ tokens, role, onOpen }: TokenBadgeProps) {
 
   return (
     <div className="token-badge-container">
-      <button
+      <MaterialButton materialKey={"TokenBadge.button-4"}
         ref={buttonRef}
         type="button"
         className={`token-badge ${isUser ? "user-badge" : "assistant-badge"} ${internalOpen ? "active" : ""}`}
@@ -233,7 +234,7 @@ export function TokenBadge({ tokens, role, onOpen }: TokenBadgeProps) {
       >
         <Zap size={11} className="token-badge-icon" />
         <span className="token-badge-text">{badgeText}</span>
-      </button>
+      </MaterialButton>
 
       {internalOpen &&
         createPortal(
@@ -266,7 +267,7 @@ export function TokenBadge({ tokens, role, onOpen }: TokenBadgeProps) {
                   </p>
                 </div>
                 <div className="notification-side-actions">
-                  <button
+                  <MaterialButton materialKey={"TokenBadge.button-5"}
                     type="button"
                     className="notification-control-btn notification-close-btn"
                     onClick={() => setInternalOpen(false)}
@@ -274,7 +275,7 @@ export function TokenBadge({ tokens, role, onOpen }: TokenBadgeProps) {
                     title="Закрыть диалог"
                   >
                     <X size={18} aria-hidden="true" />
-                  </button>
+                  </MaterialButton>
                 </div>
               </div>
 

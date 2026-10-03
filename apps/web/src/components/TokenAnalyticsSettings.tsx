@@ -1,3 +1,4 @@
+import { MaterialButton } from "./MaterialButton";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Zap,
@@ -194,18 +195,18 @@ export function TokenAnalyticsSettings() {
                 { key: "all", label: "Всё время" },
               ] as const
             ).map((tf) => (
-              <button
+              <MaterialButton materialKey={["TokenAnalyticsSettings.button-1", tf.key].join(":")}
                 key={tf.key}
                 type="button"
                 className={`token-timeframe-btn ${timeframe === tf.key ? "active" : ""}`}
                 onClick={() => setTimeframe(tf.key)}
               >
                 {tf.label}
-              </button>
+              </MaterialButton>
             ))}
           </div>
 
-          <button
+          <MaterialButton materialKey={"TokenAnalyticsSettings.button-2"}
             type="button"
             className="secondary icon-btn-text"
             onClick={() => {
@@ -217,9 +218,9 @@ export function TokenAnalyticsSettings() {
           >
             <RefreshCw size={15} className={loading ? "spin" : ""} />
             <span>Обновить</span>
-          </button>
+          </MaterialButton>
 
-          <button
+          <MaterialButton materialKey={"TokenAnalyticsSettings.button-3"}
             type="button"
             className="secondary icon-btn-text token-reset-btn"
             onClick={() => setShowResetDialog(true)}
@@ -227,7 +228,7 @@ export function TokenAnalyticsSettings() {
           >
             <Trash2 size={15} />
             <span>Сброс</span>
-          </button>
+          </MaterialButton>
         </div>
       </div>
 
@@ -429,7 +430,7 @@ export function TokenAnalyticsSettings() {
         {/* High-level Category Tabs */}
         <div className="records-category-tabs" role="tablist" aria-label="Категории вызовов LLM">
           {CATEGORY_TABS.map((cat) => (
-            <button
+            <MaterialButton materialKey={["TokenAnalyticsSettings.button-4", cat.id].join(":")}
               key={cat.id}
               type="button"
               role="tab"
@@ -442,7 +443,7 @@ export function TokenAnalyticsSettings() {
               }}
             >
               {cat.label}
-            </button>
+            </MaterialButton>
           ))}
         </div>
 
@@ -498,7 +499,7 @@ export function TokenAnalyticsSettings() {
                       </span>
                     </td>
                     <td>
-                      <button
+                      <MaterialButton materialKey={["TokenAnalyticsSettings.button-5", `${r.request_id}-${i}`].join(":")}
                         type="button"
                         className="inspect-btn"
                         onClick={() => setInspectRecord(r)}
@@ -506,7 +507,7 @@ export function TokenAnalyticsSettings() {
                         aria-label="Просмотреть сырой JSON"
                       >
                         <Terminal size={13} />
-                      </button>
+                      </MaterialButton>
                     </td>
                   </tr>
                 ))
@@ -528,7 +529,7 @@ export function TokenAnalyticsSettings() {
               Страница {page + 1} из {totalPages}
             </span>
             <div className="pagination-buttons">
-              <button
+              <MaterialButton materialKey={"TokenAnalyticsSettings.button-6"}
                 type="button"
                 className="secondary pagination-btn"
                 disabled={page === 0 || recordsLoading}
@@ -536,8 +537,8 @@ export function TokenAnalyticsSettings() {
               >
                 <ChevronLeft size={15} />
                 <span>Назад</span>
-              </button>
-              <button
+              </MaterialButton>
+              <MaterialButton materialKey={"TokenAnalyticsSettings.button-7"}
                 type="button"
                 className="secondary pagination-btn"
                 disabled={page >= totalPages - 1 || recordsLoading}
@@ -545,7 +546,7 @@ export function TokenAnalyticsSettings() {
               >
                 <span>Вперед</span>
                 <ChevronRight size={15} />
-              </button>
+              </MaterialButton>
             </div>
           </div>
         )}
@@ -584,14 +585,14 @@ export function TokenAnalyticsSettings() {
               <div className="inspect-json-box">
                 <div className="inspect-json-header">
                   <span>Сырой объект записи</span>
-                  <button
+                  <MaterialButton materialKey={"TokenAnalyticsSettings.button-8"}
                     type="button"
                     className="token-copy-btn"
                     onClick={handleCopyInspectJson}
                   >
                     {copiedInspect ? <Check size={13} /> : <Copy size={13} />}
                     <span>{copiedInspect ? "Скопировано!" : "Копировать JSON"}</span>
-                  </button>
+                  </MaterialButton>
                 </div>
                 <pre className="inspect-pre">
                   <code>{JSON.stringify(inspectRecord, null, 2)}</code>
@@ -600,13 +601,13 @@ export function TokenAnalyticsSettings() {
             </>
           )}
           <div className="dialog-actions" style={{ marginTop: 16 }}>
-            <button
+            <MaterialButton materialKey={"TokenAnalyticsSettings.button-9"}
               type="button"
               className="secondary"
               onClick={() => setInspectRecord(null)}
             >
               Закрыть
-            </button>
+            </MaterialButton>
           </div>
         </div>
       </AppDialog>
@@ -620,22 +621,22 @@ export function TokenAnalyticsSettings() {
         variant="danger"
       >
         <div className="dialog-actions">
-          <button
+          <MaterialButton materialKey={"TokenAnalyticsSettings.button-10"}
             type="button"
             className="secondary"
             disabled={resetting}
             onClick={() => setShowResetDialog(false)}
           >
             Отмена
-          </button>
-          <button
+          </MaterialButton>
+          <MaterialButton materialKey={"TokenAnalyticsSettings.button-11"}
             type="button"
             className="danger-button"
             disabled={resetting}
             onClick={() => void handleReset()}
           >
             {resetting ? "Удаление…" : "Сбросить все данные токенов"}
-          </button>
+          </MaterialButton>
         </div>
       </AppDialog>
     </div>

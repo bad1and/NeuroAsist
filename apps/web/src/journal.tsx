@@ -1,3 +1,4 @@
+import { MaterialButton } from "./components/MaterialButton";
 import {
   IconInterfaceTimeStopWatchCircle,
   IconInterfaceSpirals,
@@ -402,7 +403,7 @@ function JournalMessageDetails({
 
       {/* 4. Raw JSON Inspection Button */}
       <div className="details-footer-actions">
-        <button
+        <MaterialButton materialKey={"journal.button-1"}
           type="button"
           className="details-json-btn"
           onClick={() =>
@@ -415,7 +416,7 @@ function JournalMessageDetails({
         >
           <Terminal size={12} />
           <span>Сырой JSON хода</span>
-        </button>
+        </MaterialButton>
       </div>
     </div>
   );
@@ -662,7 +663,8 @@ export function JournalPage({
                 aria-label="Поиск по истории"
               />
               {query && !results && (
-                <button
+                <MaterialButton materialKey={"journal.button-2"}
+                  appearance="quiet"
                   className="search-clear-btn"
                   type="button"
                   onClick={() => setQuery("")}
@@ -670,26 +672,28 @@ export function JournalPage({
                   title="Очистить"
                 >
                   <X size={12} aria-hidden="true" />
-                </button>
+                </MaterialButton>
               )}
               {results && (
-                <button
+                <MaterialButton materialKey={"journal.button-3"}
+                  appearance="quiet"
                   className="secondary reset-search-button"
                   type="button"
                   onClick={handleResetSearch}
                 >
                   Сбросить
-                </button>
+                </MaterialButton>
               )}
 
-              <button
+              <MaterialButton materialKey={"journal.button-4"}
+                appearance="quiet"
                 className="icon-button search-submit"
                 type="submit"
                 aria-label="Найти в истории"
                 title="Найти в истории"
               >
                 <IconInterfaceSearch size={16} />
-              </button>
+              </MaterialButton>
             </form>
           </div>
 
@@ -814,7 +818,7 @@ export function JournalPage({
             <>
               <header className="journal-content-header">
                 <div className="journal-header-left">
-                  <button
+                  <MaterialButton materialKey={"journal.button-5"}
                     className="journal-back-button secondary"
                     type="button"
                     onClick={onBack}
@@ -823,7 +827,7 @@ export function JournalPage({
                   >
                     <ChevronLeft size={16} aria-hidden="true" />
                     <span>Назад</span>
-                  </button>
+                  </MaterialButton>
                   <div className="journal-header-title-group">
                     <h2>{selectedEpisode.title || formatDate(selectedEpisode.day)}</h2>
                     <div className="journal-header-meta">
@@ -837,7 +841,7 @@ export function JournalPage({
                         <span>· {formatShortDate(selectedEpisode.started_at)}</span>
                       ) : null}
                       {Boolean(selectedEpisode.token_estimate && selectedEpisode.token_estimate > 0) && (
-                        <button
+                        <MaterialButton materialKey={"journal.button-6"}
                           type="button"
                           className="journal-header-tokens"
                           title="Нажмите для просмотра статистики токенов диалога"
@@ -863,7 +867,7 @@ export function JournalPage({
                         >
                           · <Zap size={11} style={{ display: "inline-block", verticalAlign: "middle", marginRight: 2 }} />
                           {selectedEpisode.token_estimate?.toLocaleString()}
-                        </button>
+                        </MaterialButton>
                       )}
                     </div>
                   </div>
@@ -871,7 +875,7 @@ export function JournalPage({
 
                 <div className="journal-header-actions">
                   <div className="journal-view-toggle" role="group" aria-label="Режим детализации">
-                    <button
+                    <MaterialButton materialKey={"journal.button-7"}
                       type="button"
                       className={`journal-view-toggle-btn ${detailMode === "simple" ? "active" : ""}`}
                       onClick={() => handleToggleDetailMode("simple")}
@@ -880,8 +884,8 @@ export function JournalPage({
                     >
                       <Eye size={13} />
                       <span>Простой</span>
-                    </button>
-                    <button
+                    </MaterialButton>
+                    <MaterialButton materialKey={"journal.button-8"}
                       type="button"
                       className={`journal-view-toggle-btn ${detailMode === "detailed" ? "active" : ""}`}
                       onClick={() => handleToggleDetailMode("detailed")}
@@ -890,10 +894,10 @@ export function JournalPage({
                     >
                       <Sliders size={13} />
                       <span>Подробный</span>
-                    </button>
+                    </MaterialButton>
                   </div>
 
-                  <button
+                  <MaterialButton materialKey={"journal.button-9"}
                     className="secondary journal-delete-action"
                     type="button"
                     title="Удалить историю до этой даты"
@@ -905,7 +909,7 @@ export function JournalPage({
                   >
                     <IconInterfaceDeleteBin3 size={15} />
                     <span>Удалить</span>
-                  </button>
+                  </MaterialButton>
                 </div>
               </header>
 
@@ -924,14 +928,14 @@ export function JournalPage({
                 ) : messages.length ? (
                   <div className="journal-message-list">
                     {hasMoreMessages && (
-                      <button
+                      <MaterialButton materialKey={"journal.button-10"}
                         className="journal-load-more-btn"
                         type="button"
                         disabled={loadingMoreMessages}
                         onClick={() => void onLoadMoreMessages()}
                       >
                         {loadingMoreMessages ? "Загрузка…" : "Загрузить более ранние сообщения"}
-                      </button>
+                      </MaterialButton>
                     )}
                     {messages.map((message, idx) => {
                       const isUser = message.role === "user";
@@ -1032,7 +1036,7 @@ export function JournalPage({
                                 />
                               )}
                               {detailMode === "simple" && hasDetails && (
-                                <button
+                                <MaterialButton materialKey={["journal.button-11", message.id].join(":")}
                                   type="button"
                                   className="journal-message-details-toggle"
                                   aria-expanded={isExpanded}
@@ -1050,7 +1054,7 @@ export function JournalPage({
                                 >
                                   {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                                   <span>{isExpanded ? "Свернуть" : "Подробнее"}</span>
-                                </button>
+                                </MaterialButton>
                               )}
                             </div>
                             {isExpanded && (
@@ -1105,15 +1109,15 @@ export function JournalPage({
         variant="danger"
       >
         <div className="dialog-actions">
-          <button
+          <MaterialButton materialKey={"journal.button-12"}
             className="secondary"
             type="button"
             onClick={() => setPendingDelete(null)}
             disabled={deleting}
           >
             Отмена
-          </button>
-          <button
+          </MaterialButton>
+          <MaterialButton materialKey={"journal.button-13"}
             className="danger-button"
             type="button"
             disabled={deleting}
@@ -1141,7 +1145,7 @@ export function JournalPage({
             }}
           >
             {deleting ? "Удаляю…" : "Удалить историю"}
-          </button>
+          </MaterialButton>
         </div>
       </AppDialog>
 
@@ -1158,7 +1162,7 @@ export function JournalPage({
         <div className="journal-inspect-dialog-content">
           <div className="journal-inspect-actions">
             <span className="inspect-subtitle">Сырой JSON токенов, эмоций и памяти:</span>
-            <button
+            <MaterialButton materialKey={"journal.button-14"}
               type="button"
               className="secondary btn-copy-json"
               onClick={async () => {
@@ -1176,7 +1180,7 @@ export function JournalPage({
             >
               {inspectCopied ? <Check size={13} className="text-emerald" /> : <Copy size={13} />}
               <span>{inspectCopied ? "Скопировано!" : "Копировать JSON"}</span>
-            </button>
+            </MaterialButton>
           </div>
           <pre className="journal-raw-json-block">
             <code>{inspectModalData ? JSON.stringify(inspectModalData.json, null, 2) : ""}</code>

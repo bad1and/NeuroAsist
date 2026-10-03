@@ -1,3 +1,4 @@
+import { MaterialButton } from "./components/MaterialButton";
 import {
   IconCitiesPoliticsVote,
   IconComputerDatabase,
@@ -316,7 +317,7 @@ export function MemoryPage() {
     <section className="memory-panel" ref={containerRef}>
       <nav className="settings-navigation memory-navigation" aria-label="Разделы памяти">
         {MEMORY_SECTIONS.map(({ id, label, icon: Icon }) => (
-          <button
+          <MaterialButton materialKey={["memory.button-1", id].join(":")}
             key={id}
             type="button"
             className={`settings-nav-direct${section === id ? " is-active" : ""}`}
@@ -328,7 +329,7 @@ export function MemoryPage() {
           >
             <Icon size={20} aria-hidden="true" />
             <span>{label}</span>
-          </button>
+          </MaterialButton>
         ))}
       </nav>
 
@@ -349,7 +350,8 @@ export function MemoryPage() {
                 aria-label="Поиск по памяти"
               />
               {query && (
-                <button
+                <MaterialButton materialKey={"memory.button-2"}
+                  appearance="quiet"
                   type="button"
                   className="search-clear-btn"
                   onClick={() => {
@@ -359,9 +361,10 @@ export function MemoryPage() {
                   aria-label="Очистить"
                 >
                   <X size={12} aria-hidden="true" />
-                </button>
+                </MaterialButton>
               )}
-              <button
+              <MaterialButton materialKey={"memory.button-3"}
+                appearance="quiet"
                 className="icon-button"
                 type="button"
                 onClick={(e) => {
@@ -372,15 +375,16 @@ export function MemoryPage() {
                 title="Обновить память"
               >
                 <IconInterfaceSpirals size={17} />
-              </button>
-              <button
+              </MaterialButton>
+              <MaterialButton materialKey={"memory.button-4"}
+                appearance="quiet"
                 className="icon-button search-submit"
                 type="submit"
                 aria-label="Найти в памяти"
                 title="Найти в памяти"
               >
                 <IconInterfaceSearch size={17} />
-              </button>
+              </MaterialButton>
             </form>
           </div>
           <CustomSelect
@@ -479,14 +483,14 @@ export function MemoryPage() {
                     </div>
                     {commitment.status === "open" && (
                       <div className="memory-actions">
-                        <button
+                        <MaterialButton materialKey={["memory.button-5", commitment.id].join(":")}
                           className="secondary memory-close-btn"
                           type="button"
                           onClick={() => void action(() => closeMemoryCommitment(commitment.id), "Обязательство закрыто.")}
                           title="Отметить выполненным"
                         >
                           Завершить
-                        </button>
+                        </MaterialButton>
                       </div>
                     )}
                   </article>
@@ -745,7 +749,7 @@ export function MemoryPage() {
                             <MoreHorizontal size={18} aria-hidden="true" />
                           </summary>
                           <div>
-                            <button
+                            <MaterialButton materialKey={["memory.button-6", memory.id].join(":")}
                               type="button"
                               onClick={async () => {
                                 const nextAudit = await getMemoryAudit(memory.id);
@@ -754,8 +758,8 @@ export function MemoryPage() {
                             >
                               <IconInterfaceAlertAlarmBell2 size={16} aria-hidden="true" />
                               История записи
-                            </button>
-                            <button
+                            </MaterialButton>
+                            <MaterialButton materialKey={["memory.button-7", memory.id].join(":")}
                               type="button"
                               onClick={(event) => {
                                 event.currentTarget.closest("details")?.removeAttribute("open");
@@ -765,8 +769,8 @@ export function MemoryPage() {
                             >
                               <IconInterfaceTextFormattingTextStyle size={16} aria-hidden="true" />
                               Изменить
-                            </button>
-                            <button
+                            </MaterialButton>
+                            <MaterialButton materialKey={["memory.button-8", memory.id].join(":")}
                               type="button"
                               onClick={(event) => {
                                 event.currentTarget.closest("details")?.removeAttribute("open");
@@ -778,9 +782,9 @@ export function MemoryPage() {
                             >
                               <IconInterfaceBookmark size={16} aria-hidden="true" />
                               {memory.user_locked ? "Открепить" : "Закрепить"}
-                            </button>
+                            </MaterialButton>
                             {memory.status === "active" ? (
-                              <button
+                              <MaterialButton materialKey={["memory.button-9", memory.id].join(":")}
                                 type="button"
                                 onClick={(event) => {
                                   event.currentTarget.closest("details")?.removeAttribute("open");
@@ -789,9 +793,9 @@ export function MemoryPage() {
                               >
                                 <IconInterfaceContentArchive size={16} aria-hidden="true" />
                                 Архивировать
-                              </button>
+                              </MaterialButton>
                             ) : (
-                              <button
+                              <MaterialButton materialKey={["memory.button-10", memory.id].join(":")}
                                 type="button"
                                 onClick={(event) => {
                                   event.currentTarget.closest("details")?.removeAttribute("open");
@@ -800,9 +804,9 @@ export function MemoryPage() {
                               >
                                 <IconInterfaceSpirals size={16} aria-hidden="true" />
                                 Восстановить
-                              </button>
+                              </MaterialButton>
                             )}
-                            <button
+                            <MaterialButton materialKey={["memory.button-11", memory.id].join(":")}
                               className="is-danger"
                               type="button"
                               onClick={(e) => {
@@ -812,7 +816,7 @@ export function MemoryPage() {
                             >
                               <IconInterfaceDeleteBin3 size={16} aria-hidden="true" />
                               Забыть навсегда
-                            </button>
+                            </MaterialButton>
                           </div>
                         </details>
                       </div>
@@ -846,10 +850,10 @@ export function MemoryPage() {
         variant="danger"
       >
         <div className="dialog-actions">
-          <button className="secondary" type="button" onClick={() => setPendingDeleteMemory(null)}>
+          <MaterialButton materialKey={"memory.button-12"} className="secondary" type="button" onClick={() => setPendingDeleteMemory(null)}>
             Отмена
-          </button>
-          <button
+          </MaterialButton>
+          <MaterialButton materialKey={"memory.button-13"}
             className="danger-button"
             type="button"
             onClick={() => {
@@ -860,7 +864,7 @@ export function MemoryPage() {
             }}
           >
             Забыть навсегда
-          </button>
+          </MaterialButton>
         </div>
       </AppDialog>
 
@@ -882,10 +886,10 @@ export function MemoryPage() {
           />
         </label>
         <div className="dialog-actions">
-          <button className="secondary" type="button" onClick={() => setPendingEditMemory(null)}>
+          <MaterialButton materialKey={"memory.button-14"} className="secondary" type="button" onClick={() => setPendingEditMemory(null)}>
             Отмена
-          </button>
-          <button
+          </MaterialButton>
+          <MaterialButton materialKey={"memory.button-15"}
             type="button"
             disabled={!editedValue.trim()}
             onClick={() => {
@@ -900,7 +904,7 @@ export function MemoryPage() {
             }}
           >
             Сохранить
-          </button>
+          </MaterialButton>
         </div>
       </AppDialog>
     </section>

@@ -1,3 +1,4 @@
+import { MaterialButton } from "./MaterialButton";
 import React, { useState, useEffect, useCallback } from "react";
 import {
   Sparkles,
@@ -284,7 +285,7 @@ export function NotificationDevPane({ onNotifyFeedback }: NotificationDevPanePro
           <h4 className="avatar-dev-section-title" style={{ margin: 0 }}>
             Основные типы уведомлений
           </h4>
-          <button
+          <MaterialButton materialKey={"AvatarDevPanel.button-1"}
             type="button"
             className="avatar-dev-btn-action"
             onClick={() => {
@@ -295,7 +296,7 @@ export function NotificationDevPane({ onNotifyFeedback }: NotificationDevPanePro
           >
             <X size={12} />
             <span>Очистить все</span>
-          </button>
+          </MaterialButton>
         </div>
 
         <div
@@ -312,7 +313,7 @@ export function NotificationDevPane({ onNotifyFeedback }: NotificationDevPanePro
                 <Info size={14} style={{ color: "var(--color-focus, #38bdf8)" }} />
                 Инфо (Info)
               </span>
-              <button
+              <MaterialButton materialKey={"AvatarDevPanel.button-2"}
                 type="button"
                 className="avatar-dev-btn-preset-run"
                 onClick={() =>
@@ -325,7 +326,7 @@ export function NotificationDevPane({ onNotifyFeedback }: NotificationDevPanePro
               >
                 <SendHorizontal size={12} />
                 <span>Показать</span>
-              </button>
+              </MaterialButton>
             </div>
             <p className="avatar-dev-preset-desc">
               Информационное сообщение (авто-закрытие через 4.5 сек).
@@ -342,7 +343,7 @@ export function NotificationDevPane({ onNotifyFeedback }: NotificationDevPanePro
                 <CheckCircle2 size={14} style={{ color: "var(--color-success, #34d399)" }} />
                 Успех (Success)
               </span>
-              <button
+              <MaterialButton materialKey={"AvatarDevPanel.button-3"}
                 type="button"
                 className="avatar-dev-btn-preset-run"
                 onClick={() =>
@@ -355,7 +356,7 @@ export function NotificationDevPane({ onNotifyFeedback }: NotificationDevPanePro
               >
                 <SendHorizontal size={12} />
                 <span>Показать</span>
-              </button>
+              </MaterialButton>
             </div>
             <p className="avatar-dev-preset-desc">
               Зелёный индикатор подтверждения успеха (авто-закрытие 4.5 сек).
@@ -372,7 +373,7 @@ export function NotificationDevPane({ onNotifyFeedback }: NotificationDevPanePro
                 <AlertTriangle size={14} style={{ color: "var(--color-warning, #fbbf24)" }} />
                 Предупреждение (Warning)
               </span>
-              <button
+              <MaterialButton materialKey={"AvatarDevPanel.button-4"}
                 type="button"
                 className="avatar-dev-btn-preset-run"
                 onClick={() =>
@@ -385,7 +386,7 @@ export function NotificationDevPane({ onNotifyFeedback }: NotificationDevPanePro
               >
                 <SendHorizontal size={12} />
                 <span>Показать</span>
-              </button>
+              </MaterialButton>
             </div>
             <p className="avatar-dev-preset-desc">
               Жёлтый индикатор повышенного внимания (авто-закрытие 8 сек).
@@ -402,7 +403,7 @@ export function NotificationDevPane({ onNotifyFeedback }: NotificationDevPanePro
                 <AlertCircle size={14} style={{ color: "var(--color-danger, #f87171)" }} />
                 Ошибка (Error)
               </span>
-              <button
+              <MaterialButton materialKey={"AvatarDevPanel.button-5"}
                 type="button"
                 className="avatar-dev-btn-preset-run"
                 onClick={() =>
@@ -415,7 +416,7 @@ export function NotificationDevPane({ onNotifyFeedback }: NotificationDevPanePro
               >
                 <SendHorizontal size={12} />
                 <span>Показать</span>
-              </button>
+              </MaterialButton>
             </div>
             <p className="avatar-dev-preset-desc">
               Красный индикатор ошибки (персистентный, остаётся до закрытия).
@@ -432,7 +433,7 @@ export function NotificationDevPane({ onNotifyFeedback }: NotificationDevPanePro
                 <Bell size={14} style={{ color: "var(--color-focus, #a78bfa)" }} />
                 Напоминание (Reminder)
               </span>
-              <button
+              <MaterialButton materialKey={"AvatarDevPanel.button-6"}
                 type="button"
                 className="avatar-dev-btn-preset-run"
                 onClick={() =>
@@ -445,7 +446,7 @@ export function NotificationDevPane({ onNotifyFeedback }: NotificationDevPanePro
               >
                 <SendHorizontal size={12} />
                 <span>Показать</span>
-              </button>
+              </MaterialButton>
             </div>
             <p className="avatar-dev-preset-desc">
               Фиолетовый колокольчик (персистентный, остаётся до закрытия).
@@ -465,7 +466,7 @@ export function NotificationDevPane({ onNotifyFeedback }: NotificationDevPanePro
           <div className="avatar-dev-preset-card">
             <div className="avatar-dev-preset-top">
               <span className="avatar-dev-preset-title">С кнопками действий</span>
-              <button
+              <MaterialButton materialKey={"AvatarDevPanel.button-7"}
                 type="button"
                 className="avatar-dev-btn-preset-run"
                 onClick={() => {
@@ -491,7 +492,7 @@ export function NotificationDevPane({ onNotifyFeedback }: NotificationDevPanePro
               >
                 <SendHorizontal size={12} />
                 <span>Запустить</span>
-              </button>
+              </MaterialButton>
             </div>
             <p className="avatar-dev-preset-desc">
               Проверка кнопок действий (Primary и Secondary) прямо в карточке тоста.
@@ -502,7 +503,7 @@ export function NotificationDevPane({ onNotifyFeedback }: NotificationDevPanePro
           <div className="avatar-dev-preset-card">
             <div className="avatar-dev-preset-top">
               <span className="avatar-dev-preset-title">С подробностями (стек)</span>
-              <button
+              <MaterialButton materialKey={"AvatarDevPanel.button-8"}
                 type="button"
                 className="avatar-dev-btn-preset-run"
                 onClick={() => {
@@ -519,7 +520,7 @@ export function NotificationDevPane({ onNotifyFeedback }: NotificationDevPanePro
               >
                 <SendHorizontal size={12} />
                 <span>Запустить</span>
-              </button>
+              </MaterialButton>
             </div>
             <p className="avatar-dev-preset-desc">
               Кнопка разворачивания шеврона и блок моноширинного кода с деталями ошибки.
@@ -530,14 +531,14 @@ export function NotificationDevPane({ onNotifyFeedback }: NotificationDevPanePro
           <div className="avatar-dev-preset-card">
             <div className="avatar-dev-preset-top">
               <span className="avatar-dev-preset-title">Стек из 3 уведомлений</span>
-              <button
+              <MaterialButton materialKey={"AvatarDevPanel.button-9"}
                 type="button"
                 className="avatar-dev-btn-preset-run"
                 onClick={handleStackDemo}
               >
                 <Layers size={12} />
                 <span>Тест стека</span>
-              </button>
+              </MaterialButton>
             </div>
             <p className="avatar-dev-preset-desc">
               Отправляет 3 тоста подряд: слои стопки под карточкой, бейдж «+2» и перелистывание.
@@ -548,7 +549,7 @@ export function NotificationDevPane({ onNotifyFeedback }: NotificationDevPanePro
           <div className="avatar-dev-preset-card">
             <div className="avatar-dev-preset-top">
               <span className="avatar-dev-preset-title">Длинный текст</span>
-              <button
+              <MaterialButton materialKey={"AvatarDevPanel.button-10"}
                 type="button"
                 className="avatar-dev-btn-preset-run"
                 onClick={() => {
@@ -561,7 +562,7 @@ export function NotificationDevPane({ onNotifyFeedback }: NotificationDevPanePro
               >
                 <SendHorizontal size={12} />
                 <span>Запустить</span>
-              </button>
+              </MaterialButton>
             </div>
             <p className="avatar-dev-preset-desc">
               Проверяет ограничение строк и кнопку разворачивания полного текста.
@@ -691,14 +692,14 @@ export function NotificationDevPane({ onNotifyFeedback }: NotificationDevPanePro
           </label>
 
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
-            <button
+            <MaterialButton materialKey={"AvatarDevPanel.button-11"}
               type="submit"
               className="avatar-dev-btn-primary"
               disabled={!customTitle.trim() || !customMessage.trim()}
             >
               <Bell size={14} />
               <span>Вызвать уведомление</span>
-            </button>
+            </MaterialButton>
           </div>
         </form>
       </div>
@@ -835,7 +836,7 @@ export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanel
         </div>
 
         <div className="avatar-dev-header-actions">
-          <button
+          <MaterialButton materialKey={"AvatarDevPanel.button-12"}
             type="button"
             className="avatar-dev-btn-danger"
             onClick={handleReset}
@@ -844,23 +845,23 @@ export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanel
           >
             <Square size={12} />
             <span>Сброс / Стоп</span>
-          </button>
-          <button
+          </MaterialButton>
+          <MaterialButton materialKey={"AvatarDevPanel.button-13"}
             type="button"
             className="avatar-dev-icon-btn"
             onClick={() => setIsMinimized((v) => !v)}
             title={isMinimized ? "Развернуть" : "Свернуть"}
           >
             {isMinimized ? <Maximize2 size={13} /> : <Minimize2 size={13} />}
-          </button>
-          <button
+          </MaterialButton>
+          <MaterialButton materialKey={"AvatarDevPanel.button-14"}
             type="button"
             className="avatar-dev-icon-btn"
             onClick={onClose}
             title="Закрыть панель тестировщика"
           >
             <X size={14} />
-          </button>
+          </MaterialButton>
         </div>
       </div>
 
@@ -884,38 +885,38 @@ export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanel
             </div>
 
             <div className="avatar-dev-tabs">
-              <button
+              <MaterialButton materialKey={"AvatarDevPanel.button-15"}
                 type="button"
                 className={`avatar-dev-tab ${activeTab === "emotions" ? "is-active" : ""}`}
                 onClick={() => setActiveTab("emotions")}
               >
                 <Smile size={13} />
                 <span>Эмоции ({EMOTIONS_CATALOG.length})</span>
-              </button>
-              <button
+              </MaterialButton>
+              <MaterialButton materialKey={"AvatarDevPanel.button-16"}
                 type="button"
                 className={`avatar-dev-tab ${activeTab === "gestures" ? "is-active" : ""}`}
                 onClick={() => setActiveTab("gestures")}
               >
                 <Hand size={13} />
                 <span>Жесты ({GESTURES_CATALOG.length})</span>
-              </button>
-              <button
+              </MaterialButton>
+              <MaterialButton materialKey={"AvatarDevPanel.button-17"}
                 type="button"
                 className={`avatar-dev-tab ${activeTab === "speech" ? "is-active" : ""}`}
                 onClick={() => setActiveTab("speech")}
               >
                 <Volume2 size={13} />
                 <span>Речь & Сценарии</span>
-              </button>
-              <button
+              </MaterialButton>
+              <MaterialButton materialKey={"AvatarDevPanel.button-18"}
                 type="button"
                 className={`avatar-dev-tab ${activeTab === "notifications" ? "is-active" : ""}`}
                 onClick={() => setActiveTab("notifications")}
               >
                 <Bell size={13} />
                 <span>Уведомления</span>
-              </button>
+              </MaterialButton>
             </div>
           </div>
 
@@ -930,14 +931,14 @@ export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanel
                   { id: "cognitive", label: "Мыслительные" },
                   { id: "complex", label: "Негатив & Покой" },
                 ].map((cat) => (
-                  <button
+                  <MaterialButton materialKey={["AvatarDevPanel.button-19", cat.id].join(":")}
                     key={cat.id}
                     type="button"
                     className={`avatar-dev-filter-chip ${emotionCategory === cat.id ? "is-active" : ""}`}
                     onClick={() => setEmotionCategory(cat.id)}
                   >
                     {cat.label}
-                  </button>
+                  </MaterialButton>
                 ))}
               </div>
 
@@ -945,7 +946,7 @@ export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanel
                 {filteredEmotions.map((item) => {
                   const isCurrent = activeEmotionId === item.id;
                   return (
-                    <button
+                    <MaterialButton materialKey={["AvatarDevPanel.button-20", item.id].join(":")}
                       key={item.id}
                       type="button"
                       className={`avatar-dev-card ${isCurrent ? "is-active-trigger" : ""}`}
@@ -959,7 +960,7 @@ export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanel
                         <span className="avatar-dev-card-code">{item.id}</span>
                       </div>
                       {isCurrent && <Check size={12} className="avatar-dev-active-check" />}
-                    </button>
+                    </MaterialButton>
                   );
                 })}
               </div>
@@ -977,14 +978,14 @@ export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanel
                     { id: "body", label: "Тело & Реакции" },
                     { id: "speech", label: "Речевые жесты" },
                   ].map((cat) => (
-                    <button
+                    <MaterialButton materialKey={["AvatarDevPanel.button-21", cat.id].join(":")}
                       key={cat.id}
                       type="button"
                       className={`avatar-dev-filter-chip ${gestureCategory === cat.id ? "is-active" : ""}`}
                       onClick={() => setGestureCategory(cat.id)}
                     >
                       {cat.label}
-                    </button>
+                    </MaterialButton>
                   ))}
                 </div>
 
@@ -1002,7 +1003,7 @@ export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanel
                 {filteredGestures.map((item) => {
                   const isCurrent = activeGestureId === item.id;
                   return (
-                    <button
+                    <MaterialButton materialKey={["AvatarDevPanel.button-22", item.id].join(":")}
                       key={item.id}
                       type="button"
                       className={`avatar-dev-card avatar-dev-gesture-card ${isCurrent ? "is-active-trigger" : ""}`}
@@ -1016,7 +1017,7 @@ export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanel
                         <span className="avatar-dev-card-code">{item.id}</span>
                       </div>
                       {isCurrent && <Activity size={12} className="avatar-dev-active-check" />}
-                    </button>
+                    </MaterialButton>
                   );
                 })}
               </div>
@@ -1033,7 +1034,7 @@ export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanel
                     <div key={idx} className="avatar-dev-preset-card">
                       <div className="avatar-dev-preset-top">
                         <span className="avatar-dev-preset-title">{preset.title}</span>
-                        <button
+                        <MaterialButton materialKey={["AvatarDevPanel.button-23", idx].join(":")}
                           type="button"
                           className="avatar-dev-btn-preset-run"
                           onClick={() => void handleSpeak(preset.text, preset.emotion, preset.gesture)}
@@ -1041,7 +1042,7 @@ export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanel
                         >
                           <SendHorizontal size={12} />
                           <span>Запустить</span>
-                        </button>
+                        </MaterialButton>
                       </div>
                       <p className="avatar-dev-preset-desc">{preset.description}</p>
                       <code className="avatar-dev-preset-quote">«{preset.text}»</code>
@@ -1092,7 +1093,7 @@ export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanel
                         </select>
                       </label>
                     </div>
-                    <button
+                    <MaterialButton materialKey={"AvatarDevPanel.button-24"}
                       type="button"
                       className="avatar-dev-btn-primary"
                       onClick={() => void handleSpeak(customPhrase, phraseEmotion, phraseGesture)}
@@ -1100,7 +1101,7 @@ export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanel
                     >
                       <Volume2 size={14} />
                       <span>Произнести фразу</span>
-                    </button>
+                    </MaterialButton>
                   </div>
                 </div>
               </div>
@@ -1337,7 +1338,7 @@ export function AvatarDevStudioStandalonePage() {
         </div>
 
         <div className="avatar-dev-header-actions">
-          <button
+          <MaterialButton materialKey={"AvatarDevPanel.button-25"}
             type="button"
             className="avatar-dev-btn-action"
             onClick={() => void fetchAvatarStatus()}
@@ -1346,8 +1347,8 @@ export function AvatarDevStudioStandalonePage() {
           >
             <RefreshCw size={12} className={isRefreshingStatus ? "spin" : ""} />
             <span>Обновить</span>
-          </button>
-          <button
+          </MaterialButton>
+          <MaterialButton materialKey={"AvatarDevPanel.button-26"}
             type="button"
             className="avatar-dev-btn-action"
             onClick={() => void handleStopSpeech()}
@@ -1356,8 +1357,8 @@ export function AvatarDevStudioStandalonePage() {
           >
             <Square size={12} />
             <span>Стоп</span>
-          </button>
-          <button
+          </MaterialButton>
+          <MaterialButton materialKey={"AvatarDevPanel.button-27"}
             type="button"
             className="avatar-dev-btn-danger"
             onClick={() => void handleReset()}
@@ -1366,8 +1367,8 @@ export function AvatarDevStudioStandalonePage() {
           >
             <RotateCcw size={12} />
             <span>Сброс</span>
-          </button>
-          <button
+          </MaterialButton>
+          <MaterialButton materialKey={"AvatarDevPanel.button-28"}
             type="button"
             className="avatar-dev-btn-close"
             onClick={() => void handleCloseWindow()}
@@ -1375,7 +1376,7 @@ export function AvatarDevStudioStandalonePage() {
           >
             <X size={14} />
             <span>Закрыть окно</span>
-          </button>
+          </MaterialButton>
         </div>
       </div>
 
@@ -1408,38 +1409,38 @@ export function AvatarDevStudioStandalonePage() {
         </div>
 
         <div className="avatar-dev-tabs">
-          <button
+          <MaterialButton materialKey={"AvatarDevPanel.button-29"}
             type="button"
             className={`avatar-dev-tab ${activeTab === "emotions" ? "is-active" : ""}`}
             onClick={() => setActiveTab("emotions")}
           >
             <Smile size={13} />
             <span>Эмоции ({EMOTIONS_CATALOG.length})</span>
-          </button>
-          <button
+          </MaterialButton>
+          <MaterialButton materialKey={"AvatarDevPanel.button-30"}
             type="button"
             className={`avatar-dev-tab ${activeTab === "gestures" ? "is-active" : ""}`}
             onClick={() => setActiveTab("gestures")}
           >
             <Hand size={13} />
             <span>Жесты ({GESTURES_CATALOG.length})</span>
-          </button>
-          <button
+          </MaterialButton>
+          <MaterialButton materialKey={"AvatarDevPanel.button-31"}
             type="button"
             className={`avatar-dev-tab ${activeTab === "speech" ? "is-active" : ""}`}
             onClick={() => setActiveTab("speech")}
           >
             <Volume2 size={13} />
             <span>Речь & Сценарии</span>
-          </button>
-          <button
+          </MaterialButton>
+          <MaterialButton materialKey={"AvatarDevPanel.button-32"}
             type="button"
             className={`avatar-dev-tab ${activeTab === "notifications" ? "is-active" : ""}`}
             onClick={() => setActiveTab("notifications")}
           >
             <Bell size={13} />
             <span>Уведомления</span>
-          </button>
+          </MaterialButton>
         </div>
       </div>
 
@@ -1454,14 +1455,14 @@ export function AvatarDevStudioStandalonePage() {
               { id: "cognitive", label: "Мыслительные" },
               { id: "complex", label: "Негатив & Покой" },
             ].map((cat) => (
-              <button
+              <MaterialButton materialKey={["AvatarDevPanel.button-33", cat.id].join(":")}
                 key={cat.id}
                 type="button"
                 className={`avatar-dev-subnav-btn ${emotionCategory === cat.id ? "is-active" : ""}`}
                 onClick={() => setEmotionCategory(cat.id)}
               >
                 {cat.label}
-              </button>
+              </MaterialButton>
             ))}
           </div>
 
@@ -1469,7 +1470,7 @@ export function AvatarDevStudioStandalonePage() {
             {filteredEmotions.map((item) => {
               const isActive = activeEmotionId === item.id;
               return (
-                <button
+                <MaterialButton materialKey={["AvatarDevPanel.button-34", item.id].join(":")}
                   key={item.id}
                   type="button"
                   className={`avatar-dev-card ${isActive ? "is-active" : ""}`}
@@ -1482,7 +1483,7 @@ export function AvatarDevStudioStandalonePage() {
                   </div>
                   <strong className="avatar-dev-card-title">{item.name}</strong>
                   <span className="avatar-dev-card-hint">{item.hint}</span>
-                </button>
+                </MaterialButton>
               );
             })}
           </div>
@@ -1499,14 +1500,14 @@ export function AvatarDevStudioStandalonePage() {
               { id: "body", label: "Корпус & Голова" },
               { id: "speech", label: "Речевые жесты" },
             ].map((cat) => (
-              <button
+              <MaterialButton materialKey={["AvatarDevPanel.button-35", cat.id].join(":")}
                 key={cat.id}
                 type="button"
                 className={`avatar-dev-subnav-btn ${gestureCategory === cat.id ? "is-active" : ""}`}
                 onClick={() => setGestureCategory(cat.id)}
               >
                 {cat.label}
-              </button>
+              </MaterialButton>
             ))}
           </div>
 
@@ -1514,7 +1515,7 @@ export function AvatarDevStudioStandalonePage() {
             {filteredGestures.map((item) => {
               const isActive = activeGestureId === item.id;
               return (
-                <button
+                <MaterialButton materialKey={["AvatarDevPanel.button-36", item.id].join(":")}
                   key={item.id}
                   type="button"
                   className={`avatar-dev-card ${isActive ? "is-active" : ""}`}
@@ -1527,7 +1528,7 @@ export function AvatarDevStudioStandalonePage() {
                   </div>
                   <strong className="avatar-dev-card-title">{item.name}</strong>
                   <span className="avatar-dev-card-hint">{item.hint}</span>
-                </button>
+                </MaterialButton>
               );
             })}
           </div>
@@ -1544,7 +1545,7 @@ export function AvatarDevStudioStandalonePage() {
                 <div key={idx} className="avatar-dev-preset-card">
                   <div className="avatar-dev-preset-top">
                     <span className="avatar-dev-preset-title">{preset.title}</span>
-                    <button
+                    <MaterialButton materialKey={["AvatarDevPanel.button-37", idx].join(":")}
                       type="button"
                       className="avatar-dev-btn-preset-run"
                       onClick={() => void handleSpeak(preset.text, preset.emotion, preset.gesture)}
@@ -1552,7 +1553,7 @@ export function AvatarDevStudioStandalonePage() {
                     >
                       <SendHorizontal size={12} />
                       <span>Запустить</span>
-                    </button>
+                    </MaterialButton>
                   </div>
                   <p className="avatar-dev-preset-desc">{preset.description}</p>
                   <code className="avatar-dev-preset-quote">«{preset.text}»</code>
@@ -1603,7 +1604,7 @@ export function AvatarDevStudioStandalonePage() {
                     </select>
                   </label>
                 </div>
-                <button
+                <MaterialButton materialKey={"AvatarDevPanel.button-38"}
                   type="button"
                   className="avatar-dev-btn-primary"
                   onClick={() => void handleSpeak(customPhrase, phraseEmotion, phraseGesture)}
@@ -1611,7 +1612,7 @@ export function AvatarDevStudioStandalonePage() {
                 >
                   <Volume2 size={14} />
                   <span>Произнести фразу</span>
-                </button>
+                </MaterialButton>
               </div>
             </div>
           </div>
