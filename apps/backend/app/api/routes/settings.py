@@ -153,6 +153,8 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         news_enabled=runtime_settings.news_enabled,
         news_category=runtime_settings.news_category,
         web_search_enabled=runtime_settings.web_search_enabled,
+        web_search_provider=runtime_settings.web_search_provider,
+        search_api_keys_configured={p: bool(getattr(settings, f"{p}_api_key", None)) for p in ("brave", "tavily", "serper")},
     )
 
 
@@ -321,6 +323,11 @@ async def patch_runtime_settings(
 
     if payload.web_search_enabled is not None:
         runtime_settings.web_search_enabled = bool(payload.web_search_enabled)
+
+    if payload.web_search_provider is not None:
+        if payload.web_search_provider not in ("free", "brave", "tavily", "serper"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported search provider")
+        runtime_settings.web_search_provider = payload.web_search_provider
 
     for field_name, allowed_values in LIVE_SETTING_VALUES.items():
         value = getattr(payload, field_name)

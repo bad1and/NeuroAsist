@@ -12,10 +12,12 @@ _WORDS = re.compile(r"[^\W_]+", re.UNICODE)
 _STOP = set("что как когда где какой какая какие сейчас сегодня последние свежие новости новостей новое нового главные события мире про для за это она они мне расскажи покажи найди искать поиск интернет интернете вышел выйдет выход выхода дата релиз релиза версия версии актуальная актуальные официальный официально сайт the a an of to in on is are when what latest current release date official news stable version please all how set setup configure microphone documentation docs".split())
 _ALIASES = {"гта": "gta", "ии": "ai", "россия": "russia", "россии": "russia", "росси": "russia", "игр": "gaming", "игры": "gaming", "техно": "technology", "наука": "science", "науки": "science"}
 _STOP.discard("microphone")
+_STOP.update("кто последний самое самый победитель выиграл победил финал итоги результаты winner final won".split())
+_MODIFIERS = set("hero heroes character characters new newest update updates patch notes full text alternative another joke doctor memory announcement announced launch launched available recent recently yesterday october september january february march april may june july august november december".split())
 
 
 def internet_forbidden(text: str) -> bool:
-    return bool(re.search(r"\b(?:не\s+(?:ищи|гугли|используй\s+интернет|обращайся\s+к\s+интернету)|без\s+(?:веб[ -]?поиска|поиска\s+в\s+интернете|интернета)|do\s+not\s+(?:search|browse)|don['’]t\s+(?:search|browse))\b", text, re.I))
+    return bool(re.search(r"\b(?:не\s+(?:ищи|гугли|используй\s+интернет|обращайся\s+(?:к\s+интернету|ни\s+к\s+чему))|без\s+(?:веб[ -]?поиска|поиска\s+в\s+интернете|интернета)|(?:ни\s+поиску|по\s+знаниям\s+модели)|do\s+not\s+(?:search|browse)|don['’]t\s+(?:search|browse))\b", text, re.I))
 
 
 def sensitive_query(text: str) -> bool:
@@ -50,6 +52,10 @@ def canonical_url(value: str) -> str:
 
 def normalize_entity(value: str) -> str:
     text = value.casefold().replace("ё", "е")
+    text = re.sub(r"\b(?:дедлок|дэдлок|дыдлок|дед\s+лок)(?:а|е|у|ом)?\b", "deadlock", text)
+    text = re.sub(r"\b(?:питон|пайтон)\b", "python", text)
+    text = re.sub(r"\b(?:госдум\w*|государственн\w*\s+дум\w*)\b", "госдума", text)
+    text = re.sub(r"\b(?:чемпионат\w*\s+мира|world\s+cup|чм)\b", "worldcup", text)
     text = re.sub(r"\b(?:искусственн\w*\s+интеллект\w*|artificial\s+intelligence)\b", "ai", text)
     text = re.sub(r"\b(?:grand\s+theft\s+auto|гта|джи\s+ти\s+эй)\b", "gta", text)
     text = re.sub(r"\bgta\s+(шесть|шестая|six|пять|пятая|five|четыре|four)\b",
@@ -62,6 +68,12 @@ def terms(value: str) -> set[str]:
     words = _WORDS.findall(normalize_entity(value))
     out = set()
     for word in words:
+        if word.startswith(("геро", "персон", "перс")):
+            word = "hero"
+        if word.startswith("футбол") or word in {"fifa", "soccer"}:
+            word = "football"
+        elif word.startswith("хокке"):
+            word = "hockey"
         if word.startswith("микрофон"):
             word = "microphone"
         elif word.startswith("нейросет"):
@@ -80,7 +92,14 @@ def relevance(query: str, text: str) -> float:
         return 0.0
     # Named Latin products and their versions must not disappear in a vaguely
     # related article; in particular GTA V must never corroborate GTA VI.
-    anchors = {w for w in q if w.isdigit() or re.fullmatch(r"[a-z]+\d*", w)}
+    latin = [w for w in _WORDS.findall(normalize_entity(query))
+             if w in q and re.fullmatch(r"[a-z]+\d*", w) and w not in _MODIFIERS]
+    event_year = bool(re.search(r"выбор|чемпионат|кубок|world\s+cup|election", query, re.I))
+    anchors = set(latin[:1]) | {w for w in q if w.isdigit() and (event_year or not re.fullmatch(r"20\d{2}", w))}
+    if "microphone" in q:
+        anchors.add("microphone")
+    if "worldcup" in q:
+        anchors.update(q & {"football", "hockey", "basketball"})
     if anchors and not anchors.issubset(candidate):
         return 0.0
     overlap = len(q & candidate) / len(q)

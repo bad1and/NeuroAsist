@@ -1,6 +1,8 @@
 import { MaterialButton } from "./MaterialButton";
 import { useCallback, useEffect, useState } from "react";
-import { getEnvironmentStatus, updateRuntimeSettings } from "../api";
+import { getEnvironmentStatus, updateRuntimeSettings, isDesktopManaged, saveDesktopSearchApiKey,
+  removeDesktopSearchApiKey, checkSearchProvider, getSettings } from "../api";
+import type { SearchApiProvider } from "../api";
 import { AppSwitch } from "./AppSwitch";
 import { CustomSelect } from "./CustomSelect";
 import type { EnvironmentStatus, PublicSettings } from "../types";
@@ -26,6 +28,11 @@ export function EnvironmentSettings({
   const [weatherEnabled, setWeatherEnabled] = useState(settings.weather_enabled ?? true);
   const [newsEnabled, setNewsEnabled] = useState(settings.news_enabled ?? true);
   const [webSearchEnabled, setWebSearchEnabled] = useState(settings.web_search_enabled ?? true);
+  const [searchProvider, setSearchProvider] = useState<NonNullable<PublicSettings["web_search_provider"]>>(settings.web_search_provider ?? "free");
+  const [keyProvider, setKeyProvider] = useState<SearchApiProvider>("brave");
+  const [apiKeyInput, setApiKeyInput] = useState("");
+  const [apiBusy, setApiBusy] = useState(false);
+  const [apiMessage, setApiMessage] = useState("");
   const [newsCategory, setNewsCategory] = useState<NonNullable<PublicSettings["news_category"]>>(
     settings.news_category ?? "all"
   );
@@ -45,6 +52,46 @@ export function EnvironmentSettings({
   useEffect(() => {
     void refreshStatus();
   }, [refreshStatus]);
+
+  useEffect(() => {
+    setSearchProvider(settings.web_search_provider ?? "free");
+  }, [settings.web_search_provider]);
+
+  const handleSearchKey = async (action: "save" | "remove" | "check") => {
+    setApiBusy(true);
+    setApiMessage("");
+    try {
+      if (action === "check") {
+        const result = await checkSearchProvider(keyProvider);
+        const messages: Record<string, string> = {
+          ok: "Подключение работает.", unconfigured: "Сначала сохраните ключ.",
+          unauthorized: "Ключ не принят сервисом.", blocked: "Сервис ограничил запросы или закончилась квота.",
+          cooldown: "Сервис временно ограничен. Повторите позже.", timeout: "Сервис не ответил вовремя.",
+          empty: "Сервис ответил без результатов.",
+        };
+        setApiMessage(messages[result.status] ?? "Проверка подключения не удалась.");
+      } else {
+        if (action === "save") await saveDesktopSearchApiKey(keyProvider, apiKeyInput.trim());
+        else await removeDesktopSearchApiKey(keyProvider);
+        setApiKeyInput("");
+        // Credential commands restart the core; retry readiness, not saving.
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          try {
+            onSettingsChanged(await getSettings());
+            break;
+          } catch {
+            if (attempt === 19) throw new Error("Ядро ещё запускается.");
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+        }
+        setApiMessage(action === "save" ? "Ключ сохранён. Режим поиска не изменён." : "Ключ удалён.");
+      }
+    } catch {
+      setApiMessage("Не удалось выполнить действие. Проверьте подключение к Iris.");
+    } finally {
+      setApiBusy(false);
+    }
+  };
 
   const saveSetting = useCallback(
     async (patch: Parameters<typeof updateRuntimeSettings>[0]) => {
@@ -207,14 +254,11 @@ export function EnvironmentSettings({
         {newsEnabled && (
           <label>
             Категория новостей
-            <CustomSelect
-              value={newsCategory}
-              onChange={(e) => {
-                const next = e.target.value as NonNullable<PublicSettings["news_category"]>;
-                setNewsCategory(next);
-                void saveSetting({ news_category: next });
-              }}
-            >
+            <CustomSelect value={newsCategory} onChange={(e) => {
+              const next = e.target.value as NonNullable<PublicSettings["news_category"]>;
+              setNewsCategory(next);
+              void saveSetting({ news_category: next });
+            }}>
               <option value="all">Все категории</option>
               <option value="tech">Технологии и IT</option>
               <option value="general">Россия и мир</option>
@@ -224,6 +268,56 @@ export function EnvironmentSettings({
             <small>Ленты обновляются в фоне. В диалог попадают только новости по теме вашего вопроса.</small>
           </label>
         )}
+
+        <label>
+          Источник веб-поиска
+          <CustomSelect value={searchProvider} disabled={apiBusy} onChange={async (event) => {
+            const next = event.target.value as NonNullable<PublicSettings["web_search_provider"]>;
+            setApiMessage("");
+            try {
+              const updated = await updateRuntimeSettings({ web_search_provider: next });
+              setSearchProvider(updated.web_search_provider ?? "free");
+              onSettingsChanged(updated);
+            } catch {
+              setApiMessage("Не удалось сохранить режим поиска.");
+            }
+          }}>
+            <option value="free">Бесплатные источники</option>
+            <option value="brave">Brave Search API</option>
+            <option value="tavily">Tavily API</option>
+            <option value="serper">Serper API</option>
+          </CustomSelect>
+          <small>По умолчанию поиск бесплатный. API используется только после вашего выбора; при ошибке Iris обращается к бесплатным источникам.</small>
+        </label>
+
+        <details>
+          <summary>Собственный поисковый API</summary>
+          <label>
+            Сервис для подключения
+            <CustomSelect value={keyProvider} disabled={apiBusy} onChange={(event) => {
+              setKeyProvider(event.target.value as SearchApiProvider);
+              setApiKeyInput("");
+              setApiMessage("");
+            }}>
+              <option value="brave">Brave</option>
+              <option value="tavily">Tavily</option>
+              <option value="serper">Serper</option>
+            </CustomSelect>
+          </label>
+          <label>
+            API-ключ поискового сервиса
+            <input type="password" autoComplete="off" value={apiKeyInput} disabled={apiBusy || !isDesktopManaged()}
+              onChange={(event) => setApiKeyInput(event.target.value)} />
+            <small>{settings.search_api_keys_configured?.[keyProvider] ? "Ключ сохранён в Windows Credential Manager." : "Ключ не подключён."}</small>
+          </label>
+          <div className="settings-input-group" style={{ flexWrap: "wrap" }}>
+            <MaterialButton materialKey="EnvironmentSettings.search-save" className="secondary" disabled={apiBusy || !apiKeyInput.trim() || !isDesktopManaged()} onClick={() => void handleSearchKey("save")}>Сохранить ключ</MaterialButton>
+            <MaterialButton materialKey="EnvironmentSettings.search-remove" className="secondary" disabled={apiBusy || !settings.search_api_keys_configured?.[keyProvider] || !isDesktopManaged()} onClick={() => void handleSearchKey("remove")}>Удалить ключ</MaterialButton>
+            <MaterialButton materialKey="EnvironmentSettings.search-check" className="secondary" disabled={apiBusy || !settings.search_api_keys_configured?.[keyProvider]} onClick={() => void handleSearchKey("check")}>Проверить подключение</MaterialButton>
+          </div>
+          <small>{isDesktopManaged() ? "Ключи сервисов независимы. Сохранение ключа не включает API. Проверка отправляет один запрос выбранному сервису." : "Управление ключами доступно в установленном приложении Iris."}</small>
+        </details>
+        {apiMessage && <p role="status">{apiMessage}</p>}
 
         <div className="readonly-setting audio-device-refresh">
           <span>Данные окружения</span>

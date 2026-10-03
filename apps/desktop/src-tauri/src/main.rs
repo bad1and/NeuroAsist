@@ -263,6 +263,11 @@ impl DesktopState {
         let port = runtime.api_base_url.rsplit(':').next().unwrap_or("8000");
         let api_key = read_api_key()?;
         let coding_api_key = read_coding_api_key()?;
+        let search_api_keys = [
+            read_credential("brave_api_key", "Brave")?,
+            read_credential("tavily_api_key", "Tavily")?,
+            read_credential("serper_api_key", "Serper")?,
+        ];
         let avatar_enabled = self.avatar_executable(app).is_some() && !self.safe_mode;
         let process =
             if cfg!(debug_assertions) || env::var_os("NEUROASIST_CORE_EXECUTABLE").is_some() {
@@ -279,7 +284,7 @@ impl DesktopState {
                 let mut child = command
                     .spawn()
                     .map_err(|error| format!("Could not start Neuro Core: {error}"))?;
-                write_core_credentials(&mut child, api_key.as_deref(), coding_api_key.as_deref())?;
+                write_core_credentials(&mut child, api_key.as_deref(), coding_api_key.as_deref(), &search_api_keys)?;
                 CoreProcess::Native(child)
             } else {
                 let executable = app
@@ -313,7 +318,7 @@ impl DesktopState {
                 let mut child = command
                     .spawn()
                     .map_err(|error| format!("Could not start bundled Neuro Core: {error}"))?;
-                write_core_credentials(&mut child, api_key.as_deref(), coding_api_key.as_deref())?;
+                write_core_credentials(&mut child, api_key.as_deref(), coding_api_key.as_deref(), &search_api_keys)?;
                 CoreProcess::Native(child)
             };
         *self.core.lock().map_err(|_| "core mutex poisoned")? = Some(process);
@@ -1181,6 +1186,53 @@ fn remove_coding_api_key(app: AppHandle) -> Result<DesktopRuntime, String> {
     remove_credential(CODING_KEYRING_ACCOUNT, "Coding", app)
 }
 
+fn search_keyring_account(provider: &str) -> Result<&'static str, String> {
+    match provider {
+        "brave" => Ok("brave_api_key"),
+        "tavily" => Ok("tavily_api_key"),
+        "serper" => Ok("serper_api_key"),
+        _ => Err("Unsupported search provider".to_owned()),
+    }
+}
+
+#[cfg(test)]
+mod search_credential_tests {
+    use super::*;
+
+    #[test]
+    fn search_keys_have_separate_accounts_and_reject_arbitrary_names() {
+        let accounts: HashSet<_> = ["brave", "tavily", "serper"]
+            .iter().map(|p| search_keyring_account(p).unwrap()).collect();
+        assert_eq!(accounts.len(), 3);
+        assert!(!accounts.contains(DEEPSEEK_KEYRING_ACCOUNT));
+        assert!(!accounts.contains(CODING_KEYRING_ACCOUNT));
+        assert!(search_keyring_account("free").is_err());
+        assert!(search_keyring_account("deepseek_api_key").is_err());
+    }
+
+    #[test]
+    fn pipe_credentials_keep_optional_search_keys_independent() {
+        let payload = serde_json::to_value(CoreCredentials {
+            deepseek_api_key: None, coding_api_key: None,
+            brave_api_key: Some("fixture-brave"), tavily_api_key: None, serper_api_key: Some("fixture-serper"),
+        }).unwrap();
+        assert_eq!(payload["brave_api_key"], "fixture-brave");
+        assert_eq!(payload["serper_api_key"], "fixture-serper");
+        assert!(payload["tavily_api_key"].is_null());
+        assert!(payload["deepseek_api_key"].is_null());
+    }
+}
+
+#[tauri::command]
+fn save_search_api_key(provider: String, api_key: String, app: AppHandle) -> Result<DesktopRuntime, String> {
+    save_credential(search_keyring_account(&provider)?, &provider, api_key, app)
+}
+
+#[tauri::command]
+fn remove_search_api_key(provider: String, app: AppHandle) -> Result<DesktopRuntime, String> {
+    remove_credential(search_keyring_account(&provider)?, &provider, app)
+}
+
 fn save_credential(
     account: &str,
     label: &str,
@@ -1377,6 +1429,8 @@ fn main() {
             save_coding_api_key,
             remove_api_key,
             remove_coding_api_key,
+            save_search_api_key,
+            remove_search_api_key,
             open_qa_studio,
             close_qa_studio,
             is_qa_studio_open
@@ -1963,12 +2017,16 @@ fn read_credential(account: &str, label: &str) -> Result<Option<String>, String>
 struct CoreCredentials<'a> {
     deepseek_api_key: Option<&'a str>,
     coding_api_key: Option<&'a str>,
+    brave_api_key: Option<&'a str>,
+    tavily_api_key: Option<&'a str>,
+    serper_api_key: Option<&'a str>,
 }
 
 fn write_core_credentials(
     child: &mut Child,
     deepseek_api_key: Option<&str>,
     coding_api_key: Option<&str>,
+    search_api_keys: &[Option<String>; 3],
 ) -> Result<(), String> {
     let result = (|| {
         let mut stdin = child
@@ -1980,6 +2038,9 @@ fn write_core_credentials(
             &CoreCredentials {
                 deepseek_api_key,
                 coding_api_key,
+                brave_api_key: search_api_keys[0].as_deref(),
+                tavily_api_key: search_api_keys[1].as_deref(),
+                serper_api_key: search_api_keys[2].as_deref(),
             },
         )
         .map_err(|error| format!("Could not serialize Neuro Core credentials: {error}"))?;

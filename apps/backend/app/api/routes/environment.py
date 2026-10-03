@@ -2,9 +2,15 @@
 from __future__ import annotations
 
 import logging
+import base64
+import json
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, HTTPException
+from pydantic import BaseModel, ConfigDict
+from typing import Literal
+from apps.backend.app.environment.news_service import NEWS_CATEGORIES
+from apps.backend.app.environment.retrieval import parse_date
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -80,12 +86,14 @@ async def get_environment_status(request: Request) -> dict[str, Any]:
             "news_enabled": runtime_settings.news_enabled,
             "news_category": runtime_settings.news_category,
             "web_search_enabled": runtime_settings.web_search_enabled,
+            "web_search_provider": getattr(runtime_settings, "web_search_provider", "free"),
         },
     }
 
 
 @router.get("/environment/news")
-async def get_environment_news(request: Request, category: str | None = None) -> dict[str, Any]:
+async def get_environment_news(request: Request, category: str | None = None, limit: int = 8,
+                               cursor: str | None = None) -> dict[str, Any]:
     """Returns latest news articles for UI preview."""
     coordinator = getattr(request.app.state, "situational_coordinator", None)
     runtime_settings = request.app.state.runtime_settings
@@ -94,13 +102,45 @@ async def get_environment_news(request: Request, category: str | None = None) ->
         return {"articles": [], "category": "none"}
 
     cat = category or runtime_settings.news_category or "all"
-    digest = await coordinator.news_service.get_news(category=cat, max_articles=8)
+    cat = cat.strip().lower()
+    if cat not in NEWS_CATEGORIES:
+        cat = "all"
+    if not 1 <= limit <= 20:
+        raise HTTPException(422, "News limit must be between 1 and 20")
+    options = {}
+    if cursor:
+        try:
+            if len(cursor) > 65536:
+                raise ValueError()
+            state = json.loads(base64.urlsafe_b64decode(cursor.encode()).decode())
+            if not isinstance(state, dict) or state.get("category") != cat:
+                raise ValueError()
+            for key in ("shown_urls", "shown_titles"):
+                values = state.get(key, [])
+                if not isinstance(values, list) or len(values) > 200 or not all(isinstance(v, str) and len(v) <= 2048 for v in values):
+                    raise ValueError()
+            for key in ("since", "until"):
+                value = state.get(key)
+                if value is not None and (not isinstance(value, str) or not parse_date(value)):
+                    raise ValueError()
+            options = {"exclude_urls": state.get("shown_urls", []), "exclude_titles": state.get("shown_titles", []),
+                       "since": state.get("since"), "until": state.get("until")}
+        except (ValueError, TypeError, UnicodeError):
+            raise HTTPException(422, "Invalid news cursor") from None
+    digest = await coordinator.news_service.get_news(category=cat, max_articles=limit,
+        refresh=runtime_settings.news_enabled if hasattr(runtime_settings, "news_enabled") else True, **options)
+    next_cursor = None
+    if digest.has_more and digest.articles:
+        state = {k: digest.metadata()[k] for k in ("category", "shown_urls", "shown_titles", "since", "until")}
+        next_cursor = base64.urlsafe_b64encode(json.dumps(state, ensure_ascii=False).encode()).decode()
 
     return {
         "category": digest.category,
         "updated_at": digest.updated_at,
         "stale": digest.stale,
         "cached": digest.cached,
+        "next_cursor": next_cursor,
+        "source_health": list(digest.source_health),
         "articles": [
             {
                 "title": a.title,
@@ -114,3 +154,16 @@ async def get_environment_news(request: Request, category: str | None = None) ->
             for a in digest.articles
         ],
     }
+
+
+class SearchProviderCheck(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider: Literal["brave", "tavily", "serper"]
+
+
+@router.post("/environment/search/check")
+async def check_search_provider(payload: SearchProviderCheck, request: Request) -> dict[str, Any]:
+    coordinator = getattr(request.app.state, "situational_coordinator", None)
+    if coordinator is None:
+        return {"provider": payload.provider, "status": "unavailable"}
+    return await coordinator.search_service.check_provider(payload.provider)

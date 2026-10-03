@@ -234,7 +234,7 @@ def test_entity_and_news_category_boundaries():
     assert _TECH_NEWS_SUBPATTERN.search("новости ИИ")
     assert _news_topic("последние новости про GTA 6") == "GTA 6"
     assert _news_topic("новости в мире") == ""
-    assert sum(len(feeds) for feeds in FEEDS.values()) == 15
+    assert sum(len(feeds) for feeds in FEEDS.values()) == 17
 
 
 def make_feed(source, category, count=4, date=None):

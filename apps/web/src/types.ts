@@ -269,6 +269,8 @@ export type PublicSettings = {
   news_enabled?: boolean;
   news_category?: "all" | "general" | "tech" | "science" | "games";
   web_search_enabled?: boolean;
+  web_search_provider?: "free" | "brave" | "tavily" | "serper";
+  search_api_keys_configured?: Partial<Record<"brave" | "tavily" | "serper", boolean>>;
 };
 
 export type EnvironmentStatus = {

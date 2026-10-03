@@ -59,6 +59,20 @@ export function removeDesktopCodingApiKey(): Promise<unknown> {
   return invokeDesktop("remove_coding_api_key");
 }
 
+export type SearchApiProvider = "brave" | "tavily" | "serper";
+
+export function saveDesktopSearchApiKey(provider: SearchApiProvider, apiKey: string): Promise<unknown> {
+  return invokeDesktop("save_search_api_key", { provider, apiKey });
+}
+
+export function removeDesktopSearchApiKey(provider: SearchApiProvider): Promise<unknown> {
+  return invokeDesktop("remove_search_api_key", { provider });
+}
+
+export function checkSearchProvider(provider: SearchApiProvider): Promise<{ provider: string; status: string; results_count?: number }> {
+  return requestJson("/environment/search/check", { method: "POST", body: JSON.stringify({ provider }) });
+}
+
 export const WS_EVENTS_URL =
   DESKTOP_RUNTIME?.wsEventsUrl
   ?? import.meta.env.VITE_WS_EVENTS_URL
@@ -199,6 +213,7 @@ export function updateRuntimeSettings(payload: {
   weather_enabled?: PublicSettings["weather_enabled"];
   news_enabled?: PublicSettings["news_enabled"];
   web_search_enabled?: PublicSettings["web_search_enabled"];
+  web_search_provider?: PublicSettings["web_search_provider"];
   news_category?: PublicSettings["news_category"];
 }): Promise<PublicSettings> {
   return requestJson<PublicSettings>("/settings/runtime", {

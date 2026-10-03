@@ -523,6 +523,24 @@ class TimelineStore:
             )
             return ids
 
+    def get_recent_retrieval_state(self, session_id: str) -> dict:
+        """Bounded, session-local continuation; never consult durable user memory."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT role, metadata_json FROM conversation_messages
+                   WHERE timeline_id = ? AND session_id = ? AND status = 'completed'
+                   AND role IN ('user', 'assistant') ORDER BY sequence_no DESC LIMIT 8""",
+                (PRIMARY_TIMELINE_ID, session_id),
+            ).fetchall()
+        for row in rows:
+            if row["role"] != "assistant":
+                continue
+            metadata = json.loads(row["metadata_json"] or "{}")
+            if metadata.get("news") or metadata.get("web_search"):
+                return {k: metadata[k] for k in ("news", "web_search") if isinstance(metadata.get(k), dict)}
+            return {}
+        return {}
+
     def get_recent_messages(self, session_id: str, limit: int) -> list[ChatMessage]:
         with self._connect() as connection:
             rows = connection.execute(
@@ -4827,6 +4845,9 @@ class TimelineHistoryAdapter:
             replacement_count,
             replacements,
         )
+
+    def get_recent_retrieval_state(self, session_id: str) -> dict:
+        return self._store.get_recent_retrieval_state(session_id)
 
     def get_recent_messages(self, session_id: str, limit: int) -> list[ChatMessage]:
         return self._store.get_recent_messages(session_id, limit)

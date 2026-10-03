@@ -71,6 +71,8 @@ class PublicSettingsResponse(BaseModel):
     news_enabled: bool = True
     news_category: str = "all"
     web_search_enabled: bool = True
+    web_search_provider: str = "free"
+    search_api_keys_configured: dict[str, bool] = Field(default_factory=dict)
 
 
 class RuntimeSettingsPatch(BaseModel):
@@ -116,6 +118,7 @@ class RuntimeSettingsPatch(BaseModel):
     news_enabled: bool | None = None
     news_category: str | None = None
     web_search_enabled: bool | None = None
+    web_search_provider: str | None = None
 
 
 class VoiceStylePatch(BaseModel):

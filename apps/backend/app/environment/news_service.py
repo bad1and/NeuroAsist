@@ -39,6 +39,8 @@ FEEDS: dict[str, list[tuple[str, str]]] = {
     "games": [
         ("DTF", "https://dtf.ru/rss"),
         ("IGN", "https://feeds.feedburner.com/ign/all"),
+        ("Чемпионат", "https://www.championat.com/rss/news/cybersport/"),
+        ("PC Gamer", "https://www.pcgamer.com/rss/"),
     ],
 }
 NEWS_CATEGORIES = ("all", *FEEDS)
@@ -68,6 +70,12 @@ class NewsDigestSnapshot:
     stale: bool = False
     query: str = ""
     cached: bool = False
+    since: str = ""
+    until: str = ""
+    shown_urls: tuple[str, ...] = ()
+    shown_titles: tuple[str, ...] = ()
+    has_more: bool = False
+    source_health: tuple[dict[str, object], ...] = ()
 
     def compact_summary(self, max_items: int = 5, max_chars: int = 900) -> str:
         if not self.articles:
@@ -97,6 +105,9 @@ class NewsDigestSnapshot:
             "updated_at": self.updated_at, "searched_at": self.updated_at,
             "provider": "rss", "status": "ok" if self.articles else "empty",
             "cached": self.cached, "stale": self.stale,
+            "topic": self.query, "since": self.since, "until": self.until,
+            "shown_urls": list(self.shown_urls), "shown_titles": list(self.shown_titles),
+            "has_more": self.has_more, "source_health": list(self.source_health),
             "sources": [{"title": a.title, "url": a.url, "published_at": a.published,
                          "source": a.source, "stale": a.stale} for a in self.articles if a.url],
         }
@@ -115,6 +126,7 @@ class NewsService:
         self._background_task: asyncio.Task[None] | None = None
         self._background_enabled = None
         self._closed = False
+        self._health: dict[str, dict[str, object]] = {}
 
     async def _get_client(self):
         if self._client is None or self._client.is_closed:
@@ -195,11 +207,17 @@ class NewsService:
             if articles:
                 self._sources[url] = (articles, time.monotonic(), datetime.now(UTC).isoformat())
                 self._retry_after.pop(url, None)
+                self._health[url] = {"source": source, "status": "ok", "articles_count": len(articles),
+                                     "updated_at": self._sources[url][2]}
             else:
                 self._retry_after[url] = time.monotonic() + 30
+                self._health[url] = {"source": source, "status": "empty", "articles_count": 0}
         except (httpx.HTTPError, TimeoutError, ValueError, ET.ParseError) as exc:
             self._retry_after[url] = time.monotonic() + 30
-            logger.debug("RSS source %s unavailable: %s", source, exc)
+            self._health[url] = {"source": source, "status": "timeout" if isinstance(exc, (TimeoutError, httpx.TimeoutException)) else "error",
+                                 "articles_count": len(self._sources.get(url, ((),))[0]),
+                                 "updated_at": self._sources.get(url, ((), 0, ""))[2]}
+            logger.debug("RSS source %s unavailable: %s", source, type(exc).__name__)
 
     @staticmethod
     def _parse_feed(content, category, source):
@@ -225,7 +243,8 @@ class NewsService:
                 date.isoformat() if date else "", category, canonical_url(link)))
         return tuple(articles)
 
-    async def get_news(self, category="all", max_articles=6, *, query="", since=None, until=None, refresh=True):
+    async def get_news(self, category="all", max_articles=6, *, query="", since=None, until=None, refresh=True,
+                       exclude_urls=(), exclude_titles=(), deadline=None):
         category = category.lower().strip()
         if category not in NEWS_CATEGORIES:
             category = "all"
@@ -233,10 +252,11 @@ class NewsService:
         selection_category = "all" if query else category
         tasks = self._schedule(selection_category) if refresh else []
         was_cached = not tasks
-        if tasks and not self._sources and not query:
+        if tasks:
             # Pending source tasks continue warming the cache; no network wait
             # occurs under a shared lock, and cancellation cannot strand a lock.
-            await asyncio.wait(tasks, timeout=self._foreground_timeout)
+            remaining = max(0, deadline - time.monotonic()) if deadline is not None else self._foreground_timeout
+            await asyncio.wait(tasks, timeout=min(self._foreground_timeout, remaining))
         now, wall = time.monotonic(), datetime.now(UTC)
         lower = parse_date(since) if isinstance(since, str) else since
         upper = parse_date(until) if isinstance(until, str) else until
@@ -291,7 +311,13 @@ class NewsService:
             unique.append(NewsArticle(article.title, article.source, article.snippet, article.published,
                                       article.category, article.url, stale))
         chosen, counts = [], Counter()
-        limit = max(0, min(int(max_articles), 5))
+        limit = max(0, min(int(max_articles), 20))
+        excluded = set(exclude_urls)
+        old_titles = [normalize_entity(t) for t in exclude_titles]
+        unique = [a for a in unique if a.url not in excluded and not any(
+            SequenceMatcher(None, normalize_entity(a.title), t).ratio() >= 0.82
+            and set(re.findall(r"\d+", a.title)) == set(re.findall(r"\d+", t)) for t in old_titles)]
+        source_limit = max(2, (limit + max(1, len({a.source for a in unique})) - 1) // max(1, len({a.source for a in unique})))
         # First cover the available categories, then fill by freshness/relevance.
         if not query and category == "all":
             for cat in FEEDS:
@@ -302,8 +328,12 @@ class NewsService:
         for article in unique:
             if len(chosen) >= limit:
                 break
-            if article not in chosen and counts[article.source] < 2:
+            if article not in chosen and counts[article.source] < source_limit:
                 chosen.append(article)
                 counts[article.source] += 1
+        shown_urls = tuple(dict.fromkeys([*exclude_urls, *(a.url for a in chosen if a.url)]))[-200:]
+        shown_titles = tuple(dict.fromkeys([*exclude_titles, *(a.title for a in chosen)]))[-200:]
         return NewsDigestSnapshot(category, tuple(chosen), now, max(updates, default=""),
-                                  any(a.stale for a in chosen), query, was_cached)
+                                  any(a.stale for a in chosen), query, was_cached,
+                                  lower.isoformat(), upper.isoformat(), shown_urls, shown_titles,
+                                  any(a not in chosen for a in unique), tuple(self._health.values()))
