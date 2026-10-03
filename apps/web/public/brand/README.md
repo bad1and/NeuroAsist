@@ -1,0 +1,29 @@
+# Iris brand assets
+
+`iris-logo.svg` is the original Iris V3 vector artwork, including its supplied
+colors and static shadows. The local source folder is ignored by Git; production
+assets are committed here so clean checkouts and release builds remain complete.
+
+`iris-wordmark-{light,dark}.svg` contains the full logo and lettering.
+`iris-mark-{light,dark}.svg` contains only the three petals.
+`iris-mark-backed-{light,dark}.svg` adds the existing icon backing for favicons.
+The rounded backing fills the canvas; the mark uses the full inner viewport,
+with its original SVG padding keeping the petals clear of the rounded edges.
+The theme aliases intentionally share the original V3 palette.
+
+Regenerate all static SVG variants and desktop/mobile icons from the repository
+root, with the desktop npm dependencies installed:
+
+```powershell
+./scripts/update-brand-assets.ps1
+```
+
+To import a replacement V3 source, pass `-Source` with its local SVG path.
+`-SkipIcons` updates only the SVGs. The Tauri icon CLI renders the PNG, ICO and
+ICNS files in `apps/desktop/src-tauri/icons`, including Windows, Android and iOS
+sizes. The tray uses `32x32.png`; the application and installer use these same
+generated bundle icons.
+
+The Lottie artwork in `apps/web/src/brand/iris-loader.json` is intentionally
+unchanged. Floral banners and archived Figma layouts are separate illustrations,
+not logo assets.

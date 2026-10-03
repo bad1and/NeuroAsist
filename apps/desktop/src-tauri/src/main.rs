@@ -1228,6 +1228,8 @@ async fn open_qa_studio(app: AppHandle) -> Result<(), String> {
     );
     WebviewWindowBuilder::new(&app, "qa_studio", WebviewUrl::App("index.html".into()))
         .title("Лаборатория тестирования аватара — QA Studio")
+        .icon(tauri::include_image!("./icons/128x128.png"))
+        .map_err(|e| e.to_string())?
         .decorations(true)
         .inner_size(760.0, 880.0)
         .min_inner_size(520.0, 600.0)
@@ -1377,6 +1379,7 @@ fn create_main_window(app: &AppHandle, runtime: DesktopRuntime) -> tauri::Result
     );
     WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("Iris")
+        .icon(tauri::include_image!("./icons/128x128.png"))?
         .decorations(false)
         .inner_size(1120.0, 760.0)
         .min_inner_size(760.0, 540.0)

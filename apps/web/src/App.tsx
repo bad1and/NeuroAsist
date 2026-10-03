@@ -1140,9 +1140,12 @@ function Sidebar({
   return (
     <aside id="main-sidebar" ref={sidebarRef} className={`sidebar${isOpen ? " is-open" : ""}`} aria-label="Основная навигация">
       <div className="sidebar-brand" data-tauri-drag-region>
-        <img className="brand-logo brand-logo-wordmark" src="/brand/iris-wordmark-light.svg" alt="Iris" />
-        <img className="brand-logo brand-logo-mark" src="/brand/iris-mark-light.svg" alt="" aria-hidden="true" />
-        <span className="brand-alias" data-tauri-drag-region aria-hidden="true">ириска<sup>*</sup></span>
+        <span className="brand-lockup brand-lockup-wordmark">
+          <img className="brand-logo brand-logo-wordmark" src="/brand/iris-wordmark-light.svg" alt="Iris" />
+        </span>
+        <span className="brand-lockup brand-lockup-mark" aria-hidden="true">
+          <img className="brand-logo brand-logo-mark" src="/brand/iris-mark-light.svg" alt="" aria-hidden="true" />
+        </span>
       </div>
       <nav className="sidebar-nav" aria-label="Разделы приложения">
         {MAIN_NAVIGATION.map(({ id, label, icon: Icon }) => (
