@@ -37,6 +37,7 @@ from apps.backend.app.api.routes.coding import router as coding_router
 from apps.backend.app.api.routes.environment import router as environment_router
 from apps.backend.app.api.websocket import router as websocket_router
 from apps.backend.app.environment.coordinator import SituationalCoordinator
+from apps.backend.app.environment.search_service import SearchService
 from apps.backend.app.core.config import APP_VERSION, ROOT_DIR, get_settings
 from apps.backend.app.core.logging import configure_logging
 from apps.backend.app.events.bus import EventBus
@@ -202,7 +203,10 @@ def create_app() -> FastAPI:
     runtime_settings = runtime_settings_store.load(runtime_defaults)
     coding_agent_service = CodingAgentService(settings, runtime_settings, timeline_store, event_bus.publish)
     coding_bridge = CodingBridge(coding_agent_service)
-    situational_coordinator = SituationalCoordinator()
+    situational_coordinator = SituationalCoordinator(search_service=SearchService(
+        runtime_settings=runtime_settings,
+        credentials={p: getattr(settings, f"{p}_api_key", None) for p in ("brave", "tavily", "serper")},
+    ))
     app.state.voice_tts_style = "auto"
     app.state.voice_tts_expression_level = "natural"
     model_manager = ModelManager(settings.app_data_path / "models", event_bus.publish)

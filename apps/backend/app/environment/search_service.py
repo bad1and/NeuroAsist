@@ -19,6 +19,7 @@ import xml.etree.ElementTree as ET
 import httpx
 
 from apps.backend.app.environment.retrieval import canonical_url, clean_text, model_text, parse_date, preferred_host, relevance, sensitive_query
+from apps.backend.app.environment.search_providers import API_PROVIDERS, api_search
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,27 @@ _WHITESPACE_RE = re.compile(r"\s+")
 _MAX_QUERY_CHARS = 300
 _MAX_TITLE_CHARS = 120
 _MAX_SNIPPET_CHARS = 300
+
+
+def _outcome_query(query: str) -> bool:
+    return bool(re.search(r"выбор|чемпионат|world\s+cup|election", query, re.I) and
+                re.search(r"результат|итог|побед|выиграл|winner|final", query, re.I))
+
+
+def _outcome_evidence(result: SearchResult) -> bool:
+    evidence = result.page_text or result.snippet
+    if re.search(r"прогноз|предсказ|симуляци|победит\b|как может|может измениться|prediction|simulation", result.title + " " + evidence, re.I):
+        return False
+    return bool(re.search(r"победил|победила|выиграл|выиграла|чемпион\w*.{0,15}стал|\d+\s*(?:мандат|мест)|набрал|набрала|\d+(?:[.,]\d+)?\s*%|\bwon\b|winner|defeated|beat\b", evidence, re.I))
+
+
+def _final_outcome_evidence(result: SearchResult) -> bool:
+    text = result.title + " " + (result.page_text or result.snippet)
+    if not _outcome_evidence(result) or re.search(r"предварительн|неполны|экзитпол|preliminary|exit[ -]poll|early results", text, re.I):
+        return False
+    if re.search(r"выбор|госдум|государственн\w*\s+дум|election", text, re.I):
+        return bool(re.search(r"окончательн|утвердил|утвержден|общие результаты|100\s*%|official final|certified results", text, re.I))
+    return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,10 +73,19 @@ class SearchSnapshot:
     searched_at: str = ""
     attempts: tuple[dict[str, object], ...] = ()
     latency_ms: int = 0
+    mode: str = "web"
+    since: str = ""
+    until: str = ""
 
     def compact_summary(self, max_items: int = 3, max_chars: int = 1600) -> str:
         """Return bounded facts for the model; URLs stay in durable metadata."""
         lines = [f"Результаты поиска по запросу «{model_text(self.query, 300)}»:"]
+        if _outcome_query(self.query):
+            lines.append("Нужен итог события: расписание, подготовка и прогнозы не подтверждают победителя. Проверяй год события; не дополняй цифры и имена из догадок.")
+            if not any(_outcome_evidence(r) for r in self.results):
+                lines.append("Найдена только информация по теме; подтверждённого итога в полученном содержании нет.")
+            elif not any(_final_outcome_evidence(r) for r in self.results):
+                lines.append("Получены предварительные итоги; не называй их окончательными.")
         if self.answer:
             lines.append(f"Краткий ответ: {self.answer[:_MAX_SNIPPET_CHARS]}")
         for res in self.results[:max_items]:
@@ -76,6 +107,13 @@ class SearchSnapshot:
             "cached": self.cached,
             "attempts": list(self.attempts),
             "latency_ms": self.latency_ms,
+            "topic": self.query,
+            "mode": self.mode,
+            "since": self.since,
+            "until": self.until,
+            "requested_fact": "outcome" if _outcome_query(self.query) else "",
+            "evidence_status": ("none" if not self.results else "topic_only" if _outcome_query(self.query) and not any(_outcome_evidence(r) for r in self.results)
+                                else "provisional" if _outcome_query(self.query) and not any(_final_outcome_evidence(r) for r in self.results) else "available"),
             "sources": [
                 {"title": item.title, "url": item.url, "published_at": item.published_at,
                  "page_status": item.page_status, "provider": item.provider, "modified_at": item.modified_at}
@@ -298,14 +336,29 @@ def _conflicting_date_claims(results):
 
 class SearchService:
     """Two search providers and optional page evidence under one deadline."""
-    def __init__(self, http_client: httpx.AsyncClient | None = None) -> None:
+    def __init__(self, http_client: httpx.AsyncClient | None = None, *, runtime_settings=None, credentials=None) -> None:
         self._client = http_client
         self._page_client = http_client
         self._cache_lock = asyncio.Lock()
         self._cache = OrderedDict()
         self._inflight, self._inflight_waiters, self._blocked_until = {}, {}, {}
         self._cache_ttl_seconds, self._error_ttl_seconds = 300, 30
-        self._cache_max_entries, self._deadline_seconds = 256, 5.0
+        self._cache_max_entries, self._deadline_seconds = 256, 10.0
+        self._runtime_settings = runtime_settings
+        self._credentials = dict(credentials or {})
+
+    def selected_provider(self) -> str:
+        provider = getattr(self._runtime_settings, "web_search_provider", "free")
+        return provider if provider in API_PROVIDERS else "free"
+
+    def configured_providers(self) -> dict[str, bool]:
+        return {name: bool(self._credentials.get(name)) for name in API_PROVIDERS}
+
+    async def check_provider(self, provider: str) -> dict[str, object]:
+        if provider not in API_PROVIDERS:
+            return {"provider": provider, "status": "invalid"}
+        results, status = await self._api_provider(provider, "Python documentation")
+        return {"provider": provider, "status": status, "results_count": len(results)}
 
     async def _get_client(self):
         if self._client is None or self._client.is_closed:
@@ -326,7 +379,9 @@ class SearchService:
         self._client = self._page_client = None
 
     async def search(self, query: str, *, fallback_query: str | None = None,
-                     preferred_domains: tuple[str, ...] = ()) -> SearchSnapshot:
+                     preferred_domains: tuple[str, ...] = (), force_refresh: bool = False,
+                     mode: str = "web", since: str = "", until: str = "",
+                     deadline: float | None = None) -> SearchSnapshot:
         clean_q = clean_text(query, 300)
         fallback = clean_text(fallback_query or "", 300)
         domains = tuple(sorted({d.lower().strip().removeprefix("www.") for d in preferred_domains
@@ -335,10 +390,10 @@ class SearchService:
             return self._snapshot("", status="empty")
         if sensitive_query(clean_q) or sensitive_query(fallback):
             return self._snapshot(clean_q, status="invalid")
-        key = (clean_q.casefold(), fallback.casefold(), domains)
+        key = (clean_q.casefold(), fallback.casefold(), domains, self.selected_provider(), mode, since, until)
         async with self._cache_lock:
             entry = self._cache.get(key)
-            if entry:
+            if entry and not force_refresh:
                 snap, timestamp = entry
                 ttl = self._cache_ttl_seconds if snap.status == "ok" else self._error_ttl_seconds
                 if time.monotonic() - timestamp < ttl:
@@ -348,7 +403,11 @@ class SearchService:
             task = self._inflight.get(key)
             if task is None:
                 async def run():
-                    snap = await (self._perform_search(clean_q, fallback, domains) if fallback or domains else self._perform_search(clean_q))
+                    options = {"mode": mode, "since": since, "until": until} if mode != "web" or since or until else {}
+                    if deadline is not None:
+                        options["deadline"] = deadline
+                    snap = await (self._perform_search(clean_q, fallback, domains, **options)
+                                  if fallback or domains or options else self._perform_search(clean_q))
                     async with self._cache_lock:
                         self._cache[key] = (snap, time.monotonic())
                         self._cache.move_to_end(key)
@@ -377,9 +436,12 @@ class SearchService:
             return [], "cooldown"
         client = await self._get_client()
         try:
-            async with asyncio.timeout(1.25):
+            async with asyncio.timeout(2.5):
                 if provider == "duckduckgo":
                     response = await client.post("https://html.duckduckgo.com/html/", data={"q": query})
+                elif provider == "google_news":
+                    response = await client.get("https://news.google.com/rss/search",
+                        params={"q": query, "hl": "ru", "gl": "RU", "ceid": "RU:ru"})
                 else:
                     response = await client.get("https://www.bing.com/search", params={"q": query, "format": "rss"})
             lower = response.text.lower()
@@ -394,17 +456,38 @@ class SearchService:
             else:
                 root = ET.fromstring(response.content)
                 results = [SearchResult(clean_text(i.findtext("title") or "", 120),
-                    clean_text(i.findtext("description") or "", 300), canonical_url(i.findtext("link") or ""),
-                    provider="bing") for i in root.findall(".//item")[:8]]
+                    clean_text(re.sub(r"<[^>]+>", " ", html.unescape(i.findtext("description") or "")), 300), canonical_url(i.findtext("link") or ""),
+                    published_at=(parse_date(i.findtext("pubDate") or "").isoformat() if parse_date(i.findtext("pubDate") or "") else ""),
+                    provider=provider) for i in root.findall(".//item")[:10]]
             results = [replace(r, url=canonical_url(r.url)) for r in results if canonical_url(r.url)]
             return results, "ok" if results else "empty"
         except (TimeoutError, httpx.TimeoutException):
             return [], "timeout"
         except (httpx.HTTPError, ValueError, ET.ParseError) as exc:
-            logger.debug("Search provider %s failed: %s", provider, exc)
+            logger.debug("Search provider %s failed: %s", provider, type(exc).__name__)
             return [], "error"
 
-    def _rank(self, query, results, domains):
+    async def _api_provider(self, provider, query, *, mode="web", since="", until=""):
+        key = self._credentials.get(provider)
+        if not key:
+            return [], "unconfigured"
+        if self._blocked_until.get(provider, 0) > time.monotonic():
+            return [], "cooldown"
+        try:
+            async with asyncio.timeout(2.5):
+                rows = await api_search(await self._get_client(), provider, key, query, mode=mode, since=since, until=until)
+            return [SearchResult(**row) for row in rows], "ok" if rows else "empty"
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            if status in {401, 403, 429, 432, 433}:
+                self._blocked_until[provider] = time.monotonic() + 60
+            return [], "unauthorized" if status == 401 else "blocked" if status in {403, 429, 432, 433} else "error"
+        except (TimeoutError, httpx.TimeoutException):
+            return [], "timeout"
+        except (httpx.HTTPError, ValueError, TypeError, AttributeError):
+            return [], "error"
+
+    def _rank(self, query, results, domains, max_items=3):
         scored, seen = [], set()
         for item in results:
             score = relevance(query, item.title + " " + item.snippet + " " + (urllib.parse.urlsplit(item.url).hostname or ""))
@@ -412,9 +495,13 @@ class SearchService:
                 continue
             seen.add(item.url)
             score += 1.0 if preferred_host(item.url, domains) else 0
+            if _outcome_query(query) and _outcome_evidence(item):
+                score += 1.0
+                if _final_outcome_evidence(item):
+                    score += 0.5
             scored.append((score, item))
         scored.sort(key=lambda x: (-x[0], -(parse_date(x[1].published_at).timestamp() if parse_date(x[1].published_at) else 0)))
-        return [r for _, r in scored[:3]]
+        return [r for _, r in scored[:max_items]]
 
     async def _page(self, result, query):
         try:
@@ -428,47 +515,71 @@ class SearchService:
             if text and not relevance(query, result.title + " " + text):
                 text = ""
             modified = [d for v in parser.modified if (d := parse_date(v)) is not None]
-            return replace(result, page_text=text, published_at=date,
+            return replace(result, page_text=text, published_at=date or result.published_at,
                            modified_at=max(modified).isoformat() if modified else "",
                            page_status="read" if text else "unavailable")
         except (TimeoutError, httpx.HTTPError, ValueError, OSError):
             return replace(result, page_status="unavailable")
 
-    async def _perform_search(self, query, fallback_query=None, preferred_domains=()):
+    async def _perform_search(self, query, fallback_query=None, preferred_domains=(), *, mode="web", since="", until="", deadline=None):
         start = time.monotonic()
         attempts, candidates, ranked = [], [], []
-        providers = [("duckduckgo", query), ("bing", query)]
+        outcome = _outcome_query(query)
+        topical = outcome or mode == "news" or bool(re.search(r"новост|недавн|последн.{0,20}(?:геро|перс)|latest.{0,20}(?:hero|update)", query, re.I))
+        providers = [("duckduckgo", query), ("google_news" if topical else "bing", query)]
         if fallback_query and fallback_query.casefold() != query.casefold():
             providers.append(("refine", fallback_query))
         elif preferred_domains:
             providers.append(("duckduckgo", query + " site:" + preferred_domains[0]))
         else:
-            suffix = " официальный источник" if re.search(r"[а-яё]", query, re.I) else " official source"
-            refined = query[:300 - len(suffix)] + suffix
+            refined = re.sub(r"\b(?:полный текст|full text|последний|самый|latest|recently)\b", "", query, flags=re.I)
+            refined = clean_text(refined, 250)
+            if refined == query:
+                refined += " " + ("варианты текст" if re.search(r"анекдот|joke", query, re.I) else "подробности" if re.search(r"[а-яё]", query, re.I) else "details")
             if refined != query:
                 providers.append(("refine", refined))
         refinement_query = providers[2][1] if len(providers) == 3 else None
+        selected = self.selected_provider()
+        if selected != "free":
+            providers.insert(0, (selected, query))
+        limit = 3 if selected == "free" else 4
+        rank_limit = 7 if mode == "news" else 3
         try:
-            async with asyncio.timeout(self._deadline_seconds):
-                for attempt_index in range(min(3, len(providers))):
+            async with asyncio.timeout(min(self._deadline_seconds, max(0, deadline - time.monotonic())) if deadline is not None else self._deadline_seconds):
+                for attempt_index in range(min(limit, len(providers))):
                     provider, actual_query = providers[attempt_index]
                     if provider == "refine":
-                        provider = "bing" if self._blocked_until.get("duckduckgo", 0) > time.monotonic() else "duckduckgo"
+                        provider = "bing" if (topical and not outcome) or self._blocked_until.get("duckduckgo", 0) > time.monotonic() else "duckduckgo"
                     t = time.monotonic()
-                    results, status = await self._provider(provider, actual_query)
+                    results, status = (await self._api_provider(provider, actual_query, mode=mode, since=since, until=until)
+                                       if provider in API_PROVIDERS else await self._provider(provider, actual_query))
+                    if since or until:
+                        lower, upper = parse_date(since), parse_date(until)
+                        results = [r for r in results if not parse_date(r.published_at) or
+                                   ((not lower or parse_date(r.published_at) >= lower) and
+                                    (not upper or parse_date(r.published_at) < upper))]
                     if attempt_index > 0 and actual_query == refinement_query and _conflicting_date_claims(ranked):
                         # On equal relevance, the focused clarification precedes
                         # the broad results that prompted the conflict.
                         candidates = [*results, *candidates]
                     else:
                         candidates.extend(results)
-                    ranked = self._rank(query, candidates, preferred_domains)
+                    ranked = self._rank(query, candidates, preferred_domains, rank_limit)
                     attempts.append({"provider": provider, "query": actual_query[:300], "status": status,
+                                     "raw_count": len(results),
                                      "accepted": len(self._rank(query, results, preferred_domains)),
                                      "latency_ms": round((time.monotonic() - t) * 1000)})
                     preferred_found = any(preferred_host(r.url, preferred_domains) for r in ranked)
                     conflict = _conflicting_date_claims(ranked)
                     if ranked and (not preferred_domains or preferred_found):
+                        if outcome and not any(_final_outcome_evidence(r) for r in ranked):
+                            # A schedule page is related, but does not answer
+                            # who won. Use the remaining bounded providers.
+                            continue
+                        if topical and attempt_index == 0 and not any(parse_date(r.published_at) for r in ranked):
+                            # A fresh-event query needs dated evidence, not just
+                            # a plausible title from the first general provider.
+                            continue
                         if attempt_index == 0 and conflict and len(providers) == 3:
                             # Go straight to the one refinement when relevant
                             # results disagree. Repeating the broad query loses
@@ -476,25 +587,31 @@ class SearchService:
                             providers[1], providers[2] = providers[2], providers[1]
                         elif not conflict or (attempt_index > 0 and self._rank(query, results, preferred_domains)):
                             break
-                needs_pages = bool(re.search(r"релиз|выход|выйдет|верси|release|version|\bкогда\b|\bdate\b", query, re.I))
+                needs_pages = topical or bool(re.search(r"релиз|выход|выйдет|верси|release|version|\bкогда\b|\bdate\b|полны|текст|анекдот|вариант|joke|full text|геро|перс", query, re.I))
                 date_claims = {m.group(0) for r in ranked for m in re.finditer(r"\b20\d{2}\b", r.snippet)}
                 if ranked and (needs_pages or len(date_claims) > 1):
                     reads = await asyncio.gather(*(self._page(r, query) for r in ranked[:2]))
-                    ranked = self._rank(query, [*reads, *ranked[2:]], preferred_domains)
+                    evidence = [*reads, *ranked[2:]]
+                    lower, upper = parse_date(since), parse_date(until)
+                    evidence = [r for r in evidence if not parse_date(r.published_at) or
+                                ((not lower or parse_date(r.published_at) >= lower) and
+                                 (not upper or parse_date(r.published_at) < upper))]
+                    ranked = self._rank(query, evidence, preferred_domains, rank_limit)
         except TimeoutError:
             pass
         except asyncio.CancelledError:
             raise
         status = "ok" if ranked else (attempts[-1]["status"] if attempts else "timeout")
-        if status in {"ok", "cooldown"} and not ranked:
-            status = "empty" if status == "ok" else "blocked"
+        if not ranked:
+            statuses = {a["status"] for a in attempts}
+            status = "empty" if "ok" in statuses or "empty" in statuses else "blocked" if statuses & {"blocked", "cooldown"} else "timeout" if "timeout" in statuses else status
         providers_used = "+".join(dict.fromkeys(r.provider for r in ranked)) or "+".join(dict.fromkeys(a["provider"] for a in attempts))
         return self._snapshot(query, results=ranked, status=status, provider=providers_used or "duckduckgo",
-                              attempts=tuple(attempts), latency_ms=round((time.monotonic() - start) * 1000))
+                              attempts=tuple(attempts), latency_ms=round((time.monotonic() - start) * 1000), mode=mode, since=since, until=until)
 
     @staticmethod
     def _snapshot(query, *, results=None, answer=None, status, **kwargs):
-        return SearchSnapshot(query=query, results=tuple((results or [])[:3]), answer=answer,
+        return SearchSnapshot(query=query, results=tuple((results or [])[:7 if kwargs.get("mode") == "news" else 3]), answer=answer,
                               status=status, searched_at=datetime.now(UTC).isoformat(), **kwargs)
 
     def _parse_ddg_html(self, html_text, max_items=3):

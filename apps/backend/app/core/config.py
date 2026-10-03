@@ -8,9 +8,10 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, Settings
 from apps.backend.app.llm.models import DEEPSEEK_FLASH_MODEL, canonical_deepseek_model
 
 
-_SECRET_SETTING_NAMES = frozenset({"deepseek_api_key", "coding_api_key"})
+_SECRET_SETTING_NAMES = frozenset({"deepseek_api_key", "coding_api_key", "brave_api_key", "tavily_api_key", "serper_api_key"})
 _runtime_deepseek_api_key: str | None = None
 _runtime_coding_api_key: str | None = None
+_runtime_search_api_keys: dict[str, str | None] = {}
 
 
 class _SourceWithoutApiKeys(PydanticBaseSettingsSource):
@@ -61,6 +62,9 @@ class Settings(BaseSettings):
         )
 
     app_name: str = "Iris"
+    brave_api_key: str | None = Field(default=None, repr=False)
+    tavily_api_key: str | None = Field(default=None, repr=False)
+    serper_api_key: str | None = Field(default=None, repr=False)
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = DEEPSEEK_FLASH_MODEL
@@ -416,6 +420,7 @@ def get_settings() -> Settings:
     return Settings(
         deepseek_api_key=_runtime_deepseek_api_key,
         coding_api_key=_runtime_coding_api_key,
+        **{f"{provider}_api_key": _runtime_search_api_keys.get(provider) for provider in ("brave", "tavily", "serper")},
     )
 
 
@@ -423,11 +428,14 @@ def configure_runtime_credentials(
     *,
     deepseek_api_key: str | None,
     coding_api_key: str | None,
+    search_api_keys: dict[str, str | None] | None = None,
 ) -> None:
     """Install desktop-provided credentials in memory before app creation."""
     global _runtime_deepseek_api_key, _runtime_coding_api_key
     _runtime_deepseek_api_key = _clean_secret(deepseek_api_key)
     _runtime_coding_api_key = _clean_secret(coding_api_key)
+    _runtime_search_api_keys.clear()
+    _runtime_search_api_keys.update({p: _clean_secret((search_api_keys or {}).get(p)) for p in ("brave", "tavily", "serper")})
     get_settings.cache_clear()
 
 

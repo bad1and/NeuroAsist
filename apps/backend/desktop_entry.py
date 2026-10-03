@@ -41,6 +41,7 @@ def load_runtime_credentials() -> None:
     configure_runtime_credentials(
         deepseek_api_key=_optional_string(payload.get("deepseek_api_key")),
         coding_api_key=_optional_string(payload.get("coding_api_key")),
+        search_api_keys={p: _optional_string(payload.get(f"{p}_api_key")) for p in ("brave", "tavily", "serper")},
     )
 
 

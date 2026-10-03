@@ -137,7 +137,7 @@ def _settings_environment_keys() -> set[str]:
     for node in settings.body:
         if not isinstance(node, ast.AnnAssign) or not isinstance(node.target, ast.Name):
             continue
-        if node.target.id in {"deepseek_api_key", "coding_api_key"}:
+        if node.target.id in {"deepseek_api_key", "coding_api_key", "brave_api_key", "tavily_api_key", "serper_api_key"}:
             continue
         key = node.target.id.upper()
         value = node.value
@@ -155,7 +155,7 @@ def check_environment_reference(errors: list[str]) -> None:
     missing = sorted(_settings_environment_keys() - documented)
     if missing:
         errors.append(".env.example is missing Settings keys: " + ", ".join(missing))
-    leaked_secret_settings = {"DEEPSEEK_API_KEY", "CODING_API_KEY"} & documented
+    leaked_secret_settings = {"DEEPSEEK_API_KEY", "CODING_API_KEY", "BRAVE_API_KEY", "TAVILY_API_KEY", "SERPER_API_KEY"} & documented
     if leaked_secret_settings:
         errors.append(
             ".env.example must not advertise API secrets: "

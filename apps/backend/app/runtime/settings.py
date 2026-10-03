@@ -94,6 +94,7 @@ class RuntimeSettings:
     news_enabled: bool = True
     news_category: str = "all"
     web_search_enabled: bool = True
+    web_search_provider: str = "free"
 
 
 class RuntimeSettingsStore:
@@ -139,6 +140,8 @@ class RuntimeSettingsStore:
             values["live_conversation_enabled"] = True
             if values.get("interface_locale") not in {None, "ru", "en"}:
                 values["interface_locale"] = defaults.interface_locale
+            if values.get("web_search_provider") not in {None, "free", "brave", "tavily", "serper"}:
+                values["web_search_provider"] = "free"
             if values.get("avatar_placement") not in {None, "desktop_overlay", "in_app"}:
                 values["avatar_placement"] = defaults.avatar_placement
             persisted_coding_model = values.get("coding_model")
