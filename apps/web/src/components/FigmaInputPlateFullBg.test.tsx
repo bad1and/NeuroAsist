@@ -74,16 +74,18 @@ describe("FigmaInputPlateFullBg", () => {
     }
   });
 
-  it.each([0, 48, 200])("не обводит стык с доком и скрытый хвост при высоте %i", (height) => {
+  it.each([0, 48, 200])("продолжает правый контур до конца хвоста без обводки стыка при высоте %i", (height) => {
     const { container } = render(<FigmaInputPlateFullBg extraHeight={height} />);
     const focus = container.querySelector(".tactile-plate-focus path")!;
     const bevel = container.querySelector(".tactile-plate-edge path")!;
     const outline = focus.getAttribute("d")!;
     expect(outline).toBe(bevel.getAttribute("d"));
-    expect(outline).toMatch(new RegExp(`^M839 ${73.5 + height}V70`));
+    expect(outline).toMatch(new RegExp(`^M839 ${133.5 + height}V70`));
     expect(outline).toContain("C821.426 10 807.284 10 779 10H456.25");
     expect(outline).toMatch(new RegExp(`392.75 ${73.5 + height}$`));
     expect(outline).not.toContain("Z");
+    expect(outline).not.toContain("H839");
+    expect(outline).not.toContain("L830.213");
     expect(container.querySelector(".tactile-plate-focus use")).toBeNull();
   });
 });

@@ -1,3 +1,4 @@
+import { MaterialButton } from "./MaterialButton";
 import { useEffect, useState, type RefObject } from "react";
 import { Copy, Menu, Minus, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -53,7 +54,7 @@ export function WindowChrome({
     >
       <div className="window-chrome-title" data-tauri-drag-region>
         {onOpenNavigation && (
-          <button
+          <MaterialButton materialKey={"WindowChrome.button-1"}
             ref={navigationButtonRef}
             className="icon-button menu-toggle"
             type="button"
@@ -67,18 +68,20 @@ export function WindowChrome({
             title={navigationOpen ? "Закрыть меню" : "Открыть меню"}
           >
             {navigationOpen ? <X size={19} aria-hidden="true" /> : <Menu size={19} aria-hidden="true" />}
-          </button>
+          </MaterialButton>
         )}
         {title && <h1 data-tauri-drag-region>{title}</h1>}
       </div>
       <div className="window-chrome-actions">
         {desktop && (
           <div className="window-controls" aria-label="Управление окном">
-            <button onClick={(e) => { animateButtonPress(e.currentTarget); void getCurrentWindow().minimize(); }} aria-label="Свернуть окно"><Minus size={14} /></button>
-            <button onClick={(e) => { animateButtonPress(e.currentTarget); void toggleMaximize(); }} aria-label={maximized ? "Восстановить окно" : "Развернуть окно"}>
+            <MaterialButton materialKey={"WindowChrome.button-2"} appearance="quiet" tone="success" onClick={(e) => { animateButtonPress(e.currentTarget); void getCurrentWindow().minimize(); }} aria-label="Свернуть окно"><Minus size={14} /></MaterialButton>
+            <MaterialButton materialKey={"WindowChrome.button-3"} appearance="quiet" tone="warning" onClick={(e) => { animateButtonPress(e.currentTarget); void toggleMaximize(); }} aria-label={maximized ? "Восстановить окно" : "Развернуть окно"}>
               {maximized ? <Copy size={12} /> : <Square size={12} />}
-            </button>
-            <button
+            </MaterialButton>
+            <MaterialButton materialKey={"WindowChrome.button-4"}
+              appearance="quiet"
+              tone="danger"
               className="window-close"
               onClick={(e) => {
                 animateButtonPress(e.currentTarget);
@@ -91,7 +94,7 @@ export function WindowChrome({
               aria-label="Закрыть Iris"
             >
               <X size={15} />
-            </button>
+            </MaterialButton>
           </div>
         )}
       </div>

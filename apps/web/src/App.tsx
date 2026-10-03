@@ -1,3 +1,4 @@
+import { MaterialButton, MaterialButtonGroup } from "./components/MaterialButton";
 import { BackgroundConversationControls, BackgroundConversationExpandButton } from "./components/BackgroundConversationControls";
 import { CustomSelect } from "./components/CustomSelect";
 import { CorpusSurface } from "./components/CorpusSurface";
@@ -31,6 +32,7 @@ import {
   Key,
   Terminal,
   MessageSquare,
+  MessageSquarePlus,
   Timer,
   Volume2,
   Mic,
@@ -57,12 +59,7 @@ import {
   FigmaSettingsIcon,
   FigmaExitIcon,
   FigmaNewChatIcon,
-  FigmaSquareButtonBg,
-  FigmaFinishButtonBg,
-  FigmaNewChatButtonBg,
   FigmaDockBg,
-  FigmaDualMediaButtonBg,
-  FigmaStartButtonBg,
   FigmaInputPlateFullBg,
 } from "./FigmaIcons";
 
@@ -389,7 +386,7 @@ function AutoSaveStatus({ status, onRetry }: { status: AutoSaveStatus; onRetry: 
 
   if (status === "saving") return <span ref={elRef} className="settings-save-status is-saving" role="status">Сохраняем…</span>;
   if (status === "error") {
-    return <span ref={elRef} className="settings-save-status is-error" role="alert">Не удалось сохранить <button type="button" onClick={(e) => { animateButtonPress(e.currentTarget); onRetry(); }}>Повторить</button></span>;
+    return <span ref={elRef} className="settings-save-status is-error" role="alert">Не удалось сохранить <MaterialButton materialKey={"App.button-1"} type="button" onClick={(e) => { animateButtonPress(e.currentTarget); onRetry(); }}>Повторить</MaterialButton></span>;
   }
   if (status === "saved") return <span ref={elRef} className="settings-save-status is-saved" role="status">Сохранено</span>;
   return null;
@@ -1149,13 +1146,14 @@ function Sidebar({
       </div>
       <nav className="sidebar-nav" aria-label="Разделы приложения">
         {MAIN_NAVIGATION.map(({ id, label, icon: Icon }) => (
-          <NavigationButton key={id} icon={Icon} label={label} active={activeView === id} compact={isCollapsed} onClick={() => onNavigate(id)} />
+          <NavigationButton key={id} materialKey={`navigation.${id}`} icon={Icon} label={label} active={activeView === id} compact={isCollapsed} onClick={() => onNavigate(id)} />
         ))}
       </nav>
       <div className="sidebar-footer">
         <div className="sidebar-footer-row">
-          <NavigationButton icon={FigmaSettingsIcon} label="Настройки" active={activeView === "settings"} compact={isCollapsed} iconSize={24} onClick={() => onNavigate("settings")} />
-          <button
+          <NavigationButton materialKey="navigation.settings" icon={FigmaSettingsIcon} label="Настройки" active={activeView === "settings"} compact={isCollapsed} iconSize={24} onClick={() => onNavigate("settings")} />
+          <MaterialButton materialKey={"App.button-2"}
+            appearance="quiet"
             className="icon-button sidebar-collapse-toggle"
             type="button"
             aria-label={isCollapsed ? "Развернуть меню" : "Свернуть меню"}
@@ -1167,7 +1165,7 @@ function Sidebar({
             }}
           >
             {isCollapsed ? <IconInterfaceCursorArrow2 size={19} aria-hidden="true" /> : <IconInterfaceCursorArrow2 size={19} aria-hidden="true" />}
-          </button>
+          </MaterialButton>
         </div>
       </div>
     </aside>
@@ -1175,6 +1173,7 @@ function Sidebar({
 }
 
 function NavigationButton({
+  materialKey,
   icon: Icon,
   label,
   active,
@@ -1182,6 +1181,7 @@ function NavigationButton({
   iconSize = 21,
   onClick,
 }: {
+  materialKey: string;
   icon: any;
   label: string;
   active: boolean;
@@ -1190,7 +1190,7 @@ function NavigationButton({
   onClick: () => void;
 }) {
   return (
-    <button
+    <MaterialButton materialKey={materialKey}
       className={`navigation-button${active ? " is-active" : ""}`}
       aria-label={label}
       aria-current={active ? "page" : undefined}
@@ -1203,7 +1203,7 @@ function NavigationButton({
     >
       <Icon size={iconSize} aria-hidden="true" />
       <span>{label}</span>
-    </button>
+    </MaterialButton>
   );
 }
 
@@ -2715,34 +2715,34 @@ export function ChatPage({
                 </defs>
                 <image href="/brand/chat-start-banner.png" width="829" height="121" preserveAspectRatio="xMidYMid slice" clipPath="url(#banner-squircle-clip)" />
               </svg>
-              <button
+              <MaterialButton materialKey={"App.button-4"}
                 className="chat-start-button"
                 type="button"
                 onClick={handleStart}
                 title="Начать"
                 aria-label="Начать"
               >
-                <FigmaStartButtonBg className="btn-shape-bg" preserveAspectRatio="none" />
                 <span className="btn-content">
                   <IrisPetalsIcon size={28} />
                   <span>НАЧАТЬ</span>
                 </span>
-              </button>
+              </MaterialButton>
             </div>
           </div>
         </div>
         <AppDialog
           open={newDialogConfirmationOpen}
           title="Начать новый диалог?"
+          icon={<MessageSquarePlus size={24} aria-hidden="true" />}
           description="Текущий диалог будет завершён и сохранён в истории. Начнётся новый разговор с Iris."
           onClose={() => !newDialogPending && setNewDialogConfirmationOpen(false)}
           variant="danger"
         >
           <div className="dialog-actions">
-            <button className="secondary" type="button" disabled={newDialogPending} onClick={() => setNewDialogConfirmationOpen(false)}>
+            <MaterialButton materialKey={"App.button-5"} className="secondary" type="button" disabled={newDialogPending} onClick={() => setNewDialogConfirmationOpen(false)}>
               Отмена
-            </button>
-            <button
+            </MaterialButton>
+            <MaterialButton materialKey={"App.button-6"}
               className="danger-button"
               type="button"
               disabled={newDialogPending}
@@ -2750,8 +2750,8 @@ export function ChatPage({
               aria-label="Начать новый диалог"
               title="Начать новый диалог"
             >
-              {newDialogPending ? "Создаю…" : "Новый"}
-            </button>
+              {newDialogPending ? "Создаю…" : "Новый диалог"}
+            </MaterialButton>
           </div>
         </AppDialog>
       </section>
@@ -2780,7 +2780,7 @@ export function ChatPage({
         {memoryNotice && (
           <div className="notice" role="status">
             {memoryNotice}
-            <button className="text-button" onClick={onOpenMemory}>Открыть память</button>
+            <MaterialButton materialKey={"App.button-7"} className="text-button" onClick={onOpenMemory}>Открыть память</MaterialButton>
           </div>
         )}
         <ConversationSurface
@@ -2860,7 +2860,7 @@ export function ChatPage({
                   rows={1}
                   title="Enter — отправить сообщение; Shift+Enter — новая строка"
                 />
-                <button
+                <MaterialButton materialKey={"App.button-8"}
                   className="send-button"
                   type="submit"
                   disabled={!sessionId || sessionStarting || loading || !draft.trim().length}
@@ -2869,16 +2869,16 @@ export function ChatPage({
                   title={sessionStarting ? "Подготавливаем сессию" : loading ? "Отправка сообщения" : "Отправить сообщение"}
                 >
                   <SendHorizontal size={18} aria-hidden="true" />
-                </button>
+                </MaterialButton>
               </div>
             </div>
 
             <div className="chat-dock-toolbar voice-controls">
               <FigmaDockBg className="dock-bg-svg" preserveAspectRatio="none" />
               <div className="dock-left-actions">
-                <div className="dock-dual-pill">
-                  <FigmaDualMediaButtonBg className="dual-pill-bg" preserveAspectRatio="none" />
-                  <button
+                <MaterialButtonGroup materialKey="chat.media-controls" muted={[microphoneMuted, soundMuted]} className="dock-dual-pill" role="group" aria-label="Микрофон и звук">
+                  <MaterialButton materialKey={"App.button-9"}
+                    appearance="joined" tone={microphoneMuted ? "danger" : "graphite"}
                     className={`dock-dual-btn ${microphoneMuted ? "is-muted" : ""}${microphoneStarting ? " is-loading" : ""}`}
                     disabled={!liveVoiceSupported || !sessionId || microphoneStarting || voiceState === "stopping"}
                     onClick={(e) => {
@@ -2902,11 +2902,13 @@ export function ChatPage({
                     }
                     aria-label={microphoneStarting ? "Микрофон подключается" : "Live"}
                     aria-busy={microphoneStarting}
+                    aria-pressed={liveConversation && !microphoneMuted}
                     type="button"
                   >
                     <FigmaMicIcon width={24} height={26} />
-                  </button>
-                  <button
+                  </MaterialButton>
+                  <MaterialButton materialKey={"App.button-10"}
+                    appearance="joined" tone={soundMuted ? "danger" : "graphite"}
                     className={`dock-dual-btn ${soundMuted ? "is-muted" : ""}`}
                     onClick={(e) => {
                       animateButtonPress(e.currentTarget);
@@ -2914,13 +2916,14 @@ export function ChatPage({
                     }}
                     title={soundMuted ? "Звук выключен (нажмите, чтобы включить)" : "Звук включён (нажмите, чтобы выключить)"}
                     aria-label={soundMuted ? "Звук выключен" : "Звук включён"}
+                    aria-pressed={!soundMuted}
                     type="button"
                   >
                     <FigmaHeadphonesIcon width={26} height={25} />
-                  </button>
-                </div>
+                  </MaterialButton>
+                </MaterialButtonGroup>
 
-                <button
+                <MaterialButton materialKey={"App.button-11"}
                   className="dock-icon-btn"
                   onClick={(e) => {
                     animateButtonPress(e.currentTarget);
@@ -2930,12 +2933,11 @@ export function ChatPage({
                   aria-label="Параметры"
                   type="button"
                 >
-                  <FigmaSquareButtonBg className="btn-shape-bg" preserveAspectRatio="none" />
                   <span className="btn-content"><FigmaSettingsIcon width={26} height={26} /></span>
-                </button>
+                </MaterialButton>
               </div>
 
-              <button
+              <MaterialButton materialKey={"App.button-12"}
                 className="dock-finish-btn"
                 type="button"
                 onClick={(e) => {
@@ -2945,14 +2947,13 @@ export function ChatPage({
                 title="Завершить"
                 aria-label="Завершить"
               >
-                <FigmaFinishButtonBg className="btn-shape-bg" preserveAspectRatio="none" />
                 <span className="btn-content">
                   <FigmaExitIcon />
                   <span>Завершить</span>
                 </span>
-              </button>
+              </MaterialButton>
 
-              <button
+              <MaterialButton materialKey={"App.button-13"}
                 className="dock-new-dialog-btn new-dialog-button"
                 disabled={!sessionId || sessionStarting || newDialogPending || voiceState === "recording" || voiceState === "transcribing"}
                 onClick={(e) => {
@@ -2963,12 +2964,11 @@ export function ChatPage({
                 aria-label="Новый диалог"
                 type="button"
               >
-                <FigmaNewChatButtonBg className="btn-shape-bg" preserveAspectRatio="none" />
                 <span className="btn-content">
                   <FigmaNewChatIcon />
                   <span>Новый диалог</span>
                 </span>
-              </button>
+              </MaterialButton>
             </div>
           </form>
         </div>
@@ -2990,15 +2990,16 @@ export function ChatPage({
       <AppDialog
         open={newDialogConfirmationOpen}
         title="Начать новый диалог?"
+        icon={<MessageSquarePlus size={24} aria-hidden="true" />}
         description="Текущий диалог будет завершён и сохранён в истории. Начнётся новый разговор с Iris."
         onClose={() => !newDialogPending && setNewDialogConfirmationOpen(false)}
         variant="danger"
       >
         <div className="dialog-actions">
-          <button className="secondary" type="button" disabled={newDialogPending} onClick={() => setNewDialogConfirmationOpen(false)}>
+          <MaterialButton materialKey={"App.button-14"} className="secondary" type="button" disabled={newDialogPending} onClick={() => setNewDialogConfirmationOpen(false)}>
             Отмена
-          </button>
-          <button
+          </MaterialButton>
+          <MaterialButton materialKey={"App.button-15"}
             className="danger-button"
             type="button"
             disabled={newDialogPending}
@@ -3006,8 +3007,8 @@ export function ChatPage({
             aria-label="Начать новый диалог"
             title="Начать новый диалог"
           >
-            {newDialogPending ? "Создаю…" : "Новый"}
-          </button>
+            {newDialogPending ? "Создаю…" : "Новый диалог"}
+          </MaterialButton>
         </div>
       </AppDialog>
     </section>
@@ -3056,7 +3057,7 @@ function EventsPage({
             </div>
           </div>
           <div className="settings-card-header-actions">
-            <button
+            <MaterialButton materialKey={"App.button-16"}
               className="secondary"
               onClick={(e) => {
                 animateButtonPress(e.currentTarget);
@@ -3067,16 +3068,16 @@ function EventsPage({
             >
               <RefreshCw size={15} aria-hidden="true" />
               Обновить
-            </button>
+            </MaterialButton>
           </div>
         </div>
       ) : (
         <div className="panel-header">
           <div><h2>Журнал системы</h2><span>Технические события и диагностика</span></div>
-          <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void onRefreshEvents(); }}>
+          <MaterialButton materialKey={"App.button-17"} className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void onRefreshEvents(); }}>
             <IconInterfaceSpirals size={16} aria-hidden="true" />
             Обновить
-          </button>
+          </MaterialButton>
         </div>
       )}
 
@@ -3085,7 +3086,7 @@ function EventsPage({
           (level) => {
             const labels: Record<LevelFilter, string> = { all: "Все", debug: "Отладка", info: "Информация", warning: "Предупреждения", error: "Ошибки", critical: "Критические" };
             return (
-            <button
+            <MaterialButton materialKey={["App.button-18", level].join(":")}
               key={level}
               className={levelFilter === level ? "is-active" : ""}
               onClick={(e) => {
@@ -3094,7 +3095,7 @@ function EventsPage({
               }}
             >
               {labels[level]}
-            </button>
+            </MaterialButton>
           );
           },
         )}
@@ -3598,22 +3599,22 @@ export function SettingsPage({
             </label>
 
             <div className="settings-card-actions">
-              <button
+              <MaterialButton materialKey={"App.button-19"}
                 className="primary-button"
                 type="button"
                 disabled={saving || !desktopCredentialStorageAvailable || !deepseekApiKeyInput.trim()}
                 onClick={() => void saveApiCredential("deepseek")}
               >
                 {settings.api_key_configured ? "Заменить ключ" : "Сохранить ключ"}
-              </button>
-              <button
+              </MaterialButton>
+              <MaterialButton materialKey={"App.button-20"}
                 className="danger-button"
                 type="button"
                 disabled={saving || !desktopCredentialStorageAvailable || !settings.api_key_configured}
                 onClick={() => void removeApiCredential("deepseek")}
               >
                 Удалить
-              </button>
+              </MaterialButton>
             </div>
           </div>
 
@@ -3651,22 +3652,22 @@ export function SettingsPage({
             </label>
 
             <div className="settings-card-actions">
-              <button
+              <MaterialButton materialKey={"App.button-21"}
                 className="primary-button"
                 type="button"
                 disabled={saving || !desktopCredentialStorageAvailable || !codingApiKeyInput.trim()}
                 onClick={() => void saveApiCredential("coding")}
               >
                 {settings.coding_api_key_configured ? "Заменить ключ" : "Сохранить ключ"}
-              </button>
-              <button
+              </MaterialButton>
+              <MaterialButton materialKey={"App.button-22"}
                 className="danger-button"
                 type="button"
                 disabled={saving || !desktopCredentialStorageAvailable || !settings.coding_api_key_configured}
                 onClick={() => void removeApiCredential("coding")}
               >
                 Удалить
-              </button>
+              </MaterialButton>
             </div>
           </div>
 
@@ -4028,14 +4029,14 @@ export function SettingsPage({
 
             <div className="readonly-setting audio-device-refresh">
               <span>Аудиоустройства</span>
-              <button
+              <MaterialButton materialKey={"App.button-23"}
                 className="secondary"
                 type="button"
                 onClick={() => void refreshAudioDevices(true)}
                 disabled={saving || audioDevicesLoading}
               >
                 {audioDevicesLoading ? "Обновляем…" : "Разрешить доступ и обновить"}
-              </button>
+              </MaterialButton>
               {audioDevicesMessage && <small role="status">{audioDevicesMessage}</small>}
             </div>
           </div>
@@ -4091,9 +4092,9 @@ export function SettingsPage({
               <small>Исправляются только перечисленные варианты. Нечёткий поиск и LLM не используются.</small>
             </label>
             <div className="settings-card-actions">
-              <button className="secondary" type="button" onClick={() => void saveSttTerms()} disabled={saving || !developerModeEnabled}>
+              <MaterialButton materialKey={"App.button-24"} className="secondary" type="button" onClick={() => void saveSttTerms()} disabled={saving || !developerModeEnabled}>
                 Сохранить словарь распознавания
-              </button>
+              </MaterialButton>
             </div>
           </div>
 
@@ -4126,9 +4127,9 @@ export function SettingsPage({
               </small>
             </label>
             <div className="settings-card-actions">
-              <button className="secondary" type="button" onClick={() => void savePronunciations()} disabled={saving || !developerModeEnabled}>
+              <MaterialButton materialKey={"App.button-25"} className="secondary" type="button" onClick={() => void savePronunciations()} disabled={saving || !developerModeEnabled}>
                 Сохранить словарь
-              </button>
+              </MaterialButton>
             </div>
           </div>
 
@@ -4185,7 +4186,7 @@ export function SettingsPage({
             </div>
 
             <div className="settings-card-actions">
-              <button
+              <MaterialButton materialKey={"App.button-26"}
                 className="secondary"
                 type="button"
                 aria-expanded={showSttCapture}
@@ -4194,7 +4195,7 @@ export function SettingsPage({
                 onClick={() => setShowSttCapture((value) => !value)}
               >
                 {showSttCapture ? "Скрыть сбор тестовых записей" : "Собрать приватный STT-корпус"}
-              </button>
+              </MaterialButton>
             </div>
           </div>
 
@@ -4541,7 +4542,7 @@ function SettingsNavigation({
       {SETTINGS_NAVIGATION.map((group) => {
         if (group.directSection) {
           return (
-            <button
+            <MaterialButton materialKey={["App.button-27", group.id].join(":")}
               key={group.id}
               type="button"
               className={`settings-nav-direct${current === group.directSection ? " is-active" : ""}`}
@@ -4553,7 +4554,7 @@ function SettingsNavigation({
             >
               <group.icon size={20} aria-hidden="true" />
               <span>{group.label}</span>
-            </button>
+            </MaterialButton>
           );
         }
         const isExpanded = expanded[group.id] ?? false;
@@ -4561,7 +4562,7 @@ function SettingsNavigation({
         const childrenId = `settings-nav-children-${group.id}`;
         return (
           <div className={`settings-nav-group${isActive ? " is-active" : ""}`} key={group.id}>
-            <button
+            <MaterialButton materialKey={["App.button-28", group.id].join(":")}
               type="button"
               className="settings-nav-group-button"
               aria-expanded={isExpanded}
@@ -4574,7 +4575,7 @@ function SettingsNavigation({
               <group.icon size={20} aria-hidden="true" />
               <span>{group.label}</span>
               <ChevronDown className="settings-nav-chevron" size={15} aria-hidden="true" />
-            </button>
+            </MaterialButton>
             <div id={childrenId} className="settings-nav-children" hidden={!isExpanded}>
               {group.items.map((item) => (
                 <SettingsSectionButton
@@ -4612,7 +4613,7 @@ function SettingsSectionButton({
 }) {
   const isDimmed = Boolean(devOnly && !developerMode);
   return (
-    <button
+    <MaterialButton materialKey={"settings.navigation." + section}
       type="button"
       className={`settings-nav-button${section === current ? " is-active" : ""}${isDimmed ? " is-dev-dimmed" : ""}`}
       aria-current={section === current ? "page" : undefined}
@@ -4622,7 +4623,7 @@ function SettingsSectionButton({
       }}
     >
       <span>{label}</span>
-    </button>
+    </MaterialButton>
   );
 }
 
@@ -4692,10 +4693,10 @@ function ModelManager({
           </div>
         </div>
         <div className="settings-card-header-actions">
-          <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void refresh(); }}>
+          <MaterialButton materialKey={"App.button-30"} className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void refresh(); }}>
             <RefreshCw size={15} aria-hidden="true" />
             Обновить
-          </button>
+          </MaterialButton>
         </div>
       </div>
       {models.map((model) => {
@@ -4712,24 +4713,24 @@ function ModelManager({
           {model.status === "downloading" && <progress value={percent} max="100">{percent}%</progress>}
           <div className="model-actions">
             {!model.installed && (
-              <button
+              <MaterialButton materialKey={["App.button-31", model.id].join(":")}
                 className="primary-button"
                 onClick={(e) => { animateButtonPress(e.currentTarget); void install(model.id); }}
                 disabled={!developerMode || model.status === "downloading"}
                 title={!developerMode ? "Требуется режим разработчика" : undefined}
               >
                 {model.status === "failed" ? "Повторить загрузку" : "Скачать"}
-              </button>
+              </MaterialButton>
             )}
             {model.installed && (
-              <button
+              <MaterialButton materialKey={["App.button-32", model.id].join(":")}
                 className="secondary danger-button"
                 onClick={(e) => { animateButtonPress(e.currentTarget); void remove(model.id); }}
                 disabled={!developerMode}
                 title={!developerMode ? "Требуется режим разработчика" : undefined}
               >
                 Удалить
-              </button>
+              </MaterialButton>
             )}
           </div>
           {model.restart_required && model.installed && <small>Перезапустите Iris, чтобы использовать модель.</small>}
@@ -4784,9 +4785,9 @@ function BackupControls() {
           </div>
         </div>
         <div className="settings-card-header-actions">
-          <button className="primary-button" onClick={(e) => { animateButtonPress(e.currentTarget); void create(); }} disabled={busy}>
+          <MaterialButton materialKey={"App.button-33"} className="primary-button" onClick={(e) => { animateButtonPress(e.currentTarget); void create(); }} disabled={busy}>
             {busy ? "Создаём…" : "Создать копию"}
-          </button>
+          </MaterialButton>
         </div>
       </div>
       {backups.length ? (
@@ -4888,7 +4889,7 @@ function SystemMaintenance({
                 Сами записи останутся на месте. Iris заново подготовит их для поиска.
               </p>
             </div>
-            <button
+            <MaterialButton materialKey={"App.button-34"}
               type="button"
               className="secondary"
               disabled={busy || !developerMode}
@@ -4903,7 +4904,7 @@ function SystemMaintenance({
               }}
             >
               Перестроить индекс памяти
-            </button>
+            </MaterialButton>
           </div>
         </div>
 
@@ -4919,7 +4920,7 @@ function SystemMaintenance({
                 История диалогов сохранится, но восстановить записи памяти будет нельзя.
               </p>
             </div>
-            <button
+            <MaterialButton materialKey={"App.button-35"}
               type="button"
               className="secondary danger-button"
               disabled={busy || !developerMode}
@@ -4934,7 +4935,7 @@ function SystemMaintenance({
               }}
             >
               Очистить память
-            </button>
+            </MaterialButton>
           </div>
 
           <div className="maintenance-row">
@@ -4945,7 +4946,7 @@ function SystemMaintenance({
                 История, сводки и долгосрочная память будут удалены без возможности восстановления.
               </p>
             </div>
-            <button
+            <MaterialButton materialKey={"App.button-36"}
               type="button"
               className="danger-button"
               disabled={busy || !developerMode}
@@ -4956,7 +4957,7 @@ function SystemMaintenance({
               }}
             >
               Сбросить все данные
-            </button>
+            </MaterialButton>
           </div>
         </div>
       </div>
@@ -4972,17 +4973,17 @@ function SystemMaintenance({
         variant="danger"
       >
         <div className="dialog-actions">
-          <button className="secondary" type="button" disabled={busy} onClick={() => setPendingAction(null)}>
+          <MaterialButton materialKey={"App.button-37"} className="secondary" type="button" disabled={busy} onClick={() => setPendingAction(null)}>
             Отмена
-          </button>
-          <button
+          </MaterialButton>
+          <MaterialButton materialKey={"App.button-38"}
             className="danger-button"
             type="button"
             disabled={busy || !developerMode}
             onClick={() => pendingAction && void run(pendingAction.action, pendingAction.success)}
           >
             {busy ? "Выполняю…" : "Подтвердить"}
-          </button>
+          </MaterialButton>
         </div>
       </AppDialog>
 
@@ -5016,7 +5017,7 @@ function SystemMaintenance({
           />
 
           <div className="dialog-actions">
-            <button
+            <MaterialButton materialKey={"App.button-39"}
               className="secondary"
               type="button"
               disabled={busy}
@@ -5026,15 +5027,15 @@ function SystemMaintenance({
               }}
             >
               Отмена
-            </button>
-            <button
+            </MaterialButton>
+            <MaterialButton materialKey={"App.button-40"}
               className="danger-button"
               type="button"
               disabled={busy || !developerMode || !isPhraseMatched}
               onClick={() => void handleResetConfirm()}
             >
               {busy ? "Выполняю…" : "Сбросить все данные"}
-            </button>
+            </MaterialButton>
           </div>
         </div>
       </AppDialog>
@@ -5166,9 +5167,9 @@ function AvatarControls({
               <span className="settings-status-dot" />
               {enabled ? `${avatarStatus?.client_count ?? 0} подключено` : "Интеграция отключена"}
             </span>
-            <button className="icon-button" onClick={() => void onRefresh()} disabled={busy} aria-label="Обновить статус аватара" title="Обновить статус аватара">
+            <MaterialButton materialKey={"App.button-41"} className="icon-button" onClick={() => void onRefresh()} disabled={busy} aria-label="Обновить статус аватара" title="Обновить статус аватара">
               <RefreshCw size={15} />
-            </button>
+            </MaterialButton>
           </div>
         </div>
 
@@ -5233,7 +5234,7 @@ function AvatarControls({
             Автономный стенд тестировщика: проверка всех 24 эмоций, 20 жестов, сценариев речи и системных уведомлений.
           </span>
         </div>
-        <button
+        <MaterialButton materialKey={"App.button-42"}
           type="button"
           className="primary-button"
           onClick={() => onOpenQaStudio?.()}
@@ -5241,7 +5242,7 @@ function AvatarControls({
         >
           <Sparkles size={14} />
           Открыть окно тестирования
-        </button>
+        </MaterialButton>
       </div>
 
       <details className="avatar-technical">
@@ -5291,10 +5292,10 @@ function AvatarControls({
         </label>
         </div>
         <div className="avatar-test-actions" style={{ marginTop: 16 }}>
-          <button className="primary-button" onClick={(e) => { animateButtonPress(e.currentTarget); void run(() => sendAvatarTestPhrase({ text: phrase, emotion }), "Тестовая фраза отправлена."); }} disabled={!enabled || busy || !developerMode || !phrase.trim()}>Отправить фразу</button>
-          <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void run(() => sendAvatarTestEmotion({ emotion, intensity: 1 }), "Эмоция отправлена."); }} disabled={!enabled || busy || !developerMode}>Отправить эмоцию</button>
-          <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void run(() => sendAvatarTestGesture({ gesture, intensity: motionIntensity, interrupt: true }), "Тестовый жест отправлен."); }} disabled={!enabled || busy || !developerMode}>Отправить жест</button>
-          <button className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void run(stopAvatar, "Движение сброшено."); }} disabled={!enabled || busy || !developerMode}>Сбросить движение</button>
+          <MaterialButton materialKey={"App.button-43"} className="primary-button" onClick={(e) => { animateButtonPress(e.currentTarget); void run(() => sendAvatarTestPhrase({ text: phrase, emotion }), "Тестовая фраза отправлена."); }} disabled={!enabled || busy || !developerMode || !phrase.trim()}>Отправить фразу</MaterialButton>
+          <MaterialButton materialKey={"App.button-44"} className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void run(() => sendAvatarTestEmotion({ emotion, intensity: 1 }), "Эмоция отправлена."); }} disabled={!enabled || busy || !developerMode}>Отправить эмоцию</MaterialButton>
+          <MaterialButton materialKey={"App.button-45"} className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void run(() => sendAvatarTestGesture({ gesture, intensity: motionIntensity, interrupt: true }), "Тестовый жест отправлен."); }} disabled={!enabled || busy || !developerMode}>Отправить жест</MaterialButton>
+          <MaterialButton materialKey={"App.button-46"} className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void run(stopAvatar, "Движение сброшено."); }} disabled={!enabled || busy || !developerMode}>Сбросить движение</MaterialButton>
         </div>
       </details>
       {message && <div className="notice" role="status">{message}</div>}

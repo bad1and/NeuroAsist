@@ -85,6 +85,107 @@ describe("Unified Notification System", () => {
   });
 
   describe("NotificationHost component", () => {
+    it("resumes the remaining lifetime after repeated pointer pauses", () => {
+      act(() => { notify.info("Таймер", "Сообщение", { duration: 4500 }); });
+      render(<NotificationHost />);
+      const card = screen.getByRole("status");
+      act(() => { vi.advanceTimersByTime(1500); });
+      fireEvent.mouseEnter(card);
+      const offset = card.querySelector<SVGPathElement>(".notification-countdown path")!.style.strokeDashoffset;
+      expect(Number(offset)).toBeCloseTo(-100 / 3);
+      act(() => { vi.advanceTimersByTime(10000); });
+      expect(screen.getByText("Таймер")).toBeInTheDocument();
+      fireEvent.mouseLeave(card);
+      act(() => { vi.advanceTimersByTime(1000); });
+      fireEvent.mouseEnter(card);
+      act(() => { vi.advanceTimersByTime(5000); });
+      fireEvent.mouseLeave(card);
+      act(() => { vi.advanceTimersByTime(1999); });
+      expect(card).not.toHaveClass("is-exiting");
+      act(() => { vi.advanceTimersByTime(1); });
+      expect(card).toHaveClass("is-exiting");
+      act(() => { vi.advanceTimersByTime(200); });
+      expect(screen.queryByText("Таймер")).toBeNull();
+    });
+
+    it("keeps the countdown paused while focus moves between controls or details stay open", () => {
+      act(() => { notify.info("Подробности", "Сообщение", { duration: 4500, details: "Длинный лог" }); });
+      render(<NotificationHost />);
+      const card = screen.getByRole("status");
+      const expand = screen.getByRole("button", { name: "Развернуть подробности" });
+      const close = screen.getByRole("button", { name: "Закрыть уведомление" });
+      act(() => { vi.advanceTimersByTime(1500); });
+      fireEvent.focus(expand);
+      act(() => { vi.advanceTimersByTime(5000); });
+      fireEvent.blur(expand, { relatedTarget: close });
+      fireEvent.focus(close);
+      act(() => { vi.advanceTimersByTime(5000); });
+      fireEvent.click(expand);
+      fireEvent.blur(close, { relatedTarget: document.body });
+      act(() => { vi.advanceTimersByTime(5000); });
+      expect(card).not.toHaveClass("is-exiting");
+      fireEvent.click(screen.getByRole("button", { name: "Свернуть подробности" }));
+      act(() => { vi.advanceTimersByTime(2999); });
+      expect(card).not.toHaveClass("is-exiting");
+      act(() => { vi.advanceTimersByTime(1); });
+      expect(card).toHaveClass("is-exiting");
+    });
+
+    it("keeps an unfinished task visible and starts a fresh countdown on completion", () => {
+      act(() => { notify.info("Загрузка", "Подготовка", { id: "task", duration: 2000, progress: .5 }); });
+      render(<NotificationHost />);
+      expect(screen.getByRole("status").querySelector(".notification-countdown")).toBeNull();
+      act(() => { vi.advanceTimersByTime(10000); });
+      expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "50");
+      act(() => { notify.info("Готово", "Подготовлено", { id: "task", duration: 2000, progress: 1 }); });
+      expect(screen.queryByRole("progressbar")).toBeNull();
+      expect(screen.getByRole("status").querySelector(".notification-countdown")).not.toBeNull();
+      act(() => { vi.advanceTimersByTime(2000); });
+      expect(screen.getByRole("status")).toHaveClass("is-exiting");
+    });
+
+    it("does not reset an active countdown when the same notification's content updates", () => {
+      act(() => { notify.info("Сохранено", "Первый текст", { id: "update", duration: 3000 }); });
+      render(<NotificationHost />);
+      act(() => { vi.advanceTimersByTime(2000); });
+      act(() => { notify.info("Сохранено", "Обновлённый текст", { id: "update", duration: 3000 }); });
+      act(() => { vi.advanceTimersByTime(1000); });
+      expect(screen.getByRole("status")).toHaveClass("is-exiting");
+    });
+
+    it("measures the mounted card and follows resizing without resetting its remaining time", () => {
+      let height = 72;
+      let resize = () => {};
+      const widthMock = vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(410);
+      const heightMock = vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains("notification-card") ? height : 28;
+      });
+      vi.stubGlobal("ResizeObserver", class {
+        constructor(private callback: () => void) {}
+        observe(element: Element) { if (element.classList.contains("notification-card")) resize = this.callback; }
+        disconnect() {}
+      });
+      try {
+        act(() => { notify.info("Размер", "Сообщение", { duration: 3000 }); });
+        const view = render(<NotificationHost />);
+        const card = screen.getByRole("status");
+        const svg = card.querySelector(".notification-countdown")!;
+        expect(svg).toHaveAttribute("viewBox", "0 0 410 72");
+        act(() => { vi.advanceTimersByTime(1000); });
+        fireEvent.mouseEnter(card);
+        const path = card.querySelector<SVGPathElement>(".notification-countdown path")!;
+        const offset = path.style.strokeDashoffset;
+        height = 180;
+        act(() => resize());
+        expect(svg).toHaveAttribute("viewBox", "0 0 410 180");
+        expect(path.style.strokeDashoffset).toBe(offset);
+        fireEvent.mouseLeave(card);
+        act(() => { vi.advanceTimersByTime(2000); });
+        expect(card).toHaveClass("is-exiting");
+        view.unmount();
+      } finally { widthMock.mockRestore(); heightMock.mockRestore(); vi.unstubAllGlobals(); }
+    });
+
     it("uses shared entrance and waits for the shared exit before removing a toast", () => {
       let finishExit: (() => void) | undefined;
       const motion = vi.spyOn(animations, "animateNotification").mockImplementation((_card, phase, finish) => {
@@ -102,19 +203,22 @@ describe("Unified Notification System", () => {
         expect(screen.queryByText("Анимация")).toBeNull();
       } finally { motion.mockRestore(); }
     });
-    it("keeps the conversation slot above notifications after timers and dismiss-all", () => {
+    it("keeps the same conversation slot below notifications after timers and dismiss-all", () => {
       const pinnedContentRef = React.createRef<HTMLDivElement>();
       render(<NotificationHost pinnedContentRef={pinnedContentRef} />);
       const conversation = document.createElement("div");
       conversation.textContent = "Разговор продолжается";
       pinnedContentRef.current!.appendChild(conversation);
+      const slot = pinnedContentRef.current;
       act(() => { notify.info("Новое уведомление", "Сообщение"); });
       const host = screen.getByRole("complementary", { name: "Уведомления приложения" });
-      expect(host.firstElementChild).toBe(pinnedContentRef.current);
+      expect(host.lastElementChild).toBe(slot);
+      expect(host.firstElementChild).toContainElement(screen.getByText("Новое уведомление"));
       act(() => { vi.advanceTimersByTime(5000); });
       expect(screen.getByText("Разговор продолжается")).toBeVisible();
       act(() => { notify.dismissAll(); });
-      expect(host.firstElementChild).toContainElement(conversation);
+      expect(pinnedContentRef.current).toBe(slot);
+      expect(host.lastElementChild).toContainElement(conversation);
     });
     it("renders nothing when there are no notifications", () => {
       const { container } = render(<NotificationHost />);

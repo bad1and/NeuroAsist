@@ -1,3 +1,4 @@
+import { MaterialButton } from "./components/MaterialButton";
 import { CustomSelect } from "./components/CustomSelect";
 import { AppSwitch } from "./components/AppSwitch";
 import { AppDialog } from "./components/AppDialog";
@@ -318,7 +319,7 @@ export function CodingAgentPage({
     <section className="coding-panel" ref={containerRef} aria-labelledby="coding-agent-title">
       <nav className="settings-navigation coding-navigation" aria-label="Разделы Coding Agent">
         {CODING_SECTIONS.map(({ id, label, icon: Icon }) => (
-          <button
+          <MaterialButton materialKey={["coding.button-1", id].join(":")}
             key={id}
             type="button"
             className={`settings-nav-direct${activeSection === id ? " is-active" : ""}`}
@@ -330,7 +331,7 @@ export function CodingAgentPage({
           >
             <Icon size={20} aria-hidden="true" />
             <span>{label}</span>
-          </button>
+          </MaterialButton>
         ))}
       </nav>
 
@@ -349,7 +350,7 @@ export function CodingAgentPage({
               /* Полноэкранный детальный просмотр выбранной задачи */
               <main className="coding-detail-panel" ref={detailRef}>
                 <div className="coding-detail-nav">
-                  <button
+                  <MaterialButton materialKey={"coding.button-2"}
                     type="button"
                     className="secondary coding-back-button"
                     onClick={(e) => {
@@ -360,11 +361,11 @@ export function CodingAgentPage({
                   >
                     <ChevronLeft size={16} aria-hidden="true" />
                     <span>Назад к списку задач</span>
-                  </button>
+                  </MaterialButton>
 
                   <div className="coding-detail-actions">
                     {ACTIVE_TASKS.has(selected.status) && (
-                      <button
+                      <MaterialButton materialKey={"coding.button-3"}
                         className="danger-button"
                         type="button"
                         disabled={busy}
@@ -374,10 +375,10 @@ export function CodingAgentPage({
                         }}
                       >
                         <IconInterfaceTimeStopWatchCircle size={15} /> Остановить
-                      </button>
+                      </MaterialButton>
                     )}
                     {["failed", "cancelled", "waiting_for_input", "conflicted"].includes(selected.status) && (
-                      <button
+                      <MaterialButton materialKey={"coding.button-4"}
                         className="secondary"
                         type="button"
                         disabled={busy}
@@ -387,10 +388,10 @@ export function CodingAgentPage({
                         }}
                       >
                         <IconInterfaceSpirals size={15} /> Повторить
-                      </button>
+                      </MaterialButton>
                     )}
                     {selected.status === "review_ready" && (
-                      <button
+                      <MaterialButton materialKey={"coding.button-5"}
                         className="primary-button"
                         type="button"
                         disabled={busy}
@@ -401,7 +402,7 @@ export function CodingAgentPage({
                       >
                         <IconInterfaceFavoriteLike1 size={16} />{" "}
                         {selected.project_root ? "Применить изменения" : "Подтвердить результат"}
-                      </button>
+                      </MaterialButton>
                     )}
                   </div>
                 </div>
@@ -525,13 +526,13 @@ export function CodingAgentPage({
                         placeholder="Например: проверь также обработку пустой строки или добавь комментарии к коду"
                         disabled={busy || !ACTIVE_TASKS.has(selected.status)}
                       />
-                      <button
+                      <MaterialButton materialKey={"coding.button-6"}
                         className="secondary"
                         type="submit"
                         disabled={busy || !ACTIVE_TASKS.has(selected.status) || !instruction.trim()}
                       >
                         Отправить указание
-                      </button>
+                      </MaterialButton>
                     </form>
                     <p className="coding-hint">
                       Уточнение передаётся агенту на следующем шаге. Если задача ожидает решения, она продолжится
@@ -549,7 +550,7 @@ export function CodingAgentPage({
                     <p>Очередь выполнения, ревью кода, diff изменений и логи событий в реальном времени.</p>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <button
+                    <MaterialButton materialKey={"coding.button-7"}
                       className="primary-button"
                       type="button"
                       onClick={(e) => {
@@ -558,8 +559,8 @@ export function CodingAgentPage({
                       }}
                     >
                       <IconInterfaceCursorArrow2 size={16} /> Новая задача
-                    </button>
-                    <button
+                    </MaterialButton>
+                    <MaterialButton materialKey={"coding.button-8"}
                       className="secondary"
                       type="button"
                       disabled={busy || tasks.length === 0 || Boolean(active)}
@@ -570,7 +571,7 @@ export function CodingAgentPage({
                       title="Очистить завершённые задачи"
                     >
                       <IconInterfaceDeleteBin3 size={15} /> Очистить
-                    </button>
+                    </MaterialButton>
                   </div>
                 </header>
 
@@ -589,7 +590,8 @@ export function CodingAgentPage({
                       aria-label="Поиск по задачам"
                     />
                     {searchQuery && (
-                      <button
+                      <MaterialButton materialKey={"coding.button-9"}
+                        appearance="quiet"
                         className="search-clear-btn"
                         type="button"
                         onClick={() => setSearchQuery("")}
@@ -597,9 +599,10 @@ export function CodingAgentPage({
                         title="Очистить поиск"
                       >
                         <X size={12} aria-hidden="true" />
-                      </button>
+                      </MaterialButton>
                     )}
-                    <button
+                    <MaterialButton materialKey={"coding.button-10"}
+                      appearance="quiet"
                       className="icon-button"
                       type="button"
                       onClick={(e) => {
@@ -610,15 +613,16 @@ export function CodingAgentPage({
                       aria-label="Обновить задачи"
                     >
                       <IconInterfaceSpirals size={16} className={busy ? "is-spinning" : ""} />
-                    </button>
-                    <button
+                    </MaterialButton>
+                    <MaterialButton materialKey={"coding.button-11"}
+                      appearance="quiet"
                       className="icon-button search-submit"
                       type="submit"
                       title="Найти задачи"
                       aria-label="Найти задачи"
                     >
                       <IconInterfaceSearch size={16} />
-                    </button>
+                    </MaterialButton>
                   </form>
 
                   <div className="coding-filters" role="tablist" aria-label="Фильтр статусов">
@@ -630,7 +634,7 @@ export function CodingAgentPage({
                         { id: "completed", label: "Завершены" },
                       ] as Array<{ id: TaskFilter; label: string }>
                     ).map(({ id, label }) => (
-                      <button
+                      <MaterialButton materialKey={["coding.button-12", id].join(":")}
                         key={id}
                         type="button"
                         className={`coding-filter-pill${taskFilter === id ? " is-active" : ""}`}
@@ -640,7 +644,7 @@ export function CodingAgentPage({
                         }}
                       >
                         {label}
-                      </button>
+                      </MaterialButton>
                     ))}
                   </div>
                 </div>
@@ -655,7 +659,7 @@ export function CodingAgentPage({
                         : "Поставьте агенту задачу для написания кода или тестирования в изолированной Docker-песочнице."}
                     </span>
                     {!searchQuery && (
-                      <button
+                      <MaterialButton materialKey={"coding.button-13"}
                         className="primary-button"
                         type="button"
                         onClick={(e) => {
@@ -664,13 +668,13 @@ export function CodingAgentPage({
                         }}
                       >
                         <IconInterfaceCursorArrow2 size={16} /> Создать первую задачу
-                      </button>
+                      </MaterialButton>
                     )}
                   </div>
                 ) : (
                   <div className="coding-tasks-grid" ref={tasksListRef}>
                     {filteredTasks.map((task) => (
-                      <button
+                      <MaterialButton materialKey={["coding.button-14", task.id].join(":")}
                         type="button"
                         key={task.id}
                         className="coding-task-card"
@@ -700,7 +704,7 @@ export function CodingAgentPage({
                             )}
                           </span>
                         </div>
-                      </button>
+                      </MaterialButton>
                     ))}
                   </div>
                 )}
@@ -737,7 +741,7 @@ export function CodingAgentPage({
                       : formatDockerAvailabilityReason(status?.availability_reason)}
                   </p>
                 </div>
-                <button
+                <MaterialButton materialKey={"coding.button-15"}
                   type="button"
                   className="secondary"
                   style={{ minHeight: "32px", padding: "4px 10px", fontSize: "12px", alignSelf: "center" }}
@@ -747,7 +751,7 @@ export function CodingAgentPage({
                   }}
                 >
                   Диагностика Docker
-                </button>
+                </MaterialButton>
               </div>
             )}
 
@@ -818,15 +822,15 @@ export function CodingAgentPage({
               </div>
 
               <div className="coding-form-actions">
-                <button
+                <MaterialButton materialKey={"coding.button-16"}
                   className="primary-button"
                   type="submit"
                   disabled={busy || !status?.enabled || !dockerReady || objective.trim().length < 3}
                   onClick={(e) => animateButtonPress(e.currentTarget)}
                 >
                   <IconInterfaceCursorArrow2 size={16} /> Передать агенту
-                </button>
-                <button
+                </MaterialButton>
+                <MaterialButton materialKey={"coding.button-17"}
                   className="secondary"
                   type="button"
                   onClick={(e) => {
@@ -835,7 +839,7 @@ export function CodingAgentPage({
                   }}
                 >
                   Отмена
-                </button>
+                </MaterialButton>
               </div>
 
               <p className="coding-hint" style={{ marginTop: "4px" }}>
@@ -854,7 +858,7 @@ export function CodingAgentPage({
                 <h2>Песочница и окружение Docker</h2>
                 <p>Диагностика контейнеризации, образа песочницы и изоляции рабочих папок.</p>
               </div>
-              <button
+              <MaterialButton materialKey={"coding.button-18"}
                 className="secondary"
                 type="button"
                 onClick={(e) => {
@@ -864,7 +868,7 @@ export function CodingAgentPage({
                 disabled={busy}
               >
                 <IconInterfaceSpirals size={16} className={busy ? "is-spinning" : ""} /> Обновить окружение
-              </button>
+              </MaterialButton>
             </header>
 
             {error && (
@@ -978,9 +982,9 @@ export function CodingAgentPage({
                 <div>
                   <strong>API-ключ не настроен:</strong>
                   <p>Для работы кодинг-агента сохраните отдельный Coding API-ключ в настройках приложения.</p>
-                  <button className="secondary" type="button" onClick={onOpenApiSettings}>
+                  <MaterialButton materialKey={"coding.button-19"} className="secondary" type="button" onClick={onOpenApiSettings}>
                     Открыть настройки API
-                  </button>
+                  </MaterialButton>
                 </div>
               </div>
             )}
@@ -1091,15 +1095,15 @@ export function CodingAgentPage({
         variant="danger"
       >
         <div className="dialog-actions">
-          <button
+          <MaterialButton materialKey={"coding.button-20"}
             className="secondary"
             type="button"
             disabled={busy}
             onClick={() => setPendingClearTasks(false)}
           >
             {translateInterfaceText("Отмена", currentInterfaceLocale())}
-          </button>
-          <button
+          </MaterialButton>
+          <MaterialButton materialKey={"coding.button-21"}
             className="danger-button"
             type="button"
             disabled={busy}
@@ -1108,7 +1112,7 @@ export function CodingAgentPage({
             {busy
               ? translateInterfaceText("Очищаю…", currentInterfaceLocale())
               : translateInterfaceText("Очистить", currentInterfaceLocale())}
-          </button>
+          </MaterialButton>
         </div>
       </AppDialog>
     </section>

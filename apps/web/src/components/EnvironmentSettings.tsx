@@ -1,3 +1,4 @@
+import { MaterialButton } from "./MaterialButton";
 import { useCallback, useEffect, useState } from "react";
 import { getEnvironmentStatus, updateRuntimeSettings } from "../api";
 import { AppSwitch } from "./AppSwitch";
@@ -142,13 +143,13 @@ export function EnvironmentSettings({
                   }
                 }}
               />
-              <button
+              <MaterialButton materialKey={"EnvironmentSettings.button-1"}
                 type="button"
                 className="secondary"
                 onClick={() => void handleSaveCity()}
               >
                 {citySaved ? "Сохранено ✓" : "Сохранить"}
-              </button>
+              </MaterialButton>
             </div>
             <small>Нажмите Enter или «Сохранить», чтобы применить город.</small>
           </label>
@@ -226,14 +227,14 @@ export function EnvironmentSettings({
 
         <div className="readonly-setting audio-device-refresh">
           <span>Данные окружения</span>
-          <button
+          <MaterialButton materialKey={"EnvironmentSettings.button-2"}
             className="secondary"
             type="button"
             onClick={() => void refreshStatus()}
             disabled={loading}
           >
             {loading ? "Обновляем…" : "Обновить данные"}
-          </button>
+          </MaterialButton>
         </div>
 
         {developerMode && envStatus?.ambient_header && (

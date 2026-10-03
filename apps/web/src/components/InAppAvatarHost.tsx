@@ -1,3 +1,4 @@
+import { MaterialButton } from "./MaterialButton";
 import { useLayoutEffect, useRef, useState } from "react";
 
 import {
@@ -134,9 +135,9 @@ export function InAppAvatarHost({
           </strong>
           <span>{retryError ?? status?.error ?? "Unity не подтвердила готовность за отведённое время."}</span>
           {phase !== "disabled" && onRetry && (
-            <button className="secondary" type="button" disabled={retrying} onClick={() => void retry()}>
+            <MaterialButton materialKey={"InAppAvatarHost.button-1"} className="secondary" type="button" disabled={retrying} onClick={() => void retry()}>
               {retrying ? "Перезапускаю…" : "Повторить"}
-            </button>
+            </MaterialButton>
           )}
         </div>
       )}

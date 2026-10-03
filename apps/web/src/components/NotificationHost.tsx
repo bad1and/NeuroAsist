@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
+import { MaterialButton } from "./MaterialButton";
+import React, { useState, useLayoutEffect, useRef, useCallback } from "react";
 import {
   IconInterfaceCross,
   IconInterfaceCheckCircle,
@@ -13,6 +14,10 @@ import {
 } from "../CustomIcons";
 import { useNotifications, notify, type AppNotification, type NotificationType } from "../notifications";
 import { animateButtonPress, animateNotification, NOTIFICATION_EXIT_DURATION } from "../animations";
+import { buttonSeed } from "./buttonMaterial";
+import { NotificationCountdown, NotificationTaskProgress, useNotificationCountdown } from "./NotificationCountdown";
+import { useNotificationDialogOffset } from "./useNotificationDialogOffset";
+import "./NotificationHost.css";
 
 interface NotificationHostProps {
   pinnedContentRef?: React.RefObject<HTMLDivElement | null>;
@@ -43,7 +48,7 @@ interface NotificationCardProps {
   remainingCount?: number;
 }
 
-function NotificationCard({
+export function NotificationCard({
   notification,
   onNavigate,
   onDismiss,
@@ -51,10 +56,18 @@ function NotificationCard({
 }: NotificationCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
   const [copied, setCopied] = useState(false);
   const exitingTimerRef = useRef<number | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  const countdownRef = useRef<SVGPathElement>(null);
+  const seed = buttonSeed(`notification.${notification.id}`);
+  const taskProgress = notification.progress === undefined
+    ? null : Math.min(1, Math.max(0, notification.progress));
+  const taskRunning = taskProgress !== null && taskProgress < 1;
+  const duration = notification.duration === "persistent" || taskRunning ? null : notification.duration ?? 4500;
+  const isPaused = isHovered || isFocused || isExpanded || isExiting;
 
   const handleDismiss = useCallback(() => {
     if (isExiting) return;
@@ -76,26 +89,7 @@ function NotificationCard({
     };
   }, [isExiting, notification.id, onDismiss]);
 
-  // Smart auto-dismiss timer
-  useEffect(() => {
-    if (notification.duration === "persistent" || isPaused || isExiting) {
-      return;
-    }
-
-    const duration = notification.duration ?? 4500;
-    const timer = window.setTimeout(() => {
-      handleDismiss();
-    }, duration);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [notification.duration, isPaused, isExiting, handleDismiss]);
-
-  const isAutoDismiss = notification.duration !== "persistent" && typeof notification.duration === "number";
-  const taskProgress = notification.progress === undefined
-    ? null
-    : Math.min(1, Math.max(0, notification.progress));
+  useNotificationCountdown({ duration, paused: isPaused, onComplete: handleDismiss, pathRef: countdownRef });
   const hasDetails = Boolean(notification.details);
   const isLongMessage = (notification.message?.length ?? 0) > 90 || notification.message?.includes("\n");
   const canExpand = hasDetails || isLongMessage;
@@ -129,9 +123,15 @@ function NotificationCard({
       ref={cardRef}
       className={`notification-card notification-type-${notification.type}${
         isExiting ? " is-exiting" : ""
-      }${isExpanded ? " is-expanded" : ""}${notification.navigateView ? " is-clickable" : ""}`}
-      onMouseEnter={() => setIsPaused(true)}
-      onMouseLeave={() => setIsPaused(false)}
+      }${isExpanded ? " is-expanded" : ""}${notification.navigateView ? " is-clickable" : ""}${taskProgress !== null && duration === null ? " has-task-progress" : ""}`}
+      data-countdown-paused={duration !== null ? isPaused : undefined}
+      data-material-seed={seed}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      onFocus={() => setIsFocused(true)}
+      onBlur={(event) => {
+        if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setIsFocused(false);
+      }}
       onClick={handleCardClick}
       role={notification.type === "error" ? "alert" : "status"}
     >
@@ -142,7 +142,7 @@ function NotificationCard({
           <div className="notification-title-row">
             <strong className="notification-title">{notification.title}</strong>
             {remainingCount > 0 && (
-              <button
+              <MaterialButton materialKey={"NotificationHost.button-1." + notification.id}
                 type="button"
                 className="notification-stack-badge"
                 title="Остальные уведомления в очереди"
@@ -154,7 +154,7 @@ function NotificationCard({
               >
                 <IconInterfaceFilesFolderCopy2 size={11} aria-hidden="true" />
                 <span>+{remainingCount}</span>
-              </button>
+              </MaterialButton>
             )}
           </div>
 
@@ -163,7 +163,7 @@ function NotificationCard({
           </p>
 
           {canExpand && (
-            <button
+            <MaterialButton materialKey={"NotificationHost.button-2." + notification.id}
               type="button"
               className="notification-expand-link"
               aria-label={isExpanded ? "Свернуть подробности" : "Развернуть подробности"}
@@ -180,31 +180,14 @@ function NotificationCard({
               ) : (
                 <IconInterfaceChevronDown size={10} aria-hidden="true" />
               )}
-            </button>
+            </MaterialButton>
           )}
         </div>
 
         <div className="notification-side-actions">
-          {notification.actions && notification.actions.length > 0 ? (
-            notification.actions.map((action, idx) => (
-              <button
-                key={idx}
-                type="button"
-                className={`notification-action-btn notification-pill-btn${
-                  action.variant === "primary" ? " is-primary" : " is-secondary"
-                }`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  animateButtonPress(e.currentTarget);
-                  action.onClick();
-                  handleDismiss();
-                }}
-              >
-                {action.label}
-              </button>
-            ))
-          ) : canCopy && isError ? (
-            <button
+          {canCopy && isError && !notification.actions?.length ? (
+            <MaterialButton materialKey={"NotificationHost.button-4." + notification.id}
+              appearance="quiet"
               type="button"
               className={`notification-copy-btn${copied ? " is-copied" : ""}`}
               aria-label={copied ? "Скопировано!" : "Скопировать"}
@@ -220,10 +203,11 @@ function NotificationCard({
                 <IconInterfaceCopy size={15} aria-hidden="true" />
               )}
               <span className="sr-only">{copied ? "Скопировано!" : "Скопировать"}</span>
-            </button>
+            </MaterialButton>
           ) : null}
 
-          <button
+          <MaterialButton materialKey={"NotificationHost.button-5." + notification.id}
+            appearance="quiet"
             type="button"
             className="notification-control-btn notification-close-btn"
             aria-label="Закрыть уведомление"
@@ -234,15 +218,25 @@ function NotificationCard({
             }}
           >
             <IconInterfaceCross size={16} aria-hidden="true" />
-          </button>
+          </MaterialButton>
         </div>
       </div>
+
+      {Boolean(notification.actions?.length) && <div className="notification-footer-actions">
+        {notification.actions!.map((action, index) => <MaterialButton key={index}
+          materialKey={`notification.${notification.id}.action.${index}`} type="button"
+          className={`notification-action-btn notification-pill-btn ${action.variant === "primary" ? "is-primary" : "is-secondary"}`}
+          onClick={(event) => {
+            event.stopPropagation(); animateButtonPress(event.currentTarget); action.onClick(); handleDismiss();
+          }}>{action.label}</MaterialButton>)}
+      </div>}
 
       {isExpanded && notification.details && (
         <div className="notification-details-wrapper">
           <div className="notification-details-header">
             <span className="notification-details-label">Лог / Подробности</span>
-            <button
+            <MaterialButton materialKey={"NotificationHost.button-6." + notification.id}
+              appearance="quiet"
               type="button"
               className={`notification-details-copy-btn${copied ? " is-copied" : ""}`}
               aria-label={copied ? "Скопировано!" : "Скопировать лог"}
@@ -258,37 +252,25 @@ function NotificationCard({
                 <IconInterfaceCopy size={13} aria-hidden="true" />
               )}
               <span className="sr-only">{copied ? "Скопировано!" : "Скопировать лог"}</span>
-            </button>
+            </MaterialButton>
           </div>
           <pre className="notification-details">{notification.details}</pre>
         </div>
       )}
 
-      {taskProgress !== null ? (
-        <div
-          className="notification-task-progress"
-          role="progressbar"
-          aria-label="Прогресс"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={Math.round(taskProgress * 100)}
-        >
-          <span style={{ width: `${taskProgress * 100}%` }} />
-        </div>
-      ) : isAutoDismiss && (
-        <div
-          className={`notification-progress-bar${isPaused ? " is-paused" : ""}`}
-          style={{ animationDuration: `${notification.duration}ms` }}
-        />
-      )}
+      {taskProgress !== null && duration === null && <NotificationTaskProgress progress={taskProgress} />}
+      {duration !== null && <NotificationCountdown cardRef={cardRef} pathRef={countdownRef} seed={seed} />}
     </div>
   );
 }
 
 export function NotificationHost({ onNavigate, maxVisible = 3, pinnedContentRef }: NotificationHostProps) {
   const notifications = useNotifications();
+  const hostRef = useRef<HTMLElement>(null);
+  const mounted = notifications.length > 0 || Boolean(pinnedContentRef);
+  useNotificationDialogOffset(hostRef, mounted);
 
-  if (notifications.length === 0 && !pinnedContentRef) {
+  if (!mounted) {
     return null;
   }
 
@@ -297,20 +279,25 @@ export function NotificationHost({ onNavigate, maxVisible = 3, pinnedContentRef 
 
   return (
     <aside
+      ref={hostRef}
       className="notification-host"
       aria-label="Уведомления приложения"
       aria-live="polite"
     >
-      {pinnedContentRef && <div ref={pinnedContentRef} className="notification-pinned-slot" />}
-      {visibleNotifications.map((notif, index) => (
-        <NotificationCard
-          key={notif.id}
-          notification={notif}
-          onNavigate={onNavigate}
-          onDismiss={notify.dismiss}
-          remainingCount={index === 0 ? totalRemaining : 0}
-        />
-      ))}
+      {visibleNotifications.length > 0 && (
+        <div key="notifications" className="notification-stack">
+          {visibleNotifications.map((notif, index) => (
+            <NotificationCard
+              key={notif.id}
+              notification={notif}
+              onNavigate={onNavigate}
+              onDismiss={notify.dismiss}
+              remainingCount={index === 0 ? totalRemaining : 0}
+            />
+          ))}
+        </div>
+      )}
+      {pinnedContentRef && <div key="pinned-conversation" ref={pinnedContentRef} className="notification-pinned-slot" />}
     </aside>
   );
 }
