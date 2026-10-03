@@ -24,7 +24,7 @@ import {
   IconInterfaceAlertTriangle,
   IconInterfaceCheckCircle,
 } from "./CustomIcons";
-import { FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, Activity as ViewActivity, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   SendHorizontal,
@@ -153,6 +153,8 @@ import {
   PcmInputClient,
   type MicrophoneProfile,
 } from "./vad";
+import { LoadingRing } from "./components/LoadingRing";
+import { WorkspaceView } from "./components/WorkspaceView";
 import { OverviewPage } from "./overview";
 import {
   configureAvatarPlacement,
@@ -219,22 +221,12 @@ import {
 type AppView = "overview" | "chat" | "journal" | "memory" | "state" | "coding" | "settings";
 
 const JournalPage = lazy(() => import("./journal").then(({ JournalPage }) => ({ default: JournalPage })));
-const MemoryPage = lazy(() => import("./memory").then(({ MemoryPage }) => ({ default: MemoryPage })));
+const MemoryPage = lazy(() => import("./memory").then(({ MemoryPage }) => ({ default: memo(MemoryPage) })));
 const StatePage = lazy(() => import("./state").then(({ StatePage }) => ({ default: StatePage })));
 const CodingAgentPage = lazy(() => import("./coding").then(({ CodingAgentPage }) => ({ default: CodingAgentPage })));
 const LazyChatPage = lazy(() => Promise.resolve({ default: ChatPage }));
 const LazySettingsPage = lazy(() => Promise.resolve({ default: SettingsPage }));
 
-function preloadAppPages() {
-  void import("./journal");
-  void import("./memory");
-  void import("./state");
-  void import("./coding");
-}
-
-function LazyPageFallback() {
-  return <div className="panel page-loading" role="status">Загружаю раздел…</div>;
-}
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "iris.sidebar.collapsed";
 const CHAT_ERROR_AUTO_DISMISS_MS = 8_000;
 type SettingsSection =
@@ -523,20 +515,6 @@ function MainApp() {
   });
   const menuToggleRef = useRef<HTMLButtonElement>(null);
   const backgroundConversationRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setVisitedViews((prev) => {
-      if (prev.has(activeView)) return prev;
-      const next = new Set(prev);
-      next.add(activeView);
-      return next;
-    });
-  }, [activeView]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(preloadAppPages, 400);
-    return () => window.clearTimeout(timer);
-  }, []);
 
   const handleAppClose = useCallback(() => {
     setIsClosing(true);
@@ -964,6 +942,7 @@ function MainApp() {
   };
 
   const switchView = (view: AppView) => {
+    setVisitedViews((previous) => previous.has(view) ? previous : new Set([...previous, view]));
     setActiveView(view);
     closeNavigation();
   };
@@ -991,7 +970,7 @@ function MainApp() {
       />
       <section className="app-content">
         <main className={`workspace workspace-${activeView}`}>
-          <div className="workspace-view-slot" hidden={activeView !== "overview"}>
+          <WorkspaceView active={activeView === "overview"}>
             <OverviewPage
               status={status}
               avatarStatus={avatarStatus}
@@ -1000,9 +979,9 @@ function MainApp() {
               onOpenMemory={() => switchView("memory")}
               onOpenSettings={() => switchView("settings")}
             />
-          </div>
+          </WorkspaceView>
           <div className="chat-view" hidden={activeView !== "chat"}>
-            <Suspense fallback={<LazyPageFallback />}>
+            <Suspense fallback={<LoadingRing className="page-loading" />}>
               <LazyChatPage
                 sessionId={sessionId}
                 sessionStarting={startingSession}
@@ -1024,29 +1003,29 @@ function MainApp() {
             </Suspense>
           </div>
           {visitedViews.has("journal") && (
-            <div className="workspace-view-slot" hidden={activeView !== "journal"}>
-              <Suspense fallback={<LazyPageFallback />}>
+            <WorkspaceView active={activeView === "journal"}>
+              <Suspense fallback={<LoadingRing className="page-loading" />}>
                 <JournalPage onOpenChat={() => switchView("chat")} isActive={activeView === "journal"} />
               </Suspense>
-            </div>
+            </WorkspaceView>
           )}
           {visitedViews.has("memory") && (
-            <div className="workspace-view-slot" hidden={activeView !== "memory"}>
-              <Suspense fallback={<LazyPageFallback />}>
+            <WorkspaceView active={activeView === "memory"}>
+              <Suspense fallback={<LoadingRing className="page-loading" />}>
                 <MemoryPage />
               </Suspense>
-            </div>
+            </WorkspaceView>
           )}
           {visitedViews.has("state") && (
-            <div className="workspace-view-slot" hidden={activeView !== "state"}>
-              <Suspense fallback={<LazyPageFallback />}>
+            <WorkspaceView active={activeView === "state"}>
+              <Suspense fallback={<LoadingRing className="page-loading" />}>
                 <StatePage events={events} />
               </Suspense>
-            </div>
+            </WorkspaceView>
           )}
           {visitedViews.has("coding") && (
-            <div className="workspace-view-slot" hidden={activeView !== "coding"}>
-              <Suspense fallback={<LazyPageFallback />}>
+            <WorkspaceView active={activeView === "coding"}>
+              <Suspense fallback={<LoadingRing className="page-loading" />}>
                 <CodingAgentPage
                   settings={settings}
                   events={events}
@@ -1061,37 +1040,39 @@ function MainApp() {
                   }}
                 />
               </Suspense>
-            </div>
+            </WorkspaceView>
           )}
-          {activeView === "settings" && (
-            <Suspense fallback={<LazyPageFallback />}>
-              <LazySettingsPage
-                settings={settings}
-                initialSection={settingsInitialSection}
-                avatarStatus={avatarStatus}
-                avatarOverlay={avatarOverlay}
-                events={events}
-                onRefreshEvents={refreshEvents}
-                onRefreshAvatar={refreshOverview}
-                onAvatarOverlayChanged={(nextOverlay) => {
-                  overviewRevision.current += 1;
-                  setAvatarOverlay(nextOverlay);
-                }}
-                onInterfaceLocaleChange={(locale) => {
-                  setInterfaceLocale(locale);
-                  setInterfaceLocalePreference(locale);
-                }}
-                onSettingsChanged={(nextSettings) => {
-                  overviewRevision.current += 1;
-                  setSettings(nextSettings);
-                  void refreshOverview();
-                  void refreshEvents();
-                }}
-                qaStudioEnabled={qaStudioOpen}
-                onToggleQaStudioEnabled={handleToggleQaStudio}
-                onOpenQaStudio={() => void handleToggleQaStudio(true)}
-              />
-            </Suspense>
+          {visitedViews.has("settings") && (
+            <WorkspaceView active={activeView === "settings"}>
+              <Suspense fallback={<LoadingRing className="page-loading" />}>
+                <LazySettingsPage
+                  settings={settings}
+                  initialSection={settingsInitialSection}
+                  avatarStatus={avatarStatus}
+                  avatarOverlay={avatarOverlay}
+                  events={events}
+                  onRefreshEvents={refreshEvents}
+                  onRefreshAvatar={refreshOverview}
+                  onAvatarOverlayChanged={(nextOverlay) => {
+                    overviewRevision.current += 1;
+                    setAvatarOverlay(nextOverlay);
+                  }}
+                  onInterfaceLocaleChange={(locale) => {
+                    setInterfaceLocale(locale);
+                    setInterfaceLocalePreference(locale);
+                  }}
+                  onSettingsChanged={(nextSettings) => {
+                    overviewRevision.current += 1;
+                    setSettings(nextSettings);
+                    void refreshOverview();
+                    void refreshEvents();
+                  }}
+                  qaStudioEnabled={qaStudioOpen}
+                  onToggleQaStudioEnabled={handleToggleQaStudio}
+                  onOpenQaStudio={() => void handleToggleQaStudio(true)}
+                />
+              </Suspense>
+            </WorkspaceView>
           )}
         </main>
         <NotificationHost pinnedContentRef={backgroundConversationRef} onNavigate={(view) => switchView(view as AppView)} />
@@ -3466,6 +3447,16 @@ export function SettingsPage({
     }
   };
 
+  const settingsContentRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (settingsContentRef.current) {
+      const motion = animatePageEnter(settingsContentRef.current);
+      return () => { motion?.revert(); };
+    }
+  }, [activeSection, Boolean(settings)]);
+
+
   if (!settings) {
     return (
       <section className="panel">
@@ -3533,18 +3524,6 @@ export function SettingsPage({
 
   const activeSettingsMeta = settingsSectionMeta[activeSection] || { title: "", description: "" };
   const desktopCredentialStorageAvailable = isDesktopApp();
-  const settingsContentRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (settingsContentRef.current) {
-      animatePageEnter(settingsContentRef.current);
-      animateStaggerCards(
-        settingsContentRef.current,
-        "fieldset:not([hidden]), .settings-group:not([hidden]), .settings-grid > *, .system-card, .avatar-placement, .avatar-summary-grid, .avatar-options > *",
-        30,
-      );
-    }
-  }, [activeSection]);
 
   return (
     <section className="panel settings-panel">
@@ -3796,25 +3775,25 @@ export function SettingsPage({
         </div>
 
         <div className="system-stack" hidden={!(["models", "backups", "maintenance", "events"] as SettingsSection[]).includes(activeSection)}>
-          <div hidden={activeSection !== "models"}>
+          <ViewActivity mode={activeSection === "models" ? "visible" : "hidden"}><div hidden={activeSection !== "models"}>
             <ModelManager
               developerMode={developerModeEnabled}
               onUnlockRequest={() => setActiveSection("system-interface")}
             />
-          </div>
-          <div hidden={activeSection !== "backups"}><BackupControls /></div>
-          <div hidden={activeSection !== "maintenance"}>
+          </div></ViewActivity>
+          <ViewActivity mode={activeSection === "backups" ? "visible" : "hidden"}><div hidden={activeSection !== "backups"}><BackupControls /></div></ViewActivity>
+          <ViewActivity mode={activeSection === "maintenance" ? "visible" : "hidden"}><div hidden={activeSection !== "maintenance"}>
             <SystemMaintenance
               developerMode={developerModeEnabled}
               onUnlockRequest={() => setActiveSection("system-interface")}
             />
-          </div>
-          <div hidden={activeSection !== "events"}>
+          </div></ViewActivity>
+          <ViewActivity mode={activeSection === "events" ? "visible" : "hidden"}><div hidden={activeSection !== "events"}>
             <EventsPage events={events} onRefreshEvents={onRefreshEvents} compact />
-          </div>
+          </div></ViewActivity>
         </div>
 
-        <div hidden={activeSection !== "avatar"}>
+        <ViewActivity mode={activeSection === "avatar" ? "visible" : "hidden"}><div hidden={activeSection !== "avatar"}>
           <AvatarControls
             avatarStatus={avatarStatus}
             overlay={avatarOverlay}
@@ -3828,19 +3807,19 @@ export function SettingsPage({
             onSettingsChanged={onSettingsChanged}
             onOpenQaStudio={onOpenQaStudio}
           />
-        </div>
+        </div></ViewActivity>
 
-        <div className="form-grid settings-form" hidden={activeSection !== "environment"}>
+        <ViewActivity mode={activeSection === "environment" ? "visible" : "hidden"}><div className="form-grid settings-form" hidden={activeSection !== "environment"}>
           <EnvironmentSettings
             settings={settings}
             developerMode={developerModeEnabled}
             onSettingsChanged={onSettingsChanged}
           />
-        </div>
+        </div></ViewActivity>
 
-        <div hidden={activeSection !== "token-usage"}>
+        <ViewActivity mode={activeSection === "token-usage" ? "visible" : "hidden"}><div hidden={activeSection !== "token-usage"}>
           <TokenAnalyticsSettings />
-        </div>
+        </div></ViewActivity>
 
         <div className="form-grid settings-form" hidden={activeSection === "token-usage" || activeSection === "avatar" || activeSection === "environment" || activeSection === "system-interface" || activeSection === "api-keys" || activeSection === "system-overview" || ["models", "backups", "maintenance", "events"].includes(activeSection)}>
           {/* VOICE: Language Card */}

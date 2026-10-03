@@ -72,6 +72,7 @@
 
 
 /* Layout stays with each existing control; the shared layers own its finish. */
+:where(button.iris-button[data-material]:not([data-material="plain"])) { position: relative; }
 button.iris-button[data-material]:not([data-material="plain"]) {
   background: transparent !important;
   box-shadow: none !important;

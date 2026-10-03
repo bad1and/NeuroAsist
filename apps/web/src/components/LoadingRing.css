@@ -1,0 +1,18 @@
+.section-loading {
+  display: grid;
+  place-items: center;
+  min-height: 160px;
+  width: 100%;
+}
+.loading-ring {
+  display: block;
+  width: 32px;
+  height: 32px;
+  border: 2px solid color-mix(in srgb, var(--color-text-soft) 12%, transparent);
+  border-top-color: var(--color-focus);
+  border-right-color: color-mix(in srgb, var(--color-focus) 50%, transparent);
+  border-radius: 50%;
+}
+.section-loading.page-loading { min-height: min(50vh, 360px); }
+
+.section-loading.is-inline { min-height: 32px; width: 32px; }

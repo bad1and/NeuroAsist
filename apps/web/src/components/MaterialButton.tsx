@@ -69,19 +69,31 @@ export const MaterialButton = forwardRef<HTMLButtonElement, Props>(function Mate
   useLayoutEffect(() => {
     const element = localRef.current;
     if (!element || mode === "plain") return;
-    const originalPosition = element.style.position;
-    if (getComputedStyle(element).position === "static") element.style.position = "relative";
-    const measure = () => {
-      const { width, height } = element.getBoundingClientRect();
-      const computed = getComputedStyle(element);
-      const squircle = computed.getPropertyValue("corner-shape").includes("squircle") || /\b(icon-button|dock-icon-btn)\b/.test(className);
-      element.dataset.materialSquare = String(mode !== "joined" && width > 0 && Math.abs(width - height) < 1 && squircle);
+    let squircle: boolean | undefined;
+    const measure = (width: number, height: number) => {
+      if (!width || !height) return;
+      squircle ??= getComputedStyle(element).getPropertyValue("corner-shape").includes("squircle") || /\b(icon-button|dock-icon-btn)\b/.test(className);
+      element.dataset.materialSquare = String(mode !== "joined" && Math.abs(width - height) < 1 && squircle);
       element.dataset.materialCompact = String(height <= 80 && width / height <= 3);
     };
-    measure();
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    // ResizeObserver supplies layout results, avoiding a forced synchronous
+    // layout for every individual button during the route commit.
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(entries => {
+      for (const entry of entries) {
+        const box = entry.borderBoxSize?.[0];
+        if (box) measure(box.inlineSize, box.blockSize);
+        else {
+          const rect = element.getBoundingClientRect();
+          measure(rect.width, rect.height);
+        }
+      }
+    });
     observer?.observe(element);
-    return () => { observer?.disconnect(); element.style.position = originalPosition; };
+    if (!observer) {
+      const rect = element.getBoundingClientRect();
+      measure(rect.width, rect.height);
+    }
+    return () => observer?.disconnect();
   }, [mode, className]);
 
   return <button {...props} ref={attach} disabled={disabled}

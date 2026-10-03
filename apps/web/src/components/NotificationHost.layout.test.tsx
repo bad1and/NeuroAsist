@@ -21,7 +21,7 @@ it("reserves the measured confirmation height through resizing and exit, then re
   const resizes: (() => void)[] = [];
   const disconnect = vi.fn();
   vi.stubGlobal("ResizeObserver", class {
-    constructor(callback: () => void) { resizes.push(callback); }
+    constructor(callback: (entries: ResizeObserverEntry[]) => void) { resizes.push(() => callback([])); }
     observe() {}
     unobserve() {}
     disconnect = disconnect;

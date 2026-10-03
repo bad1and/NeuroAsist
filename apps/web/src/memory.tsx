@@ -1,3 +1,4 @@
+import { LoadingRing } from "./components/LoadingRing";
 import { MaterialButton } from "./components/MaterialButton";
 import {
   IconCitiesPoliticsVote,
@@ -25,7 +26,7 @@ import {
 import { CustomSelect } from "./components/CustomSelect";
 import { AppDialog } from "./components/AppDialog";
 import { MoreHorizontal, X } from "lucide-react";
-import { useEffect, useRef, useState, type ComponentType } from "react";
+import { startTransition, useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 
 import {
   deleteMemory,
@@ -129,6 +130,22 @@ function getSlotIcon(memory: MemoryItem): ComponentType<CustomIconProps> {
   return IconComputerDatabase;
 }
 
+const memoryDateFormats = new Map<string, {
+  time: Intl.DateTimeFormat; short: Intl.DateTimeFormat; year: Intl.DateTimeFormat;
+}>();
+function getMemoryDateFormats(locale: string) {
+  let formats = memoryDateFormats.get(locale);
+  if (!formats) {
+    formats = {
+      time: new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }),
+      short: new Intl.DateTimeFormat(locale, { day: "numeric", month: "short" }),
+      year: new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", year: "numeric" }),
+    };
+    memoryDateFormats.set(locale, formats);
+  }
+  return formats;
+}
+
 function formatMemoryDate(dateString?: string | null, id?: string | null) {
   let time: number | null = null;
   
@@ -163,7 +180,8 @@ function formatMemoryDate(dateString?: string | null, id?: string | null) {
   const isYesterday = date.getDate() === yesterday.getDate() && date.getMonth() === yesterday.getMonth() && date.getFullYear() === yesterday.getFullYear();
 
   const locale = currentInterfaceLocale();
-  const timeStr = date.toLocaleTimeString(interfaceIntlLocale(), { hour: "2-digit", minute: "2-digit" });
+  const formats = getMemoryDateFormats(interfaceIntlLocale());
+  const timeStr = formats.time.format(date);
   
   if (isToday) {
     return locale === "en" ? `Today, ${timeStr}` : `Сегодня, ${timeStr}`;
@@ -173,17 +191,29 @@ function formatMemoryDate(dateString?: string | null, id?: string | null) {
   }
   
   const isSameYear = date.getFullYear() === now.getFullYear();
-  let dateStr = date.toLocaleDateString(interfaceIntlLocale(), {
-    day: "numeric",
-    month: "short",
-    ...(isSameYear ? {} : { year: "numeric" })
-  });
+  let dateStr = (isSameYear ? formats.short : formats.year).format(date);
   if (locale === "ru") dateStr = dateStr.replace(" г.", "");
   
   return `${dateStr}, ${timeStr}`;
 }
 
+/** Closed menus should not mount five material controls for every record. */
+function MemoryActionMenu({ children }: { children: ReactNode }) {
+  const [prepared, setPrepared] = useState(false);
+  return <details className="memory-action-menu" onToggle={event => {
+    if (!event.currentTarget.open) setPrepared(false);
+  }}>
+    <summary className="icon-button" role="button" aria-label="Дополнительные действия" title="Действия" onClick={() => setPrepared(true)}>
+      <MoreHorizontal size={18} aria-hidden="true" />
+    </summary>
+    {prepared && children}
+  </details>;
+}
+
 export function MemoryPage() {
+  const [loading, setLoading] = useState(true);
+  const requestRevision = useRef(0);
+  const loadedSection = useRef<MemorySection | null>(null);
   const [items, setItems] = useState<MemoryItem[]>([]);
   const [topics, setTopics] = useState<MemoryTopic[]>([]);
   const [commitments, setCommitments] = useState<MemoryCommitment[]>([]);
@@ -212,25 +242,32 @@ export function MemoryPage() {
   }, [section]);
 
   useEffect(() => {
-    if (listRef.current) {
+    if (!loading && listRef.current) {
       animateStaggerCards(listRef.current, ".memory-card", 35);
     }
-  }, [section, items, topics, commitments, diagnostics, conflicts]);
+  }, [loading, section, items, topics, commitments, diagnostics, conflicts]);
 
   const refresh = async () => {
+    const revision = ++requestRevision.current;
+    if (loadedSection.current !== section) setLoading(true);
     try {
       if (section === "topics") {
-        setTopics((await getMemoryTopics()).items);
+        const response = await getMemoryTopics();
+        if (revision !== requestRevision.current) return;
+        setTopics(response.items);
         setMessage(null);
         return;
       }
       if (section === "commitments") {
-        setCommitments((await getMemoryCommitments()).items);
+        const response = await getMemoryCommitments();
+        if (revision !== requestRevision.current) return;
+        setCommitments(response.items);
         setMessage(null);
         return;
       }
       if (section === "diagnostics") {
         const [conflictData, diagnosticData] = await Promise.all([getMemoryConflicts(), getMemoryDiagnostics()]);
+        if (revision !== requestRevision.current) return;
         setConflicts(conflictData.items);
         setDiagnostics(diagnosticData);
         setMessage(null);
@@ -240,21 +277,25 @@ export function MemoryPage() {
         section === "all" || section === "archive" ? undefined : section,
         query || undefined,
       );
-      setItems(
+      if (revision !== requestRevision.current) return;
+      const nextItems =
         section === "archive"
           ? result.items.filter((item) => item.status !== "active")
           : section === "all"
             ? result.items.filter((item) => item.status === "active")
-            : result.items,
-      );
+            : result.items;
+      startTransition(() => setItems(current => JSON.stringify(current) === JSON.stringify(nextItems) ? current : nextItems));
       setMessage(null);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Память недоступна");
+      if (revision === requestRevision.current) setMessage(error instanceof Error ? error.message : "Память недоступна");
+    } finally {
+      if (revision === requestRevision.current) { loadedSection.current = section; startTransition(() => setLoading(false)); }
     }
   };
 
   useEffect(() => {
     void refresh();
+    return () => { requestRevision.current += 1; };
   }, [section]);
 
   const action = async (run: () => Promise<unknown>, successMsg?: string) => {
@@ -406,7 +447,8 @@ export function MemoryPage() {
           </p>
         )}
 
-        <div className="memory-list" ref={listRef}>
+        {loading && <LoadingRing label="Загружаю память…" />}
+        <div className="memory-list" ref={listRef} hidden={loading}>
           {section === "topics" && (
             <>
               {sortedTopics.length ? (
@@ -698,6 +740,7 @@ export function MemoryPage() {
               {sortedItems.length ? (
                 sortedItems.map((memory) => {
                   const SlotIcon = getSlotIcon(memory);
+                  const createdAt = formatMemoryDate(memory.created_at, memory.id);
                   return (
                     <article className="memory-card" key={memory.id}>
                       <div className="memory-card-main">
@@ -736,18 +779,15 @@ export function MemoryPage() {
                             {memory.access_count}
                           </small>
                         </div>
-                        {formatMemoryDate(memory.created_at, memory.id) && (
+                        {createdAt && (
                           <small style={{ position: "absolute", bottom: "14px", right: "18px", color: "var(--color-text-soft)", whiteSpace: "nowrap" }}>
-                            {formatMemoryDate(memory.created_at, memory.id)}
+                            {createdAt}
                           </small>
                         )}
                       </div>
 
                       <div className="memory-actions">
-                        <details className="memory-action-menu">
-                          <summary className="icon-button" role="button" aria-label="Дополнительные действия" title="Действия">
-                            <MoreHorizontal size={18} aria-hidden="true" />
-                          </summary>
+                        <MemoryActionMenu>
                           <div>
                             <MaterialButton materialKey={["memory.button-6", memory.id].join(":")}
                               type="button"
@@ -818,7 +858,7 @@ export function MemoryPage() {
                               Забыть навсегда
                             </MaterialButton>
                           </div>
-                        </details>
+                        </MemoryActionMenu>
                       </div>
 
                       {audit[memory.id] && (

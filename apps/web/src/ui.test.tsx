@@ -242,8 +242,7 @@ describe("русский интерфейс", () => {
       expect(screen.getByRole("region", { name: "Субтитры Iris" })).toBe(subtitles);
       expect(screen.getByRole("button", { name: "Включить микрофон" })).toBeVisible();
       const notificationHost = screen.getByRole("complementary", { name: "Уведомления приложения" });
-      expect(notificationHost.firstElementChild).toHaveClass("notification-pinned-slot");
-      expect(notificationHost.firstElementChild).toContainElement(subtitles);
+      expect(notificationHost.querySelector(".notification-pinned-slot")).toContainElement(subtitles);
       expect(document.querySelector(".background-conversation-host")).toBeNull();
       expect(pause).not.toHaveBeenCalled();
       fireEvent.click(screen.getByRole("button", { name: "Диалог" }));
@@ -577,7 +576,8 @@ describe("русский интерфейс", () => {
     fireEvent.click(await screen.findByText("Test emotions and gestures"));
     await waitFor(() => expect(screen.getByLabelText("Test phrase")).toHaveValue("Avatar test."));
 
-    fireEvent.click(within(englishSettingsNavigation).getByRole("button", { name: "System" }));
+    const systemGroup = within(englishSettingsNavigation).getByRole("button", { name: "System" });
+    if (systemGroup.getAttribute("aria-expanded") !== "true") fireEvent.click(systemGroup);
     fireEvent.click(within(englishSettingsNavigation).getByRole("button", { name: "Data maintenance" }));
     expect(await screen.findByRole("button", { name: "Rebuild memory index" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Clear memory" })).toBeInTheDocument();

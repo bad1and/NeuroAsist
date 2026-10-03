@@ -1,3 +1,4 @@
+import { LoadingRing } from "./components/LoadingRing";
 import { MaterialButton } from "./components/MaterialButton";
 import { CustomSelect } from "./components/CustomSelect";
 import { AppSwitch } from "./components/AppSwitch";
@@ -111,6 +112,7 @@ export function CodingAgentPage({
   onSettingsChanged: (settings: PublicSettings) => void;
 }) {
   const [activeSection, setActiveSection] = useState<CodingSection>("tasks");
+  const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<CodingStatus | null>(null);
   const [tasks, setTasks] = useState<CodingTask[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -153,6 +155,8 @@ export function CodingAgentPage({
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Не удалось получить состояние Coding Agent.");
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -649,7 +653,7 @@ export function CodingAgentPage({
                   </div>
                 </div>
 
-                {filteredTasks.length === 0 ? (
+                {loading && !tasks.length ? <LoadingRing label="Загружаю задачи…" /> : filteredTasks.length === 0 ? (
                   <div className="empty-state" style={{ minHeight: "340px", padding: "48px 24px" }}>
                     <IconInterfaceTimeStopWatchCircle size={44} />
                     <strong>{searchQuery ? "Задач не найдено" : "Задач пока нет"}</strong>

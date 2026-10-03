@@ -1,3 +1,4 @@
+import { LoadingRing } from "./components/LoadingRing";
 import { MaterialButton } from "./components/MaterialButton";
 import {
   IconInterfaceTimeStopWatchCircle,
@@ -429,6 +430,7 @@ export function JournalPage({
   onOpenChat?: () => void;
   isActive?: boolean;
 } = {}) {
+  const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<TimelineJournalItem[]>([]);
   const [selectedEpisode, setSelectedEpisode] = useState<TimelineJournalItem | null>(null);
   const [messages, setMessages] = useState<TimelineMessage[]>([]);
@@ -546,6 +548,8 @@ export function JournalPage({
       });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "История недоступна");
+    } finally {
+      setLoading(false);
     }
   }, [onSelectEpisode]);
 
@@ -804,7 +808,7 @@ export function JournalPage({
             </div>
           ) : (
             <div className="history-list" ref={listRef}>
-              {items.length ? (
+              {loading && !items.length ? <LoadingRing label="Загружаю историю…" /> : items.length ? (
                 items.map(renderHistoryCard)
               ) : (
                 <EmptyHistory text="История пока пуста" />
@@ -915,14 +919,7 @@ export function JournalPage({
 
               <div className="journal-messages-container" ref={messagesContainerRef}>
                 {loadingMessages ? (
-                  <div className="journal-loading">
-                    <div className="assistant-thinking">
-                      <span />
-                      <span />
-                      <span />
-                    </div>
-                    <p>Загрузка сообщений…</p>
-                  </div>
+                  <LoadingRing label="Загружаю сообщения…" />
                 ) : messagesError ? (
                   <p className="error-text" role="alert">{messagesError}</p>
                 ) : messages.length ? (
