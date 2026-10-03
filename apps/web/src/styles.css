@@ -126,7 +126,33 @@ svg { shape-rendering: geometricPrecision; }
 
 html, body, #root { min-width: 320px; height: 100%; min-height: 100%; }
 
-body { margin: 0; min-height: 100vh; overflow: hidden; background: var(--bg); }
+body {
+  margin: 0;
+  min-height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Keep selection for conversation content and editing, including portaled subtitles. */
+.message p,
+.journal-message p,
+input:not([type="button"]):not([type="submit"]):not([type="reset"]),
+textarea,
+[contenteditable]:not([contenteditable="false"]) {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Controls and artwork stay non-selectable even inside selectable content. */
+button,
+select,
+svg,
+img {
+  -webkit-user-select: none;
+  user-select: none;
+}
 
 button, input, textarea, select { font: inherit; }
 

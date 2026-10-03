@@ -182,6 +182,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { StartupScreen } from "./components/StartupScreen";
 import { getStartupStage } from "./startup";
 import { WindowChrome } from "./components/WindowChrome";
+import { WindowSettings } from "./components/WindowSettings";
 import { AppDialog } from "./components/AppDialog";
 import { AppSwitch } from "./components/AppSwitch";
 import { InfoRow } from "./components/InfoRow";
@@ -239,6 +240,7 @@ type SettingsSection =
   | "voice-advanced"
   | "memory"
   | "system-interface"
+  | "system-window"
   | "api-keys"
   | "token-usage"
   | "system-overview"
@@ -3459,8 +3461,14 @@ export function SettingsPage({
 
   if (!settings) {
     return (
-      <section className="panel">
-        <div className="empty-state"><IconInterfaceAlertAlarmBell2 size={28} aria-hidden="true" /><strong>Настройки недоступны</strong><span>Подключитесь к сервису и попробуйте ещё раз.</span></div>
+      <section className="panel settings-panel">
+        <SettingsNavigation current={activeSection} onChange={setActiveSection} />
+        <div className="settings-content" ref={settingsContentRef}>
+          {activeSection === "system-window" ? <>
+            <header className="settings-heading"><h2>Окно приложения</h2><p>Эталонный размер, фиксация и восстановление окна.</p></header>
+            <WindowSettings />
+          </> : <div className="empty-state"><IconInterfaceAlertAlarmBell2 size={28} aria-hidden="true" /><strong>Настройки недоступны</strong><span>Подключитесь к сервису и попробуйте ещё раз.</span></div>}
+        </div>
       </section>
     );
   }
@@ -3479,6 +3487,7 @@ export function SettingsPage({
     "voice-advanced": { title: "Дополнительно", description: "Буфер воспроизведения и приватный сбор тестовых записей." },
     memory: { title: "Память", description: "Какие сведения Iris может сохранять между разговорами." },
     "system-interface": { title: "Интерфейс", description: "Общие настройки интерфейса." },
+    "system-window": { title: "Окно приложения", description: "Эталонный размер, фиксация и восстановление окна." },
     "api-keys": { title: "API-ключи", description: "Защищённое локальное хранение ключей моделей." },
     "token-usage": { title: "Токены и расходы", description: "Учет входящих и исходящих токенов API, кэширование и аналитика затрат." },
     "system-overview": { title: "Система", description: "Состояние подключения и компонентов Iris." },
@@ -3536,7 +3545,7 @@ export function SettingsPage({
               <h2>{activeSettingsMeta.title}</h2>
               <p>{activeSettingsMeta.description}</p>
             </div>
-            <AutoSaveStatus status={autosave.status} onRetry={autosave.retry} />
+            {activeSection !== "system-window" && <AutoSaveStatus status={autosave.status} onRetry={autosave.retry} />}
           </div>
         </header>
 
@@ -3686,6 +3695,8 @@ export function SettingsPage({
           />
         </div>
 
+        {activeSection === "system-window" && <WindowSettings />}
+
         <div className="form-grid settings-form" hidden={activeSection !== "system-interface"}>
           {/* Interface Language Card */}
           <div className="settings-card">
@@ -3821,7 +3832,7 @@ export function SettingsPage({
           <TokenAnalyticsSettings />
         </div></ViewActivity>
 
-        <div className="form-grid settings-form" hidden={activeSection === "token-usage" || activeSection === "avatar" || activeSection === "environment" || activeSection === "system-interface" || activeSection === "api-keys" || activeSection === "system-overview" || ["models", "backups", "maintenance", "events"].includes(activeSection)}>
+        <div className="form-grid settings-form" hidden={activeSection === "token-usage" || activeSection === "avatar" || activeSection === "environment" || activeSection === "system-interface" || activeSection === "system-window" || activeSection === "api-keys" || activeSection === "system-overview" || ["models", "backups", "maintenance", "events"].includes(activeSection)}>
           {/* VOICE: Language Card */}
           <div className="settings-card" hidden={activeSection !== "voice"}>
             <div className="settings-card-header">
@@ -4501,6 +4512,7 @@ const SETTINGS_NAVIGATION: Array<{
     icon: IconComputerScreenCurve,
     items: [
       { section: "system-interface", label: "Интерфейс" },
+      { section: "system-window", label: "Окно приложения" },
       { section: "api-keys", label: "API-ключи" },
       { section: "token-usage", label: "Токены и расходы" },
       { section: "system-overview", label: "Обзор" },

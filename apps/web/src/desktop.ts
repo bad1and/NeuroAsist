@@ -47,6 +47,31 @@ export function isDesktopApp(): boolean {
   return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 }
 
+export type DesktopWindowPreferences = {
+  locked: boolean;
+  reference: { width: number; height: number };
+  minimum: { width: number; height: number };
+  effectiveReference: { width: number; height: number };
+};
+
+export function getDesktopWindowPreferences(): Promise<DesktopWindowPreferences> {
+  return invoke<DesktopWindowPreferences>("get_window_preferences");
+}
+
+export function setReferenceWindowLocked(locked: boolean): Promise<DesktopWindowPreferences> {
+  return invoke<DesktopWindowPreferences>("set_reference_window_locked", { locked });
+}
+
+export function resetReferenceWindow(): Promise<DesktopWindowPreferences> {
+  return invoke<DesktopWindowPreferences>("reset_reference_window");
+}
+
+export function listenForWindowPreferences(
+  listener: (preferences: DesktopWindowPreferences) => void,
+): Promise<UnlistenFn> {
+  return listen<DesktopWindowPreferences>("desktop-window-preferences", ({ payload }) => listener(payload));
+}
+
 export function initialCoreStatus(): CoreStatus {
   return isDesktopApp()
     ? window.__NEUROASIST_DESKTOP_CONFIG__?.coreStatus ?? "starting"

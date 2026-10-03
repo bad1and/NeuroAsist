@@ -22,6 +22,11 @@ use tauri::{
 };
 use tauri_plugin_global_shortcut::ShortcutState;
 
+mod window_preferences;
+use window_preferences::{
+    get_window_preferences, reset_reference_window, set_reference_window_locked, WindowPreferences,
+};
+
 #[cfg(windows)]
 use windows::core::BOOL;
 #[cfg(windows)]
@@ -1269,6 +1274,14 @@ fn main() {
             if window.label() != "main" {
                 return;
             }
+            if matches!(
+                event,
+                WindowEvent::Moved(_) | WindowEvent::ScaleFactorChanged { .. }
+            ) {
+                if let Some(main) = window.app_handle().get_webview_window("main") {
+                    window_preferences::refresh_for_monitor(&main);
+                }
+            }
             match event {
                 WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
@@ -1298,6 +1311,9 @@ fn main() {
         .setup(|app| {
             let state = DesktopState::new();
             app.manage(state);
+            app.manage(WindowPreferences::load(
+                app.path().app_config_dir()?.join("window-preferences.json"),
+            ));
             let shutdown_handle = app.handle().clone();
             ctrlc::set_handler(move || {
                 // In development Ctrl+C reaches both Cargo/Tauri and the
@@ -1342,6 +1358,9 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            get_window_preferences,
+            set_reference_window_locked,
+            reset_reference_window,
             desktop_runtime,
             restart_core,
             start_graceful_shutdown,
@@ -1377,14 +1396,31 @@ fn create_main_window(app: &AppHandle, runtime: DesktopRuntime) -> tauri::Result
         "window.__NEUROASIST_DESKTOP_CONFIG__ = {};",
         serde_json::to_string(&runtime).expect("desktop config serializes")
     );
-    WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+    let locked = app.state::<WindowPreferences>().locked();
+    let (reference, minimum) = match app.primary_monitor()? {
+        Some(monitor) => window_preferences::fitted_dimensions(
+            monitor.work_area().size.width as f64 / monitor.scale_factor(),
+            monitor.work_area().size.height as f64 / monitor.scale_factor(),
+        ),
+        None => window_preferences::fitted_dimensions(
+            window_preferences::REFERENCE_WIDTH + 16.0,
+            window_preferences::REFERENCE_HEIGHT + 16.0,
+        ),
+    };
+    let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("Iris")
         .icon(tauri::include_image!("./icons/128x128.png"))?
         .decorations(false)
-        .inner_size(1120.0, 760.0)
-        .min_inner_size(760.0, 540.0)
+        .inner_size(reference.width, reference.height)
+        .min_inner_size(minimum.width, minimum.height)
+        .resizable(!locked)
+        .maximizable(!locked)
+        .center()
+        .visible(false)
         .initialization_script(&bootstrap)
         .build()?;
+    window_preferences::apply(&window, locked, true).map_err(std::io::Error::other)?;
+    window.show()?;
     Ok(())
 }
 
