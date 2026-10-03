@@ -57,6 +57,30 @@ describe("desktop chrome и запуск", () => {
     expect(retry).toHaveBeenCalledOnce();
   });
 
+  it("раскрывает лепестки по готовности и завершает только после третьего", async () => {
+    const complete = vi.fn();
+    const { container, rerender } = render(<StartupScreen status="starting" stage={1} onComplete={complete} />);
+    expect(container.querySelector(".startup-screen")).toHaveAttribute("data-revealed", "1");
+    rerender(<StartupScreen status="ready" stage={2} onComplete={complete} />);
+    expect(container.querySelector(".startup-screen")).toHaveAttribute("data-revealed", "2");
+    expect(complete).not.toHaveBeenCalled();
+    rerender(<StartupScreen status="ready" stage={3} onComplete={complete} />);
+    expect(container.querySelector(".startup-screen")).toHaveAttribute("data-revealed", "3");
+    await waitFor(() => expect(complete).toHaveBeenCalledOnce());
+  });
+
+  it("отменяет финал при сбое и размонтировании", async () => {
+    const complete = vi.fn();
+    const { rerender, unmount } = render(<StartupScreen status="ready" onComplete={complete} />);
+    rerender(<StartupScreen status="crashed" onComplete={complete} />);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(complete).not.toHaveBeenCalled();
+    rerender(<StartupScreen status="ready" onComplete={complete} />);
+    unmount();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(complete).not.toHaveBeenCalled();
+  });
+
   it("вызывает minimize, maximize/restore, двойной клик по header и завершение приложения", async () => {
     render(<WindowChrome title="Обзор" />);
 
