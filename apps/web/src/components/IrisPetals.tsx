@@ -46,8 +46,8 @@ function Petal({ index, paint, unfolding, alive, settling }: {
 }
 
 /** Exact V3 contours and gradients, extracted from public/brand/iris-logo.svg. */
-export function IrisPetals({ unfolding = false, withWordmark = false, idlePetals = 0, settling = false }: {
-  unfolding?: boolean; withWordmark?: boolean; idlePetals?: number; settling?: boolean;
+export function IrisPetals({ unfolding = false, withWordmark = false, withSilhouettes = false, idlePetals = 0, settling = false }: {
+  unfolding?: boolean; withWordmark?: boolean; withSilhouettes?: boolean; idlePetals?: number; settling?: boolean;
 }) {
   const id = useId().replace(/:/g, "");
   return (
@@ -81,6 +81,11 @@ export function IrisPetals({ unfolding = false, withWordmark = false, idlePetals
         <Petal key={index} index={index} paint={`url(#${id}-paint-${index})`}
           unfolding={unfolding} alive={index < idlePetals} settling={settling} />
       ))}
+      {withSilhouettes && <g fill="#fff" opacity="0.075" pointerEvents="none">
+        {petals.map((petal, index) => (
+          <path key={index} data-petal-silhouette={index} d={petal.d} />
+        ))}
+      </g>}
       {withWordmark && <g data-wordmark mask={`url(#${id}-letter-reveal)`}>
         {[0, 1, 2, 3].map((letterIndex) => <g key={letterIndex} data-letter={letterIndex}>
           {lettering.map((letter, index) => letter.letter === letterIndex &&

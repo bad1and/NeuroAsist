@@ -18,6 +18,7 @@ import { buttonSeed } from "./buttonMaterial";
 import { NotificationCountdown, NotificationTaskProgress, useNotificationCountdown } from "./NotificationCountdown";
 import { useNotificationDialogOffset } from "./useNotificationDialogOffset";
 import "./NotificationHost.css";
+import { animate, isTestEnvironment, prefersReducedMotion, type Animation } from "../animations/core";
 
 interface NotificationHostProps {
   pinnedContentRef?: React.RefObject<HTMLDivElement | null>;
@@ -123,7 +124,7 @@ export function NotificationCard({
       ref={cardRef}
       className={`notification-card notification-type-${notification.type}${
         isExiting ? " is-exiting" : ""
-      }${isExpanded ? " is-expanded" : ""}${notification.navigateView ? " is-clickable" : ""}${taskProgress !== null && duration === null ? " has-task-progress" : ""}`}
+      }${isExpanded ? " is-expanded" : ""}${notification.navigateView ? " is-clickable" : ""}${taskProgress !== null ? " has-task-progress" : ""}`}
       data-countdown-paused={duration !== null ? isPaused : undefined}
       data-material-seed={seed}
       onMouseEnter={() => setIsHovered(true)}
@@ -258,7 +259,7 @@ export function NotificationCard({
         </div>
       )}
 
-      {taskProgress !== null && duration === null && <NotificationTaskProgress progress={taskProgress} />}
+      {taskProgress !== null && <NotificationTaskProgress progress={taskProgress} />}
       {duration !== null && <NotificationCountdown cardRef={cardRef} pathRef={countdownRef} seed={seed} />}
     </div>
   );
@@ -267,8 +268,54 @@ export function NotificationCard({
 export function NotificationHost({ onNavigate, maxVisible = 3, pinnedContentRef }: NotificationHostProps) {
   const notifications = useNotifications();
   const hostRef = useRef<HTMLElement>(null);
+  const stackRef = useRef<HTMLDivElement>(null);
+  const positions = useRef(new Map<HTMLElement, number>());
+  const motions = useRef(new Map<HTMLElement, Animation>());
   const mounted = notifications.length > 0 || Boolean(pinnedContentRef);
   useNotificationDialogOffset(hostRef, mounted);
+
+  // Animate layout wrappers so card entrance/exit transforms remain independent.
+  useLayoutEffect(() => {
+    const stack = stackRef.current;
+    if (!stack) {
+      positions.current.clear();
+      for (const motion of motions.current.values()) motion.cancel();
+      motions.current.clear();
+      return;
+    }
+    const measure = () => {
+      const next = new Map<HTMLElement, number>();
+      for (const element of Array.from(stack.children) as HTMLElement[]) {
+        const top = element.offsetTop;
+        const previous = positions.current.get(element);
+        next.set(element, top);
+        if (previous === undefined || previous === top) continue;
+        const transform = getComputedStyle(element).transform;
+        const currentY = isTestEnvironment() || !transform || transform === "none"
+          ? 0 : new DOMMatrixReadOnly(transform).m42;
+        motions.current.get(element)?.cancel();
+        element.style.transform = "";
+        if (!isTestEnvironment() && !prefersReducedMotion()) {
+          motions.current.set(element, animate(element, {
+            translateY: [previous - top + currentY, 0], duration: 240, ease: "outCubic",
+          }));
+        }
+      }
+      for (const [element, motion] of motions.current) {
+        if (!next.has(element)) { motion.cancel(); motions.current.delete(element); }
+      }
+      positions.current = next;
+    };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    for (const element of Array.from(stack.children)) observer?.observe(element);
+    return () => { observer?.disconnect(); };
+  }, [notifications, maxVisible]);
+
+  useLayoutEffect(() => () => {
+    for (const motion of motions.current.values()) motion.cancel();
+    motions.current.clear();
+  }, []);
 
   if (!mounted) {
     return null;
@@ -285,15 +332,16 @@ export function NotificationHost({ onNavigate, maxVisible = 3, pinnedContentRef 
       aria-live="polite"
     >
       {visibleNotifications.length > 0 && (
-        <div key="notifications" className="notification-stack">
+        <div key="notifications" ref={stackRef} className="notification-stack">
           {visibleNotifications.map((notif, index) => (
-            <NotificationCard
-              key={notif.id}
-              notification={notif}
-              onNavigate={onNavigate}
-              onDismiss={notify.dismiss}
-              remainingCount={index === 0 ? totalRemaining : 0}
-            />
+            <div key={notif.id} className="notification-stack-item">
+              <NotificationCard
+                notification={notif}
+                onNavigate={onNavigate}
+                onDismiss={notify.dismiss}
+                remainingCount={index === 0 ? totalRemaining : 0}
+              />
+            </div>
           ))}
         </div>
       )}

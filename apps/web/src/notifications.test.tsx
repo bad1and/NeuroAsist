@@ -8,6 +8,7 @@ import { notify, notificationStore, notifyBackendEvent } from "./notifications";
 import type { BackendEvent } from "./types";
 import { NotificationHost } from "./components/NotificationHost";
 import * as animations from "./animations";
+import * as animationCore from "./animations/core";
 
 describe("Unified Notification System", () => {
   beforeEach(() => {
@@ -85,6 +86,25 @@ describe("Unified Notification System", () => {
   });
 
   describe("NotificationHost component", () => {
+    it("smoothly moves existing cards down on insertion and back up on removal", () => {
+      const testMode = vi.spyOn(animationCore, "isTestEnvironment").mockReturnValue(false);
+      const reduced = vi.spyOn(animationCore, "prefersReducedMotion").mockReturnValue(false);
+      const motion = vi.spyOn(animationCore, "animate").mockReturnValue({ cancel: vi.fn() } as unknown as animations.Animation);
+      const top = vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains("notification-stack-item")
+          ? Array.from(this.parentElement!.children).indexOf(this) * 80 : 0;
+      });
+      try {
+        act(() => { notify.info("Загрузка", "Подготовка", { duration: "persistent" }); });
+        render(<NotificationHost />);
+        const loading = screen.getByRole("status");
+        act(() => { notify.success("Готово", "Можно говорить", { id: "ready", duration: "persistent" }); });
+        expect(motion).toHaveBeenCalledWith(loading.parentElement, expect.objectContaining({ translateY: [-80, 0] }));
+        act(() => { notify.dismiss("ready"); });
+        expect(screen.getByRole("status")).toBe(loading);
+        expect(motion).toHaveBeenCalledWith(loading.parentElement, expect.objectContaining({ translateY: [80, 0] }));
+      } finally { cleanup(); top.mockRestore(); motion.mockRestore(); reduced.mockRestore(); testMode.mockRestore(); }
+    });
     it("resumes the remaining lifetime after repeated pointer pauses", () => {
       act(() => { notify.info("Таймер", "Сообщение", { duration: 4500 }); });
       render(<NotificationHost />);
@@ -138,7 +158,7 @@ describe("Unified Notification System", () => {
       act(() => { vi.advanceTimersByTime(10000); });
       expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "50");
       act(() => { notify.info("Готово", "Подготовлено", { id: "task", duration: 2000, progress: 1 }); });
-      expect(screen.queryByRole("progressbar")).toBeNull();
+      expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "100");
       expect(screen.getByRole("status").querySelector(".notification-countdown")).not.toBeNull();
       act(() => { vi.advanceTimersByTime(2000); });
       expect(screen.getByRole("status")).toHaveClass("is-exiting");
@@ -151,6 +171,31 @@ describe("Unified Notification System", () => {
       act(() => { notify.info("Сохранено", "Обновлённый текст", { id: "update", duration: 3000 }); });
       act(() => { vi.advanceTimersByTime(1000); });
       expect(screen.getByRole("status")).toHaveClass("is-exiting");
+    });
+
+    it("keeps completed loading below readiness and dismisses them in order without remounting", () => {
+      act(() => { notify.info("Подготавливаю микрофон", "Подключение · 92%", { id: "startup", duration: "persistent", progress: .92 }); });
+      render(<NotificationHost />);
+      const loading = screen.getByRole("status");
+      act(() => { vi.advanceTimersByTime(10000); });
+      act(() => {
+        notify.info("Подготавливаю микрофон", "Загружено · 100%", { id: "startup", duration: 3000, progress: 1 });
+        notify.success("Микрофон готов", "Можно говорить", { duration: 4500 });
+      });
+      expect(screen.getAllByRole("status")[1]).toBe(loading);
+      expect(screen.getAllByRole("status")[0]).toHaveTextContent("Микрофон готов");
+      expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "100");
+      act(() => { vi.advanceTimersByTime(2999); });
+      expect(loading).not.toHaveClass("is-exiting");
+      act(() => { vi.advanceTimersByTime(1); });
+      expect(loading).toHaveClass("is-exiting");
+      act(() => { vi.advanceTimersByTime(200); });
+      expect(loading).not.toBeInTheDocument();
+      expect(screen.getByRole("status")).not.toHaveClass("is-exiting");
+      act(() => { vi.advanceTimersByTime(1300); });
+      expect(screen.getByRole("status")).toHaveClass("is-exiting");
+      act(() => { vi.advanceTimersByTime(200); });
+      expect(screen.queryByRole("status")).toBeNull();
     });
 
     it("measures the mounted card and follows resizing without resetting its remaining time", () => {

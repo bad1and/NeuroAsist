@@ -434,6 +434,9 @@ describe("русский интерфейс", () => {
       await waitFor(() => expect(startButton).toBeEnabled());
       fireEvent.click(startButton);
       await waitFor(() => expect(start).toHaveBeenCalledOnce());
+      expect(await screen.findByText("Микрофон готов")).toBeVisible();
+      expect(screen.getByText("Голосовые сервисы загружены, поток подключён · 100%")).toBeVisible();
+      expect(screen.getByRole("progressbar", { name: "Прогресс" })).toHaveAttribute("aria-valuenow", "100");
       stop.mockClear(); close.mockClear();
       fireEvent.click(screen.getByRole("button", { name: "Обзор" }));
       expect(await screen.findByRole("button", { name: "Выключить микрофон" })).toHaveAttribute("aria-pressed", "true");

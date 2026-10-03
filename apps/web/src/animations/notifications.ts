@@ -3,7 +3,7 @@ import { animate, isTestEnvironment, prefersReducedMotion, type Animation } from
 
 export const NOTIFICATION_EXIT_DURATION = 190;
 
-/** Shared toast motion, including the pinned conversation card. */
+/** Shared viewport-edge slide for toasts and the persistent conversation panel. */
 export function animateNotification(
   target: HTMLElement,
   phase: "enter" | "exit",
@@ -12,12 +12,18 @@ export function animateNotification(
   if (isTestEnvironment()) return null;
   const reduced = prefersReducedMotion();
   const entering = phase === "enter";
+  const transform = getComputedStyle(target).transform;
+  const currentX = transform && transform !== "none" ? new DOMMatrixReadOnly(transform).m41 : 0;
+  // Subtract the current translation so closing mid-entry still aims beyond the edge.
+  const left = target.getBoundingClientRect().left - currentX;
+  const distance = Math.max(0, window.innerWidth - left) + 16;
+  const interrupted = Boolean(target.style.transform);
   return animate(target, {
-    opacity: entering ? target.style.opacity ? 1 : [0, 1] : 0,
-    translateX: reduced ? 0 : entering ? target.style.transform ? 0 : [28, 0] : 28,
-    scale: reduced ? 1 : entering ? target.style.transform ? 1 : [0.96, 1] : 0.96,
-    duration: reduced ? 120 : entering ? 220 : NOTIFICATION_EXIT_DURATION,
-    ease: entering ? cubicBezier(0.2, 0.8, 0.2, 1) : cubicBezier(0.42, 0, 1, 1),
+    opacity: reduced ? entering ? target.style.opacity ? 1 : [0, 1] : 0 : 1,
+    translateX: reduced ? 0 : entering ? interrupted ? 0 : [distance, 0] : distance,
+    scale: 1,
+    duration: reduced ? 120 : entering ? 420 : NOTIFICATION_EXIT_DURATION,
+    ease: entering ? cubicBezier(0.22, 1, 0.36, 1) : cubicBezier(0.42, 0, 1, 1),
     onComplete: () => onComplete?.(),
   });
 }
