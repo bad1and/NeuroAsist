@@ -167,7 +167,13 @@ export function useMaterialFeedback(
     window.addEventListener("resize", invalidateBounds);
     window.addEventListener("scroll", invalidateBounds, true);
     media?.addEventListener("change", motionPreference);
-    update();
+    // Initial mount is static: hundreds of resting controls must not create
+    // zero-to-zero animations when opening a screen.
+    const visible = !disabled && Boolean(pinned || focused);
+    element.dataset.rimVisible = String(visible);
+    if (rim) rim.style.opacity = visible ? "1" : "0";
+    if (light) light.style.opacity = "0";
+    if (quiet && surface) surface.style.opacity = !disabled && focused ? "1" : "0";
     return () => {
       element.removeEventListener("pointerenter", enter);
       element.removeEventListener("pointermove", move);

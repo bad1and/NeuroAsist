@@ -1,3 +1,4 @@
+import { LoadingRing } from "./components/LoadingRing";
 import { MaterialButton } from "./components/MaterialButton";
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { deleteCharacterReflection, getCharacterReflections, getCharacterState, getCharacterStateEvents, getReflectionSettings, resetCharacterState, updateReflectionSettings } from "./api";
@@ -138,7 +139,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
     if (timelineRef.current && timelineItems.length > 0) {
       animateStaggerCards(timelineRef.current, ".state-timeline-item", 40);
     }
-  }, [timelineItems]);
+  }, [timelineItems.length, filterOnlyImportant]);
 
   const refresh = useCallback(async () => {
     try {
@@ -260,7 +261,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
               </div>
             </>
           ) : (
-            <div className="state-loading">Загрузка состояния...</div>
+            <LoadingRing label="Загружаю состояние…" />
           )}
         </aside>
 

@@ -1,65 +1,58 @@
+import { waapi } from "animejs";
 import { animate, createTimeline, stagger, prefersReducedMotion, isTestEnvironment, ANIMATION_TOKENS } from "./core";
 import type { Animation } from "./core";
 
 /**
  * Animate page entrance: subtle fade, scale and vertical slide with cubic easing
  */
-export function animatePageEnter(target: HTMLElement | string): Animation | null {
+export function animatePageEnter(target: HTMLElement | string): ReturnType<typeof waapi.animate> | null {
   if (typeof window === "undefined" || !target || isTestEnvironment()) return null;
   const reduced = prefersReducedMotion();
 
-  return animate(target, {
+  return waapi.animate(target, {
     opacity: [0, 1],
-    translateY: reduced ? 0 : [10, 0],
-    duration: reduced ? ANIMATION_TOKENS.duration.micro : ANIMATION_TOKENS.duration.page,
-    ease: ANIMATION_TOKENS.ease.smooth,
-    onComplete: () => {
-      if (typeof target === "string") {
-        document.querySelectorAll(target).forEach((el) => {
-          if (el instanceof HTMLElement) el.style.transform = "";
-        });
-      } else if (target instanceof HTMLElement) {
-        target.style.transform = "";
-      }
-    },
+    transform: reduced ? "none" : ["translateY(6px)", "translateY(0)"],
+    duration: reduced ? ANIMATION_TOKENS.duration.micro : 220,
+    ease: "cubic-bezier(0.2, 0.8, 0.2, 1)",
   });
 }
 
-/**
- * Staggered cascade entrance for collections of cards or list items with soft spring
- */
+const cardMotions = new WeakMap<HTMLElement, Animation>();
+
+/** Animate a bounded set of visible rows, never an entire long history. */
 export function animateStaggerCards(
   container: HTMLElement | string,
   itemSelector: string = ".overview-card, .history-card, .memory-card, .event-row, .state-card, article",
   customDelay: number = 40,
 ): Animation | null {
   if (typeof window === "undefined" || !container || isTestEnvironment()) return null;
+  const root = typeof container === "string" ? document.querySelector<HTMLElement>(container) : container;
+  if (!root) return null;
+  cardMotions.get(root)?.revert();
+  cardMotions.delete(root);
+  if (root.closest("[hidden]") || !root.getClientRects().length) return null;
+  const targets: HTMLElement[] = [];
+  for (const element of root.querySelectorAll<HTMLElement>(itemSelector)) {
+    if (element.closest("[hidden]")) continue;
+    const rect = element.getBoundingClientRect();
+    if (rect.width && rect.height && rect.bottom > 0 && rect.top < window.innerHeight) targets.push(element);
+    if (targets.length === 12) break;
+  }
+  if (!targets.length) return null;
   const reduced = prefersReducedMotion();
-  const targets = typeof container === "string" 
-    ? `${container} ${itemSelector}`
-    : container.querySelectorAll(itemSelector);
-
-  if (!targets || (targets instanceof NodeList && targets.length === 0)) return null;
-
-  return animate(targets, {
+  const motion = animate(targets, {
     opacity: [0, 1],
-    scale: reduced ? 1 : [0.96, 1],
-    translateY: reduced ? 0 : [14, 0],
-    duration: reduced ? ANIMATION_TOKENS.duration.micro : ANIMATION_TOKENS.duration.medium,
-    delay: reduced ? 0 : stagger(customDelay, { from: "first" }),
-    ease: ANIMATION_TOKENS.ease.softSpring,
+    translateY: reduced ? 0 : [6, 0],
+    duration: reduced ? 120 : 220,
+    delay: reduced ? 0 : stagger(Math.min(customDelay, 16)),
+    ease: ANIMATION_TOKENS.ease.smooth,
     onComplete: () => {
-      if (typeof targets === "string") {
-        document.querySelectorAll(targets).forEach((el) => {
-          if (el instanceof HTMLElement) el.style.transform = "";
-        });
-      } else if (targets && "forEach" in targets) {
-        (targets as NodeListOf<HTMLElement>).forEach((el) => {
-          if (el instanceof HTMLElement) el.style.transform = "";
-        });
-      }
+      targets.forEach(element => element.style.removeProperty("transform"));
+      cardMotions.delete(root);
     },
   });
+  cardMotions.set(root, motion);
+  return motion;
 }
 
 /**

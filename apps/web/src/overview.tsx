@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { getMemories, getTimelineJournal } from "./api";
 import type { AvatarStatusResponse, MemoryItem, StatusResponse, TimelineJournalItem } from "./types";
-import { IrisLoader } from "./components/IrisLoader";
+import { LoadingRing } from "./components/LoadingRing";
 import { notify } from "./notifications";
 import { interfaceIntlLocale } from "./i18n";
 import {
@@ -204,7 +204,7 @@ export function OverviewPage({
 
       {loading && (
         <span className="overview-loading" style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
-          <IrisLoader size="compact" active />
+          <LoadingRing className="is-inline" label="Обновляю обзор…" />
           <span>Обновляю данные…</span>
         </span>
       )}
