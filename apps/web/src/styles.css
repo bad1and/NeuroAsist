@@ -1134,8 +1134,14 @@ select { appearance: auto; }
   align-items: center;
   justify-content: center;
   contain: strict;
-  transform: translateZ(0);
-  will-change: transform;
+  isolation: isolate;
+}
+
+.iris-portal-shader {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .iris-portal-canvas {
@@ -1143,9 +1149,7 @@ select { appearance: auto; }
   height: 100%;
   display: block;
   pointer-events: none;
-  opacity: 0.95;
-  transform: translateZ(0);
-  transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  opacity: 1;
 }
 
 :root[data-theme="light"] .iris-portal-canvas,

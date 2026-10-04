@@ -69,7 +69,7 @@ export function removeDesktopSearchApiKey(provider: SearchApiProvider): Promise<
   return invokeDesktop("remove_search_api_key", { provider });
 }
 
-export function checkSearchProvider(provider: SearchApiProvider): Promise<{ provider: string; status: string; results_count?: number }> {
+export function checkSearchProvider(provider: SearchApiProvider): Promise<{ provider: string; status: string; results_count?: number; quota?: { used?: number; limit?: number } | null }> {
   return requestJson("/environment/search/check", { method: "POST", body: JSON.stringify({ provider }) });
 }
 

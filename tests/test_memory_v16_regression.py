@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
+
+import pytest
 
 from apps.backend.app.conversation.decision import ConversationDecisionEngine
 from apps.backend.app.conversation.reflection import ReflectionService
@@ -130,9 +133,21 @@ def test_partial_output_keeps_valid_siblings_and_persists_diagnostics(tmp_path) 
     assert len(store.list_topics(status="active")) == 1
 
 
+@pytest.mark.parametrize("diagnostics_not_null", [False, True])
 def test_consolidation_trailing_debounce_updates_one_job_and_correction_flushes(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, diagnostics_not_null,
 ) -> None:
+    if diagnostics_not_null:
+        # Some existing desktop databases require diagnostics to be JSON even
+        # before a pending job has run. Keep that schema through init_db().
+        with sqlite3.connect(tmp_path / "memory-v16.sqlite3") as connection:
+            connection.execute("""CREATE TABLE background_jobs (
+                id TEXT PRIMARY KEY, type TEXT NOT NULL, status TEXT NOT NULL,
+                payload_json TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+                available_at TEXT NOT NULL, created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL, error_text TEXT,
+                diagnostics_json TEXT NOT NULL DEFAULT '{}'
+            )""")
     store, service = _service(tmp_path)
     # Keep the debounced deadline ahead of SQLite's real wall clock. The
     # worker's availability query intentionally uses the database clock, so a
@@ -149,6 +164,10 @@ def test_consolidation_trailing_debounce_updates_one_job_and_correction_flushes(
         first_job = dict(connection.execute(
             "SELECT * FROM background_jobs WHERE type = 'memory_consolidation' AND status = 'pending'"
         ).fetchone())
+        connection.execute(
+            "UPDATE background_jobs SET diagnostics_json = ? WHERE id = ?",
+            ('{"outcome": "stale"}', first_job["id"]),
+        )
 
     monkeypatch.setattr(store, "_now", lambda: "2099-08-21T12:00:30.000+00:00")
     second, _ = store.append_message(role="user", content="особенно кооперативные", input_mode="text")
@@ -160,6 +179,7 @@ def test_consolidation_trailing_debounce_updates_one_job_and_correction_flushes(
         ).fetchall()]
     assert len(pending) == 1
     assert pending[0]["id"] == first_job["id"]
+    assert json.loads(pending[0]["diagnostics_json"]) == {}
     assert json.loads(pending[0]["payload_json"])["end_message_id"] == second.id
     assert json.loads(pending[0]["payload_json"])["debounced_turns"] == 2
     assert pending[0]["idempotency_key"].endswith(f":{second.id}:v12")

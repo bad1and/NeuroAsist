@@ -74,6 +74,8 @@ class Settings(BaseSettings):
     # disabled in the provider independently of these caps.
     llm_chat_json_max_tokens: int = Field(default=900, ge=64, le=16_384)
     llm_chat_live_max_tokens: int = Field(default=500, ge=64, le=16_384)
+    llm_search_plan_max_tokens: int = Field(default=256, ge=64, le=512)
+    llm_search_assess_max_tokens: int = Field(default=400, ge=64, le=512)
     llm_memory_max_tokens: int = Field(default=1_000, ge=64, le=16_384)
     llm_reflection_max_tokens: int = Field(default=300, ge=64, le=8_192)
     llm_adjudication_max_tokens: int = Field(default=350, ge=64, le=8_192)

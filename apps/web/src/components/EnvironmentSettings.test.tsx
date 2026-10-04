@@ -45,7 +45,7 @@ describe("настройки поискового API", () => {
     render(<Harness />);
     fireEvent.change(screen.getByLabelText(/API-ключ поискового сервиса/), { target: { value: " test-key " } });
     fireEvent.click(screen.getByRole("button", { name: "Сохранить ключ" }));
-    await waitFor(() => expect(api.saveDesktopSearchApiKey).toHaveBeenCalledWith("brave", "test-key"));
+    await waitFor(() => expect(api.saveDesktopSearchApiKey).toHaveBeenCalledWith("tavily", "test-key"));
     await waitFor(() => expect(screen.getByLabelText(/API-ключ поискового сервиса/)).toHaveValue(""));
     expect(screen.getByLabelText(/Источник веб-поиска/)).toHaveValue("free");
     expect(api.updateRuntimeSettings).not.toHaveBeenCalled();
@@ -53,11 +53,11 @@ describe("настройки поискового API", () => {
   });
 
   it("проверяет подключение только по кнопке и отдельно от выбранного режима", async () => {
-    api.checkSearchProvider.mockResolvedValue({ provider: "brave", status: "unauthorized" });
-    render(<Harness initial={{ search_api_keys_configured: { brave: true } }} />);
+    api.checkSearchProvider.mockResolvedValue({ provider: "tavily", status: "unauthorized" });
+    render(<Harness initial={{ search_api_keys_configured: { tavily: true } }} />);
     fireEvent.click(screen.getByRole("button", { name: "Проверить подключение" }));
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Ключ не принят"));
-    expect(api.checkSearchProvider).toHaveBeenCalledExactlyOnceWith("brave");
+    expect(api.checkSearchProvider).toHaveBeenCalledExactlyOnceWith("tavily");
     expect(api.updateRuntimeSettings).not.toHaveBeenCalled();
   });
 

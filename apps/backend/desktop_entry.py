@@ -20,6 +20,9 @@ from fastapi import FastAPI
 
 
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 5
+# The legacy websockets transport can race concurrent writes with ping/pong
+# while its TCP buffer is paused. SansIO uses Uvicorn's own flow control.
+WEBSOCKET_PROTOCOL = "websockets-sansio"
 
 
 def load_runtime_credentials() -> None:
@@ -88,6 +91,7 @@ def main() -> None:
         host="127.0.0.1",
         port=port,
         log_level="info",
+        ws=WEBSOCKET_PROTOCOL,
         timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS,
     )
     server = uvicorn.Server(config)

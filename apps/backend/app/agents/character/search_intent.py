@@ -18,6 +18,8 @@ class SearchRequest:
     mode: str = "web"
     since: str = ""
     until: str = ""
+    reason: str = "explicit"
+    entity: str = ""
 
 
 _COMMAND = re.compile(r"\b(?:найди|поищи|поискать|погугли|загугли|погуглить|гугли|ищи|(?:посмотри|глянь|проверь)\s+в\s+(?:интернете|инете|сети)|search\s+(?:for|the\s+web)|look\s+up)\b", re.I)
@@ -31,6 +33,82 @@ _RETRY = re.compile(r"\b(?:заново|еще\s+раз|по\s+другому|л
 _ENTITY = re.compile(r"\b(?:deadlock|gta\s+(?:[456]|iv|v|vi)|python|valorant|minecraft|r\.?e\.?p\.?o\.?)\b", re.I)
 _EVENT = re.compile(r"выбор\w*|госдум\w*|государственн\w*\s+дум\w*|чемпионат\w*|кубок\w*|world\s*cup|election", re.I)
 _OUTCOME = re.compile(r"\b(?:кто\s+(?:выиграл|победил|победитель)|результат\w*|итоги)\b", re.I)
+
+# Intent is independent of the words following a command. In spoken dialogue
+# the subject is often in a previous turn and the command ends in filler.
+_LOOKUP = re.compile(r"\b(?:найти|почитай|почитать|прочитай|узнай|проверь|посмотри|глянь)\b", re.I)
+_CHANGING = re.compile(r"последн\w*.{0,35}(?:песн|трек|релиз|альбом|верси)|(?:песн|трек|релиз).{0,35}последн|(?:по)?удал\w*.{0,90}(?:музык|платформ|трек)|(?:музык|платформ|трек).{0,90}(?:по)?удал|(?:цен\w*|стоимост\w*|курс\w*).{0,25}(?:сейчас|сегодня)|биограф", re.I)
+_ACCEPT = re.compile(r"^\s*(?:ну\s+)?(?:давай(?:\s+ка)?|да|ага|хорошо|окей)(?:\s+(?:еще\s+раз|поищи|проверь))?[.!? ]*$", re.I)
+_EMPTY_TAIL = re.compile(r"\b(?:в|принципе|да|попробуй|можешь|можно|вообще|подробнее|его|нее|него|это|такого|исполнителя|исполнитель|знаешь|ли|пожалуйста|найти|почитать|почитай|узнай|проверь)\b", re.I)
+
+
+def contextual_search(text: str) -> bool:
+    return bool(_FOLLOWUP.search(text) or _RETRY.search(text) or _ACCEPT.fullmatch(text) or
+                ((_LOOKUP.search(text) or _CHANGING.search(text)) and re.search(r"\b(?:его|нее|него|нем|ней|это|еще|заново)\b", text, re.I)))
+
+
+def search_subject(text: str) -> str:
+    """Extract a user-supplied name, never an assistant's invented biography."""
+    if internet_forbidden(text) or sensitive_query(text):
+        return ""
+    normalized = normalize_entity(text)
+    entity = _ENTITY.search(normalized)
+    if entity:
+        return entity[0]
+    match = re.search(r"(?:исполнител\w*|рэпер\w*|певец|групп\w*|песню)\s+([\w. -]{2,70})", text, re.I)
+    if match:
+        name = re.split(r"\b(?:это|если|котор|ну|трек|можешь)\b", match[1], maxsplit=1, flags=re.I)[0]
+        if re.match(r"(?:с |котор|какой|такой|этот|необычн)", name, re.I):
+            return ""
+        return name.strip(" .?!")[:70]
+    if re.search(r"\bлсп\b|\blsp\b", text, re.I):
+        return "ЛСП"
+    return ""
+
+
+def _conversation_request(text: str, messages: Iterable) -> SearchRequest | None:
+    active = bool(_COMMAND.search(text) or _LOOKUP.search(text) or _CHANGING.search(text) or _ACCEPT.fullmatch(text) or _RETRY.search(text))
+    if not active:
+        return None
+    # Complete fresh questions do not need a product allowlist.
+    if _CHANGING.search(text) and not re.search(r"\b(?:его|нее|него|у него)\b", text, re.I):
+        query = " ".join(_EMPTY_TAIL.sub(" ", _FILLER.sub(" ", text)).split()).strip(" ,.!?:")
+        if len(terms(query)) >= 2:
+            return SearchRequest(query[:300], reason="current_fact")
+    command = _COMMAND.search(text) or _LOOKUP.search(text)
+    tail = text[command.end():] if command else ""
+    tail = " ".join(_EMPTY_TAIL.sub(" ", _FILLER.sub(" ", tail)).split()).strip(" ,.!?:")
+    if tail and _meaningful(tail) and not re.search(r"биограф|географ|последн", tail, re.I):
+        return None  # Existing self-contained query handling owns this case.
+    subject = ""
+    prior_query = ""
+    track = ""
+    for message in reversed(list(messages)[-8:]):
+        if getattr(message, "role", None) != "user" or message.content.strip() == text.strip():
+            continue
+        previous = message.content
+        if internet_forbidden(previous) or sensitive_query(previous) or re.fullmatch(r"\s*(?:привет|ладно|не надо|да не не надо)[.!? ]*", previous, re.I):
+            return None
+        subject = search_subject(previous)
+        song = re.search(r"называется\s+(?:трек\s+)?([\w -]{2,50})", previous, re.I) or re.search(r"трек\s+([\w -]{2,50})", previous, re.I)
+        if song and not track:
+            track = song[1].strip()
+        if _CHANGING.search(previous) and not prior_query:
+            prior_query = previous
+        if subject:
+            break
+        if re.search(r"\b(?:кстати|сменим тему|теперь о|давай про)\b|(?:расскажи|поговорим).{0,12}\b(?:про|о)\b", previous, re.I):
+            break
+    if prior_query and _ACCEPT.fullmatch(text):
+        recovered = _conversation_request(prior_query, ()) or _request(prior_query)
+        return replace(recovered, force_refresh=bool(_RETRY.search(text)), reason="continuation") if recovered else None
+    if not subject:
+        return None
+    if _ENTITY.search(subject):
+        return None  # Preserve the existing version/event/detail recovery.
+    fact = "биография" if re.search(r"биограф|географ|почита", text, re.I) else "последняя песня дата релиза" if _CHANGING.search(text) else ""
+    query = " ".join(filter(None, (subject, fact, track if not fact else "")))
+    return SearchRequest(query[:300], force_refresh=bool(_RETRY.search(text)), reason="continuation", entity=subject)
 
 
 def _event_request(text: str) -> SearchRequest | None:
@@ -58,21 +136,22 @@ def _event_request(text: str) -> SearchRequest | None:
 
 
 def search_requested(text: str) -> bool:
+    text = text.replace("ё", "е")
     return not (internet_forbidden(text) or sensitive_query(text) or _LOCAL.search(text)) and bool(
-        _COMMAND.search(text) or _FRESH.search(text) or _RECENT.search(text) or _FOLLOWUP.search(text) or _DETAIL.search(text) or (_EVENT.search(text) and _OUTCOME.search(text)))
+        _COMMAND.search(text) or _LOOKUP.search(text) or _CHANGING.search(text) or _RETRY.search(text) or _ACCEPT.fullmatch(text) or _FRESH.search(text) or _RECENT.search(text) or _FOLLOWUP.search(text) or _DETAIL.search(text) or (_EVENT.search(text) and _OUTCOME.search(text)))
 
 
 def needs_query_planner(text: str, recent_messages: Iterable = ()) -> bool:
     """An explicit but unresolved request must not become an invented query."""
     users = [m for m in recent_messages if getattr(m, "role", None) == "user"][-8:]
-    explicit = bool(_COMMAND.search(text) or _FRESH.search(text) or _RECENT.search(text) or (_EVENT.search(text) and _OUTCOME.search(text)))
+    explicit = bool(_COMMAND.search(text) or _LOOKUP.search(text) or _CHANGING.search(text) or _FRESH.search(text) or _RECENT.search(text) or (_EVENT.search(text) and _OUTCOME.search(text)))
     contextual = bool(users and (_DETAIL.search(text) or _FOLLOWUP.search(text)) and
                       any(_COMMAND.search(m.content) or _FRESH.search(m.content) or _RECENT.search(m.content) or _event_request(m.content) for m in users))
     return search_requested(text) and (explicit or contextual) and plan_search(text, users) is None
 
 
 def _meaningful(query: str) -> bool:
-    return bool(_ENTITY.search(query) or len(terms(query)) >= 2)
+    return bool(_ENTITY.search(query) or re.fullmatch(r"(?:gonefludd|lsp)", normalize_entity(query)) or len(terms(query)) >= 2)
 
 
 def _fact(text: str) -> str:
@@ -101,10 +180,12 @@ def _request(text: str) -> SearchRequest | None:
     event = _event_request(normalize_entity(text))
     if event:
         return event
-    command = _COMMAND.search(text)
+    command = _COMMAND.search(text) or _LOOKUP.search(text)
     if not command and not (_FRESH.search(text) or _RECENT.search(text)):
         return None
     query = text[command.end():] if command else text
+    if command and not _EMPTY_TAIL.sub("", _FILLER.sub("", query)).strip(" ,.!?:"):
+        return None
     # STT may spell a product's number as a word; preserve the exact version.
     query = normalize_entity(query)
     gta = re.search(r"\bgta\s+([456])\b", query)
@@ -146,6 +227,9 @@ def plan_search(user_text: str, recent_messages: Iterable = ()) -> SearchRequest
     if internet_forbidden(user_text) or sensitive_query(user_text) or _LOCAL.search(user_text):
         return None
     user_text = user_text.replace("ё", "е")
+    conversation_request = _conversation_request(user_text, recent_messages)
+    if conversation_request is not None:
+        return conversation_request
     request = _request(user_text)
     users = [m for m in recent_messages if getattr(m, "role", None) == "user"][-8:]
     # A request for a different anecdote needs the quoted fragment, not just

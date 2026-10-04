@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 import html
 from html.parser import HTMLParser
@@ -14,12 +14,16 @@ import urllib.parse
 import socket
 import ipaddress
 import json
+import sqlite3
+from pathlib import Path
+from contextvars import ContextVar
 import xml.etree.ElementTree as ET
 
 import httpx
 
 from apps.backend.app.environment.retrieval import canonical_url, clean_text, model_text, parse_date, preferred_host, relevance, sensitive_query
 from apps.backend.app.environment.search_providers import API_PROVIDERS, api_search
+from apps.backend.app.environment.search_budget import SearchBudget
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +31,24 @@ _WHITESPACE_RE = re.compile(r"\s+")
 _MAX_QUERY_CHARS = 300
 _MAX_TITLE_CHARS = 120
 _MAX_SNIPPET_CHARS = 300
+_API_SENT = ContextVar("search_api_sent", default=False)
+
+
+@dataclass
+class SearchTurnBudget:
+    deadline: float
+    queries: set[str] = field(default_factory=set)
+    requests: int = 0
+    pages: int = 0
+    page_results: dict[str, SearchResult] = field(default_factory=dict)
+
+    def admit(self, query: str) -> bool:
+        normalized = clean_text(query, 300).casefold()
+        if time.monotonic() >= self.deadline or self.requests >= 6 or (normalized not in self.queries and len(self.queries) >= 3):
+            return False
+        self.queries.add(normalized)
+        self.requests += 1
+        return True
 
 
 def _outcome_query(query: str) -> bool:
@@ -76,6 +98,8 @@ class SearchSnapshot:
     mode: str = "web"
     since: str = ""
     until: str = ""
+    evidence_status: str = ""
+    quota: dict | None = None
 
     def compact_summary(self, max_items: int = 3, max_chars: int = 1600) -> str:
         """Return bounded facts for the model; URLs stay in durable metadata."""
@@ -88,14 +112,15 @@ class SearchSnapshot:
                 lines.append("Получены предварительные итоги; не называй их окончательными.")
         if self.answer:
             lines.append(f"Краткий ответ: {self.answer[:_MAX_SNIPPET_CHARS]}")
-        for res in self.results[:max_items]:
+        for index, res in enumerate(self.results[:max_items], 1):
             date = f" ({res.published_at[:10]})" if res.published_at else ""
             evidence = res.page_text or res.snippet
             limit = 600 if res.page_text else _MAX_SNIPPET_CHARS
             limitation = " [только поисковый сниппет]" if res.page_status != "read" else ""
             if not res.published_at and re.search(r"новост|\bnews\b", self.query, re.I):
                 limitation += " [дата публикации неизвестна]"
-            lines.append(f"• {model_text(res.title, _MAX_TITLE_CHARS)}{date}: {model_text(evidence, limit)}{limitation}")
+            lines.append(f"[S{index}] {model_text(res.title, _MAX_TITLE_CHARS)}{date}: {model_text(evidence, limit)}{limitation}")
+        lines.append("Дата публикации не равна дате события или релиза. Факты вне этих данных не подтверждены проверкой.")
         return "\n".join(lines)[:max_chars]
 
     def metadata(self) -> dict[str, object]:
@@ -111,13 +136,14 @@ class SearchSnapshot:
             "mode": self.mode,
             "since": self.since,
             "until": self.until,
+            "quota": self.quota,
             "requested_fact": "outcome" if _outcome_query(self.query) else "",
-            "evidence_status": ("none" if not self.results else "topic_only" if _outcome_query(self.query) and not any(_outcome_evidence(r) for r in self.results)
+            "evidence_status": self.evidence_status or ("none" if not self.results else "topic_only" if _outcome_query(self.query) and not any(_outcome_evidence(r) for r in self.results)
                                 else "provisional" if _outcome_query(self.query) and not any(_final_outcome_evidence(r) for r in self.results) else "available"),
             "sources": [
-                {"title": item.title, "url": item.url, "published_at": item.published_at,
+                {"id": f"S{index}", "title": item.title, "url": item.url, "published_at": item.published_at,
                  "page_status": item.page_status, "provider": item.provider, "modified_at": item.modified_at}
-                for item in self.results
+                for index, item in enumerate(self.results, 1)
                 if item.url
             ],
         }
@@ -336,20 +362,23 @@ def _conflicting_date_claims(results):
 
 class SearchService:
     """Two search providers and optional page evidence under one deadline."""
-    def __init__(self, http_client: httpx.AsyncClient | None = None, *, runtime_settings=None, credentials=None) -> None:
+    def __init__(self, http_client: httpx.AsyncClient | None = None, *, runtime_settings=None, credentials=None, budget_path: Path | None = None) -> None:
         self._client = http_client
         self._page_client = http_client
         self._cache_lock = asyncio.Lock()
         self._cache = OrderedDict()
         self._inflight, self._inflight_waiters, self._blocked_until = {}, {}, {}
         self._cache_ttl_seconds, self._error_ttl_seconds = 300, 30
-        self._cache_max_entries, self._deadline_seconds = 256, 10.0
+        self._cache_max_entries, self._deadline_seconds = 256, 15.0
         self._runtime_settings = runtime_settings
         self._credentials = dict(credentials or {})
+        self._budget = SearchBudget(budget_path)
+        self._quota = None
+        self._admission_lock = asyncio.Lock()
 
     def selected_provider(self) -> str:
         provider = getattr(self._runtime_settings, "web_search_provider", "free")
-        return provider if provider in API_PROVIDERS else "free"
+        return provider if provider == "tavily" else "free"
 
     def configured_providers(self) -> dict[str, bool]:
         return {name: bool(self._credentials.get(name)) for name in API_PROVIDERS}
@@ -358,7 +387,7 @@ class SearchService:
         if provider not in API_PROVIDERS:
             return {"provider": provider, "status": "invalid"}
         results, status = await self._api_provider(provider, "Python documentation")
-        return {"provider": provider, "status": status, "results_count": len(results)}
+        return {"provider": provider, "status": status, "results_count": len(results), "quota": self._quota if provider == "tavily" else None}
 
     async def _get_client(self):
         if self._client is None or self._client.is_closed:
@@ -381,7 +410,7 @@ class SearchService:
     async def search(self, query: str, *, fallback_query: str | None = None,
                      preferred_domains: tuple[str, ...] = (), force_refresh: bool = False,
                      mode: str = "web", since: str = "", until: str = "",
-                     deadline: float | None = None) -> SearchSnapshot:
+                     deadline: float | None = None, budget: SearchTurnBudget | None = None, progress=None) -> SearchSnapshot:
         clean_q = clean_text(query, 300)
         fallback = clean_text(fallback_query or "", 300)
         domains = tuple(sorted({d.lower().strip().removeprefix("www.") for d in preferred_domains
@@ -406,6 +435,10 @@ class SearchService:
                     options = {"mode": mode, "since": since, "until": until} if mode != "web" or since or until else {}
                     if deadline is not None:
                         options["deadline"] = deadline
+                    if budget is not None:
+                        options["budget"] = budget
+                    if progress is not None:
+                        options["progress"] = progress
                     snap = await (self._perform_search(clean_q, fallback, domains, **options)
                                   if fallback or domains or options else self._perform_search(clean_q))
                     async with self._cache_lock:
@@ -442,6 +475,12 @@ class SearchService:
                 elif provider == "google_news":
                     response = await client.get("https://news.google.com/rss/search",
                         params={"q": query, "hl": "ru", "gl": "RU", "ceid": "RU:ru"})
+                elif provider == "wikipedia":
+                    subject = re.sub(r"биограф\w*|подроб\w*|исполнител\w*", "", query, flags=re.I).strip()
+                    response = await client.get("https://ru.wikipedia.org/w/api.php", params={
+                        "action": "query", "generator": "search", "gsrsearch": subject,
+                        "gsrnamespace": 0, "gsrlimit": 3, "prop": "extracts|info", "exintro": 1,
+                        "explaintext": 1, "inprop": "url", "format": "json"})
                 else:
                     response = await client.get("https://www.bing.com/search", params={"q": query, "format": "rss"})
             lower = response.text.lower()
@@ -453,6 +492,13 @@ class SearchService:
                 return [], "error"
             if provider == "duckduckgo":
                 results = self._parse_ddg_html(response.text, 8)
+            elif provider == "wikipedia":
+                payload = response.json()
+                pages = payload.get("query", {}).get("pages", {})
+                results = [SearchResult(clean_text(p.get("title", ""), 120), clean_text(p.get("extract", ""), 300),
+                            canonical_url(p.get("fullurl", "")), page_text=clean_text(p.get("extract", ""), 1800),
+                            page_status="read" if p.get("extract") else "not_read", provider=provider)
+                           for p in pages.values() if isinstance(p, dict)]
             else:
                 root = ET.fromstring(response.content)
                 results = [SearchResult(clean_text(i.findtext("title") or "", 120),
@@ -463,18 +509,31 @@ class SearchService:
             return results, "ok" if results else "empty"
         except (TimeoutError, httpx.TimeoutException):
             return [], "timeout"
-        except (httpx.HTTPError, ValueError, ET.ParseError) as exc:
+        except (httpx.HTTPError, ValueError, TypeError, AttributeError, ET.ParseError) as exc:
             logger.debug("Search provider %s failed: %s", provider, type(exc).__name__)
             return [], "error"
 
     async def _api_provider(self, provider, query, *, mode="web", since="", until=""):
+        _API_SENT.set(False)
+        if provider != "tavily":
+            return [], "free_only"
         key = self._credentials.get(provider)
         if not key:
             return [], "unconfigured"
         if self._blocked_until.get(provider, 0) > time.monotonic():
             return [], "cooldown"
         try:
+            async with self._admission_lock:
+                async with asyncio.timeout(2.5):
+                    response = await (await self._get_client()).get("https://api.tavily.com/usage", headers={"Authorization": f"Bearer {key}"})
+                    response.raise_for_status()
+                    if len(response.content) > 64_000:
+                        return [], "unverified_free_plan"
+                    self._quota = await asyncio.to_thread(self._budget.reserve, response.json())
+                if self._quota["status"] != "reserved":
+                    return [], self._quota["status"]
             async with asyncio.timeout(2.5):
+                _API_SENT.set(True)
                 rows = await api_search(await self._get_client(), provider, key, query, mode=mode, since=since, until=until)
             return [SearchResult(**row) for row in rows], "ok" if rows else "empty"
         except httpx.HTTPStatusError as exc:
@@ -484,13 +543,13 @@ class SearchService:
             return [], "unauthorized" if status == 401 else "blocked" if status in {403, 429, 432, 433} else "error"
         except (TimeoutError, httpx.TimeoutException):
             return [], "timeout"
-        except (httpx.HTTPError, ValueError, TypeError, AttributeError):
+        except (httpx.HTTPError, ValueError, TypeError, AttributeError, OSError, sqlite3.Error):
             return [], "error"
 
     def _rank(self, query, results, domains, max_items=3):
         scored, seen = [], set()
         for item in results:
-            score = relevance(query, item.title + " " + item.snippet + " " + (urllib.parse.urlsplit(item.url).hostname or ""))
+            score = relevance(query, item.title + " " + (item.page_text or item.snippet) + " " + (urllib.parse.urlsplit(item.url).hostname or ""))
             if not score or not item.url or item.url in seen:
                 continue
             seen.add(item.url)
@@ -521,28 +580,32 @@ class SearchService:
         except (TimeoutError, httpx.HTTPError, ValueError, OSError):
             return replace(result, page_status="unavailable")
 
-    async def _perform_search(self, query, fallback_query=None, preferred_domains=(), *, mode="web", since="", until="", deadline=None):
+    async def _perform_search(self, query, fallback_query=None, preferred_domains=(), *, mode="web", since="", until="", deadline=None, budget=None, progress=None):
         start = time.monotonic()
+        controlled = budget is not None
+        budget = budget or SearchTurnBudget(deadline or start + self._deadline_seconds)
         attempts, candidates, ranked = [], [], []
         outcome = _outcome_query(query)
-        topical = outcome or mode == "news" or bool(re.search(r"новост|недавн|последн.{0,20}(?:геро|перс)|latest.{0,20}(?:hero|update)", query, re.I))
+        topical = outcome or mode == "news" or bool(re.search(r"новост|недавн|удал|последн.{0,35}(?:геро|перс|песн|трек|релиз)|latest.{0,20}(?:hero|update|song|release)", query, re.I))
         providers = [("duckduckgo", query), ("google_news" if topical else "bing", query)]
+        if re.search(r"биограф|biography", query, re.I):
+            providers.insert(0, ("wikipedia", query))
         if fallback_query and fallback_query.casefold() != query.casefold():
             providers.append(("refine", fallback_query))
         elif preferred_domains:
             providers.append(("duckduckgo", query + " site:" + preferred_domains[0]))
-        else:
+        elif not controlled:
             refined = re.sub(r"\b(?:полный текст|full text|последний|самый|latest|recently)\b", "", query, flags=re.I)
             refined = clean_text(refined, 250)
             if refined == query:
                 refined += " " + ("варианты текст" if re.search(r"анекдот|joke", query, re.I) else "подробности" if re.search(r"[а-яё]", query, re.I) else "details")
             if refined != query:
                 providers.append(("refine", refined))
-        refinement_query = providers[2][1] if len(providers) == 3 else None
+        refinement_query = providers[-1][1] if len(providers) >= 3 else None
         selected = self.selected_provider()
         if selected != "free":
             providers.insert(0, (selected, query))
-        limit = 3 if selected == "free" else 4
+        limit = min(6, len(providers))
         rank_limit = 7 if mode == "news" else 3
         try:
             async with asyncio.timeout(min(self._deadline_seconds, max(0, deadline - time.monotonic())) if deadline is not None else self._deadline_seconds):
@@ -550,6 +613,10 @@ class SearchService:
                     provider, actual_query = providers[attempt_index]
                     if provider == "refine":
                         provider = "bing" if (topical and not outcome) or self._blocked_until.get("duckduckgo", 0) > time.monotonic() else "duckduckgo"
+                    if not budget.admit(actual_query):
+                        break
+                    if progress:
+                        progress("searching" if actual_query == query else "refining")
                     t = time.monotonic()
                     results, status = (await self._api_provider(provider, actual_query, mode=mode, since=since, until=until)
                                        if provider in API_PROVIDERS else await self._provider(provider, actual_query))
@@ -566,6 +633,7 @@ class SearchService:
                         candidates.extend(results)
                     ranked = self._rank(query, candidates, preferred_domains, rank_limit)
                     attempts.append({"provider": provider, "query": actual_query[:300], "status": status,
+                                     "searched": _API_SENT.get() if provider in API_PROVIDERS else status != "cooldown",
                                      "raw_count": len(results),
                                      "accepted": len(self._rank(query, results, preferred_domains)),
                                      "latency_ms": round((time.monotonic() - t) * 1000)})
@@ -587,11 +655,16 @@ class SearchService:
                             providers[1], providers[2] = providers[2], providers[1]
                         elif not conflict or (attempt_index > 0 and self._rank(query, results, preferred_domains)):
                             break
-                needs_pages = topical or bool(re.search(r"релиз|выход|выйдет|верси|release|version|\bкогда\b|\bdate\b|полны|текст|анекдот|вариант|joke|full text|геро|перс", query, re.I))
+                needs_pages = topical or bool(re.search(r"биограф|подроб|релиз|выход|выйдет|верси|release|version|\bкогда\b|\bdate\b|полны|текст|анекдот|вариант|joke|full text|геро|перс", query, re.I))
                 date_claims = {m.group(0) for r in ranked for m in re.finditer(r"\b20\d{2}\b", r.snippet)}
                 if ranked and (needs_pages or len(date_claims) > 1):
-                    reads = await asyncio.gather(*(self._page(r, query) for r in ranked[:2]))
-                    evidence = [*reads, *ranked[2:]]
+                    to_read = [r for r in ranked if r.page_status != "read" and r.url not in budget.page_results][:min(2, 3 - budget.pages)]
+                    budget.pages += len(to_read)
+                    if to_read and progress:
+                        progress("reading")
+                    reads = await asyncio.gather(*(self._page(r, query) for r in to_read))
+                    budget.page_results.update({r.url: r for r in reads})
+                    evidence = [budget.page_results.get(r.url, r) for r in ranked]
                     lower, upper = parse_date(since), parse_date(until)
                     evidence = [r for r in evidence if not parse_date(r.published_at) or
                                 ((not lower or parse_date(r.published_at) >= lower) and
@@ -606,7 +679,7 @@ class SearchService:
             statuses = {a["status"] for a in attempts}
             status = "empty" if "ok" in statuses or "empty" in statuses else "blocked" if statuses & {"blocked", "cooldown"} else "timeout" if "timeout" in statuses else status
         providers_used = "+".join(dict.fromkeys(r.provider for r in ranked)) or "+".join(dict.fromkeys(a["provider"] for a in attempts))
-        return self._snapshot(query, results=ranked, status=status, provider=providers_used or "duckduckgo",
+        return self._snapshot(query, results=ranked, status=status, provider=providers_used or "duckduckgo", quota=self._quota if selected == "tavily" else None,
                               attempts=tuple(attempts), latency_ms=round((time.monotonic() - start) * 1000), mode=mode, since=since, until=until)
 
     @staticmethod

@@ -291,20 +291,15 @@ async def test_api_adapters_normalize_formats_and_only_use_selected_service(prov
         else:
             payload = {"news" if mode == "news" else "organic": [item]}
         return httpx.Response(200, json=payload)
-    service = SearchService(httpx.AsyncClient(transport=httpx.MockTransport(handler)),
-                            runtime_settings=RuntimeSettings(web_search_provider=provider),
-                            credentials={p: "fixture-secret" for p in ("brave", "tavily", "serper")})
-    try:
-        snap = await service.search("Python documentation", mode=mode)
-        assert snap.status == "ok" and snap.provider == provider and snap.results[0].published_at
-        assert len(snap.attempts) == 1
+    from apps.backend.app.environment.search_providers import api_search
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        rows = await api_search(client, provider, "fixture-secret", "Python documentation", mode=mode)
+        assert rows[0]["provider"] == provider and rows[0]["published_at"]
         assert len([r for r in calls if r.url.host != "93.184.216.34"]) == 1
-        assert "fixture-secret" not in json.dumps(snap.metadata()) + caplog.text
+        assert "fixture-secret" not in json.dumps(rows) + caplog.text
         if provider == "tavily":
             assert json.loads(calls[0].content)["include_answer"] is False
             assert json.loads(calls[0].content)["search_depth"] == "basic"
-    finally:
-        await service.close()
 
 
 @pytest.mark.anyio
@@ -337,8 +332,8 @@ async def test_paid_failure_uses_free_not_another_paid_service(caplog):
                             credentials={p: "fixture-secret" for p in ("brave", "tavily", "serper")})
     try:
         snap = await service.search("Python docs")
-        assert snap.status == "ok" and snap.attempts[0]["status"] == "unauthorized"
-        assert hosts == ["api.search.brave.com", "html.duckduckgo.com"]
+        assert snap.status == "ok" and snap.attempts[0]["provider"] == "duckduckgo"
+        assert hosts == ["html.duckduckgo.com"]
         assert "fixture-secret" not in caplog.text + json.dumps(snap.metadata())
     finally:
         await service.close()

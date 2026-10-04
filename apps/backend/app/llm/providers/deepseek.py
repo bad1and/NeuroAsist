@@ -55,6 +55,8 @@ class _RequestProfile:
 
 
 _PROFILE_SETTINGS: dict[str, tuple[str, int]] = {
+    "chat_search_plan": ("llm_search_plan_max_tokens", 256),
+    "chat_search_assess": ("llm_search_assess_max_tokens", 400),
     "chat_json": ("llm_chat_json_max_tokens", 900),
     "chat_live": ("llm_chat_live_max_tokens", 500),
     "memory": ("llm_memory_max_tokens", 1_000),

@@ -206,6 +206,7 @@ def create_app() -> FastAPI:
     situational_coordinator = SituationalCoordinator(search_service=SearchService(
         runtime_settings=runtime_settings,
         credentials={p: getattr(settings, f"{p}_api_key", None) for p in ("brave", "tavily", "serper")},
+        budget_path=settings.app_data_path / "search-budget.sqlite3",
     ))
     app.state.voice_tts_style = "auto"
     app.state.voice_tts_expression_level = "natural"

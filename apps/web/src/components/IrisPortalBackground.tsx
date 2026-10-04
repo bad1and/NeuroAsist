@@ -1,4 +1,9 @@
 import { memo, useEffect, useRef } from "react";
+import { createTimer, type Timer } from "animejs";
+import {
+  ShaderMount, grainGradientFragmentShader,
+  ShaderFitOptions, getShaderNoiseTexture,
+} from "@paper-design/shaders";
 import { getMoodVisuals } from "../mood-visuals";
 import { audioAnalyzer } from "../audio-analyzer";
 import type { VoiceState } from "../types";
@@ -77,38 +82,27 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
-const VERTEX_SHADER_SOURCE = `
-attribute vec2 a_position;
-void main() {
-    gl_Position = vec4(a_position, 0.0, 1.0);
-}
-`;
-
-const FRAGMENT_SHADER_SOURCE = `
-precision highp float;
-
-uniform vec2 u_resolution;
-uniform float u_time;
+// Paper supplies only the grain functions and noise texture. Iris owns the
+// complete wave geometry, spectral color mixing, and audio-reactive parameters.
+const PAPER_GRAIN_HELPERS = grainGradientFragmentShader.slice(
+  0, grainGradientFragmentShader.indexOf("void main()"),
+).replace("precision lowp float;", "precision highp float;");
+const IRIS_GRAIN_WAVE_SHADER = `${PAPER_GRAIN_HELPERS}
+uniform float u_irisTime;
 uniform vec2 u_mouse;
 uniform vec2 u_center;
-
 uniform vec3 u_colorCore;
 uniform vec3 u_colorFringe;
 uniform vec3 u_colorAccent;
-
 uniform float u_radius;
 uniform float u_warp;
-uniform float u_intensity;
-
 uniform float u_audioLow;
 uniform float u_audioMid;
 uniform float u_audioHigh;
 uniform float u_audioLevel;
-uniform float u_statusMode; // 0=idle, 1=listening, 2=thinking, 3=speaking
-
 float sdArc(vec2 p, vec2 center, float radius, float width, float warp) {
-    float w1 = sin(p.x * 2.4 + u_time * 0.45) * warp;
-    float w2 = (sin(p.y * 2.2 + u_time * 0.35) * cos(p.x * 1.7 - u_time * 0.25)) * (warp * 0.85);
+    float w1 = sin(p.x * 2.4 + u_irisTime * 0.45) * warp;
+    float w2 = (sin(p.y * 2.2 + u_irisTime * 0.35) * cos(p.x * 1.7 - u_irisTime * 0.25)) * (warp * 0.85);
     p.y += w1;
     p.x += w2;
     float d = length(p - center) - radius;
@@ -128,7 +122,7 @@ void main() {
     st += mouseOffset;
 
     // Audio reactive dynamics
-    float dynRadius = u_radius + (u_audioLow * 0.18) + (sin(u_time * 0.8) * 0.012);
+    float dynRadius = u_radius + (u_audioLow * 0.18) + (sin(u_irisTime * 0.8) * 0.012);
     float dynWarp = u_warp + (u_audioMid * 0.25);
     float dynIntensity = u_intensity + (u_audioHigh * 0.4) + (u_audioLevel * 0.3);
 
@@ -137,7 +131,7 @@ void main() {
     float d2 = sdArc(st, center, dynRadius + 0.055 + u_audioMid * 0.03, 0.06 + u_audioMid * 0.02, dynWarp * 1.35);
 
     float distToCenter = length(st - center);
-    float wash = smoothstep(dynRadius * 2.2, 0.0, distToCenter) * 0.22;
+    float wash = (1.0 - smoothstep(0.0, dynRadius * 2.2, distToCenter)) * 0.22;
 
     // Glow distributions
     float coreGlow = exp(-max(0.0, d1) * (26.0 - u_audioHigh * 7.0));
@@ -145,7 +139,7 @@ void main() {
 
     // Subtle multi-spectral dispersion along the organic arc
     float angle = atan(st.y - center.y, st.x - center.x);
-    float spectralMod = sin(angle * 3.0 + u_time * 0.5) * 0.12 + 0.88;
+    float spectralMod = sin(angle * 3.0 + u_irisTime * 0.5) * 0.12 + 0.88;
     
     // Iris signature violet undertone for brand harmony
     vec3 irisBaseViolet = vec3(0.412, 0.357, 0.525);
@@ -154,44 +148,36 @@ void main() {
     finalColor += u_colorCore * (coreGlow * (1.35 + u_audioHigh * 0.65));
     finalColor += mix(u_colorFringe, u_colorCore, 0.25 * spectralMod) * (fringeGlow * (1.15 + u_audioMid * 0.45));
     finalColor += u_colorAccent * (wash * (0.85 + u_audioLevel * 0.5));
-    finalColor += mix(u_colorFringe, irisBaseViolet, 0.20) * wash * (sin(u_time * 0.65) * 0.20 + 0.80);
+    finalColor += mix(u_colorFringe, irisBaseViolet, 0.20) * wash * (sin(u_irisTime * 0.65) * 0.20 + 0.80);
 
-    float alpha = clamp((coreGlow * 1.55 + fringeGlow * 0.95 + wash * 0.80), 0.0, 1.0);
-    vec3 toneMapped = vec3(1.0) - exp(-finalColor * (1.65 * dynIntensity));
+    // Paper's original multi-scale grain field; it changes pigment coverage,
+    // while sdArc above remains Iris's original moving, audio-reactive wave.
+    vec2 grain_uv = (gl_FragCoord.xy - 0.5 * u_resolution) * 0.7;
+    float baseNoise = snoise(grain_uv * .5);
+    vec4 fbmVals = fbmR(.002 * grain_uv + 10., .003 * grain_uv,
+                       .001 * grain_uv, rotate(.4 * grain_uv, 2.));
+    float grainDist = baseNoise * snoise(grain_uv * .2) - fbmVals.x - fbmVals.y;
+    float rawNoise = .75 * baseNoise - fbmVals.w - fbmVals.z;
+    float noise = clamp(rawNoise, 0., 1.);
 
-    gl_FragColor = vec4(toneMapped, alpha * 0.95);
+    float coverage = clamp(coreGlow * 1.55 + fringeGlow * 0.95 + wash * 0.80, 0., 1.);
+    // Use Paper's field displacement and anti-aliased coverage threshold. Applying
+    // a tiny brightness multiplier alone loses the characteristic granular edge.
+    float shape = coverage * .35;
+    shape += .5 * 2. / 3. * (grainDist + .5);
+    shape += u_noise * 10. / 3. * noise;
+    float aa = fwidth(shape);
+    shape = clamp(shape - .5 / 3., 0., 1.);
+    float totalShape = smoothstep(0., .5 + 2. * aa, clamp(shape * 3., 0., 1.));
+    float alpha = totalShape * smoothstep(0., .12, coverage);
+    // Ink keeps its original core/fringe/accent mixture without whitening the
+    // overlapping colors. The grain fades with the wave onto transparent graphite.
+    vec3 pigment = finalColor / max(1., max(finalColor.r, max(finalColor.g, finalColor.b)));
+    pigment *= .92 * (1. - u_noise * .35 * noise);
+    alpha = clamp(alpha * dynIntensity * .90, 0., .95);
+    fragColor = vec4(pigment * alpha, alpha);
 }
 `;
-
-function createShader(gl: WebGLRenderingContext, type: number, source: string): WebGLShader | null {
-  const shader = gl.createShader(type);
-  if (!shader) return null;
-  gl.shaderSource(shader, source);
-  gl.compileShader(shader);
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    gl.deleteShader(shader);
-    return null;
-  }
-  return shader;
-}
-
-function createProgram(gl: WebGLRenderingContext, vsSource: string, fsSource: string): WebGLProgram | null {
-  const vs = createShader(gl, gl.VERTEX_SHADER, vsSource);
-  const fs = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
-  if (!vs || !fs) return null;
-
-  const program = gl.createProgram();
-  if (!program) return null;
-  gl.attachShader(program, vs);
-  gl.attachShader(program, fs);
-  gl.linkProgram(program);
-
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    gl.deleteProgram(program);
-    return null;
-  }
-  return program;
-}
 
 export const IrisPortalBackground = memo(function IrisPortalBackground({
   emotion = "neutral",
@@ -202,9 +188,8 @@ export const IrisPortalBackground = memo(function IrisPortalBackground({
   isActive = true,
   className = "",
 }: IrisPortalBackgroundProps) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const animationFrameRef = useRef<number | null>(null);
-  const renderCallbackRef = useRef<((now: number) => void) | null>(null);
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const timerRef = useRef<Timer | null>(null);
   const resetTimeRef = useRef<(() => void) | null>(null);
 
   // References for live smooth interpolation without re-binding WebGL
@@ -227,65 +212,55 @@ export const IrisPortalBackground = memo(function IrisPortalBackground({
       showInAppAvatar,
       isActive,
     };
-    if (isActive && !wasActive && renderCallbackRef.current) {
+    if (isActive && !wasActive && timerRef.current && !document.hidden) {
       if (resetTimeRef.current) resetTimeRef.current();
-      if (animationFrameRef.current === null) {
-        animationFrameRef.current = requestAnimationFrame(renderCallbackRef.current);
-      }
+      timerRef.current.resume();
+    } else if (!isActive) {
+      timerRef.current?.pause();
     }
   }, [emotion, voiceState, loading, isDialogActive, showInAppAvatar, isActive]);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return undefined;
-
-    let gl: WebGLRenderingContext | null = null;
-    try {
-      gl = canvas.getContext("webgl", {
-        alpha: true,
-        antialias: true,
-        premultipliedAlpha: false,
-        powerPreference: "high-performance",
-      });
-    } catch {
-      return undefined;
+    const host = hostRef.current;
+    if (!host) return undefined;
+    // Paper's 2x sampling is essential: downsampling makes its fine grain coarse.
+    // Keep a finite pixel budget and let the Anime timer cap the frame rate.
+    let mount: ShaderMount | null = null;
+    const noiseTexture = getShaderNoiseTexture();
+    let disposed = false;
+    const initialize = () => {
+      if (disposed) return;
+      try {
+        mount = new ShaderMount(host, IRIS_GRAIN_WAVE_SHADER, {
+          u_irisTime: 0,
+          u_colorCore: hexToRgb(getMoodVisuals(stateRef.current.emotion).colors[0]),
+          u_colorFringe: hexToRgb(getMoodVisuals(stateRef.current.emotion).colors[1]),
+          u_colorAccent: hexToRgb(getMoodVisuals(stateRef.current.emotion).colors[2]),
+          u_radius: 0.54, u_warp: getMoodVisuals(stateRef.current.emotion).warp,
+          u_intensity: 1, u_noise: 0.25,
+          u_audioLow: 0, u_audioMid: 0, u_audioHigh: 0, u_audioLevel: 0,
+          u_mouse: [0.5, 0.5],
+          u_center: [stateRef.current.showInAppAvatar && stateRef.current.isDialogActive ? -0.08 : 0, 0.95],
+          u_fit: ShaderFitOptions.contain,
+          u_scale: 1, u_rotation: 0,
+          u_originX: 0.5, u_originY: 0.5,
+          u_offsetX: 0, u_offsetY: 0,
+          u_worldWidth: 0, u_worldHeight: 0,
+          u_noiseTexture: noiseTexture,
+        }, { alpha: true, antialias: false, depth: false, stencil: false,
+             premultipliedAlpha: true, powerPreference: "high-performance" },
+        0, 0, 2, 4_000_000);
+        mount.canvasElement.className = "iris-portal-canvas";
+      } catch {
+        // Keep the rest of the conversation usable when WebGL2 is unavailable.
+        host.querySelector("canvas")?.remove();
+      }
+    };
+    if (!noiseTexture || (noiseTexture.complete && noiseTexture.naturalWidth > 0)) {
+      initialize();
+    } else {
+      noiseTexture.addEventListener("load", initialize, { once: true });
     }
-    if (!gl) return undefined;
-
-    const program = createProgram(gl, VERTEX_SHADER_SOURCE, FRAGMENT_SHADER_SOURCE);
-    if (!program) return undefined;
-
-    gl.useProgram(program);
-
-    // Fullscreen quad buffer
-    const positionBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-    gl.bufferData(
-      gl.ARRAY_BUFFER,
-      new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
-      gl.STATIC_DRAW,
-    );
-
-    const aPositionLocation = gl.getAttribLocation(program, "a_position");
-    gl.enableVertexAttribArray(aPositionLocation);
-    gl.vertexAttribPointer(aPositionLocation, 2, gl.FLOAT, false, 0, 0);
-
-    // Uniform locations
-    const uResLoc = gl.getUniformLocation(program, "u_resolution");
-    const uTimeLoc = gl.getUniformLocation(program, "u_time");
-    const uMouseLoc = gl.getUniformLocation(program, "u_mouse");
-    const uCenterLoc = gl.getUniformLocation(program, "u_center");
-    const uColorCoreLoc = gl.getUniformLocation(program, "u_colorCore");
-    const uColorFringeLoc = gl.getUniformLocation(program, "u_colorFringe");
-    const uColorAccentLoc = gl.getUniformLocation(program, "u_colorAccent");
-    const uRadiusLoc = gl.getUniformLocation(program, "u_radius");
-    const uWarpLoc = gl.getUniformLocation(program, "u_warp");
-    const uIntensityLoc = gl.getUniformLocation(program, "u_intensity");
-    const uAudioLowLoc = gl.getUniformLocation(program, "u_audioLow");
-    const uAudioMidLoc = gl.getUniformLocation(program, "u_audioMid");
-    const uAudioHighLoc = gl.getUniformLocation(program, "u_audioHigh");
-    const uAudioLevelLoc = gl.getUniformLocation(program, "u_audioLevel");
-    const uStatusModeLoc = gl.getUniformLocation(program, "u_statusMode");
 
     // Helper: convert hex to OKLab triple
     const hexToOklab = (hex: string): [number, number, number] => {
@@ -328,7 +303,6 @@ export const IrisPortalBackground = memo(function IrisPortalBackground({
     let currSpeed = cachedMood.visuals.speed;
     let currRadius = 0.54;
     let currIntensity = 1.0;
-    let currStatusMode = 0.0;
     const initialDialogActive = stateRef.current.isDialogActive;
     let currCenterX = (initialDialogActive && stateRef.current.showInAppAvatar) ? -0.08 : 0.0;
     let currCenterY = 0.95;
@@ -338,78 +312,30 @@ export const IrisPortalBackground = memo(function IrisPortalBackground({
     let currMouseX = 0.50;
     let currMouseY = 0.50;
 
-    let cachedRect = { left: 0, top: 0, width: 1, height: 1 };
-
+    let cachedRect = host.getBoundingClientRect();
+    const updateRect = () => { cachedRect = host.getBoundingClientRect(); };
     const handleMouseMove = (event: MouseEvent) => {
       if (cachedRect.width > 0 && cachedRect.height > 0) {
         targetMouseX = Math.max(0, Math.min(1, (event.clientX - cachedRect.left) / cachedRect.width));
-        targetMouseY = Math.max(0, Math.min(1, 1.0 - (event.clientY - cachedRect.top) / cachedRect.height));
+        targetMouseY = Math.max(0, Math.min(1, 1 - (event.clientY - cachedRect.top) / cachedRect.height));
       }
     };
-
     window.addEventListener("mousemove", handleMouseMove, { passive: true });
-
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(updateRect) : null;
+    observer?.observe(host);
     let lastTime = performance.now();
     let accumulatedTime = 0;
-    resetTimeRef.current = () => {
-      lastTime = performance.now();
-    };
-
-    const resize = (width?: number, height?: number) => {
-      const clientW = width && width > 0 ? width : (canvas.clientWidth || window.innerWidth || 800);
-      const clientH = height && height > 0 ? height : (canvas.clientHeight || window.innerHeight || 600);
-      cachedRect = { left: 0, top: 0, width: clientW, height: clientH };
-
-      // Atmospheric background portal is an ambient glow; capping at max 800x450 / DPR 0.8
-      // drastically cuts GPU fragment shader fill-rate while preserving visual fidelity
-      const dpr = Math.min(window.devicePixelRatio || 1, 0.8);
-
-      let targetW = Math.max(1, Math.floor(clientW * dpr));
-      let targetH = Math.max(1, Math.floor(clientH * dpr));
-
-      const maxDim = 800;
-      if (targetW > maxDim || targetH > maxDim) {
-        const aspect = targetW / targetH;
-        if (targetW >= targetH) {
-          targetW = maxDim;
-          targetH = Math.max(1, Math.floor(maxDim / aspect));
-        } else {
-          targetH = maxDim;
-          targetW = Math.max(1, Math.floor(maxDim * aspect));
-        }
-      }
-
-      if (Math.abs(canvas.width - targetW) > 2 || Math.abs(canvas.height - targetH) > 2) {
-        canvas.width = targetW;
-        canvas.height = targetH;
-        gl.viewport(0, 0, targetW, targetH);
-      }
-    };
-
-    const observer = typeof ResizeObserver !== "undefined"
-      ? new ResizeObserver((entries) => {
-          const entry = entries[0];
-          if (entry?.contentRect && entry.contentRect.width > 0 && entry.contentRect.height > 0) {
-            resize(entry.contentRect.width, entry.contentRect.height);
-          } else {
-            resize();
-          }
-        })
-      : null;
-    observer?.observe(canvas);
-    resize();
-
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    let wasSpeaking = false;
+    resetTimeRef.current = () => { lastTime = performance.now(); };
 
     const render = (now: number) => {
       const state = stateRef.current;
       if (!state.isActive || (typeof document !== "undefined" && document.hidden)) {
-        animationFrameRef.current = null;
+        timerRef.current?.pause();
         return;
       }
 
-      const dt = Math.min(0.033, Math.max(0.001, (now - lastTime) / 1000));
+      const dt = Math.min(0.05, Math.max(0.001, (now - lastTime) / 1000));
       lastTime = now;
 
       if (state.emotion !== cachedEmotion) {
@@ -426,27 +352,22 @@ export const IrisPortalBackground = memo(function IrisPortalBackground({
       let targetSpeed = currentVisuals.speed;
       let targetRadius = 0.54;
       let targetIntensity = 1.0;
-      let targetStatus = 0.0; // 0=idle, 1=listening, 2=thinking, 3=speaking
 
       // Determine status target
       if (state.voiceState === "speaking") {
-        targetStatus = 3.0;
         targetRadius = 0.56;
         targetSpeed *= 1.08;
         targetIntensity = 1.08;
       } else if (state.voiceState === "thinking" || state.voiceState === "transcribing" || state.loading) {
-        targetStatus = 2.0;
         targetRadius = 0.54;
         targetSpeed *= 1.05;
         targetWarp = currentVisuals.warp;
         targetIntensity = 1.10;
       } else if (state.voiceState === "recording") {
-        targetStatus = 1.0;
         targetRadius = 0.48;
         targetSpeed *= 1.4;
         targetIntensity = 1.15;
       } else if (state.voiceState === "error") {
-        targetStatus = 4.0;
         targetRadius = 0.52;
         targetSpeed = 1.6;
         targetIntensity = 1.4;
@@ -454,7 +375,6 @@ export const IrisPortalBackground = memo(function IrisPortalBackground({
         targetFringeLab = errorFringeLab;
         targetAccentLab = errorAccentLab;
       } else if (!state.isDialogActive) {
-        targetStatus = 0.0;
         targetRadius = 0.52;
         targetSpeed *= 0.75;
         targetIntensity = 0.85;
@@ -495,7 +415,6 @@ export const IrisPortalBackground = memo(function IrisPortalBackground({
       currSpeed = lerp(currSpeed, targetSpeed, dynamicFactor);
       currRadius = lerp(currRadius, targetRadius, dynamicFactor);
       currIntensity = lerp(currIntensity, targetIntensity, dynamicFactor);
-      currStatusMode = lerp(currStatusMode, targetStatus, dynamicFactor);
       currCenterX = lerp(currCenterX, targetCenterX, dynamicFactor);
       currCenterY = lerp(currCenterY, targetCenterY, dynamicFactor);
 
@@ -507,7 +426,8 @@ export const IrisPortalBackground = memo(function IrisPortalBackground({
 
       // Audio frequency spectrum from analyzer
       const isSpeaking = state.voiceState === "speaking";
-      if (!isSpeaking) audioAnalyzer.reset();
+      if (!isSpeaking && wasSpeaking) audioAnalyzer.reset();
+      wasSpeaking = isSpeaking;
       const measuredBands = isSpeaking
         ? audioAnalyzer.getAudioBands()
         : { low: 0, mid: 0, high: 0, level: 0 };
@@ -522,73 +442,59 @@ export const IrisPortalBackground = memo(function IrisPortalBackground({
         level: Math.min(0.28, measuredBands.level * 0.55 + presence),
       };
 
-      gl.uniform2f(uResLoc, canvas.width, canvas.height);
-      gl.uniform1f(uTimeLoc, accumulatedTime);
-      gl.uniform2f(uMouseLoc, currMouseX, currMouseY);
-      gl.uniform2f(uCenterLoc, currCenterX, currCenterY);
+      const core = oklabToRgb(currCoreL, currCoreA, currCoreB);
+      const fringe = oklabToRgb(currFringeL, currFringeA, currFringeB);
+      const accent = oklabToRgb(currAccentL, currAccentA, currAccentB);
+      mount?.setUniforms({
+        u_irisTime: accumulatedTime,
+        u_colorCore: core, u_colorFringe: fringe, u_colorAccent: accent,
+        u_radius: currRadius, u_warp: currWarp, u_intensity: currIntensity,
+        u_mouse: [currMouseX, currMouseY], u_center: [currCenterX, currCenterY],
+        u_audioLow: bands.low, u_audioMid: bands.mid,
+        u_audioHigh: bands.high, u_audioLevel: bands.level,
+      });
 
-      // Convert OKLab to sRGB only once per uniform upload
-      const [rCore, gCore, bCore] = oklabToRgb(currCoreL, currCoreA, currCoreB);
-      const [rFringe, gFringe, bFringe] = oklabToRgb(currFringeL, currFringeA, currFringeB);
-      const [rAccent, gAccent, bAccent] = oklabToRgb(currAccentL, currAccentA, currAccentB);
-
-      gl.uniform3f(uColorCoreLoc, rCore, gCore, bCore);
-      gl.uniform3f(uColorFringeLoc, rFringe, gFringe, bFringe);
-      gl.uniform3f(uColorAccentLoc, rAccent, gAccent, bAccent);
-
-      gl.uniform1f(uRadiusLoc, currRadius);
-      gl.uniform1f(uWarpLoc, currWarp);
-      gl.uniform1f(uIntensityLoc, currIntensity);
-
-      gl.uniform1f(uAudioLowLoc, bands.low);
-      gl.uniform1f(uAudioMidLoc, bands.mid);
-      gl.uniform1f(uAudioHighLoc, bands.high);
-      gl.uniform1f(uAudioLevelLoc, bands.level);
-      gl.uniform1f(uStatusModeLoc, currStatusMode);
-
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-      animationFrameRef.current = requestAnimationFrame(render);
     };
 
-    renderCallbackRef.current = render;
+    const timer = createTimer({
+      loop: true,
+      frameRate: 40,
+      autoplay: false,
+      onUpdate: () => render(performance.now()),
+    });
+    timerRef.current = timer;
 
     const handleVisibility = () => {
       if (document.hidden) {
-        if (animationFrameRef.current !== null) {
-          cancelAnimationFrame(animationFrameRef.current);
-          animationFrameRef.current = null;
-        }
-      } else if (stateRef.current.isActive && animationFrameRef.current === null) {
+        timer.pause();
+      } else if (stateRef.current.isActive) {
         lastTime = performance.now();
-        animationFrameRef.current = requestAnimationFrame(render);
+        timer.resume();
       }
     };
 
     document.addEventListener("visibilitychange", handleVisibility);
 
-    if (stateRef.current.isActive) {
-      animationFrameRef.current = requestAnimationFrame(render);
+    if (stateRef.current.isActive && !document.hidden) {
+      timer.resume();
     }
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("mousemove", handleMouseMove);
       observer?.disconnect();
-      if (animationFrameRef.current !== null) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
-      }
-      renderCallbackRef.current = null;
+      timer.cancel();
+      timerRef.current = null;
       resetTimeRef.current = null;
-      gl.deleteBuffer(positionBuffer);
-      gl.deleteProgram(program);
+      disposed = true;
+      noiseTexture?.removeEventListener("load", initialize);
+      mount?.dispose();
     };
   }, []);
 
   return (
     <div className={`iris-portal-backdrop ${className}`.trim()} data-emotion={emotion} aria-hidden="true">
-      <canvas ref={canvasRef} className="iris-portal-canvas" />
+      <div ref={hostRef} className="iris-portal-shader" />
     </div>
   );
 });

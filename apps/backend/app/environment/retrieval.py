@@ -52,6 +52,9 @@ def canonical_url(value: str) -> str:
 
 def normalize_entity(value: str) -> str:
     text = value.casefold().replace("ё", "е")
+    # Spelling equivalence for matching, not a factual assertion of identity.
+    text = re.sub(r"\b(?:gone[. -]?fludd|гон[ -]?(?:флат|флад|флудд?))\b", "gonefludd", text)
+    text = re.sub(r"\bлсп\b", "lsp", text)
     text = re.sub(r"\b(?:дедлок|дэдлок|дыдлок|дед\s+лок)(?:а|е|у|ом)?\b", "deadlock", text)
     text = re.sub(r"\b(?:питон|пайтон)\b", "python", text)
     text = re.sub(r"\b(?:госдум\w*|государственн\w*\s+дум\w*)\b", "госдума", text)
@@ -90,6 +93,13 @@ def relevance(query: str, text: str) -> float:
     q, candidate = terms(query), terms(text)
     if not q:
         return 0.0
+    if re.search(r"(?:по)?удал|убрал|исчез|removed|deleted", query, re.I) and not re.search(r"(?:по)?удал|убрал|исчез|заблок|недоступ|removed|deleted|unavailable", text, re.I):
+        return 0.0
+    if re.search(r"(?:по)?удал|removed|deleted", query, re.I) and not re.search(r"вернул|возврат|returned", query, re.I) and re.search(r"вернул|возврат|returned", text[:180], re.I):
+        return 0.0
+    for entity in ("gonefludd", "lsp"):
+        if entity in q and entity not in candidate:
+            return 0.0
     # Named Latin products and their versions must not disappear in a vaguely
     # related article; in particular GTA V must never corroborate GTA VI.
     latin = [w for w in _WORDS.findall(normalize_entity(query))

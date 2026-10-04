@@ -154,6 +154,7 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         news_category=runtime_settings.news_category,
         web_search_enabled=runtime_settings.web_search_enabled,
         web_search_provider=runtime_settings.web_search_provider,
+        web_search_free_only=True,
         search_api_keys_configured={p: bool(getattr(settings, f"{p}_api_key", None)) for p in ("brave", "tavily", "serper")},
     )
 
