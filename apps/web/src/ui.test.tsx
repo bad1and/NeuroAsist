@@ -686,6 +686,7 @@ describe("русский интерфейс", () => {
   });
 
   it("автосохраняет отдельное поле и откатывает его при ошибке", async () => {
+    api.updateRuntimeSettings.mockImplementation(async patch => ({ ...settings, ...patch }));
     render(<App />);
     expect(await screen.findByRole("button", { name: "Диалог" })).toBeInTheDocument();
 
@@ -705,6 +706,7 @@ describe("русский интерфейс", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
     await waitFor(() => expect(api.updateRuntimeSettings).toHaveBeenCalledWith({ memory_mode: "automatic" }));
+    await waitFor(() => expect(mode).toHaveValue("automatic"));
   });
 
   it("откладывает сохранение скорости до окончания debounce", async () => {
@@ -1313,4 +1315,65 @@ describe("русский интерфейс", () => {
     expect(screen.getByText("Iris")).toBeInTheDocument();
     expect(screen.getByText("Событие")).toBeInTheDocument();
   });
+});
+
+
+describe("переходы и размещение настроек", () => {
+  function renderSettings(extra: Record<string, unknown> = {}) {
+    return render(<SettingsPage settings={{ ...settings, coding_api_key_configured: true,
+      web_search_enabled: true, search_api_keys_configured: {}, ...extra } as PublicSettings}
+      initialSection="environment" avatarStatus={null} avatarOverlay={null} events={[]}
+      onRefreshEvents={vi.fn()} onRefreshAvatar={vi.fn()} onAvatarOverlayChanged={vi.fn()}
+      onInterfaceLocaleChange={vi.fn()} onSettingsChanged={vi.fn()} />);
+  }
+  it("повторяет переход к Tavily с фокусом через навигацию разделов", async () => {
+    renderSettings();
+    for (let repeat = 0; repeat < 2; repeat += 1) {
+      fireEvent.click(await screen.findByRole("button", { name: "Настроить API-ключ" }));
+      const heading = await screen.findByRole("heading", { name: "Tavily API" });
+      await waitFor(() => expect(heading).toHaveFocus());
+      expect(screen.getByLabelText("API-ключ Tavily")).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "Окружение и гео" }));
+      await waitFor(() => expect(screen.getByRole("heading", { name: "Веб-поиск" })).toBeVisible());
+      expect(screen.queryByLabelText("API-ключ Tavily")).not.toBeVisible();
+    }
+  });
+  it("повторно открывает целевой ключ из внешнего запроса", async () => {
+    const props = { settings: settings as PublicSettings, avatarStatus: null, avatarOverlay: null, events: [],
+      onRefreshEvents: vi.fn(), onRefreshAvatar: vi.fn(), onAvatarOverlayChanged: vi.fn(),
+      onInterfaceLocaleChange: vi.fn(), onSettingsChanged: vi.fn() };
+    const { rerender } = render(<SettingsPage {...props} navigationRequest={{ section: "api-keys", target: "coding", id: 1 }} />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Coding Agent API" })).toHaveFocus());
+    fireEvent.click(screen.getByRole("button", { name: "Живой разговор" }));
+    rerender(<SettingsPage {...props} navigationRequest={{ section: "api-keys", target: "coding", id: 2 }} />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Coding Agent API" })).toHaveFocus());
+  });
+  it("размещает эхозащиту рядом с устройствами и сохраняет Dev-ограничение", async () => {
+    renderSettings();
+    const navigation = screen.getByRole("navigation", { name: "Разделы настроек" });
+    fireEvent.click(within(navigation).getByRole("button", { name: "Устройства" }));
+    expect(screen.getByLabelText("Защита от собственного голоса")).toBeVisible();
+    expect(screen.getByLabelText("Защита от собственного голоса")).toBeDisabled();
+    fireEvent.click(within(navigation).getByRole("button", { name: "Живой разговор" }));
+    expect(screen.getByRole("heading", { name: "Эмоции и настроение" })).toBeVisible();
+    expect(screen.getByLabelText("Защита от собственного голоса")).not.toBeVisible();
+  });
+});
+
+
+it("сохраняет оба поля буфера при быстром изменении и выходе из подраздела", async () => {
+  let confirmed = { ...settings, developer_mode_enabled: true };
+  api.updateRuntimeSettings.mockImplementation(async patch => { confirmed = { ...confirmed, ...patch }; return confirmed; });
+  render(<SettingsPage settings={confirmed as PublicSettings} initialSection="voice-advanced"
+    avatarStatus={null} avatarOverlay={null} events={[]} onRefreshEvents={vi.fn()} onRefreshAvatar={vi.fn()}
+    onAvatarOverlayChanged={vi.fn()} onInterfaceLocaleChange={vi.fn()} onSettingsChanged={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText("Сегментов в буфере"), { target: { value: "3" } });
+  fireEvent.change(screen.getByLabelText("Задержка буфера, мс"), { target: { value: "800" } });
+  expect(api.updateRuntimeSettings).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Устройства" }));
+  await waitFor(() => expect(confirmed.voice_live_playback_prebuffer_segments).toBe(3));
+  await waitFor(() => expect(confirmed.voice_live_playback_prebuffer_ms).toBe(800));
+  fireEvent.click(screen.getByRole("button", { name: "Дополнительно" }));
+  expect(screen.getByLabelText("Сегментов в буфере")).toHaveValue(3);
+  expect(screen.getByLabelText("Задержка буфера, мс")).toHaveValue(800);
 });

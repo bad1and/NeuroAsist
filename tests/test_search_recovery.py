@@ -148,7 +148,7 @@ async def test_fragment_search_and_answer_complete_in_same_text_or_voice_turn(li
     agent = CharacterAgent(llm, History(DEADLOCK), 8, situational_coordinator=Environment(lookup), runtime_settings=RuntimeSettings())
     if live:
         visible = "".join([c async for c in agent.stream_user_message("s", "поищи выноти", input_mode="voice", persist_reply=False)])
-        assert visible.count("Так, секунду, проверю") == 1
+        assert visible.count("Так, секунду, проверю") == 0
     else:
         visible = (await agent.handle_user_message("s", "поищи выноти", persist_reply=False))["reply"]
     assert "Новый герой найден" in visible
@@ -169,7 +169,7 @@ async def test_observed_promise_only_reply_is_repaired_without_repeating_lookup(
     text = "кто победил на выборах в госдуму россии"
     if live:
         visible = "".join([c async for c in agent.stream_user_message("s", text, input_mode="voice", persist_reply=False)])
-        assert visible.count("Так, секунду, проверю") == 1
+        assert visible.count("Так, секунду, проверю") == 0
     else:
         visible = (await agent.handle_user_message("s", text, persist_reply=False))["reply"]
     assert "Результат проверки получен" in visible

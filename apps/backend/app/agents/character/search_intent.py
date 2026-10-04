@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Iterable
 
 from apps.backend.app.environment.retrieval import internet_forbidden, normalize_entity, sensitive_query, terms
+from apps.backend.app.agents.character.turn_intent import analyze_dialogue_turn
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,7 +29,7 @@ _LOCAL = re.compile(r"\b(?:в\s+(?:этом|моем|данном)\s+(?:коде
 _FOLLOWUP = re.compile(r"\b(?:ты.{0,35}\bнайди|найди\s+не\s+я|(?:ну\s+)?(?:и\s+)?что\s+там|что\s+с\s+поиском|ты.{0,60}\b(?:ищешь|искать)|але|алло|ты\s+тут|(?:найди|поищи|проверь)\s+(?:это|еще\s+раз|заново|лучше)|ищи\s+(?:ты|сама)|поищи\s+(?:ты|сама))\b", re.I)
 _FILLER = re.compile(r"\b(?:пожалуйста|плиз|ирис|iris|ты|сама|сам|мне|нам|это|то|не|я|нет|ну|так|с|в|и|там|данные|информацию|информация|что|же|еще|раз|заново|лучше|нормально|давай|теперь|уже|бля|блять|смысле|ебаный|свет|поиск|поиском)\b", re.I)
 _RECENT = re.compile(r"\b(?:последн\w*|нов\w*|свеж\w*)\s+(?:перс\w*|геро\w*|обновлен\w*|патч\w*)|\b(?:latest|newest)\s+(?:hero|character|update)\b", re.I)
-_DETAIL = re.compile(r"^\s*(?:(?:вот|прям|еще|ну|это|не|нет|да|а)\s+)*(?:сейчас|в\s+этом\s+году|вчера|сегодня|недавно|другой\s+(?:вариант|анекдот)|за\s+(?:неделю|месяц))\b", re.I)
+_DETAIL = re.compile(r"^\s*(?:(?:вот|прям|еще|ну|это|не|нет|да|а|давай|точнее|вернее|я имел в виду)\s+)*(?:сейчас|в\s+этом\s+году|(?:за\s+)?(?:вчера|сегодня)|недавно|другой\s+(?:вариант|анекдот)|за\s+(?:неделю|месяц))\b", re.I)
 _RETRY = re.compile(r"\b(?:заново|еще\s+раз|по\s+другому|лучше|другой)\b", re.I)
 _ENTITY = re.compile(r"\b(?:deadlock|gta\s+(?:[456]|iv|v|vi)|python|valorant|minecraft|r\.?e\.?p\.?o\.?)\b", re.I)
 _EVENT = re.compile(r"выбор\w*|госдум\w*|государственн\w*\s+дум\w*|чемпионат\w*|кубок\w*|world\s*cup|election", re.I)
@@ -43,7 +44,7 @@ _EMPTY_TAIL = re.compile(r"\b(?:в|принципе|да|попробуй|мож
 
 
 def contextual_search(text: str) -> bool:
-    return bool(_FOLLOWUP.search(text) or _RETRY.search(text) or _ACCEPT.fullmatch(text) or
+    return bool(_FOLLOWUP.search(text) or _RETRY.search(text) or _ACCEPT.fullmatch(text) or _DETAIL.search(text) or
                 ((_LOOKUP.search(text) or _CHANGING.search(text)) and re.search(r"\b(?:его|нее|него|нем|ней|это|еще|заново)\b", text, re.I)))
 
 
@@ -135,19 +136,24 @@ def _event_request(text: str) -> SearchRequest | None:
     return SearchRequest(query) if len(terms(query)) >= 2 else None
 
 
-def search_requested(text: str) -> bool:
+def search_requested(text: str, recent_messages: Iterable = ()) -> bool:
     text = text.replace("ё", "е")
+    if analyze_dialogue_turn(text, recent_messages).suppress_lookup:
+        return False
     return not (internet_forbidden(text) or sensitive_query(text) or _LOCAL.search(text)) and bool(
         _COMMAND.search(text) or _LOOKUP.search(text) or _CHANGING.search(text) or _RETRY.search(text) or _ACCEPT.fullmatch(text) or _FRESH.search(text) or _RECENT.search(text) or _FOLLOWUP.search(text) or _DETAIL.search(text) or (_EVENT.search(text) and _OUTCOME.search(text)))
 
 
 def needs_query_planner(text: str, recent_messages: Iterable = ()) -> bool:
     """An explicit but unresolved request must not become an invented query."""
+    recent_messages = list(recent_messages)
+    if analyze_dialogue_turn(text, recent_messages).suppress_lookup:
+        return False
     users = [m for m in recent_messages if getattr(m, "role", None) == "user"][-8:]
     explicit = bool(_COMMAND.search(text) or _LOOKUP.search(text) or _CHANGING.search(text) or _FRESH.search(text) or _RECENT.search(text) or (_EVENT.search(text) and _OUTCOME.search(text)))
     contextual = bool(users and (_DETAIL.search(text) or _FOLLOWUP.search(text)) and
                       any(_COMMAND.search(m.content) or _FRESH.search(m.content) or _RECENT.search(m.content) or _event_request(m.content) for m in users))
-    return search_requested(text) and (explicit or contextual) and plan_search(text, users) is None
+    return search_requested(text, recent_messages) and (explicit or contextual) and plan_search(text, recent_messages) is None
 
 
 def _meaningful(query: str) -> bool:
@@ -226,6 +232,9 @@ def plan_search(user_text: str, recent_messages: Iterable = ()) -> SearchRequest
     """
     if internet_forbidden(user_text) or sensitive_query(user_text) or _LOCAL.search(user_text):
         return None
+    recent_messages = list(recent_messages)
+    if analyze_dialogue_turn(user_text, recent_messages).suppress_lookup:
+        return None
     user_text = user_text.replace("ё", "е")
     conversation_request = _conversation_request(user_text, recent_messages)
     if conversation_request is not None:
@@ -237,7 +246,7 @@ def plan_search(user_text: str, recent_messages: Iterable = ()) -> SearchRequest
     contextual = bool(_RETRY.search(user_text) and re.search(r"анекдот|вариант", user_text, re.I))
     if request is not None and not contextual:
         return request
-    if len(user_text) > 300 or not search_requested(user_text):
+    if len(user_text) > 300 or not search_requested(user_text, recent_messages):
         return None
     fragments = []
     for message in reversed(users):

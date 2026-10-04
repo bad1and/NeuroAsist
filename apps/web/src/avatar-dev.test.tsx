@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, within } from "@testing-library/react";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { AvatarDevStudioStandalonePage } from "./components/AvatarDevPanel";
 import App from "./App";
@@ -182,8 +182,8 @@ describe("AvatarDevStudioStandalonePage", () => {
     expect(screen.getByRole("heading", { name: "API-ключи" })).toBeInTheDocument();
     expect(screen.getByLabelText(/API-ключ DeepSeek/)).toHaveAttribute("type", "password");
     expect(screen.getByLabelText(/API-ключ Coding Agent/)).toHaveAttribute("type", "password");
-    expect(screen.getByText("Ключ настроен")).toBeInTheDocument();
-    expect(screen.getByText("Ключ не настроен")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "DeepSeek API" })).getByText("Ключ настроен")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Coding Agent API" })).getByText("Ключ не настроен")).toBeInTheDocument();
   });
 });
 

@@ -1,350 +1,195 @@
 import { MaterialButton } from "./MaterialButton";
-import { useCallback, useEffect, useState } from "react";
-import { getEnvironmentStatus, updateRuntimeSettings, isDesktopManaged, saveDesktopSearchApiKey,
-  removeDesktopSearchApiKey, checkSearchProvider, getSettings } from "../api";
-import type { SearchApiProvider } from "../api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowUpRight } from "lucide-react";
+import { getEnvironmentStatus } from "../api";
 import { AppSwitch } from "./AppSwitch";
 import { CustomSelect } from "./CustomSelect";
 import type { EnvironmentStatus, PublicSettings } from "../types";
+import type { RuntimeSettingsPatch } from "../settingsAutosave";
 
 export interface EnvironmentSettingsProps {
   settings: PublicSettings;
   developerMode: boolean;
-  onSettingsChanged: (nextSettings: PublicSettings) => void;
+  onSaveSetting: (patch: RuntimeSettingsPatch, rollback?: () => void,
+    committed?: (settings: PublicSettings) => void) => Promise<boolean>;
+  onOpenApiKeys: () => void;
 }
 
-export function EnvironmentSettings({
-  settings,
-  developerMode,
-  onSettingsChanged,
-}: EnvironmentSettingsProps) {
+export function EnvironmentSettings({ settings, developerMode, onSaveSetting, onOpenApiKeys }: EnvironmentSettingsProps) {
   const [envStatus, setEnvStatus] = useState<EnvironmentStatus | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [cityInput, setCityInput] = useState(settings.location_city ?? "");
   const [citySaved, setCitySaved] = useState(false);
-  const [locationMode, setLocationMode] = useState<"auto" | "manual">(
-    (settings.location_mode as "auto" | "manual") ?? "auto"
-  );
-  const [weatherEnabled, setWeatherEnabled] = useState(settings.weather_enabled ?? true);
-  const [newsEnabled, setNewsEnabled] = useState(settings.news_enabled ?? true);
-  const [webSearchEnabled, setWebSearchEnabled] = useState(settings.web_search_enabled ?? true);
-  const [searchProvider, setSearchProvider] = useState<NonNullable<PublicSettings["web_search_provider"]>>(settings.web_search_provider ?? "free");
-  const [keyProvider, setKeyProvider] = useState<SearchApiProvider>("tavily");
-  const [apiKeyInput, setApiKeyInput] = useState("");
-  const [apiBusy, setApiBusy] = useState(false);
-  const [apiMessage, setApiMessage] = useState("");
-  const [newsCategory, setNewsCategory] = useState<NonNullable<PublicSettings["news_category"]>>(
-    settings.news_category ?? "all"
-  );
+  const [cityBusy, setCityBusy] = useState(false);
+  const cityDraft = useRef(cityInput);
+  const cityDirty = useRef(false);
+  const citySaving = useRef(false);
+  const requestId = useRef(0);
+  const locationMode = settings.location_mode ?? "auto";
+  const weatherEnabled = settings.weather_enabled ?? true;
+  const newsEnabled = settings.news_enabled ?? true;
+  const webSearchEnabled = settings.web_search_enabled ?? true;
+  const searchProvider = settings.web_search_provider === "tavily" ? "tavily" : "free";
+  const newsCategory = settings.news_category ?? "all";
 
   const refreshStatus = useCallback(async () => {
+    const id = ++requestId.current;
     setLoading(true);
     try {
       const data = await getEnvironmentStatus();
-      setEnvStatus(data);
+      if (id === requestId.current) setEnvStatus(data);
     } catch {
-      // Ignored: silent refresh fallback
+      if (id === requestId.current) setEnvStatus(null);
     } finally {
-      setLoading(false);
+      if (id === requestId.current) setLoading(false);
     }
   }, []);
-
   useEffect(() => {
     void refreshStatus();
+    return () => { requestId.current += 1; };
   }, [refreshStatus]);
-
   useEffect(() => {
-    setSearchProvider(settings.web_search_provider ?? "free");
-  }, [settings.web_search_provider]);
+    if (!cityDirty.current) {
+      const city = settings.location_city ?? "";
+      setCityInput(city);
+      cityDraft.current = city;
+    }
+  }, [settings.location_city]);
 
-  const handleSearchKey = async (action: "save" | "remove" | "check") => {
-    setApiBusy(true);
-    setApiMessage("");
+  const saveSetting = (patch: RuntimeSettingsPatch) => {
+    void onSaveSetting(patch, undefined, () => { void refreshStatus(); });
+  };
+  const handleSaveCity = async () => {
+    const trimmed = cityDraft.current.trim();
+    if (!trimmed || citySaving.current) return;
+    citySaving.current = true;
+    setCityBusy(true);
+    setCitySaved(false);
     try {
-      if (action === "check") {
-        const result = await checkSearchProvider(keyProvider);
-        const messages: Record<string, string> = {
-          ok: "Подключение работает.", unconfigured: "Сначала сохраните ключ.",
-          unauthorized: "Ключ не принят сервисом.", blocked: "Сервис ограничил запросы или закончилась квота.",
-          cooldown: "Сервис временно ограничен. Повторите позже.", timeout: "Сервис не ответил вовремя.",
-          empty: "Сервис ответил без результатов.",
-          free_only: "Этот сервис исключён из строго бесплатного режима.",
-          unverified_free_plan: "Бесплатный тариф без оплаты сверх пакета не подтверждён. Используются открытые источники.",
-          quota_exhausted: "Лимит бесплатного поиска исчерпан. Iris продолжает через открытые источники.",
-          budget_unavailable: "Не удалось проверить локальный лимит. Используются открытые источники.",
-        };
-        setApiMessage((messages[result.status] ?? "Проверка подключения не удалась.") +
-          (result.quota?.used !== undefined ? ` Расход: ${result.quota.used} / ${result.quota.limit}.` : ""));
-      } else {
-        if (action === "save") await saveDesktopSearchApiKey(keyProvider, apiKeyInput.trim());
-        else await removeDesktopSearchApiKey(keyProvider);
-        setApiKeyInput("");
-        // Credential commands restart the core; retry readiness, not saving.
-        for (let attempt = 0; attempt < 20; attempt += 1) {
-          try {
-            onSettingsChanged(await getSettings());
-            break;
-          } catch {
-            if (attempt === 19) throw new Error("Ядро ещё запускается.");
-            await new Promise((resolve) => setTimeout(resolve, 500));
-          }
+      await onSaveSetting({ location_city: trimmed }, undefined, next => {
+        if (cityDraft.current.trim() === trimmed) {
+          cityDirty.current = false;
+          cityDraft.current = next.location_city ?? trimmed;
+          setCityInput(cityDraft.current);
+          setCitySaved(true);
         }
-        setApiMessage(action === "save" ? "Ключ сохранён. Режим поиска не изменён." : "Ключ удалён.");
-      }
-    } catch {
-      setApiMessage("Не удалось выполнить действие. Проверьте подключение к Iris.");
+        void refreshStatus();
+      });
     } finally {
-      setApiBusy(false);
+      citySaving.current = false;
+      setCityBusy(false);
     }
   };
 
-  const saveSetting = useCallback(
-    async (patch: Parameters<typeof updateRuntimeSettings>[0]) => {
-      try {
-        const next = await updateRuntimeSettings(patch);
-        onSettingsChanged(next);
-        void refreshStatus();
-      } catch {
-        // Ignored: standard error handler
-      }
-    },
-    [onSettingsChanged, refreshStatus]
-  );
-
-  const handleSaveCity = async () => {
-    const trimmed = cityInput.trim();
-    await saveSetting({ location_city: trimmed });
-    setCitySaved(true);
-    setTimeout(() => setCitySaved(false), 2000);
+  const unavailable = loading ? "Загрузка…" : "Данные недоступны";
+  const location = envStatus?.location;
+  const sources: Record<string, string> = {
+    manual: "вручную", ip_auto: "по IP", timezone_fallback: "примерно, по часовому поясу", unknown: "не определён",
   };
-
+  const locationLabel = location?.city ? `${location.city} (${sources[location.source] ?? "источник не определён"})` : unavailable;
+  const timeLabel = envStatus?.time ? `${envStatus.time.formatted_time}, ${envStatus.time.weekday}` : unavailable;
   const weatherLabel = envStatus?.weather
     ? `${envStatus.weather.temperature > 0 ? "+" : ""}${Math.round(envStatus.weather.temperature)}°C, ${envStatus.weather.condition}`
-    : weatherEnabled
-      ? "Загрузка…"
-      : "Выключена";
+    : unavailable;
 
-  const locationLabel = envStatus?.location.city
-    ? `${envStatus.location.city} (${envStatus.location.source === "manual" ? "вручную" : "авто"})`
-    : "Определение…";
-
-  const timeLabel = envStatus?.time
-    ? `${envStatus.time.formatted_time}, ${envStatus.time.weekday}`
-    : "Определение…";
-
-  return (
-    <>
-      {/* Location Settings Card */}
-      <div className="settings-card">
-        <div className="settings-card-header">
-          <div className="settings-card-header-main">
-            <div className="settings-card-title-group">
-              <h3 className="settings-card-title">Местоположение и время</h3>
-              <p className="settings-card-subtitle">Определение города и времени для прогноза погоды и контекста бесед</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="settings-card-grid">
-          <div className="readonly-setting">
-            <span>Местное время</span>
-            <strong>{timeLabel}</strong>
-          </div>
-
-          <div className="readonly-setting">
-            <span>Текущий город</span>
-            <strong>{locationLabel}</strong>
-          </div>
-        </div>
-
-        <label>
-          Режим определения города
-          <CustomSelect
-            value={locationMode}
-            onChange={(e) => {
-              const next = e.target.value as "auto" | "manual";
-              setLocationMode(next);
-              void saveSetting({ location_mode: next });
-            }}
-          >
-            <option value="auto">Автоматически (по IP и часовому поясу)</option>
-            <option value="manual">Указать город вручную</option>
-          </CustomSelect>
-          <small>
-            {locationMode === "auto"
-              ? "Iris определяет город по сетевому адресу и часовому поясу Windows."
-              : "Вы можете указать любой город мира для прогноза погоды."}
-          </small>
-        </label>
-
-        {locationMode === "manual" && (
-          <label>
-            Город
-            <div className="settings-input-group">
-              <input
-                type="text"
-                value={cityInput}
-                placeholder="Например: Москва, Санкт-Петербург, Сочи..."
-                onChange={(e) => {
-                  setCityInput(e.target.value);
-                  setCitySaved(false);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    void handleSaveCity();
-                  }
-                }}
-              />
-              <MaterialButton materialKey={"EnvironmentSettings.button-1"}
-                type="button"
-                className="secondary"
-                onClick={() => void handleSaveCity()}
-              >
-                {citySaved ? "Сохранено ✓" : "Сохранить"}
-              </MaterialButton>
-            </div>
-            <small>Нажмите Enter или «Сохранить», чтобы применить город.</small>
-          </label>
-        )}
+  return <>
+    <section className="settings-card" aria-labelledby="environment-location">
+      <div className="settings-card-header"><div className="settings-card-header-main"><div className="settings-card-title-group">
+        <h3 className="settings-card-title" id="environment-location">Местоположение и время</h3>
+        <p className="settings-card-subtitle">Город для погоды и контекста бесед. Время берётся из системных часов.</p>
+      </div></div></div>
+      <div className="settings-card-grid">
+        <div className="readonly-setting"><span>Время на устройстве</span><strong>{timeLabel}</strong></div>
+        <div className="readonly-setting"><span>Текущий город</span><strong>{locationLabel}</strong></div>
       </div>
-
-      {/* Weather & News Switches Card */}
-      <div className="settings-card">
-        <div className="settings-card-header">
-          <div className="settings-card-header-main">
-            <div className="settings-card-title-group">
-              <h3 className="settings-card-title">Данные и внешние источники</h3>
-              <p className="settings-card-subtitle">Погода, новости и самостоятельная проверка информации по открытым источникам</p>
-            </div>
-          </div>
-        </div>
-
-        {weatherEnabled && (
-          <div className="readonly-setting">
-            <span>Погода за окном</span>
-            <strong>{weatherLabel}</strong>
-          </div>
-        )}
-
-        <AppSwitch
-          checked={weatherEnabled}
-          label="Погода за окном"
-          description="Iris всегда знает текущую температуру и погоду, а при вопросе даёт подробный прогноз на 3 дня."
-          onChange={(checked) => {
-            setWeatherEnabled(checked);
-            void saveSetting({ weather_enabled: checked });
-          }}
-        />
-
-        <AppSwitch
-          checked={webSearchEnabled}
-          label="Самостоятельный поиск в интернете"
-          description="Iris может незаметно проверить актуальные сведения во время ответа. Запросы и источники сохраняются только в истории диалога."
-          onChange={(checked) => {
-            setWebSearchEnabled(checked);
-            void saveSetting({ web_search_enabled: checked });
-          }}
-        />
-
-        <AppSwitch
-          checked={newsEnabled}
-          label="Сводка новостей"
-          description="Свежие события России и мира, технологии, наука и игры из открытых RSS-лент."
-          onChange={(checked) => {
-            setNewsEnabled(checked);
-            void saveSetting({ news_enabled: checked });
-          }}
-        />
-
-        {newsEnabled && (
-          <label>
-            Категория новостей
-            <CustomSelect value={newsCategory} onChange={(e) => {
-              const next = e.target.value as NonNullable<PublicSettings["news_category"]>;
-              setNewsCategory(next);
-              void saveSetting({ news_category: next });
-            }}>
-              <option value="all">Все категории</option>
-              <option value="tech">Технологии и IT</option>
-              <option value="general">Россия и мир</option>
-              <option value="science">Наука и космос</option>
-              <option value="games">Игры</option>
-            </CustomSelect>
-            <small>Ленты обновляются в фоне. В диалог попадают только новости по теме вашего вопроса.</small>
-          </label>
-        )}
-
-        <label>
-          Источник веб-поиска
-          <CustomSelect value={searchProvider} disabled={apiBusy} onChange={async (event) => {
-            const next = event.target.value as NonNullable<PublicSettings["web_search_provider"]>;
-            setApiMessage("");
-            try {
-              const updated = await updateRuntimeSettings({ web_search_provider: next });
-              setSearchProvider(updated.web_search_provider ?? "free");
-              onSettingsChanged(updated);
-            } catch {
-              setApiMessage("Не удалось сохранить режим поиска.");
-            }
-          }}>
-            <option value="free">Бесплатные источники</option>
-            <option value="brave" disabled>Brave · используется бесплатный резерв</option>
-            <option value="tavily">Tavily Free</option>
-            <option value="serper" disabled>Serper · используется бесплатный резерв</option>
-          </CustomSelect>
-          <small>Только бесплатный поиск. Tavily Free даёт 1000 кредитов в месяц без карты; Iris ограничивает расход до 900 и проверяет тариф перед обращением. При отсутствии ключа или исчерпании квоты работают открытые источники.</small>
-        </label>
-
-        <details>
-          <summary>Собственный поисковый API</summary>
-          <label>
-            Сервис для подключения
-            <CustomSelect value={keyProvider} disabled={apiBusy} onChange={(event) => {
-              setKeyProvider(event.target.value as SearchApiProvider);
-              setApiKeyInput("");
-              setApiMessage("");
-            }}>
-              <option value="brave">Brave</option>
-              <option value="tavily">Tavily</option>
-              <option value="serper">Serper</option>
-            </CustomSelect>
-          </label>
-          <label>
-            API-ключ поискового сервиса
-            <input type="password" autoComplete="off" value={apiKeyInput} disabled={apiBusy || !isDesktopManaged()}
-              onChange={(event) => setApiKeyInput(event.target.value)} />
-            <small>{settings.search_api_keys_configured?.[keyProvider] ? "Ключ сохранён в Windows Credential Manager." : "Ключ не подключён."}</small>
-          </label>
-          <div className="settings-input-group" style={{ flexWrap: "wrap" }}>
-            <MaterialButton materialKey="EnvironmentSettings.search-save" className="secondary" disabled={apiBusy || !apiKeyInput.trim() || !isDesktopManaged()} onClick={() => void handleSearchKey("save")}>Сохранить ключ</MaterialButton>
-            <MaterialButton materialKey="EnvironmentSettings.search-remove" className="secondary" disabled={apiBusy || !settings.search_api_keys_configured?.[keyProvider] || !isDesktopManaged()} onClick={() => void handleSearchKey("remove")}>Удалить ключ</MaterialButton>
-            <MaterialButton materialKey="EnvironmentSettings.search-check" className="secondary" disabled={apiBusy || !settings.search_api_keys_configured?.[keyProvider]} onClick={() => void handleSearchKey("check")}>Проверить подключение</MaterialButton>
-          </div>
-          <small>{isDesktopManaged() ? "Подключите отдельный ключ Tavily бесплатного тарифа Researcher без оплаты сверх пакета. Сохранение ключа не включает API. Проверка Tavily учитывается в лимите. Ключи Brave и Serper можно сохранить или удалить, но они не используются." : "Управление ключами доступно в установленном приложении Iris."}</small>
-        </details>
-        {apiMessage && <p role="status">{apiMessage}</p>}
-
-        <div className="readonly-setting audio-device-refresh">
-          <span>Данные окружения</span>
-          <MaterialButton materialKey={"EnvironmentSettings.button-2"}
-            className="secondary"
-            type="button"
-            onClick={() => void refreshStatus()}
-            disabled={loading}
-          >
-            {loading ? "Обновляем…" : "Обновить данные"}
+      <label>Режим определения города
+        <CustomSelect value={locationMode} onChange={event => saveSetting({ location_mode: event.target.value as "auto" | "manual" })}>
+          <option value="auto">Автоматически (по IP и часовому поясу)</option>
+          <option value="manual">Указать город вручную</option>
+        </CustomSelect>
+        <small>{locationMode === "auto" ? "Город определяется по IP; часовой пояс даёт приблизительное местоположение."
+          : "Укажите город для прогноза погоды. Системное время при этом не меняется."}</small>
+      </label>
+      {locationMode === "manual" && <div className="settings-city-field">
+        <label htmlFor="environment-city">Город</label>
+        <div className="settings-input-group">
+          <input id="environment-city" type="text" value={cityInput} maxLength={100} placeholder="Например: Москва, Санкт-Петербург, Сочи…"
+            onChange={event => {
+              cityDraft.current = event.target.value;
+              cityDirty.current = true;
+              setCityInput(event.target.value);
+              setCitySaved(false);
+            }} onKeyDown={event => {
+              if (event.key === "Enter") { event.preventDefault(); void handleSaveCity(); }
+            }} />
+          <MaterialButton materialKey="environment.city.save" type="button" className="secondary"
+            disabled={cityBusy || !cityInput.trim()} onClick={() => void handleSaveCity()}>
+            {cityBusy ? "Сохраняем…" : citySaved ? "Сохранено ✓" : "Сохранить"}
           </MaterialButton>
         </div>
+        <small>Нажмите Enter или «Сохранить», чтобы применить город.</small>
+      </div>}
+    </section>
 
-        {developerMode && envStatus?.ambient_header && (
-          <div className="readonly-setting dev-locked-field">
-            <span>Промпт контекста (режим разработчика)</span>
-            <small style={{ fontFamily: "var(--font-mono)", fontSize: "11px", wordBreak: "break-all" }}>
-              {envStatus.ambient_header}
-            </small>
-          </div>
-        )}
+    <section className="settings-card" aria-labelledby="environment-weather">
+      <div className="settings-card-header"><div className="settings-card-title-group">
+        <h3 className="settings-card-title" id="environment-weather">Погода</h3>
+        <p className="settings-card-subtitle">Текущая погода и прогноз для выбранного города.</p>
+      </div></div>
+      <AppSwitch checked={weatherEnabled} label="Погода за окном"
+        description="Iris получает текущую погоду, а при вопросе запрашивает подробный прогноз."
+        onChange={checked => saveSetting({ weather_enabled: checked })} />
+      {weatherEnabled && <div className="readonly-setting"><span>Погода сейчас</span><strong>{weatherLabel}</strong></div>}
+    </section>
+
+    <section className="settings-card" aria-labelledby="environment-news">
+      <div className="settings-card-header"><div className="settings-card-title-group">
+        <h3 className="settings-card-title" id="environment-news">Новости</h3>
+        <p className="settings-card-subtitle">Свежие события из открытых RSS-лент.</p>
+      </div></div>
+      <AppSwitch checked={newsEnabled} label="Сводка новостей"
+        description="Россия и мир, технологии, наука и игры. В беседу попадают новости по теме вопроса."
+        onChange={checked => saveSetting({ news_enabled: checked })} />
+      {newsEnabled && <label>Категория новостей
+        <CustomSelect value={newsCategory} onChange={event => saveSetting({ news_category: event.target.value as NonNullable<PublicSettings["news_category"]> })}>
+          <option value="all">Все категории</option><option value="tech">Технологии и IT</option>
+          <option value="general">Россия и мир</option><option value="science">Наука и космос</option><option value="games">Игры</option>
+        </CustomSelect>
+        <small>Ленты обновляются в фоне. API-ключ для новостей не требуется.</small>
+      </label>}
+    </section>
+
+    <section className="settings-card" aria-labelledby="environment-search">
+      <div className="settings-card-header"><div className="settings-card-title-group">
+        <h3 className="settings-card-title settings-target-heading" id="environment-search" tabIndex={-1}>Веб-поиск</h3>
+        <p className="settings-card-subtitle">Проверка актуальной информации во время разговора.</p>
+      </div></div>
+      <AppSwitch checked={webSearchEnabled} label="Самостоятельный поиск в интернете"
+        description="Запросы и источники сохраняются только в истории диалога."
+        onChange={checked => saveSetting({ web_search_enabled: checked })} />
+      <label>Источник веб-поиска
+        <CustomSelect value={searchProvider} disabled={!webSearchEnabled} onChange={event => saveSetting({ web_search_provider: event.target.value as "free" | "tavily" })}>
+          <option value="free">Бесплатные источники</option><option value="tavily">Tavily Free</option>
+        </CustomSelect>
+        <small>При отсутствии ключа Tavily или исчерпании бесплатной квоты Iris использует открытые источники.</small>
+      </label>
+      <div className="settings-source-key-row">
+        <span>{settings.search_api_keys_configured?.tavily ? "Ключ Tavily настроен" : "Ключ Tavily не настроен"}</span>
+        <MaterialButton materialKey="environment.open-api-keys" type="button" className="text-button settings-inline-link" onClick={onOpenApiKeys}>
+          Настроить API-ключ<ArrowUpRight size={15} aria-hidden="true" />
+        </MaterialButton>
       </div>
-    </>
-  );
+    </section>
+
+    <div className="readonly-setting audio-device-refresh">
+      <span>Данные окружения</span>
+      <MaterialButton materialKey="environment.refresh" type="button" className="secondary" disabled={loading} onClick={() => void refreshStatus()}>
+        {loading ? "Обновляем…" : "Обновить данные"}
+      </MaterialButton>
+      {!loading && (!envStatus || envStatus.status === "unavailable") && <small role="status">Окружение пока недоступно. Попробуйте обновить данные.</small>}
+    </div>
+    {developerMode && envStatus?.ambient_header && <div className="readonly-setting dev-locked-field">
+      <span>Промпт контекста (режим разработчика)</span><small className="settings-environment-prompt">{envStatus.ambient_header}</small>
+    </div>}
+  </>;
 }

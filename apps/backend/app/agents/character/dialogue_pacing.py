@@ -12,6 +12,8 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
+from apps.backend.app.agents.character.turn_intent import analyze_dialogue_turn, recent_reply_cue
+
 
 DialogueMode = Literal["micro", "conversational", "focused", "deep"]
 
@@ -21,17 +23,8 @@ _DEEP_REQUEST_RE = re.compile(
     r"(?iu)\b(?:подробно|детально|разв[её]рнуто|по\s+шагам|пошагово|"
     r"проанализируй|сделай\s+разбор|сравни\s+варианты|исследуй)\b"
 )
-_QUESTION_OR_EXPLANATION_RE = re.compile(
-    r"(?iu)(?:\?|\b(?:почему|зачем|как|какой|какая|какие|кто|что|где|когда|"
-    r"сколько|объясни|расскажи|проверь|найди|покажи|помоги|посоветуй|"
-    r"можешь\s+(?:ли\s+)?(?:объяснить|рассказать|проверить|найти|показать|помочь))\b)"
-)
 _CASUAL_QUESTION_RE = re.compile(
     r"(?iu)^\s*(?:(?:ну|а|и)\s+)?(?:как\s+(?:ты|дела|сама)|ты\s+как|ч[её]\s+как)\s*[?!.]*\s*$"
-)
-_CORRECTION_RE = re.compile(
-    r"(?iu)\b(?:я\s+(?:сказал|имел\s+в\s+виду)|"
-    r"это(?:\s+\w+){0,2}\s+(?:stt|стт)|не\s+так|точнее|вернее)\b"
 )
 _SHORT_REACTION_RE = re.compile(
     r"(?iu)^\s*(?:(?:ну|а|и)\s+)?(?:ага|угу|да|неа|нет|ясно|понятно|ладно|ок(?:ей)?)\b"
@@ -55,11 +48,11 @@ class DialoguePacing:
 
     mode: DialogueMode
 
-    def prompt_block(self, *, input_mode: str) -> str:
+    def prompt_block(self, *, input_mode: str, recent_messages=()) -> str:
         rules = {
             "micro": (
                 "Дай одну естественную короткую реплику, обычно одно предложение и до 12 слов. "
-                "Коротко не значит стерильно: сохрани характер, живую реакцию и текущий регистр. "
+                "Простое согласие тоже полноценный ответ: характер не требует мата или шутки в каждом ходе. "
                 "Не добавляй второй абзац, объяснение, пересказ или дежурный вопрос."
             ),
             "conversational": (
@@ -68,8 +61,9 @@ class DialoguePacing:
                 "если тебе правда интересно продолжение, а не для поддержания видимости диалога."
             ),
             "focused": (
-                "Сначала прямо ответь на вопрос или просьбу; обычно достаточно 2-5 предложений и не более "
-                "двух коротких абзацев. Сам факт вопроса не превращает ответ в лекцию. Не повторяй вывод "
+                "Сначала прямо ответь на вопрос или просьбу. Для одного факта достаточно короткой фразы; "
+                "для объяснения — обычно 2-5 предложений, до двух коротких абзацев. Сам факт вопроса "
+                "не превращает ответ в лекцию. Не повторяй вывод "
                 "другими словами и не приклеивай лишнее предложение после уже полного ответа."
             ),
             "deep": (
@@ -89,10 +83,11 @@ class DialoguePacing:
             "- Не собирай шаблон «реакция + шутка + объяснение + вопрос». Выбери один основной ход, "
             "иногда два, и оставь собеседнику место ответить. Это ограничивает длину, а не характер."
             f"{voice_rule}"
+            f"{recent_reply_cue(recent_messages)}"
         )
 
 
-def infer_dialogue_pacing(user_text: str) -> DialoguePacing:
+def infer_dialogue_pacing(user_text: str, recent_messages=()) -> DialoguePacing:
     """Choose reply granularity from the current turn, not from its raw length."""
 
     text = " ".join(user_text.strip().split())
@@ -101,12 +96,13 @@ def infer_dialogue_pacing(user_text: str) -> DialoguePacing:
         return DialoguePacing("deep")
     if _CASUAL_QUESTION_RE.fullmatch(text):
         return DialoguePacing("micro")
-    if _CORRECTION_RE.search(text):
+    intent = analyze_dialogue_turn(user_text, recent_messages)
+    if intent.kind in {"greeting", "reaction", "correction"}:
         return DialoguePacing("micro")
+    if intent.kind == "request" or "?" in text:
+        return DialoguePacing("focused")
     if len(words) <= 6 and _MICRO_RE.fullmatch(text):
         return DialoguePacing("micro")
-    if _QUESTION_OR_EXPLANATION_RE.search(text):
-        return DialoguePacing("focused")
     if len(words) <= 5 and _SHORT_REACTION_RE.search(text):
         return DialoguePacing("micro")
     if len(words) <= 6 and (_SHORT_SOCIAL_BEAT_RE.search(text) or text.casefold() in {"ну", "мда"}):

@@ -14,7 +14,7 @@ def test_default_persona_requires_adaptive_conversational_replies() -> None:
     persona = get_persona("default")
 
     assert persona.display_name == "Iris"
-    assert persona.persona_version == 7
+    assert persona.persona_version == 8
     assert "Ты — Iris" in persona.voice
     for alias in ("Ирис", "Айрис", "Ириска"):
         assert alias in persona.voice

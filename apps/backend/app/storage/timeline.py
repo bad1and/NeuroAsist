@@ -541,6 +541,21 @@ class TimelineStore:
             return {}
         return {}
 
+    def get_recent_news_reference(self, session_id: str) -> dict:
+        """Bounded source recovery for a clarification after an unhelpful reply."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT content, metadata_json FROM conversation_messages
+                   WHERE timeline_id = ? AND session_id = ? AND status = 'completed'
+                   AND role = 'assistant' ORDER BY sequence_no DESC LIMIT 3""",
+                (PRIMARY_TIMELINE_ID, session_id),
+            ).fetchall()
+        for row in rows:
+            metadata = json.loads(row["metadata_json"] or "{}")
+            if isinstance(metadata.get("news"), dict):
+                return {"news": metadata["news"], "reply": row["content"]}
+        return {}
+
     def get_recent_messages(self, session_id: str, limit: int) -> list[ChatMessage]:
         with self._connect() as connection:
             rows = connection.execute(
@@ -4917,6 +4932,9 @@ class TimelineHistoryAdapter:
 
     def get_recent_retrieval_state(self, session_id: str) -> dict:
         return self._store.get_recent_retrieval_state(session_id)
+
+    def get_recent_news_reference(self, session_id: str) -> dict:
+        return self._store.get_recent_news_reference(session_id)
 
     def get_recent_messages(self, session_id: str, limit: int) -> list[ChatMessage]:
         return self._store.get_recent_messages(session_id, limit)

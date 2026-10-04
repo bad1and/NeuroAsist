@@ -55,6 +55,10 @@ class SituationalEnrichment:
 def _news_topic(text: str) -> str:
     match = re.search(r"\b(?:новост\w*|news|сводк\w*|дайджест)\s+(?:(?:о|об|про|по|в|для|about|on)\s+)?(.+)", text, re.I)
     topic = match[1].strip(" ?!.:") if match else ""
+    if not topic:
+        before = re.search(r"\b(?:в|по)\s+([а-яёa-z-]{3,30})(?:\s+по)?\s+новост\w*", text, re.I)
+        topic = before[1] if before else ""
+    topic = re.sub(r"\bпитер\w*\b", "Санкт-Петербург", topic, flags=re.I)
     # Category-only and generic requests need a balanced digest, not a keyword
     # search for the words 'world', 'IT', or 'today'.
     generic = re.sub(r"\b(?:мир\w*|it|ии|ai|tech|ай[ -]?ти|технолог\w*|наук\w*|игр\w*|сегодня|вчера|недел\w*|последн\w*|свеж\w*|главн\w*|там|интересн\w*|что|за|эт\w*|и)\b", "", topic, flags=re.I)
@@ -210,6 +214,7 @@ class SituationalCoordinator:
         location_mode: str,
     ) -> str | None:
         target_city = manual_city
+        target_mode = location_mode
 
         # Check if user mentioned another city (e.g. "погода в сочи")
         city_match = _WEATHER_CITY_PATTERN.search(user_text)
@@ -221,10 +226,11 @@ class SituationalCoordinator:
                 "течение", "целом"
             ):
                 target_city = candidate
+                target_mode = "manual"
 
         loc = await self.location_service.resolve_location(
             manual_city=target_city,
-            location_mode=location_mode,
+            location_mode=target_mode,
         )
         if not loc or loc.latitude is None or loc.longitude is None:
             return None

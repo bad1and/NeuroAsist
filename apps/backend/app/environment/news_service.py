@@ -109,7 +109,8 @@ class NewsDigestSnapshot:
             "shown_urls": list(self.shown_urls), "shown_titles": list(self.shown_titles),
             "has_more": self.has_more, "source_health": list(self.source_health),
             "sources": [{"title": a.title, "url": a.url, "published_at": a.published,
-                         "source": a.source, "stale": a.stale} for a in self.articles if a.url],
+                         "source": a.source, "stale": a.stale,
+                         "summary": model_text(a.snippet, 600)} for a in self.articles if a.url],
         }
 
 

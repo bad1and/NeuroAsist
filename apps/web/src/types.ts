@@ -276,8 +276,8 @@ export type PublicSettings = {
 
 export type EnvironmentStatus = {
   status: string;
-  ambient_header: string;
-  time: {
+  ambient_header?: string;
+  time?: {
     iso: string;
     formatted_date: string;
     formatted_time: string;
@@ -286,7 +286,7 @@ export type EnvironmentStatus = {
     timezone: string;
     offset: string;
   };
-  location: {
+  location?: {
     city: string;
     country: string;
     latitude: number | null;
@@ -294,7 +294,7 @@ export type EnvironmentStatus = {
     timezone: string;
     source: string;
   };
-  weather: {
+  weather?: {
     temperature: number;
     apparent_temperature: number;
     condition: string;
@@ -304,7 +304,7 @@ export type EnvironmentStatus = {
     city: string;
     detailed: string;
   } | null;
-  settings: {
+  settings?: {
     location_mode: string;
     location_city: string;
     weather_enabled: boolean;
