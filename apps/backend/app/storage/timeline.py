@@ -770,18 +770,87 @@ class TimelineStore:
             )
 
     def delete_episode(self, episode_id: str) -> int:
-        with self._connect() as connection:
+        with self._immediate_connect() as connection:
             row = connection.execute(
                 "SELECT id FROM conversation_episodes WHERE id = ? AND timeline_id = ?",
                 (episode_id, PRIMARY_TIMELINE_ID),
             ).fetchone()
             if row is None:
                 raise KeyError(episode_id)
+            self._delete_episode_history(connection, episode_id)
             deleted = connection.execute("DELETE FROM conversation_messages WHERE episode_id = ?", (episode_id,)).rowcount
             connection.execute("DELETE FROM conversation_episodes WHERE id = ?", (episode_id,))
             connection.execute(
                 "UPDATE conversation_timelines SET current_episode_id = NULL WHERE id = ? AND current_episode_id = ?",
                 (PRIMARY_TIMELINE_ID, episode_id),
+            )
+            self._refresh_latest_message(connection)
+            return deleted
+
+    def _delete_episode_history(self, connection: sqlite3.Connection, episode_id: str) -> None:
+        """Remove dialogue-derived history while retaining extracted long-term memory."""
+        self._delete_legacy_history_sources(connection, episode_id)
+        connection.execute(
+            "DELETE FROM timeline_message_fts WHERE message_id IN (SELECT id FROM conversation_messages WHERE episode_id = ?)",
+            (episode_id,),
+        )
+        connection.execute(
+            "DELETE FROM conversation_turn_state WHERE active_user_message_id IN (SELECT id FROM conversation_messages WHERE episode_id = ?)",
+            (episode_id,),
+        )
+        connection.execute(
+            "DELETE FROM episode_summary_fts WHERE summary_id IN (SELECT id FROM episode_summaries WHERE episode_id = ?)",
+            (episode_id,),
+        )
+        connection.execute(
+            "DELETE FROM semantic_vectors WHERE namespace = 'episode_summary' AND item_id IN (SELECT id FROM episode_summaries WHERE episode_id = ?)",
+            (episode_id,),
+        )
+        connection.execute("DELETE FROM episode_summaries WHERE episode_id = ?", (episode_id,))
+        connection.execute("DELETE FROM episode_checkpoints WHERE episode_id = ?", (episode_id,))
+        connection.execute("DELETE FROM background_jobs WHERE json_extract(payload_json, '$.episode_id') = ?", (episode_id,))
+
+    @staticmethod
+    def _delete_legacy_history_sources(connection: sqlite3.Connection, episode_id: str | None = None) -> None:
+        # Otherwise init_db imports deleted legacy messages again on the next launch.
+        if connection.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages'").fetchone():
+            connection.execute(
+                """DELETE FROM messages WHERE id IN (
+                       SELECT legacy_source_id FROM conversation_messages
+                       WHERE timeline_id = ? AND (? IS NULL OR episode_id = ?)
+                   )""",
+                (PRIMARY_TIMELINE_ID, episode_id, episode_id),
+            )
+
+    def _refresh_latest_message(self, connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """UPDATE conversation_timelines SET latest_message_id = (
+                   SELECT id FROM conversation_messages WHERE timeline_id = ? ORDER BY sequence_no DESC LIMIT 1
+               ), updated_at = ? WHERE id = ?""",
+            (PRIMARY_TIMELINE_ID, self._now(), PRIMARY_TIMELINE_ID),
+        )
+
+    def clear_history(self) -> int:
+        """Clear all primary dialogue history, preserving memory and settings."""
+        with self._immediate_connect() as connection:
+            self._delete_legacy_history_sources(connection)
+            episodes = connection.execute(
+                "SELECT id FROM conversation_episodes WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,)
+            ).fetchall()
+            for episode in episodes:
+                self._delete_episode_history(connection, episode["id"])
+            connection.execute(
+                "DELETE FROM timeline_message_fts WHERE message_id IN (SELECT id FROM conversation_messages WHERE timeline_id = ?)",
+                (PRIMARY_TIMELINE_ID,),
+            )
+            deleted = connection.execute(
+                "DELETE FROM conversation_messages WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,)
+            ).rowcount
+            connection.execute("DELETE FROM conversation_episodes WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,))
+            connection.execute("DELETE FROM conversation_turn_state WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,))
+            connection.execute(
+                "UPDATE conversation_timelines SET current_episode_id = NULL, latest_message_id = NULL, updated_at = ? WHERE id = ?",
+                (self._now(), PRIMARY_TIMELINE_ID),
             )
             return deleted
 

@@ -1,6 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { getAvatarOverlay, getAvatarStatus, sendAvatarTestEmotion, sendAvatarTestGesture, sendAvatarTestPhrase, stopAvatar, updateAvatarOverlay } from "./api";
+import { clearTimelineHistory, deleteTimelineEpisode, getAvatarOverlay, getAvatarStatus, sendAvatarTestEmotion, sendAvatarTestGesture, sendAvatarTestPhrase, stopAvatar, updateAvatarOverlay } from "./api";
+
+describe("history deletion API", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("uses distinct routes for one episode and the complete history", async () => {
+    const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ deleted: 1 }) });
+    vi.stubGlobal("fetch", fetch);
+    await deleteTimelineEpisode("episode/one");
+    await clearTimelineHistory();
+    expect(fetch.mock.calls.map(([url, options]) => [url, options.method])).toEqual([
+      ["http://127.0.0.1:8000/episodes/episode%2Fone", "DELETE"],
+      ["http://127.0.0.1:8000/timeline/history", "DELETE"],
+    ]);
+  });
+});
 
 describe("avatar API", () => {
   afterEach(() => vi.unstubAllGlobals());

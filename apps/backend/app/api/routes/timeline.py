@@ -91,3 +91,12 @@ def delete_range(request: Request, before: str | None = None, after: str | None 
         {"deleted": deleted},
     )
     return {"deleted": deleted}
+
+
+@router.delete("/history")
+def clear_history(request: Request) -> dict[str, int]:
+    deleted = _store(request).clear_history()
+    request.app.state.event_bus.publish(
+        "timeline.history_deleted", "warning", "All conversation history deleted", {"deleted": deleted}
+    )
+    return {"deleted": deleted}
