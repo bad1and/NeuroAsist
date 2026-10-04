@@ -383,6 +383,14 @@ export function deleteTimelineRange(before: string): Promise<{ deleted: number }
   return requestJson(`/timeline/range?before=${encodeURIComponent(before)}`, { method: "DELETE" });
 }
 
+export function deleteTimelineEpisode(episodeId: string): Promise<{ deleted_messages: number }> {
+  return requestJson(`/episodes/${encodeURIComponent(episodeId)}`, { method: "DELETE" });
+}
+
+export function clearTimelineHistory(): Promise<{ deleted: number }> {
+  return requestJson("/timeline/history", { method: "DELETE" });
+}
+
 export function getMemories(status?: string, query?: string): Promise<{ items: MemoryItem[] }> {
   const params = new URLSearchParams();
   if (status) params.set("status", status);

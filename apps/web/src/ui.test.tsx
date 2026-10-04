@@ -17,7 +17,7 @@ const api = vi.hoisted(() => ({
   clearMemories: vi.fn(), reindexMemories: vi.fn(), resetAllCompanionData: vi.fn(),
   resetConversationSession: vi.fn(), getConversationSession: vi.fn(), getCharacterState: vi.fn(),
   confirmMemory: vi.fn(), rejectMemory: vi.fn(), deleteMemory: vi.fn(), purgeMemory: vi.fn(), restoreMemory: vi.fn(), updateMemory: vi.fn(),
-  deleteTimelineRange: vi.fn(), saveDesktopApiKey: vi.fn(), sendAvatarTestEmotion: vi.fn(),
+  deleteTimelineRange: vi.fn(), deleteTimelineEpisode: vi.fn(), clearTimelineHistory: vi.fn(), saveDesktopApiKey: vi.fn(), sendAvatarTestEmotion: vi.fn(),
   sendAvatarTestGesture: vi.fn(), sendAvatarTestPhrase: vi.fn(), stopAvatar: vi.fn(), updateAvatarOverlay: vi.fn(),
   getLlmTokenStats: vi.fn(), getLlmTokenRecords: vi.fn(), resetLlmTokenStats: vi.fn(),
 }));
@@ -36,6 +36,7 @@ import { JournalPage } from "./journal";
 import { MemoryPage } from "./memory";
 import { BrowserVadRecorder, PcmInputClient } from "./vad";
 import { TTSStreamPlayer, VoiceSocketClient } from "./voice-live";
+import type { PublicSettings } from "./types";
 
 const settings = {
   developer_mode_enabled: false,
@@ -988,19 +989,82 @@ describe("русский интерфейс", () => {
     ));
   });
 
-  it("подтверждает удаление истории во встроенном диалоге", async () => {
+  it("удаляет только выбранный диалог по ID после подтверждения", async () => {
     api.getTimelineJournal.mockResolvedValue({
-      items: [{ day: "2026-07-27", message_count: 4, started_at: "2026-07-27T10:00:00Z", last_activity_at: "2026-07-27T11:00:00Z" }],
+      items: [
+        { id: "ep-delete", day: "2026-07-27", message_count: 4, started_at: "2026-07-27T10:00:00Z", last_activity_at: "2026-07-27T11:00:00Z", title: "Удаляемый диалог" },
+        { id: "ep-keep", day: "2026-07-27", message_count: 2, started_at: "2026-07-27T09:00:00Z", last_activity_at: "2026-07-27T09:30:00Z", title: "Сохраняемый диалог" },
+      ],
     });
-    api.deleteTimelineRange.mockResolvedValue({ deleted: 4 });
+    api.deleteTimelineEpisode.mockResolvedValue({ deleted_messages: 4 });
     render(<JournalPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /Диалог от/ }));
-    fireEvent.click(await screen.findByRole("button", { name: /Удалить историю до/ }));
-    expect(screen.getByRole("heading", { name: "Удалить часть истории?" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Удалить историю" }));
+    fireEvent.click((await screen.findAllByRole("button", { name: /Диалог от/ }))[0]);
+    fireEvent.click(await screen.findByRole("button", { name: "Удалить этот диалог" }));
+    expect(screen.getByRole("heading", { name: "Удалить этот диалог?" })).toBeInTheDocument();
+    expect(api.deleteTimelineEpisode).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+    expect(api.deleteTimelineEpisode).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Удалить этот диалог" }));
+    api.getTimelineJournal.mockResolvedValue({ items: [
+      { id: "ep-keep", day: "2026-07-27", message_count: 2, started_at: "2026-07-27T09:00:00Z", last_activity_at: "2026-07-27T09:30:00Z", title: "Сохраняемый диалог" },
+    ] });
+    fireEvent.click(screen.getByRole("button", { name: "Удалить диалог" }));
 
-    await waitFor(() => expect(api.deleteTimelineRange).toHaveBeenCalledWith("2026-07-27T23:59:59.999Z"));
+    await waitFor(() => expect(api.deleteTimelineEpisode).toHaveBeenCalledWith("ep-delete"));
+    expect(api.deleteTimelineRange).not.toHaveBeenCalled();
+    expect(api.clearTimelineHistory).not.toHaveBeenCalled();
+    expect(await screen.findByText("Сохраняемый диалог")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("Удаляемый диалог")).not.toBeInTheDocument());
+  });
+
+  it("не удаляет историю при отсутствии ID диалога", async () => {
+    api.getTimelineJournal.mockResolvedValue({ items: [
+      { day: "2026-07-27", message_count: 4, started_at: "2026-07-27T10:00:00Z", last_activity_at: "2026-07-27T11:00:00Z" },
+    ] });
+    render(<JournalPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /Диалог от/ }));
+    expect(screen.getByRole("button", { name: "Удалить этот диалог" })).toBeDisabled();
+    expect(api.deleteTimelineRange).not.toHaveBeenCalled();
+  });
+
+  it("сохраняет открытый диалог при ошибке удаления", async () => {
+    api.getTimelineJournal.mockResolvedValue({ items: [
+      { id: "ep-failed", day: "2026-07-27", message_count: 4, started_at: "2026-07-27T10:00:00Z", last_activity_at: "2026-07-27T11:00:00Z" },
+    ] });
+    api.deleteTimelineEpisode.mockRejectedValueOnce(new Error("Сервер недоступен"));
+    render(<JournalPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /Диалог от/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Удалить этот диалог" }));
+    fireEvent.click(screen.getByRole("button", { name: "Удалить диалог" }));
+    await waitFor(() => expect(api.deleteTimelineEpisode).toHaveBeenCalledWith("ep-failed"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Удалить диалог" })).not.toBeDisabled());
+    expect(screen.getByRole("heading", { name: "Удалить этот диалог?" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Удалить этот диалог" })).toBeInTheDocument();
+    expect(api.deleteTimelineRange).not.toHaveBeenCalled();
+  });
+
+  it("подтверждает очистку всей истории отдельно в обслуживании данных", async () => {
+    api.clearTimelineHistory.mockResolvedValue({ deleted: 6 });
+    render(<SettingsPage
+      settings={{ ...settings, developer_mode_enabled: true } as PublicSettings} avatarStatus={null} avatarOverlay={null} events={[]}
+      onRefreshEvents={vi.fn()} onRefreshAvatar={vi.fn()} onAvatarOverlayChanged={vi.fn()}
+      onInterfaceLocaleChange={vi.fn()} onSettingsChanged={vi.fn()}
+    />);
+    const navigation = screen.getByRole("navigation", { name: "Разделы настроек" });
+    fireEvent.click(within(navigation).getByRole("button", { name: "Система" }));
+    fireEvent.click(within(navigation).getByRole("button", { name: /Обслуживание данных/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Удалить всю историю" }));
+    expect(screen.getByRole("heading", { name: "Удалить всю историю диалогов?" })).toBeInTheDocument();
+    expect(api.clearTimelineHistory).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+    expect(api.clearTimelineHistory).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Удалить всю историю" }));
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить" }));
+    await waitFor(() => expect(api.clearTimelineHistory).toHaveBeenCalledOnce());
+    expect(api.clearMemories).not.toHaveBeenCalled();
+    expect(api.resetAllCompanionData).not.toHaveBeenCalled();
+    expect(await screen.findByText("Вся история диалогов удалена.")).toBeInTheDocument();
   });
 
   it("отображает двухпанельный интерфейс истории и загружает сообщения выбранного диалога", async () => {

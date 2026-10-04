@@ -227,6 +227,76 @@ def test_timeline_pagination_journal_and_range_deletion(monkeypatch, tmp_path: P
     assert remaining.json()["items"] == []
 
 
+def test_delete_episode_keeps_older_and_same_day_dialogues(monkeypatch, tmp_path: Path) -> None:
+    client, database = make_client(monkeypatch, tmp_path)
+    with client:
+        store = client.app.state.timeline_store
+        older_ids = {message.id for message in store.list_messages(50)[0]}
+        first, _ = store.append_message(role="user", content="Первый диалог", input_mode="text", created_at="2026-10-04T10:00:00Z")
+        store.close_current_episode()
+        second, _ = store.append_message(role="user", content="Второй диалог", input_mode="text", created_at="2026-10-04T12:00:00Z")
+        store.close_current_episode()
+        deleted = client.delete(f"/episodes/{first.episode_id}")
+        missing = client.delete(f"/episodes/{first.episode_id}")
+        remaining = client.get("/timeline/messages?limit=50").json()["items"]
+        episode_ids = {item["id"] for item in client.get("/timeline/journal").json()["items"]}
+
+    assert deleted.status_code == 200
+    assert deleted.json() == {"deleted_messages": 1}
+    assert missing.status_code == 404
+    assert {message["id"] for message in remaining} == older_ids | {second.id}
+    assert first.episode_id not in episode_ids
+    assert second.episode_id in episode_ids
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM episode_summaries WHERE episode_id = ?", (first.episode_id,)).fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM episode_summaries WHERE episode_id = ?", (second.episode_id,)).fetchone()[0] >= 1
+
+
+def test_deleted_legacy_episode_stays_deleted_after_restart(monkeypatch, tmp_path: Path) -> None:
+    client, database = make_client(monkeypatch, tmp_path)
+    with client:
+        episode_id = client.get("/timeline/journal").json()["items"][0]["id"]
+        assert client.delete(f"/episodes/{episode_id}").json() == {"deleted_messages": 4}
+    reopened = TimelineStore(database)
+    reopened.init_db()
+    assert reopened.list_messages(50)[0] == []
+    assert reopened.journal() == []
+
+
+def test_clear_history_preserves_memory_and_allows_new_dialogue(monkeypatch, tmp_path: Path) -> None:
+    from apps.backend.app.memory.service import MemoryService
+    from apps.backend.app.runtime.settings import RuntimeSettings
+
+    client, database = make_client(monkeypatch, tmp_path)
+    with client:
+        store = client.app.state.timeline_store
+        message, _ = store.append_message(role="user", content="Меня зовут Роман", input_mode="text")
+        MemoryService(store, RuntimeSettings(memory_mode="automatic")).extract_from_message(message)
+        store.summarize_episode(message.episode_id)
+        memory_before = store.list_memories(limit=10)
+        assert memory_before
+        count = len(store.list_messages(50)[0])
+        deleted = client.delete("/timeline/history")
+        assert deleted.status_code == 200
+        assert deleted.json() == {"deleted": count}
+        assert client.get("/timeline/messages").json()["items"] == []
+        assert client.get("/timeline/journal").json()["items"] == []
+        assert store.list_memories(limit=10) == memory_before
+        assert client.delete("/timeline/history").json() == {"deleted": 0}
+        with sqlite3.connect(database) as connection:
+            for table in ("episode_summaries", "episode_checkpoints", "episode_summary_fts", "timeline_message_fts"):
+                assert connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+            assert connection.execute("SELECT current_episode_id, latest_message_id FROM conversation_timelines").fetchone() == (None, None)
+        new, _ = store.append_message(role="user", content="Новый разговор", input_mode="text")
+        assert new.episode_id != message.episode_id
+        assert [item.id for item in store.list_messages(50)[0]] == [new.id]
+
+    # Reopening the database must not restore migrated legacy history.
+    reopened = TimelineStore(database)
+    reopened.init_db()
+    assert [item.id for item in reopened.list_messages(50)[0]] == [new.id]
+
+
 def test_timeline_search_accepts_hyphenated_russian_text(monkeypatch, tmp_path: Path) -> None:
     client, _ = make_client(monkeypatch, tmp_path)
     with client:

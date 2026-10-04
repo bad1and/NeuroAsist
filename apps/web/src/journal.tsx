@@ -12,7 +12,7 @@ import {
 } from "./CustomIcons";
 import { FormEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { deleteTimelineRange, getTimelineJournal, getTimelineMessages, searchTimeline } from "./api";
+import { deleteTimelineEpisode, getTimelineJournal, getTimelineMessages, searchTimeline } from "./api";
 import type { TimelineJournalItem, TimelineMessage, TokenMetadata } from "./types";
 import { calculateDeepSeekCostUsd } from "./deepseek";
 import { AppDialog } from "./components/AppDialog";
@@ -912,8 +912,9 @@ export function JournalPage({
                   <MaterialButton materialKey={"journal.button-9"}
                     className="secondary journal-delete-action"
                     type="button"
-                    title="Удалить историю до этой даты"
-                    aria-label={`Удалить историю до ${formatDate(selectedEpisode.day)}`}
+                    title="Удалить этот диалог"
+                    aria-label="Удалить этот диалог"
+                    disabled={!selectedEpisode.id || deleting}
                     onClick={(e) => {
                       animateButtonPress(e.currentTarget);
                       setPendingDelete(selectedEpisode);
@@ -1104,10 +1105,10 @@ export function JournalPage({
 
       <AppDialog
         open={Boolean(pendingDelete)}
-        title="Удалить часть истории?"
+        title="Удалить этот диалог?"
         description={
           pendingDelete
-            ? `Все сообщения по ${formatDate(pendingDelete.day)} включительно будут удалены без возможности восстановления.`
+            ? `Диалог от ${formatDate(pendingDelete.day)} будет удалён без возможности восстановления. Остальная история сохранится.`
             : undefined
         }
         onClose={() => !deleting && setPendingDelete(null)}
@@ -1127,15 +1128,13 @@ export function JournalPage({
             type="button"
             disabled={deleting}
             onClick={async () => {
-              if (!pendingDelete) return;
+              if (!pendingDelete?.id || deleting) return;
               setDeleting(true);
               try {
-                await deleteTimelineRange(`${pendingDelete.day}T23:59:59.999Z`);
+                await deleteTimelineEpisode(pendingDelete.id);
                 if (
                   selectedEpisode &&
-                  (selectedEpisode.id === pendingDelete.id ||
-                    selectedEpisode.day === pendingDelete.day ||
-                    selectedEpisode.day <= pendingDelete.day)
+                  selectedEpisode.id === pendingDelete.id
                 ) {
                   activeRequestIdRef.current++;
                   setSelectedEpisode(null);
@@ -1143,13 +1142,17 @@ export function JournalPage({
                   setMessagesError(null);
                 }
                 setPendingDelete(null);
+                setResults(null);
+                setQuery("");
                 await refresh();
+              } catch (cause) {
+                notify.error("Журнал", cause instanceof Error ? cause.message : "Не удалось удалить диалог.");
               } finally {
                 setDeleting(false);
               }
             }}
           >
-            {deleting ? "Удаляю…" : "Удалить историю"}
+            {deleting ? "Удаляю…" : "Удалить диалог"}
           </MaterialButton>
         </div>
       </AppDialog>

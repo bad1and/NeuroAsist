@@ -103,7 +103,7 @@ import {
   sendChatMessage,
   sendLiveTextMessage,
   searchTimeline,
-  deleteTimelineRange,
+  clearTimelineHistory,
   updateRuntimeSettings,
   updatePronunciations,
   updateSttTerms,
@@ -4926,6 +4926,32 @@ function SystemMaintenance({
         {/* Зона 2: Опасная зона */}
         <div className="maintenance-zone">
           <div className="maintenance-zone-title is-danger">Опасная зона</div>
+
+          <div className="maintenance-row">
+            <IconInterfaceDeleteBin3 size={20} className="maintenance-icon is-danger" aria-hidden="true" />
+            <div className="maintenance-row-copy">
+              <strong className="maintenance-row-title">Удалить всю историю диалогов</strong>
+              <p className="maintenance-row-desc">
+                Все диалоги и их сводки будут удалены без возможности восстановления. Долгосрочная память сохранится.
+              </p>
+            </div>
+            <MaterialButton materialKey="App.clear-history"
+              type="button"
+              className="secondary danger-button"
+              disabled={busy || !developerMode}
+              onClick={(e) => {
+                animateButtonPress(e.currentTarget);
+                setPendingAction({
+                  title: "Удалить всю историю диалогов?",
+                  description: "Все диалоги и их сводки будут удалены без возможности восстановления. Долгосрочная память сохранится.",
+                  action: clearTimelineHistory,
+                  success: "Вся история диалогов удалена.",
+                });
+              }}
+            >
+              Удалить всю историю
+            </MaterialButton>
+          </div>
 
           <div className="maintenance-row">
             <IconInterfaceDeleteBin3 size={20} className="maintenance-icon is-danger" aria-hidden="true" />
