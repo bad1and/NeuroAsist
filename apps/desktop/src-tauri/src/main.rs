@@ -1172,6 +1172,30 @@ fn save_api_key(api_key: String, app: AppHandle) -> Result<DesktopRuntime, Strin
 }
 
 #[tauri::command]
+fn open_api_key_portal(provider: String) -> Result<(), String> {
+    let url = match provider.as_str() {
+        "deepseek" => "https://platform.deepseek.com/api_keys",
+        "tavily" => "https://app.tavily.com/home",
+        _ => return Err("Unsupported API key provider".into()),
+    };
+    #[cfg(windows)]
+    {
+        use windows::{core::PCWSTR, Win32::UI::Shell::ShellExecuteW};
+        let wide_url: Vec<u16> = url.encode_utf16().chain(Some(0)).collect();
+        let result = unsafe {
+            ShellExecuteW(None, windows::core::w!("open"), PCWSTR(wide_url.as_ptr()),
+                PCWSTR::null(), PCWSTR::null(), windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL)
+        };
+        if result.0 as isize > 32 { Ok(()) } else { Err("Could not open API key portal".into()) }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = url;
+        Err("Opening API key portals requires Windows".into())
+    }
+}
+
+#[tauri::command]
 fn save_coding_api_key(api_key: String, app: AppHandle) -> Result<DesktopRuntime, String> {
     save_credential(CODING_KEYRING_ACCOUNT, "Coding", api_key, app)
 }
@@ -1426,6 +1450,7 @@ fn main() {
             set_avatar_in_app_visible,
             is_avatar_ready,
             save_api_key,
+            open_api_key_portal,
             save_coding_api_key,
             remove_api_key,
             remove_coding_api_key,

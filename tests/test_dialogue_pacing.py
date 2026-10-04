@@ -23,8 +23,8 @@ def test_short_social_beats_get_micro_pacing(text: str) -> None:
     assert pacing.mode == "micro"
     prompt = pacing.prompt_block(input_mode="voice")
     assert "обычно одно предложение и до 12 слов" in prompt
-    assert "Коротко не значит стерильно" in prompt
-    assert "сохрани характер" in prompt
+    assert "Простое согласие тоже полноценный ответ" in prompt
+    assert "характер не требует мата или шутки" in prompt
     assert "не список тем" in prompt
 
 

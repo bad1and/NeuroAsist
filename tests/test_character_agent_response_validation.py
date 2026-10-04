@@ -600,14 +600,8 @@ def test_explicit_request_to_repeat_does_not_trigger_stale_guard() -> None:
     assert result["reply"] == previous
 
 
-def test_duplicate_guard_hold_survives_being_hoisted_out_of_the_delta_loop() -> None:
-    """The two-sentence hold is what lets the guard see a stale continuation.
-
-    `duplicate_guard` is now resolved once per turn instead of on every delta.
-    It still has to gate `required_sentences`, so a turn with a previous reply
-    must buffer past the first sentence while a turn without one releases it
-    immediately.
-    """
+def test_unrelated_previous_reply_does_not_delay_first_sentence() -> None:
+    """An unrelated previous response must not impose a two-sentence hold."""
     previous = "Заварку я бы не стала доливать кипятком, вкус уходит совсем."
 
     class PreviousReplyContext:
@@ -641,7 +635,7 @@ def test_duplicate_guard_hold_survives_being_hoisted_out_of_the_delta_loop() -> 
     )
     unguarded = first_chunk(PreviousReplyContext([]))
 
-    assert guarded == "Ага, ясно. Тогда возьми другой сорт. "
+    assert guarded == "Ага, ясно. "
     assert unguarded == "Ага, ясно. "
 
 

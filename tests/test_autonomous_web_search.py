@@ -394,7 +394,7 @@ async def test_live_search_decision_with_avatar_prefix_bypasses_speech_style_gua
                            runtime_settings=RuntimeSettings(), dialogue_style_service=StreetStyle())
     visible = "".join([part async for part in agent.stream_user_message("s", "Расскажи про игру", persist_reply=False)])
     assert "web_search" not in visible and "GTA VI: дата объявлена" in visible
-    assert "секунду" in visible
+    assert "секунду" not in visible
     assert provider.calls == 2 and len(search.queries) == 1
     assert agent.token_metadata()["total_tokens"] == 24
 

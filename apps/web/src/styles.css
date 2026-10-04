@@ -12766,3 +12766,35 @@ button.journal-header-tokens:hover {
   outline-offset: 2px;
   opacity: 1;
 }
+
+/* Settings links and credentials share the existing graphite surfaces. */
+.settings-inline-link { min-height: 44px; padding: 6px 0; text-align: left; }
+.settings-source-key-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 20px; color: var(--color-text-muted); font-size: 13px; }
+.settings-credential-card .settings-card-header { flex-wrap: wrap; gap: 12px; }
+.settings-credential-card .settings-card-header-main { min-width: 0; flex: 1 1 240px; }
+.settings-credential-card .settings-card-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.settings-credential-card > small, .settings-city-field > small, .settings-credential-hint { color: var(--color-text-muted); font-size: 12px; line-height: 1.5; }
+.settings-city-field { display: grid; gap: 7px; }
+.settings-city-field .settings-input-group { display: flex; gap: 10px; }
+.settings-city-field input { min-width: 0; flex: 1; }
+.settings-city-field button { flex-shrink: 0; }
+.settings-target-heading { scroll-margin-top: 20px; }
+.settings-target-heading:focus { outline: 2px solid var(--color-focus); outline-offset: 2px; border-radius: 3px; }
+.settings-action-error { color: var(--color-danger-text); font-size: 13px; line-height: 1.5; }
+.settings-environment-prompt { font-family: var(--font-mono); font-size: 11px; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .settings-city-field .settings-input-group { flex-wrap: wrap; }
+  .settings-city-field input { flex-basis: 100%; }
+  .settings-credential-card .settings-card-actions { align-items: stretch; }
+  .settings-credential-card .settings-card-actions button { flex: 1 1 140px; }
+}
+
+@media (max-width: 900px) {
+  /* The desktop sticky menu must not sit over a focused section on narrow windows. */
+  .settings-panel > .settings-navigation {
+    position: static !important;
+    max-height: 240px;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+}

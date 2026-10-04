@@ -167,7 +167,7 @@ class LocationService:
         cleaned_city = (manual_city or "").strip()
 
         # If manual city specified and location_mode is not forced auto:
-        if cleaned_city:
+        if location_mode == "manual" and cleaned_city:
             return await self._resolve_city(cleaned_city, source="manual")
 
         # Check in-memory auto-detect cache

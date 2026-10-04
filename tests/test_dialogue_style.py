@@ -10,7 +10,6 @@ from apps.backend.app.agents.character.dialogue_style import (
     DialogueStyleService,
     dialogue_style_prompt,
     has_street_voice,
-    street_voice_expected,
 )
 from apps.backend.app.agents.character.protocol import legacy_result
 from apps.backend.app.conversation.adjudicator import StructuredConversationAdjudicator
@@ -53,28 +52,18 @@ def test_dialogue_style_never_enters_avatar_or_legacy_payload() -> None:
     assert "dialogue_style" not in legacy_result(turn, include_metadata=True)
 
 
-def test_street_is_a_visible_baseline_while_other_modes_remain_restrained() -> None:
+def test_street_keeps_character_without_a_per_reply_vocabulary_quota() -> None:
     street = dialogue_style_prompt("street")
-    restrained = dialogue_style_prompt("restrained")
-    clean = dialogue_style_prompt("clean")
-
-    assert "обязателен как заметный базовый голос" in street
-    assert "В большинстве неформальных, эмоциональных и шутливых ответов" in street
-    assert "можешь материться первой" in street
-    assert "чё" in street
-    assert "движуха" in street
-    assert "Не копируй стерильную манеру" in street
-    assert "Да бля, это реально мрачно" in street
+    assert "Можешь материться первой" in street
+    assert "Мат, шутка и сленг необязательны" in street
     assert "Не вставляй мат механически" in street
-    assert "матерись заметно меньше" in restrained
-    assert "без мата" in clean
+    assert "матерись заметно меньше" in dialogue_style_prompt("restrained")
+    assert "без мата" in dialogue_style_prompt("clean")
 
 
 @pytest.mark.parametrize(
     "reply",
     [
-        "О, здорово. Чё, какая движуха?",
-        "Да бля, это реально мрачно.",
         "Ну и дичь.",
         "Ща разберёмся с этой хренью.",
     ],
@@ -95,13 +84,6 @@ def test_street_voice_quality_check_rejects_sterile_casual_replies(reply: str) -
     assert not has_street_voice(reply)
 
 
-def test_street_voice_is_enforced_only_for_casual_street_turns() -> None:
-    assert street_voice_expected("street", "micro")
-    assert street_voice_expected("street", "conversational")
-    assert not street_voice_expected("street", "focused")
-    assert not street_voice_expected("street", "deep")
-    assert not street_voice_expected("restrained", "micro")
-    assert not street_voice_expected("clean", "conversational")
 
 
 class _SequencedStreetProvider:
@@ -131,12 +113,11 @@ class _SequencedStreetProvider:
 
 
 @pytest.mark.anyio
-async def test_batch_sterile_street_reply_is_rewritten_before_persisting(tmp_path: Path) -> None:
+async def test_batch_plain_reply_is_accepted_without_style_retry(tmp_path: Path) -> None:
     store = TimelineStore(tmp_path / "timeline.sqlite3")
     store.init_db()
     provider = _SequencedStreetProvider([
         "Ага, мрачно.",
-        "Да бля, это реально мрачно.",
     ])
     agent = CharacterAgent(
         provider,
@@ -147,18 +128,16 @@ async def test_batch_sterile_street_reply_is_rewritten_before_persisting(tmp_pat
 
     result = await agent.handle_user_message("session", "пиздец")
 
-    assert provider.calls == 2
-    assert result["reply"] == "Да бля, это реально мрачно."
-    assert "стерильно" in provider.message_batches[1][-1].content
+    assert provider.calls == 1
+    assert result["reply"] == "Ага, мрачно."
 
 
 @pytest.mark.anyio
-async def test_live_sterile_street_opening_never_reaches_output(tmp_path: Path) -> None:
+async def test_live_plain_opening_reaches_output_without_style_retry(tmp_path: Path) -> None:
     store = TimelineStore(tmp_path / "timeline.sqlite3")
     store.init_db()
     provider = _SequencedStreetProvider([
         "Здорово, Федя. Чего хотел?",
-        "О, здорово. Чё, какая движуха?",
     ])
     agent = CharacterAgent(
         provider,
@@ -169,10 +148,8 @@ async def test_live_sterile_street_opening_never_reaches_output(tmp_path: Path) 
 
     chunks = [chunk async for chunk in agent.stream_user_message("session", "Здорово")]
 
-    assert provider.calls == 2
-    assert "".join(chunks) == "О, здорово. Чё, какая движуха?"
-    assert all("Чего хотел" not in chunk for chunk in chunks)
-    assert "обычный текст ответа" in provider.message_batches[1][-1].content
+    assert provider.calls == 1
+    assert "".join(chunks) == "Здорово, Федя. Чего хотел?"
 
 
 class _BatchStyleProvider:

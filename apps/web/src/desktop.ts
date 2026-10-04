@@ -2,6 +2,15 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import type { AvatarPlacement, InterfaceLocale } from "./types";
 
+export async function openApiKeyPortal(provider: "deepseek" | "tavily"): Promise<void> {
+  if (isDesktopApp()) {
+    await invoke("open_api_key_portal", { provider });
+    return;
+  }
+  const url = provider === "tavily" ? "https://app.tavily.com/home" : "https://platform.deepseek.com/api_keys";
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
 export type CoreStatus = "starting" | "ready" | "failed" | "crashed" | "closing";
 
 export type DesktopRuntime = {

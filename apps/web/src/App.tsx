@@ -52,6 +52,8 @@ import {
 } from "lucide-react";
 import { AvatarDevStudioStandalonePage } from "./components/AvatarDevPanel";
 import { EnvironmentSettings } from "./components/EnvironmentSettings";
+import { ApiKeysSettings, type CredentialTarget } from "./components/ApiKeysSettings";
+import { useRuntimeSettingsAutosave, type RuntimeSettingsPatch, type AutoSaveStatus } from "./settingsAutosave";
 import {
   FigmaStartFlowerIcon,
   FigmaMicIcon,
@@ -96,10 +98,6 @@ import {
   resetConversationSession,
   resetAllCompanionData,
   resolveApiUrl,
-  removeDesktopApiKey,
-  removeDesktopCodingApiKey,
-  saveDesktopApiKey,
-  saveDesktopCodingApiKey,
   sendChatMessage,
   sendLiveTextMessage,
   searchTimeline,
@@ -249,8 +247,7 @@ type SettingsSection =
   | "backups"
   | "maintenance"
   | "events";
-type RuntimeSettingsPatch = Parameters<typeof updateRuntimeSettings>[0];
-type AutoSaveStatus = "idle" | "saving" | "saved" | "error";
+type SettingsNavigationRequest = { section: SettingsSection; target?: CredentialTarget; id: number };
 type LiveConversationSettings = Pick<
   PublicSettings,
   | "live_conversation_enabled"
@@ -308,60 +305,6 @@ function parsePronunciations(value: string): Record<string, string> {
       .map((line) => line.split(/\s*=\s*/, 2))
       .filter(([term, pronunciation]) => term && pronunciation),
   );
-}
-
-function useRuntimeSettingsAutosave(onSettingsChanged: (settings: PublicSettings) => void) {
-  const pendingPatchRef = useRef<RuntimeSettingsPatch>({});
-  const failedPatchRef = useRef<RuntimeSettingsPatch | null>(null);
-  const rollbackRef = useRef<Array<() => void>>([]);
-  const runningRef = useRef(false);
-  const [status, setStatus] = useState<AutoSaveStatus>("idle");
-
-  const drain = useCallback(async () => {
-    if (runningRef.current || Object.keys(pendingPatchRef.current).length === 0) {
-      return;
-    }
-
-    runningRef.current = true;
-    const patch = pendingPatchRef.current;
-    const rollback = rollbackRef.current;
-    pendingPatchRef.current = {};
-    rollbackRef.current = [];
-    setStatus("saving");
-
-    try {
-      const nextSettings = await updateRuntimeSettings(patch);
-      failedPatchRef.current = null;
-      onSettingsChanged(nextSettings);
-      setStatus("saved");
-    } catch {
-      failedPatchRef.current = patch;
-      rollback.forEach((restore) => restore());
-      setStatus("error");
-    } finally {
-      runningRef.current = false;
-      if (Object.keys(pendingPatchRef.current).length > 0) {
-        void drain();
-      }
-    }
-  }, [onSettingsChanged]);
-
-  const save = useCallback((patch: RuntimeSettingsPatch, rollback?: () => void) => {
-    pendingPatchRef.current = { ...pendingPatchRef.current, ...patch };
-    if (rollback) {
-      rollbackRef.current.push(rollback);
-    }
-    void drain();
-  }, [drain]);
-
-  const retry = useCallback(() => {
-    if (!failedPatchRef.current) return;
-    pendingPatchRef.current = { ...failedPatchRef.current, ...pendingPatchRef.current };
-    failedPatchRef.current = null;
-    void drain();
-  }, [drain]);
-
-  return { save, retry, status };
 }
 
 function AutoSaveStatus({ status, onRetry }: { status: AutoSaveStatus; onRetry: () => void }) {
@@ -507,7 +450,7 @@ function MainApp() {
   const readinessEpoch = useRef(0);
   const [activeView, setActiveView] = useState<AppView>("overview");
   const [visitedViews, setVisitedViews] = useState<Set<AppView>>(() => new Set<AppView>(["overview", "chat"]));
-  const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSection | undefined>();
+  const [settingsNavigationRequest, setSettingsNavigationRequest] = useState<SettingsNavigationRequest>();
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
@@ -582,7 +525,7 @@ function MainApp() {
 
   useEffect(() => {
     if (!setupRequired) return;
-    setSettingsInitialSection("api-keys");
+    setSettingsNavigationRequest(current => ({ section: "api-keys", target: "deepseek", id: (current?.id ?? 0) + 1 }));
     setActiveView("settings");
   }, [setupRequired]);
 
@@ -1034,7 +977,7 @@ function MainApp() {
                   events={events}
                   sessionId={sessionId}
                   onOpenApiSettings={() => {
-                    setSettingsInitialSection("api-keys");
+                    setSettingsNavigationRequest(current => ({ section: "api-keys", target: "coding", id: (current?.id ?? 0) + 1 }));
                     switchView("settings");
                   }}
                   onSettingsChanged={(nextSettings) => {
@@ -1050,7 +993,7 @@ function MainApp() {
               <Suspense fallback={<LoadingRing className="page-loading" />}>
                 <LazySettingsPage
                   settings={settings}
-                  initialSection={settingsInitialSection}
+                  navigationRequest={settingsNavigationRequest}
                   avatarStatus={avatarStatus}
                   avatarOverlay={avatarOverlay}
                   events={events}
@@ -3175,6 +3118,7 @@ function DevBadge({
 export function SettingsPage({
   settings,
   initialSection,
+  navigationRequest,
   avatarStatus,
   avatarOverlay,
   events,
@@ -3189,6 +3133,7 @@ export function SettingsPage({
 }: {
   settings: PublicSettings | null;
   initialSection?: SettingsSection;
+  navigationRequest?: SettingsNavigationRequest;
   avatarStatus: AvatarStatusResponse | null;
   avatarOverlay: AvatarOverlaySettings | null;
   events: BackendEvent[];
@@ -3242,15 +3187,46 @@ export function SettingsPage({
   });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [deepseekApiKeyInput, setDeepseekApiKeyInput] = useState("");
-  const [codingApiKeyInput, setCodingApiKeyInput] = useState("");
   const [showSttCapture, setShowSttCapture] = useState(false);
-  const autosaveTimersRef = useRef<Partial<Record<SettingsSection, number>>>({});
-  // Settings are polled by the app shell.  Once this form is open, a polling
-  // response must not replace a value the person has just selected before
-  // they get a chance to press Save (most visibly the participant mode).
+  const [environmentValues, setEnvironmentValues] = useState<Partial<PublicSettings>>({});
+  const [focusTarget, setFocusTarget] = useState<string | null>(null);
+  // Polling must not replace edits waiting in the autosave queue. Only the
+  // initial snapshot and confirmed responses update the local form fields.
   const hasInitialSettings = useRef(false);
-  const autosave = useRuntimeSettingsAutosave(onSettingsChanged);
+  const applyRuntimeFields = useCallback((next: PublicSettings, fields: Array<keyof RuntimeSettingsPatch>) => {
+    const setters: Partial<Record<keyof RuntimeSettingsPatch, (value: any) => void>> = {
+      interface_locale: value => { setInterfaceLocale(value); onInterfaceLocaleChange(value); },
+      developer_mode_enabled: setDeveloperModeEnabled,
+      background_conversation_notifications_enabled: setBackgroundConversationNotificationsEnabled,
+      voice_language: setVoiceLanguage, voice_microphone_profile: setVoiceMicrophoneProfile,
+      voice_input_device_id: setVoiceInputDeviceId, voice_output_device_id: setVoiceOutputDeviceId,
+      voice_tts_voice: setVoiceTtsVoice, voice_playback_rate: setVoicePlaybackRate,
+      voice_live_playback_prebuffer_segments: setPrebufferSegments,
+      voice_live_playback_prebuffer_ms: setPrebufferMs,
+      memory_mode: setMemoryMode, memory_incognito: setMemoryIncognito,
+    };
+    const environmentPatch: Partial<PublicSettings> = {};
+    const livePatch: Partial<LiveConversationSettings> = {};
+    for (const field of fields) {
+      if (field.startsWith("live_conversation_")) Object.assign(livePatch, { [field]: next[field] });
+      else if (["location_mode", "location_city", "weather_enabled", "news_enabled", "news_category", "web_search_enabled", "web_search_provider"].includes(field)) {
+        Object.assign(environmentPatch, { [field]: next[field] });
+      } else setters[field]?.(next[field]);
+    }
+    if (Object.keys(environmentPatch).length) setEnvironmentValues(current => ({ ...current, ...environmentPatch }));
+    if (Object.keys(livePatch).length) setLiveSettings(current => ({ ...current, ...livePatch }));
+  }, [onInterfaceLocaleChange]);
+  const autosave = useRuntimeSettingsAutosave(onSettingsChanged, settings, applyRuntimeFields);
+
+  const openSettingsSection = useCallback((section: SettingsSection, target?: string) => {
+    autosave.flush();
+    setActiveSection(section);
+    setFocusTarget(target ?? null);
+  }, [autosave.flush]);
+  useEffect(() => {
+    if (navigationRequest) openSettingsSection(navigationRequest.section,
+      navigationRequest.target ? `credential-${navigationRequest.target}` : undefined);
+  }, [navigationRequest, openSettingsSection]);
 
   useEffect(() => {
     if (initialSection) setActiveSection(initialSection);
@@ -3303,53 +3279,14 @@ export function SettingsPage({
   }, []);
 
   const saveRuntimeSetting = useCallback((patch: RuntimeSettingsPatch, rollback?: () => void) => {
-    autosave.save(patch, rollback);
-  }, [autosave]);
+    return autosave.save(patch, rollback);
+  }, [autosave.save]);
 
-  const refreshSettingsAfterCredentialChange = useCallback(async () => {
-    const nextSettings = await getSettings();
-    onSettingsChanged(nextSettings);
-  }, [onSettingsChanged]);
-
-  const saveApiCredential = async (kind: "deepseek" | "coding") => {
-    const value = kind === "deepseek" ? deepseekApiKeyInput.trim() : codingApiKeyInput.trim();
-    if (!value) return;
-    setSaving(true);
-    setMessage(null);
-    try {
-      if (kind === "deepseek") {
-        await saveDesktopApiKey(value);
-        setDeepseekApiKeyInput("");
-      } else {
-        await saveDesktopCodingApiKey(value);
-        setCodingApiKeyInput("");
-      }
-      await refreshSettingsAfterCredentialChange();
-      setMessage(`${kind === "deepseek" ? "DeepSeek" : "Coding"} API-ключ сохранён в защищённом хранилище Windows.`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Не удалось сохранить API-ключ.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const removeApiCredential = async (kind: "deepseek" | "coding") => {
-    setSaving(true);
-    setMessage(null);
-    try {
-      if (kind === "deepseek") {
-        await removeDesktopApiKey();
-      } else {
-        await removeDesktopCodingApiKey();
-      }
-      await refreshSettingsAfterCredentialChange();
-      setMessage(`${kind === "deepseek" ? "DeepSeek" : "Coding"} API-ключ удалён из защищённого хранилища Windows.`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Не удалось удалить API-ключ.");
-    } finally {
-      setSaving(false);
-    }
-  };
+  const saveEnvironmentSetting = useCallback((patch: RuntimeSettingsPatch, rollback?: () => void,
+    committed?: (next: PublicSettings) => void) => {
+    setEnvironmentValues(current => ({ ...current, ...patch }));
+    return autosave.save(patch, rollback, committed);
+  }, [autosave.save]);
 
   const updateLiveSetting = <K extends keyof LiveConversationSettings>(
     key: K,
@@ -3363,20 +3300,11 @@ export function SettingsPage({
     );
   };
 
-  const scheduleRuntimeSetting = useCallback((section: SettingsSection, patch: RuntimeSettingsPatch, rollback?: () => void) => {
-    const currentTimer = autosaveTimersRef.current[section];
-    if (currentTimer !== undefined) window.clearTimeout(currentTimer);
-    autosaveTimersRef.current[section] = window.setTimeout(() => {
-      delete autosaveTimersRef.current[section];
-      saveRuntimeSetting(patch, rollback);
-    }, 300);
-  }, [saveRuntimeSetting]);
+  const scheduleRuntimeSetting = useCallback((patch: RuntimeSettingsPatch, rollback?: () => void) => {
+    void autosave.save(patch, rollback, undefined, 300);
+  }, [autosave.save]);
 
-  useEffect(() => () => {
-    Object.values(autosaveTimersRef.current).forEach((timer) => {
-      if (timer !== undefined) window.clearTimeout(timer);
-    });
-  }, []);
+  useEffect(() => () => autosave.flush(), [activeSection, autosave.flush]);
 
   const refreshAudioDevices = useCallback(async (requestMicrophoneAccess = false) => {
     setAudioDevicesLoading(true);
@@ -3467,10 +3395,19 @@ export function SettingsPage({
   }, [activeSection, Boolean(settings)]);
 
 
+  useLayoutEffect(() => {
+    if (!focusTarget || !settings) return;
+    const heading = settingsContentRef.current?.querySelector<HTMLElement>(`#${focusTarget}`);
+    if (!heading || heading.closest("[hidden]")) return;
+    heading.scrollIntoView?.({ block: "start", behavior: "instant" });
+    heading.focus({ preventScroll: true });
+    setFocusTarget(null);
+  }, [focusTarget, activeSection, Boolean(settings)]);
+
   if (!settings) {
     return (
       <section className="panel settings-panel">
-        <SettingsNavigation current={activeSection} onChange={setActiveSection} />
+        <SettingsNavigation current={activeSection} onChange={openSettingsSection} />
         <div className="settings-content" ref={settingsContentRef}>
           {activeSection === "system-window" ? <>
             <header className="settings-heading"><h2>Окно приложения</h2><p>Эталонный размер, фиксация и восстановление окна.</p></header>
@@ -3487,7 +3424,7 @@ export function SettingsPage({
     .join(" · ");
   const settingsSectionMeta: Record<SettingsSection, { title: string; description: string }> = {
     conversation: { title: "Живой разговор", description: "Когда Iris слушает, вступает в разговор и выражает эмоции." },
-    environment: { title: "Окружение и гео", description: "Локация, местное время, погода и новостные сводки." },
+    environment: { title: "Окружение и гео", description: "Город, время на устройстве, погода, новости и веб-поиск." },
     avatar: { title: "Аватар", description: "Размещение, внешний вид и тестовые команды Iris." },
     voice: { title: "Голос", description: "Звучание, темп и подача речи." },
     "voice-devices": { title: "Устройства", description: "Микрофон, наушники и профиль записи." },
@@ -3496,7 +3433,7 @@ export function SettingsPage({
     memory: { title: "Память", description: "Какие сведения Iris может сохранять между разговорами." },
     "system-interface": { title: "Интерфейс", description: "Общие настройки интерфейса." },
     "system-window": { title: "Окно приложения", description: "Эталонный размер, фиксация и восстановление окна." },
-    "api-keys": { title: "API-ключи", description: "Защищённое локальное хранение ключей моделей." },
+    "api-keys": { title: "API-ключи", description: "Защищённое локальное хранение ключей моделей и веб-поиска." },
     "token-usage": { title: "Токены и расходы", description: "Учет входящих и исходящих токенов API, кэширование и аналитика затрат." },
     "system-overview": { title: "Система", description: "Состояние подключения и компонентов Iris." },
     models: { title: "Модели", description: "Загрузка и обслуживание локальных моделей." },
@@ -3544,7 +3481,7 @@ export function SettingsPage({
 
   return (
     <section className="panel settings-panel">
-      <SettingsNavigation current={activeSection} developerMode={developerModeEnabled} onChange={setActiveSection} />
+      <SettingsNavigation current={activeSection} developerMode={developerModeEnabled} onChange={openSettingsSection} />
 
       <div className="settings-content" ref={settingsContentRef}>
         <header className="settings-heading" hidden={activeSection === "token-usage"}>
@@ -3553,141 +3490,13 @@ export function SettingsPage({
               <h2>{activeSettingsMeta.title}</h2>
               <p>{activeSettingsMeta.description}</p>
             </div>
-            {activeSection !== "system-window" && <AutoSaveStatus status={autosave.status} onRetry={autosave.retry} />}
+            {!["system-window", "api-keys", "token-usage", "system-overview", "models", "backups", "maintenance", "events", "avatar"].includes(activeSection) && <AutoSaveStatus status={autosave.status} onRetry={autosave.retry} />}
           </div>
         </header>
 
         <div className="form-grid settings-form" hidden={activeSection !== "api-keys"}>
-          {!settings.api_key_configured && (
-            <div className="notice is-error" role="alert">
-              <IconInterfaceAlertAlarmBell2 size={17} aria-hidden="true" />
-              <div>
-                <strong>DeepSeek API-ключ не настроен.</strong>
-                <p>Диалог и функции памяти недоступны. Сохраните ключ ниже, чтобы подключить Iris.</p>
-              </div>
-            </div>
-          )}
-          {!settings.coding_api_key_configured && (
-            <div className="notice is-warning" role="status">
-              <IconInterfaceAlertAlarmBell2 size={17} aria-hidden="true" />
-              <div>
-                <strong>Coding API-ключ не настроен.</strong>
-                <p>Coding Agent останется выключенным, пока не будет сохранён отдельный ключ.</p>
-              </div>
-            </div>
-          )}
-
-          {/* DeepSeek API 3D Card */}
-          <div className="settings-card">
-            <div className="settings-card-header">
-              <div className="settings-card-header-main">
-                <div className="settings-card-title-group">
-                  <h3 className="settings-card-title">DeepSeek API</h3>
-                  <p className="settings-card-subtitle">
-                    Используется для диалога, памяти и фоновых ответов Iris
-                  </p>
-                </div>
-              </div>
-              <div className="settings-card-header-actions">
-                <span className={`settings-status-pill ${settings.api_key_configured ? "is-active" : "is-warning"}`}>
-                  <span className="settings-status-dot" />
-                  {settings.api_key_configured ? "Ключ настроен" : "Ключ не настроен"}
-                </span>
-              </div>
-            </div>
-
-            <label htmlFor="deepseek-api-key-input">
-              API-ключ DeepSeek
-              <input
-                id="deepseek-api-key-input"
-                type="password"
-                autoComplete="new-password"
-                value={deepseekApiKeyInput}
-                onChange={(event) => setDeepseekApiKeyInput(event.target.value)}
-                placeholder={settings.api_key_configured ? "Введите новый ключ для замены" : "sk-…"}
-                disabled={saving || !desktopCredentialStorageAvailable}
-              />
-              <small>Используется для диалога, памяти и фоновых ответов Iris. Значение никогда не отображается обратно.</small>
-            </label>
-
-            <div className="settings-card-actions">
-              <MaterialButton materialKey={"App.button-19"}
-                className="primary-button"
-                type="button"
-                disabled={saving || !desktopCredentialStorageAvailable || !deepseekApiKeyInput.trim()}
-                onClick={() => void saveApiCredential("deepseek")}
-              >
-                {settings.api_key_configured ? "Заменить ключ" : "Сохранить ключ"}
-              </MaterialButton>
-              <MaterialButton materialKey={"App.button-20"}
-                className="danger-button"
-                type="button"
-                disabled={saving || !desktopCredentialStorageAvailable || !settings.api_key_configured}
-                onClick={() => void removeApiCredential("deepseek")}
-              >
-                Удалить
-              </MaterialButton>
-            </div>
-          </div>
-
-          {/* Coding Agent API 3D Card */}
-          <div className="settings-card">
-            <div className="settings-card-header">
-              <div className="settings-card-header-main">
-                <div className="settings-card-title-group">
-                  <h3 className="settings-card-title">Coding Agent API</h3>
-                  <p className="settings-card-subtitle">
-                    Отдельный ключ для автономных задач кодинга и рефакторинга
-                  </p>
-                </div>
-              </div>
-              <div className="settings-card-header-actions">
-                <span className={`settings-status-pill ${settings.coding_api_key_configured ? "is-active" : "is-warning"}`}>
-                  <span className="settings-status-dot" />
-                  {settings.coding_api_key_configured ? "Ключ настроен" : "Ключ не настроен"}
-                </span>
-              </div>
-            </div>
-
-            <label htmlFor="coding-api-key-input">
-              API-ключ Coding Agent
-              <input
-                id="coding-api-key-input"
-                type="password"
-                autoComplete="new-password"
-                value={codingApiKeyInput}
-                onChange={(event) => setCodingApiKeyInput(event.target.value)}
-                placeholder={settings.coding_api_key_configured ? "Введите новый ключ для замены" : "sk-…"}
-                disabled={saving || !desktopCredentialStorageAvailable}
-              />
-              <small>Отдельный ключ для задач Coding Agent. Основной DeepSeek-ключ автоматически не используется.</small>
-            </label>
-
-            <div className="settings-card-actions">
-              <MaterialButton materialKey={"App.button-21"}
-                className="primary-button"
-                type="button"
-                disabled={saving || !desktopCredentialStorageAvailable || !codingApiKeyInput.trim()}
-                onClick={() => void saveApiCredential("coding")}
-              >
-                {settings.coding_api_key_configured ? "Заменить ключ" : "Сохранить ключ"}
-              </MaterialButton>
-              <MaterialButton materialKey={"App.button-22"}
-                className="danger-button"
-                type="button"
-                disabled={saving || !desktopCredentialStorageAvailable || !settings.coding_api_key_configured}
-                onClick={() => void removeApiCredential("coding")}
-              >
-                Удалить
-              </MaterialButton>
-            </div>
-          </div>
-
-          {!desktopCredentialStorageAvailable && (
-            <div className="notice" role="status">
-              Управление ключами доступно в установленном desktop-приложении.
-            </div>
-          )}
+          <ApiKeysSettings settings={settings} active={activeSection === "api-keys"}
+            onSettingsChanged={onSettingsChanged} />
         </div>
 
         <div className="settings-grid system-status-grid" hidden={activeSection !== "system-overview"}>
@@ -3830,9 +3639,10 @@ export function SettingsPage({
 
         <ViewActivity mode={activeSection === "environment" ? "visible" : "hidden"}><div className="form-grid settings-form" hidden={activeSection !== "environment"}>
           <EnvironmentSettings
-            settings={settings}
+            settings={{ ...settings, ...environmentValues }}
             developerMode={developerModeEnabled}
-            onSettingsChanged={onSettingsChanged}
+            onSaveSetting={saveEnvironmentSetting}
+            onOpenApiKeys={() => openSettingsSection("api-keys", "credential-tavily")}
           />
         </div></ViewActivity>
 
@@ -3920,7 +3730,7 @@ export function SettingsPage({
                     const nextValue = Number(event.target.value);
                     const previousValue = voicePlaybackRate;
                     setVoicePlaybackRate(nextValue);
-                    scheduleRuntimeSetting("voice", { voice_playback_rate: nextValue }, () => setVoicePlaybackRate(previousValue));
+                    scheduleRuntimeSetting({ voice_playback_rate: nextValue }, () => setVoicePlaybackRate(previousValue));
                   }}
                 />
               </label>
@@ -4038,6 +3848,23 @@ export function SettingsPage({
                     ? "Выбранное устройство используется для синтезированных аудиофайлов и воспроизведения сообщений; запасной системный голос браузера следует настройке Windows."
                     : "Этот WebView не поддерживает выбор устройства вывода."}
                 </small>
+              </label>
+            </div>
+
+            <div className="settings-card-grid">
+              <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+                Защита от собственного голоса
+                <CustomSelect
+                  value={liveSettings.live_conversation_echo_mode}
+                  disabled={!developerModeEnabled}
+                  onChange={(event) => updateLiveSetting(
+                    "live_conversation_echo_mode",
+                    event.target.value as LiveConversationSettings["live_conversation_echo_mode"],
+                  )}
+                >
+                  <option value="auto">Автоматически</option>
+                  <option value="half_duplex">Не слушать во время ответа</option>
+                </CustomSelect>
               </label>
             </div>
 
@@ -4175,7 +4002,7 @@ export function SettingsPage({
                     const nextValue = Number(event.target.value);
                     const previousValue = prebufferSegments;
                     setPrebufferSegments(nextValue);
-                    scheduleRuntimeSetting("voice-advanced", { voice_live_playback_prebuffer_segments: nextValue }, () => setPrebufferSegments(previousValue));
+                    scheduleRuntimeSetting({ voice_live_playback_prebuffer_segments: nextValue }, () => setPrebufferSegments(previousValue));
                   }}
                 />
               </label>
@@ -4193,7 +4020,7 @@ export function SettingsPage({
                     const nextValue = Number(event.target.value);
                     const previousValue = prebufferMs;
                     setPrebufferMs(nextValue);
-                    scheduleRuntimeSetting("voice-advanced", { voice_live_playback_prebuffer_ms: nextValue }, () => setPrebufferMs(previousValue));
+                    scheduleRuntimeSetting({ voice_live_playback_prebuffer_ms: nextValue }, () => setPrebufferMs(previousValue));
                   }}
                 />
               </label>
@@ -4347,8 +4174,8 @@ export function SettingsPage({
             <div className="settings-card-header">
               <div className="settings-card-header-main">
                 <div className="settings-card-title-group">
-                  <h3 className="settings-card-title">Эмоции и аудио-баланс</h3>
-                  <p className="settings-card-subtitle">Выраженность эмоций, восстановление настроения и эхоподавление</p>
+                  <h3 className="settings-card-title">Эмоции и настроение</h3>
+                  <p className="settings-card-subtitle">Выраженность эмоций, восстановление настроения и влияние недавних событий</p>
                 </div>
               </div>
               <div className="settings-card-header-actions">
@@ -4405,20 +4232,7 @@ export function SettingsPage({
                 </CustomSelect>
               </label>
 
-              <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
-                Защита от собственного голоса
-                <CustomSelect
-                  value={liveSettings.live_conversation_echo_mode}
-                  disabled={!developerModeEnabled}
-                  onChange={(event) => updateLiveSetting(
-                    "live_conversation_echo_mode",
-                    event.target.value as LiveConversationSettings["live_conversation_echo_mode"],
-                  )}
-                >
-                  <option value="auto">Автоматически</option>
-                  <option value="half_duplex">Не слушать во время ответа</option>
-                </CustomSelect>
-              </label>
+
             </div>
           </div>
 

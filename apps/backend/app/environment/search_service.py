@@ -580,6 +580,34 @@ class SearchService:
         except (TimeoutError, httpx.HTTPError, ValueError, OSError):
             return replace(result, page_status="unavailable")
 
+    async def read_sources(self, query, sources, *, budget, progress=None):
+        """Read an already selected article with the same page/network bounds."""
+        started = time.monotonic()
+        selected = [r for r in sources if canonical_url(r.url) and not sensitive_query(r.url)][:2]
+        results, attempts = [], []
+        for source in selected:
+            if source.url in budget.page_results:
+                results.append(budget.page_results[source.url])
+                continue
+            if budget.pages >= 3 or budget.requests >= 6 or time.monotonic() >= budget.deadline:
+                break
+            budget.pages += 1
+            budget.requests += 1
+            if progress:
+                progress("reading")
+            try:
+                async with asyncio.timeout(max(.01, budget.deadline - time.monotonic())):
+                    result = await self._page(source, query)
+            except TimeoutError:
+                result = replace(source, page_status="unavailable")
+            budget.page_results[source.url] = result
+            results.append(result)
+            attempts.append({"provider": "source_page", "query": query, "status": result.page_status,
+                             "searched": True, "raw_count": 1, "accepted": int(result.page_status == "read")})
+        return self._snapshot(query, results=results, status="ok" if results else "timeout",
+                              provider="source_page", mode="news", attempts=tuple(attempts), cached=not attempts,
+                              latency_ms=round((time.monotonic() - started) * 1000))
+
     async def _perform_search(self, query, fallback_query=None, preferred_domains=(), *, mode="web", since="", until="", deadline=None, budget=None, progress=None):
         start = time.monotonic()
         controlled = budget is not None

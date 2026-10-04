@@ -45,7 +45,10 @@ def test_pasted_music_dialogue_and_topic_boundaries():
     assert latest.query.casefold() == "лсп последняя песня дата релиза"
     deletion = "угу кстати какие там треки поудаляли на яндекс музыке ну и российских платформах для прослушивания"
     assert "яндекс" in plan_search(deletion).query
-    assert "яндекс" in plan_search("давай", messages(deletion)).query
+    assert plan_search("давай", messages(deletion)) is None
+    from apps.backend.app.llm.base import ChatMessage
+    offer = [*messages(deletion), ChatMessage(role="assistant", content="Хочешь, проверю в интернете?")]
+    assert "яндекс" in plan_search("давай", offer).query
     assert plan_search("давай ка еще раз", messages(deletion, "давай")).force_refresh
     assert plan_search("давай", messages("привет")) is None
     assert plan_search("попробуй еще раз найти", [*context, *messages("не надо")]) is None
