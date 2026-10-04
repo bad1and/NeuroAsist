@@ -966,7 +966,7 @@ class TimelineStore:
                     """UPDATE background_jobs
                        SET payload_json = ?, idempotency_key = ?, available_at = ?,
                            attempts = 0, updated_at = ?, error_text = NULL,
-                           result_json = NULL, diagnostics_json = NULL, completed_at = NULL,
+                           result_json = NULL, diagnostics_json = '{}', completed_at = NULL,
                            lease_owner = NULL, lease_until = NULL
                        WHERE id = ? AND status = 'pending'""",
                     (json.dumps(payload), key, available_at, now, str(pending["id"])),

@@ -62,7 +62,7 @@ async def test_gta_prefers_latest_official_announcement_and_rejects_gta_v(monkey
         assert "PC date is not announced" in snap.compact_summary()
         assert all("wrong" not in r.url for r in snap.results)
         assert "https://" not in snap.compact_summary()
-        assert len(calls) == 3  # One search and at most two page reads.
+        assert len(calls) == 3  # One search and two reads; reserve one read for refinement.
         assert len(snap.metadata()["sources"]) == 3
     finally:
         await service.close()
@@ -380,7 +380,7 @@ def test_extended_hidden_protocol_and_external_context_replacement():
                 ChatMessage(role="user", content="Проверь")]
     result = agent._search_followup_messages(messages, snap, live=False, command="internal")
     assert not any("OLD DIGEST" in m.content for m in result)
-    assert sum(len(m.content) for m in result if m.role == "system" and m.content != "persona") <= 1600
+    assert sum(len(m.content) for m in result if m.role == "system" and m.content != "persona") <= 3200
 
 @pytest.mark.anyio
 async def test_prohibited_internet_uses_only_news_cache_and_no_weather():

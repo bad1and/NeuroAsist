@@ -29,7 +29,7 @@ export function EnvironmentSettings({
   const [newsEnabled, setNewsEnabled] = useState(settings.news_enabled ?? true);
   const [webSearchEnabled, setWebSearchEnabled] = useState(settings.web_search_enabled ?? true);
   const [searchProvider, setSearchProvider] = useState<NonNullable<PublicSettings["web_search_provider"]>>(settings.web_search_provider ?? "free");
-  const [keyProvider, setKeyProvider] = useState<SearchApiProvider>("brave");
+  const [keyProvider, setKeyProvider] = useState<SearchApiProvider>("tavily");
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [apiBusy, setApiBusy] = useState(false);
   const [apiMessage, setApiMessage] = useState("");
@@ -68,8 +68,13 @@ export function EnvironmentSettings({
           unauthorized: "Ключ не принят сервисом.", blocked: "Сервис ограничил запросы или закончилась квота.",
           cooldown: "Сервис временно ограничен. Повторите позже.", timeout: "Сервис не ответил вовремя.",
           empty: "Сервис ответил без результатов.",
+          free_only: "Этот сервис исключён из строго бесплатного режима.",
+          unverified_free_plan: "Бесплатный тариф без оплаты сверх пакета не подтверждён. Используются открытые источники.",
+          quota_exhausted: "Лимит бесплатного поиска исчерпан. Iris продолжает через открытые источники.",
+          budget_unavailable: "Не удалось проверить локальный лимит. Используются открытые источники.",
         };
-        setApiMessage(messages[result.status] ?? "Проверка подключения не удалась.");
+        setApiMessage((messages[result.status] ?? "Проверка подключения не удалась.") +
+          (result.quota?.used !== undefined ? ` Расход: ${result.quota.used} / ${result.quota.limit}.` : ""));
       } else {
         if (action === "save") await saveDesktopSearchApiKey(keyProvider, apiKeyInput.trim());
         else await removeDesktopSearchApiKey(keyProvider);
@@ -283,11 +288,11 @@ export function EnvironmentSettings({
             }
           }}>
             <option value="free">Бесплатные источники</option>
-            <option value="brave">Brave Search API</option>
-            <option value="tavily">Tavily API</option>
-            <option value="serper">Serper API</option>
+            <option value="brave" disabled>Brave · используется бесплатный резерв</option>
+            <option value="tavily">Tavily Free</option>
+            <option value="serper" disabled>Serper · используется бесплатный резерв</option>
           </CustomSelect>
-          <small>По умолчанию поиск бесплатный. API используется только после вашего выбора; при ошибке Iris обращается к бесплатным источникам.</small>
+          <small>Только бесплатный поиск. Tavily Free даёт 1000 кредитов в месяц без карты; Iris ограничивает расход до 900 и проверяет тариф перед обращением. При отсутствии ключа или исчерпании квоты работают открытые источники.</small>
         </label>
 
         <details>
@@ -315,7 +320,7 @@ export function EnvironmentSettings({
             <MaterialButton materialKey="EnvironmentSettings.search-remove" className="secondary" disabled={apiBusy || !settings.search_api_keys_configured?.[keyProvider] || !isDesktopManaged()} onClick={() => void handleSearchKey("remove")}>Удалить ключ</MaterialButton>
             <MaterialButton materialKey="EnvironmentSettings.search-check" className="secondary" disabled={apiBusy || !settings.search_api_keys_configured?.[keyProvider]} onClick={() => void handleSearchKey("check")}>Проверить подключение</MaterialButton>
           </div>
-          <small>{isDesktopManaged() ? "Ключи сервисов независимы. Сохранение ключа не включает API. Проверка отправляет один запрос выбранному сервису." : "Управление ключами доступно в установленном приложении Iris."}</small>
+          <small>{isDesktopManaged() ? "Подключите отдельный ключ Tavily бесплатного тарифа Researcher без оплаты сверх пакета. Сохранение ключа не включает API. Проверка Tavily учитывается в лимите. Ключи Brave и Serper можно сохранить или удалить, но они не используются." : "Управление ключами доступно в установленном приложении Iris."}</small>
         </details>
         {apiMessage && <p role="status">{apiMessage}</p>}
 

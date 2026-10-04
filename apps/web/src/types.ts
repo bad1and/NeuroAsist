@@ -270,6 +270,7 @@ export type PublicSettings = {
   news_category?: "all" | "general" | "tech" | "science" | "games";
   web_search_enabled?: boolean;
   web_search_provider?: "free" | "brave" | "tavily" | "serper";
+  web_search_free_only?: boolean;
   search_api_keys_configured?: Partial<Record<"brave" | "tavily" | "serper", boolean>>;
 };
 
@@ -480,6 +481,10 @@ export type MessageMetadata = {
 };
 
 export type ExternalSourceMetadata = {
+    reason?: string;
+    canonical_entity?: string;
+    evidence_status?: string;
+    quota?: { status: string; used?: number; limit?: number; remaining?: number } | null;
     query: string;
     searched_at?: string;
     provider: string;
@@ -488,8 +493,8 @@ export type ExternalSourceMetadata = {
     stale?: boolean;
     updated_at?: string;
     latency_ms?: number;
-    attempts?: Array<{ provider: string; query: string; status: string; accepted: number; latency_ms: number }>;
-    sources: Array<{ title: string; url: string; published_at?: string; source?: string; stale?: boolean; page_status?: string; provider?: string }>;
+    attempts?: Array<{ provider: string; query: string; status: string; accepted: number; latency_ms: number; cached?: boolean; searched?: boolean }>;
+    sources: Array<{ id?: string; title: string; url: string; published_at?: string; source?: string; stale?: boolean; page_status?: string; provider?: string }>;
 };
 
 export type TimelineMessage = {

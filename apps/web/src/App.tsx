@@ -191,6 +191,7 @@ import { InAppAvatarHost } from "./components/InAppAvatarHost";
 import { IrisPortalBackground } from "./components/IrisPortalBackground";
 import { IrisSubtitles } from "./components/IrisSubtitles";
 import { ConversationSurface } from "./components/ConversationSurface";
+import { RetrievalProgress } from "./components/RetrievalProgress";
 import { NotificationHost } from "./components/NotificationHost";
 import { TokenAnalyticsSettings } from "./components/TokenAnalyticsSettings";
 import { notify, notifyBackendEvent } from "./notifications";
@@ -2807,6 +2808,7 @@ export function ChatPage({
               onMinimize={toggleMinimized}
             />
           )}
+          <RetrievalProgress events={events} sessionId={sessionId} />
           <IrisSubtitles
             messages={messages}
             loading={loading}

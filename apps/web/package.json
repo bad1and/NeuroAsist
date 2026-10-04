@@ -14,6 +14,7 @@
     "preview": "vite preview --host 127.0.0.1 --port 4173"
   },
   "dependencies": {
+    "@paper-design/shaders": "^0.0.81",
     "@tauri-apps/api": "^2.11.1",
     "@visx/responsive": "^4.0.0",
     "@visx/scale": "^4.0.0",

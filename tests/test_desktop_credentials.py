@@ -68,4 +68,5 @@ def test_desktop_server_allows_background_tasks_to_shutdown(monkeypatch) -> None
     desktop_entry.main()
 
     assert captured["timeout_graceful_shutdown"] == 5
+    assert captured["ws"] == "websockets-sansio"
     assert captured["ran"] is True

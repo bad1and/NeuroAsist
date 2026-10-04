@@ -341,7 +341,15 @@ function JournalMessageDetails({
             {webSearch.cached && <small>из кэша</small>}
             {webSearch.stale && <small>обновление не удалось; данные могут устареть</small>}
             {webSearch.latency_ms !== undefined && <small>{(webSearch.latency_ms / 1000).toFixed(1)} с</small>}
+            {webSearch.canonical_entity && <small>Предмет: {webSearch.canonical_entity}</small>}
+            {webSearch.evidence_status && <small>Доказательства: {({ sufficient: "достаточно", partial: "частично", none: "не получены", topic_only: "только по теме", provisional: "предварительные", available: "получены" } as Record<string, string>)[webSearch.evidence_status] ?? webSearch.evidence_status}</small>}
+            {webSearch.quota?.used !== undefined && <small>Квота: {webSearch.quota.used} / {webSearch.quota.limit}</small>}
           </div>
+          {webSearch.attempts?.map((attempt, index) => <div className="web-search-query" key={index}>
+            <span>Попытка {index + 1} · {attempt.provider}</span>
+            <strong>{attempt.query}</strong>
+            <small>{attempt.status} · принято {attempt.accepted} · {(attempt.latency_ms / 1000).toFixed(1)} с{attempt.cached ? " · из кэша" : attempt.searched === false ? " · поиск не отправлен" : ""}</small>
+          </div>)}
           {webSearch.sources.length > 0 ? (
             <div className="web-search-sources">
               {webSearch.sources.map((source, index) => (

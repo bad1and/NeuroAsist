@@ -95,6 +95,7 @@ class RuntimeSettings:
     news_category: str = "all"
     web_search_enabled: bool = True
     web_search_provider: str = "free"
+    web_search_free_only: bool = True
 
 
 class RuntimeSettingsStore:
@@ -138,6 +139,7 @@ class RuntimeSettingsStore:
             # Voice is live-only since protocol v3. Keep the field readable for
             # old settings files, but never allow a persisted flag to disable it.
             values["live_conversation_enabled"] = True
+            values["web_search_free_only"] = True
             if values.get("interface_locale") not in {None, "ru", "en"}:
                 values["interface_locale"] = defaults.interface_locale
             if values.get("web_search_provider") not in {None, "free", "brave", "tavily", "serper"}:

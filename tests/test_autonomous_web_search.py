@@ -141,7 +141,7 @@ async def test_live_search_command_split_across_chunks_never_reaches_visible_str
         runtime_settings=RuntimeSettings(web_search_enabled=True),
     )
 
-    visible = "".join([part async for part in agent.stream_user_message("s", "Проверь Python", persist_reply=False)])
+    visible = "".join([part async for part in agent.stream_user_message("s", "Есть информация о Python?", persist_reply=False)])
 
     assert "web_search" not in visible
     assert "Сейчас проверила" in visible
@@ -162,7 +162,7 @@ async def test_malformed_live_search_command_is_hidden_and_not_sent_to_provider(
         runtime_settings=RuntimeSettings(web_search_enabled=True),
     )
 
-    visible = "".join([part async for part in agent.stream_user_message("s", "Проверь данные", persist_reply=False)])
+    visible = "".join([part async for part in agent.stream_user_message("s", "Какие данные доступны?", persist_reply=False)])
 
     assert "web_search" not in visible
     assert "Не удалось проверить" in visible
