@@ -86,7 +86,7 @@
   .startup-mark { width: 180px; margin-bottom: 8px; }
   .startup-copy h1 { font-size: 21px; }
   .startup-copy { min-height: 54px; }
-  .startup-game .startup-jump { width: min(248px, max(100px, calc(77dvh - 225px)), calc(100vw - 48px)); }
+  .startup-game .startup-snake { width: min(248px, max(100px, calc(77dvh - 225px)), calc(100vw - 48px)); }
 }
 @media (max-width: 520px) {
   .startup-stages { gap: 16px; font-size: 11px; }

@@ -4,11 +4,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const game = vi.hoisted(() => ({ imported: vi.fn(), mounted: vi.fn(), disposed: vi.fn() }));
-vi.mock("../startup-jump/StartupJump", () => {
+vi.mock("../startup-snake/StartupSnake", () => {
   game.imported();
-  return { StartupJump: ({ autoStart }: { autoStart: boolean }) => {
+  return { StartupSnake: ({ autoStart }: { autoStart: boolean }) => {
     useEffect(() => { game.mounted(autoStart); return () => { game.disposed(); }; }, []);
-    return <section aria-label="Мини-игра Прыжок" />;
+    return <section aria-label="Мини-игра Змейка" />;
   } };
 });
 import { StartupScreen } from "./StartupScreen";
@@ -26,13 +26,15 @@ describe("startup mini-game integration", () => {
     expect(screen.queryByRole("button", { name: "Попинать х.." })).toBeNull();
   });
 
-  it("allows play while a healthy core still prepares voice, and disposes it on actual readiness", async () => {
-    const { rerender } = render(<StartupScreen status="ready" stage={2} />);
+  it("keeps play available through the final logo handoff", async () => {
+    const { rerender, unmount } = render(<StartupScreen status="ready" stage={2} />);
     fireEvent.click(screen.getByRole("button", { name: "Попинать х.." }));
     await waitFor(() => expect(game.mounted).toHaveBeenCalledWith(true));
     rerender(<StartupScreen status="ready" stage={3} />);
+    expect(game.disposed).not.toHaveBeenCalled();
+    unmount();
     expect(game.disposed).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("region", { name: "Мини-игра Прыжок" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Мини-игра Змейка" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Попинать х.." })).toBeNull();
   });
 
@@ -45,7 +47,7 @@ describe("startup mini-game integration", () => {
     expect(screen.queryByRole("button", { name: "Попинать х.." })).toBeNull();
     rerender(<StartupScreen status="starting" stage={1} />);
     expect(screen.getByRole("button", { name: "Попинать х.." })).toBeTruthy();
-    expect(screen.queryByRole("region", { name: "Мини-игра Прыжок" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Мини-игра Змейка" })).toBeNull();
   });
 
   it.each(["failed", "crashed", "closing"] as const)("has no game action while %s", (status) => {

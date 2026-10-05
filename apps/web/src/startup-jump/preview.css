@@ -1,8 +1,0 @@
-.jump-review-tools { position: fixed; z-index: 200; bottom: 8px; left: 12px; display: flex; align-items: center; gap: 12px; color: var(--color-text-muted); font-size: 10px; }
-.jump-review-tools > span { opacity: .65; }
-.jump-review-tools button { border: 0; padding: 5px 0; background: none; color: var(--color-text-soft); font: inherit; cursor: pointer; }
-.jump-review-tools button:hover { color: var(--color-text); }
-.jump-review-tools button:focus-visible { outline: 1px solid var(--color-focus); outline-offset: 3px; }
-.jump-review-ready { display: grid; min-height: 100dvh; place-content: center; justify-items: center; gap: 16px; color: var(--color-text); }
-.jump-review-ready p { font-size: 24px; }
-.jump-review-ready button { padding: 10px 16px; border: 0; border-radius: 10px; background: var(--color-surface); color: var(--color-text); cursor: pointer; }
