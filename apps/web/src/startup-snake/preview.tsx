@@ -18,16 +18,16 @@ function Preview() {
   const [done, setDone] = useState(false);
   const appRef = useRef<HTMLDivElement>(null);
   const reset = () => { setStatus("starting"); setStage(2); setRevealed(false); setDone(false); setAttempt((value) => value + 1); };
-  return <div className="jump-review">
+  return <div className="snake-review">
     <MaterialButtonContours />
-    {revealed && <div ref={appRef} className="jump-review-ready" style={{ opacity: done ? 1 : 0 }}>
+    {revealed && <div ref={appRef} className="snake-review-ready" style={{ opacity: done ? 1 : 0 }}>
       <p>Iris готова к разговору</p><button onClick={reset}>Вернуться к макету</button>
     </div>}
     {!done && <>
       <StartupScreen key={attempt} stage={stage} status={status} revealTarget={appRef}
         onReveal={() => setRevealed(true)} onComplete={() => setDone(true)} onRetry={reset} />
     </>}
-    {showControls && <nav className="jump-review-tools" aria-label="Макет загрузки">
+    {showControls && <nav className="snake-review-tools" aria-label="Макет загрузки">
       <span>Макет</span><button onClick={reset}>Сначала</button>
       <button onClick={() => { setStage(3); setStatus("starting"); }}>Сервисы</button>
       <button onClick={() => { setStage(3); setStatus("ready"); }}>Готово</button>

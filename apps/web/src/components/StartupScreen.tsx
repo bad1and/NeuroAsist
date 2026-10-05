@@ -10,7 +10,7 @@ import { WindowChrome } from "./WindowChrome";
 import { animate, createTimeline, isTestEnvironment, prefersReducedMotion } from "../animations";
 import "./StartupScreen.css";
 
-const StartupJump = lazy(() => import("../startup-jump/StartupJump").then((module) => ({ default: module.StartupJump })));
+const StartupSnake = lazy(() => import("../startup-snake/StartupSnake").then((module) => ({ default: module.StartupSnake })));
 
 const floraAssetsPromise = Promise.all([
   import("../../../../assets/startup-flora-left.webp"),
@@ -56,9 +56,9 @@ export function StartupScreen({ status, stage = status === "ready" || status ===
   const canReveal = !failed && revealed < stage;
   const canFinish = status === "ready" && stage === 3 && revealed === 3;
   const revealingInterface = finishPhase === "revealing";
-  // Core health can be ready while the model/voice still load. Stop playing
-  // on actual readiness, before the existing petal finale and handoff.
-  const gameAvailable = !failed && status !== "closing" && !(status === "ready" && stage === 3);
+  // Keep the game available through the final logo transition. The screen
+  // itself unmounts when the app is ready to appear.
+  const gameAvailable = !failed && status !== "closing";
 
   useEffect(() => {
     if (!gameAvailable) setGameOpen(false);
@@ -316,8 +316,8 @@ export function StartupScreen({ status, stage = status === "ready" || status ===
         )}
       </main>
       {gameAvailable && <div className="startup-game">
-        {gameOpen ? <Suspense fallback={null}><StartupJump autoStart /></Suspense>
-          : <MaterialButton type="button" materialKey="StartupJump.open" appearance="plain"
+        {gameOpen ? <Suspense fallback={null}><StartupSnake autoStart /></Suspense>
+          : <MaterialButton type="button" materialKey="StartupSnake.open" appearance="plain"
             className="startup-game-open" onClick={() => setGameOpen(true)}>Попинать х..</MaterialButton>}
       </div>}
     </div>
