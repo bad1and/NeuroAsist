@@ -1,3 +1,4 @@
+import { SlidingSegments } from "./components/SlidingSegments";
 import { LoadingRing } from "./components/LoadingRing";
 import { MaterialButton } from "./components/MaterialButton";
 import {
@@ -886,8 +887,8 @@ export function JournalPage({
                 </div>
 
                 <div className="journal-header-actions">
-                  <div className="journal-view-toggle" role="group" aria-label="Режим детализации">
-                    <MaterialButton materialKey={"journal.button-7"}
+                  <SlidingSegments className="journal-view-toggle" value={detailMode} aria-label="Режим детализации">
+                    <MaterialButton appearance="plain" materialKey={"journal.button-7"}
                       type="button"
                       className={`journal-view-toggle-btn ${detailMode === "simple" ? "active" : ""}`}
                       onClick={() => handleToggleDetailMode("simple")}
@@ -897,7 +898,7 @@ export function JournalPage({
                       <Eye size={13} />
                       <span>Простой</span>
                     </MaterialButton>
-                    <MaterialButton materialKey={"journal.button-8"}
+                    <MaterialButton appearance="plain" materialKey={"journal.button-8"}
                       type="button"
                       className={`journal-view-toggle-btn ${detailMode === "detailed" ? "active" : ""}`}
                       onClick={() => handleToggleDetailMode("detailed")}
@@ -907,7 +908,7 @@ export function JournalPage({
                       <Sliders size={13} />
                       <span>Подробный</span>
                     </MaterialButton>
-                  </div>
+                  </SlidingSegments>
 
                   <MaterialButton materialKey={"journal.button-9"}
                     className="secondary journal-delete-action"

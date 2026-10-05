@@ -1,3 +1,4 @@
+import { SlidingSegments } from "./components/SlidingSegments";
 import { LoadingRing } from "./components/LoadingRing";
 import { MaterialButton } from "./components/MaterialButton";
 import { CustomSelect } from "./components/CustomSelect";
@@ -629,7 +630,7 @@ export function CodingAgentPage({
                     </MaterialButton>
                   </form>
 
-                  <div className="coding-filters" role="tablist" aria-label="Фильтр статусов">
+                  <SlidingSegments className="coding-filters" value={taskFilter} aria-label="Фильтр статусов">
                     {(
                       [
                         { id: "all", label: "Все" },
@@ -638,19 +639,18 @@ export function CodingAgentPage({
                         { id: "completed", label: "Завершены" },
                       ] as Array<{ id: TaskFilter; label: string }>
                     ).map(({ id, label }) => (
-                      <MaterialButton materialKey={["coding.button-12", id].join(":")}
+                      <MaterialButton appearance="plain" materialKey={["coding.button-12", id].join(":")}
                         key={id}
                         type="button"
-                        className={`coding-filter-pill${taskFilter === id ? " is-active" : ""}`}
-                        onClick={(e) => {
-                          animateButtonPress(e.currentTarget);
+                        className={`coding-filter-pill${taskFilter === id ? " is-active" : ""}`} aria-pressed={taskFilter === id}
+                        onClick={() => {
                           setTaskFilter(id);
                         }}
                       >
                         {label}
                       </MaterialButton>
                     ))}
-                  </div>
+                  </SlidingSegments>
                 </div>
 
                 {loading && !tasks.length ? <LoadingRing label="Загружаю задачи…" /> : filteredTasks.length === 0 ? (

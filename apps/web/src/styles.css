@@ -5670,46 +5670,6 @@ body {
   opacity: 0;
 }
 
-.settings-switch {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  width: 42px;
-  height: 24px;
-  padding: 3px;
-  border-radius: 999px;
-  background: var(--color-surface-soft);
-  box-shadow: 0 0 0 1px var(--color-rule) inset;
-  transition: background-color 0.18s ease, box-shadow 0.18s ease;
-}
-
-.settings-switch > span {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--color-text-soft);
-  box-shadow: var(--shadow-row);
-  transition: transform 0.24s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.18s ease;
-}
-
-.settings-switch-row:active:not(:has(:disabled)) .settings-switch > span {
-  transform: scaleX(1.18);
-}
-
-.settings-switch-input:checked + .settings-switch {
-  background: var(--color-accent);
-  box-shadow: 0 0 0 1px var(--color-accent) inset;
-}
-
-.settings-switch-input:checked + .settings-switch > span {
-  background: var(--color-accent-ink);
-  transform: translateX(18px);
-}
-
-.settings-switch-row:active:not(:has(:disabled)) .settings-switch-input:checked + .settings-switch > span {
-  transform: translateX(18px) scaleX(1.18);
-}
-
 .settings-switch-input:focus-visible + .settings-switch {
   outline: 3px solid var(--color-focus);
   outline-offset: 3px;
@@ -6656,67 +6616,6 @@ body {
   margin: 0;
   padding: 0;
   user-select: none;
-}
-
-.custom-checkbox-wrapper {
-  position: relative;
-  display: inline-flex;
-  width: 18px;
-  height: 18px;
-  align-items: center;
-  justify-content: center;
-}
-
-.custom-checkbox-wrapper input[type="checkbox"] {
-  position: absolute;
-  opacity: 0;
-  width: 100%;
-  height: 100%;
-  cursor: pointer;
-  margin: 0;
-  z-index: 2;
-}
-
-.checkbox-indicator {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid var(--color-rule-strong);
-  border-radius: 4px;
-  pointer-events: none;
-  transition: all var(--motion-fast) var(--ease-out);
-  z-index: 1;
-}
-
-.custom-checkbox-wrapper input[type="checkbox"]:checked + .checkbox-indicator {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-}
-
-.custom-checkbox-wrapper input[type="checkbox"]:focus-visible + .checkbox-indicator {
-  box-shadow: 0 0 0 2px var(--color-accent-soft);
-}
-
-.checkbox-indicator::after {
-  content: "";
-  position: absolute;
-  top: 1px;
-  left: 5px;
-  width: 4px;
-  height: 9px;
-  border: solid var(--color-accent-ink);
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg) scale(0.5);
-  opacity: 0;
-  transition: all var(--motion-fast) cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-
-.custom-checkbox-wrapper input[type="checkbox"]:checked + .checkbox-indicator::after {
-  opacity: 1;
-  transform: rotate(45deg) scale(1);
 }
 
 .state-sidebar-actions {
@@ -12174,72 +12073,6 @@ button.danger-button:not(.secondary):active:not(:disabled) {
   color: #ffffff !important;
 }
 
-/* 3. Physical Recessed Filter Tracks & 3D Buttons */
-.coding-filters,
-.timeline-filter-pills,
-.journal-view-toggle {
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 4px !important;
-  background: var(--color-base-deep) !important;
-  border: 1px solid rgba(0, 0, 0, 0.5) !important;
-  border-top-color: rgba(0, 0, 0, 0.7) !important;
-  border-bottom-color: rgba(255, 255, 255, 0.06) !important;
-  border-radius: var(--radius-control, 24px) !important;
-  corner-shape: squircle !important;
-  padding: 3px 4px !important;
-  box-shadow:
-    inset 0 2px 4px 0 rgba(0, 0, 0, 0.65),
-    inset 0 1px 2px 0 rgba(0, 0, 0, 0.45),
-    0 1px 0 0 rgba(255, 255, 255, 0.05) !important;
-  box-sizing: border-box !important;
-}
-
-.coding-filter-pill,
-.timeline-filter-pill,
-.journal-view-toggle-btn {
-  border: 1px solid transparent !important;
-  background: transparent !important;
-  color: var(--color-text-muted) !important;
-  font-size: 12px !important;
-  font-weight: 550 !important;
-  padding: 5px 13px !important;
-  border-radius: var(--radius-control-sm, 18px) !important;
-  corner-shape: squircle !important;
-  cursor: pointer !important;
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
-  user-select: none !important;
-}
-
-.coding-filter-pill:hover:not(.is-active),
-.timeline-filter-pill:hover:not(.active),
-.journal-view-toggle-btn:hover:not(.active) {
-  background: rgba(255, 255, 255, 0.05) !important;
-  color: #ffffff !important;
-}
-
-.coding-filter-pill.is-active,
-.timeline-filter-pill.active,
-.journal-view-toggle-btn.active {
-  background: linear-gradient(180deg, var(--color-accent-hover) 0%, var(--color-accent) 100%) !important;
-  border: 1px solid rgba(255, 255, 255, 0.12) !important;
-  border-top-color: rgba(255, 255, 255, 0.22) !important;
-  border-bottom-color: rgba(0, 0, 0, 0.2) !important;
-  border-radius: var(--radius-control-sm, 18px) !important;
-  corner-shape: squircle !important;
-  color: #ffffff !important;
-  font-weight: 600 !important;
-  box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.26),
-    0 2px 6px rgba(0, 0, 0, 0.25) !important;
-}
-
-.coding-filter-pill:active:not(:disabled),
-.timeline-filter-pill:active:not(:disabled),
-.journal-view-toggle-btn:active:not(:disabled) {
-  transform: translateY(1px) scale(0.98) !important;
-}
-
 /* 4. Hardware LED Status Pills */
 .coding-status-pill,
 .memory-status,
@@ -12354,6 +12187,13 @@ button.danger-button:not(.secondary):active:not(:disabled) {
 .state-layout {
   grid-template-columns: 290px minmax(0, 1fr) !important;
   gap: 24px !important;
+}
+
+/* Preserve access to timeline filters below the existing single-column breakpoint. */
+.state-timeline-container { min-width: 0; }
+.timeline-header-controls { max-width: 100%; }
+@media (max-width: 48rem) {
+  .state-layout { grid-template-columns: minmax(0, 1fr) !important; }
 }
 
 .relationship-metrics {

@@ -1,4 +1,7 @@
-import { type ReactNode } from "react";
+import { SelectionMaterial } from "./SelectionMaterial";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
+import { animate, prefersReducedMotion } from "../animations/core";
+import "./SelectionControls.css";
 
 export interface AppSwitchProps {
   checked: boolean;
@@ -17,6 +20,17 @@ export function AppSwitch({
   className = "",
   onChange,
 }: AppSwitchProps) {
+  const thumb = useRef<HTMLSpanElement>(null);
+  const fill = useRef<HTMLSpanElement>(null);
+  const mounted = useRef(false);
+  useLayoutEffect(() => {
+    if (!thumb.current || !fill.current) return;
+    const duration = mounted.current && !prefersReducedMotion() ? 220 : 0;
+    mounted.current = true;
+    const slide = animate(thumb.current, { x: checked ? 18 : 0, duration, ease: "outCubic" });
+    const tint = animate(fill.current, { opacity: checked ? 1 : 0, duration, ease: "outQuad" });
+    return () => { slide.cancel(); tint.cancel(); };
+  }, [checked]);
   return (
     <label className={`settings-switch-row ${className}${disabled ? " is-disabled" : ""}`.trim()}>
       <span className="settings-switch-copy">
@@ -33,7 +47,8 @@ export function AppSwitch({
         onChange={(event) => onChange(event.target.checked)}
       />
       <span className="settings-switch" aria-hidden="true">
-        <span />
+        <span className="iris-switch-fill" ref={fill}><SelectionMaterial /></span>
+        <span className="iris-switch-thumb" ref={thumb}><SelectionMaterial tone="thumb" /></span>
       </span>
     </label>
   );

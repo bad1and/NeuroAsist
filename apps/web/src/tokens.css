@@ -92,6 +92,17 @@
   --surface-select-selected: linear-gradient(var(--color-accent), var(--color-accent));
   --depth-select-selected: inset 0 2px 4px rgb(0 0 0 / .35), inset 0 1px 1px rgb(0 0 0 / .28), 0 1px 0 rgb(255 255 255 / .055);
 
+  /* Quiet recessed selection tracks and a shared sliding accent face. */
+  --surface-selection-track: var(--surface-select-field);
+  --depth-selection-track: inset 0 2px 5px rgb(0 0 0 / .5), inset 0 1px 2px rgb(0 0 0 / .3), inset 3px 0 7px rgb(0 0 0 / .3), inset -3px 0 7px rgb(0 0 0 / .3);
+  --corner-selection: var(--corner-shape);
+  --corner-selection-square: var(--corner-shape);
+  --color-selection-active: color-mix(in srgb, var(--color-accent) 90%, #16151b);
+  --surface-selection-active: linear-gradient(var(--color-selection-active), var(--color-selection-active));
+  --depth-selection-active: inset 0 1px 3px rgb(0 0 0 / .22), inset 0 0 1px rgb(0 0 0 / .16), inset 2px 0 4px rgb(0 0 0 / .16), inset -2px 0 4px rgb(0 0 0 / .16), inset 0 -1px 2px rgb(0 0 0 / .14), 0 1px 0 rgb(255 255 255 / .055);
+  --color-selection-thumb: #d4d0df;
+  --surface-selection-thumb: linear-gradient(var(--color-selection-thumb), var(--color-selection-thumb));
+
   --font-ui: "Proxima Nova", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-subtitles: "Shantell Sans", cursive, sans-serif;
   --font-mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
@@ -158,4 +169,12 @@
   --notification-rim-width: 1.5px;
   --notification-task-height: 8px;
   --notification-rim-gradient: linear-gradient(90deg, var(--rim-light-start) 0%, var(--rim-light-mid) 21%, var(--rim-tone) 45%, var(--rim-light-lower) 72%, var(--rim-light-end) 100%);
+}
+
+/* Soften compact selection controls without changing the approved button contours. */
+@supports (corner-shape: superellipse(1.45)) {
+  :root {
+    --corner-selection: superellipse(1.65);
+    --corner-selection-square: superellipse(1.3);
+  }
 }

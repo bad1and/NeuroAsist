@@ -1,3 +1,5 @@
+import { AppCheckbox } from "./components/AppCheckbox";
+import { SlidingSegments } from "./components/SlidingSegments";
 import { LoadingRing } from "./components/LoadingRing";
 import { MaterialButton } from "./components/MaterialButton";
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
@@ -269,27 +271,24 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
           <div className="state-timeline-header">
             <h2>Живая история</h2>
             <div className="timeline-header-controls">
-              <div className="timeline-filter-pills">
-                <MaterialButton materialKey={"state.button-3"}
+              <SlidingSegments className="timeline-filter-pills" value={filterOnlyImportant} aria-label="Фильтр истории">
+                <MaterialButton appearance="plain" materialKey={"state.button-3"}
                   type="button"
-                  className={`timeline-filter-pill ${filterOnlyImportant ? "active" : ""}`}
+                  className={`timeline-filter-pill ${filterOnlyImportant ? "active" : ""}`} aria-pressed={filterOnlyImportant}
                   onClick={() => setFilterOnlyImportant(true)}
                 >
                   Только важные
                 </MaterialButton>
-                <MaterialButton materialKey={"state.button-4"}
+                <MaterialButton appearance="plain" materialKey={"state.button-4"}
                   type="button"
-                  className={`timeline-filter-pill ${!filterOnlyImportant ? "active" : ""}`}
+                  className={`timeline-filter-pill ${!filterOnlyImportant ? "active" : ""}`} aria-pressed={!filterOnlyImportant}
                   onClick={() => setFilterOnlyImportant(false)}
                 >
                   Все ({events.length + reflections.length})
                 </MaterialButton>
-              </div>
+              </SlidingSegments>
               <label className="toggle-notes">
-                <div className="custom-checkbox-wrapper">
-                  <input type="checkbox" checked={reflectionEnabled} onChange={(event) => void toggleReflections(event.target.checked)}/>
-                  <span className="checkbox-indicator"></span>
-                </div>
+                <AppCheckbox checked={reflectionEnabled} onChange={(event) => void toggleReflections(event.target.checked)} />
                 Личные заметки
               </label>
             </div>

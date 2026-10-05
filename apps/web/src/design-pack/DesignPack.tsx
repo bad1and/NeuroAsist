@@ -2,7 +2,9 @@ import { useContext, useEffect, useRef, useState, type ButtonHTMLAttributes, typ
 import { ArrowUp, Check, ChevronLeft, ChevronRight, Copy, Headphones, Mic, Minus, Search, Sparkles, Square, X } from "lucide-react";
 import { CustomSelect } from "../components/CustomSelect";
 import { useMaterialFeedback } from "./useMaterialFeedback";
-import { animate, prefersReducedMotion } from "../animations/core";
+import { AppSwitch } from "../components/AppSwitch";
+import { AppCheckbox } from "../components/AppCheckbox";
+import { SlidingSegments } from "../components/SlidingSegments";
 import { MaterialSeed, materialSeeds, materialStyle, maxSeed, readMaterialSeed, seedStorageKey, validSeed } from "./materialSeeds";
 import { ButtonMaterialLayers, MaterialButton } from "../components/MaterialButton";
 import { NotificationExamples } from "./NotificationExamples";
@@ -70,33 +72,23 @@ function Review({ id, votes, onVote }: {
 
 function SwitchSample({ title }: { title: string }) {
   const [checked, setChecked] = useState(true);
-  const thumb = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    if (!thumb.current) return;
-    const animation = animate(thumb.current, { x: checked ? 24 : 0, duration: prefersReducedMotion() ? 0 : 180, ease: "outQuad" });
-    return () => { animation.cancel(); };
-  }, [checked]);
-  return <div className="dp-switch-line"><span>{title}</span>
-    <LensButton className={`dp-switch${checked ? " is-on" : ""}`} tone={checked ? "accent" : "graphite"}
-      role="switch" aria-checked={checked} aria-label={title} onClick={() => setChecked(!checked)}>
-      <span className="dp-switch-thumb" ref={thumb} />
-    </LensButton>
-  </div>;
+  return <AppSwitch checked={checked} label={title} onChange={setChecked} />;
 }
 
 function ControlsSample() {
   const [tab, setTab] = useState("Диалог");
   const [volume, setVolume] = useState(65);
+  const [notes, setNotes] = useState(true);
   return <div className="dp-control-set">
     <SwitchSample title="Голосовой ответ" />
     <div className="dp-slider-line"><label htmlFor="preview-volume">Громкость <span>{volume}%</span></label>
       <input id="preview-volume" type="range" min="0" max="100" value={volume} onChange={(event) => setVolume(Number(event.target.value))} />
     </div>
-    <div className="dp-segments" role="group" aria-label="Вид">
-      {["Диалог", "История", "Память"].map((name) => <LensButton key={name}
-        className={tab === name ? "" : "dp-unselected"} tone={tab === name ? "accent" : "graphite"}
-        aria-pressed={tab === name} onClick={() => setTab(name)}>{name}</LensButton>)}
-    </div>
+    <SlidingSegments value={tab} aria-label="Вид">
+      {["Диалог", "История", "Память"].map((name) => <button key={name} type="button"
+        aria-pressed={tab === name} onClick={() => setTab(name)}>{name}</button>)}
+    </SlidingSegments>
+    <label className="dp-checkbox-line"><AppCheckbox checked={notes} onChange={event => setNotes(event.target.checked)} />Личные заметки</label>
   </div>;
 }
 

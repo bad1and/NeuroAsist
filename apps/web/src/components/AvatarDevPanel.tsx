@@ -1,3 +1,5 @@
+import { AppCheckbox } from "./AppCheckbox";
+import { SlidingSegments } from "./SlidingSegments";
 import { MaterialButton } from "./MaterialButton";
 import React, { useState, useEffect, useCallback } from "react";
 import {
@@ -884,46 +886,46 @@ export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanel
               <span className="avatar-dev-slider-value">{Math.round(intensity * 100)}%</span>
             </div>
 
-            <div className="avatar-dev-tabs">
-              <MaterialButton materialKey={"AvatarDevPanel.button-15"}
+            <SlidingSegments className="avatar-dev-tabs" value={activeTab} aria-label="Раздел аватара">
+              <MaterialButton appearance="plain" materialKey={"AvatarDevPanel.button-15"}
                 type="button"
-                className={`avatar-dev-tab ${activeTab === "emotions" ? "is-active" : ""}`}
+                className={`avatar-dev-tab ${activeTab === "emotions" ? "is-active" : ""}`} aria-pressed={activeTab === "emotions"}
                 onClick={() => setActiveTab("emotions")}
               >
                 <Smile size={13} />
                 <span>Эмоции ({EMOTIONS_CATALOG.length})</span>
               </MaterialButton>
-              <MaterialButton materialKey={"AvatarDevPanel.button-16"}
+              <MaterialButton appearance="plain" materialKey={"AvatarDevPanel.button-16"}
                 type="button"
-                className={`avatar-dev-tab ${activeTab === "gestures" ? "is-active" : ""}`}
+                className={`avatar-dev-tab ${activeTab === "gestures" ? "is-active" : ""}`} aria-pressed={activeTab === "gestures"}
                 onClick={() => setActiveTab("gestures")}
               >
                 <Hand size={13} />
                 <span>Жесты ({GESTURES_CATALOG.length})</span>
               </MaterialButton>
-              <MaterialButton materialKey={"AvatarDevPanel.button-17"}
+              <MaterialButton appearance="plain" materialKey={"AvatarDevPanel.button-17"}
                 type="button"
-                className={`avatar-dev-tab ${activeTab === "speech" ? "is-active" : ""}`}
+                className={`avatar-dev-tab ${activeTab === "speech" ? "is-active" : ""}`} aria-pressed={activeTab === "speech"}
                 onClick={() => setActiveTab("speech")}
               >
                 <Volume2 size={13} />
                 <span>Речь & Сценарии</span>
               </MaterialButton>
-              <MaterialButton materialKey={"AvatarDevPanel.button-18"}
+              <MaterialButton appearance="plain" materialKey={"AvatarDevPanel.button-18"}
                 type="button"
-                className={`avatar-dev-tab ${activeTab === "notifications" ? "is-active" : ""}`}
+                className={`avatar-dev-tab ${activeTab === "notifications" ? "is-active" : ""}`} aria-pressed={activeTab === "notifications"}
                 onClick={() => setActiveTab("notifications")}
               >
                 <Bell size={13} />
                 <span>Уведомления</span>
               </MaterialButton>
-            </div>
+            </SlidingSegments>
           </div>
 
           {/* Tab 1: Emotions (24 Emotions) */}
           {activeTab === "emotions" && (
             <div className="avatar-dev-content-pane">
-              <div className="avatar-dev-subnav">
+              <SlidingSegments className="avatar-dev-subnav" value={emotionCategory} aria-label="Категории">
                 {[
                   { id: "all", label: "Все (24)" },
                   { id: "morphs", label: "Мимика & Особые" },
@@ -931,16 +933,16 @@ export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanel
                   { id: "cognitive", label: "Мыслительные" },
                   { id: "complex", label: "Негатив & Покой" },
                 ].map((cat) => (
-                  <MaterialButton materialKey={["AvatarDevPanel.button-19", cat.id].join(":")}
+                  <MaterialButton appearance="plain" materialKey={["AvatarDevPanel.button-19", cat.id].join(":")}
                     key={cat.id}
                     type="button"
-                    className={`avatar-dev-filter-chip ${emotionCategory === cat.id ? "is-active" : ""}`}
+                    className={`avatar-dev-filter-chip ${emotionCategory === cat.id ? "is-active" : ""}`} aria-pressed={emotionCategory === cat.id}
                     onClick={() => setEmotionCategory(cat.id)}
                   >
                     {cat.label}
                   </MaterialButton>
                 ))}
-              </div>
+              </SlidingSegments>
 
               <div className="avatar-dev-grid avatar-dev-emotions-grid">
                 {filteredEmotions.map((item) => {
@@ -971,27 +973,26 @@ export function AvatarDevPanel({ isOpen, onClose, avatarStatus }: AvatarDevPanel
           {activeTab === "gestures" && (
             <div className="avatar-dev-content-pane">
               <div className="avatar-dev-subnav-row">
-                <div className="avatar-dev-subnav">
+                <SlidingSegments className="avatar-dev-subnav" value={gestureCategory} aria-label="Категории">
                   {[
                     { id: "all", label: "Все жесты" },
                     { id: "hands", label: "Руки & Приветствия" },
                     { id: "body", label: "Тело & Реакции" },
                     { id: "speech", label: "Речевые жесты" },
                   ].map((cat) => (
-                    <MaterialButton materialKey={["AvatarDevPanel.button-21", cat.id].join(":")}
+                    <MaterialButton appearance="plain" materialKey={["AvatarDevPanel.button-21", cat.id].join(":")}
                       key={cat.id}
                       type="button"
-                      className={`avatar-dev-filter-chip ${gestureCategory === cat.id ? "is-active" : ""}`}
+                      className={`avatar-dev-filter-chip ${gestureCategory === cat.id ? "is-active" : ""}`} aria-pressed={gestureCategory === cat.id}
                       onClick={() => setGestureCategory(cat.id)}
                     >
                       {cat.label}
                     </MaterialButton>
                   ))}
-                </div>
+                </SlidingSegments>
 
                 <label className="avatar-dev-checkbox-label">
-                  <input
-                    type="checkbox"
+                  <AppCheckbox
                     checked={gestureInterrupt}
                     onChange={(e) => setGestureInterrupt(e.target.checked)}
                   />
@@ -1399,8 +1400,7 @@ export function AvatarDevStudioStandalonePage() {
           </div>
 
           <label className="avatar-dev-checkbox-label">
-            <input
-              type="checkbox"
+            <AppCheckbox
               checked={gestureInterrupt}
               onChange={(e) => setGestureInterrupt(e.target.checked)}
             />
@@ -1408,46 +1408,46 @@ export function AvatarDevStudioStandalonePage() {
           </label>
         </div>
 
-        <div className="avatar-dev-tabs">
-          <MaterialButton materialKey={"AvatarDevPanel.button-29"}
+        <SlidingSegments className="avatar-dev-tabs" value={activeTab} aria-label="Раздел аватара">
+          <MaterialButton appearance="plain" materialKey={"AvatarDevPanel.button-29"}
             type="button"
-            className={`avatar-dev-tab ${activeTab === "emotions" ? "is-active" : ""}`}
+            className={`avatar-dev-tab ${activeTab === "emotions" ? "is-active" : ""}`} aria-pressed={activeTab === "emotions"}
             onClick={() => setActiveTab("emotions")}
           >
             <Smile size={13} />
             <span>Эмоции ({EMOTIONS_CATALOG.length})</span>
           </MaterialButton>
-          <MaterialButton materialKey={"AvatarDevPanel.button-30"}
+          <MaterialButton appearance="plain" materialKey={"AvatarDevPanel.button-30"}
             type="button"
-            className={`avatar-dev-tab ${activeTab === "gestures" ? "is-active" : ""}`}
+            className={`avatar-dev-tab ${activeTab === "gestures" ? "is-active" : ""}`} aria-pressed={activeTab === "gestures"}
             onClick={() => setActiveTab("gestures")}
           >
             <Hand size={13} />
             <span>Жесты ({GESTURES_CATALOG.length})</span>
           </MaterialButton>
-          <MaterialButton materialKey={"AvatarDevPanel.button-31"}
+          <MaterialButton appearance="plain" materialKey={"AvatarDevPanel.button-31"}
             type="button"
-            className={`avatar-dev-tab ${activeTab === "speech" ? "is-active" : ""}`}
+            className={`avatar-dev-tab ${activeTab === "speech" ? "is-active" : ""}`} aria-pressed={activeTab === "speech"}
             onClick={() => setActiveTab("speech")}
           >
             <Volume2 size={13} />
             <span>Речь & Сценарии</span>
           </MaterialButton>
-          <MaterialButton materialKey={"AvatarDevPanel.button-32"}
+          <MaterialButton appearance="plain" materialKey={"AvatarDevPanel.button-32"}
             type="button"
-            className={`avatar-dev-tab ${activeTab === "notifications" ? "is-active" : ""}`}
+            className={`avatar-dev-tab ${activeTab === "notifications" ? "is-active" : ""}`} aria-pressed={activeTab === "notifications"}
             onClick={() => setActiveTab("notifications")}
           >
             <Bell size={13} />
             <span>Уведомления</span>
           </MaterialButton>
-        </div>
+        </SlidingSegments>
       </div>
 
       {/* Tab 1: Emotions (24 Emotions) */}
       {activeTab === "emotions" && (
         <div className="avatar-dev-content-pane">
-          <div className="avatar-dev-subnav">
+          <SlidingSegments className="avatar-dev-subnav" value={emotionCategory} aria-label="Категории">
             {[
               { id: "all", label: "Все (24)" },
               { id: "morphs", label: "Мимика & Особые" },
@@ -1455,16 +1455,16 @@ export function AvatarDevStudioStandalonePage() {
               { id: "cognitive", label: "Мыслительные" },
               { id: "complex", label: "Негатив & Покой" },
             ].map((cat) => (
-              <MaterialButton materialKey={["AvatarDevPanel.button-33", cat.id].join(":")}
+              <MaterialButton appearance="plain" materialKey={["AvatarDevPanel.button-33", cat.id].join(":")}
                 key={cat.id}
                 type="button"
-                className={`avatar-dev-subnav-btn ${emotionCategory === cat.id ? "is-active" : ""}`}
+                className={`avatar-dev-subnav-btn ${emotionCategory === cat.id ? "is-active" : ""}`} aria-pressed={emotionCategory === cat.id}
                 onClick={() => setEmotionCategory(cat.id)}
               >
                 {cat.label}
               </MaterialButton>
             ))}
-          </div>
+          </SlidingSegments>
 
           <div className="avatar-dev-grid">
             {filteredEmotions.map((item) => {
@@ -1493,23 +1493,23 @@ export function AvatarDevStudioStandalonePage() {
       {/* Tab 2: Gestures (20 Gestures) */}
       {activeTab === "gestures" && (
         <div className="avatar-dev-content-pane">
-          <div className="avatar-dev-subnav">
+          <SlidingSegments className="avatar-dev-subnav" value={gestureCategory} aria-label="Категории">
             {[
               { id: "all", label: "Все (20)" },
               { id: "hands", label: "Руки & Приветствия" },
               { id: "body", label: "Корпус & Голова" },
               { id: "speech", label: "Речевые жесты" },
             ].map((cat) => (
-              <MaterialButton materialKey={["AvatarDevPanel.button-35", cat.id].join(":")}
+              <MaterialButton appearance="plain" materialKey={["AvatarDevPanel.button-35", cat.id].join(":")}
                 key={cat.id}
                 type="button"
-                className={`avatar-dev-subnav-btn ${gestureCategory === cat.id ? "is-active" : ""}`}
+                className={`avatar-dev-subnav-btn ${gestureCategory === cat.id ? "is-active" : ""}`} aria-pressed={gestureCategory === cat.id}
                 onClick={() => setGestureCategory(cat.id)}
               >
                 {cat.label}
               </MaterialButton>
             ))}
-          </div>
+          </SlidingSegments>
 
           <div className="avatar-dev-grid">
             {filteredGestures.map((item) => {

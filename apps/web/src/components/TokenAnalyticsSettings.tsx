@@ -1,3 +1,4 @@
+import { SlidingSegments } from "./SlidingSegments";
 import { MaterialButton } from "./MaterialButton";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
@@ -186,7 +187,7 @@ export function TokenAnalyticsSettings() {
 
         <div className="token-analytics-controls">
           {/* Timeframe pill selector */}
-          <div className="token-timeframe-selector" role="group" aria-label="Временной диапазон">
+          <SlidingSegments className="token-timeframe-selector" value={timeframe} aria-label="Временной диапазон">
             {(
               [
                 { key: "24h", label: "24 ч" },
@@ -195,16 +196,16 @@ export function TokenAnalyticsSettings() {
                 { key: "all", label: "Всё время" },
               ] as const
             ).map((tf) => (
-              <MaterialButton materialKey={["TokenAnalyticsSettings.button-1", tf.key].join(":")}
+              <MaterialButton appearance="plain" materialKey={["TokenAnalyticsSettings.button-1", tf.key].join(":")}
                 key={tf.key}
                 type="button"
-                className={`token-timeframe-btn ${timeframe === tf.key ? "active" : ""}`}
+                className={`token-timeframe-btn ${timeframe === tf.key ? "active" : ""}`} aria-pressed={timeframe === tf.key}
                 onClick={() => setTimeframe(tf.key)}
               >
                 {tf.label}
               </MaterialButton>
             ))}
-          </div>
+          </SlidingSegments>
 
           <MaterialButton materialKey={"TokenAnalyticsSettings.button-2"}
             type="button"
@@ -428,13 +429,14 @@ export function TokenAnalyticsSettings() {
         </div>
 
         {/* High-level Category Tabs */}
-        <div className="records-category-tabs" role="tablist" aria-label="Категории вызовов LLM">
+        <SlidingSegments className="records-category-tabs" role="tablist" value={selectedCategory} aria-label="Категории вызовов LLM">
           {CATEGORY_TABS.map((cat) => (
-            <MaterialButton materialKey={["TokenAnalyticsSettings.button-4", cat.id].join(":")}
+            <MaterialButton appearance="plain" materialKey={["TokenAnalyticsSettings.button-4", cat.id].join(":")}
               key={cat.id}
               type="button"
               role="tab"
               aria-selected={selectedCategory === cat.id}
+              tabIndex={selectedCategory === cat.id ? 0 : -1}
               className={`records-category-tab ${selectedCategory === cat.id ? "active" : ""}`}
               onClick={() => {
                 setSelectedCategory(cat.id);
@@ -445,7 +447,7 @@ export function TokenAnalyticsSettings() {
               {cat.label}
             </MaterialButton>
           ))}
-        </div>
+        </SlidingSegments>
 
         <div className="records-table-wrapper">
           <table className="token-records-table">
