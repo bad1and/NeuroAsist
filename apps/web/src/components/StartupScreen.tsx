@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type RefObject } from "react";
 import { MaterialButton } from "./MaterialButton";
 import { IconInterfaceSpirals } from "../CustomIcons";
 import type { CoreStatus } from "../desktop";
@@ -9,6 +9,8 @@ import { shapePetal } from "../brand/irisPetalGeometry";
 import { WindowChrome } from "./WindowChrome";
 import { animate, createTimeline, isTestEnvironment, prefersReducedMotion } from "../animations";
 import "./StartupScreen.css";
+
+const StartupJump = lazy(() => import("../startup-jump/StartupJump").then((module) => ({ default: module.StartupJump })));
 
 const floraAssetsPromise = Promise.all([
   import("../../../../assets/startup-flora-left.webp"),
@@ -48,11 +50,19 @@ export function StartupScreen({ status, stage = status === "ready" || status ===
   revealRef.current = onReveal;
   const [finishPhase, setFinishPhase] = useState<"loading" | "finishing" | "preparing" | "revealing">("loading");
   const [revealed, setRevealed] = useState(0);
+  const [gameOpen, setGameOpen] = useState(false);
   const [flora, setFlora] = useState<{ left: string; right: string; leftCompact: string; rightCompact: string; topRight: string } | null>(null);
   const failed = status === "failed" || status === "crashed";
   const canReveal = !failed && revealed < stage;
   const canFinish = status === "ready" && stage === 3 && revealed === 3;
   const revealingInterface = finishPhase === "revealing";
+  // Core health can be ready while the model/voice still load. Stop playing
+  // on actual readiness, before the existing petal finale and handoff.
+  const gameAvailable = !failed && status !== "closing" && !(status === "ready" && stage === 3);
+
+  useEffect(() => {
+    if (!gameAvailable) setGameOpen(false);
+  }, [gameAvailable]);
 
   useEffect(() => {
     let active = true;
@@ -305,6 +315,11 @@ export function StartupScreen({ status, stage = status === "ready" || status ===
           </MaterialButton>
         )}
       </main>
+      {gameAvailable && <div className="startup-game">
+        {gameOpen ? <Suspense fallback={null}><StartupJump autoStart /></Suspense>
+          : <MaterialButton type="button" materialKey="StartupJump.open" appearance="plain"
+            className="startup-game-open" onClick={() => setGameOpen(true)}>Попинать х..</MaterialButton>}
+      </div>}
     </div>
   );
 }

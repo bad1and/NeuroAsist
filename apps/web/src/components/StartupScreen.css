@@ -16,14 +16,14 @@
   z-index: 1;
   display: grid;
   min-height: 100dvh;
-  padding: 64px 24px 44px;
+  padding: 0 24px;
   place-content: center;
   justify-items: center;
   text-align: center;
 }
 .startup-mark {
-  width: clamp(280px, 31vw, 390px);
-  margin-block-end: 24px;
+  width: clamp(260px, 27vw, 330px);
+  margin-block-end: 16px;
   filter: drop-shadow(0 12px 20px var(--color-shadow));
 }
 .iris-petals { display: block; width: 100%; height: auto; overflow: visible; }
@@ -54,15 +54,15 @@
 }
 .startup-flora-top-right picture { opacity: 0.32; transform: rotate(180deg); }
 .startup-flora-top-right img { transform-origin: 10% 92%; }
-.startup-copy { max-width: 340px; min-height: 72px; }
-.startup-copy h1 { margin: 0; font-size: clamp(24px, 4vw, 34px); font-weight: 600; letter-spacing: -0.035em; }
+.startup-copy { max-width: 340px; min-height: 66px; }
+.startup-copy h1 { margin: 0; font-size: 27px; font-weight: 600; letter-spacing: -0.035em; }
 .startup-copy p { margin: 10px 0 0; color: var(--color-text-soft); font-size: 13px; line-height: 1.5; }
 .startup-content > .primary-button { margin-block-start: 28px; }
 .startup-stages {
   display: flex;
   gap: 24px;
   padding: 0;
-  margin: 36px 0 0;
+  margin: 20px 0 0;
   list-style: none;
   color: var(--color-text-muted);
   font-size: 12px;
@@ -72,6 +72,22 @@
 .startup-stage-index { font-size: 10px; letter-spacing: 0.08em; }
 .startup-stages li[aria-current="step"] { color: var(--color-text); }
 .startup-stages li[data-state="formed"] .startup-stage-index { color: var(--color-text-soft); }
+.startup-game { position: absolute; z-index: 2; left: 50%; bottom: 28px; transform: translateX(-50%); }
+.startup-game-open { padding: 10px 20px; min-height: 36px; border: 0; border-radius: var(--radius-control); background: transparent; box-shadow: none; color: var(--color-text-muted); font: inherit; font-size: 12px; cursor: pointer; }
+.startup-game-open:hover { color: var(--color-text-soft); }
+@media (max-height: 680px) {
+  .startup-mark { width: 230px; margin-bottom: 10px; }
+  .startup-copy h1 { font-size: 23px; }
+  .startup-copy { min-height: 58px; }
+  .startup-stages { margin-top: 10px; }
+  .startup-game { bottom: 20px; }
+}
+@media (max-height: 620px) {
+  .startup-mark { width: 180px; margin-bottom: 8px; }
+  .startup-copy h1 { font-size: 21px; }
+  .startup-copy { min-height: 54px; }
+  .startup-game .startup-jump { width: min(248px, max(100px, calc(77dvh - 225px)), calc(100vw - 48px)); }
+}
 @media (max-width: 520px) {
   .startup-stages { gap: 16px; font-size: 11px; }
   .startup-content { padding-inline: 20px; }
