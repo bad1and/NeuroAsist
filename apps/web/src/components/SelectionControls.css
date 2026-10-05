@@ -1,0 +1,207 @@
+/* One restrained material for selection controls; motion is driven by Anime.js. */
+.iris-segments.iris-segments {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 2px;
+  width: max-content;
+  max-width: 100%;
+  padding: 4px;
+  border: 0;
+  border-radius: var(--radius-control, 24px) !important;
+  corner-shape: var(--corner-selection, squircle) !important;
+  background: var(--surface-selection-track);
+  box-shadow: var(--depth-selection-track);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.iris-segments::-webkit-scrollbar { display: none; }
+.iris-segments > .iris-segments-face {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: var(--radius-control-sm, 18px) !important;
+  corner-shape: var(--corner-selection, squircle);
+  background: var(--surface-selection-active);
+  box-shadow: none;
+  opacity: 0;
+}
+.iris-segments.iris-segments > button {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  margin: 0;
+  padding: 5px 12px;
+  border: 0;
+  border-radius: var(--radius-control-sm, 18px) !important;
+  corner-shape: var(--corner-selection, squircle) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+  cursor: pointer;
+  transform: none !important;
+  transition: none !important;
+}
+.iris-segments.iris-segments > button:is(.active, .is-active, [aria-pressed="true"], [aria-selected="true"]) { color: var(--color-accent-ink); }
+.iris-segments.iris-segments > button:hover:not(:disabled) { color: var(--color-text); }
+.iris-segments.iris-segments > button:focus-visible { outline: 2px solid var(--color-focus); outline-offset: -2px; }
+.iris-segments > button:disabled { opacity: .45; cursor: not-allowed; }
+
+/* The row is stable; only the thumb moves. */
+.settings-switch-row.settings-switch-row { transition: none; transform: none; }
+.settings-switch-row.settings-switch-row:hover,
+.settings-switch-row.settings-switch-row:active { transform: none; }
+.settings-switch.settings-switch {
+  position: relative;
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control-sm, 18px);
+  corner-shape: var(--corner-selection, squircle);
+  isolation: isolate;
+  background: var(--surface-selection-track);
+  box-shadow: var(--depth-selection-track);
+  transition: none;
+}
+.settings-switch > .iris-switch-fill {
+  position: absolute;
+  inset: 0;
+  width: auto;
+  height: auto;
+  border-radius: inherit;
+  corner-shape: inherit;
+  background: var(--surface-selection-active);
+  box-shadow: none;
+  opacity: 0;
+  transform: none;
+  transition: none;
+}
+.settings-switch > .iris-switch-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 45%;
+  corner-shape: var(--corner-selection-square, squircle);
+  background: var(--surface-selection-thumb);
+  box-shadow: none;
+  transition: none;
+}
+
+.iris-checkbox {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  vertical-align: middle;
+}
+.iris-checkbox > .iris-checkbox-input {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.iris-checkbox-face {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: 45%;
+  corner-shape: var(--corner-selection-square, squircle);
+  isolation: isolate;
+  background: var(--surface-selection-track);
+  box-shadow: none;
+}
+.iris-checkbox-input:checked + .iris-checkbox-face {
+  background: var(--surface-selection-active);
+  box-shadow: none;
+}
+.iris-checkbox-face svg { position: relative; z-index: 1; display: block; width: 18px; height: 18px; opacity: 0; }
+.iris-checkbox-face path { fill: none; stroke: var(--color-accent-ink); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.iris-checkbox-input:focus-visible + .iris-checkbox-face { outline: 2px solid var(--color-focus); outline-offset: 3px; }
+.iris-checkbox-input:disabled { cursor: not-allowed; }
+.iris-checkbox-input:disabled + .iris-checkbox-face { opacity: .45; }
+
+/* The isolated design preview shares the production controls. */
+.dp-control-set .settings-switch-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--color-text); cursor: pointer; }
+.dp-control-set .settings-switch-copy { display: grid; gap: 4px; }
+.dp-control-set .settings-switch-copy strong { font-size: 13px; font-weight: 600; }
+.dp-control-set .settings-switch-input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.dp-control-set .settings-switch-input:focus-visible + .settings-switch { outline: 2px solid var(--color-focus); outline-offset: 3px; }
+.dp-checkbox-line { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--color-text-soft); cursor: pointer; }
+
+/* Retain the approved button grain; use the shared field recess for depth. */
+.iris-selection-material.dp-lens {
+  min-width: 0;
+  min-height: 0;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  box-sizing: border-box;
+  flex: none;
+  position: absolute;
+  inset: 0;
+  display: block;
+  border-radius: inherit;
+  corner-shape: inherit;
+  pointer-events: none;
+  --dp-effect-scale: .4;
+  --dp-intensity: .7;
+}
+.iris-selection-material.dp-lens.dp-accent { --dp-tone: var(--color-selection-active); }
+.iris-selection-material.dp-lens[data-selection-tone="thumb"] { --dp-tone: var(--color-selection-thumb); --dp-intensity: .45; }
+.iris-selection-material .dp-hover-surface,
+.iris-selection-material .dp-depth,
+.iris-selection-material .dp-material,
+.iris-selection-material .dp-material > span {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  corner-shape: inherit;
+}
+/* The field owns one continuous face, without raised bevels or exterior shadows. */
+.iris-selection-material .dp-material {
+  overflow: hidden;
+  background: linear-gradient(var(--dp-tone), var(--dp-tone));
+  box-shadow: var(--depth-selection-active);
+}
+.iris-selection-material.dp-lens[data-selection-tone="graphite"] { --dp-tone: var(--color-base-deep); }
+.iris-selection-material[data-selection-tone="graphite"] .dp-material { box-shadow: var(--depth-selection-track); }
+.iris-selection-material .dp-depth,
+.iris-selection-material .dp-material > :is(.dp-inner-top, .dp-inner-bottom, .dp-inner-edge, .dp-bevel, .dp-bloom) { display: none; }
+.iris-selection-material .dp-material::after { content: none; }
+.iris-selection-material .dp-noise { opacity: var(--lens-noise-alpha); }
+.iris-selection-material .dp-hover-light,
+.iris-selection-material > .dp-rim { display: none; }
+/* Small faces need a softer curve at 18px. The material inherits this same
+   contour instead of imposing a second, fixed SVG clip on top of it. */
+@supports (corner-shape: superellipse(1.45)) {
+  .settings-switch > .iris-switch-thumb,
+  .iris-checkbox-face { border-radius: 50%; }
+}
