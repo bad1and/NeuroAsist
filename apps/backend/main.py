@@ -325,6 +325,8 @@ def create_app() -> FastAPI:
         parallel_appraisal=settings.voice_live_parallel_appraisal,
     ) if timeline_store is not None else None
     turn_coordinator = ConversationTurnCoordinator(timeline_store, event_bus.publish) if timeline_store is not None else None
+    if conversation_service is not None:
+        conversation_service.bind_turn_coordinator(turn_coordinator)
     voice_service = VoiceService(settings)
     available_tts_voices = voice_service.available_tts_voices()
     if runtime_settings.voice_tts_voice not in available_tts_voices:
@@ -528,6 +530,7 @@ def create_app() -> FastAPI:
                 agent=agent,
                 generation=generation,
                 source_message=source_message,
+                owner_is_current=lambda: session.generation == generation,
                 state_context=reaction.state_context,
                 on_assistant_completed=persist_live_usage(
                     agent, session_id, utterance_id, generation,
@@ -539,10 +542,12 @@ def create_app() -> FastAPI:
             deferred_response=conversation_deferred_response,
         )
 
-    async def interrupt_voice_session(session_id: str, utterance_id: str | None = None) -> dict[str, int]:
+    async def interrupt_voice_session(session_id: str, utterance_id: str | None = None, *, cancel_turns: bool = True) -> dict[str, int]:
         """Unified barge-in cancellation for streaming, batch TTS and avatar audio."""
+        if turn_coordinator is not None and cancel_turns:
+            await turn_coordinator.cancel_session(session_id, utterance_id)
         await voice_session_manager.cancel(session_id, utterance_id)
-        batch_cancelled = await speech_orchestrator.cancel_session(session_id)
+        batch_cancelled = await speech_orchestrator.cancel_session(session_id, utterance_id)
         await avatar_service.stop(session_id=session_id, utterance_id=utterance_id)
         event_bus.publish(
             "voice.interrupted",
@@ -708,6 +713,7 @@ def create_app() -> FastAPI:
                 agent=agent,
                 generation=result.generation,
                 source_message=result.message,
+                owner_is_current=lambda: session.generation == result.generation,
                 state_context=result.state_context,
                 pipeline_started_at=connection.pipeline_started_at or None,
                 raw_transcript=stt_result.raw_text,

@@ -52,6 +52,7 @@ def canonical_url(value: str) -> str:
 
 def normalize_entity(value: str) -> str:
     text = value.casefold().replace("ё", "е")
+    text = re.sub(r"\b(?:харбас|харвас|хардбас(?:с)?)\b", "хардбасс", text)
     # Spelling equivalence for matching, not a factual assertion of identity.
     text = re.sub(r"\b(?:gone[. -]?fludd|гон[ -]?(?:флат|флад|флудд?))\b", "gonefludd", text)
     text = re.sub(r"\bлсп\b", "lsp", text)

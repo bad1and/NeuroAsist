@@ -63,6 +63,8 @@ class NotificationStore {
           if (!msg || typeof msg !== "object") return;
           if (msg.type === "show" && msg.notification) {
             this.handleSyncShow(msg.notification);
+          } else if (msg.type === "update" && msg.notification) {
+            this.update(msg.notification.id, msg.notification, false);
           } else if (msg.type === "dismiss" && msg.id) {
             this.handleSyncDismiss(msg.id);
           } else if (msg.type === "dismissAll") {
@@ -171,6 +173,20 @@ class NotificationStore {
     return id;
   };
 
+  /** Update in place; a dismissed card is never recreated by a phase update. */
+  update = (id: string, patch: Partial<Omit<AppNotification, "id" | "createdAt">>, broadcast = true): boolean => {
+    const index = this.notifications.findIndex(n => n.id === id);
+    if (index < 0) return false;
+    const next = [...this.notifications];
+    next[index] = { ...next[index], ...patch };
+    this.notifications = next;
+    this.emitChange();
+    if (broadcast) {
+      try { this.channel?.postMessage({ type: "update", notification: { ...next[index], actions: undefined } }); } catch {}
+    }
+    return true;
+  };
+
   error = (title: string, message: string, options?: NotificationOptions): string => {
     return this.show({
       type: "error",
@@ -242,6 +258,7 @@ export const notificationStore = new NotificationStore();
 
 export const notify = {
   show: notificationStore.show,
+  update: notificationStore.update,
   error: notificationStore.error,
   warning: notificationStore.warning,
   success: notificationStore.success,

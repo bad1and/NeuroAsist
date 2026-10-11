@@ -77,6 +77,7 @@ class UtteranceContext:
     started_at: float = field(default_factory=time.perf_counter)
     tracks_end_of_speech: bool = False
     avatar_segment_texts: dict[int, str] = field(default_factory=dict)
+    owner_is_current: Callable[[], bool] | None = None
 
 
 @dataclass
@@ -299,10 +300,15 @@ class VoiceSessionManager:
         transcript_corrections: tuple[dict[str, object], ...] = (),
         playback_rate: float = 1.0,
         pipeline_started_at: float | None = None,
+        owner_is_current: Callable[[], bool] | None = None,
     ) -> asyncio.Task[None]:
+        if owner_is_current is not None and not owner_is_current():
+            raise asyncio.CancelledError
         if not self.connected(session_id):
             raise RuntimeError("Voice WebSocket is not connected")
         await self.cancel(session_id)
+        if owner_is_current is not None and not owner_is_current():
+            raise asyncio.CancelledError
         self._playback_pending.pop(session_id, None)
         self._avatar_playback = {
             active_utterance_id: active_context
@@ -318,6 +324,7 @@ class VoiceSessionManager:
             playback_rate=max(MIN_SPEECH_TEMPO, min(MAX_SPEECH_TEMPO, float(playback_rate))),
             started_at=pipeline_started_at or time.perf_counter(),
             tracks_end_of_speech=pipeline_started_at is not None,
+            owner_is_current=owner_is_current,
         )
         self._active[session_id] = context
         context.task = asyncio.create_task(
@@ -780,6 +787,8 @@ class VoiceSessionManager:
             ).__aiter__()
             pending = asyncio.create_task(anext(iterator))
             while True:
+                if not self._is_active(context):
+                    raise asyncio.CancelledError
                 idle_timeout = (
                     self._next_idle_flush_seconds
                     if chunker.emitted
@@ -794,6 +803,8 @@ class VoiceSessionManager:
                     delta = pending.result()
                 except StopAsyncIteration:
                     break
+                if not self._is_active(context):
+                    raise asyncio.CancelledError
                 if not first_delta_seen:
                     first_delta_seen = True
                     elapsed_ms = int((time.perf_counter() - started) * 1000)
@@ -841,6 +852,8 @@ class VoiceSessionManager:
                 await enqueue_spoken_segment(raw_segment)
             completed_reply = re.sub(r"[ \t]+", " ", "".join(reply_parts)).strip()
             completed_reply = re.sub(r" ([.,!?:;…])", r"\1", completed_reply)
+            if not self._is_active(context):
+                raise asyncio.CancelledError
             if on_assistant_completed is not None:
                 await on_assistant_completed(completed_reply)
             if self._character_state_service is not None and completed_reply:
@@ -1518,6 +1531,7 @@ class VoiceSessionManager:
         return (
             not context.cancelled
             and self._active.get(context.session_id) is context
+            and (context.owner_is_current is None or context.owner_is_current())
         )
 
     def _publish_latency(self, context: UtteranceContext, event_type: str, **payload: Any) -> None:

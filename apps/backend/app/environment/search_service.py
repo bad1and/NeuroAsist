@@ -21,7 +21,7 @@ import xml.etree.ElementTree as ET
 
 import httpx
 
-from apps.backend.app.environment.retrieval import canonical_url, clean_text, model_text, parse_date, preferred_host, relevance, sensitive_query
+from apps.backend.app.environment.retrieval import canonical_url, clean_text, model_text, parse_date, preferred_host, relevance, sensitive_query, terms
 from apps.backend.app.environment.search_providers import API_PROVIDERS, api_search
 from apps.backend.app.environment.search_budget import SearchBudget
 
@@ -41,6 +41,7 @@ class SearchTurnBudget:
     requests: int = 0
     pages: int = 0
     page_results: dict[str, SearchResult] = field(default_factory=dict)
+    denied_api: dict[str, str] = field(default_factory=dict)
 
     def admit(self, query: str) -> bool:
         normalized = clean_text(query, 300).casefold()
@@ -82,6 +83,7 @@ class SearchResult:
     page_status: str = "not_read"
     provider: str = "duckduckgo"
     modified_at: str = ""
+    content_truncated: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +102,7 @@ class SearchSnapshot:
     until: str = ""
     evidence_status: str = ""
     quota: dict | None = None
+    requested_fact: str = ""
 
     def compact_summary(self, max_items: int = 3, max_chars: int = 1600) -> str:
         """Return bounded facts for the model; URLs stay in durable metadata."""
@@ -112,14 +115,20 @@ class SearchSnapshot:
                 lines.append("Получены предварительные итоги; не называй их окончательными.")
         if self.answer:
             lines.append(f"Краткий ответ: {self.answer[:_MAX_SNIPPET_CHARS]}")
-        for index, res in enumerate(self.results[:max_items], 1):
+        selected = list(self.results[:max_items])
+        # Spend most of the existing context budget on the best read document.
+        best_read = next((i for i, r in enumerate(selected) if r.page_status == "read"), None)
+        for index, res in enumerate(selected, 1):
             date = f" ({res.published_at[:10]})" if res.published_at else ""
             evidence = res.page_text or res.snippet
-            limit = 600 if res.page_text else _MAX_SNIPPET_CHARS
+            limit = max(600, max_chars - 800 - 450 * (len(selected) - 1)) if index - 1 == best_read else 300
             limitation = " [только поисковый сниппет]" if res.page_status != "read" else ""
+            if res.content_truncated or len(evidence) > limit:
+                limitation += " [содержание сокращено; полнота не подтверждена]"
             if not res.published_at and re.search(r"новост|\bnews\b", self.query, re.I):
                 limitation += " [дата публикации неизвестна]"
-            lines.append(f"[S{index}] {model_text(res.title, _MAX_TITLE_CHARS)}{date}: {model_text(evidence, limit)}{limitation}")
+            document = _evidence_excerpt(evidence, self.requested_fact or self.query, limit) if res.page_status == "read" else model_text(evidence, limit)
+            lines.append(f"[S{index}] {model_text(res.title, _MAX_TITLE_CHARS)}{date}: {document}{limitation}")
         lines.append("Дата публикации не равна дате события или релиза. Факты вне этих данных не подтверждены проверкой.")
         return "\n".join(lines)[:max_chars]
 
@@ -137,12 +146,14 @@ class SearchSnapshot:
             "since": self.since,
             "until": self.until,
             "quota": self.quota,
-            "requested_fact": "outcome" if _outcome_query(self.query) else "",
+            "requested_fact": self.requested_fact or ("outcome" if _outcome_query(self.query) else ""),
             "evidence_status": self.evidence_status or ("none" if not self.results else "topic_only" if _outcome_query(self.query) and not any(_outcome_evidence(r) for r in self.results)
                                 else "provisional" if _outcome_query(self.query) and not any(_final_outcome_evidence(r) for r in self.results) else "available"),
             "sources": [
                 {"id": f"S{index}", "title": item.title, "url": item.url, "published_at": item.published_at,
-                 "page_status": item.page_status, "provider": item.provider, "modified_at": item.modified_at}
+                 "page_status": item.page_status, "provider": item.provider, "modified_at": item.modified_at,
+                 "evidence": _evidence_excerpt(item.page_text or item.snippet, self.requested_fact or self.query, 1800 if index == 1 else 400),
+                 "content_truncated": item.content_truncated or len(item.page_text or item.snippet) > (1800 if index == 1 else 400)}
                 for index, item in enumerate(self.results, 1)
                 if item.url
             ],
@@ -208,12 +219,38 @@ def _unwrap_ddg_url(value: str) -> str:
 
 
 
+def _document_text(value: str, max_chars: int = 4000) -> str:
+    """Keep document order/line breaks, while removing URLs from spoken evidence."""
+    value = re.sub(r"https?://\S+", "", html.unescape(value))
+    return "\n".join(re.sub(r"[ \t\r]+", " ", line).strip() for line in value.splitlines()).strip()[:max_chars]
+
+
+def _evidence_excerpt(value: str, query: str, max_chars: int) -> str:
+    """Use the bounded window for the requested fragment, keeping its order."""
+    document = _document_text(value, 16000)
+    if len(document) <= max_chars:
+        return document
+    lines = document.splitlines(keepends=True)
+    wanted = terms(query)
+    scores = [len(wanted & terms(line)) for line in lines]
+    best = max(range(len(lines)), key=lambda i: scores[i], default=0)
+    offset = sum(len(line) for line in lines[:best])
+    start = max(0, offset - min(150, max_chars // 5))
+    if start:
+        boundary = document.find("\n", start, offset)
+        start = boundary + 1 if boundary >= 0 else start
+    return document[start:start + max_chars].strip()
+
+
 class _ArticleParser(HTMLParser):
     """Collect paragraphs and publication metadata without executing page code."""
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.stack, self.paragraphs, self.current, self.dates, self.ld = [], [], [], [], []
         self.capture, self.description, self.ld_capture = None, "", False
+        self.capture_depth = 0
+        self.content_truncated = False
+        self.used_description = False
         self.modified, self.article_depth = [], 0
         self.skips = {"script", "style", "nav", "header", "footer", "aside", "form", "noscript", "svg"}
 
@@ -238,8 +275,14 @@ class _ArticleParser(HTMLParser):
                 self.ld_capture = True
                 self.ld.append("")
             return
-        if tag in {"p", "h1", "h2", "h3"}:
+        if self.capture:
+            if tag == self.capture:
+                self.capture_depth += 1
+            if tag in {"br", "p", "div", "h1", "h2", "h3"}:
+                self.current.append("\n")
+        elif tag in {"p", "h1", "h2", "h3", "div", "pre"}:
             self.capture, self.current = tag, []
+            self.capture_depth = 1
 
     def handle_endtag(self, tag):
         if tag == "article":
@@ -252,10 +295,18 @@ class _ArticleParser(HTMLParser):
                 self.ld_capture = False
             return
         if tag == self.capture:
-            text = clean_text(" ".join(self.current), 1600)
+            self.capture_depth -= 1
+            if self.capture_depth:
+                self.current.append("\n")
+                return
+            raw = "".join(self.current)
+            text = _document_text(raw, 16000)
+            self.content_truncated |= len(raw) > 4000
             if len(text) >= 20:
                 self.paragraphs.append(text)
             self.capture, self.current = None, []
+        elif self.capture and tag in {"p", "div", "h1", "h2", "h3"}:
+            self.current.append("\n")
 
     def handle_data(self, data):
         if self.ld_capture and self.ld:
@@ -283,11 +334,16 @@ class _ArticleParser(HTMLParser):
                         self.modified.append(str(item["dateModified"]))
                     body = item.get("articleBody")
                     if isinstance(body, str):
-                        self.paragraphs.append(clean_text(body, 4000))
+                        self.paragraphs.append(_document_text(body, 16000))
+                        self.content_truncated |= len(body) > 4000
                     queue.extend(v for v in item.values() if isinstance(v, (dict, list)))
         paragraphs = self.paragraphs or ([self.description] if self.description else [])
-        paragraphs = sorted(enumerate(paragraphs), key=lambda x: (-relevance(query, x[1]), x[0]))
-        text = model_text(" ".join(p for _, p in paragraphs[:4]), 1800)
+        self.used_description = not bool(self.paragraphs)
+        ranked = sorted(enumerate(paragraphs), key=lambda x: (-relevance(query, x[1]), x[0]))
+        selected = sorted(ranked[:4])
+        document = "\n".join(p for _, p in selected)
+        self.content_truncated |= len(document) > 4000 or len(paragraphs) > 4
+        text = _evidence_excerpt(document, query, 4000)
         dates = [d for v in self.dates if (d := parse_date(v)) is not None]
         return text, max(dates).isoformat() if dates else ""
 
@@ -497,7 +553,7 @@ class SearchService:
                 pages = payload.get("query", {}).get("pages", {})
                 results = [SearchResult(clean_text(p.get("title", ""), 120), clean_text(p.get("extract", ""), 300),
                             canonical_url(p.get("fullurl", "")), page_text=clean_text(p.get("extract", ""), 1800),
-                            page_status="read" if p.get("extract") else "not_read", provider=provider)
+                            page_status="snippet" if p.get("extract") else "not_read", provider=provider, content_truncated=bool(p.get("extract")))
                            for p in pages.values() if isinstance(p, dict)]
             else:
                 root = ET.fromstring(response.content)
@@ -576,7 +632,8 @@ class SearchService:
             modified = [d for v in parser.modified if (d := parse_date(v)) is not None]
             return replace(result, page_text=text, published_at=date or result.published_at,
                            modified_at=max(modified).isoformat() if modified else "",
-                           page_status="read" if text else "unavailable")
+                           content_truncated=parser.content_truncated,
+                           page_status=("snippet" if parser.used_description else "read") if text else "unavailable")
         except (TimeoutError, httpx.HTTPError, ValueError, OSError):
             return replace(result, page_status="unavailable")
 
@@ -639,6 +696,8 @@ class SearchService:
             async with asyncio.timeout(min(self._deadline_seconds, max(0, deadline - time.monotonic())) if deadline is not None else self._deadline_seconds):
                 for attempt_index in range(min(limit, len(providers))):
                     provider, actual_query = providers[attempt_index]
+                    if provider in budget.denied_api:
+                        continue
                     if provider == "refine":
                         provider = "bing" if (topical and not outcome) or self._blocked_until.get("duckduckgo", 0) > time.monotonic() else "duckduckgo"
                     if not budget.admit(actual_query):
@@ -648,6 +707,8 @@ class SearchService:
                     t = time.monotonic()
                     results, status = (await self._api_provider(provider, actual_query, mode=mode, since=since, until=until)
                                        if provider in API_PROVIDERS else await self._provider(provider, actual_query))
+                    if provider in API_PROVIDERS and status in {"unconfigured", "unverified_free_plan", "quota_exhausted", "unauthorized", "blocked", "cooldown", "budget_unavailable", "free_only"}:
+                        budget.denied_api[provider] = status
                     if since or until:
                         lower, upper = parse_date(since), parse_date(until)
                         results = [r for r in results if not parse_date(r.published_at) or

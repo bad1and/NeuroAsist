@@ -60,6 +60,8 @@ def pending_lookup_offer(user_text: str, messages: Iterable) -> bool:
 
 def analyze_dialogue_turn(user_text: str, messages: Iterable = ()) -> DialogueTurnIntent:
     text = " ".join(user_text.replace("ё", "е").strip().split())
+    if search_process_question(text):
+        return DialogueTurnIntent("correction")
     if _GREETING.fullmatch(text):
         return DialogueTurnIntent("greeting")
     if _ACCEPT.fullmatch(text):
@@ -73,6 +75,16 @@ def analyze_dialogue_turn(user_text: str, messages: Iterable = ()) -> DialogueTu
     if _BEAT.fullmatch(text) or (len(words) <= 18 and (_EMOTIONAL.search(text) or _AGREEMENT.search(text))):
         return DialogueTurnIntent("reaction")
     return DialogueTurnIntent("other")
+
+
+def search_process_question(text: str) -> bool:
+    """A challenge about our actions does not request another lookup."""
+    text = text.replace("ё", "е")
+    return bool(
+        re.search(r"(?:почему|зачем).{0,65}(?:говорила|сказала|могла|не могла|врешь|соврала).{0,45}(?:искать|поиск|искала)", text, re.I)
+        or re.search(r"почему.{0,25}поиск.{0,20}(?:не работал|не отвечал|не поднялся)|(?:врешь|соврала|выдумала).{0,35}(?:искала|поиск)", text, re.I)
+        or re.search(r"(?:запроса|поиска|обращения).{0,15}не\s+было|(?:ты|тебя).{0,25}(?:врешь|пиздишь|выдумала).{0,60}(?:поиск|запрос)|(?:ты|правда|реально).{0,15}(?:искала|отправляла)\s*\?", text, re.I)
+    )
 
 
 def recent_reply_cue(messages: Iterable) -> str:

@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import time
 
 from fastapi.testclient import TestClient
 
@@ -93,7 +94,15 @@ def test_startup_continues_when_tts_preload_fails(
 
     with TestClient(app) as client:
         response = client.get("/health")
-        events = client.get("/events?limit=20").json()["events"]
+        # Voice preloading runs in the background after HTTP readiness.
+        deadline = time.monotonic() + 5
+        while True:
+            events = client.get("/events?limit=100").json()["events"]
+            if any(event["type"] == "voice.tts_preload_failed" for event in events):
+                break
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.01)
 
     assert response.status_code == 200
     assert any(event["type"] == "voice.tts_preload_failed" for event in events)

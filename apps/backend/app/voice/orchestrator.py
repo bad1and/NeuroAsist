@@ -31,6 +31,7 @@ class SpeechOrchestrator:
         self.avatar_service = avatar_service
         self._tasks: set[asyncio.Task[None]] = set()
         self._tasks_by_session: dict[str, set[asyncio.Task[None]]] = {}
+        self._request_ids: dict[asyncio.Task[None], str] = {}
 
     def enqueue(
         self,
@@ -70,9 +71,11 @@ class SpeechOrchestrator:
         )
         self._tasks.add(task)
         self._tasks_by_session.setdefault(session_id, set()).add(task)
+        self._request_ids[task] = request_id
 
         def discard(completed: asyncio.Task[None]) -> None:
             self._tasks.discard(completed)
+            self._request_ids.pop(completed, None)
             session_tasks = self._tasks_by_session.get(session_id)
             if session_tasks is None:
                 return
@@ -95,9 +98,10 @@ class SpeechOrchestrator:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def cancel_session(self, session_id: str) -> int:
+    async def cancel_session(self, session_id: str, utterance_id: str | None = None) -> int:
         """Cancel queued or synthesizing full-WAV speech for one conversation."""
-        tasks = list(self._tasks_by_session.get(session_id, set()))
+        tasks = [task for task in self._tasks_by_session.get(session_id, set())
+                 if utterance_id is None or self._request_ids.get(task) == utterance_id]
         for task in tasks:
             task.cancel()
         if tasks:

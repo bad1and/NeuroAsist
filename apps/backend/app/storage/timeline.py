@@ -541,6 +541,23 @@ class TimelineStore:
             return {}
         return {}
 
+    def get_recent_search_operations(self, session_id: str) -> list[dict]:
+        """Recorded operations, rather than assistant prose, for process questions."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT metadata_json FROM conversation_messages
+                   WHERE timeline_id = ? AND session_id = ? AND status = 'completed'
+                   AND role = 'assistant' ORDER BY sequence_no DESC LIMIT 12""",
+                (PRIMARY_TIMELINE_ID, session_id),
+            ).fetchall()
+        operations = []
+        for row in reversed(rows):
+            metadata = json.loads(row["metadata_json"] or "{}")
+            search = metadata.get("web_search")
+            if isinstance(search, dict):
+                operations.append({key: search[key] for key in ("query", "status", "cached", "attempts") if key in search})
+        return operations
+
     def get_recent_news_reference(self, session_id: str) -> dict:
         """Bounded source recovery for a clarification after an unhelpful reply."""
         with self._connect() as connection:
@@ -4932,6 +4949,9 @@ class TimelineHistoryAdapter:
 
     def get_recent_retrieval_state(self, session_id: str) -> dict:
         return self._store.get_recent_retrieval_state(session_id)
+
+    def get_recent_search_operations(self, session_id: str) -> list[dict]:
+        return self._store.get_recent_search_operations(session_id)
 
     def get_recent_news_reference(self, session_id: str) -> dict:
         return self._store.get_recent_news_reference(session_id)

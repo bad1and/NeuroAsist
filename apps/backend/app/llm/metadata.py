@@ -4,7 +4,7 @@ import time
 from typing import Any
 
 
-def token_metadata(provider: object, *, timestamp: float | None = None) -> dict[str, object] | None:
+def token_metadata(provider: object, *, timestamp: float | None = None, response=None) -> dict[str, object] | None:
     """Return the latest provider usage in the durable timeline shape.
 
     Streaming and batch calls expose the same information through slightly
@@ -12,8 +12,8 @@ def token_metadata(provider: object, *, timestamp: float | None = None) -> dict[
     path from losing usage while it waits for playback acknowledgement.
     """
 
-    response = getattr(provider, "last_response", None)
-    metrics = getattr(provider, "last_call_metrics", None)
+    metrics = getattr(provider, "last_call_metrics", None) if response is None else None
+    response = response if response is not None else getattr(provider, "last_response", None)
     usage = (
         getattr(response, "usage", None)
         or getattr(metrics, "usage", None)

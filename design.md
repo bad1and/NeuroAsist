@@ -1,3 +1,7 @@
+<img src="apps/web/public/brand/iris-mark-backed-dark.svg" width="36" alt="Знак Iris">
+
+<sub>[Документация](Docs/index.md) / Дизайн</sub>
+
 # Iris — дизайн-система desktop-приложения
 
 ## Характер

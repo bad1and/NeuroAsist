@@ -153,6 +153,7 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         news_enabled=runtime_settings.news_enabled,
         news_category=runtime_settings.news_category,
         web_search_enabled=runtime_settings.web_search_enabled,
+        web_search_notifications_enabled=runtime_settings.web_search_notifications_enabled,
         web_search_provider=runtime_settings.web_search_provider,
         web_search_free_only=True,
         search_api_keys_configured={p: bool(getattr(settings, f"{p}_api_key", None)) for p in ("brave", "tavily", "serper")},
@@ -324,6 +325,8 @@ async def patch_runtime_settings(
 
     if payload.web_search_enabled is not None:
         runtime_settings.web_search_enabled = bool(payload.web_search_enabled)
+    if payload.web_search_notifications_enabled is not None:
+        runtime_settings.web_search_notifications_enabled = payload.web_search_notifications_enabled
 
     if payload.web_search_provider is not None:
         if payload.web_search_provider not in ("free", "brave", "tavily", "serper"):

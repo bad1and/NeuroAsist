@@ -14,6 +14,9 @@ os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
 os.environ.setdefault("KMP_BLOCKTIME", "0")
+# Desktop readiness owns loading feedback. Hub progress bars assume a console
+# and can fail while flushing inherited Windows GUI handles.
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 
 import uvicorn
 from fastapi import FastAPI
@@ -23,6 +26,20 @@ GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 5
 # The legacy websockets transport can race concurrent writes with ping/pong
 # while its TCP buffer is paused. SansIO uses Uvicorn's own flow control.
 WEBSOCKET_PROTOCOL = "websockets-sansio"
+
+
+def configure_standard_streams() -> None:
+    """Keep model/library diagnostics from depending on a live parent console."""
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name)
+        try:
+            if stream is None:
+                raise ValueError("No console stream")
+            stream.flush()
+            stream.write("")
+        except (OSError, ValueError):
+            # Application diagnostics still go to the configured UTF-8 log.
+            setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
 
 
 def load_runtime_credentials() -> None:
@@ -82,6 +99,7 @@ def create_desktop_app() -> FastAPI:
 
 
 def main() -> None:
+    configure_standard_streams()
     configure_safe_mode()
     load_runtime_credentials()
     port = int(os.getenv("NEUROASIST_PORT", "8000"))

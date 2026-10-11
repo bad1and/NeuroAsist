@@ -152,6 +152,7 @@ class LiveConversationService:
         self._dialogue_style_service = dialogue_style_service
         self._parallel_appraisal = parallel_appraisal
         self._turn_detector = None
+        self._turn_coordinator = None
         self._stt_semaphore = asyncio.Semaphore(2)
         self._decision_semaphore = asyncio.Semaphore(4)
         self._avatar_reaction_handler: AvatarReactionHandler | None = None
@@ -183,6 +184,9 @@ class LiveConversationService:
     def bind_turn_detector(self, detector) -> None:
         self._turn_detector = detector
 
+    def bind_turn_coordinator(self, coordinator) -> None:
+        self._turn_coordinator = coordinator
+
     def bind_action_handlers(
         self,
         *,
@@ -193,6 +197,12 @@ class LiveConversationService:
         self._deferred_response_handler = deferred_response
 
     async def speech_started(self, session_id: str, send: EventSender | None = None) -> int:
+        return await self._input_started(session_id, send, input_mode="voice")
+
+    async def text_started(self, session_id: str) -> int:
+        return await self._input_started(session_id, input_mode="text", invalidate_coordinator=False)
+
+    async def _input_started(self, session_id: str, send: EventSender | None = None, *, input_mode: str, invalidate_coordinator: bool = True) -> int:
         session = await self.ensure_session(session_id)
         async with session.lock:
             if send is not None:
@@ -222,7 +232,7 @@ class LiveConversationService:
             for utterance_id, _, _, _, _ in interrupted:
                 session.committed_assistant_utterances.add(utterance_id)
             session.generation += 1
-            session.phase = ConversationPhase.LISTENING
+            session.phase = ConversationPhase.LISTENING if input_mode == "voice" else ConversationPhase.GENERATING
             session.last_human_activity_at = time.monotonic()
             generation = session.generation
             cancelled_tasks = 0
@@ -238,7 +248,7 @@ class LiveConversationService:
                 session.last_iris_activity_at = time.monotonic() + 120.0
             session.last_cancellation = {
                 "generation": generation,
-                "reason": "human_speech_started",
+                "reason": "human_speech_started" if input_mode == "voice" else "human_text_started",
                 "cancelled_tasks": cancelled_tasks,
                 "discarded_deferred": discarded_deferred,
             }
@@ -252,6 +262,11 @@ class LiveConversationService:
                 status=status,
                 metadata=metadata,
             )
+        if self._turn_coordinator is not None and invalidate_coordinator:
+            await self._turn_coordinator.cancel_session(session_id)
+        if self._publish is not None:
+            self._publish("conversation.cancelled", "info", "New user input superseded the previous response",
+                          {"session_id": session_id, "generation": generation, "input_mode": input_mode})
         if send is not None:
             await send(self._event(session, "conversation.phase", payload={"phase": session.phase.value}))
             if cancelled_tasks or discarded_deferred:
