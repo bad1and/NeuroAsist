@@ -13,7 +13,7 @@
 
 [![Версия исходников](https://img.shields.io/badge/version-1.0.0-695B86?style=flat-square)](VERSION) · [Apache 2.0](LICENSE)
 
-[Возможности](#возможности) · [Интерфейс](#интерфейс) · [Запуск](#запуск) · [Данные](#данные) · [Разработка](#разработка)
+[Возможности](#возможности) · [Интерфейс](#интерфейс) · [Требования](#системные-требования) · [Запуск](#запуск) · [Данные](#данные) · [Разработка](#разработка)
 
 </div>
 
@@ -96,9 +96,26 @@
 
 <sub>Снимки сделаны в отдельном профиле с подготовленными примерами разговоров и памяти.</sub>
 
+## Системные требования
+
+Для текущего запуска из исходников с локальным голосом и внешней моделью диалога:
+
+| Компонент | Минимальные — расчётный ориентир | Рекомендованные |
+| :--- | :--- | :--- |
+| ОС | Windows 10 22H2, x64 | Windows 11, x64 |
+| Процессор | 4 ядра / 8 потоков, поддержка AVX2 | AMD Ryzen 7 5700X, 8 ядер / 16 потоков |
+| ОЗУ | 8 ГБ; перед запуском свободно около 5 ГиБ | 16 ГБ; 32 ГБ при работе вместе с Docker, Unity Editor или тяжёлыми приложениями |
+| Графика | Встроенная для интерфейса; речь может работать на CPU без дискретной карты | NVIDIA GTX 1660 SUPER, 6 ГБ видеопамяти — ориентир для аватара и необязательного CUDA STT |
+| Свободное место | 20 ГиБ для исходников, зависимостей, моделей и временных файлов | 30 ГиБ на SSD; инструменты сборки, Unity и Docker требуют отдельного места |
+| Подключение и звук | Интернет и API-ключ модели; микрофон и наушники или колонки для голоса | Стабильный интернет, микрофон и наушники для меньшего акустического эха |
+
+Минимум рассчитан для голосового режима без аватара и Docker; на компьютере с 8 ГБ он ещё не испытан. Речевые модели в отдельном CPU-прогоне заняли около 3,1 ГиБ ОЗУ, веса — около 1,93 ГиБ на диске. Рекомендация 16 ГБ оставляет запас для Windows и интерфейса. Видеокарта не обязательна для голоса; ускорение требует [отдельного ONNX CUDA-профиля](Docs/dependencies.md#gigaam-onnx-и-локальное-ускорение-stt).
+
+**Эталон запуска Iris:** компьютер разработчика — Ryzen 7 5700X, **32 ГБ ОЗУ**, GTX 1660 SUPER **6 ГБ**, Windows 11 Pro x64. Характеристики сверены 12 октября 2026 года. Рекомендация по ОЗУ снижена до 16 ГБ по расчёту; это не отдельное испытание на машине с 16 ГБ. [Расчёт, условия и требования дополнительных компонентов](Docs/system-requirements.md).
+
 ## Запуск
 
-Для запуска из исходников понадобятся **Windows 10 или 11**, Git, **Python 3.12**, **Node.js 24 / npm 11**, FFmpeg и FFprobe в `PATH`. Для оболочки Tauri нужны Rust 1.77.2 или новее, Microsoft C++ Build Tools и WebView2 Runtime.
+Для запуска из исходников понадобятся Git, **Python 3.12**, **Node.js 24 / npm 11**, FFmpeg и FFprobe в `PATH`. Для оболочки Tauri нужны текущий stable Rust из `rust-toolchain.toml`, Microsoft C++ Build Tools с компонентом **Desktop development with C++** и WebView2 Runtime. Значение Rust 1.77.2 в Cargo задаёт нижнюю границу, а не версию для установки. [Подготовка Windows для Tauri](https://v2.tauri.app/start/prerequisites/).
 
 ### Установить зависимости
 
@@ -106,18 +123,19 @@
 git clone https://github.com/bad1and/NeuroAsist.git Iris
 cd Iris
 
-python -m venv .venv
+py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements/torch-cpu.txt
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 
 npm ci
 npm ci --prefix apps/web
 npm ci --prefix apps/desktop
 
-Copy-Item .env.example .env
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
-Для CUDA сначала установите профиль из блока ниже, затем `requirements.txt`. [Подробнее о зависимостях](Docs/dependencies.md).
+Это базовый CPU-профиль. Необязательное ускорение STT подключается **после** него по инструкции ниже. [Подробнее о зависимостях](Docs/dependencies.md).
 
 ### Открыть Ирис
 
@@ -129,25 +147,27 @@ npm --prefix apps/desktop run dev
 
 Для первого разговора достаточно текста. Чтобы включить голос, дождитесь загрузки речевых моделей и выберите микрофон и устройство вывода. Для скачивания моделей понадобятся интернет и место на диске.
 
-Для полного выхода используйте **Quit** в меню значка Ирис в области уведомлений Windows. [Первый запуск и повседневная работа](Docs/user-guide.md).
+Для полного выхода закройте главное окно или выберите **Выйти** в меню значка Ирис в области уведомлений Windows (**Quit** в английском интерфейсе). Сворачивание окна оставляет приложение работающим. [Первый запуск и повседневная работа](Docs/user-guide.md).
 
 <details>
 <summary>CUDA — ускорение распознавания речи</summary>
 
-Видеокарта NVIDIA может ускорить распознавание речи. Перед `requirements.txt` установите CUDA-профиль:
+Видеокарта NVIDIA может ускорить текущий GigaAM ONNX. После установки базового профиля замените CPU ONNX Runtime на GPU-вариант:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements/torch-cu128.txt
+.\.venv\Scripts\python.exe -m pip uninstall -y onnxruntime
+.\.venv\Scripts\python.exe -m pip install -r requirements/stt-cuda.txt
+.\.venv\Scripts\python.exe scripts/check_python_dependencies.py --stt-cuda
 ```
 
-Если CUDA недоступна, используйте `VOICE_STT_DEVICE=cpu` в `.env`. Стандартный профиль синтеза TeraTTSv2 работает на CPU.
+Оставьте `VOICE_STT_DEVICE=auto` в `.env` для выбора CUDA с резервом CPU. Нужен совместимый драйвер NVIDIA; CPU и GPU ONNX Runtime одновременно не устанавливаются. PyTorch и TeraTTSv2 остаются на CPU. Профиль `torch-cu128.txt` относится к PyTorch и сам по себе не ускоряет GigaAM ONNX. [Проверка и возврат к CPU](Docs/dependencies.md#gigaam-onnx-и-локальное-ускорение-stt).
 
 </details>
 
 <details>
 <summary>Unity — пересборка аватара</summary>
 
-Готовую локальную сборку аватара Tauri находит автоматически. Unity 2022.3.62f3 нужен только для пересборки после изменений:
+Аватар необязателен. В новом клоне готового исполняемого файла нет: для его первой сборки и последующих пересборок нужны Unity 2022.3.62f3 и модуль **Windows Build Support (Mono)**:
 
 ```powershell
 $env:NEUROASIST_UNITY_EDITOR = 'C:\Program Files\Unity\Hub\Editor\2022.3.62f3\Editor\Unity.exe'
@@ -155,6 +175,8 @@ npm --prefix apps/desktop run build:avatar
 ```
 
 [Сборка и настройка Unity-аватара](apps/avatar-unity/README.md).
+
+После сборки Tauri найдёт аватар автоматически. Без него текст и голос доступны.
 
 </details>
 
@@ -177,7 +199,7 @@ docker build -t neuroasist-coding:latest -f apps/backend/docker/coding.Dockerfil
 В двух окнах PowerShell:
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+.\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000 --ws websockets-sansio --reload
 ```
 
 ```powershell

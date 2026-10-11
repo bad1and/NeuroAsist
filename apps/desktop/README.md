@@ -4,9 +4,16 @@ The desktop shell is a Tauri 2 application around the existing React UI and Fast
 
 ## Development
 
+Run all commands from the repository root. First prepare Python, Node.js,
+Rust, Microsoft C++ Build Tools and WebView2 using
+[the dependency guide](../../Docs/dependencies.md). The CPU profile is the
+default; [hardware requirements](../../Docs/system-requirements.md) distinguish
+estimated minimums from the reference computer. Install the root npm package
+as well (`npm ci`).
+
 ```powershell
-npm install --prefix apps/desktop
-npm install --prefix apps/web
+npm ci --prefix apps/desktop
+npm ci --prefix apps/web
 ```
 
 Start the companion with one command:
@@ -20,13 +27,17 @@ The shell starts Vite and `python -m apps.backend.desktop_entry` itself, so no s
 The Unity Editor path is needed only when rebuilding the avatar renderer:
 
 ```powershell
-$env:NEUROASIST_UNITY_EDITOR = 'C:\Program Files\Unity\Hub\Editor\<version>\Editor\Unity.exe'
+$env:NEUROASIST_UNITY_EDITOR = 'C:\Program Files\Unity\Hub\Editor\2022.3.62f3\Editor\Unity.exe'
 npm --prefix apps/desktop run build:avatar
 ```
 
-Replace `<version>` with the installed Unity version or use the full path to your `Unity.exe`. The environment variable applies only to the current PowerShell session and must be set again in a new terminal.
+Use Unity 2022.3.62f3 with Windows Build Support (Mono); adjust the installation path if necessary. A clean clone has no built avatar, so the editor is needed for its first build as well as rebuilds. Text and voice work without the avatar. The environment variable applies only to the current PowerShell session and must be set again in a new terminal.
 
-The dev shell uses the repository `.venv\Scripts\python.exe` when present. `CommandOrControl+Shift+N` opens the main window again; the tray provides the same action, Safe Mode, avatar toggle, and Quit.
+The dev shell uses the repository `.venv\Scripts\python.exe` when present. `CommandOrControl+Shift+N` opens the main window again; the tray provides the same action, Safe Mode, avatar toggle, and Quit (Выйти in the Russian interface).
+
+Closing the main window starts graceful shutdown and exits the application;
+minimizing it keeps the app running. The tray Quit action also stops the
+managed core and avatar.
 
 Build the Unity renderer first with `npm run build:avatar --prefix apps/desktop`. In development the shell automatically discovers `apps/avatar-unity/Builds/NeuroAsistAvatar/NeuroAsistAvatar.exe`; production bundles include that directory as an `avatar` resource. `NEUROASIST_AVATAR_EXECUTABLE` remains an override for a custom renderer.
 

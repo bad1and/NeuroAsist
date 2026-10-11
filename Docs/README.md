@@ -1,48 +1,17 @@
-# Документация Iris 1.0
+# Документация Iris
 
-Этот каталог разделяет действующие эксплуатационные документы, подробные
-описания подсистем и исторические планы. Документы из `archive/` не являются
-инструкциями для текущей реализации.
+Основная карта документов находится в [index.md](index.md).
+Этот README сохранён как вход для просмотра каталога на GitHub.
 
-## Основные документы
+- [Руководство пользователя](user-guide.md) — первый запуск и повседневная работа.
+- [Системные требования](system-requirements.md) — минимальные и рекомендованные параметры, эталон и расчёт.
+- [Окружение](dependencies.md) и [эксплуатация](operations.md) — установка, сборка и диагностика.
+- [Архитектура](architecture.md) — процессы, данные и основные потоки.
+- [Статус проекта](MILESTONES.md) и [условия выпуска](release-checklist.md) — реализация и подтверждения перед публикацией.
 
-- [Архитектура](architecture.md) — владельцы процессов, данные и основные потоки.
-- [Эксплуатация и сборка](operations.md) — development, диагностика, smoke и release build.
-- [Release checklist 1.0](release-checklist.md) — обязательные условия публикации.
-- [Release runbook](release-runbook.md) — CI, Windows candidate artifact и ручные evidence gates.
-- [Версии](versioning.md) — источник версии, зеркала и порядок подготовки релиза.
-- [Python-зависимости](dependencies.md) — runtime/dev/build профили и чистая release-среда.
-- [HTTP и WebSocket API](api.md) — authentication, route groups и transport versions.
-- [Текущий статус](MILESTONES.md) — что уже реализовано и что остаётся до публичной версии.
-- [Coding Agent](coding-agent.md) — Docker sandbox и границы безопасности.
-- [Live conversation](live-conversation.md) — PCM/VAD/Smart Turn/voice lifecycle.
-- [Поиск и новости](awareness.md) — источники, фоновое обновление и бюджет контекста.
-- [Memory и semantic retrieval](chroma-memory.md) — каноническая память и перестраиваемый индекс.
-- [Дизайн-система](../design.md) — визуальные токены и правила интерфейса.
-- [Desktop shell](../apps/desktop/README.md) и [Unity avatar](../apps/avatar-unity/README.md).
+Архивные планы и старые измерения сохраняют свои даты и версии.
+[Архив](archive/README.md) описывает историю решений; его команды не являются
+инструкциями текущего продукта. README сторонних Unity-пакетов относятся
+к этим пакетам и не задают требования Iris.
 
-## Специализированные материалы
-
-- [Live Voice milestone report](milestone-9-live-voice.md) — подробности barge-in и latency gate.
-- [Сравнение локального STT](stt-comparison.md) — измерения CPU/GPU, точность и выбор конфигурации.
-- [Qwen3-TTS quality pack](qwen-tts-quality-gate.md) — изолированный исторический эксперимент, не production provider.
-- [Third-party assets](../THIRD_PARTY_ASSETS.md) — происхождение и ограничения сторонних ассетов.
-- [Privacy](../PRIVACY.md), [Security](../SECURITY.md), [Changelog](../CHANGELOG.md) и [Contributing](../CONTRIBUTING.md).
-- `version-manifest-v0.4.1.json` — неизменяемый исторический baseline миграций.
-
-## История
-
-Старые blueprints и branch-specific задания перенесены в [archive/](archive/README.md).
-Упоминания V0.4–V0.9 внутри архива описывают соответствующий момент истории и
-не должны синхронизироваться с текущей версией продукта.
-
-## Автоматическая проверка
-
-Из корня репозитория:
-
-```powershell
-.\.venv\Scripts\python.exe scripts/check_docs.py
-```
-
-Проверка требует совпадения version metadata и существования всех локальных
-Markdown-ссылок в поддерживаемой документации.
+[Главный README](../README.md) · [English](../README.en.md) · [Правила документации](documentation.md)
