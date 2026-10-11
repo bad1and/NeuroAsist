@@ -50,6 +50,7 @@ class AssistantLease:
 class _GenerationTask:
     task: asyncio.Task[Any]
     assistant_message_id: str | None = None
+    utterance_id: str | None = None
 
 
 class ConversationTurnCoordinator:
@@ -64,6 +65,7 @@ class ConversationTurnCoordinator:
         self._publish = event_publisher
         self._locks: dict[str, asyncio.Lock] = {}
         self._tasks: dict[tuple[str, int], _GenerationTask] = {}
+        self._generations: dict[str, int | None] = {}
 
     def _lock(self, session_id: str) -> asyncio.Lock:
         return self._locks.setdefault(session_id, asyncio.Lock())
@@ -78,6 +80,7 @@ class ConversationTurnCoordinator:
         utterance_id: str | None = None,
         language: str | None = None,
         metadata: dict[str, object] | None = None,
+        on_created=None,
     ) -> AcceptedTurn:
         async with self._lock(session_id):
             accepted: AcceptedTimelineTurn = await asyncio.to_thread(
@@ -105,6 +108,7 @@ class ConversationTurnCoordinator:
             if not accepted.created:
                 self._emit("turn.deduplicated", session_id, result)
                 return result
+            self._generations[session_id] = result.generation
             # The durable commit above is deliberately before this cancellation.
             await asyncio.to_thread(
                 self._store.interrupt_stale_assistant_leases,
@@ -114,6 +118,8 @@ class ConversationTurnCoordinator:
             for (task_session, generation), record in list(self._tasks.items()):
                 if task_session == session_id and generation < result.generation:
                     await self._interrupt_record(session_id, generation, record)
+            if on_created is not None:
+                await on_created()
             self._emit("turn.accepted", session_id, result)
             return result
 
@@ -143,9 +149,17 @@ class ConversationTurnCoordinator:
             )
 
     def register_generation_task(self, lease: AssistantLease, task: asyncio.Task[Any] | None = None) -> None:
+        task = task or asyncio.current_task()
+        if not self.is_current(lease):
+            task.cancel()
+            return
         self._tasks[(lease.session_id, lease.generation)] = _GenerationTask(
-            task=task or asyncio.current_task(), assistant_message_id=lease.assistant_message_id,
+            task=task, assistant_message_id=lease.assistant_message_id,
+            utterance_id=lease.utterance_id,
         )
+
+    def is_current(self, lease: AssistantLease) -> bool:
+        return self._generations.get(lease.session_id) == lease.generation
 
     async def complete_assistant(
         self,
@@ -154,6 +168,8 @@ class ConversationTurnCoordinator:
         content: str,
         metadata_update: dict[str, object] | None = None,
     ) -> StoredTimelineMessage:
+        if not self.is_current(lease):
+            raise asyncio.CancelledError
         message = await asyncio.to_thread(
             self._store.finish_assistant_turn,
             session_key=session_id,
@@ -163,6 +179,8 @@ class ConversationTurnCoordinator:
             status="completed",
             metadata_update=metadata_update,
         )
+        if message.status != "completed" or not self.is_current(lease):
+            raise asyncio.CancelledError
         self._tasks.pop((session_id, lease.generation), None)
         return message
 
@@ -190,11 +208,15 @@ class ConversationTurnCoordinator:
         self._tasks.pop((session_id, lease.generation), None)
         return message
 
-    async def cancel_session(self, session_id: str) -> None:
+    async def cancel_session(self, session_id: str, utterance_id: str | None = None) -> None:
         """Invalidate all in-flight generations before the session store is cleared."""
         async with self._lock(session_id):
+            if utterance_id is None:
+                self._generations[session_id] = None
             for (task_session, generation), record in list(self._tasks.items()):
-                if task_session == session_id:
+                if task_session == session_id and (utterance_id is None or record.utterance_id == utterance_id):
+                    if self._generations.get(session_id) == generation:
+                        self._generations[session_id] = None
                     await self._interrupt_record(session_id, generation, record)
 
     async def _interrupt_record(self, session_id: str, generation: int, record: _GenerationTask) -> None:
@@ -220,6 +242,7 @@ class ConversationTurnCoordinator:
         details: dict[str, object] = {"session_id": session_id}
         if isinstance(value, AcceptedTurn):
             details.update({"message_id": value.user_message_id, "turn_id": value.turn_id, "generation": value.generation})
+            details["turn_sequence"] = value.sequence_no
         elif isinstance(value, AssistantLease):
             details.update({"message_id": value.assistant_message_id, "turn_id": value.turn_id, "generation": value.generation})
         elif isinstance(value, dict):

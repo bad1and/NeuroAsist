@@ -269,6 +269,7 @@ export type PublicSettings = {
   news_enabled?: boolean;
   news_category?: "all" | "general" | "tech" | "science" | "games";
   web_search_enabled?: boolean;
+  web_search_notifications_enabled?: boolean;
   web_search_provider?: "free" | "brave" | "tavily" | "serper";
   web_search_free_only?: boolean;
   search_api_keys_configured?: Partial<Record<"brave" | "tavily" | "serper", boolean>>;

@@ -16,6 +16,16 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+async def _supersede_voice_response(request: Request, session_id: str) -> None:
+    """A typed turn invalidates old microphone/STT work and both audio paths."""
+    conversation = getattr(request.app.state, "conversation_service", None)
+    if conversation is not None:
+        await conversation.text_started(session_id)
+    interrupt = getattr(request.app.state, "interrupt_voice_session", None)
+    if callable(interrupt):
+        await interrupt(session_id, cancel_turns=False)
+
+
 @router.post("/chat/live", response_model=VoiceLiveResponse)
 async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse:
     """Stream a typed message through the same LLM/TTS path as live voice.
@@ -70,6 +80,7 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
             accepted = await coordinator.accept_user_turn(
                 session_id=payload.session_id, content=payload.message, input_mode="text",
                 client_message_id=payload.client_message_id, utterance_id=utterance_id,
+                on_created=lambda: _supersede_voice_response(request, payload.session_id),
             )
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -95,6 +106,7 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
             )
             state_context, state_behavior = state_turn.prompt_block(), state_turn.behavior
     else:
+        await _supersede_voice_response(request, payload.session_id)
         timeline_store = getattr(request.app.state, "timeline_store", None)
         if timeline_store is not None:
             source_message, _ = await asyncio.to_thread(
@@ -161,6 +173,7 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
         persist_reply=False if lease is not None else True,
         on_assistant_completed=complete_live_assistant if lease is not None else None,
         on_assistant_interrupted=interrupt_live_assistant if lease is not None else None,
+        owner_is_current=(lambda: coordinator.is_current(lease)) if lease is not None else None,
     )
     if coordinator is not None and lease is not None:
         coordinator.register_generation_task(lease, task)
@@ -228,6 +241,7 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
                     content=payload.message,
                     input_mode="text",
                     client_message_id=payload.client_message_id,
+                    on_created=lambda: _supersede_voice_response(request, payload.session_id),
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -307,6 +321,7 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
                 "usage": tokens_meta,
             })
         else:
+            await _supersede_voice_response(request, payload.session_id)
             result = await agent.handle_user_message(payload.session_id, payload.message)
         result["memory_updates"] = agent.last_memory_updates
     except asyncio.CancelledError:

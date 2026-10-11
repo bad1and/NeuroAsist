@@ -351,26 +351,26 @@ async def test_live_acknowledgement_precedes_search_and_answer_in_same_turn():
             await gate.wait()
             return await super().search(query, **kwargs)
     search = GatedSearch(snapshot())
-    provider = SearchProvider(["Проверила: дата официально объявлена."])
+    provider = SearchProvider(['{"reply":"С датой надо свериться."}', "Дата официально объявлена."])
     history = History()
     agent = CharacterAgent(provider, history, 10,
                            situational_coordinator=Coordinator(search), runtime_settings=RuntimeSettings())
     stream = agent.stream_user_message("s", "Когда выйдет гта шесть?")
-    first = await anext(stream)
-    assert "Так, секунду, проверю." in first
+    first = await asyncio.wait_for(anext(stream), 3)
+    assert "С датой надо свериться." in first
     continuation = asyncio.create_task(anext(stream))
     await asyncio.wait_for(started.wait(), 1)
-    assert not continuation.done() and provider.calls == 0
+    assert not continuation.done() and provider.calls == 1
     gate.set()
     answer = await continuation
     tail = "".join([part async for part in stream])
-    assert "Проверила" in answer + tail
-    assert provider.calls == 1 and len(search.queries) == 1
-    assert "секунду" in history.saved[-1][2]
-    assert "Проверила" in history.saved[-1][2]
-    external = [m.content for m in provider.seen_messages[0] if m.content.startswith("Окружение и текущее время:")]
-    assert len(external[0]) <= 1600
-    assert agent.token_metadata()["total_tokens"] == 12
+    assert "Дата официально объявлена" in answer + tail
+    assert provider.calls == 2 and len(search.queries) == 1
+    assert "С датой надо свериться" in history.saved[-1][2]
+    assert "Дата официально объявлена" in history.saved[-1][2]
+    external = [m.content for m in provider.seen_messages[-1] if m.content.startswith("Окружение и текущее время:")]
+    assert len(external[0]) <= 3200
+    assert agent.token_metadata()["total_tokens"] == 24
 
 
 @pytest.mark.anyio
@@ -412,17 +412,17 @@ async def test_cancelling_after_acknowledgement_cancels_search_without_fake_answ
                 cancelled.set()
                 raise
     history = History()
-    provider = SearchProvider([])
+    provider = SearchProvider(['{"reply":"Уточню дату."}'])
     agent = CharacterAgent(provider, history, 0, situational_coordinator=Coordinator(SlowSearch(snapshot())), runtime_settings=RuntimeSettings())
     stream = agent.stream_user_message("s", "Когда выйдет GTA 6?")
-    assert "секунду" in await anext(stream)
+    assert "Уточню дату" in await asyncio.wait_for(anext(stream), 3)
     continuation = asyncio.create_task(anext(stream))
     await asyncio.wait_for(started.wait(), 1)
     continuation.cancel()
     with pytest.raises(asyncio.CancelledError):
         await continuation
     await asyncio.wait_for(cancelled.wait(), 1)
-    assert provider.calls == 0
+    assert provider.calls == 1
     assert all(role != "assistant" for _, role, _ in history.saved)
 
 
@@ -481,9 +481,9 @@ async def test_voice_pipeline_speaks_ack_before_search_finishes_and_completes_an
         async def segment(self, started, audio, finished):
             text = audio.decode()
             self.spoken.append(text)
-            if "секунду" in text:
+            if "С датой" in text:
                 spoken_ack.set()
-    provider = SearchProvider(["[[avatar emotion=neutral gesture=auto intensity=1.0]] Проверила: релиз объявлен."])
+    provider = SearchProvider(['{"reply":"С датой надо свериться."}', "[[avatar emotion=neutral gesture=auto intensity=1.0]] Релиз объявлен."])
     agent = CharacterAgent(provider, History(), 10, situational_coordinator=Coordinator(GatedSearch(snapshot())), runtime_settings=RuntimeSettings())
     manager = VoiceSessionManager(RecordingTTS(), idle_flush_ms=10)
     monkeypatch.setattr(manager, "_validate_audio", lambda *_args: 0.1)
@@ -492,7 +492,7 @@ async def test_voice_pipeline_speaks_ack_before_search_finishes_and_completes_an
     task = await manager.start(session_id="s", utterance_id="u", transcript="Когда выйдет гта шесть?", language="ru", voice="ru_f1", agent=agent)
     try:
         await asyncio.wait_for(spoken_ack.wait(), 2)
-        assert provider.calls == 0
+        assert provider.calls == 1
         assert not task.done()
         gate.set()
         await asyncio.wait_for(task, 2)
@@ -501,10 +501,10 @@ async def test_voice_pipeline_speaks_ack_before_search_finishes_and_completes_an
         if not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
-    assert any("Проверила: релиз объявлен" in text for text in connection.spoken)
+    assert any("Релиз объявлен" in text for text in connection.spoken)
     completed = [e for e in connection.events if e["type"] == "voice.text.completed"]
     assert len(completed) == 1
-    assert "секунду" in completed[0]["reply"] and "Проверила" in completed[0]["reply"]
+    assert "С датой надо свериться" in completed[0]["reply"] and "Релиз объявлен" in completed[0]["reply"]
     assert "web_search" not in completed[0]["reply"] and "https://" not in completed[0]["reply"]
     assert not any(e["type"] == "voice.error" for e in connection.events)
 

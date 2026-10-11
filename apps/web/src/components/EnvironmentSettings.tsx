@@ -167,6 +167,10 @@ export function EnvironmentSettings({ settings, developerMode, onSaveSetting, on
       <AppSwitch checked={webSearchEnabled} label="Самостоятельный поиск в интернете"
         description="Запросы и источники сохраняются только в истории диалога."
         onChange={checked => saveSetting({ web_search_enabled: checked })} />
+      <AppSwitch checked={settings.web_search_notifications_enabled ?? false}
+        label="Показывать поиск в уведомлениях"
+        description="Этапы проверки и источники можно раскрыть в уведомлении. История сохраняется и без уведомлений."
+        onChange={checked => saveSetting({ web_search_notifications_enabled: checked })} />
       <label>Источник веб-поиска
         <CustomSelect value={searchProvider} disabled={!webSearchEnabled} onChange={event => saveSetting({ web_search_provider: event.target.value as "free" | "tavily" })}>
           <option value="free">Бесплатные источники</option><option value="tavily">Tavily Free</option>

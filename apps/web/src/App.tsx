@@ -189,7 +189,7 @@ import { InAppAvatarHost } from "./components/InAppAvatarHost";
 import { IrisPortalBackground } from "./components/IrisPortalBackground";
 import { IrisSubtitles } from "./components/IrisSubtitles";
 import { ConversationSurface } from "./components/ConversationSurface";
-import { RetrievalProgress } from "./components/RetrievalProgress";
+import { RetrievalNotifications } from "./retrievalNotifications";
 import { NotificationHost } from "./components/NotificationHost";
 import { TokenAnalyticsSettings } from "./components/TokenAnalyticsSettings";
 import { notify, notifyBackendEvent } from "./notifications";
@@ -482,6 +482,11 @@ function MainApp() {
   const [avatarStatus, setAvatarStatus] = useState<AvatarStatusResponse | null>(null);
   const [avatarOverlay, setAvatarOverlay] = useState<AvatarOverlaySettings | null>(null);
   const [settings, setSettings] = useState<PublicSettings | null>(null);
+  const retrievalNotifications = useRef(new RetrievalNotifications());
+  useEffect(() => {
+    retrievalNotifications.current.setEnabled(settings?.web_search_notifications_enabled ?? false);
+  }, [settings?.web_search_notifications_enabled]);
+  useEffect(() => () => retrievalNotifications.current.disconnect(), []);
   const [qaStudioOpen, setQaStudioOpen] = useState(false);
 
   useEffect(() => {
@@ -839,12 +844,14 @@ function MainApp() {
           const event = JSON.parse(message.data) as BackendEvent;
           setEvents((current) => dedupeEvents([...current, event]));
           notifyBackendEvent(event);
+          retrievalNotifications.current.consume(event);
         } catch {
           // Ignore malformed event frames.
         }
       };
 
       socket.onclose = () => {
+        retrievalNotifications.current.disconnect();
         if (closed) {
           return;
         }
@@ -2210,6 +2217,8 @@ export function ChatPage({
     if (!text || !sessionId) {
       return;
     }
+    stopVoicePlayback();
+    livePlayerRef.current?.stop();
 
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
@@ -2751,7 +2760,6 @@ export function ChatPage({
               onMinimize={toggleMinimized}
             />
           )}
-          <RetrievalProgress events={events} sessionId={sessionId} />
           <IrisSubtitles
             messages={messages}
             loading={loading}
@@ -3209,7 +3217,7 @@ export function SettingsPage({
     const livePatch: Partial<LiveConversationSettings> = {};
     for (const field of fields) {
       if (field.startsWith("live_conversation_")) Object.assign(livePatch, { [field]: next[field] });
-      else if (["location_mode", "location_city", "weather_enabled", "news_enabled", "news_category", "web_search_enabled", "web_search_provider"].includes(field)) {
+      else if (["location_mode", "location_city", "weather_enabled", "news_enabled", "news_category", "web_search_enabled", "web_search_notifications_enabled", "web_search_provider"].includes(field)) {
         Object.assign(environmentPatch, { [field]: next[field] });
       } else setters[field]?.(next[field]);
     }

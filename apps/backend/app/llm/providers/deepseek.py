@@ -55,6 +55,7 @@ class _RequestProfile:
 
 
 _PROFILE_SETTINGS: dict[str, tuple[str, int]] = {
+    "chat_search_bridge": ("llm_search_bridge_max_tokens", 96),
     "chat_search_plan": ("llm_search_plan_max_tokens", 256),
     "chat_search_assess": ("llm_search_assess_max_tokens", 400),
     "chat_json": ("llm_chat_json_max_tokens", 900),
@@ -203,6 +204,11 @@ class DeepSeekProvider(LLMProvider):
     async def generate(self, messages: list[ChatMessage]) -> LLMResponse:
         return await self._generate_json(messages, temperature=0.7)
 
+    def fork_for_purpose(self, purpose: str):
+        """Share the HTTP pool, but never mutable usage across parallel calls."""
+        return DeepSeekProvider(self._settings, api_key=self._api_key, model=self._model,
+                                base_url=self._base_url, timeout=self._timeout, purpose=purpose)
+
     async def generate_structured(
         self,
         messages: list[ChatMessage],
@@ -238,7 +244,8 @@ class DeepSeekProvider(LLMProvider):
             profile.max_tokens,
         )
 
-        for attempt in range(1, _MAX_ATTEMPTS + 1):
+        max_attempts = 1 if profile.purpose == "chat_search_bridge" else _MAX_ATTEMPTS
+        for attempt in range(1, max_attempts + 1):
             attempt_started_at = time.perf_counter()
             attempt_usage: LLMUsage | None = None
             attempt_finish_reason: str | None = None
@@ -296,7 +303,7 @@ class DeepSeekProvider(LLMProvider):
                     error_type=type(exc).__name__,
                     attempt=attempt,
                 )
-                if attempt < _MAX_ATTEMPTS and _is_retryable(exc):
+                if attempt < max_attempts and _is_retryable(exc):
                     logger.warning(
                         "Retrying DeepSeek request: model=%s purpose=%s attempt=%s "
                         "exception_type=%s root_error=%s",
@@ -598,6 +605,8 @@ class DeepSeekProvider(LLMProvider):
             max_tokens = default
         if max_tokens <= 0:
             max_tokens = default
+        if purpose == "chat_search_bridge":
+            max_tokens = min(max_tokens, 96)
         return _RequestProfile(
             purpose=purpose,
             max_tokens=max_tokens,

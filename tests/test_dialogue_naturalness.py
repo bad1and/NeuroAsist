@@ -179,7 +179,7 @@ async def test_closing_at_wait_ack_cancels_lookup(monkeypatch):
         finally:
             cancelled.set()
 
-    agent = CharacterAgent(ReplayLLM([]), History(), 10)
+    agent = CharacterAgent(ReplayLLM(['{"reply":"С названием понятно, проверю подробности."}']), History(), 10)
     waiting = agent._wait_for_lookup(lookup(), acknowledge=True)
     acknowledgement, _ = await anext(waiting)
     assert acknowledgement and agent._search_acknowledged

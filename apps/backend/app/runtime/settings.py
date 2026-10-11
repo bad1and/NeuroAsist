@@ -94,6 +94,7 @@ class RuntimeSettings:
     news_enabled: bool = True
     news_category: str = "all"
     web_search_enabled: bool = True
+    web_search_notifications_enabled: bool = False
     web_search_provider: str = "free"
     web_search_free_only: bool = True
 

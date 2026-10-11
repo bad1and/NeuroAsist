@@ -21,6 +21,26 @@ class SearchRequest:
     until: str = ""
     reason: str = "explicit"
     entity: str = ""
+    goal: str = ""
+
+
+def supplied_material(text: str) -> bool:
+    """An attached body is input to work on, not an enormous search query."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    marked_body = bool(re.search(r"(?:вот|держи|присылаю|прислал).{0,20}(?:текст|слова)|\[(?:куплет|припев|verse|chorus)|```", text, re.I))
+    return len(text) >= 160 and (len(lines) >= 6 or marked_body)
+
+
+def material_continuation(text: str) -> bool:
+    return len(text) < 160 and bool(
+        re.search(r"(?:до\s+(?:конца|полной)|полностью|(?:второй|третий).{0,15}куплет|остальн\w*.{0,15}(?:куплет|част)|продолжи.{0,15}(?:текст|песн))", text, re.I)
+        or re.fullmatch(r"\s*(?:(?:ну|а|давай|еще|ещё)\s+)*(?:дальше|продолжай|продолжи|продолжение)[.!? ]*", text, re.I)
+    )
+
+
+def query_anchors(value: str) -> set[str]:
+    generic = terms("текст песни песня трек куплет первый второй третий полностью полный слова исполнитель найти прочитать спеть напеть подробности song lyrics text verse full first second third details")
+    return terms(value) - generic
 
 
 _COMMAND = re.compile(r"\b(?:найди|поищи|поискать|погугли|загугли|погуглить|гугли|ищи|(?:посмотри|глянь|проверь)\s+в\s+(?:интернете|инете|сети)|search\s+(?:for|the\s+web)|look\s+up)\b", re.I)
@@ -58,7 +78,7 @@ def search_subject(text: str) -> str:
         return entity[0]
     match = re.search(r"(?:исполнител\w*|рэпер\w*|певец|групп\w*|песню)\s+([\w. -]{2,70})", text, re.I)
     if match:
-        name = re.split(r"\b(?:это|если|котор|ну|трек|можешь)\b", match[1], maxsplit=1, flags=re.I)[0]
+        name = re.split(r"\b(?:если|котор|ну|можешь)\b", match[1], maxsplit=1, flags=re.I)[0]
         if re.match(r"(?:с |котор|какой|такой|этот|необычн)", name, re.I):
             return ""
         return name.strip(" .?!")[:70]
@@ -153,7 +173,8 @@ def needs_query_planner(text: str, recent_messages: Iterable = ()) -> bool:
     explicit = bool(_COMMAND.search(text) or _LOOKUP.search(text) or _CHANGING.search(text) or _FRESH.search(text) or _RECENT.search(text) or (_EVENT.search(text) and _OUTCOME.search(text)))
     contextual = bool(users and (_DETAIL.search(text) or _FOLLOWUP.search(text)) and
                       any(_COMMAND.search(m.content) or _FRESH.search(m.content) or _RECENT.search(m.content) or _event_request(m.content) for m in users))
-    return search_requested(text, recent_messages) and (explicit or contextual) and plan_search(text, recent_messages) is None
+    accepted = analyze_dialogue_turn(text, recent_messages).accepts_lookup
+    return search_requested(text, recent_messages) and (explicit or contextual or accepted) and plan_search(text, recent_messages) is None
 
 
 def _meaningful(query: str) -> bool:
@@ -230,12 +251,18 @@ def plan_search(user_text: str, recent_messages: Iterable = ()) -> SearchRequest
     Never turn assistant prose, memory, or an entire transcript into a query.
     Generic greetings and search troubleshooting do not activate retrieval.
     """
-    if internet_forbidden(user_text) or sensitive_query(user_text) or _LOCAL.search(user_text):
+    if supplied_material(user_text) or internet_forbidden(user_text) or sensitive_query(user_text) or _LOCAL.search(user_text):
         return None
     recent_messages = list(recent_messages)
     if analyze_dialogue_turn(user_text, recent_messages).suppress_lookup:
         return None
     user_text = user_text.replace("ё", "е")
+    song = re.search(r"\b(?:спой|спеть|напеть|напой)\s+(?:пожалуйста\s+)?(?:песню\s+|трек\s+)?(.+)", user_text, re.I)
+    if song:
+        title = re.split(r"\b(?:если|пожалуйста|можешь)\b", song[1], maxsplit=1, flags=re.I)[0].strip(' .!?«»"')
+        title = normalize_entity(title)
+        if len(title) <= 100 and query_anchors(title) and not re.fullmatch(r"(?:это|его|ее|её|мне|что нибудь|что-нибудь|до конца)", title, re.I):
+            return SearchRequest(title + " текст песни", entity=title, goal=user_text, reason="source_content")
     conversation_request = _conversation_request(user_text, recent_messages)
     if conversation_request is not None:
         return conversation_request

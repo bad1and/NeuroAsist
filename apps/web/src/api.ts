@@ -213,6 +213,7 @@ export function updateRuntimeSettings(payload: {
   weather_enabled?: PublicSettings["weather_enabled"];
   news_enabled?: PublicSettings["news_enabled"];
   web_search_enabled?: PublicSettings["web_search_enabled"];
+  web_search_notifications_enabled?: PublicSettings["web_search_notifications_enabled"];
   web_search_provider?: PublicSettings["web_search_provider"];
   news_category?: PublicSettings["news_category"];
 }): Promise<PublicSettings> {

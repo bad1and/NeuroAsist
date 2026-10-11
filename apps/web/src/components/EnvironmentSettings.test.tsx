@@ -11,7 +11,7 @@ vi.mock("../api", () => api);
 vi.mock("./CustomSelect", () => ({ CustomSelect: ({ children, value, onChange, disabled }: any) =>
   <select value={value} onChange={onChange} disabled={disabled}>{children}</select> }));
 vi.mock("./MaterialButton", () => ({ MaterialButton: ({ materialKey, children, ...props }: any) =>
-  <button {...props}>{children}</button> }));
+  <button {...props}>{children}</button>, ButtonMaterialLayers: () => null }));
 import { EnvironmentSettings } from "./EnvironmentSettings";
 const openKeys = vi.fn();
 let server: PublicSettings;
@@ -41,6 +41,14 @@ beforeEach(() => {
 });
 
 describe("окружение и гео", () => {
+  it("выключает уведомления поиска по умолчанию и сохраняет отдельную настройку", async () => {
+    render(<Harness />);
+    const toggle = screen.getByRole("switch", { name: /Показывать поиск в уведомлениях/ });
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(api.updateRuntimeSettings).toHaveBeenCalledWith({ web_search_notifications_enabled: true }));
+    expect(toggle).toBeChecked();
+  });
   it("оставляет управление ключами в отдельном разделе и не меняет режим при открытии", async () => {
     render(<Harness initial={{ search_api_keys_configured: { tavily: true } }} />);
     expect(screen.getByLabelText(/Источник веб-поиска/)).toHaveValue("free");
