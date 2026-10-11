@@ -63,7 +63,9 @@ AI/ML-систем. Применимость к поставке Iris требу
 
 | Компонент | Где сверять состав и версию | Что нужно для поставки |
 | :--- | :--- | :--- |
-| GigaAM ONNX, TeraTTSv2, Smart Turn | [Model Manager](apps/backend/app/model_manager/service.py) и закреплённые revisions | Лицензия весов, уведомления и право выбранного способа доставки |
+| GigaAM ONNX | [STT-провайдер](apps/backend/app/voice/gigaam_onnx.py), закреплённая revision | Лицензия исходной модели и ONNX-экспорта, уведомления и способ доставки |
+| TeraTTSv2 и включённый RUAccent | [TTS-провайдер](apps/backend/app/voice/teratts_provider.py), закреплённая revision и состав snapshot | Лицензии всех включённых весов и кода, уведомления и способ доставки |
+| Silero VAD и Smart Turn | [Model Manager](apps/backend/app/model_manager/service.py), revisions и SHA-256 | Лицензии весов, уведомления и способ доставки |
 | Python runtime | [Профили requirements](requirements/) | Перечень всех поставляемых пакетов, включая транзитивные |
 | React, Tauri, Rust | Package/lock-файлы и Cargo.lock | Уведомления зависимостей |
 | UniVRM и glTF-пакеты | [Unity Packages](apps/avatar-unity/Packages/) | Лицензии фактически включённых пакетов |

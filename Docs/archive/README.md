@@ -20,4 +20,4 @@
 - [Unity source handoff](unity-source.md)
 - [Unity avatar runtime v0.4](unity_avatar_runtime_v0.4.md)
 
-Актуальная документация находится в [Docs/README.md](../README.md).
+Актуальная документация находится в [Docs/index.md](../index.md).

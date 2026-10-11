@@ -9,6 +9,9 @@
 
 ## Инструменты
 
+Оценка CPU, ОЗУ, диска и эталонный компьютер — в
+[системных требованиях](system-requirements.md).
+
 | Инструмент | Источник версии | Назначение |
 | :--- | :--- | :--- |
 | Python | [`.python-version`](../.python-version), `3.12.1` | Ядро и инструменты сборки |
@@ -16,12 +19,15 @@
 | Rust | [`rust-toolchain.toml`](../rust-toolchain.toml), `stable` | Оболочка Tauri |
 | Unity | [`ProjectVersion.txt`](../apps/avatar-unity/ProjectSettings/ProjectVersion.txt), `2022.3.62f3` | Пересборка аватара |
 | FFmpeg / FFprobe | Исполняемые файлы в `PATH` для разработки | Обработка аудио |
-| Microsoft C++ Build Tools и WebView2 | Windows-среда разработки Tauri | Сборка и запуск оболочки |
+| Microsoft C++ Build Tools и WebView2 | Windows-среда разработки Tauri; компонент Desktop development with C++ | Сборка и запуск оболочки |
 | Docker Desktop | Необязательный внешний компонент | Выполнение команд Coding Agent |
 
 `rust-version = 1.77.2` в Cargo — нижняя граница совместимости, а не закреплённая
 версия установленного компилятора. Unity и Docker не нужны для работы над
 обычным интерфейсом без этих подсистем.
+Для первой сборки аватара в новом клоне нужен модуль Unity Windows Build
+Support (Mono). Исполняемый файл аватара в Git не входит. Подготовка компилятора
+и WebView2 — в [руководстве Tauri](https://v2.tauri.app/start/prerequisites/).
 
 ## Профили Python
 
@@ -51,7 +57,7 @@ py -3.12 -m venv .venv
 npm ci
 npm ci --prefix apps/web
 npm ci --prefix apps/desktop
-Copy-Item .env.example .env
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 .\.venv\Scripts\python.exe scripts/check_python_dependencies.py
 .\.venv\Scripts\python.exe -m pip check
 ```
@@ -76,6 +82,9 @@ py -3.12 -m venv .venv-clean
 Текущий основной STT: `gigaam_onnx`, `v3_rnnt`, FP32, `device=auto`.
 Он использует CUDA при совместимом установленном runtime, иначе CPU.
 TeraTTSv2 остаётся на CPU. Прежний PyTorch-провайдер доступен как `gigaam`.
+`torch-cu128.txt` выбирает CUDA-сборку **PyTorch** и сам по себе не ускоряет
+ONNX-провайдер. Для текущего GigaAM ONNX достаточно CPU PyTorch и отдельного
+`stt-cuda.txt`; нужны совместимая карта и драйвер NVIDIA.
 
 Для выбранной development-среды **после** установки основного профиля:
 
@@ -117,6 +126,13 @@ CPU `onnxruntime` и `onnxruntime-gpu` используют одно имя Pyth
 CUDA inference или нехватка памяти допускают переход на CPU с повтором всей
 реплики. Явный `cuda` — строгий режим без такого перехода.
 Не относящиеся к CUDA ошибки не скрываются повторной обработкой.
+
+Управляемый каталог Model Manager содержит Silero VAD и Smart Turn: для них
+есть размер, SHA-256, установка и удаление. GigaAM ONNX и TeraTTS загружаются
+своими провайдерами по закреплённым revisions. Не все большие веса имеют
+тот же UI-контракт прогресса и проверки SHA-256; полная доставка моделей
+остаётся условием выпуска. TeraTTS включает RUAccent, отдельная модель
+для стандартного hash-индекса памяти не требуется.
 
 ## Среда установщика
 
