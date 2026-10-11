@@ -1,123 +1,113 @@
-# Архитектура Iris 1.0
+<img src="../apps/web/public/brand/iris-mark-backed-dark.svg" width="36" alt="Знак Iris">
 
-## Границы приложения
+<sub>[Документация](index.md) / Архитектура</sub>
 
-Iris состоит из четырёх runtime-компонентов:
+# Архитектура
 
-| Компонент | Владелец | Ответственность |
-| --- | --- | --- |
-| Tauri shell | `apps/desktop` | Окно, tray, single instance, запуск/остановка core и Unity, Credential Manager, случайный loopback port/token |
-| React UI | `apps/web` | Chat, Journal, Memory, Coding Agent, Settings, events, AudioWorklet и playback |
-| FastAPI core | `apps/backend` | Conversation orchestration, LLM, STT/TTS, storage, memory, models, diagnostics и WebSocket contracts |
-| Unity renderer | `apps/avatar-unity` | VRM, emotion/gesture playback, lip sync и overlay/in-app presentation |
+Оболочка Windows управляет жизненным циклом Iris. Интерфейс отвечает за ввод
+и воспроизведение, ядро — за диалог и данные, Unity — за необязательный аватар.
+Отказ отдельной функции должен оставлять доступными остальные возможности.
 
-В desktop-режиме Tauri является владельцем lifecycle. Backend не слушает
-внешний интерфейс: shell выбирает случайный `127.0.0.1` port и передаёт
-короткоживущий token React и Unity. Browser-only development на фиксированном
-порту остаётся отдельным режимом.
+| Компонент | Исходники | Ответственность |
+| :--- | :--- | :--- |
+| Tauri | [`apps/desktop`](../apps/desktop/) | Окно, значок в области уведомлений, единственный экземпляр, запуск ядра и Unity, хранилище ключей |
+| React | [`apps/web`](../apps/web/) | Диалог, журнал, память, настройки, события, AudioWorklet и воспроизведение |
+| FastAPI | [`apps/backend`](../apps/backend/) | Оркестрация разговора, LLM, STT/TTS, SQLite, память, модели и API |
+| Unity | [`apps/avatar-unity`](../apps/avatar-unity/) | VRM, мимика, жесты, синхронизация губ и размещение аватара |
 
-## Основной поток диалога
+## Запуск и границы доступа
+
+Tauri выбирает свободный порт `127.0.0.1`, создаёт временный токен и передаёт
+адрес ядра интерфейсу и Unity. HTTP и WebSocket защищены этим токеном. Ядро
+не является сетевым или многопользовательским сервисом.
+
+API-ключи Tauri читает из Windows Credential Manager и передаёт ядру через
+анонимный канал стандартного ввода. Секреты из `.env` и унаследованного
+окружения игнорируются. Браузерный режим разработки с фиксированным портом
+отделён от управляемого запуска и не получает пользовательские ключи.
+
+## Путь реплики
 
 ```mermaid
 sequenceDiagram
-    participant U as User
-    participant W as React/AudioWorklet
+    participant U as Пользователь
+    participant W as React / AudioWorklet
     participant B as FastAPI
-    participant S as Local STT
+    participant S as Локальный STT
     participant C as Character Agent
-    participant L as DeepSeek API
+    participant L as API модели
     participant D as SQLite
-    participant T as Local TTS
-
-    U->>W: text or PCM16
-    W->>B: POST /chat or voice-input WS v3
-    B->>S: confirmed voice segment
-    S-->>B: transcript
-    B->>D: user message / observation
-    B->>C: bounded context and state
-    C->>L: purpose-limited request
-    L-->>C: structured or streamed reply
-    C->>D: assistant reply and jobs
-    C-->>W: text/metadata stream
-    C->>T: safe text segments
-    T-->>W: audio segments
+    participant T as Локальный TTS
+    U->>W: Текст или PCM16
+    W->>B: HTTP или входной WebSocket v3
+    B->>S: Подтверждённая голосовая реплика
+    S-->>B: Расшифровка
+    B->>D: Реплика и наблюдение
+    B->>C: Ограниченный контекст и состояние
+    C->>L: Запрос с бюджетом назначения
+    L-->>C: Поток ответа
+    C-->>W: Текст и метаданные
+    C->>T: Фрагменты для озвучки
+    T-->>W: Аудио
+    W->>B: Подтверждение воспроизведения
+    B->>D: Подтверждённый голосовой ответ
 ```
 
-Text and voice share Character Agent, context, persistence and memory. Voice
-adds VAD, Smart Turn, generation leases and cancellation. Reconnect invalidates
-the old lease so late STT/LLM/TTS work cannot publish into a new connection.
+Текст и голос используют общий Character Agent, контекст и память. Голосовой
+путь добавляет VAD, Smart Turn и владение поколением ответа. Переподключение
+инвалидирует прежнего владельца: запоздалые STT/LLM/TTS-задачи не публикуют
+результат в новую сессию. Для голосового ответа история учитывает подтверждённые
+сегменты воспроизведения.
 
-## Conversation and character
+Поиск выполняется до фактического ответа и сохраняет собственные метаданные:
+попытки, кэш, источники и достаточность сведений. Внешний текст рассматривается
+как данные. Подробности — в [поиске](awareness.md).
 
-- `app/agents/character` owns prompts, structured response validation and LLM calls.
-- `app/context` builds bounded context from identity, summaries, recent turns and retrieved memories.
-- `app/conversation` owns observations, response decisions, mood, relationship state, reflections and live playback state.
-- Character Protocol v3 in `apps/protocol` is shared with React and Unity.
+## Владельцы логики
 
-Dynamic state is a separate system message so stable prompt prefixes remain
-cacheable. Non-coding DeepSeek calls explicitly disable model thinking and use
-purpose-specific output/retry budgets. Physical attempts emit content-free
-usage telemetry under `/debug/llm/usage`.
+| Модуль ядра | Что ему принадлежит |
+| :--- | :--- |
+| `app/agents/character` | Инструкции персонажа, вызовы модели и проверка ответа |
+| `app/context` | Контекст из личности, сводок, последних реплик и выбранной памяти |
+| `app/conversation` | Наблюдения, решение отвечать, настроение, отношения и состояние воспроизведения |
+| `app/storage` | Timeline, эпизоды, память, аудит, задания и миграции |
+| `app/environment` | Веб-поиск, чтение источников и новости |
+| [`apps/protocol`](../apps/protocol/) | Общий Character Protocol v3 для React, ядра и Unity |
 
-## Storage and background work
+Стабильный префикс инструкций отделён от динамического состояния, чтобы
+сохранять повторное использование кэша модели. Для обычных назначений DeepSeek
+отключается режим рассуждения; вывод и повторные попытки ограничены.
+`/debug/llm/usage` показывает расход каждой физической попытки без содержимого
+запроса и ответа. Поисковые служебные вызовы учитываются отдельно от основного
+ответа и включаются в общий расход хода.
 
-SQLite is canonical. `TimelineStore` contains timeline messages, episodes,
-summaries, memory records/audit, background jobs, character state and Coding
-Agent task records. Runtime JSON settings are the only separate mutable user
-state; they use atomic replace and transactional publication.
+## Данные и фоновые задачи
 
-The following durable workers are supervised by the application lifespan:
+SQLite — каноническое хранилище. `TimelineStore` содержит сообщения, эпизоды,
+сводки, память со свидетельствами и аудитом, задания, состояние персонажа и
+записи Coding Agent. Несекретные настройки живут в `settings.json`: новое
+состояние публикуется после успешной атомарной записи файла.
 
-- episode summary;
-- semantic index synchronization;
-- memory consolidation;
-- reflection;
-- Coding Agent task execution.
+Жизненный цикл приложения контролирует исполнителей сводок эпизодов,
+синхронизации индекса, консолидации памяти, рефлексий и Coding Agent. При
+неожиданном выходе публикуется `backend.worker_failed`; повторный запуск
+использует ограниченную увеличивающуюся задержку. Остановка дожидается
+завершения контролирующих задач до закрытия зависимостей.
 
-An unexpected worker exit produces `backend.worker_failed` and restarts with
-bounded exponential backoff. Shutdown cancels and awaits supervisors before
-closing their dependencies. Blocking SQLite and filesystem work in interactive
-async paths runs through the worker thread pool.
+Блокирующая работа SQLite и файловой системы в интерактивных асинхронных
+путях переносится в пул потоков. Память извлекается в фоне: подходящие реплики
+объединяются в окно консолидации, явная просьба запомнить или исправить факт
+может ускорить задание. Семантический индекс перестраивается из SQLite.
 
-## Memory
+## Границы отказов
 
-Memory extraction is not on the visible response critical path. Eligible user
-turns are coalesced into a trailing consolidation window; explicit remember,
-correction and goodbye cues can schedule immediately. The extraction request
-has a hard size budget and sees user deltas plus a small relevant topic
-shortlist, not an unbounded conversation or the whole topic catalog.
+- Ошибка LLM или TTS не удаляет сохранённую пользовательскую реплику.
+- Ошибка озвучки оставляет доступным текст ответа.
+- При отказе семантического поиска остаётся текстовый поиск SQLite FTS.
+- Ошибка записи настроек сохраняет прежнее опубликованное состояние.
+- Задачи старого поколения не публикуются после переподключения.
+- Coding Agent выполняет команды только в Docker и не переходит к оболочке хоста.
 
-SQLite stores canonical records, provenance and audit. FTS is the safe
-baseline; the optional vector index is rebuildable from SQLite. Deleting an
-index never deletes canonical memory.
+---
 
-## Voice
-
-- Browser AudioWorklet emits PCM16 to `/ws/voice-input/{session_id}?version=3`.
-- Silero VAD is primary; energy VAD is a controlled fallback.
-- Smart Turn distinguishes a pause from a complete utterance.
-- Barge-in cancels only the active generation for the session.
-- TeraTTSv2 produces local audio segments; playback acknowledgement drives character state.
-- Raw microphone audio is RAM-only unless diagnostic capture is explicitly enabled.
-
-The older `/ws/voice/{session_id}?version=1` channel remains the response-audio
-transport. There is no supported `/voice/chat` endpoint.
-
-## Coding Agent
-
-Coding Agent is an optional subsystem with a separate purpose profile. A task
-uses an isolated workspace and a Docker container with no network, dropped
-capabilities, resource limits and no live source mount. Application to an
-approved source project requires an explicit user action and source-hash
-conflict check. See [Coding Agent](coding-agent.md).
-
-## Failure boundaries
-
-- LLM/TTS failure cannot erase a persisted user turn.
-- TTS failure leaves the text response usable.
-- Semantic retrieval failure falls back to canonical text retrieval.
-- Invalid settings never mutate live state before durable persistence.
-- Stale voice work cannot publish after reconnect or shutdown.
-- Coding commands never fall back from Docker to the host.
-
-Operational handling and verification commands are in [Operations](operations.md).
+[Эксплуатация](operations.md) · [API](api.md) · [Живой разговор](live-conversation.md)

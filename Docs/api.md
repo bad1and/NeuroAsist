@@ -1,75 +1,88 @@
-# HTTP и WebSocket contracts
+<img src="../apps/web/public/brand/iris-mark-backed-dark.svg" width="36" alt="Знак Iris">
 
-FastAPI OpenAPI на запущенном development backend доступен по `/docs` и
-`/openapi.json`; он является источником точных request/response schemas. Этот
-документ фиксирует transport/lifecycle contracts, которые важны для клиентов.
+<sub>[Документация](index.md) / API</sub>
 
-## Адрес и authentication
+# HTTP и WebSocket API
 
-Browser development использует `http://127.0.0.1:8000` по умолчанию. Desktop
-shell каждый запуск выбирает случайный loopback port и session token.
+Точные поля запросов и ответов описаны в OpenAPI работающего ядра:
+`/docs` и `/openapi.json`. Этот документ описывает авторизацию, группы маршрутов
+и правила жизненного цикла, которые нужно сохранять при изменении клиентов.
 
-- HTTP desktop requests передают `X-NeuroAsist-Token`.
-- WebSocket desktop connections передают тот же token в query parameter `token`.
-- Без token desktop core возвращает `401` или закрывает WebSocket.
-- CORS допускает только настроенные local origins.
+## Адрес и авторизация
 
-Не сохраняйте ephemeral token и не включайте его в логи/bug reports.
+Браузерная разработка по умолчанию использует `http://127.0.0.1:8000`.
+При управляемом запуске Tauri выбирает случайный локальный порт и временный
+токен сессии.
 
-## Основные HTTP groups
+| Транспорт | Передача токена | Ошибка авторизации |
+| :--- | :--- | :--- |
+| HTTP | Заголовок `X-NeuroAsist-Token` | `401` |
+| WebSocket | Параметр запроса `token` | Соединение закрывается |
 
-| Group | Назначение |
-| --- | --- |
-| `/health`, `/readiness`, `/status` | Liveness, readiness по подсистемам и версия приложения |
-| `/chat`, `/chat/live` | Typed character reply и unified live response orchestration |
-| `/conversation/*` | Active session, character state, reflections и debug |
-| `/timeline/*`, `/episodes/*` | Messages, journal, search и episode lifecycle |
-| `/memory/*` | Memory CRUD, topics, commitments, audit, retrieval/index diagnostics |
-| `/settings/*`, `/models/*` | Runtime preferences, dictionaries and managed models |
-| `/voice/*`, `/avatar/*` | Interrupt/audio/TTS status и avatar commands/status |
-| `/coding/*` | Isolated Coding Agent tasks and review/apply lifecycle |
-| `/events`, `/diagnostics`, `/backups` | Runtime observability and maintenance |
-| `/debug/llm/usage` | Content-free token/cache/retry/latency telemetry |
+Токен нельзя сохранять в настройках, отчётах или журналах URL. CORS допускает
+настроенные локальные источники. Номера протоколов независимы от версии продукта.
 
-`/voice/chat` не поддерживается и намеренно возвращает `404`; voice input идёт
-через WebSocket v3, а ответ использует общий chat/live orchestration.
+## HTTP
 
-## WebSockets
+| Маршруты | Назначение |
+| :--- | :--- |
+| `/health`, `/readiness`, `/status` | Доступность ядра, готовность подсистем и версия |
+| `/chat`, `/chat/live` | Текстовый ответ и общая оркестрация потокового диалога |
+| `/conversation/*` | Активная сессия, состояние персонажа, рефлексии и диагностика |
+| `/timeline/*`, `/episodes/*` | Сообщения, журнал, поиск и жизненный цикл эпизодов |
+| `/memory/*` | Память, темы, обязательства, аудит и поисковый индекс |
+| `/environment/status`, `/environment/news`, `/environment/search/check` | Состояние источников, подборки новостей и проверка поискового API |
+| `/settings/*`, `/models/*` | Несекретные настройки, словари и управление моделями |
+| `/voice/*`, `/avatar/*` | Прерывание, озвучка, команды и состояние аватара |
+| `/coding/*` | Задания, просмотр и применение изменений Coding Agent |
+| `/events`, `/diagnostics`, `/backups` | События, обслуживание и резервные копии |
+| `/debug/llm/usage` | Токены, кэш, попытки и задержки без содержимого диалога |
 
-### `/ws/events`
+`/voice/chat` не поддерживается и возвращает `404`. Голосовой ввод поступает
+через WebSocket v3, ответ использует общий путь диалога. У резервных копий
+реализованы создание, список и удаление; маршрут восстановления отсутствует.
 
-Поток runtime events для UI. Desktop query token обязателен. Payload содержит
-event identity/type/level/message/metadata; sensitive prompts и chain-of-thought
-не являются частью contract.
+## WebSocket
 
-### `/ws/voice-input/{session_id}?version=3`
+### События · `/ws/events`
 
-Единственный input protocol Live Conversation. После connect клиент отправляет
-`voice.input.start`, затем binary PCM16 frames, в конце `voice.input.stop`.
-Точный start payload и graceful/disconnect semantics описаны в
-[live-conversation.md](live-conversation.md).
+Передаёт события исполнения для интерфейса: идентификатор, тип, уровень,
+сообщение и метаданные. Полные запросы модели и скрытые рассуждения не являются
+частью этого контракта. `retrieval.progress` сообщает этап поисковой операции;
+отмена и завершение привязаны к конкретному ходу.
 
-Version 1/2 и legacy `mode` отклоняются. Reconnect создаёт нового connection
-owner и инвалидирует старые async completions.
+### Микрофон · `/ws/voice-input/{session_id}?version=3`
 
-### `/ws/voice/{session_id}?version=1`
+Клиент отправляет `voice.input.start`, непрерывные бинарные PCM16-фреймы и
+`voice.input.stop`. Поля начала потока и поведение при остановке описаны в
+[живом разговоре](live-conversation.md#websocket-v3).
 
-Response audio/control channel. Version отличается от input protocol намеренно;
-эти версии нельзя синхронизировать с application version.
+Версии 1/2 и прежнее поле `mode` отклоняются. Переподключение создаёт нового
+владельца соединения и отменяет задачи прежнего. Обычный `stop` дожидается
+подтверждённых задач ввода; разрыв соединения инвалидирует их владение.
 
-### `/ws/avatar?version=2`
+### Ответ · `/ws/voice/{session_id}?version=1`
 
-Unity renderer registers supported protocol versions, получает speak/emotion/
-gesture/overlay commands и подтверждает playback. Unsupported versions закрываются
-policy error. Avatar protocol schemas находятся в `apps/backend/app/avatar` и
-`apps/protocol`.
+Канал аудио и управления ответом. Его версия намеренно отличается от входного
+протокола. Не повышайте её при изменении версии приложения или микрофонного канала.
 
-## Compatibility rules
+### Аватар · `/ws/avatar?version=2`
 
-- Application `1.0.0` не меняет номера transport protocols автоматически.
-- Client должен использовать OpenAPI/generated schemas, а не угадывать поля.
-- Unknown protocol version отклоняется явно.
-- `session_id`, `generation`, `turn_id` и `utterance_id` сохраняют ownership;
-  late event старой generation игнорируется.
-- Durable message/state записывается до публикации dependent events там, где
-  recovery требует такого порядка.
+Unity регистрирует поддерживаемые версии, получает команды речи, эмоций,
+жестов и размещения, подтверждает воспроизведение. Несовместимая версия
+закрывается с ошибкой политики. Схемы находятся в
+[`app/avatar`](../apps/backend/app/avatar/) и [`apps/protocol`](../apps/protocol/).
+
+## Совместимость
+
+- Клиент сверяется со схемой, а не угадывает поля по примерам.
+- Неизвестная версия протокола отклоняется явно.
+- `session_id`, `generation`, `turn_id` и `utterance_id` задают принадлежность
+  результата; позднее событие старого поколения игнорируется.
+- Там, где восстановление требует такого порядка, данные сохраняются до
+  публикации зависящих от них событий.
+- Изменение номера продукта не меняет миграции SQLite и версии транспорта.
+
+---
+
+[Архитектура](architecture.md) · [Диагностика](operations.md#диагностика)

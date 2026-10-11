@@ -1,86 +1,113 @@
-# Live voice latency
+<img src="../apps/web/public/brand/iris-mark-backed-dark.svg" width="36" alt="Знак Iris">
 
-The user-facing latency budget is measured from the last audible input frame to
-the first audible assistant frame. It is not measured from the VAD boundary,
-because the boundary is emitted only after an intentional silence window.
+<sub>[Документация](index.md) / Измерения</sub>
 
-## Critical path
+# Задержка голосового ответа
+
+Полная задержка измеряется от последнего слышимого кадра пользовательской
+речи до первого фактически слышимого кадра Iris. Граница VAD возникает после
+заданной паузы и не является правильной точкой начала этого измерения.
+
+## Последовательность
 
 ```text
-last speech frame
-  -> VAD endpoint silence
-  -> Smart Turn
-  -> GigaAM STT
-  -> conversation decision and persistence
-  -> first DeepSeek delta / first speakable text boundary
-  -> TeraTTSv2
-  -> WebSocket + browser WAV decode + AudioContext lead
-  -> first audible frame
+Последний кадр речи → пауза VAD → Smart Turn → STT
+→ решение и сохранение → первая дельта LLM → пригодный для речи фрагмент
+→ TeraTTS → транспорт и декодирование → начало звука
 ```
 
-The response path stays fully streamed at the text/segment level. TeraTTSv2 is
-kept unchanged and remains preloaded and warmed on startup.
+Контрольное событие — `voice.end_of_speech_to_playback`,
+поле `end_of_speech_to_playback_ms`. Оно возникает после подтверждения начала
+воспроизведения клиентом. Время STT или синтеза само по себе не равно
+задержке всего разговора.
 
-## Local baseline (2026-09-23)
+## Текущий профиль
 
-Measurements were taken with the checked-in configuration on this 16-logical-
-CPU Windows host, after model warmup:
+- Профиль `natural` передаёт кандидат Smart Turn после примерно 350 мс тишины.
+  Неполная реплика продолжает собираться; консервативная защита сохраняется.
+- Первый пригодный для речи фрагмент ориентируется на 24 символа,
+  ожидание сброса — 80 мс. Разрез допустим на пробеле или пунктуации.
+- Начало воспроизведения: один декодированный сегмент, без временного
+  предварительного накопления, запас планирования 10 мс.
+- Стабильные части длинной речи могут распознаваться до её окончания.
+- Для подходящих прямых обращений оценка состояния идёт параллельно ответу.
 
-| Stage | Measured latency |
-| --- | ---: |
-| Smart Turn v3.2 | 47–57 ms typical; 175 ms first measured call |
-| GigaAM v3 RNNT, 1.9–4.1 s fixtures | 177–256 ms |
-| TeraTTSv2, `ru_f1`, 3 characters | 217 ms |
-| TeraTTSv2, `ru_f1`, 25 characters | 268 ms |
-| TeraTTSv2, `ru_f1`, 53 characters | 378 ms |
-| Browser playback lead (old default) | 30 ms |
+Значения определяются [конфигурацией](../apps/backend/app/core/config.py) и
+[`.env.example`](../.env.example); действия по голосовому пути —
+в [живом разговоре](live-conversation.md).
 
-TeraTTS native generation yielded its first internal chunk only 24–74 ms before
-the complete tested segment. Converting that internal generator into multiple
-standalone WAV messages would complicate pause placement, post-processing and
-cancellation for a relatively small first-audio gain. The safer optimization is
-therefore to send a shorter first textual segment into the same model sooner.
+## Как измерять
 
-On this host, TeraTTS thread-count medians for the same phrase were 288 ms (4
-threads), 297 ms (8 threads) and 311 ms (12 threads). The difference is too
-small and noisy to justify changing the existing 8-thread default globally.
+1. Запишите оборудование, модели/revisions, устройства, акустику и тип запуска.
+2. Соберите не менее 30 реальных реплик и сгруппируйте события по `utterance_id`.
+3. Разделите первый запуск и прогретый профиль.
+4. Рассчитайте P50/P95 полной задержки и отдельных стадий.
+5. Сохраните отмены и ошибки отдельно; не исключайте неудобные результаты
+   без явного правила.
 
-## Current low-latency profile
+События стадий:
 
-- Smart Turn receives a candidate after 350 ms of silence in the natural pause
-  profile. If it reports an incomplete turn, existing continuation assembly and
-  the conservative 2.5 s forced-endpoint safeguard remain in force.
-- The first safe text fragment targets 24 characters and can idle-flush after
-  80 ms. A fragment is still released only on whitespace or punctuation and
-  never in the middle of a token.
-- Browser playback uses one decoded segment, no time prebuffer and a 10 ms
-  scheduling lead.
-- The exact end-of-speech stopwatch is propagated through endpoint, STT,
-  decision, first LLM delta, first speakable segment, first TTS segment and
-  browser playback acknowledgement.
+```text
+voice.endpoint_detected
+voice.stt_completed
+voice.decision_completed
+voice.llm_first_delta
+voice.first_speakable_segment
+voice.tts_first_segment_ready
+voice.end_of_speech_to_playback
+```
 
-The relevant event stream now includes:
+Цель выпуска: P95 ≤ 2,5 с; рабочий ориентир прогретого профиля — P50 ≤ 1,5 с.
+Это критерии приёмки, а не уже подтверждённая скорость на всех компьютерах.
 
-- `voice.endpoint_detected`
-- `voice.stt_completed`
-- `voice.decision_completed`
-- `voice.llm_first_delta`
-- `voice.first_speakable_segment`
-- `voice.tts_first_segment_ready`
-- `voice.end_of_speech_to_playback`
+## Срез · 23 сентября 2026
 
-Use the final event's `end_of_speech_to_playback_ms` as the acceptance metric.
-Track P50 and P95 separately for warm startup and cold startup. The release gate
-remains P95 <= 2.5 seconds; the practical warm target is P50 <= 1.5 seconds.
+Локальные измерения на Windows с 16 логическими CPU после прогрева:
 
-## Remaining optimization order
+| Стадия | Наблюдение |
+| :--- | ---: |
+| Smart Turn v3.2 | Обычно 47–57 мс; первый измеренный вызов 175 мс |
+| GigaAM v3 RNNT, записи 1,9–4,1 с | 177–256 мс |
+| TeraTTSv2 `ru_f1`, 3 / 25 / 53 символа | 217 / 268 / 378 мс |
+| Старый запас планирования браузера | 30 мс |
 
-1. Collect at least 30 real microphone turns and group the events by
-   `utterance_id` to identify the dominant stage on the actual DeepSeek route.
-2. If `voice.llm_first_delta` dominates, reduce prompt construction and remote
-   first-token latency; TTS tuning cannot hide that stage.
-3. If TTS dominates despite short first segments, prototype native audio
-   streaming behind a feature flag and require gapless playback/cancellation
-   tests before enabling it.
-4. Do not reduce endpoint silence further without real-audio false-cutoff tests
-   for quiet endings, short pauses and unfinished clauses.
+Первый внутренний chunk TeraTTS опережал готовность всего проверенного сегмента
+на 24–74 мс. Медианы одной фразы при 4/8/12 потоках: 288/297/311 мс.
+Эти данные не обосновывают глобальную смену восьмипоточного профиля.
+
+## Срез · 1 октября 2026
+
+PCM-повтор через `VoiceService` на GTX 1660 SUPER:
+
+| Запись | Полная обработка, медиана 3 повторов | STT после остановки с предобработкой | Заранее готовые участки |
+| :--- | ---: | ---: | ---: |
+| 33,1 с | 762 мс | 235 мс | 1 |
+| 61,2 с | 1171 мс | 476 мс | 2 |
+| 130,1 с | 2898 мс | 288 мс | 6 |
+
+Тексты совпали с GPU-базой на 35 записях. Поступление PCM было виртуальным,
+кадры подавались раз в секунду. Хвост измерен одним прогоном без микрофона,
+сетевой модели и playback. Локальный отчёт:
+`output/stt-comparison/iris-overlap-gpu.json`; в Git он не поставляется.
+
+Воспроизведение после подготовки [STT-корпуса](stt-comparison.md):
+
+```powershell
+.\.venv\Scripts\python.exe scripts/benchmark_voice_stt_overlap.py --manifest .cache/stt-lab/corpus/manifest.json --baseline output/stt-comparison/iris-integrated-gpu.json --output output/stt-comparison/iris-overlap-gpu.json
+```
+
+В локальной телеметрии полные вызовы adjudication занимали 1,05–1,56 с.
+Это длительность вызова, а не первый токен и не полный выигрыш в динамиках.
+На девяти фикстурах ограничение Smart Turn четырьмя потоками без idle spinning
+снизило медианы inference с 46–65 до 24–25 мс при совпавших вероятностях.
+
+## Следующая оптимизация
+
+Сначала найдите доминирующую стадию в реальном разговоре.
+Если задерживает первый ответ LLM, настройки TTS её не устранят.
+Потоковый native TTS требует отдельной проверки непрерывности и отмены.
+Уменьшение endpoint-паузы требует испытаний тихих окончаний и незавершённых фраз.
+
+---
+
+[Условия выпуска](release-checklist.md) · [Сравнение STT](stt-comparison.md)

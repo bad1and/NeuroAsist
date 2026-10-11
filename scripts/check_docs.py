@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import ast
+import html
 import json
 import re
-import sys
 import tomllib
+import unicodedata
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -14,9 +16,11 @@ from urllib.parse import unquote, urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$")
 LINK = re.compile(r"!?\[[^\]]*\]\((?P<target><[^>]+>|[^\s)]+)")
+IMAGE = re.compile(r"!\[[^\]]*\]\((?P<target><[^>]+>|[^\s)]+)")
 
 ROOT_MARKDOWN = (
     "README.md",
+    "README.en.md",
     "README.ru.md",
     "CHANGELOG.md",
     "CONTRIBUTING.md",
@@ -24,8 +28,16 @@ ROOT_MARKDOWN = (
     "SECURITY.md",
     "THIRD_PARTY_ASSETS.md",
     "design.md",
+    "AGENTS.md",
+    "GEMINI.md",
+    "rules.md",
+    "assets/README.md",
+    "requirements/README.md",
     "apps/desktop/README.md",
     "apps/avatar-unity/README.md",
+    "apps/web/public/brand/README.md",
+    "apps/web/src/startup-snake/README.md",
+    "apps/web/src/design-pack/reference.md",
 )
 
 
@@ -121,7 +133,7 @@ def check_versions(errors: list[str]) -> str:
         errors.append("Unity editor version must remain pinned to 2022.3.62f3")
 
     badge = f"version-{version}"
-    for readme in ("README.md", "README.ru.md"):
+    for readme in ("README.md", "README.en.md"):
         if badge not in (ROOT / readme).read_text(encoding="utf-8"):
             errors.append(f"{readme}: version badge must contain {badge}")
     return version
@@ -169,47 +181,169 @@ def maintained_markdown() -> list[Path]:
     return sorted(files)
 
 
+def prose_lines(text: str) -> list[str]:
+    """Blank fenced examples without changing line numbers."""
+    lines: list[str] = []
+    fence: tuple[str, int] | None = None
+    for line in text.splitlines():
+        marker = re.match(r"^\s{0,3}(`{3,}|~{3,})(.*)$", line)
+        if marker:
+            run, tail = marker.groups()
+            if fence is None:
+                fence = (run[0], len(run))
+            elif run[0] == fence[0] and len(run) >= fence[1] and not tail.strip():
+                fence = None
+            lines.append("")
+        else:
+            lines.append(line if fence is None else "")
+    return lines
+
+
+def markdown_anchors(text: str) -> set[str]:
+    """GitHub-style heading slugs, including duplicate and Cyrillic headings."""
+    anchors: set[str] = set()
+    counts: dict[str, int] = {}
+    for line in prose_lines(text):
+        match = re.match(r"^ {0,3}#{1,6}\s+(.+?)(?:\s+#+)?\s*$", line)
+        if not match:
+            continue
+        label = re.sub(r"!?\[([^]]*)\]\([^)]*\)", r"\1", match.group(1))
+        label = html.unescape(re.sub(r"<[^>]*>", "", label)).lower()
+        base = "".join(
+            ch for ch in label
+            if ch in "_-" or ch.isspace() or unicodedata.category(ch)[0] in "LN"
+        ).replace(" ", "-")
+        number = counts.get(base, 0)
+        slug = base if number == 0 else f"{base}-{number}"
+        while slug in anchors:
+            number += 1
+            slug = f"{base}-{number}"
+        counts[base] = number + 1
+        anchors.add(slug)
+    anchors.update(re.findall(r'<(?:a|h[1-6])\b[^>]*\b(?:id|name)=[\"\']([^\"\']+)', text, re.I))
+    return anchors
+
+
+class _HTMLTargets(HTMLParser):
+    def __init__(self, *, images_only: bool = False) -> None:
+        super().__init__()
+        self.targets: list[tuple[int, str]] = []
+        self.images_only = images_only
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        for key, value in attrs:
+            if value is None:
+                continue
+            if (tag in {"img", "source"} and key == "src") or (
+                tag == "a" and key == "href" and not self.images_only
+            ):
+                self.targets.append((self.getpos()[0], value))
+            elif tag in {"img", "source"} and key == "srcset":
+                for candidate in value.split(","):
+                    if candidate.strip():
+                        self.targets.append((self.getpos()[0], candidate.strip().split()[0]))
+
+
+def document_targets(text: str) -> list[tuple[int, str]]:
+    lines = prose_lines(text)
+    targets: list[tuple[int, str]] = []
+    for line_number, line in enumerate(lines, 1):
+        # Inline examples are not rendered links.
+        prose = re.sub(r"(`+).*?\1", "", line)
+        for match in LINK.finditer(prose):
+            targets.append((line_number, match.group("target").strip("<>")))
+        definition = re.match(r"^ {0,3}\[[^]]+\]:\s*(<[^>]+>|\S+)", prose)
+        if definition:
+            targets.append((line_number, definition.group(1).strip("<>")))
+    parser = _HTMLTargets()
+    parser.feed("\n".join(lines))
+    return targets + parser.targets
+
+
 def check_links(errors: list[str]) -> None:
     for path in maintained_markdown():
         if not path.exists():
             errors.append(f"missing maintained document: {path.relative_to(ROOT)}")
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
-        for line_number, line in enumerate(text.splitlines(), 1):
-            for match in LINK.finditer(line):
-                raw = match.group("target").strip("<>")
-                if not raw or raw.startswith("#"):
-                    continue
-                parsed = urlsplit(raw)
-                if parsed.scheme in {"http", "https", "mailto", "data"}:
-                    continue
-                if parsed.scheme:
-                    errors.append(
-                        f"{path.relative_to(ROOT)}:{line_number}: unsupported local link {raw!r}"
-                    )
-                    continue
-                target_text = unquote(parsed.path).replace("/", str(Path("/")).replace("/", "\\") if sys.platform == "win32" else "/")
-                target = (path.parent / target_text).resolve()
-                try:
-                    target.relative_to(ROOT.resolve())
-                except ValueError:
-                    errors.append(
-                        f"{path.relative_to(ROOT)}:{line_number}: link escapes repository: {raw!r}"
-                    )
-                    continue
-                if not target.exists():
-                    errors.append(
-                        f"{path.relative_to(ROOT)}:{line_number}: missing local target {raw!r}"
-                    )
+        for line_number, raw in document_targets(text):
+            if not raw:
+                continue
+            parsed = urlsplit(raw)
+            if parsed.scheme in {"http", "https", "mailto", "data"} or parsed.netloc:
+                continue
+            if parsed.scheme:
+                errors.append(f"{path.relative_to(ROOT)}:{line_number}: unsupported local link {raw!r}")
+                continue
+            target = (path.parent / unquote(parsed.path)).resolve() if parsed.path else path.resolve()
+            try:
+                target.relative_to(ROOT.resolve())
+            except ValueError:
+                errors.append(f"{path.relative_to(ROOT)}:{line_number}: link escapes repository: {raw!r}")
+                continue
+            if not target.exists():
+                errors.append(f"{path.relative_to(ROOT)}:{line_number}: missing local target {raw!r}")
+                continue
+            if parsed.fragment and target.suffix.lower() == ".md":
+                fragment = unquote(parsed.fragment)
+                anchors = markdown_anchors(target.read_text(encoding="utf-8"))
+                if fragment not in anchors:
+                    errors.append(f"{path.relative_to(ROOT)}:{line_number}: missing heading anchor {raw!r}")
 
 
-def check_readme_parity(errors: list[str]) -> None:
-    structures: list[list[int]] = []
-    for name in ("README.md", "README.ru.md"):
-        headings = [len(match.group(1)) for match in re.finditer(r"(?m)^(#{1,6})\s+", (ROOT / name).read_text(encoding="utf-8"))]
-        structures.append(headings)
-    if structures[0] != structures[1]:
-        errors.append("README.md and README.ru.md heading structures differ")
+def check_readme_navigation(errors: list[str]) -> None:
+    """Check language transitions while editions can be revised independently."""
+    for name, destination in (
+        ("README.md", "README.en.md"),
+        ("README.en.md", "README.md"),
+        ("README.ru.md", "README.md"),
+    ):
+        path = ROOT / name
+        if not path.exists():
+            continue  # check_links reports missing maintained documents.
+        targets = document_targets(path.read_text(encoding="utf-8"))
+        if not any(
+            not urlsplit(raw).scheme
+            and not urlsplit(raw).netloc
+            and (path.parent / unquote(urlsplit(raw).path)).resolve() == (ROOT / destination).resolve()
+            for _, raw in targets
+        ):
+            errors.append(f"{name}: missing language link to {destination}")
+
+
+def check_readme_images(errors: list[str]) -> None:
+    """Keep local illustrations in sync, without requiring identical text."""
+    editions: dict[str, set[Path]] = {}
+    for name in ("README.md", "README.en.md"):
+        path = ROOT / name
+        if not path.exists():
+            return  # check_links reports missing maintained documents.
+        lines = prose_lines(path.read_text(encoding="utf-8"))
+        prose = "\n".join(re.sub(r"(`+).*?\1", "", line) for line in lines)
+        parser = _HTMLTargets(images_only=True)
+        parser.feed(prose)
+        targets = [raw for _, raw in parser.targets]
+        targets.extend(
+            match.group("target").strip("<>")
+            for match in IMAGE.finditer(prose)
+        )
+        editions[name] = {
+            (path.parent / unquote(urlsplit(raw).path)).resolve()
+            for raw in targets
+            if not urlsplit(raw).scheme and not urlsplit(raw).netloc
+        }
+    for name, images in editions.items():
+        other = "README.en.md" if name == "README.md" else "README.md"
+        source_lang, target_lang = (".ru.", ".en.") if name == "README.en.md" else (".en.", ".ru.")
+        # Composed illustrations may contain translated text. Gallery photos
+        # and all other shared assets still require the identical file.
+        expected = {
+            image.with_name(image.name.replace(source_lang, target_lang))
+            for image in editions[other]
+        }
+        for missing in sorted(expected - images):
+            if missing.is_relative_to(ROOT.resolve()):
+                errors.append(f"{name}: missing shared image {missing.relative_to(ROOT.resolve()).as_posix()}")
 
 
 def _requirement_entries(relative_path: str) -> list[str]:
@@ -325,7 +459,8 @@ def main() -> int:
     version = check_versions(errors)
     check_environment_reference(errors)
     check_links(errors)
-    check_readme_parity(errors)
+    check_readme_navigation(errors)
+    check_readme_images(errors)
     check_dependency_profiles(errors)
     if errors:
         print("Documentation check failed:")

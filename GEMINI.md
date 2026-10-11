@@ -1,4 +1,4 @@
-# GEMINI / Antigravity Project Instructions
+# Инструкции для Gemini и Antigravity
 
 См. полные инструкции проекта и руководство по внешним инструментам (включая Inspo MCP) в файле [AGENTS.md](./AGENTS.md).
 

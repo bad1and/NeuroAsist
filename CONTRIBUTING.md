@@ -1,13 +1,18 @@
-# Contributing
+<img src="apps/web/public/brand/iris-mark-backed-dark.svg" width="36" alt="Знак Iris">
 
-Iris is developed primarily on Windows. Before changing code, read
-[Architecture](Docs/architecture.md), [Operations](Docs/operations.md) and the
-README for the subsystem you are touching.
+<sub>[Документация](Docs/index.md) / Проект</sub>
 
-## Setup and verification
+# Участие в разработке
 
-Use the pinned Python/Node dependencies from the root README. Before submitting
-a change, run the checks proportional to its scope; for a cross-cutting change:
+Iris разрабатывается прежде всего для Windows. Перед изменением прочитайте
+[архитектуру](Docs/architecture.md), [эксплуатацию](Docs/operations.md) и
+документ нужной подсистемы. Общая карта — [в документации](Docs/index.md).
+
+## Подготовка и проверка
+
+Установите окружение по [профилям зависимостей](Docs/dependencies.md).
+Работайте в отдельной ветке, сохраняйте чужие незавершённые изменения.
+Проверки выбираются по риску изменения. Для правок нескольких подсистем:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
@@ -17,26 +22,45 @@ npm --prefix apps/desktop run check
 .\.venv\Scripts\python.exe scripts/check_docs.py
 ```
 
-## Change rules
+Для одной документации достаточно её проверки и просмотра оформления.
+`git diff --check` проверяет пробелы и не заменяет тесты.
 
-- Preserve user data and migration compatibility.
-- Never add a host-shell fallback for Coding Agent.
-- Keep desktop core on loopback with token authentication.
-- Do not persist raw microphone audio by default.
-- Keep SQLite canonical; semantic indexes must remain rebuildable.
-- Update EN/RU README and current subsystem docs together when behaviour changes.
-- Do not rewrite protocol/schema/migration versions during an application version bump.
-- Add regression coverage for lifecycle, persistence and concurrency fixes.
+## Границы изменений
 
-## Documentation
+- Сохраняйте пользовательские данные и совместимость миграций.
+- Управляемое ядро остаётся на loopback и требует временного токена.
+- Coding Agent исполняет команды только в Docker.
+- Сырой звук микрофона по умолчанию не сохраняется.
+- SQLite остаётся каноническим хранилищем, индекс — перестраиваемым.
+- Настройки публикуются после успешной записи.
+- Версия приложения не заменяет номера схем и протоколов.
+- Исправления жизненного цикла, хранения и конкурентного выполнения
+  подтверждаются соответствующими регрессионными сценариями.
 
-Current documents live directly under `Docs/`; old branch-specific plans belong
-under `Docs/archive/`. Every local Markdown link in maintained docs must resolve.
-Update `CHANGELOG.md` for user-visible changes.
+Для UI источник истины — [`design.md`](design.md) и
+[`tokens.css`](apps/web/src/tokens.css). Анимации используют Anime.js v4.
+Подробные указания для агентов — [`AGENTS.md`](AGENTS.md).
 
-## Secrets and generated files
+## Изменение для ревью
 
-Do not commit `.env`, API keys, databases, logs, model caches, diagnostic audio,
-Unity builds, node_modules, Python environments or signing material. Keep
-experiments isolated from production dependencies and label their README as
-historical/experimental.
+Опишите проблему, новое поведение и выполненные проверки. Отдельно укажите
+ручные проверки, ограничения и миграции. Не называйте тест с заглушками
+доказательством работы установленного приложения.
+
+Пользовательские изменения отражаются в [истории версий](CHANGELOG.md);
+изменения контрактов — в документе подсистемы. Правила содержания и перевода
+находятся в [редакционном руководстве](Docs/documentation.md).
+
+## Что не включать в Git
+
+Ключи, `.env`, пользовательские базы, журналы, записи микрофона, модели,
+Unity-сборки, `node_modules`, Python-окружения и материалы подписи не входят
+в изменения. Исследования проводятся отдельно от runtime и явно помечаются
+как эксперименты.
+
+Условия сторонних материалов проверяются независимо от лицензии кода;
+см. [происхождение ассетов](THIRD_PARTY_ASSETS.md).
+
+---
+
+[Документация](Docs/index.md) · [Сообщение об уязвимости](SECURITY.md)
