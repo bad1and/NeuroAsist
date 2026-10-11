@@ -1,77 +1,70 @@
-# Versioning
+<img src="../apps/web/public/brand/iris-mark-backed-dark.svg" width="36" alt="Знак Iris">
 
-## Источник истины
+<sub>[Документация](index.md) / Выпуск</sub>
 
-Корневой файл [`VERSION`](../VERSION) содержит SemVer продукта без префикса
-`v`, например `1.0.0`. Это единственное значение, которое выбирает человек при
-подготовке версии.
+# Версии приложения
 
-Некоторые инструменты требуют собственное поле version, поэтому значение
-зеркалируется в:
+Корневой [`VERSION`](../VERSION) содержит SemVer продукта без префикса `v`.
+Это исходное значение для метаданных приложения. Текущая цель — `1.0.0`.
 
-- `package.json` и собственном root record `package-lock.json`;
-- `apps/web/package.json` и двух собственных records его lockfile;
-- `apps/desktop/package.json` и собственном root record lockfile;
-- `apps/desktop/src-tauri/Cargo.toml` и package block `neuroasist-desktop` в `Cargo.lock`;
-- `apps/desktop/src-tauri/tauri.conf.json`;
-- `apps/avatar-unity/ProjectSettings/ProjectSettings.asset` (`bundleVersion`);
-- FastAPI/OpenAPI и `/status`, которые читают `VERSION` при запуске.
+## Зеркала
 
-README badge также должен показывать текущее значение. Проверка:
+| Где | Что синхронизируется |
+| :--- | :--- |
+| Корневые `package.json` и `package-lock.json` | Версия пакета и корневая запись lock-файла |
+| `apps/web` и `apps/desktop` | Версии package/lock и собственные корневые записи |
+| `Cargo.toml` и `Cargo.lock` | Пакет `neuroasist-desktop` |
+| `tauri.conf.json` | Версия установщика |
+| Unity `ProjectSettings.asset` | `bundleVersion` |
+| FastAPI, OpenAPI и `/status` | Значение, прочитанное из `VERSION` при запуске |
+| Корневые README | Значок текущей версии |
+
+Проверка:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts/check_docs.py
 ```
 
-## Что не является версией приложения
+## Независимые версии
 
-Не заменяйте массовым search/replace:
+Не изменяйте массовой заменой номера Character/Avatar/Voice-протоколов,
+миграций SQLite, извлечения памяти, моделей и зависимостей. Их совместимость
+управляется отдельными изменениями и тестами.
 
-- `protocol_version` Character/Avatar/Voice;
-- SQLite schema migration numbers;
-- memory `pipeline_version`, extractor/generator versions;
-- model/dependency versions;
-- `Docs/archive/**` и `version-manifest-v0.4.1.json`;
-- имена legacy tables/fixtures и migration regression tests.
+[`version-manifest-v0.4.1.json`](version-manifest-v0.4.1.json), архивные планы,
+старые таблицы и миграционные fixtures фиксируют историю. Их номера сохраняются.
 
-Эти значения имеют собственные compatibility contracts и меняются только
-вместе с соответствующей миграцией.
+## Подготовка версии
 
-## Подготовка новой версии
-
-1. Изменить `VERSION`.
-2. Обновить версии трёх npm packages штатной командой:
+1. Выберите значение `VERSION`.
+2. Обновите собственные версии npm штатными командами, подставив выбранное значение:
 
    ```powershell
-   npm version <version> --no-git-tag-version
-   npm --prefix apps/web version <version> --no-git-tag-version
-   npm --prefix apps/desktop version <version> --no-git-tag-version
+   $irisVersion = (Get-Content -Raw VERSION).Trim()
+   npm version $irisVersion --no-git-tag-version
+   npm --prefix apps/web version $irisVersion --no-git-tag-version
+   npm --prefix apps/desktop version $irisVersion --no-git-tag-version
    ```
 
-3. Обновить `Cargo.toml`, `tauri.conf.json` и Unity `bundleVersion`.
-4. Запустить `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`, чтобы Cargo обновил только собственный package block lockfile.
-5. Обновить current-version формулировки и release notes, не переписывая архив.
-6. Запустить docs/version check и полную verification matrix.
-7. После одобрения release checklist создать annotated tag `v<version>` на проверенном commit.
+3. Обновите Cargo, Tauri и Unity. Выполните `cargo check`, чтобы Cargo
+   обновил собственную запись в lock-файле.
+4. Согласуйте действующие документы, значки README и историю изменений.
+   При отдельной подготовке документации без изменения версии README можно
+   оставить на следующий этап.
+5. Пройдите проверку документации и [матрицу проверок](operations.md#проверки-изменений).
+6. Для проверяемого кандидата создайте аннотированный тег `v<version>`.
+   Решение о публикации принимается отдельно по [порядку выпуска](release-runbook.md).
 
-Lockfiles изменяются штатными npm/Cargo инструментами. Нельзя заменять каждое
-совпадение старой версии внутри lockfile: большая часть совпадений принадлежит
-зависимостям.
+Не заменяйте все совпадения версии внутри lock-файлов: большинство принадлежит
+зависимостям. Имя ветки также не задаёт версию продукта.
 
-## Release channels
+## Каналы
 
-- `X.Y.Z` — stable candidate metadata; публикация разрешена только после checklist.
-- `X.Y.Z-rc.N` — release candidate, если решено распространять тестовый installer.
-- `X.Y.Z-dev.N` — локальная/ночная линия, которая не должна публиковаться как stable.
+| Формат | Назначение |
+| :--- | :--- |
+| `X.Y.Z` | Целевая версия; стабильная публикация требует проверок |
+| `X.Y.Z-rc.N` | Кандидат, если принято решение распространять тестовую сборку |
+| `X.Y.Z-dev.N` | Локальная или ночная сборка |
 
-Git branch name не задаёт version. Branch может сохранять историческое имя, но
-tag и artifact metadata обязаны совпадать с `VERSION`.
-
-## Toolchain versions
-
-Продуктовая версия не равна версии toolchain. Проверенные development tools:
-`.python-version` (`3.12.1`), `.nvmrc` (`24.18.0`) и stable Rust `1.95.0` на
-момент проверки. `rust-toolchain.toml` выбирает установленный `stable`, а
-`Cargo.toml` сохраняет `rust-version = 1.77.2` как минимальный compatibility
-contract. Unity editor version находится в
-`apps/avatar-unity/ProjectSettings/ProjectVersion.txt`.
+Тег, версия установщика и манифест должны совпадать. Версии инструментов
+отделены от версии продукта и описаны в [окружении](dependencies.md#инструменты).

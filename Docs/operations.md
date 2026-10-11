@@ -1,22 +1,32 @@
-# Эксплуатация и сборка Iris
+<img src="../apps/web/public/brand/iris-mark-backed-dark.svg" width="36" alt="Знак Iris">
 
-Команды ниже выполняются из корня репозитория в PowerShell. Поддерживаемая
-development-платформа — Windows 10/11.
+<sub>[Документация](index.md) / Эксплуатация</sub>
 
-## Development startup
+# Запуск, сборка и диагностика
 
-Полная подготовка окружения описана в [README](../README.ru.md). Обычный запуск:
+Все команды выполняются из корня репозитория в PowerShell.
+Разработка и сборка настольного приложения рассчитаны на Windows 10/11.
+Версии инструментов и установка пакетов — в [зависимостях](dependencies.md).
+
+## Запуск из исходников
+
+После подготовки окружения и копирования `.env.example` в `.env`:
 
 ```powershell
 npm --prefix apps/desktop run dev
 ```
 
 Tauri запускает Vite и `python -m apps.backend.desktop_entry`, выбирает
-свободный loopback port, создаёт session token и останавливает дочерние процессы
-при выходе. Для восстановления окна используйте tray. Safe Mode запускает core
-без Unity и preload локальных voice-моделей.
+случайный локальный порт и токен. Ключи вводятся в
+**Настройки → Система → API-ключи**. Для полного выхода используйте **Quit**
+в области уведомлений Windows или `Ctrl+C` в терминале запуска.
 
-Раздельный browser/backend режим:
+Безопасный режим запускает ядро без Unity и предварительной загрузки речевых
+моделей. Он полезен, когда неисправность необязательной подсистемы мешает запуску.
+
+### Раздельный запуск
+
+Два окна PowerShell:
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
@@ -26,193 +36,177 @@ Tauri запускает Vite и `python -m apps.backend.desktop_entry`, выб�
 npm --prefix apps/web run dev
 ```
 
-## Данные
+Интерфейс: `http://127.0.0.1:5173`; OpenAPI: `http://127.0.0.1:8000/docs`.
+Этот режим подходит для разработки UI и ядра, но не получает ключи из
+Credential Manager. Для запросов к пользовательским моделям запускайте Tauri.
+Его сервер разработки использует отдельный порт `1420`.
 
-Desktop shell задаёт `%LOCALAPPDATA%\NeuroAsist` как writable data root:
+## Где находятся данные
+
+При управляемом запуске Tauri задаёт `%LOCALAPPDATA%\NeuroAsist`:
 
 ```text
 %LOCALAPPDATA%\NeuroAsist\
-├── data\neuroasist.sqlite3   timeline, memory, jobs and character state
-├── data\audio\              short-lived generated TTS files
-├── settings.json             non-secret runtime settings
-├── backups\                  portable ZIP snapshots
-├── logs\app.log              desktop core log
-├── models\                   managed/local model data
-├── stt-terms.json
-└── tts-pronunciations.json
+├── data\neuroasist.sqlite3   история, память, задания и состояние персонажа
+├── data\audio\              временные файлы синтезированной речи
+├── settings.json            несекретные настройки
+├── backups\                 ZIP-снимки данных
+├── logs\app.log             журнал ядра
+├── models\                  управляемые и локальные модели
+├── stt-terms.json            словарь распознавания
+└── tts-pronunciations.json   словарь произношения
 ```
 
-`NEUROASIST_APP_DATA_DIR` changes the root. In browser development the relative
-`SQLITE_PATH` and `VOICE_AUDIO_DIR` defaults resolve against the repository.
+`NEUROASIST_APP_DATA_DIR` меняет корневой каталог. В браузерной разработке
+относительные `SQLITE_PATH` и `VOICE_AUDIO_DIR` разрешаются от корня репозитория.
 
-DeepSeek and Coding API keys are separate Windows Credential Manager entries,
-managed under **Settings → System → API keys**. The desktop shell delivers them
-to the local core through an anonymous stdin pipe at startup. API-key variables
-from `.env` and the inherited process environment are ignored. Keys are not
-written to `settings.json`, logs or backups.
+Ключи диалога, Coding Agent и поисковых сервисов — отдельные записи Windows
+Credential Manager. Tauri передаёт их ядру через анонимный stdin-канал.
+`.env` и унаследованное окружение не принимаются как источники секретов.
+Ключи не записываются в `settings.json` или резервные копии.
 
-## Logs and diagnostics
+## Диагностика
 
-- **Settings → System → Events** shows recent runtime events.
-- `GET /status` reports application version, database and LLM configuration.
-- `GET /readiness` separates text, STT, TTS and live readiness.
-- `GET /diagnostics` exposes storage/runtime diagnostics.
-- `GET /debug/llm/usage` contains content-free usage, cache, reasoning, retry and latency records.
-- Desktop logs are written to `%LOCALAPPDATA%\NeuroAsist\logs\app.log`.
+| Где смотреть | Что проверять |
+| :--- | :--- |
+| Настройки → Система → События | Последние ошибки и идентификаторы операций |
+| `GET /status` | Версия, доступность базы и наличие ключа LLM |
+| `GET /readiness` | Отдельная готовность текста, STT, TTS и живого разговора |
+| `GET /diagnostics` | Каталоги данных и состояние моделей |
+| `GET /debug/llm/usage` | Токены, кэш, повторные попытки и задержки |
+| `logs\app.log` в каталоге данных | Журнал управляемого ядра |
 
-When reporting a problem, include the application version, relevant event IDs,
-model status and a short log excerpt. Do not attach `.env`, Credential Manager
-entries, message text or the whole SQLite database unless intentionally sharing
-private conversation data.
+В отчёт включайте версию, шаги воспроизведения, идентификаторы событий и
+короткий фрагмент журнала. До отправки проверьте его на личные данные.
+Не прикладывайте ключи, полную базу разговоров или записи микрофона.
 
-## Backups
+Если локальный запрос возвращает неожиданный `503`, проверяйте сам HTTP-ответ
+с обходом системного прокси. Открытый TCP-порт ещё не доказывает готовность ядра.
 
-**Settings → System → Backups** creates a ZIP containing a consistent SQLite
-snapshot and `settings.json`; API keys are excluded. The service prunes files
-older than `BACKUP_RETENTION_DAYS`.
+## Резервные копии
 
-Iris 1.0 can create, list and delete backups but does not yet expose an in-app
-restore action. Treat a backup as verified only after inspecting the ZIP and
-opening the copied SQLite database with `PRAGMA integrity_check`. A supported,
-tested restore flow is a public-release gate in [release-checklist.md](release-checklist.md).
+**Настройки → Система → Резервные копии** создаёт согласованный снимок SQLite
+и `settings.json`. Хранение ограничено `BACKUP_RETENTION_DAYS`.
+Создание, список и удаление реализованы; восстановления через интерфейс пока нет.
 
-Never replace a live database while the backend is running.
+Проверка ZIP включает целостность архива и `PRAGMA integrity_check` на
+извлечённой **копии** базы. Она не заменяет восстановление на чистой установке.
+Не заменяйте базу, пока работает ядро. Поддерживаемая процедура восстановления
+остаётся [условием публикации](release-checklist.md).
 
-## Verification matrix
+## Проверки изменений
 
-### Fast checks
+Для документации:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts/check_docs.py
-.\.venv\Scripts\python.exe -m compileall -q apps/backend
-.\.venv\Scripts\python.exe -m pip check
-npm --prefix apps/web run build
-npm --prefix apps/web audit --omit=dev --audit-level=high
-npm --prefix apps/desktop audit --omit=dev --audit-level=high
-npm --prefix apps/desktop run check
 ```
 
-### Regression suites
+Для изменений, затрагивающих несколько подсистем:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
 npm --prefix apps/web test
+npm --prefix apps/web run build
+npm --prefix apps/desktop run check
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 ```
 
-### Desktop lifecycle smoke
+Дополнительные проверки окружения:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/check_python_dependencies.py
+.\.venv\Scripts\python.exe -m pip check
+npm --prefix apps/web audit --omit=dev --audit-level=high
+npm --prefix apps/desktop audit --omit=dev --audit-level=high
+```
+
+Для GPU-профиля STT используйте `check_python_dependencies.py --stt-cuda`;
+оговорка о `pip check` описана в [зависимостях](dependencies.md#gigaam-onnx-и-локальное-ускорение-stt).
+
+### Жизненный цикл ядра
 
 ```powershell
 .\scripts\smoke_desktop_core.ps1
-```
-
-It verifies authenticated startup, rejection without the token and graceful
-shutdown using temporary data and mock voice providers.
-
-### Startup benchmark
-
-```powershell
 .\scripts\benchmark-startup.ps1 -Scenario both
 ```
 
-The script measures clean and cached text/live readiness. Save the JSON output
-for release-to-release comparison.
+Первый сценарий использует временные данные и тестовые речевые провайдеры:
+проверяет авторизацию и корректную остановку. Второй измеряет готовность
+текста и голоса при первом и повторном запуске. Сохраните JSON для сравнения.
 
-### Synthetic conversation soak
-
-```powershell
-.\.venv\Scripts\python.exe scripts\live_conversation_soak.py --duration 300 --cycles 120
-```
-
-This exercises conversation state and cancellation without a microphone. It
-does not replace a real-audio soak with reconnect, barge-in and Unity playback.
-
-The one-hour synthetic release profile has an explicit RSS-growth threshold and
-is uploaded by the weekly `Synthetic lifecycle soak` GitHub workflow:
+### Синтетический длительный прогон
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\live_conversation_soak.py --release --output artifacts\live-soak.json
+.\.venv\Scripts\python.exe scripts/live_conversation_soak.py --duration 300 --cycles 120
+.\.venv\Scripts\python.exe scripts/live_conversation_soak.py --release --output artifacts/live-soak.json
 ```
 
-Use `--full` only for a four-hour extended synthetic rehearsal. Neither profile
-replaces the documented real microphone and avatar soak.
+`--release` запускает одночасовой профиль с ограничением роста RSS;
+`--full` — расширенный четырёхчасовой. Это проверка состояний и отмены задач
+без микрофона. Для релиза отдельно требуется живой разговор с аватаром.
 
-## Coding Agent runtime
+## Необязательные компоненты
 
-Build the no-network sandbox image whenever its Dockerfile changes:
+Образ Coding Agent:
 
 ```powershell
 docker build -t neuroasist-coding:latest -f apps/backend/docker/coding.Dockerfile apps/backend/docker
 ```
 
-Confirm Docker Desktop is running and open `/coding/status` or the Coding Agent
-screen. A missing daemon/image must make the agent unavailable; it must never
-execute on the host. See [coding-agent.md](coding-agent.md).
+Docker Desktop должен работать. Отсутствие среды делает агент недоступным;
+команды не переносятся на хост. Подробнее — [Coding Agent](coding-agent.md).
 
-## Unity avatar build
+Пересборка аватара:
 
 ```powershell
 $env:NEUROASIST_UNITY_EDITOR = 'C:\Program Files\Unity\Hub\Editor\2022.3.62f3\Editor\Unity.exe'
 npm --prefix apps/desktop run build:avatar
 ```
 
-Close Unity Editor and any running avatar process first. Output:
+Сначала закройте Unity Editor и работающий аватар. Результат:
 `apps\avatar-unity\Builds\NeuroAsistAvatar\NeuroAsistAvatar.exe`.
 
-## Windows release build
+## Кандидат Windows-сборки
 
-Prerequisites: clean worktree, synchronized `VERSION`, green verification
-matrix, Unity avatar build, enough disk space for the Python ML runtime, and
-PyInstaller/build dependencies available through the script.
+После проверок исходников и сборки Unity:
 
 ```powershell
-.\scripts\build-desktop-release.ps1
+.\scripts\build-desktop-release.ps1 -RequireCleanWorktree -ArtifactDirectory artifacts
 ```
 
-The script recreates `build\release-venv` from `requirements\build.txt`, builds
-the PyInstaller `--onedir` core from that isolated environment, temporarily adds
-it to Tauri resources, builds NSIS, token-smokes the packaged sidecar, scans
-package staging trees for private runtime files and retired dependencies, emits a SHA-256 manifest and
-restores `tauri.conf.json` in `finally`. It never packages from the developer
-`.venv`, where abandoned experiment packages may still be installed. Candidate
-output defaults to:
+Сценарий создаёт отдельную `build\release-venv`, устанавливает CPU-профиль,
+собирает ядро PyInstaller, проверяет упакованное ядро с токеном и ресурсы на
+частные данные и удалённые зависимости, собирает NSIS и создаёт SHA-256-манифест.
+Временное изменение ресурсов `tauri.conf.json` восстанавливается в `finally`.
+Рабочая developer `.venv` не является источником пакетов установщика.
 
-```text
-artifacts\
-```
+`-SkipDependencyInstall` разрешён при повторе с неизменными профилями
+зависимостей. `-ReuseCore` — только для повторения этапа Tauri/NSIS из того же
+набора исходников, зависимостей и версии. После их изменения соберите ядро заново.
 
-For repeated builds after the isolated release environment has already been
-created from the current dependency profile:
+Отдельная проверка готового ядра:
 
 ```powershell
-.\scripts\build-desktop-release.ps1 -SkipDependencyInstall -ArtifactDirectory artifacts
+$coreExecutable = 'C:\path\to\neuroasist-core.exe'
+.\scripts\smoke_packaged_runtime.ps1 -Executable $coreExecutable
 ```
 
-`-ReuseCore` is only for retrying the Tauri/NSIS stage after a successful core
-build from the **same** checkout. It still removes CUDA-only DLLs from that
-generated sidecar, because the 1.0 candidate is CPU-base. Do not use it after a
-source, dependency or `VERSION` change.
+Замените путь на фактически собранный файл. Публикация требует
+[порядка выпуска](release-runbook.md) и закрытых [условий](release-checklist.md).
 
-Dependency ownership and the clean-environment update procedure are documented
-in [Python dependency profiles](dependencies.md).
+## Если что-то не работает
 
-Smoke a standalone packaged core when an executable has been produced:
+| Симптом | Следующий шаг |
+| :--- | :--- |
+| Нет текстового ответа | Проверить `/status`, наличие ключа и события LLM |
+| Голос не готов | Проверить `/readiness`, модели, разрешение микрофона и FFmpeg |
+| В конкретном приложении нет звука | Проверить его устройство вывода и громкость в микшере Windows |
+| Фоновый исполнитель остановился | Найти `backend.worker_failed` и причину повторного запуска |
+| Не запускается Unity | Запустить безопасный режим, проверить состояние аватара и журнал сборки |
+| Настройки не сохраняются | Проверить доступ к файлу; прежнее опубликованное состояние остаётся действующим |
+| Ошибка SQLite | Завершить Iris, сохранить базу и резервные копии, исследовать отдельную копию |
 
-```powershell
-.\scripts\smoke_packaged_runtime.ps1 -Executable <path-to-neuroasist-core.exe>
-```
+---
 
-Do not publish merely because the build succeeds. Complete every required item
-in [Release checklist 1.0](release-checklist.md), including clean-VM install,
-upgrade, uninstall, backup recovery, real voice soak and license review. The
-[release runbook](release-runbook.md) describes the protected self-hosted
-Windows candidate workflow and signing evidence.
-
-## Failure handling
-
-- If text is unavailable, check `/status`, API-key availability and LLM events.
-- If voice is unavailable, check `/readiness`, Models, microphone permission and FFmpeg.
-- If a worker crashes, look for `backend.worker_failed`; the supervisor retries with bounded backoff.
-- If Unity fails, use Safe Mode, then inspect avatar status and the Unity build log.
-- If a settings write fails, the previous runtime/file state remains authoritative; fix filesystem access and retry.
-- If SQLite reports an error, stop Iris, preserve the database and latest backup, and investigate a copy.
+[Окружение](dependencies.md) · [Выпуск](release-runbook.md) · [Безопасность](../SECURITY.md)

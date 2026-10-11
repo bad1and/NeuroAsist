@@ -1,69 +1,83 @@
-# Python-зависимости и release-среда
+<img src="../apps/web/public/brand/iris-mark-backed-dark.svg" width="36" alt="Знак Iris">
 
-## Профили
+<sub>[Документация](index.md) / Окружение</sub>
 
-Зависимости разделены по назначению:
+# Окружение и зависимости
 
-- `requirements/runtime.txt` — прямые зависимости Python-sidecar, которые
-  попадают в Windows installer;
-- `requirements/dev.txt` — тесты и локальные benchmark-инструменты;
-- `requirements/build.txt` — runtime плюс PyInstaller;
-- `requirements/constraints.txt` — проверенные версии транзитивного графа без
-  самостоятельной установки пакетов;
-- `requirements/torch-cpu.txt` и `requirements/torch-cu128.txt` — явный выбор
-  PyTorch wheel channel до установки основного профиля;
-- корневой `requirements.txt` — удобный объединённый профиль для разработки.
+Профили зависимостей описывают назначение среды, а не содержимое случайной
+рабочей `.venv`. Пакеты старых экспериментов не должны попадать в установщик.
 
-В профилях фиксируются прямые зависимости, а constraints удерживают проверенные
-транзитивные версии. Переносить результат `pip freeze` из рабочей `.venv`
-нельзя. Долгоживущее окружение сохраняет пакеты удалённых прототипов даже после
-обновления `requirements.txt`.
+## Инструменты
 
-## Чистая разработческая среда
+| Инструмент | Источник версии | Назначение |
+| :--- | :--- | :--- |
+| Python | [`.python-version`](../.python-version), `3.12.1` | Ядро и инструменты сборки |
+| Node.js | [`.nvmrc`](../.nvmrc), `24.18.0`; npm `11.x` | React/Vite и Tauri CLI |
+| Rust | [`rust-toolchain.toml`](../rust-toolchain.toml), `stable` | Оболочка Tauri |
+| Unity | [`ProjectVersion.txt`](../apps/avatar-unity/ProjectSettings/ProjectVersion.txt), `2022.3.62f3` | Пересборка аватара |
+| FFmpeg / FFprobe | Исполняемые файлы в `PATH` для разработки | Обработка аудио |
+| Microsoft C++ Build Tools и WebView2 | Windows-среда разработки Tauri | Сборка и запуск оболочки |
+| Docker Desktop | Необязательный внешний компонент | Выполнение команд Coding Agent |
 
-Если состав зависимостей изменился, надёжнее пересоздать `.venv`, чем удалять
-пакеты вручную:
+`rust-version = 1.77.2` в Cargo — нижняя граница совместимости, а не закреплённая
+версия установленного компилятора. Unity и Docker не нужны для работы над
+обычным интерфейсом без этих подсистем.
+
+## Профили Python
+
+| Файл | Назначение |
+| :--- | :--- |
+| [`runtime.txt`](../requirements/runtime.txt) | Прямые зависимости ядра для установки и упаковки |
+| [`dev.txt`](../requirements/dev.txt) | Тесты и измерения |
+| [`build.txt`](../requirements/build.txt) | Runtime и PyInstaller |
+| [`constraints.txt`](../requirements/constraints.txt) | Ограничения транзитивных версий |
+| [`torch-cpu.txt`](../requirements/torch-cpu.txt) | CPU-канал PyTorch |
+| [`torch-cu128.txt`](../requirements/torch-cu128.txt) | CUDA-канал PyTorch для отдельного окружения |
+| [`stt-cuda.txt`](../requirements/stt-cuda.txt) | Ускорение ONNX STT без смены TTS |
+| [`requirements.txt`](../requirements.txt) | Объединённый runtime/dev-профиль |
+
+`constraints.txt` ограничивает выбор версий и сам не устанавливает пакеты.
+Не заменяйте профили результатом `pip freeze` из долгоживущей среды.
+
+## Первая установка
+
+В новом клоне, из корня репозитория:
 
 ```powershell
-deactivate 2>$null
-Remove-Item -LiteralPath .venv -Recurse -Force
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements/torch-cpu.txt
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe scripts\check_python_dependencies.py
+npm ci
+npm ci --prefix apps/web
+npm ci --prefix apps/desktop
+Copy-Item .env.example .env
+.\.venv\Scripts\python.exe scripts/check_python_dependencies.py
 .\.venv\Scripts\python.exe -m pip check
 ```
 
-Удаление `.venv` не затрагивает исходники или пользовательские данные Iris.
+Копируйте `.env.example` только при отсутствии собственной `.env`.
+Файл содержит несекретные параметры; ключи вводятся в приложении.
+[Запуск](operations.md#запуск-из-исходников) выполняется через Tauri.
 
-## Release-сборка
+При смене состава зависимостей проверяйте новый профиль в отдельной среде,
+сохраняя прежнюю до успешной проверки:
 
-`scripts/build-desktop-release.ps1` на каждом обычном запуске пересоздаёт
-`build/release-venv`, сначала устанавливает `requirements/torch-cpu.txt`, затем
-`requirements/build.txt`. PyInstaller запускается только
-из этого окружения, а dependency check отклоняет любой незаявленный пакет.
-Поэтому старые `edge-tts`, `silero`, `silero-stress`,
-`supertonic`, `py7zr`, `torchvision` или другие локальные эксперименты не могут
-случайно попасть в sidecar.
+```powershell
+py -3.12 -m venv .venv-clean
+.\.venv-clean\Scripts\python.exe -m pip install -r requirements/torch-cpu.txt
+.\.venv-clean\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv-clean\Scripts\python.exe scripts/check_python_dependencies.py
+.\.venv-clean\Scripts\python.exe -m pip check
+```
 
-`-SkipDependencyInstall` допустим только для повтора сборки из уже созданного
-`build/release-venv` при неизменных manifests. `-ReuseCore` дополнительно требует
-неизменные исходники и версию.
+## GigaAM ONNX и локальное ускорение STT
 
-Базовый installer остаётся CPU-only. Экспериментальные Qwen ASR/TTS окружения
-из benchmark-скриптов не входят в Iris 1.0. CUDA runtime следует выпускать как
-отдельно тестируемый installer/add-on: его нельзя собирать из developer `.venv`
-или добавлять в CPU-sidecar постфактум.
+Текущий основной STT: `gigaam_onnx`, `v3_rnnt`, FP32, `device=auto`.
+Он использует CUDA при совместимом установленном runtime, иначе CPU.
+TeraTTSv2 остаётся на CPU. Прежний PyTorch-провайдер доступен как `gigaam`.
 
-### GigaAM ONNX и локальное ускорение STT
-
-Основной STT — `gigaam_onnx`, модель `v3_rnnt`, FP32. Базовый runtime включает
-`onnx-asr==0.12.0` и CPU ONNX Runtime; `VOICE_STT_DEVICE=auto` выбирает CUDA при
-наличии совместимого runtime, иначе CPU. TeraTTS/PyTorch остаются на CPU.
-ONNX-пакет включён в оба PyInstaller build entrypoints; CUDA-библиотеки
-в базовую CPU-сборку не добавлены.
-
-Для Windows development после установки основного профиля:
+Для выбранной development-среды **после** установки основного профиля:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip uninstall -y onnxruntime
@@ -72,64 +86,56 @@ ONNX-пакет включён в оба PyInstaller build entrypoints; CUDA-б�
 .\.venv\Scripts\python.exe -m pip check
 ```
 
-Не устанавливать CPU `onnxruntime` и `onnxruntime-gpu` одновременно: они
-используют один Python module. После повторной установки основного профиля
-нужно заново выбрать один runtime. Опциональный CUDA-профиль фиксирует
-проверенные версии, включая cuDNN 9.10.2.21 для GTX 1660 SUPER.
-Возврат к CPU: удалить `onnxruntime-gpu`, установить `onnxruntime==1.23.2`
-и задать `VOICE_STT_DEVICE=cpu`. NVIDIA wheels можно оставить до отдельной
-очистки окружения; они не используются CPU-режимом.
-Некоторые зависимости декларируют именно имя CPU distribution `onnxruntime`:
-`pip check` сообщает его отсутствие даже при рабочем GPU runtime.
-`check_python_dependencies.py --stt-cuda` учитывает эту замену при обходе графа;
-остальные сообщения `pip check` требуют отдельной проверки окружения.
+CPU `onnxruntime` и `onnxruntime-gpu` используют одно имя Python-модуля;
+одновременно их не устанавливают. Повторная установка основного профиля
+требует заново выбрать один runtime. Профиль закрепляет проверенные версии,
+в том числе cuDNN `9.10.2.21` для локальной проверки на GTX 1660 SUPER.
 
-Модель хранится вне репозитория: `%LOCALAPPDATA%/NeuroAsist/models/` /
+Некоторые пакеты требуют именно distribution `onnxruntime`. Поэтому
+`pip check` может сообщать об отсутствии CPU-пакета при рабочем GPU runtime.
+Проверка `--stt-cuda` учитывает эту замену; остальные конфликты требуют
+отдельного разбора.
+
+Возврат к CPU:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip uninstall -y onnxruntime-gpu
+.\.venv\Scripts\python.exe -m pip install onnxruntime==1.23.2
+```
+
+При необходимости задайте `VOICE_STT_DEVICE=cpu` в `.env`.
+Профиль CPU не использует оставшиеся NVIDIA-пакеты.
+
+Веса находятся вне репозитория, в каталоге моделей:
 `gigaam-v3-rnnt-onnx/322c3b29492673eb7d0b434bfa9dfb8653e34d02`.
-`VOICE_STT_ONNX_MODEL_PATH` позволяет выбрать готовую локальную папку.
-При отсутствии файлов preload скачивает только FP32 RNNT-файлы по закреплённой
-Hugging Face revision. Это загрузка весов, записи речи не передаются.
-Первое включение микрофона использует существующий readiness/loading flow.
+`VOICE_STT_ONNX_MODEL_PATH` выбирает существующую локальную папку.
+При отсутствии весов загрузка получает закреплённые FP32 RNNT-файлы;
+записи речи наружу не отправляются.
 
-Настройки: `VOICE_STT_ONNX_THREADS=4` для CUDA preprocessing/CPU work и
-`VOICE_STT_ONNX_CPU_THREADS=8` для CPU-сессий. При ошибке инициализации CUDA
-или CUDA inference/OOM режим `auto` загружает CPU-модель и повторяет целую
-реплику; выбранное устройство и причина перехода доступны в STT metadata.
-Явное `VOICE_STT_DEVICE=cuda` означает строгий GPU-режим без CPU-перехода.
-Не относящиеся к CUDA ошибки inference не скрываются повторным запуском.
-Прежний PyTorch-провайдер доступен через `VOICE_STT_PROVIDER=gigaam`.
+`VOICE_STT_ONNX_THREADS=4` задаёт число потоков для GPU-профиля,
+`VOICE_STT_ONNX_CPU_THREADS=8` — для CPU. В `auto` ошибки CUDA-инициализации,
+CUDA inference или нехватка памяти допускают переход на CPU с повтором всей
+реплики. Явный `cuda` — строгий режим без такого перехода.
+Не относящиеся к CUDA ошибки не скрываются повторной обработкой.
 
-## Граница Windows installer
+## Среда установщика
 
-Пользователю готовой сборки не нужны Python, Node или Rust: PyInstaller
-включает интерпретатор и runtime-пакеты в `core`, а Tauri/NSIS доставляет этот
-каталог вместе с frontend и Unity renderer. На машине сборки эти инструменты
-нужны, на машине пользователя — нет.
+Обычный запуск `build-desktop-release.ps1` пересоздаёт `build/release-venv`,
+ставит `torch-cpu.txt`, затем `build.txt`. PyInstaller использует только эту
+среду. Проверка зависимостей отклоняет незаявленные пакеты, включая удалённые
+`edge-tts`, `silero-stress`, `supertonic`, `py7zr` и `torchvision`.
 
-До публичной версии остаются отдельные решения по системным компонентам:
+Базовая сборка — CPU. CUDA-вариант требует отдельной поставки и проверки.
+Qwen ASR/TTS из экспериментальных окружений не входит в основной runtime.
 
-- включить WebView2 bootstrapper или offline runtime в NSIS-конфигурацию;
-- либо положить совместимые `ffmpeg.exe`/`ffprobe.exe` в resources и запускать
-  их по абсолютному resource path, либо убрать последний subprocess-fallback;
-- проверить наличие Microsoft Visual C++ Runtime, необходимого Windows wheel
-  CTranslate2, и доставлять redistributable только по лицензированному сценарию;
-- модели GigaAM/TeraTTS/Smart Turn не смешивать с Python-пакетами: скачивать их
-  отдельно по versioned manifest, показывать размер, проверять SHA-256 и уметь
-  продолжать/повторять загрузку;
-- Docker Desktop оставить опциональной внешней предпосылкой Coding Agent.
-  Установщик Iris должен определить его наличие и объяснить включение функции,
-  но не принимать за пользователя отдельную лицензию Docker и не навязывать
-  WSL/reboot всем пользователям;
-- ключи DeepSeek и Coding API не включать в installer, `.env` или конфигурацию.
-  Пользователь вводит их в **Настройки → Система → API-ключи**, после чего Tauri
-  хранит две отдельные записи в Windows Credential Manager;
-- GPU-вариант выпускать отдельным подписанным add-on или отдельным installer.
-  CPU core всегда должен запускаться сам, а add-on — устанавливаться в
-  версионированный каталог после проверки NVIDIA driver, CUDA/CTranslate2 и
-  пробного inference. При любой ошибке приложение возвращается на CPU.
+Готовая сборка содержит Python-ядро; пользователю не должны требоваться Python,
+Node.js или Rust. Перед публикацией ещё нужно подтвердить:
 
-Перед публикацией direct profiles следует компилировать в Windows x64 lock с
-SHA-256 для всех wheels (или собирать закрытый wheelhouse), а затем устанавливать
-release-среду с `--require-hashes`. Git-зависимость GigaAM лучше заранее собрать
-в собственный версионированный wheel: commit уже закреплён, но wheel и его hash
-сделают сборку воспроизводимой и независимой от доступности GitHub.
+- доставку WebView2, необходимых системных библиотек и аудиоинструментов;
+- загрузку моделей с понятным размером, проверкой целостности и повтором;
+- опциональность Docker и отсутствие навязанного GPU-профиля;
+- полноту лицензий пакетов, весов и бинарных компонентов;
+- воспроизводимость транзитивного графа: прямые pins и constraints не равны
+  полному lock-файлу с хешами всех wheels.
+
+См. [условия публикации](release-checklist.md) и [порядок выпуска](release-runbook.md).

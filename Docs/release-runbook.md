@@ -1,92 +1,108 @@
-# Iris 1.0 release runbook
+<img src="../apps/web/public/brand/iris-mark-backed-dark.svg" width="36" alt="Знак Iris">
 
-`1.0.0` is a source-tree target, not permission to publish an installer. This
-runbook produces a traceable **release candidate**; a human release owner makes
-the final publication decision only after every item in the
-[release checklist](release-checklist.md) has evidence.
+<sub>[Документация](index.md) / Выпуск</sub>
 
-## Automated evidence
+# Порядок выпуска
 
-The required GitHub checks are intentionally separated by cost and platform:
+Этот порядок создаёт проверяемого кандидата. Решение о публичной публикации
+принимается после [условий выпуска](release-checklist.md).
+Номер `1.0.0` в исходниках сам по себе не подтверждает готовность установщика.
 
-| Workflow | Trigger | Evidence |
-| --- | --- | --- |
-| `Documentation` | Pull request, `main` | version mirrors, environment reference and maintained local links |
-| `CI` | Pull request, `main` | full backend pytest, web Vitest/build and Windows Rust check |
-| `Synthetic lifecycle soak` | weekly and manual dispatch | one-hour cancellation/state/memory report |
-| `Build Windows release candidate` | `v*` tag or manual dispatch | NSIS installer, packaged-core smoke, SHA-256 manifest and optional Authenticode status |
+## Подготовить исходники
 
-The synthetic soak is a lifecycle regression test. It has no microphone, model
-download or Unity renderer, so a passing report is not evidence for the real
-voice/avatar acceptance gate.
+1. Согласуйте [версию](versioning.md), изменения и миграции.
+2. Пройдите проверки из [эксплуатации](operations.md#проверки-изменений).
+3. Создайте [карточку сборки](release-evidence.md): commit, среда и ожидаемые артефакты.
+4. Сборку выполняйте из чистого рабочего дерева. Не включайте локальные данные,
+   ключи, кэши и результаты экспериментов.
 
-## Candidate build runner
+## Автоматические подтверждения
 
-`Build Windows release candidate` runs only on a protected self-hosted runner
-labelled `Windows` and `iris-release`. It must have the pinned Unity editor,
-Rust, Node and Python available. The runner needs `NEUROASIST_UNITY_EDITOR` set
-to the Unity executable because the avatar resource is intentionally not kept
-in Git.
+| Workflow | Запуск | Результат |
+| :--- | :--- | :--- |
+| `Documentation` | PR и `main` | Версии, параметры окружения, локальные ссылки и изображения |
+| `CI` | PR и `main` | Backend pytest, Vitest/build и Windows Rust check |
+| `Synthetic lifecycle soak` | Еженедельно и вручную | Одночасовой отчёт состояний, отмены и роста памяти |
+| `Build Windows release candidate` | Тег `v*` или вручную | NSIS, проверка упакованного ядра, SHA-256-манифест и статус подписи |
 
-Configure the GitHub `release-candidate` environment with the appropriate
-review policy. If the installer must be signed, install the signing certificate
-in that runner's Windows certificate store and set the environment secret
-`WINDOWS_CERTIFICATE_THUMBPRINT`. `WINDOWS_TIMESTAMP_URL` is optional; the
-build script uses DigiCert's timestamp service when it is omitted.
+Конфигурации находятся в [`.github/workflows`](../.github/workflows/).
+Синтетический прогон не использует микрофон, загрузку моделей или Unity.
 
-The candidate workflow never creates a GitHub Release or declares a build
-stable. A tag must exactly equal `v` plus the root `VERSION` value.
+## Подготовить Windows-runner
 
-The NSIS candidate is a CPU-base installer. The build creates a disposable
-environment, explicitly installs `requirements/torch-cpu.txt`, and keeps a
-defensive CUDA-DLL scan before packaging. A CUDA-enabled PyTorch wheel adds
-multiple gigabytes of optional DLLs and exceeds NSIS's 2 GiB packaging limit.
-The supported default voice configuration is CPU; a GPU runtime must be shipped
-and qualified as a separate, explicit add-on before it can be advertised in a
-public installer.
+Workflow кандидата работает на защищённом self-hosted runner с метками
+`Windows` и `iris-release`. Нужны Python, Node.js, Rust и закреплённый Unity
+Editor. `NEUROASIST_UNITY_EDITOR` указывает на его исполняемый файл.
+Собранный аватар не хранится в Git.
 
-## Candidate contents and attestation
+В GitHub используется environment `release-candidate` с принятой в проекте
+политикой проверки. Для подписи сертификат устанавливается в хранилище Windows
+runner; его отпечаток задаётся секретом `WINDOWS_CERTIFICATE_THUMBPRINT`.
+Необязательная переменная `WINDOWS_TIMESTAMP_URL` выбирает сервер отметки
+времени. По умолчанию сценарий использует сервис DigiCert.
 
-The build produces an ignored `artifacts/` directory with:
+Workflow не создаёт GitHub Release и не объявляет сборку стабильной.
+Для запуска по тегу имя должно точно равняться `v` + корневой `VERSION`.
 
-- the NSIS installer;
-- `iris-<version>-release-manifest.json` containing the installer SHA-256,
-  commit, size and signing status.
+## Собрать кандидата
 
-Before NSIS packages the result, `scripts/check_release_artifact.py` scans the
-complete PyInstaller sidecar and Unity resource trees for `.env`, SQLite data,
-diagnostic audio and other private runtime paths. NSIS is opaque after packing,
-so the manifest records that this is a pre-NSIS resource-tree scan. Keep the
-workflow artifact together with the release evidence.
-
-For a local candidate rehearsal after Unity is built:
+После пересборки Unity, из корня репозитория:
 
 ```powershell
 .\scripts\build-desktop-release.ps1 -RequireCleanWorktree -ArtifactDirectory artifacts
 ```
 
-To sign locally, pass the certificate thumbprint explicitly:
+С подписью:
 
 ```powershell
 .\scripts\build-desktop-release.ps1 -RequireCleanWorktree `
-  -SigningCertificateThumbprint '<thumbprint>' -ArtifactDirectory artifacts
+  -SigningCertificateThumbprint 'ОТПЕЧАТОК_СЕРТИФИКАТА' -ArtifactDirectory artifacts
 ```
 
-The script verifies a requested Authenticode signature and smoke-tests the
-packaged sidecar with the desktop token enabled. An unsigned candidate remains
-an internal candidate.
+Замените отпечаток на значение из хранилища сертификатов.
+Сценарий проверяет запрошенную Authenticode-подпись и ядро с включённым токеном.
 
-## Manual release evidence
+Базовый установщик использует CPU-профиль. CUDA DLL удаляются из генерируемого
+ядра перед упаковкой; GPU-поставка должна квалифицироваться отдельно.
+Большой CUDA PyTorch runtime также создаёт риск превышения лимита NSIS.
 
-Attach reports, screenshots or logs to the checklist for these non-CI gates:
+## Зафиксировать результат
 
-1. clean Windows VM install, first run, upgrade and uninstall;
-2. backup restore on a clean install and corrupt-database handling;
-3. at least one hour of real microphone voice plus both Unity placements,
-   including reconnect and barge-in scenarios;
-4. approved memory/persona and 30-minute LLM cost evaluations;
-5. dependency, model, asset, privacy and security review;
-6. release owner approval, published checksum and rollback location.
+В игнорируемом каталоге `artifacts/` появляются:
 
-Do not reuse a checksum after rebuilding. The installer, its manifest, the
-commit and the release tag are one evidence set.
+- NSIS-установщик;
+- `iris-<version>-release-manifest.json` с SHA-256, commit, размером и статусом подписи.
+
+До NSIS `scripts/check_release_artifact.py` проверяет дерево Python-ядра и
+Unity-ресурсов на `.env`, SQLite и частные файлы. Манифест отражает именно
+проверку ресурсов **до упаковки**, а не разбор содержимого готового NSIS.
+
+Сохраните артефакты workflow и отчёты вместе. Пересборка требует нового хеша.
+Установщик, манифест, commit и тег относятся к одному набору подтверждений.
+
+## Пройти ручные проверки
+
+Заполните разделы карточки сборки:
+
+1. чистая Windows: установка, первый запуск, обновление и удаление;
+2. восстановление данных и обработка повреждённой базы;
+3. час реального микрофона с аватаром, переподключением и перебиванием;
+4. память, характер и 30-минутный расход LLM;
+5. лицензии, конфиденциальность, секреты и границы Coding Agent.
+
+Заранее запишите пороги и оборудование. Отчёт без выполненного сценария
+не закрывает проверку. Условия измерения задержки — в [голосовой задержке](voice-latency.md).
+
+## Одобрить и опубликовать
+
+Ответственный за выпуск сверяет checklist и карточку, записывает решение и
+известные ограничения. Для стабильной версии нужны подтверждённая подпись,
+контрольная сумма и понятный путь отката. До этого кандидат остаётся внутренним.
+
+Откат должен учитывать совместимость базы: понижение бинарной версии после
+миграции нельзя считать безопасным без проверки. Сохраните предмиграционный
+снимок и протестированную предыдущую сборку.
+
+---
+
+[Условия публикации](release-checklist.md) · [Версии](versioning.md)

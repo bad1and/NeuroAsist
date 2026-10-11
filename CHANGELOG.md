@@ -1,56 +1,63 @@
-# Changelog
+<img src="apps/web/public/brand/iris-mark-backed-dark.svg" width="36" alt="Знак Iris">
 
-Notable user-visible changes are recorded here. The project follows Semantic
-Versioning; historical experimental branches before 1.0 were not published as
-stable releases.
+<sub>[Документация](Docs/index.md) / Версии</sub>
 
-## [1.0.0] - Unreleased
+# История изменений
 
-### Added
+Здесь фиксируются заметные пользовательские изменения.
+Версии следуют SemVer. Ранние экспериментальные ветки до 1.0 не обозначаются
+стабильными публичными релизами.
 
-- Tauri 2 desktop lifecycle with tray, single instance, safe mode, protected
-  random loopback port and Windows Credential Manager integration.
-- Continuous live voice input with PCM16 AudioWorklet transport, VAD, Smart
-  Turn, barge-in and reconnect-safe generation ownership.
-- Unified timeline, episodes, summaries, long-term memory provenance/audit,
-  Memory Center and optional semantic retrieval.
-- Character Protocol v3, mood/relationship state, reflections and Unity VRM
-  avatar placement as desktop overlay or embedded chat surface.
-- Optional Docker-only Coding Agent with isolated workspaces, durable task
-  queue, logs, diff, conflict detection and explicit review/apply.
-- Purpose-level LLM token limits, retry budgets and content-free usage/cache/
-  reasoning telemetry.
-- GitHub regression CI, weekly one-hour synthetic lifecycle soak and a protected
-  Windows release-candidate workflow with SHA-256 manifest generation.
+## [1.0.0] — не опубликована
 
-### Changed
+Целевая версия исходников. Публикация требует
+[условий выпуска](Docs/release-checklist.md).
 
-- Memory extraction is coalesced and gated instead of calling the LLM after
-  every turn.
-- Character prompts use a compact stable prefix and separate dynamic state for
-  better cache reuse.
-- Runtime settings are persisted atomically before live publication.
-- Blocking SQLite/filesystem operations were removed from interactive async
-  hot paths.
-- Product metadata and public documentation now use `1.0.0` consistently.
-- Desktop packaging token-smokes the PyInstaller sidecar and scans package
-  staging resources for private runtime files before NSIS packaging.
-- The NSIS candidate keeps the CPU PyTorch runtime used by the default voice
-  profile; CUDA distribution requires a separately qualified GPU add-on.
+### Добавлено
 
-### Fixed
+- Оболочка Tauri 2: значок Windows, единственный экземпляр, безопасный режим,
+  случайный локальный порт, временный токен и Windows Credential Manager.
+- Живой разговор: PCM16 AudioWorklet, VAD, Smart Turn, перебивание и владение
+  поколением ответа при переподключении.
+- Единая история, эпизоды, сводки, центр памяти, свидетельства и аудит,
+  необязательный семантический поиск.
+- Character Protocol v3, настроение, отношения, рефлексии и Unity VRM-аватар
+  на рабочем столе или внутри чата.
+- Coding Agent с Docker-средой, очередью задач, журналами, diff, проверкой
+  конфликтов и отдельным применением изменений.
+- Ограничения токенов по назначению, бюджет повторов и телеметрия без
+  содержимого запросов и ответов.
+- CI, синтетический одночасовой прогон и защищённая Windows-сборка кандидата
+  с SHA-256-манифестом.
 
-- Model installation could deadlock on a duplicate request.
-- Background workers could stop permanently after an unexpected exception.
-- Voice STT/LLM/TTS tasks could outlive disconnect/reconnect and publish stale
-  results.
-- Concurrent settings writers could lose changes or expose a partial update.
+### Изменено
 
-### Known release gates
+- Извлечение памяти объединяет подходящие ходы и не вызывает модель после
+  каждой реплики.
+- Инструкции персонажа разделяют стабильный префикс и динамическое состояние.
+- Новые настройки публикуются после успешной атомарной записи.
+- Блокирующие операции SQLite и файлов вынесены из интерактивных асинхронных путей.
+- Метаданные продукта согласованы с `1.0.0`.
+- Упаковка проверяет ядро с токеном и сканирует ресурсы на частные файлы до NSIS.
+- Базовый установщик использует CPU runtime; GPU-поставка требует отдельной проверки.
+- Основной STT использует GigaAM v3 RNNT ONNX FP32 с выбором совместимого
+  GPU runtime или CPU. TeraTTSv2 `ru_f1` остаётся локальным CPU-профилем.
+- Русская документация разделяет пользовательское руководство, технические
+  контракты, выпуск и датированные исследования.
 
-- Supported backup restore workflow.
-- Clean Windows VM installer/upgrade/uninstall rehearsal.
-- Real one-hour voice/avatar soak and memory/persona quality evaluation.
-- Full dependency/model/asset license audit and signed release artifact.
+### Исправлено
 
-See [Docs/release-checklist.md](Docs/release-checklist.md).
+- Повторный запрос установки модели мог блокировать Model Manager.
+- Фоновые исполнители могли прекращать работу после неожиданной ошибки.
+- STT/LLM/TTS-задачи могли пережить разрыв соединения и опубликовать старый результат.
+- Конкурирующие записи настроек могли терять изменения или показывать неполное состояние.
+
+### Условия до публикации
+
+- Поддерживаемое восстановление резервных копий.
+- Установка, обновление и удаление на чистой Windows.
+- Час реального голоса и аватара, проверка памяти и характера.
+- Полный аудит зависимостей, весов и ассетов, включая ограничения текущего VRM.
+- Подписанный установщик, подтверждения проверок и процедура отката.
+
+[Статус проекта](Docs/MILESTONES.md) · [Документация](Docs/index.md)

@@ -1,181 +1,142 @@
-# Iris Live Conversation
+<img src="../apps/web/public/brand/iris-mark-backed-dark.svg" width="36" alt="Знак Iris">
 
-## Назначение
+<sub>[Документация](index.md) / Голос</sub>
 
-Live Conversation — единственный голосовой режим Iris. Текстовый чат сохраняется,
-а голос запускается одной кнопкой `Live`: после старта браузер непрерывно
-передаёт PCM16, backend сам определяет реплики и автоматически запускает ответ.
-Отдельных режимов записи и ручного управления репликой в контракте больше нет.
+# Голосовой разговор
 
-Параметр `live_conversation_enabled` сохранён только для миграции старых
-настроек и всегда считается включённым. Web-клиент использует только
-`/ws/voice-input/{session_id}?version=3`.
+Live Conversation — единственный голосовой путь Iris. После включения
+микрофон непрерывно передаёт PCM16; ядро определяет реплики и запускает
+ответ. Текстовый чат остаётся доступным. Старый
+`live_conversation_enabled` сохраняется для миграций и считается включённым.
 
-## Поток данных
+## Поток
 
 ```mermaid
 flowchart TD
-    PCM["PCM16 stream"] --> VAD["Silero или energy VAD"]
-    VAD --> TURN["Turn assembler"]
-    TURN -. "stable chunks during speech" .-> STT
-    TURN --> SMART["Smart Turn v3.2"]
-    SMART -->|"incomplete"| TURN
-    SMART -->|"complete/fallback"| STT["STT"]
-    STT --> ECHO["Echo и speaker-role gates"]
-    ECHO --> OBS["Observation commit"]
-    OBS --> GATE["Hard gates"]
-    GATE -->|"confident private reply"| AGENT
-    GATE --> APPRAISAL["Structured semantic appraisal"]
-    APPRAISAL --> STATE["Affect + relationship reducer"]
-    OBS --> MEMORY["Memory provenance policy"]
-    GATE --> DECISION["Conversation decision"]
-    STATE -->|"group, uncertainty, style change"| DECISION
-    DECISION -->|"observe/wait"| LISTEN["Продолжить слушать"]
-    DECISION -->|"avatar"| AVATAR["Nonverbal avatar reaction"]
-    DECISION -->|"defer"| DEFER["Event-driven deferred queue"]
-    DECISION -->|"backchannel/respond"| AGENT["CharacterAgent"]
-    AGENT --> FENCE["Generation-fenced TTS/avatar"]
-    FENCE --> ACK["Playback acknowledgements"]
-    ACK --> TIMELINE["Completed/interrupted assistant turn"]
+    PCM["PCM16"] --> VAD["Silero VAD / резерв по энергии"]
+    VAD --> TURN["Сборка реплики"]
+    TURN -. "Стабильные участки длинной речи" .-> STT["GigaAM ONNX"]
+    TURN --> SMART["Smart Turn"]
+    SMART -->|"Реплика не закончена"| TURN
+    SMART -->|"Завершение"| STT
+    STT --> ECHO["Эхо и оценка роли говорящего"]
+    ECHO --> OBS["Сохранение наблюдения"]
+    OBS --> GATE["Условия ответа"]
+    OBS --> MEMORY["Фоновая память"]
+    GATE -->|"Слушать / ждать"| LISTEN["Продолжение ввода"]
+    GATE -->|"Ответить"| AGENT["Character Agent"]
+    GATE --> APPRAISAL["Оценка состояния"]
+    APPRAISAL --> STATE["Настроение и отношения"]
+    AGENT --> TTS["TeraTTS и команды аватара"]
+    TTS --> ACK["Подтверждение воспроизведения"]
+    ACK --> TIMELINE["История ответа"]
 ```
 
-## State machine
-
-Сессия проходит фазы:
+## Состояния и принадлежность результата
 
 ```text
 idle → listening → endpoint_pending → transcribing → deciding
      → generating → speaking → listening
 ```
 
-`suspended` и `closed` используются для остановленной и закрытой сессии.
-Каждый подтверждённый speech start увеличивает `generation`. Результаты STT,
-decision и playback acknowledgement старого поколения не могут выполнить
-поздний commit.
+`suspended` и `closed` обозначают остановленную и закрытую сессии.
+Подтверждённое начало речи увеличивает `generation`.
+Результат STT, решения или подтверждения воспроизведения старого поколения
+не может поздно изменить историю.
 
-При barge-in:
+Перебивание выполняется так:
 
-1. локальный плеер останавливается до сетевого round-trip;
-2. backend увеличивает generation;
-3. активные response/TTS/avatar задачи отменяются;
-4. старые TTS segments блокируются active-context fence;
-5. в timeline сохраняется только подтверждённый playback prefix со статусом
+1. Интерфейс останавливает локальный плеер до ожидания сетевого ответа.
+2. Ядро меняет поколение и отменяет активные LLM/TTS/avatar-задачи.
+3. Проверка активного контекста блокирует поздние аудиосегменты.
+4. История сохраняет подтверждённую воспроизведённую часть ответа со статусом
    `interrupted`.
 
-## Turn detection
+Готовый WAV может остаться во временном кэше до штатной очистки,
+но не продолжает воспроизводиться.
 
-Model Manager содержит pinned-модель:
+## Определение конца реплики
 
-```text
-id: smart-turn-v3.2
-revision: f766f81d3cfdf7737ac64aad813d91bbfd56bf93
-file: smart-turn-v3.2-cpu.onnx
-sha256: 2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f
-size: 8,679,182 bytes
-license: BSD-2-Clause
-```
+VAD считает паузу только при непрерывной тишине. Тихий речевой кадр сбрасывает
+ожидание. Smart Turn проверяет кандидат раньше консервативной границы:
+в профиле `natural` примерно после 350 мс тишины. Незавершённый кандидат
+остаётся в `pending_turn` и принимает продолжение.
 
-VAD считает endpoint только после непрерывной тишины: тихий, но всё ещё
-речевой фрейм сбрасывает pending-паузу. При готовом Smart Turn кандидат
-передаётся на семантическую проверку раньше (для `natural` примерно через
-350 мс); неполный кандидат остаётся в `pending_turn` и продолжает накапливать
-аудио. Если Smart Turn недоступен при старте, сохраняется консервативная
-граница 1100 мс для `natural`; при timeout/error модель не выпускает ответ на
-кандидате и действует прежний timeout ожидания продолжения. `short` и
-`patient` меняют эти границы. Поэтому внутренняя пауза не становится ранним
-ответом, а завершённая реплика начинает STT быстрее.
+Без готовой модели `natural` использует более терпеливую границу около
+1100 мс. Таймаут или ошибка Smart Turn не означают немедленного ответа;
+действует консервативное ожидание продолжения. `short` и `patient`
+изменяют профиль паузы.
 
-Модель принимает последние восемь секунд 16 kHz PCM. При отсутствии модели,
-неподдерживаемой частоте, timeout или ошибке ONNX используется консервативный
-audio fallback. PCM продолжает поступать во время inference и STT; продолжение
-речи инвалидирует устаревший результат.
+Модель получает последние восемь секунд 16 кГц PCM.
+Локальный NumPy frontend строит Whisper-совместимый `80×800` log-mel.
+Smart Turn не импортирует `transformers`.
 
-Whisper-compatible `80×800` log-mel frontend реализован локально на NumPy.
-Smart Turn не импортирует `transformers`, поэтому его зависимости не могут
-сломать TeraTTSv2. Проверенные audio fixtures находятся в
-`tests/fixtures/live_audio`; manifest содержит transcript, sample rate,
-ожидаемый endpoint и назначение записи. Исходной записи/генератора fixtures в
-репозитории нет: заменять эти WAV нужно осознанным real-audio QA с обновлением
-manifest и regression expectations.
+Закреплённая модель:
 
-## Observation и память
+| Поле | Значение |
+| :--- | :--- |
+| ID / файл | `smart-turn-v3.2` / `smart-turn-v3.2-cpu.onnx` |
+| Revision | `f766f81d3cfdf7737ac64aad813d91bbfd56bf93` |
+| SHA-256 | `2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f` |
+| Размер | 8 679 182 байта |
+| Лицензия в каталоге моделей | BSD-2-Clause |
 
-Порядок live-turn фиксирован:
+Фактическую запись сверяйте с [Model Manager](../apps/backend/app/model_manager/service.py).
+PCM продолжает поступать во время вычислений; новая речь инвалидирует старый
+результат. При отсутствии модели, неподдерживаемой частоте или ошибке действует
+аудиорезерв.
 
-1. raw transcript сохраняется как completed user message;
-2. безопасная интерпретация может храниться отдельно в `corrected_content`;
-3. speaker/address/EOT/STT/echo provenance записывается в metadata и
-   `conversation_observations`;
-4. применяются bounded affect/relationship deltas; для уверенной private-реплики
-   при включённом parallel appraisal этот шаг выполняется параллельно ответу;
-5. eligible primary-speaker observation проходит novelty/cue gate и при
-   необходимости обновляет один coalesced `memory_consolidation` job;
-6. conversation policy выбирает действие.
+## Наблюдение, память и состояние
 
-`assistant_echo`, `other`, `unknown`, сомнительный STT и incognito не создают
-active memory автоматически. Human observation не зависит от успешного ответа
-Iris.
+Порядок подтверждённой реплики:
 
-## Affect и отношения
+1. Сохраняется исходная расшифровка пользователя.
+2. Безопасная интерпретация может записываться в `corrected_content`.
+3. Роль, адресация, конец реплики, уверенность STT и эхо фиксируются в metadata
+   и `conversation_observations`.
+4. Применяются ограниченные изменения настроения и отношений.
+5. Подходящее наблюдение основного говорящего проходит условия новизны и
+   при необходимости обновляет одно задание памяти.
+6. Политика разговора выбирает ответ, ожидание, молчание или реакцию.
 
-Snapshot хранит только ограниченное состояние, а не факты. Все значения
-валидируются reducer-ом. Обычный relationship event ограничен `0.03`, серьёзный
-подтверждённый — `0.10`, дневной бюджет одного facet — `0.15`. Повторения
-ослабляются экспоненциально.
+`assistant_echo`, `other`, `unknown`, сомнительный STT и инкогнито
+не создают активные факты автоматически. Наблюдение не зависит от того,
+смогла ли Iris ответить.
 
-Эмоции затухают по реальному времени с индивидуальными half-life. Настройка
-recovery меняет общий множитель:
+Снимок состояния хранит настроение и отношения, а не факты памяти.
+Обычное изменение отношения ограничено `0.03`, серьёзное подтверждённое —
+`0.10`; дневной бюджет аспекта — `0.15`. Повторы ослабляются.
 
-```text
-fast=0.6
-natural=1.0
-slow=1.6
-```
+Эмоции затухают по реальному времени. Множители восстановления:
+`fast=0.6`, `natural=1.0`, `slow=1.6`.
+При перезапуске к снимку применяется прошедшее время;
+отложенные реакции и незавершённые поколения не восстанавливаются.
 
-После restart snapshot загружается, к нему применяется offline decay; deferred
-tasks и незавершённые generations не восстанавливаются.
+## Решение отвечать
 
-## Storage compatibility
+Эхо, незавершённая реплика, прямое обращение, приглашение, роль говорящего,
+пауза между инициативами и речевой бюджет проверяются локально.
+Семантическая оценка — ограниченный JSON-вызов с таймаутом 3,5 секунды
+без отдельного запроса исправления.
 
-Live Conversation использует таблицы:
+Для уверенного обращения основного говорящего в `one_to_one` ответ может
+начаться параллельно оценке состояния. Групповой разговор, сомнительный STT и
+просьба изменить регистр сохраняют последовательную проверку. При сбое
+действует локальное правило; эмоциональная классификация по ключевым словам
+не подставляется.
 
-- `character_state_snapshots`;
-- `character_state_events`;
-- `character_participant_states`;
-- `conversation_observations`.
+Оценка роли не использует биометрию. В `one_to_one` исходное предположение —
+`primary`, в `group` — `unknown`; уверенность повышается по обращению,
+связности и явным признакам. Причины видны в диагностике.
 
-Они были добавлены ранней миграцией Live Conversation; текущий номер SQLite
-schema определяется `LATEST_SCHEMA_VERSION` в `app/storage/timeline.py`, а не
-этим документом. Перед применением новых migrations startup создаёт backup.
-Миграции идемпотентны и сохраняют существующие memory/timeline rows.
-«Очистить память» не удаляет conversation state, а «Сбросить данные Iris»
-очищает весь заявленный companion scope.
+Отложенная очередь: максимум три элемента, TTL 45 секунд, одна попытка.
+Новая пользовательская генерация отменяет очередь. Инициатива проверяет
+тишину, паузу 90 секунд, предел двух инициатив за десять минут и долю речи
+Iris не более 35% в двухминутном окне.
 
 ## WebSocket v3
 
-Conversation events содержат `session_id`, `generation`, `turn_id`,
-`utterance_id` и `created_at`:
-
-```text
-conversation.phase
-conversation.turn_candidate
-conversation.turn_completed
-conversation.observation
-conversation.decision
-conversation.silent
-conversation.reaction
-conversation.deferred
-conversation.state
-conversation.cancelled
-conversation.echo_rejected
-```
-
-`voice.input.transcript` содержит `raw_transcript`, исправленный `transcript`,
-`confidence`, а при срабатывании вторичной модели — `fallback` и
-`fallback_reason`. Silence отображается коротким статусом и не создаёт
-assistant bubble.
-
-Клиентский input-контракт:
+Входной канал: `/ws/voice-input/{session_id}?version=3`.
 
 ```text
 voice.input.start {
@@ -193,155 +154,81 @@ voice.input.start {
 voice.input.stop
 ```
 
-Поле `mode` и версии протокола 1/2 отклоняются. `stop` — graceful завершение
-текущего input stream: подтверждённые finalize/STT задачи дожидаются окончания,
-и уже начатый ответ не отменяется. Disconnect/reconnect инвалидирует старый
-connection lease, отменяет его pending задачи и уже переданную downstream
-generation. Старое соединение не может отправить результат в новую сессию;
-ожидающие фреймы принимает только новый owner.
+Это схема сообщения, а не готовый JSON: значения задаются клиентом.
+Поле `mode` и версии 1/2 отклоняются.
 
-Клиент отправляет:
+`stop` корректно завершает текущий ввод: подтверждённые задачи финализации
+и STT дожидаются окончания, начатый ответ не отменяется.
+Разрыв или переподключение инвалидирует владение прежнего соединения,
+отменяет его задачи и переданную дальше генерацию.
+Новое соединение получает собственное владение.
+
+События содержат `session_id`, `generation`, `turn_id`, `utterance_id`
+и `created_at`. Основные типы:
 
 ```text
-playback.segment.started
-playback.segment.finished
-playback.finished
+conversation.phase             conversation.turn_candidate
+conversation.turn_completed    conversation.observation
+conversation.decision          conversation.silent
+conversation.reaction          conversation.deferred
+conversation.state             conversation.cancelled
+conversation.echo_rejected
 ```
 
-Assistant message создаётся только из подтверждённых сегментов.
+`voice.input.transcript` содержит `raw_transcript`, `transcript`,
+`confidence`, а при вторичном распознавании — `fallback/fallback_reason`.
+Молчание не создаёт сообщение ассистента.
 
-## Диагностика
+Клиент подтверждает `playback.segment.started`,
+`playback.segment.finished` и `playback.finished`.
+Голосовой ответ в истории строится из подтверждённых сегментов.
 
-Для локальной разработки:
+## Хранение и диагностика
 
-```env
-CONVERSATION_DIAGNOSTICS_ENABLED=true
-```
+Таблицы: `character_state_snapshots`, `character_state_events`,
+`character_participant_states`, `conversation_observations`.
+Номер схемы задаёт `LATEST_SCHEMA_VERSION` в
+[`timeline.py`](../apps/backend/app/storage/timeline.py).
+До миграций создаётся копия. Очистка памяти и сброс данных персонажа
+имеют разные границы. В инкогнито состояние этого пути остаётся в RAM.
 
-После этого `GET /conversation/debug/{session_id}` показывает фазу, generation,
-последние observations/decision, affect, participant facets, budgets, active
-tasks с generation/reason, speaker estimate, источник decision, deferred queue,
-последнюю отмену и состояние turn detector. В dev web-build этот snapshot
-показывается в сворачиваемом inspector. Raw audio, prompts и chain-of-thought
-endpoint не возвращает.
+`CONVERSATION_DIAGNOSTICS_ENABLED=true` включает
+`GET /conversation/debug/{session_id}`: фаза, поколение, наблюдения, решение,
+бюджеты, задачи, роль, очередь и последняя отмена. В dev-интерфейсе доступен
+инспектор. Endpoint не возвращает сырой звук, полные инструкции модели
+или скрытые рассуждения.
 
-## Decision, роли и инициатива
+## Распознавание во время длинной речи
 
-Echo, incomplete turn, direct address, explicit invitation, speaker gate,
-cooldown и speech budget проверяются локально. Семантическая оценка события
-остаётся модельной: один decision+appraisal JSON, timeout 3,5 секунды, без
-repair-запроса. Для уверенного обращения primary-speaker в `one_to_one`
-hard gate уже разрешает ответ, поэтому этот запрос выполняется параллельно
-генерации. Групповой разговор, неуверенный STT и признаки просьбы изменить
-регистр речи сохраняют последовательную проверку. При сбое действует
-deterministic fallback, эмоциональная классификация по словам не добавляется.
+`VOICE_STT_PROCESS_WHILE_SPEAKING=true` позволяет GigaAM ONNX заранее
+распознавать стабильные участки. Разрез между 16 и 23 секундами становится
+независимым от будущего аудио после накопления 28 секунд.
+Сохраняются FP32, перекрытие 0,75 с и объединение текста.
 
-Speaker-role estimator не использует биометрию. В `one_to_one` действует prior
-`primary`; в `group` базовый результат `unknown`, а повышение confidence
-возможно по прямому обращению, continuity и явным текстовым признакам разговора
-с третьим лицом. Reasons доступны в diagnostics.
+На окончании реплики участки сравниваются с финальным PCM байт в байт;
+изменившиеся распознаются заново. Ошибка возвращает полную обработку.
+Короткие реплики идут обычным путём. Кэш — только RAM; промежуточный текст
+не публикуется и освобождается при отмене.
 
-Deferred queue ограничена тремя элементами, TTL 45 секунд и одной попыткой.
-Любая новая human generation отменяет очередь. Инициатива запускается только
-наличием deferred event, проверяет тишину, 90-секундный cooldown, максимум две
-инициативы за 10 минут и 35% подтверждённой речи Iris в окне две минуты.
+`VOICE_LIVE_PARALLEL_APPRAISAL=true` включает параллельную оценку для
+подходящих обращений. Ответ получает последний готовый снимок и текущую
+реплику. Оценка применяется один раз; новое поколение отменяет старую задачу.
+Завершение ответа дожидается её результата для сохранения порядка состояния.
 
-## Failure modes
+Исторические числа и ограничения измерений находятся в
+[задержке голоса](voice-latency.md) и [сравнении STT](stt-comparison.md).
 
-- Smart Turn не установлен: VAD использует более терпеливую fallback-паузу.
-- Smart Turn timeout/error: endpoint остаётся pending и закрывается только
-  осторожным timeout-fallback, поэтому внутренняя пауза не запускает ранний
-  ответ.
-- Secondary STT не установлен или упал: первичный результат сохраняется, а
-  причина fallback попадает в diagnostics без потери пользовательской реплики.
-- STT старого generation: результат отбрасывается до timeline write.
-- Decision path не зависит от внешнего adjudicator: hard gates и deterministic
-  score работают локально, поэтому прямое обращение не теряется при сбое LLM
-  ответа.
-- TTS/LLM cancellation: неподтверждённый хвост не попадает в timeline.
-- Echo ambiguity: `auto` использует playback window и transcript similarity;
-  `half_duplex` полностью отклоняет commit во время активного playback.
-- Incognito: timeline, observations, participant events и snapshots остаются
-  только в RAM.
+## Проверка отказов
 
-## Проверка
+Проверьте недоступный Smart Turn, вторичный STT, эхо, инкогнито, отмену LLM/TTS,
+переподключение на каждой стадии и позднее подтверждение старого аудио.
+Затем выполните синтетический и реальный прогон по
+[эксплуатации](operations.md#синтетический-длительный-прогон).
 
-Основные команды:
+Фикстуры — [`tests/fixtures/live_audio`](../tests/fixtures/live_audio/).
+Изменение WAV требует обновления manifest и проверки реальной акустики.
+Синтетика не доказывает работу микрофона, системного подавления эха и колонок.
 
-```powershell
-.\.venv\Scripts\python.exe -m pytest tests -vv --disable-warnings
-npm --prefix apps/web test -- --run
-npm run build
-```
+---
 
-Короткий soak:
-
-```powershell
-.\.venv\Scripts\python.exe scripts/live_conversation_soak.py --duration 900 --cycles 100
-```
-
-Четырёхчасовой release soak:
-
-```powershell
-.\.venv\Scripts\python.exe scripts/live_conversation_soak.py --full --cycles 100 --output output/live-soak-4h.json
-```
-
-Обе команды создают JSON и Markdown report. Синтетические fixtures и soak не
-заменяют ручную проверку конкретного микрофона, колонок, браузерного AEC и
-акустики помещения.
-
-## Сокращение задержки ответа, 1 октября 2026
-
-По умолчанию включены две backend-настройки (применяются при перезапуске):
-
-```env
-VOICE_STT_PROCESS_WHILE_SPEAKING=true
-VOICE_LIVE_PARALLEL_APPRAISAL=true
-```
-
-GigaAM ONNX распознаёт стабильные участки длинной реплики ещё во время речи.
-Тихий разрез между 16 и 23 секундами становится независимым от будущего
-аудио после накопления 28 секунд. Используются те же FP32-модель, overlap
-0,75 секунды и объединение текста. При endpoint каждый сохранённый участок
-сравнивается с финальным PCM байт в байт; изменённый участок распознаётся
-заново. Ошибка фоновой обработки возвращает полный batch-путь. Короткие
-реплики обрабатываются прежним способом. Кеш — только RAM, промежуточный
-текст не публикуется. Disconnect и закрытие кандидата освобождают его.
-
-Распознавание на GTX 1660 SUPER через реальный `VoiceService`, после прогрева:
-
-| Длина записи | Полный batch, медиана 3 повторов | STT после остановки при precompute | Участков готово заранее |
-| --- | ---: | ---: | ---: |
-| 33,1 с | 762 мс | 235 мс | 1 |
-| 61,2 с | 1171 мс | 476 мс | 2 |
-| 130,1 с | 2898 мс | 288 мс | 6 |
-
-Сырые тексты совпали с предыдущим GPU-baseline во всех 35 случаях. Это
-PCM replay с виртуальным поступлением кадров раз в секунду: отдельный
-precompute занимал 298–442 мс и укладывался между кадрами. Время хвоста
-измерено одним прогоном, без микрофона, сетевой модели и playback. Отчёт:
-`output/stt-comparison/iris-overlap-gpu.json`. Воспроизведение на подготовленном
-корпусе из [сравнения STT](stt-comparison.md):
-
-```powershell
-.\.venv\Scripts\python.exe scripts/benchmark_voice_stt_overlap.py --manifest .cache/stt-lab/corpus/manifest.json --baseline output/stt-comparison/iris-integrated-gpu.json --output output/stt-comparison/iris-overlap-gpu.json
-```
-
-Parallel appraisal убирает отдельный сетевой запрос из последовательного
-пути до первого ответа. В локальной LLM telemetry недавние adjudication
-занимали 1,05–1,56 секунды; это длительность всего запроса, не TTFT и не
-измерение полного выигрыша в динамиках. Новый ответ получает последний
-готовый snapshot состояния и полную текущую реплику. Оценка текущей реплики
-применяется в фоне один раз, без предварительного neutral-события; новая
-generation отменяет устаревшие задачи. После постановки аудио в очередь
-завершение ответа дожидается appraisal, чтобы сохранить порядок
-«состояние пользователя → итоговое состояние ответа Iris». Бюджеты отношений,
-semantic ownership, incognito и скрытый регистр речи сохраняются.
-
-Smart Turn ограничен четырьмя CPU-потоками, idle spinning выключен. На девяти
-аудиофикстурах медианы inference уменьшились с 46–65 до 24–25 мс; вероятности
-совпали. Паузы endpoint, проверки завершённости речи, защитные проверки
-генерации и TeraTTSv2 / ru_f1 сохранены. Оставшаяся задержка включает сеть/LLM,
-проверку начала ответа, синтез первого сегмента и реальный playback.
-Для полной задержки ориентир — событие `voice.end_of_speech_to_playback`
-после фактического подтверждения начала воспроизведения, а не только STT.
+[API](api.md) · [Задержка](voice-latency.md) · [Память](chroma-memory.md)

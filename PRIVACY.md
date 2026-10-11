@@ -1,70 +1,85 @@
-# Privacy
+<img src="apps/web/public/brand/iris-mark-backed-dark.svg" width="36" alt="Знак Iris">
 
-Iris is local-first, not fully offline. This document describes the current
-source implementation; a distributed build must reproduce these properties.
+<sub>[Документация](Docs/index.md) / Проект</sub>
 
-## Processed locally
+# Ваши данные в Iris
 
-- microphone PCM, VAD and configured STT;
-- configured TTS and generated playback audio;
-- timeline, episodes, character state, memory and audit in SQLite;
-- runtime settings, model files, logs and backups;
-- Unity avatar rendering;
-- Coding Agent files and commands inside the local Docker sandbox.
+Iris обрабатывает речь и хранит данные локально, но использует внешнюю модель
+для ответов. Веб-поиск тоже обращается к внешним источникам. Этот документ
+описывает исходную реализацию; поставляемая сборка должна подтвердить те же
+свойства в [проверках выпуска](Docs/release-checklist.md).
 
-Raw live microphone audio is held in memory and is not persisted by default.
-Diagnostic audio capture must be explicitly enabled and should be treated as
-sensitive user data.
+## Что остаётся на компьютере
 
-## Sent to configured external services
+- Поток микрофона, VAD, распознавание речи и синтез.
+- История, эпизоды, состояние персонажа, память, свидетельства и аудит в SQLite.
+- Несекретные настройки, веса моделей, журналы и резервные копии.
+- Отрисовка Unity-аватара.
+- Копии файлов и команды Coding Agent в локальной Docker-среде.
 
-Conversation generation, background memory consolidation, reflections and
-optional Coding Agent reasoning send prompts to the configured DeepSeek-
-compatible endpoint. Requests may contain the current user message, a bounded
-recent context, compact retrieved memories and system instructions required for
-the task. Coding Agent uses a separate purpose profile and requires a separate
-API key.
+Сырой звук живого микрофона удерживается в памяти и по умолчанию не сохраняется.
+Диагностическая запись включается отдельно и является чувствительными данными.
+Синтезированное аудио может временно храниться для воспроизведения.
 
-Review the endpoint provider's privacy and retention policy before use. Iris
-does not make a cloud LLM local merely because STT and TTS are local.
+## Что отправляется наружу
 
-## Storage locations
+| Получатель | Данные и повод |
+| :--- | :--- |
+| Настроенный API модели диалога | Текущая реплика, ограниченная история, выбранные воспоминания и инструкции персонажа |
+| API для памяти и рефлексий | Ограниченные пользовательские сведения и состояние для фоновой обработки |
+| Отдельный API Coding Agent | Запрос задачи, разрешённый контекст файлов и результаты, нужные для решения |
+| Поисковые сервисы и сайты | Запрос поиска, URL и обычные сетевые данные обращения |
+| Источники RSS | Запросы обновления включённых лент |
+| Хранилища весов | Запросы загрузки моделей; записи речи для этого не передаются |
 
-Installed desktop data is stored under `%LOCALAPPDATA%\NeuroAsist` by default.
-See [operations](Docs/operations.md) for the layout. Browser development may
-use repository-relative `data/` and `logs/` paths.
+Проверьте политику своего поставщика API. Локальная речь не делает внешнюю
+модель локальной. Поисковый запрос может содержать личные сведения, если они
+есть в запросе пользователя; учитывайте это перед просьбой о веб-проверке.
 
-Windows Credential Manager stores the DeepSeek and Coding API keys as separate
-entries. The desktop shell passes them to the local core through an anonymous
-stdin pipe; inherited environment variables and `.env` are not accepted as API
-key sources. Runtime settings and backup ZIP files exclude API keys.
+## Хранение и ключи
 
-## Diagnostics
+По умолчанию desktop-данные находятся в `%LOCALAPPDATA%\NeuroAsist`.
+Структура — в [эксплуатации](Docs/operations.md#где-находятся-данные).
+Браузерная разработка может использовать `data/` и `logs/` репозитория.
 
-LLM telemetry records counts, cache usage, reasoning tokens, latency, status
-and errors without storing prompt/response content. Application logs and event
-metadata can still reveal filenames, model names, error details or task IDs;
-inspect them before sharing.
+Ключи диалога, Coding Agent и поиска — отдельные записи Credential Manager.
+Tauri передаёт их ядру через анонимный stdin-канал. Секреты из `.env` и
+унаследованного окружения игнорируются. Runtime settings и ZIP-копии
+не содержат API-ключей.
 
-## User controls
+## Диагностика и передача отчётов
 
-The application exposes memory review/edit/delete, dialog reset, companion data
-reset, diagnostic visibility and backup creation. A supported in-app backup
-restore is not yet available and remains a release gate.
+LLM-телеметрия содержит токены, кэш, задержки, статус и ошибки без полного
+содержимого запросов и ответов. Другие события, поисковые метаданные и журналы
+могут раскрывать запросы, адреса источников, пути, имена файлов и детали ошибок.
+Проверяйте отчёт перед отправкой.
 
-To remove local data, stop every Iris process first and use the application's
-reset controls or remove the chosen data directory intentionally. Uninstall
-behaviour and the retain/delete choice must be verified for each public build.
+История поиска хранит фактически выполненные операции. Отключение уведомлений
+не удаляет эти метаданные из истории.
+
+## Управление данными
+
+В приложении доступны просмотр и исправление памяти, её архивирование и
+удаление, очистка диалога, сброс данных персонажа, диагностика и резервные копии.
+Удаление памяти и исходной реплики истории — разные действия.
+
+Режим инкогнито оставляет состояние живого разговора в RAM. Он не превращает
+внешний LLM или явно запрошенный веб-поиск в локальную операцию.
+
+Создание ZIP не доказывает возможность восстановления. Поддерживаемого
+восстановления через интерфейс пока нет. Поведение удаления приложения и выбор
+сохранения данных проверяются для каждой публичной сборки.
+
+Перед переносом или удалением каталога данных завершите все процессы Iris.
+Обращения об уязвимостях отправляйте по [политике безопасности](SECURITY.md).
 
 ## Coding Agent
 
-Project context is opt-in and restricted to allowed roots/files. The task copy
-can be sent to the configured coding model as needed for the objective. Docker
-commands have no network and no live source mount; applying reviewed changes to
-the source requires an explicit user action.
+Контекст проекта добавляется явно и ограничивается разрешёнными файлами.
+Команды Docker не имеют сети и живого подключения исходного проекта.
+Применение просмотренных изменений требует отдельного действия пользователя.
+Разрешённая копия может передаваться внешней coding-модели.
 
-## Questions
+---
 
-For implementation details, open a repository issue without private data. For
-a suspected vulnerability, follow [SECURITY.md](SECURITY.md) instead of posting
-secrets or an exploit publicly.
+[Руководство пользователя](Docs/user-guide.md) · [Безопасность](SECURITY.md)

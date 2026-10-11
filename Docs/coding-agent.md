@@ -1,76 +1,84 @@
+<img src="../apps/web/public/brand/iris-mark-backed-dark.svg" width="36" alt="Знак Iris">
+
+<sub>[Документация](index.md) / Coding Agent</sub>
+
 # Coding Agent
 
-This document describes the Coding Agent shipped with Iris 1.0. It is an
-optional subsystem and remains disabled until its host prerequisites and API
-key are available.
+Coding Agent — необязательный исполнитель задач с собственным API-ключом.
+Iris создаёт сохраняемое задание, показывает ход выполнения и передаёт
+уточнения или отмену. Исполнитель работает с копией файлов.
 
-Coding Agent is a separately managed, review-first worker. Iris remains the
-conversation orchestrator: it detects an explicit coding request, creates a
-durable task, sends a short status back to the user, and can deliver a later
-instruction or cancellation. The Coding Agent itself never receives live
-project access.
+## Путь задачи
 
-## Safety model
+```text
+Запрос → отдельная рабочая область → Docker → результат и diff
+                                             ↓
+                               просмотр → применение в проект
+```
 
-1. A task without context files starts in a new, empty task directory. Its
-   created files remain there; it never reads or alters a project folder.
-2. The optional project-context mode accepts only a server-configured project
-   root and copies explicitly requested allowed source files into the task.
-   Git metadata, environments, dependencies, database files, logs, secret-like
-   files and unsupported extensions are excluded.
-3. The model can use a small JSON tool protocol: read/list/write/delete within
-   that copy and a policy-checked argv command.
-4. Commands run with Docker only: no network, dropped capabilities,
-   `no-new-privileges`, read-only container root, non-root user, CPU/memory/PID
-   limits, timeout and output caps. Generated commands never execute through a
-   host shell.
-5. The UI displays task events, command output, errors, tests, changed files
-   and unified diff. In standalone mode, confirming the result keeps generated
-   files in its workspace; optional project-context tasks have a separate
-   `Apply changes` action.
-6. Before apply, source hashes are compared with the snapshot. A conflict
-   blocks application. Changed originals are copied to the task's
-   `apply-backup` folder before any write.
+Обычная задача начинается в пустом каталоге. Созданные файлы остаются там.
+Контекст проекта добавляется явно из разрешённого корня:
+копируются допустимые исходники, исключаются Git, окружения, зависимости,
+базы, журналы и файлы, похожие на секреты.
 
-Docker is a hard requirement for execution. If the CLI/daemon/image is absent,
-the task fails safely and the UI reports the reason; the backend never falls
-back to host command execution.
+Модель использует ограниченный JSON-протокол чтения, записи и удаления
+в копии задачи и команды с проверяемым массивом аргументов.
 
-## One-time host setup
+## Исполнение и применение
 
-From the repository root, build the locked runtime image:
+Команды работают только в Docker: без сети, с отключёнными capabilities,
+`no-new-privileges`, доступной только для чтения корневой системой контейнера,
+непривилегированным пользователем, лимитами CPU/памяти/PID, времени и вывода.
+Живой каталог проекта не подключается в контейнер.
+
+В интерфейсе доступны события, вывод команд, ошибки, проверки и diff.
+Подтверждение автономной задачи оставляет файлы в её рабочей области.
+Перенос в исходный проект требует отдельного действия применения.
+
+Перед применением сравниваются хеши исходников со снимком. Конфликт блокирует
+запись. Изменяемые оригиналы сохраняются в `apply-backup` каталога задачи.
+
+При отсутствии CLI, Docker daemon или образа функция сообщает причину
+недоступности. Перехода к командной оболочке хоста нет.
+
+## Подготовка
+
+Из корня репозитория:
 
 ```powershell
 docker build -t neuroasist-coding:latest -f apps/backend/docker/coding.Dockerfile apps/backend/docker
 ```
 
-Ensure Docker Desktop is running, then enable **Coding Agent** in the new left
-navigation section. A new task is standalone by default. Add project context
-only when the task must edit known source files.
+Запустите Docker Desktop, сохраните отдельный Coding API-ключ в
+**Настройки → Система → API-ключи** и откройте Coding Agent.
+Ключ диалога автоматически не подставляется.
 
-## Configuration
+## Каталоги и пределы
 
-`CODING_WORKSPACE_ROOT` optionally selects where task folders are created; it
-must be outside every directory listed in `CODING_ALLOWED_PROJECT_ROOTS`. When
-omitted, the workspace is created as `CodingAgentWorkspace` beside the project
-root: for example, `B:\\NeuroAsist` uses `B:\\CodingAgentWorkspace`, while a
-checkout on another drive uses that checkout's parent directory automatically.
-`CODING_ALLOWED_PROJECT_ROOTS` is an optional comma-separated allowlist of
-project-context directories. When omitted, the current NeuroAsist repository
-root is the only allowed project context.
-The Coding API key is entered under **Settings → System → API keys** and stored
-as its own Windows Credential Manager entry. It is required for the Coding
-Agent and never falls back to the conversation DeepSeek key. Neither `.env` nor
-inherited environment variables are accepted as a secret source. The runtime
-stores no API key. `CODING_AGENT_ENABLED=false` hides execution globally while
-preserving past task records.
+`CODING_WORKSPACE_ROOT` выбирает каталог задач вне всех разрешённых проектов.
+По умолчанию `CodingAgentWorkspace` создаётся рядом с корнем checkout.
+`CODING_ALLOWED_PROJECT_ROOTS` — список разрешённых корней через запятую;
+без явного значения разрешён текущий репозиторий NeuroAsist.
 
-See `.env.example` for limits and the Docker image name. Static limits are
-operator configuration; workspace/model/enable/auto-delegation are the only
-user-facing runtime preferences.
+`CODING_AGENT_ENABLED=false` отключает выполнение и сохраняет историю задач.
+Образ, время, ресурсы и расширения — статические параметры
+[`.env.example`](../.env.example). Пользовательские настройки управляют
+рабочей областью, моделью, включением и автоматическим делегированием.
 
-The defaults admit 10,000 approved files and 128 MB per task snapshot. If an
-explicitly allowlisted project exceeds that profile, the error identifies
-whether the file-count or byte limit was reached. Raise these static limits
-only after confirming the project root contains no material you do not want
-the Coding Agent model to read.
+По умолчанию снимок ограничен 10 000 файлов и 128 000 000 байт.
+Превышение числа файлов или размера даёт отдельную ошибку.
+Меняйте пределы только после проверки состава разрешённого проекта.
+
+Ключ находится в Credential Manager, доставляется через stdin и не хранится
+в runtime settings. `.env` и унаследованные переменные не являются его источниками.
+
+## Что проверять при изменениях
+
+Проверьте отсутствие Docker, выход за разрешённый каталог, попытку чтения
+секрета, сетевую команду, отмену, превышение лимита и конфликт исходного файла.
+Сценарии применения должны сохранять оригинал и не переносить непроверенный
+результат в проект.
+
+---
+
+[Безопасность](../SECURITY.md) · [API](api.md) · [Эксплуатация](operations.md)

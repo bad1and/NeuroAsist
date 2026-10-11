@@ -1,78 +1,90 @@
-# Memory и semantic retrieval
+<img src="../apps/web/public/brand/iris-mark-backed-dark.svg" width="36" alt="Знак Iris">
 
-SQLite остаётся единственным каноническим хранилищем долгосрочной памяти Iris.
-ChromaDB или другой vector backend — перестраиваемый поисковый индекс, который
-можно удалить без потери memory records, provenance или audit trail.
+<sub>[Документация](index.md) / Память</sub>
 
-## Запись памяти
+# Память
 
-Visible reply не ждёт отдельный memory LLM call. После сохранения пользовательского
-хода deterministic gate решает, нужен ли background consolidation:
+SQLite хранит канонические факты, свидетельства и аудит. ChromaDB — поисковый
+индекс: его можно перестроить из SQLite. Удаление индекса не удаляет память.
 
-1. Small talk и сообщения без durable cues пропускаются.
-2. Уже покрытые high-precision facts не отправляются повторно.
-3. Обычные eligible turns объединяются в один trailing window вместо job на каждый ход.
-4. Явные user cues — просьба запомнить, correction или goodbye — могут сделать job доступной сразу.
-5. Background worker анализирует user deltas в жёстком input budget и получает только небольшой релевантный shortlist тем.
-6. Proposal проходит schema validation, policy, confidence/importance gates, deduplication и conflict handling до записи.
+## От реплики к факту
 
-Один coalesced job имеет тип `memory_consolidation`. Повторные сообщения до
-deadline обновляют существующий pending job, а не создают независимые requests.
-Assistant text не используется как источник новых пользовательских фактов.
+Видимый ответ не ждёт отдельного вызова извлечения памяти.
+После сохранения пользовательского хода локальные условия определяют,
+нужна ли фоновая консолидация:
 
-Sensitive/ambiguous memory следует выбранному режиму и может потребовать
-уточнения. Каждый сохранённый объект содержит source IDs, extractor version и
-audit events. Ручное создание отключено: факты появляются из разговора, но в
-Memory Center пользователь может исправить, закрепить, архивировать и
-восстановить запись. «Забыть навсегда» физически удаляет memory item, его
-audit/evidence и rebuildable vector; исходную реплику в истории нужно удалять
-отдельным явным действием.
+1. Обычная беседа без устойчивых сведений пропускается.
+2. Уже известные точные факты не отправляются повторно.
+3. Подходящие реплики объединяются в одно отложенное окно.
+4. Просьба запомнить, исправление или прощание могут ускорить задание.
+5. Исполнитель получает новые пользовательские сведения и небольшой список
+   релевантных тем с жёстким бюджетом ввода.
+6. Предложение проходит проверку схемы, политики, уверенности, важности,
+   повторов и конфликтов до записи.
 
-## Retrieval
+Задание имеет тип `memory_consolidation`. Новые сообщения до срока его
+выполнения обновляют существующее задание. Ответы самой Iris не являются
+источником новых пользовательских фактов.
 
-1. Context Manager формирует запрос из текущего user turn и continuity.
-2. SQLite FTS даёт безопасный lexical baseline.
-3. При включённом и прошедшем eval semantic backend добавляет факты, темы,
-   обязательства и сводки прошлых эпизодов.
-4. Memory service объединяет результаты, фильтрует inactive/superseded items и ограничивает context token budget.
-5. В LLM prompt попадают компактные JSON records с ID, помеченные как данные,
-   а не инструкции. `access_count` растёт только если Character Protocol
-   подтвердил, что видимый ответ реально использовал этот ID.
+## Управление записью
 
-В clean install включены background extraction и локальный Chroma/hash-контур;
-для них не нужен отдельный секрет или скачивание модели. При ошибке semantic
-backend система продолжает работу через FTS. Индексные jobs
-durable; status и reindex доступны через `/memory/index/status` и
-`/memory/reindex`.
+Чувствительные и неоднозначные сведения следуют выбранной политике и могут
+требовать уточнения. Сохранённая запись содержит идентификаторы источников,
+версию извлечения и события аудита.
 
-## Основные настройки
+Факты возникают из разговора; ручное создание отключено. В центре памяти
+пользователь может исправить, закрепить, архивировать и восстановить запись.
+«Забыть навсегда» физически удаляет запись, её аудит, свидетельства и вектор.
+Исходное сообщение истории удаляется отдельным явным действием.
 
-Статические defaults находятся в [.env.example](../.env.example), runtime policy
-— в Settings → Memory. Ключевые параметры:
+## Поиск для ответа
 
-- `MEMORY_ENABLED`;
-- `MEMORY_MODE` и `MEMORY_SENSITIVE_MODE`;
-- `MEMORY_CONTEXT_MAX_TOKENS`;
-- `MEMORY_ASYNC_EXTRACTION_ENABLED`;
-- `MEMORY_AUTO_MIN_CONFIDENCE` / `MEMORY_AUTO_MIN_IMPORTANCE`;
-- `SEMANTIC_RETRIEVAL_ENABLED` / `SEMANTIC_RETRIEVAL_EVAL_PASSED`;
-- `SEMANTIC_VECTOR_BACKEND`, embedding provider/model/dimension и retrieval limit.
+1. Менеджер контекста строит запрос из текущей реплики и продолжения разговора.
+2. SQLite FTS даёт лексические результаты.
+3. Если включён и допущен семантический поиск, он дополняет факты, темы,
+   обязательства и сводки эпизодов.
+4. Сервис объединяет результаты, исключает неактивные и заменённые записи,
+   ограничивает бюджет.
+5. В инструкции модели попадают компактные JSON-записи с ID, помеченные
+   как данные. `access_count` растёт при подтверждённом использовании ID
+   в видимом ответе через Character Protocol.
 
-## Диагностика
+В исходных настройках включены фоновое извлечение и локальный Chroma/hash-поиск.
+Hash-профиль не требует скачивания отдельной embedding-модели.
+Извлечение фактов всё равно использует внешний LLM.
+Ошибка индекса оставляет FTS; индексные задания сохраняются в SQLite.
 
-- `GET /memory/diagnostics` — counts, jobs, policy state и реально активные
-  writer/retrieval/backend/provider capabilities;
-- `GET /memory/retrieval/explain` — объяснение выбранных результатов;
-- `GET /memory/{id}/audit` — provenance/audit конкретной записи;
-- `GET /debug/llm/usage` — реальные tokens/cache/retries background extraction.
+## Настройки и диагностика
 
-Release quality оценивается по corpus precision/recall и token cost, а не по
-количеству созданных memories. Воспроизводимый локальный gate:
+Статические значения — в [`.env.example`](../.env.example),
+пользовательская политика — в настройках памяти.
+
+| Параметры | Назначение |
+| :--- | :--- |
+| `MEMORY_ENABLED`, `MEMORY_MODE`, `MEMORY_SENSITIVE_MODE` | Включение и политика сохранения |
+| `MEMORY_CONTEXT_MAX_TOKENS` | Бюджет выбранной памяти |
+| `MEMORY_ASYNC_EXTRACTION_ENABLED` | Фоновая консолидация |
+| `MEMORY_AUTO_MIN_CONFIDENCE`, `MEMORY_AUTO_MIN_IMPORTANCE` | Условия автоматического принятия |
+| `SEMANTIC_RETRIEVAL_ENABLED`, `SEMANTIC_RETRIEVAL_EVAL_PASSED` | Включение и допуск семантического поиска |
+| `SEMANTIC_VECTOR_BACKEND` и embedding-параметры | Хранилище, модель и размерность индекса |
+
+`GET /memory/diagnostics` показывает записи, задания, политику и реально
+активные возможности. `/memory/retrieval/explain` объясняет результаты,
+`/memory/{id}/audit` — происхождение записи,
+`/memory/index/status` — индекс. Перестроение вызывается через
+`POST /memory/reindex`. Точные методы и схемы сверяйте с OpenAPI.
+
+## Проверка качества
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\evaluate_memory.py
+.\.venv\Scripts\python.exe scripts/evaluate_memory.py
 ```
 
-Corpus находится в `tests/fixtures/memory_eval.json`; ненулевой exit code
-означает, что хотя бы один заявленный threshold не пройден. Требования находятся
-в [release-checklist.md](release-checklist.md).
+Корпус: [`tests/fixtures/memory_eval.json`](../tests/fixtures/memory_eval.json).
+Ненулевой код означает провал хотя бы одного порога. Качество оценивается
+точностью и полнотой извлечения, обработкой исправлений и стоимостью,
+а не количеством созданных записей.
+
+---
+
+[Живой разговор](live-conversation.md) · [Конфиденциальность](../PRIVACY.md)

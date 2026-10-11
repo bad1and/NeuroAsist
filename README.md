@@ -1,126 +1,180 @@
 <div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="Docs/media/readme/header.ru.dark.png">
+    <img src="Docs/media/readme/header.ru.light.png" width="900" alt="Ирис — помощник, с которым можно поговорить. По краям — акварельные ирисы">
+  </picture>
 
-<img src="./apps/web/public/brand/iris-wordmark-dark.svg" width="240" alt="Iris logo">
+# Ирис
 
-# Iris
+Голосовой помощник для Windows, с которым можно обсудить идею, разобрать задачу или просто поговорить.<br>
+Ирис помнит важное из бесед; рядом с окном диалога можно разместить аватар.
 
-### Local-first voice AI character for Windows
+**Русский** · [English](README.en.md) · [Документация](Docs/index.md)
 
-[![Version](https://img.shields.io/badge/version-1.0.0-7c3aed?style=flat-square)](VERSION)
-[![Python](https://img.shields.io/badge/Python-3.12-3776ab?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
-[![Node.js](https://img.shields.io/badge/Node.js-24-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
-[![React](https://img.shields.io/badge/React-19-61dafb?style=flat-square&logo=react&logoColor=111827)](https://react.dev/)
-[![Tauri](https://img.shields.io/badge/Tauri-2-24c8db?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE)
+[![Версия исходников](https://img.shields.io/badge/version-1.0.0-695B86?style=flat-square)](VERSION) · [Apache 2.0](LICENSE)
 
-**English** · [Русская версия](README.ru.md) · [Documentation](Docs/README.md)
+[Возможности](#возможности) · [Интерфейс](#интерфейс) · [Запуск](#запуск) · [Данные](#данные) · [Разработка](#разработка)
 
 </div>
 
-> [!IMPORTANT]
-> The source tree targets **Iris 1.0.0**. The local development application is functional; the distributable installer still has to pass the release checklist before a public release.
+[![Обзор Iris: начало разговора, последняя беседа, память и состояние системы](Docs/media/readme/overview.png)](Docs/media/readme/overview.png)
 
-Iris is a desktop AI character with local speech recognition and synthesis, a DeepSeek-compatible conversation model, durable memory, a live voice mode, and an optional Unity VRM avatar. The Tauri shell owns the React interface and the authenticated FastAPI core as one application.
+<sub>Главный экран</sub>
 
-## What works
+Распознавание и озвучивание речи работают на компьютере. За ответы отвечает внешняя модель: для разговора нужны интернет и API-ключ выбранного сервиса.
 
-| Area | Current implementation |
-| --- | --- |
-| Text and live voice | Streaming replies, continuous PCM input, VAD, smart turn detection, barge-in, reconnect cleanup |
-| Local speech | GigaAM v3 STT with optional fallback; TeraTTSv2 `ru_f1` voice by default |
-| Character | Stable persona, affect, gestures, delivery metadata, mood and relationship state |
-| Memory | SQLite as the source of truth, background extraction, provenance, audit, FTS and optional semantic retrieval |
-| Desktop | Tauri 2 lifecycle, tray, single instance, safe mode and protected random loopback port |
-| Avatar | Optional Unity VRM renderer, lip sync, gestures, desktop overlay or embedded chat placement |
-| Coding Agent | Optional Docker-only worker with isolated snapshots, logs, diff and explicit review/apply |
-| Diagnostics | Runtime event stream, model/readiness status, token/retry telemetry and backups |
+Пока Ирис запускается из исходников. [Статус выпуска](Docs/MILESTONES.md).
 
-Iris does not provide general desktop control. The Coding Agent can only work inside its task sandbox and never falls back to a host shell.
+## Возможности
 
-## Runtime at a glance
+**Разговор.** С Ирис можно говорить голосом или переписываться. В голосовом режиме она определяет конец реплики; ответ можно перебить. [О голосовом разговоре](Docs/live-conversation.md).
 
-```mermaid
-flowchart LR
-    A[Text or microphone] --> B[React / AudioWorklet]
-    B --> C[Authenticated FastAPI core]
-    C --> D[GigaAM STT]
-    C --> E[Character Agent]
-    E --> F[DeepSeek-compatible API]
-    E --> G[SQLite timeline and memory]
-    F --> H[TeraTTSv2]
-    H --> B
-    C --> I[Unity avatar]
-```
+**Память.** Ирис сохраняет важные сведения из бесед. Записи можно прочитать, исправить или удалить в разделе памяти. [Как работает память](Docs/chroma-memory.md).
 
-See [Architecture](Docs/architecture.md) for ownership and data-flow details.
+**Поиск.** Если нужно проверить информацию или найти новости, Ирис может обратиться к поиску. Результаты и источники остаются в истории. Уведомления о поиске по умолчанию выключены. [Поиск и новости](Docs/awareness.md).
 
-## Quick start
+**Аватар.** Необязательный Unity-аватар можно разместить на рабочем столе или внутри окна диалога. Он сопровождает речь движением губ и жестами. [Настройка аватара](apps/avatar-unity/README.md).
 
-### Requirements
+**Coding Agent.** Отдельный агент работает с задачами по коду в Docker. Изменения можно просмотреть перед переносом в проект. Для него нужны Docker и собственный API-ключ. [Настройка и границы доступа](Docs/coding-agent.md).
 
-- Windows 10 or 11;
-- Git;
-- Python 3.12;
-- Node.js 24 and npm 11;
-- FFmpeg and FFprobe available through `PATH`;
-- a DeepSeek-compatible API key;
-- Rust 1.77.2+ and Microsoft C++ Build Tools for Tauri development;
-- WebView2 Runtime, normally included with current Windows versions.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="Docs/media/readme/interface.ru.dark.png">
+    <img src="Docs/media/readme/interface.ru.light.png" width="900" alt="Как выглядит Ирис">
+  </picture>
+</p>
 
-Optional components:
+## Интерфейс
 
-- Docker Desktop for Coding Agent;
-- Unity 2022.3.62f3 only when rebuilding the avatar renderer;
-- an NVIDIA GPU for accelerated STT. The default TTS profile runs on CPU.
+### Диалог
 
-### 1. Clone and install
+[![Диалог Iris в приложении Windows: Unity-аватар, субтитры ответа, поле сообщения и управление голосом](Docs/media/readme/dialogue.png)](Docs/media/readme/dialogue.png)
+
+Здесь можно писать, включать голосовой разговор и читать субтитры ответа. Аватар можно отключить.
+
+### Память
+
+[![Память Iris: подготовленные записи о ночных правках, коротких ответах и планах](Docs/media/readme/memory.png)](Docs/media/readme/memory.png)
+
+У записей из бесед можно посмотреть источник — сообщение, из которого Ирис их запомнила.
+
+<details>
+<summary>История</summary>
+
+[![История Iris: список разговоров и сообщения выбранного диалога](Docs/media/readme/history.png)](Docs/media/readme/history.png)
+
+Список бесед и поиск по сообщениям.
+
+</details>
+
+<details>
+<summary>Состояние</summary>
+
+[![Состояние Iris: настроение и состояние отношений](Docs/media/readme/state.png)](Docs/media/readme/state.png)
+
+Настроение Ирис и состояние отношений с собеседником.
+
+</details>
+
+<details>
+<summary>Настройки голоса</summary>
+
+[![Настройки голоса Iris: язык, голос и параметры воспроизведения](Docs/media/readme/voice-settings.png)](Docs/media/readme/voice-settings.png)
+
+Микрофон и устройство вывода выбираются отдельно, в разделе устройств.
+
+</details>
+
+<details>
+<summary>Coding Agent</summary>
+
+[![Coding Agent: раздел задач без запущенных заданий](Docs/media/readme/coding.png)](Docs/media/readme/coding.png)
+
+Задачи агента, изменения в файлах и журнал выполнения. На снимке задач ещё нет.
+
+</details>
+
+<sub>Снимки сделаны в отдельном профиле с подготовленными примерами разговоров и памяти.</sub>
+
+## Запуск
+
+Для запуска из исходников понадобятся **Windows 10 или 11**, Git, **Python 3.12**, **Node.js 24 / npm 11**, FFmpeg и FFprobe в `PATH`. Для оболочки Tauri нужны Rust 1.77.2 или новее, Microsoft C++ Build Tools и WebView2 Runtime.
+
+### Установить зависимости
 
 ```powershell
 git clone https://github.com/bad1and/NeuroAsist.git Iris
 cd Iris
 
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 
 npm ci
 npm ci --prefix apps/web
 npm ci --prefix apps/desktop
-```
 
-`requirements.txt` composes separate runtime and development profiles. For CUDA development, install compatible `torch` and `torchaudio` wheels from the PyTorch index before running the regular command above:
-
-```powershell
-python -m pip install -r requirements/torch-cu128.txt
-```
-
-Keep `VOICE_STT_DEVICE=cpu` when CUDA is unavailable. These prerequisites apply to source development: the Windows installer contains an isolated Python sidecar and must not require Python, Node or Rust on the user's machine. See [Dependency profiles](Docs/dependencies.md) for update rules.
-
-### 2. Configure
-
-```powershell
 Copy-Item .env.example .env
 ```
 
-Start the Tauri application and enter the DeepSeek and Coding API keys under
-**Settings → System → API keys**. They are stored as separate entries in Windows
-Credential Manager and delivered to the local core over an anonymous pipe.
-Secrets in `.env` or inherited environment variables are intentionally ignored
-and are never written to runtime settings, backups, or Git. All non-secret static
-options and safe defaults are documented inline in [.env.example](.env.example).
+Для CUDA сначала установите профиль из блока ниже, затем `requirements.txt`. [Подробнее о зависимостях](Docs/dependencies.md).
 
-### 3. Start the desktop application
+### Открыть Ирис
 
 ```powershell
 npm --prefix apps/desktop run dev
 ```
 
-Tauri starts Vite and the FastAPI core automatically. Use the tray **Quit** action or `Ctrl+C` to stop the managed processes.
+Оболочка сама запускает интерфейс и локальное ядро. В **Настройки → Система → API-ключи** сохраните ключ модели диалога. Ключи хранятся в Windows Credential Manager; `.env` предназначен для несекретных параметров.
 
-### Browser-only development
+Для первого разговора достаточно текста. Чтобы включить голос, дождитесь загрузки речевых моделей и выберите микрофон и устройство вывода. Для скачивания моделей понадобятся интернет и место на диске.
 
-Run these commands in separate PowerShell windows:
+Для полного выхода используйте **Quit** в меню значка Ирис в области уведомлений Windows. [Первый запуск и повседневная работа](Docs/user-guide.md).
+
+<details>
+<summary>CUDA — ускорение распознавания речи</summary>
+
+Видеокарта NVIDIA может ускорить распознавание речи. Перед `requirements.txt` установите CUDA-профиль:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements/torch-cu128.txt
+```
+
+Если CUDA недоступна, используйте `VOICE_STT_DEVICE=cpu` в `.env`. Стандартный профиль синтеза TeraTTSv2 работает на CPU.
+
+</details>
+
+<details>
+<summary>Unity — пересборка аватара</summary>
+
+Готовую локальную сборку аватара Tauri находит автоматически. Unity 2022.3.62f3 нужен только для пересборки после изменений:
+
+```powershell
+$env:NEUROASIST_UNITY_EDITOR = 'C:\Program Files\Unity\Hub\Editor\2022.3.62f3\Editor\Unity.exe'
+npm --prefix apps/desktop run build:avatar
+```
+
+[Сборка и настройка Unity-аватара](apps/avatar-unity/README.md).
+
+</details>
+
+<details>
+<summary>Docker — среда для Coding Agent</summary>
+
+Запустите Docker Desktop и соберите образ:
+
+```powershell
+docker build -t neuroasist-coding:latest -f apps/backend/docker/coding.Dockerfile apps/backend/docker
+```
+
+Сохраните отдельный Coding API-ключ в настройках приложения и включите агента. Ключ диалоговой модели вместо него не используется. [Полная инструкция](Docs/coding-agent.md).
+
+</details>
+
+<details>
+<summary>Браузерный режим — разработка интерфейса и ядра</summary>
+
+В двух окнах PowerShell:
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
@@ -130,35 +184,36 @@ Run these commands in separate PowerShell windows:
 npm --prefix apps/web run dev
 ```
 
-Open `http://127.0.0.1:5173`. API documentation is at `http://127.0.0.1:8000/docs`.
-This mode is intended for UI and local-core work and does not receive credentials;
-use the Tauri development launch for real model requests.
+Интерфейс — `http://127.0.0.1:5173`, описание API — `http://127.0.0.1:8000/docs`.
 
-## Optional setup
+Браузерный режим не получает ключи из Windows Credential Manager. Для запросов к модели запускайте приложение через Tauri.
 
-### Coding Agent
+</details>
 
-```powershell
-docker build -t neuroasist-coding:latest -f apps/backend/docker/coding.Dockerfile apps/backend/docker
-```
+Если приложение не запускается или не слышно голос, начните с [диагностики](Docs/operations.md#диагностика).
 
-Start Docker Desktop, save a dedicated Coding API key in application settings,
-then enable the agent in its application section. The Coding Agent never falls
-back to the conversation key. Read the [Coding Agent safety model](Docs/coding-agent.md)
-before allowing project context.
+## Данные
 
-### Unity avatar
+История, память и настройки хранятся на компьютере. При запуске через Tauri — в `%LOCALAPPDATA%\NeuroAsist`. Запись с микрофона по умолчанию не сохраняется.
 
-The checked-in Tauri development flow discovers an existing Unity build automatically. Rebuild it only after Unity-side changes:
+Для ответа модель получает текст запроса и выбранный контекст беседы. Поиск обращается к внешним источникам. [Подробнее о данных](PRIVACY.md).
 
-```powershell
-$env:NEUROASIST_UNITY_EDITOR = 'C:\Program Files\Unity\Hub\Editor\2022.3.62f3\Editor\Unity.exe'
-npm --prefix apps/desktop run build:avatar
-```
+Удаление записи памяти и исходного сообщения — разные действия. Резервные копии можно создавать в настройках; восстановления через интерфейс пока нет. Ирис не предоставляет общего управления рабочим столом, а Coding Agent работает в своей изолированной среде.
 
-See the [Unity avatar README](apps/avatar-unity/README.md).
+[Безопасность](SECURITY.md) · [Текущий статус проекта](Docs/MILESTONES.md) · [Условия выпуска](Docs/release-checklist.md)
 
-## Verification
+## Разработка
+
+| Каталог | Что внутри |
+| :--- | :--- |
+| `apps/web` | Интерфейс React |
+| `apps/backend` | Диалог, голос, память и локальное API |
+| `apps/desktop` | Оболочка Windows на Tauri |
+| `apps/avatar-unity` | Необязательный Unity-аватар |
+| `apps/protocol` | Общие контракты персонажа и аватара |
+| `Docs`, `scripts`, `tests` | Документация, инструменты и проверки |
+
+Основные проверки из корня репозитория:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
@@ -168,41 +223,18 @@ npm --prefix apps/desktop run check
 .\.venv\Scripts\python.exe scripts/check_docs.py
 ```
 
-Operational smoke tests, backups, clean startup and release build commands are in [Operations](Docs/operations.md). The public-release acceptance criteria are in the [1.0 release checklist](Docs/release-checklist.md).
+[Документация](Docs/index.md) · [Архитектура](Docs/architecture.md) · [Участие в разработке](CONTRIBUTING.md) · [Дизайн Ирис](design.md)
 
-## Data and privacy
+Версию задаёт `VERSION`. Порядок сборки установщика и проверки перед публикацией описаны в [эксплуатации](Docs/operations.md) и [руководстве выпуска](Docs/release-runbook.md).
 
-- Desktop data is stored under `%LOCALAPPDATA%\NeuroAsist` unless `NEUROASIST_APP_DATA_DIR` overrides it.
-- SQLite is canonical for timeline, episodes, memory, settings-related jobs and Coding Agent task records.
-- Raw live microphone PCM is not retained by default.
-- STT and TTS run locally; conversation prompts and selected compact context are sent to the configured DeepSeek-compatible endpoint.
-- Semantic indexes are rebuildable and never replace canonical SQLite data.
-- Coding containers have no network, no live project mount and no host-shell fallback.
+<p align="center">
+  <a href="Docs/media/readme/poster-less-noise.png"><img src="Docs/media/readme/poster-less-noise.png" width="260" alt="Постер «Меньше шума — больше мысли»"></a>
+  <a href="Docs/media/readme/poster-always-with-you.png"><img src="Docs/media/readme/poster-always-with-you.png" width="260" alt="Футуристический постер IRIS — Always with you"></a>
+  <a href="Docs/media/readme/poster-assistant-project.png"><img src="Docs/media/readme/poster-assistant-project.png" width="260" alt="Постер Assistant Project: Iris"></a>
+</p>
 
-## Repository map
+---
 
-```text
-apps/backend/       FastAPI core, character, memory, voice and storage
-apps/web/           React 19 interface
-apps/desktop/       Tauri 2 shell and release metadata
-apps/avatar-unity/  Optional Unity VRM renderer
-apps/protocol/      Shared character and avatar contracts
-Docs/               Current architecture, operation and release documents
-scripts/            Build, smoke, benchmark and maintenance tools
-tests/              Backend regression and isolated experiment suites
-```
+Код распространяется по [Apache 2.0](LICENSE). У моделей, аватара и других сторонних материалов свои условия: [состав и происхождение](THIRD_PARTY_ASSETS.md).
 
-Start with the [documentation index](Docs/README.md). Historical plans are isolated under [Docs/archive](Docs/archive/README.md) and are not implementation instructions.
-
-Project policies: [Privacy](PRIVACY.md), [Security](SECURITY.md),
-[Changelog](CHANGELOG.md), and [Contributing](CONTRIBUTING.md).
-
-## Versioning and releases
-
-`VERSION` is the product-version source of truth. Package manifests mirror it because npm, Cargo and Tauri require their own metadata; `scripts/check_docs.py` verifies that they remain synchronized. The policy is documented in [Versioning](Docs/versioning.md).
-
-The Windows installer build is intentionally a release operation, not the normal development path. Follow [Operations](Docs/operations.md) and complete [the release checklist](Docs/release-checklist.md) before publishing an artifact.
-
-## License
-
-Source code is licensed under [Apache 2.0](LICENSE). Third-party avatar and motion assets have separate terms summarized in [THIRD_PARTY_ASSETS.md](THIRD_PARTY_ASSETS.md).
+[Документация](Docs/index.md) · [История изменений](CHANGELOG.md) · [English](README.en.md) · [К началу](#ирис)

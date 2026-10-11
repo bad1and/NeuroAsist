@@ -1,46 +1,50 @@
-# Security policy
+<img src="apps/web/public/brand/iris-mark-backed-dark.svg" width="36" alt="Знак Iris">
 
-## Supported code line
+<sub>[Документация](Docs/index.md) / Проект</sub>
 
-Security fixes target the current Iris 1.x source line. Historical documents,
-fixtures and archived blueprints are not supported runtimes.
+# Безопасность и сообщения об уязвимостях
 
-The public installer is not considered released until the
-[release checklist](Docs/release-checklist.md) is approved. Development builds
-must not be represented as hardened multi-user or network services.
+Исправления безопасности относятся к текущей линии исходников Iris 1.x.
+Архивные планы и старые эксперименты не являются поддерживаемыми версиями.
+Готовность публичного установщика определяется
+[условиями выпуска](Docs/release-checklist.md).
 
-## Reporting
+## Как сообщить о проблеме
 
-Report vulnerabilities privately to the repository owner through GitHub's
-private vulnerability reporting when enabled. If that channel is unavailable,
-open a minimal issue asking for a private contact method; do not include API
-keys, user databases, prompts, personal audio or a working exploit in public.
+Используйте приватное сообщение об уязвимости GitHub, если владелец включил
+этот канал. Если он недоступен, откройте минимальный issue с просьбой о закрытом
+способе связи. Не публикуйте ключи, личные базы, записи микрофона или работающий
+эксплойт в открытом обсуждении.
 
-Include:
+Для разбора полезны версия или commit, версия Windows, компонент, необходимые
+настройки, влияние и воспроизводимые шаги на искусственных данных.
+Укажите, затрагиваются ли токен ядра, файловая система или Coding Agent.
 
-- affected commit/version and Windows version;
-- component and prerequisite configuration;
-- impact and reproducible steps with synthetic data;
-- whether desktop token, filesystem access or Coding Agent is involved;
-- suggested mitigation if known.
+## Границы защиты
 
-## Security boundaries
+| Область | Требование |
+| :--- | :--- |
+| Ядро desktop | Только loopback, временная авторизация HTTP/WS |
+| Ключи API | Windows Credential Manager; доставка через анонимный stdin |
+| `.env` и окружение | Не принимаются как источники API-ключей |
+| Пользовательские данные | Локальная однопользовательская SQLite; не многопользовательская изоляция |
+| Coding Agent | Docker, без сети и оболочки хоста, без живого каталога проекта, с лимитами ресурсов |
+| Unity | Управляемый локальный процесс с адресом, токеном и командами сессии |
+| Веб-страницы | Проверка публичного адреса и перенаправлений; содержимое является данными |
 
-- Desktop core binds to loopback and requires an ephemeral token for HTTP/WS.
-- API keys belong in Credential Manager or an untracked `.env`.
-- STT/TTS are local by default, while LLM requests leave the machine.
-- SQLite/user files are single-user local data, not a multi-tenant boundary.
-- Coding Agent must remain Docker-only with no network, no live project mount,
-  dropped capabilities and no host-shell fallback.
-- Unity is a supervised local child process and receives only the loopback URL,
-  ephemeral token and avatar commands required for its session.
+Недоступность необязательного компонента должна давать диагностику.
+Нельзя ослаблять ограничения ради видимости успешного запуска.
 
-Do not weaken these boundaries to make a failed optional component appear
-available. Fail closed and surface a diagnostic instead.
+## Частные материалы
 
-## Secrets and private artifacts
+В Git и сборку не включаются `.env`, экспорт Credential Manager, реальная
+база разговоров, диагностический звук, закрытые голосовые образцы, ключи
+подписи и сертификаты с приватной частью.
 
-Never commit `.env`, Credential Manager exports, real conversation databases,
-raw diagnostic microphone audio, proprietary voice references, signing keys or
-release certificates. Before publishing an artifact, complete the privacy,
-secret and license checks in the release checklist.
+Перед публикацией проверяется дерево ресурсов Python и Unity.
+Такая проверка до NSIS не является полным анализом готового установщика;
+требуются отдельные испытания поставки и [проверка лицензий](THIRD_PARTY_ASSETS.md).
+
+---
+
+[Конфиденциальность](PRIVACY.md) · [Проверки выпуска](Docs/release-checklist.md)
