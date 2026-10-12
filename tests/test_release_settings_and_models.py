@@ -145,7 +145,7 @@ def test_backup_snapshots_database_and_nonsecret_settings(tmp_path: Path) -> Non
     backup = service.create()
 
     with ZipFile(tmp_path / "backups" / str(backup["name"])) as archive:
-        assert sorted(archive.namelist()) == ["data/neuroasist.sqlite3", "settings.json"]
+        assert sorted(archive.namelist()) == ["data/neuroasist.sqlite3", "manifest.json", "settings.json"]
         archive.extract("data/neuroasist.sqlite3", tmp_path / "restored")
 
     restored = sqlite3.connect(tmp_path / "restored" / "data" / "neuroasist.sqlite3")

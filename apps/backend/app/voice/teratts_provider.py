@@ -253,6 +253,9 @@ class TeraTTSProvider(TTSProvider):
                 raise self._friendly_load_error(exc) from exc
 
     def _load_model_sync(self) -> Any:
+        if self.model_path is not None:
+            from apps.backend.app.model_manager.service import require_managed_model
+            require_managed_model("teratts-v2", self.model_path)
         if self.model_path is not None and not self.model_path.is_dir():
             raise RuntimeError(f"TeraTTS local model directory does not exist: {self.model_path}")
         if self._model_loader is not None:

@@ -51,6 +51,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 const AvatarDevStudioStandalonePage = lazy(() => import("./components/AvatarDevPanel").then(module => ({ default: module.AvatarDevStudioStandalonePage })));
+import { ModelManager } from "./components/ModelSettings";
 import { BackupControls } from "./components/BackupControls";
 import { EnvironmentSettings } from "./components/EnvironmentSettings";
 import { ApiKeysSettings, type CredentialTarget } from "./components/ApiKeysSettings";
@@ -593,6 +594,25 @@ function MainApp() {
   }, [desktopManaged]);
 
   const isWaitingForAvatar = shouldWaitForInAppAvatar(desktopManaged, avatarHostStatus);
+  const modelNoticeShown = useRef(false);
+  useEffect(() => {
+    if (!desktopManaged || !readiness?.models?.length) return;
+    if (readiness.models.every(model => model.installed)) {
+      notify.dismiss("models.readiness");
+      modelNoticeShown.current = false;
+    } else if (!modelNoticeShown.current && coreStatus === "ready" && !showStartup) {
+      modelNoticeShown.current = true;
+      notify.warning("Голос пока недоступен", "Скачайте недостающие модели в настройках, чтобы включить голос.", {
+        id: "models.readiness", duration: "persistent", accent: "danger",
+        actions: [{ label: "Открыть модели", onClick: () => {
+          setSettingsNavigationRequest(current => ({ section: "models", id: (current?.id ?? 0) + 1 }));
+          switchView("settings");
+          notify.dismiss("models.readiness");
+        } }],
+      });
+    }
+  }, [desktopManaged, readiness, coreStatus, showStartup]);
+
   const startupStage = getStartupStage(coreStatus, readiness, isWaitingForAvatar, readinessUnavailable);
   const startupReady = coreStatus === "ready" && startupStage === 3;
 
@@ -851,7 +871,7 @@ function MainApp() {
         try {
           const event = JSON.parse(message.data) as BackendEvent;
           setEvents((current) => dedupeEvents([...current, event]));
-          notifyBackendEvent(event);
+          notifyBackendEvent(event, () => { setSettingsNavigationRequest(current => ({ section: "models", id: (current?.id ?? 0) + 1 })); switchView("settings"); });
           retrievalNotifications.current.consume(event);
         } catch {
           // Ignore malformed event frames.
@@ -4366,7 +4386,7 @@ const SETTINGS_NAVIGATION: Array<{
       { section: "api-keys", label: "API-ключи" },
       { section: "token-usage", label: "Токены и расходы" },
       { section: "system-overview", label: "Обзор" },
-      { section: "models", label: "Модели", devOnly: true },
+      { section: "models", label: "Модели" },
       { section: "backups", label: "Резервные копии" },
       { section: "maintenance", label: "Обслуживание данных", devOnly: true },
       { section: "events", label: "Журнал событий", devOnly: true },
@@ -4481,120 +4501,6 @@ function SettingsSectionButton({
     >
       <span>{label}</span>
     </MaterialButton>
-  );
-}
-
-function ModelManager({
-  developerMode = false,
-  onUnlockRequest,
-}: {
-  developerMode?: boolean;
-  onUnlockRequest?: () => void;
-}) {
-  const [models, setModels] = useState<ManagedModel[]>([]);
-  const [message, setMessage] = useState<string | null>(null);
-  const listRef = useRef<HTMLDivElement | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      setModels((await getModels()).models);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Модели недоступны.");
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 1000);
-    return () => window.clearInterval(timer);
-  }, [refresh]);
-
-  useEffect(() => {
-    if (listRef.current && models.length > 0) {
-      animateStaggerCards(listRef.current, ".model-item-card", 40);
-    }
-  }, [models.length]);
-
-  const install = async (modelId: string) => {
-    if (!developerMode) return;
-    setMessage(null);
-    try {
-      await installModel(modelId);
-      await refresh();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Не удалось начать загрузку модели.");
-    }
-  };
-
-  const remove = async (modelId: string) => {
-    if (!developerMode) return;
-    setMessage(null);
-    try {
-      await removeModel(modelId);
-      await refresh();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Не удалось удалить модель.");
-    }
-  };
-
-  return (
-    <section className="settings-card" aria-label="Управление моделями" ref={listRef}>
-      <div className="settings-card-header">
-        <div className="settings-card-header-main">
-          <div className="settings-card-title-group">
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <h2 className="settings-card-title">Модели</h2>
-              <DevBadge active={developerMode} onClick={onUnlockRequest} />
-            </div>
-            <p className="settings-card-subtitle">Хранятся вне папки приложения</p>
-          </div>
-        </div>
-        <div className="settings-card-header-actions">
-          <MaterialButton materialKey={"App.button-30"} className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void refresh(); }}>
-            <RefreshCw size={15} aria-hidden="true" />
-            Обновить
-          </MaterialButton>
-        </div>
-      </div>
-      {models.map((model) => {
-        const percent = model.total_bytes > 0 ? Math.min(100, Math.round((model.downloaded_bytes / model.total_bytes) * 100)) : 0;
-        return <div className="model-item-card" key={model.id}>
-          <div className="model-item-header">
-            <strong>{model.name} {model.version}</strong>
-            <span className={`settings-status-pill${model.installed ? " is-active" : ""}`}>
-              <span className="settings-status-dot" />
-              {model.installed ? "Установлена и проверена" : model.status === "downloading" ? `Загружаем: ${percent}%` : "Не установлена"}
-            </span>
-          </div>
-          {model.status === "failed" && <span className="notice">{model.error}</span>}
-          {model.status === "downloading" && <progress value={percent} max="100">{percent}%</progress>}
-          <div className="model-actions">
-            {!model.installed && (
-              <MaterialButton materialKey={["App.button-31", model.id].join(":")}
-                className="primary-button"
-                onClick={(e) => { animateButtonPress(e.currentTarget); void install(model.id); }}
-                disabled={!developerMode || model.status === "downloading"}
-                title={!developerMode ? "Требуется режим разработчика" : undefined}
-              >
-                {model.status === "failed" ? "Повторить загрузку" : "Скачать"}
-              </MaterialButton>
-            )}
-            {model.installed && (
-              <MaterialButton materialKey={["App.button-32", model.id].join(":")}
-                className="secondary danger-button"
-                onClick={(e) => { animateButtonPress(e.currentTarget); void remove(model.id); }}
-                disabled={!developerMode}
-                title={!developerMode ? "Требуется режим разработчика" : undefined}
-              >
-                Удалить
-              </MaterialButton>
-            )}
-          </div>
-          {model.restart_required && model.installed && <small>Перезапустите Iris, чтобы использовать модель.</small>}
-        </div>;
-      })}
-      {message && <div className="notice">{message}</div>}
-    </section>
   );
 }
 

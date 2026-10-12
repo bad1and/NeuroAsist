@@ -53,8 +53,12 @@ class GigaAMOnnxSTTProvider(STTProvider):
         }
 
     def _prepare_model_files(self) -> None:
+        from apps.backend.app.model_manager.service import require_managed_model
+        require_managed_model("gigaam-v3-rnnt", self._model_dir)
         if all((self._model_dir / name).is_file() for name in MODEL_FILES):
             return
+        if os.getenv("NEUROASIST_MANAGED_MODELS") == "1":
+            raise RuntimeError("Скачайте GigaAM в Настройки → Система → Модели.")
         from huggingface_hub import snapshot_download
 
         snapshot_download("istupakov/gigaam-v3-onnx", revision=MODEL_REVISION,

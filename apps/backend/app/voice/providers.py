@@ -4,7 +4,6 @@ import io
 import logging
 import math
 import re
-import subprocess
 import tempfile
 import threading
 import time
@@ -684,27 +683,8 @@ class GigaAMSTTProvider(STTProvider):
         return self._merge_overlapped_texts(texts)
 
     def _decode_pcm16(self, audio_path: Path) -> bytes:
-        command = [
-            "ffmpeg",
-            "-v",
-            "error",
-            "-nostdin",
-            "-i",
-            str(audio_path),
-            "-f",
-            "s16le",
-            "-acodec",
-            "pcm_s16le",
-            "-ac",
-            "1",
-            "-ar",
-            str(self._SAMPLE_RATE),
-            "-",
-        ]
-        completed = subprocess.run(command, capture_output=True, check=False)
-        if completed.returncode != 0 or not completed.stdout:
-            raise RuntimeError("Could not decode long audio for GigaAM")
-        return completed.stdout
+        from apps.backend.app.voice.audio import decode_audio_file
+        return decode_audio_file(audio_path).data
 
     def _split_pcm16_on_quiet(self, pcm16: bytes, *, overlap_seconds: float = 0.0) -> list[bytes]:
         samples = array.array("h")

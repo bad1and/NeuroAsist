@@ -12577,3 +12577,13 @@ button.journal-header-tokens:hover {
     flex-shrink: 0;
   }
 }
+
+.model-storage-path { overflow-wrap: anywhere; color: var(--color-text-muted); }
+
+.app-dialog-card .model-storage-path { flex: 1 0 100%; min-width: 0; }
+
+.settings-card-header.models-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.models-total-size { flex-shrink: 0; color: var(--color-text-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.model-download-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; width: 100%; }
+.model-download-actions > button { width: 100%; min-width: 0; padding-inline: 8px; }
+.model-download-actions > .model-download-cancel { grid-column: 1 / -1; }
