@@ -269,6 +269,7 @@ def test_clear_history_preserves_memory_and_allows_new_dialogue(monkeypatch, tmp
 
     client, database = make_client(monkeypatch, tmp_path)
     with client:
+        client.portal.call(client.app.state.storage_maintenance_ready.wait)
         store = client.app.state.timeline_store
         message, _ = store.append_message(role="user", content="Меня зовут Роман", input_mode="text")
         MemoryService(store, RuntimeSettings(memory_mode="automatic")).extract_from_message(message)

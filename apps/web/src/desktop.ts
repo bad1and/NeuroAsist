@@ -145,6 +145,10 @@ export async function restartDesktopCore(): Promise<DesktopRuntime> {
   return invoke<DesktopRuntime>("restart_core");
 }
 
+export const importDesktopBackup = () => invoke<{ name: string } | null>("import_backup");
+export const exportDesktopBackup = (name: string) => invoke<boolean>("export_backup", { name });
+export const restoreDesktopBackup = (name: string) => invoke("restore_backup", { name });
+
 export async function getDesktopRuntime(): Promise<DesktopRuntime> {
   return invoke<DesktopRuntime>("desktop_runtime");
 }

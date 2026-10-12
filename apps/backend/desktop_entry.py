@@ -100,6 +100,12 @@ def create_desktop_app() -> FastAPI:
 
 def main() -> None:
     configure_standard_streams()
+    from pathlib import Path
+    from apps.backend.app.storage.recovery import maintenance_main, recover_interrupted_restore
+    if maintenance_main(sys.argv[1:]):
+        return
+    if root := os.getenv("NEUROASIST_APP_DATA_DIR"):
+        recover_interrupted_restore(Path(root))
     configure_safe_mode()
     load_runtime_credentials()
     port = int(os.getenv("NEUROASIST_PORT", "8000"))

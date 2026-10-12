@@ -157,6 +157,7 @@ struct DesktopState {
     avatar_error: Mutex<Option<String>>,
     crash_restarts: Mutex<u8>,
     core_generation: AtomicU64,
+    maintenance: Mutex<()>,
 }
 
 enum CoreProcess {
@@ -207,6 +208,7 @@ impl DesktopState {
             avatar_error: Mutex::new(None),
             crash_restarts: Mutex::new(0),
             core_generation: AtomicU64::new(0),
+            maintenance: Mutex::new(()),
         }
     }
 
@@ -246,6 +248,7 @@ impl DesktopState {
     }
 
     fn start_core(&self, app: &AppHandle) -> Result<(), String> {
+        if self.runtime().core_status == "closing" { return Err("Iris is closing".into()); }
         if self
             .core
             .lock()
@@ -349,7 +352,8 @@ impl DesktopState {
         thread::spawn(move || loop {
             thread::sleep(Duration::from_secs(1));
             let state = app.state::<DesktopState>();
-            if state.core_generation.load(Ordering::SeqCst) != generation {
+            let Ok(guard) = state.maintenance.lock() else { break; };
+            if !state.core_watch_is_current(generation) {
                 break;
             }
             let exited = match state.core_exited() {
@@ -370,7 +374,10 @@ impl DesktopState {
                 }
             };
             if restart {
+                drop(guard);
                 thread::sleep(Duration::from_secs(1));
+                let Ok(_guard) = state.maintenance.lock() else { break; };
+                if !state.core_watch_is_current(generation) { break; }
                 let _ = state.start_core(&app);
             }
             break;
@@ -394,7 +401,12 @@ impl DesktopState {
         Ok(false)
     }
 
+    fn core_watch_is_current(&self, generation: u64) -> bool {
+        self.core_generation.load(Ordering::SeqCst) == generation && self.runtime().core_status != "closing"
+    }
+
     fn restart_core(&self, app: &AppHandle) -> Result<DesktopRuntime, String> {
+        let _maintenance = self.maintenance.lock().map_err(|_| "maintenance mutex poisoned")?;
         self.stop_core();
         *self
             .crash_restarts
@@ -1049,6 +1061,9 @@ impl DesktopState {
     }
 
     fn shutdown(&self) {
+        // Finish stopped-core maintenance before exiting; do not orphan a restore worker.
+        let _maintenance = self.maintenance.lock().ok();
+        if let Ok(mut runtime) = self.runtime.lock() { runtime.core_status = "closing".into(); }
         self.stop_avatar();
         self.stop_core();
     }
@@ -1060,7 +1075,12 @@ fn start_avatar_with_retries(app: AppHandle, placement: AvatarPlacement) {
         return;
     }
     for attempt in 0..5 {
-        match state.start_avatar(&app, placement) {
+        let outcome = {
+            let Ok(_guard) = state.maintenance.lock() else { break; };
+            if state.runtime().core_status == "closing" { break; }
+            state.start_avatar(&app, placement)
+        };
+        match outcome {
             Ok(true) | Ok(false) => break,
             Err(error) => {
                 eprintln!(
@@ -1080,6 +1100,77 @@ fn start_avatar_with_retries(app: AppHandle, placement: AvatarPlacement) {
 #[tauri::command]
 fn restart_core(app: AppHandle) -> Result<DesktopRuntime, String> {
     app.state::<DesktopState>().restart_core(&app)
+}
+
+fn run_maintenance(app: &AppHandle, option: &str, value: &str, stop: bool) -> Result<serde_json::Value, String> {
+    let state = app.state::<DesktopState>();
+    let _guard = state.maintenance.lock().map_err(|_| "maintenance mutex poisoned")?;
+    let data_root = desktop_data_root(&state.root);
+    if stop {
+        state.set_core_status(app, "starting");
+        state.stop_avatar();
+        state.stop_core();
+    }
+    let operation = (|| {
+        let mut command = if cfg!(debug_assertions) || env::var_os("NEUROASIST_CORE_EXECUTABLE").is_some() {
+            let mut command = core_command(&state.root)?;
+            command.current_dir(&state.root);
+            command
+        } else {
+            let resources = app.path().resource_dir().map_err(|e| e.to_string())?;
+            let mut command = Command::new(resources.join("core/neuroasist-core.exe"));
+            command.current_dir(resources);
+            command
+        };
+        command.args([option, value]).env("NEUROASIST_APP_DATA_DIR", &data_root)
+            .env("PYTHONUTF8", "1").env("PYTHONIOENCODING", "utf-8")
+            .env_remove("NEUROASIST_CREDENTIALS_STDIN").stdin(Stdio::null());
+        #[cfg(windows)] {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000);
+        }
+        let output = command.output().map_err(|e| e.to_string())?;
+        let result: serde_json::Value = serde_json::from_slice(&output.stdout)
+            .map_err(|_| "Не удалось выполнить обслуживание. Данные сохранены; проверьте журнал Iris.".to_string())?;
+        if !output.status.success() {
+            return Err(result.get("error").and_then(|v| v.as_str()).unwrap_or("Ошибка обслуживания").to_string());
+        }
+        Ok(result)
+    })();
+    if stop {
+        state.start_core(app)?;
+        let cloned = app.clone();
+        let placement = avatar_placement_from_settings(&data_root);
+        thread::spawn(move || start_avatar_with_retries(cloned, placement));
+    }
+    operation
+}
+
+#[tauri::command]
+async fn import_backup(app: AppHandle) -> Result<Option<serde_json::Value>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(path) = rfd::FileDialog::new().set_title(maintenance_copy(&app, "Импорт резервной копии Iris", "Import an Iris backup")).add_filter("Iris ZIP", &["zip"]).pick_file() else { return Ok(None); };
+        run_maintenance(&app, "--maintenance-import", &path.to_string_lossy(), false).map(Some)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn restore_backup(app: AppHandle, name: String) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || run_maintenance(&app, "--maintenance-restore", &name, true))
+        .await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn export_backup(app: AppHandle, name: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if !name.starts_with("neuroasist-") || !name.ends_with(".zip") || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.') {
+            return Err("Некорректное имя копии".into());
+        }
+        let source = desktop_data_root(&app.state::<DesktopState>().root).join("backups").join(&name);
+        let Some(destination) = rfd::FileDialog::new().set_title(maintenance_copy(&app, "Экспорт резервной копии", "Export an Iris backup")).set_file_name(&name).add_filter("Iris ZIP", &["zip"]).save_file() else { return Ok(false); };
+        if destination != source { std::fs::copy(source, destination).map_err(|e| e.to_string())?; }
+        Ok(true)
+    }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1402,9 +1493,8 @@ fn main() {
             let state = app.state::<DesktopState>();
             create_main_window(&app.handle(), state.runtime())?;
             setup_tray(app)?;
-            // Core health and Unity window discovery are independent. Start
-            // both workers immediately so a cold Unity launch cannot delay the
-            // text UI, while the existing attach/retry logic remains intact.
+            // Window attachment stays in the background. Startup and later
+            // maintenance share ownership of child-process creation.
             let avatar_handle = app.handle().clone();
             thread::spawn(move || {
                 let state = avatar_handle.state::<DesktopState>();
@@ -1414,6 +1504,7 @@ fn main() {
             let core_handle = app.handle().clone();
             thread::spawn(move || {
                 let state = core_handle.state::<DesktopState>();
+                let Ok(_guard) = state.maintenance.lock() else { return; };
                 let _ = state.start_core(&core_handle);
             });
             #[cfg(desktop)]
@@ -1439,6 +1530,9 @@ fn main() {
             reset_reference_window,
             desktop_runtime,
             restart_core,
+            import_backup,
+            export_backup,
+            restore_backup,
             start_graceful_shutdown,
             quit_app,
             set_interface_locale,
@@ -1585,10 +1679,10 @@ fn keyring_entry(account: &str) -> Result<Entry, String> {
 }
 
 fn desktop_data_root(root: &PathBuf) -> PathBuf {
-    env::var_os("LOCALAPPDATA")
+    env::var_os("NEUROASIST_APP_DATA_DIR").map(PathBuf::from).unwrap_or_else(|| env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .map(|path| path.join("NeuroAsist"))
-        .unwrap_or_else(|| root.join("data"))
+        .unwrap_or_else(|| root.join("data")))
 }
 
 /// The backend owns this persisted preference. The shell reads it only before
@@ -1788,6 +1882,10 @@ fn resize_embedded_avatar_window(
     Ok(())
 }
 
+fn maintenance_copy(app: &AppHandle, ru: &'static str, en: &'static str) -> &'static str {
+    if interface_locale_from_settings(&desktop_data_root(&app.state::<DesktopState>().root)) == "en" { en } else { ru }
+}
+
 fn interface_locale_from_settings(data_root: &PathBuf) -> String {
     std::fs::read_to_string(data_root.join("settings.json"))
         .ok()
@@ -1933,6 +2031,17 @@ unsafe fn is_unity_render_window(window: HWND) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retired_watchers_cannot_restart_during_maintenance_or_exit() {
+        let state = DesktopState::new();
+        assert!(state.core_watch_is_current(0));
+        state.core_generation.fetch_add(1, Ordering::SeqCst);
+        assert!(!state.core_watch_is_current(0));
+        assert!(state.core_watch_is_current(1));
+        state.runtime.lock().unwrap().core_status = "closing".into();
+        assert!(!state.core_watch_is_current(1));
+    }
 
     #[cfg(windows)]
     #[test]

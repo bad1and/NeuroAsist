@@ -124,6 +124,19 @@ class TimelineStore:
 
     def init_db(self) -> None:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        if self._db_path.exists() and self._db_path.stat().st_size:
+            from apps.backend.app.storage.backups import check_database, snapshot_database
+            version = check_database(self._db_path, maximum_schema=LATEST_SCHEMA_VERSION, require_iris=False)
+            if version < LATEST_SCHEMA_VERSION:
+                snapshot = self._db_path.parent / "migration-backups" / f"{self._db_path.stem}-schema-{version}.sqlite3"
+                if snapshot.exists():
+                    try:
+                        if check_database(snapshot, maximum_schema=LATEST_SCHEMA_VERSION, require_iris=False) != version:
+                            raise ValueError("Migration snapshot has a different schema")
+                    except (ValueError, sqlite3.DatabaseError):
+                        snapshot.rename(snapshot.with_name(snapshot.name + ".invalid-" + uuid4().hex))
+                if not snapshot.exists():
+                    snapshot_database(self._db_path, snapshot)
         with self._connect() as connection:
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
