@@ -464,6 +464,8 @@ def create_app() -> FastAPI:
                     metadata["web_search"] = agent.last_web_search_metadata
                 if getattr(agent, "last_news_metadata", None) is not None:
                     metadata["news"] = agent.last_news_metadata
+                if getattr(agent, "last_skill_metadata", None) is not None:
+                    metadata["skill"] = agent.last_skill_metadata
                 if metadata:
                     await conversation_service.assistant_metadata_generated(
                         session_id,

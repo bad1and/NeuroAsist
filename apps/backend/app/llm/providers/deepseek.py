@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import logging
+import json
 import ssl
 import time
 from collections.abc import AsyncIterator
@@ -157,6 +158,8 @@ async def close_shared_clients() -> None:
 
 
 class DeepSeekProvider(LLMProvider):
+    supports_native_tools = True
+
     def __init__(
         self,
         settings: Settings,
@@ -204,6 +207,9 @@ class DeepSeekProvider(LLMProvider):
     async def generate(self, messages: list[ChatMessage]) -> LLMResponse:
         return await self._generate_json(messages, temperature=0.7)
 
+    async def generate_with_tools(self, messages, *, tools):
+        return await self._generate_json(messages, temperature=0.7, tools=tools)
+
     def fork_for_purpose(self, purpose: str):
         """Share the HTTP pool, but never mutable usage across parallel calls."""
         return DeepSeekProvider(self._settings, api_key=self._api_key, model=self._model,
@@ -222,6 +228,7 @@ class DeepSeekProvider(LLMProvider):
         messages: list[ChatMessage],
         *,
         temperature: float,
+        tools: list[dict] | None = None,
     ) -> LLMResponse:
         client = self._client
         if client is None:
@@ -252,16 +259,21 @@ class DeepSeekProvider(LLMProvider):
             try:
                 response = await client.chat.completions.create(
                     model=self._model,
-                    messages=[message.model_dump() for message in messages],
+                    messages=[message.model_dump(exclude_none=True) for message in messages],
                     temperature=temperature,
                     response_format={"type": "json_object"},
                     max_tokens=profile.max_tokens,
                     extra_body={"thinking": {"type": profile.thinking}},
+                    **({"tools": tools, "tool_choice": "auto"} if tools else {}),
                 )
                 attempt_usage = _extract_usage(getattr(response, "usage", None))
                 aggregate_usage = _add_usage(aggregate_usage, attempt_usage)
                 choice = response.choices[0]
                 content = choice.message.content
+                preamble = content
+                native_calls = _normalize_tool_calls(getattr(choice.message, "tool_calls", None))
+                if native_calls:
+                    content = _skill_command(native_calls, live=False)
                 model = response.model or self._model
                 attempt_finish_reason = _optional_string(
                     getattr(choice, "finish_reason", None)
@@ -340,6 +352,8 @@ class DeepSeekProvider(LLMProvider):
                 )
                 result = LLMResponse(
                     content=content,
+                    tool_calls=native_calls or None,
+                    tool_preamble=preamble if native_calls and isinstance(preamble, str) else None,
                     model=model,
                     usage=aggregate_usage,
                     finish_reason=last_finish_reason,
@@ -403,6 +417,16 @@ class DeepSeekProvider(LLMProvider):
         raise AssertionError("unreachable")
 
     async def stream(self, messages: list[ChatMessage]) -> AsyncIterator[str]:
+        async with contextlib.aclosing(self._stream(messages)) as stream:
+            async for delta in stream:
+                yield delta
+
+    async def stream_with_tools(self, messages, *, tools):
+        async with contextlib.aclosing(self._stream(messages, tools=tools)) as stream:
+            async for delta in stream:
+                yield delta
+
+    async def _stream(self, messages, *, tools=None) -> AsyncIterator[str]:
         client = self._client
         if client is None:
             raise ValueError("DeepSeek API key is not configured")
@@ -423,15 +447,18 @@ class DeepSeekProvider(LLMProvider):
             attempt_usage: LLMUsage | None = None
             attempt_finish_reason: str | None = None
             emitted_this_attempt = False
+            pending_content: list[str] = []
+            call_parts: dict[int, dict] = {}
             try:
                 response = await client.chat.completions.create(
                     model=self._model,
-                    messages=[message.model_dump() for message in messages],
+                    messages=[message.model_dump(exclude_none=True) for message in messages],
                     temperature=0.7,
                     stream=True,
                     stream_options={"include_usage": True},
                     max_tokens=profile.max_tokens,
                     extra_body={"thinking": {"type": profile.thinking}},
+                    **({"tools": tools, "tool_choice": "auto"} if tools else {}),
                 )
                 async for chunk in response:
                     model = _optional_string(getattr(chunk, "model", None)) or model
@@ -451,11 +478,30 @@ class DeepSeekProvider(LLMProvider):
                     if chunk_finish_reason is not None:
                         attempt_finish_reason = chunk_finish_reason
                         finish_reason = chunk_finish_reason
-                    content = getattr(getattr(choice, "delta", None), "content", None)
+                    delta = getattr(choice, "delta", None)
+                    for part in getattr(delta, "tool_calls", None) or []:
+                        index = getattr(part, "index", 0)
+                        call = call_parts.setdefault(index, {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                        call["id"] += getattr(part, "id", None) or ""
+                        function = getattr(part, "function", None)
+                        for field in ("name", "arguments"):
+                            call["function"][field] += getattr(function, field, None) or ""
+                    content = getattr(delta, "content", None)
                     if isinstance(content, str) and content:
-                        emitted_this_attempt = True
-                        assembled.append(content)
-                        yield content
+                        if tools:
+                            # A native call may follow a spoken preamble. Hold
+                            # this decision response so it cannot reach TTS first.
+                            pending_content.append(content)
+                        else:
+                            emitted_this_attempt = True
+                            assembled.append(content)
+                            yield content
+                native_calls = [call_parts[index] for index in sorted(call_parts)]
+                if native_calls or pending_content:
+                    content = _skill_command(native_calls, live=True) if native_calls else "".join(pending_content)
+                    emitted_this_attempt = True
+                    assembled.append(content)
+                    yield content
             except (asyncio.CancelledError, GeneratorExit) as exc:
                 self._record_telemetry(
                     request_id=request_id,
@@ -536,6 +582,8 @@ class DeepSeekProvider(LLMProvider):
                 )
                 result = LLMResponse(
                     content="".join(assembled),
+                    tool_calls=native_calls or None,
+                    tool_preamble="".join(pending_content) if native_calls else None,
                     model=model,
                     usage=aggregate_usage,
                     finish_reason=finish_reason,
@@ -718,6 +766,26 @@ class DeepSeekProvider(LLMProvider):
             usage.prompt_cache_hit_tokens,
             usage.prompt_cache_miss_tokens,
         )
+
+
+def _normalize_tool_calls(calls) -> list[dict]:
+    return [{"id": call.id, "type": "function", "function": {
+        "name": call.function.name, "arguments": call.function.arguments}}
+        for call in (calls or [])]
+
+
+def _skill_command(calls: list[dict], *, live: bool) -> str:
+    # Do not silently execute a subset of a parallel tool batch. The runtime
+    # returns an error and tool results for every ID, without executing any.
+    payload = None
+    if len(calls) == 1:
+        try:
+            payload = {"name": calls[0]["function"]["name"],
+                       "arguments": json.loads(calls[0]["function"]["arguments"])}
+        except (ValueError, KeyError, TypeError):
+            pass
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    return "[[skill: " + body + "]]" if live else '{"skill":' + body + '}'
 
 
 def _is_retryable(exc: Exception) -> bool:
