@@ -50,7 +50,7 @@ import {
   SlidersHorizontal,
   RefreshCw,
 } from "lucide-react";
-import { AvatarDevStudioStandalonePage } from "./components/AvatarDevPanel";
+const AvatarDevStudioStandalonePage = lazy(() => import("./components/AvatarDevPanel").then(module => ({ default: module.AvatarDevStudioStandalonePage })));
 import { EnvironmentSettings } from "./components/EnvironmentSettings";
 import { ApiKeysSettings, type CredentialTarget } from "./components/ApiKeysSettings";
 import { useRuntimeSettingsAutosave, type RuntimeSettingsPatch, type AutoSaveStatus } from "./settingsAutosave";
@@ -179,6 +179,7 @@ import {
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { StartupScreen } from "./components/StartupScreen";
 import { getStartupStage } from "./startup";
+import { useIndicatorAnimations } from "./animations/indicators";
 import { WindowChrome } from "./components/WindowChrome";
 import { WindowSettings } from "./components/WindowSettings";
 import { AppDialog } from "./components/AppDialog";
@@ -431,8 +432,9 @@ function isQaStudioWindow(): boolean {
 }
 
 export default function App() {
+  useIndicatorAnimations();
   if (isQaStudioWindow()) {
-    return <AvatarDevStudioStandalonePage />;
+    return <Suspense fallback={<p role="status">Загрузка студии…</p>}><AvatarDevStudioStandalonePage /></Suspense>;
   }
   return <MainApp />;
 }
@@ -3196,7 +3198,6 @@ export function SettingsPage({
     live_conversation_echo_mode: "auto",
   });
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const [showSttCapture, setShowSttCapture] = useState(false);
   const [environmentValues, setEnvironmentValues] = useState<Partial<PublicSettings>>({});
   const [focusTarget, setFocusTarget] = useState<string | null>(null);
@@ -3349,15 +3350,14 @@ export function SettingsPage({
     const previousValue = voiceTtsStyle;
     setVoiceTtsStyle(value);
     setSaving(true);
-    setMessage(null);
     try {
       const nextSettings = await updateVoiceStyle(value);
       onSettingsChanged(nextSettings);
       setVoiceTtsStyle(nextSettings.voice_tts_style);
-      setMessage("Подача голоса изменена до перезапуска.");
+      notify.success("Настройки", "Подача голоса изменена до перезапуска.");
     } catch (error) {
       setVoiceTtsStyle(previousValue);
-      setMessage(error instanceof Error ? error.message : "Не удалось изменить подачу голоса.");
+      notify.error("Настройки", error instanceof Error ? error.message : "Не удалось изменить подачу голоса.");
     } finally {
       setSaving(false);
     }
@@ -3367,15 +3367,14 @@ export function SettingsPage({
     const previousValue = voiceExpressionLevel;
     setVoiceExpressionLevel(value);
     setSaving(true);
-    setMessage(null);
     try {
       const nextSettings = await updateVoiceExpression(value);
       onSettingsChanged(nextSettings);
       setVoiceExpressionLevel(nextSettings.voice_tts_expression_level);
-      setMessage("Выразительность изменена до перезапуска.");
+      notify.success("Настройки", "Выразительность изменена до перезапуска.");
     } catch (error) {
       setVoiceExpressionLevel(previousValue);
-      setMessage(error instanceof Error ? error.message : "Не удалось изменить выразительность.");
+      notify.error("Настройки", error instanceof Error ? error.message : "Не удалось изменить выразительность.");
     } finally {
       setSaving(false);
     }
@@ -3383,13 +3382,12 @@ export function SettingsPage({
 
   const savePronunciations = async () => {
     setSaving(true);
-    setMessage(null);
     try {
       const result = await updatePronunciations(parsePronunciations(pronunciationsText));
       setPronunciationsText(formatPronunciations(result.pronunciations));
-      setMessage("Словарь произношений сохранён и применён.");
+      notify.success("Настройки", "Словарь произношений сохранён и применён.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Не удалось сохранить словарь.");
+      notify.error("Настройки", error instanceof Error ? error.message : "Не удалось сохранить словарь.");
     } finally {
       setSaving(false);
     }
@@ -3454,13 +3452,12 @@ export function SettingsPage({
 
   const saveSttTerms = async () => {
     setSaving(true);
-    setMessage(null);
     try {
       const result = await updateSttTerms(parseSttTerms(sttTermsText));
       setSttTermsText(formatSttTerms(result.terms));
-      setMessage("Словарь распознавания сохранён и применён.");
+      notify.success("Настройки", "Словарь распознавания сохранён и применён.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Не удалось сохранить словарь распознавания.");
+      notify.error("Настройки", error instanceof Error ? error.message : "Не удалось сохранить словарь распознавания.");
     } finally {
       setSaving(false);
     }
@@ -4291,7 +4288,6 @@ export function SettingsPage({
           </div>
         </div>
 
-        {message && <div className="notice" role="status">{message}</div>}
       </div>
     </section>
   );
@@ -4655,7 +4651,6 @@ function SystemMaintenance({
   developerMode?: boolean;
   onUnlockRequest?: () => void;
 }) {
-  const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [pendingAction, setPendingAction] = useState<{
     title: string;
@@ -4673,7 +4668,6 @@ function SystemMaintenance({
   const run = async (action: () => Promise<unknown>, success: string) => {
     if (!developerMode) return;
     setBusy(true);
-    setMessage(null);
     try {
       const result = await action();
       const restartRequired =
@@ -4681,13 +4675,13 @@ function SystemMaintenance({
         result !== null &&
         "chroma_cleanup_pending" in result &&
         Boolean(result.chroma_cleanup_pending);
-      setMessage(
+      notify.success("Настройки",
         restartRequired
           ? `${success} Перезапусти приложение: тогда папка ChromaDB будет удалена полностью.`
           : success
       );
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Не удалось завершить обслуживание.");
+      notify.error("Настройки", error instanceof Error ? error.message : "Не удалось завершить обслуживание.");
     } finally {
       setBusy(false);
       setPendingAction(null);
@@ -4827,7 +4821,6 @@ function SystemMaintenance({
         </div>
       </div>
 
-      {message && <div className="notice" role="status">{message}</div>}
 
       {/* Стандартный диалог подтверждения для переиндексации / очистки памяти */}
       <AppDialog
@@ -4939,7 +4932,6 @@ function AvatarControls({
   const [gesture, setGesture] = useState("greeting");
   const [motionIntensity, setMotionIntensity] = useState(0.8);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const [overlay, setOverlay] = useState<AvatarOverlaySettings | null>(initialOverlay);
   const enabled = Boolean(avatarStatus?.enabled);
   const client = avatarStatus?.clients[0];
@@ -4962,56 +4954,54 @@ function AvatarControls({
   const run = async (action: () => Promise<unknown>, success: string) => {
     if (!developerMode) return;
     setBusy(true);
-    setMessage(null);
     try {
       await action();
-      setMessage(success);
+      notify.success("Настройки", success);
       await onRefresh();
     } catch {
-      setMessage("Не удалось выполнить действие с аватаром.");
+      notify.error("Настройки", "Не удалось выполнить действие с аватаром.");
     } finally {
       setBusy(false);
     }
   };
 
   const updateOverlay = async (patch: Partial<AvatarOverlaySettings>) => {
-    setBusy(true); setMessage(null);
+    setBusy(true);
     try {
       const nextOverlay = await updateAvatarOverlay(patch);
       setOverlay(nextOverlay);
       onOverlayChanged(nextOverlay);
-      setMessage(placement === "in_app" ? "Отображение аватара в диалоге обновлено." : "Настройки оверлея обновлены.");
+      notify.success("Настройки", placement === "in_app" ? "Отображение аватара в диалоге обновлено." : "Настройки оверлея обновлены.");
     }
-    catch { setMessage("Не удалось сохранить настройки оверлея."); }
+    catch { notify.error("Настройки", "Не удалось сохранить настройки оверлея."); }
     finally { setBusy(false); }
   };
 
   const updateInAppVisibility = async (visible: boolean) => {
-    setBusy(true); setMessage(null);
+    setBusy(true);
     try {
       const nextSettings = await updateRuntimeSettings({ avatar_in_app_visible: visible });
       onSettingsChanged(nextSettings);
-      setMessage(visible ? "Аватар будет показан в диалоге." : "Аватар скрыт в диалоге.");
+      notify.success("Настройки", visible ? "Аватар будет показан в диалоге." : "Аватар скрыт в диалоге.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Не удалось сохранить отображение аватара.");
+      notify.error("Настройки", error instanceof Error ? error.message : "Не удалось сохранить отображение аватара.");
     } finally { setBusy(false); }
   };
 
   const changePlacement = async (nextPlacement: AvatarPlacement) => {
     if (nextPlacement === placement) return;
     setBusy(true);
-    setMessage(null);
     try {
       const nextSettings = await updateRuntimeSettings({ avatar_placement: nextPlacement });
       onSettingsChanged(nextSettings);
       // The app-level effect owns the native transition. Keeping a single
       // caller avoids two concurrent Unity launches when this state update
       // re-renders the app.
-      setMessage(nextPlacement === "in_app"
+      notify.success("Настройки", nextPlacement === "in_app"
         ? "Режим сохранён. Аватар появится внутри Iris на экране диалога."
         : "Режим сохранён. Аватар снова будет отдельным оверлеем на рабочем столе.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Не удалось переключить размещение аватара.");
+      notify.error("Настройки", error instanceof Error ? error.message : "Не удалось переключить размещение аватара.");
     } finally {
       setBusy(false);
     }
@@ -5163,7 +5153,6 @@ function AvatarControls({
           <MaterialButton materialKey={"App.button-46"} className="secondary" onClick={(e) => { animateButtonPress(e.currentTarget); void run(stopAvatar, "Движение сброшено."); }} disabled={!enabled || busy || !developerMode}>Сбросить движение</MaterialButton>
         </div>
       </details>
-      {message && <div className="notice" role="status">{message}</div>}
     </section>
   );
 }

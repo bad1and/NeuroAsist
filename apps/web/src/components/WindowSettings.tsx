@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { RotateCcw } from "lucide-react";
+import { notify } from "../notifications";
 import { animateButtonPress } from "../animations";
 import { resetReferenceWindow, setReferenceWindowLocked, type DesktopWindowPreferences } from "../desktop";
 import { useDesktopWindowPreferences } from "../useDesktopWindowPreferences";
@@ -13,22 +14,17 @@ export function WindowSettings() {
   const { available, preferences, loadError, update, retry } = useDesktopWindowPreferences();
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
 
   const run = async (action: () => Promise<DesktopWindowPreferences>, success: string) => {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
-    setMessage(null);
-    setFailed(false);
     try {
       update(await action());
-      setMessage(success);
+      notify.success("Окно Iris", success);
     } catch (error) {
       console.error("Could not apply desktop window preferences", error);
-      setFailed(true);
-      setMessage("Не удалось применить настройку окна. Попробуйте ещё раз.");
+      notify.error("Окно Iris", "Не удалось применить настройку окна. Попробуйте ещё раз.");
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -92,7 +88,6 @@ export function WindowSettings() {
           </MaterialButton>
         </div>
         <p className="muted">Сброс размера выводит окно из развёрнутого режима. Фиксация остаётся в выбранном состоянии.</p>
-        {message && <p className={failed ? "notice is-error" : "muted"} role={failed ? "alert" : "status"}>{message}</p>}
       </section>
     </div>
   );

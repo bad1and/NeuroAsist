@@ -158,7 +158,7 @@
   font-weight: 600;
   cursor: pointer;
   line-height: 1.35;
-  transition: background-color var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out);
+  transition: none;
 }
 
 .notification-stack-badge:hover {
@@ -197,7 +197,7 @@
   font-weight: 500;
   cursor: pointer;
   align-self: flex-start;
-  transition: color 140ms ease;
+  transition: none;
 }
 
 .notification-expand-link:hover {
@@ -230,7 +230,7 @@
   border-top-color: rgba(255, 255, 255, 0.10);
   border-bottom-color: rgba(0, 0, 0, 0.15);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 2px 6px rgba(0, 0, 0, 0.2);
-  transition: background-color 140ms ease, transform 100ms ease, color 140ms ease;
+  transition: none;
   user-select: none;
   white-space: nowrap;
 }
@@ -283,7 +283,7 @@
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
-  transition: background-color 140ms ease, color 140ms ease, transform 100ms ease;
+  transition: none;
 }
 
 .notification-copy-btn:hover {
@@ -314,7 +314,7 @@
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
-  transition: color 140ms ease, opacity 140ms ease, transform 100ms ease;
+  transition: none;
 }
 
 .notification-close-btn:hover {
@@ -366,7 +366,7 @@
   border: none;
   color: var(--color-text-soft, rgba(255, 255, 255, 0.7));
   cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition: none;
 }
 
 .notification-details-copy-btn:hover {
@@ -490,3 +490,9 @@
 .notification-card.notification-type-success .notification-icon-box { color: var(--color-success-text); }
 .notification-preview { display: grid; gap: 16px; justify-items: start; align-items: start; }
 .notification-preview .notification-card { max-width: 100%; }
+
+.notification-card.has-danger-outline,
+.notification-card.has-danger-outline:hover {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-danger-text) 75%, transparent), var(--depth-notification);
+}
+.notification-card.has-danger-outline .notification-icon-box { color: var(--color-danger-text); }

@@ -80,7 +80,7 @@ button.iris-button[data-material]:not([data-material="plain"]) {
   filter: none !important;
   overflow: visible !important;
   clip-path: none !important;
-  transition: none !important;
+  transition: none;
   animation: none !important;
   transform: none !important;
   color: var(--color-text) !important;

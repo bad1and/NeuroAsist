@@ -1,3 +1,5 @@
+import { NotificationHost } from "./components/NotificationHost";
+import { notify } from "./notifications";
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
@@ -54,7 +56,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  cleanup();
+  cleanup(); notify.dismissAll();
   vi.clearAllMocks();
   windowEvents.clear();
   Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
@@ -143,7 +145,7 @@ describe("эталонное окно", () => {
   });
 
   it("сбрасывает размер отдельной командой и не снимает фиксацию", async () => {
-    render(<WindowSettings />);
+    render(<><WindowSettings /><NotificationHost /></>);
     const reset = screen.getByRole("button", { name: "Вернуть эталонный размер" });
     await waitFor(() => expect(reset).toBeEnabled());
     fireEvent.click(reset);
@@ -153,7 +155,7 @@ describe("эталонное окно", () => {
   });
 
   it("оставляет прежний переключатель при ошибке сохранения и позволяет повторить", async () => {
-    render(<WindowSettings />);
+    render(<><WindowSettings /><NotificationHost /></>);
     const toggle = screen.getByRole("switch");
     await waitFor(() => expect(toggle).toBeEnabled());
     tauriInvoke.mockRejectedValueOnce(new Error("disk full"));
@@ -167,7 +169,7 @@ describe("эталонное окно", () => {
 
   it("не изменяет браузер и отдельное окно QA Studio", () => {
     Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
-    const browser = render(<WindowSettings />);
+    const browser = render(<><WindowSettings /><NotificationHost /></>);
     expect(screen.getByRole("switch")).toBeDisabled();
     expect(screen.getByText("Управление размером окна доступно в настольном приложении Iris.")).toBeVisible();
     browser.unmount();
@@ -181,7 +183,7 @@ describe("эталонное окно", () => {
   it("не перезаписывает событие фиксации запоздавшим ответом первоначального чтения", async () => {
     let completeRead: (value: unknown) => void = () => undefined;
     tauriInvoke.mockImplementationOnce(() => new Promise((resolve) => { completeRead = resolve; }));
-    render(<WindowSettings />);
+    render(<><WindowSettings /><NotificationHost /></>);
     await waitFor(() => expect(tauriInvoke).toHaveBeenCalledWith("get_window_preferences", {}, undefined));
     const payload = {
       locked: true,

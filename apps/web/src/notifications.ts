@@ -10,6 +10,7 @@ export interface NotificationAction {
 }
 
 export interface AppNotification {
+  accent?: "danger";
   id: string;
   type: NotificationType;
   title: string;
@@ -24,6 +25,7 @@ export interface AppNotification {
 }
 
 export interface NotificationOptions {
+  accent?: "danger";
   id?: string;
   details?: string;
   actions?: NotificationAction[];
@@ -157,6 +159,7 @@ class NotificationStore {
         notification: {
           id: full.id,
           type: full.type,
+          accent: full.accent,
           title: full.title,
           message: full.message,
           details: full.details,
