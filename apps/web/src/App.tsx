@@ -2502,12 +2502,14 @@ export function ChatPage({
       let userMsg = "Live-режим недоступен";
       if (rawMsg.includes("WebSocket") || rawMsg.includes("closed before")) {
         userMsg = "Не удалось подключиться к аудиосерверу диалога. Попробуйте ещё раз.";
+      } else if (/worklet/i.test(rawMsg)) {
+        userMsg = "Не удалось запустить обработку звука. Перезапустите Iris и попробуйте ещё раз.";
       } else if (rawMsg.includes("AudioWorklet") || rawMsg.includes("getUserMedia") || rawMsg.includes("Permission") || rawMsg.includes("NotAllowed")) {
         userMsg = "Микрофон недоступен или заблокирован в браузере.";
       } else if (rawMsg) {
         userMsg = rawMsg;
       }
-      setError(userMsg);
+      setError(null);
       notify.error(
         "Не удалось включить микрофон",
         userMsg,
