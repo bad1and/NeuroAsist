@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import APIRouter, HTTPException, Request, status
+from pydantic import BaseModel, Field
 
 from apps.backend.app.api.routes.conversation import require_active_session
 from apps.backend.app.schemas.coding import (
@@ -14,6 +15,35 @@ from apps.backend.app.schemas.coding import (
 )
 
 router = APIRouter(prefix="/coding", tags=["coding"])
+
+
+class ProjectRegistration(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+
+
+@router.post("/projects")
+def register_coding_project(payload: ProjectRegistration, request: Request):
+    from apps.backend.app.coding.setup import register_project
+    try:
+        return {"allowed_project_roots": register_project(request.app.state.settings, payload.path)}
+    except (ValueError, OSError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.get("/image")
+def image_state(request: Request):
+    return dict(request.app.state.coding_image_preparation.state)
+
+
+@router.post("/image/prepare")
+async def prepare_image(request: Request):
+    return request.app.state.coding_image_preparation.start()
+
+
+@router.post("/image/cancel")
+async def cancel_image(request: Request):
+    await request.app.state.coding_image_preparation.close()
+    return dict(request.app.state.coding_image_preparation.state)
 
 
 def _service(request: Request):

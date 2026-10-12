@@ -227,7 +227,7 @@ class Settings(BaseSettings):
     coding_base_url: str | None = None
     # A stable image name lets every project release use the same local coding
     # runtime. Operators may still override it when they maintain their own.
-    coding_docker_image: str = "neuroasist-coding:latest"
+    coding_docker_image: str = "neuroasist-coding:1.0.0"
     # Optional operator-selected parent directory for task-private workspaces.
     # The portable default is a sibling of this checkout, never below it.
     coding_workspace_root: str | None = None
@@ -310,13 +310,20 @@ class Settings(BaseSettings):
         if self.coding_workspace_root:
             path = Path(self.coding_workspace_root).expanduser()
             return path if path.is_absolute() else (ROOT_DIR / path).resolve()
-        return (ROOT_DIR.parent / "CodingAgentWorkspace").resolve()
+        return (self.app_data_path / "coding-workspaces").resolve()
 
     @property
     def coding_allowed_project_paths(self) -> tuple[Path, ...]:
         """Canonical source roots that may be snapshotted or receive a reviewed patch."""
         configured = [item.strip() for item in self.coding_allowed_project_roots.split(",") if item.strip()]
-        roots = configured or [str(ROOT_DIR)]
+        import json
+        try:
+            registered = json.loads((self.app_data_path / "coding-projects.json").read_text(encoding="utf-8"))
+            if isinstance(registered, list) and all(isinstance(p, str) for p in registered):
+                configured.extend(registered)
+        except (OSError, ValueError):
+            pass
+        roots = configured
         resolved: list[Path] = []
         for value in roots:
             path = Path(value).expanduser()

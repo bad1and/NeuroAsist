@@ -387,6 +387,11 @@ export function deleteTimelineRange(before: string): Promise<{ deleted: number }
 
 export const cancelModel = (modelId: string) => requestJson(`/models/${encodeURIComponent(modelId)}/cancel`, { method: "POST" });
 export const deleteBackup = (name: string) => requestJson(`/backups/${encodeURIComponent(name)}`, { method: "DELETE" });
+export const registerCodingProject = (path: string) => requestJson<{ allowed_project_roots: string[] }>("/coding/projects", { method: "POST", body: JSON.stringify({ path }) });
+export type CodingImageState = { status: string; output: string; error: string | null };
+export const getCodingImage = () => requestJson<CodingImageState>("/coding/image");
+export const prepareCodingImage = () => requestJson<CodingImageState>("/coding/image/prepare", { method: "POST" });
+export const cancelCodingImage = () => requestJson<CodingImageState>("/coding/image/cancel", { method: "POST" });
 
 export function deleteTimelineEpisode(episodeId: string): Promise<{ deleted_messages: number }> {
   return requestJson(`/episodes/${encodeURIComponent(episodeId)}`, { method: "DELETE" });

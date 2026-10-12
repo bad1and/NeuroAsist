@@ -107,7 +107,7 @@ class CodingAgentService:
             else []
         )
         active = next((item for item in tasks if item["status"] == "running"), None)
-        project_root = await asyncio.to_thread(self._project_root)
+        project_root = await asyncio.to_thread(self._project_root) if self.settings.coding_allowed_project_paths else None
         return {
             "enabled": self.enabled,
             "configured_enabled": self.settings.coding_agent_enabled,
@@ -119,7 +119,7 @@ class CodingAgentService:
             "docker_image_name": docker.image_name,
             "model": self.runtime_settings.coding_model,
             "available_models": [DEEPSEEK_FLASH_MODEL, DEEPSEEK_PRO_MODEL],
-            "project_root": str(project_root),
+            "project_root": str(project_root) if project_root else "",
             "allowed_project_roots": [str(item) for item in self.settings.coding_allowed_project_paths],
             "workspace_name": self.runtime_settings.coding_workspace_name,
             "workspace_root": str(self.settings.coding_workspace_path),
@@ -793,6 +793,8 @@ class CodingAgentService:
 
     def _project_root(self, requested_root: str | None = None) -> Path:
         allowed = self.settings.coding_allowed_project_paths
+        if not allowed:
+            raise ValueError("Сначала выберите и зарегистрируйте папку проекта в Iris.")
         selected = requested_root or self.runtime_settings.coding_project_root
         if selected:
             try:
