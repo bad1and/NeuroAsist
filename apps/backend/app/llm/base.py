@@ -33,6 +33,8 @@ def current_llm_call_purpose() -> str | None:
 class ChatMessage(BaseModel):
     role: str
     content: str
+    tool_calls: list[dict] | None = None
+    tool_call_id: str | None = None
 
 
 class LLMUsage(BaseModel):
@@ -61,6 +63,8 @@ class LLMCallMetrics(BaseModel):
 class LLMResponse(BaseModel):
     content: str
     model: str
+    tool_calls: list[dict] | None = None
+    tool_preamble: str | None = None
     usage: LLMUsage | None = None
     finish_reason: str | None = None
     latency_ms: float | None = Field(default=None, ge=0)
@@ -73,6 +77,15 @@ class LLMProviderError(RuntimeError):
 
 
 class LLMProvider(ABC):
+    supports_native_tools = False
+
+    async def generate_with_tools(self, messages: list[ChatMessage], *, tools: list[dict]) -> LLMResponse:
+        return await self.generate(messages)
+
+    async def stream_with_tools(self, messages: list[ChatMessage], *, tools: list[dict]) -> AsyncIterator[str]:
+        async for delta in self.stream(messages):
+            yield delta
+
     @abstractmethod
     async def generate(self, messages: list[ChatMessage]) -> LLMResponse:
         raise NotImplementedError

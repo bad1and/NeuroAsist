@@ -49,6 +49,18 @@ _LOCAL = re.compile(r"\b(?:в\s+(?:этом|моем|данном)\s+(?:коде
 _FOLLOWUP = re.compile(r"\b(?:ты.{0,35}\bнайди|найди\s+не\s+я|(?:ну\s+)?(?:и\s+)?что\s+там|что\s+с\s+поиском|ты.{0,60}\b(?:ищешь|искать)|але|алло|ты\s+тут|(?:найди|поищи|проверь)\s+(?:это|еще\s+раз|заново|лучше)|ищи\s+(?:ты|сама)|поищи\s+(?:ты|сама))\b", re.I)
 _FILLER = re.compile(r"\b(?:пожалуйста|плиз|ирис|iris|ты|сама|сам|мне|нам|это|то|не|я|нет|ну|так|с|в|и|там|данные|информацию|информация|что|же|еще|раз|заново|лучше|нормально|давай|теперь|уже|бля|блять|смысле|ебаный|свет|поиск|поиском)\b", re.I)
 _RECENT = re.compile(r"\b(?:последн\w*|нов\w*|свеж\w*)\s+(?:перс\w*|геро\w*|обновлен\w*|патч\w*)|\b(?:latest|newest)\s+(?:hero|character|update)\b", re.I)
+_CURRENT = re.compile(r"(?:свеж\w*|последн\w*|актуальн\w*).{0,15}\b(?:новост\w*|информац\w*|данн\w*)|(?:что|че|чё).{0,60}\bпроизошл\w*|latest\s+(?:news|information)", re.I)
+_REFERENCE = re.compile(r"\b(?:их|его|нее|него|нему|ним|ней|них)\b", re.I)
+
+
+def _clean_query(text: str) -> str:
+    text = normalize_entity(text)
+    text = re.sub(r"\b(?:дата[ -]?центр)(?:ами|ом|ов|ы|а|е)?\b", "дата-центры", text, flags=re.I)
+    text = re.sub(r"\b(?:у\s+нас|получается|по\s+нему|по\s+ним|что\s+там|че\s+там)\b", " ", text, flags=re.I)
+    text = re.sub(r"\b(?:а|че|чё|какие|какая|какой|какое|их|его|него|нему|ним|них)\b", " ", text, flags=re.I)
+    return " ".join(_FILLER.sub(" ", text).split()).strip(" ,.!?:")[:300]
+
+
 _DETAIL = re.compile(r"^\s*(?:(?:вот|прям|еще|ну|это|не|нет|да|а|давай|точнее|вернее|я имел в виду)\s+)*(?:сейчас|в\s+этом\s+году|(?:за\s+)?(?:вчера|сегодня)|недавно|другой\s+(?:вариант|анекдот)|за\s+(?:неделю|месяц))\b", re.I)
 _RETRY = re.compile(r"\b(?:заново|еще\s+раз|по\s+другому|лучше|другой)\b", re.I)
 _ENTITY = re.compile(r"\b(?:deadlock|gta\s+(?:[456]|iv|v|vi)|python|valorant|minecraft|r\.?e\.?p\.?o\.?)\b", re.I)
@@ -161,7 +173,7 @@ def search_requested(text: str, recent_messages: Iterable = ()) -> bool:
     if analyze_dialogue_turn(text, recent_messages).suppress_lookup:
         return False
     return not (internet_forbidden(text) or sensitive_query(text) or _LOCAL.search(text)) and bool(
-        _COMMAND.search(text) or _LOOKUP.search(text) or _CHANGING.search(text) or _RETRY.search(text) or _ACCEPT.fullmatch(text) or _FRESH.search(text) or _RECENT.search(text) or _FOLLOWUP.search(text) or _DETAIL.search(text) or (_EVENT.search(text) and _OUTCOME.search(text)))
+        _COMMAND.search(text) or _LOOKUP.search(text) or _CHANGING.search(text) or _RETRY.search(text) or _ACCEPT.fullmatch(text) or _FRESH.search(text) or _RECENT.search(text) or _CURRENT.search(text) or _FOLLOWUP.search(text) or _DETAIL.search(text) or (_EVENT.search(text) and _OUTCOME.search(text)))
 
 
 def needs_query_planner(text: str, recent_messages: Iterable = ()) -> bool:
@@ -170,7 +182,7 @@ def needs_query_planner(text: str, recent_messages: Iterable = ()) -> bool:
     if analyze_dialogue_turn(text, recent_messages).suppress_lookup:
         return False
     users = [m for m in recent_messages if getattr(m, "role", None) == "user"][-8:]
-    explicit = bool(_COMMAND.search(text) or _LOOKUP.search(text) or _CHANGING.search(text) or _FRESH.search(text) or _RECENT.search(text) or (_EVENT.search(text) and _OUTCOME.search(text)))
+    explicit = bool(_COMMAND.search(text) or _LOOKUP.search(text) or _CHANGING.search(text) or _FRESH.search(text) or _RECENT.search(text) or _CURRENT.search(text) or (_EVENT.search(text) and _OUTCOME.search(text)))
     contextual = bool(users and (_DETAIL.search(text) or _FOLLOWUP.search(text)) and
                       any(_COMMAND.search(m.content) or _FRESH.search(m.content) or _RECENT.search(m.content) or _event_request(m.content) for m in users))
     accepted = analyze_dialogue_turn(text, recent_messages).accepts_lookup
@@ -208,7 +220,7 @@ def _request(text: str) -> SearchRequest | None:
     if event:
         return event
     command = _COMMAND.search(text) or _LOOKUP.search(text)
-    if not command and not (_FRESH.search(text) or _RECENT.search(text)):
+    if not command and not (_FRESH.search(text) or _RECENT.search(text) or _CURRENT.search(text)):
         return None
     query = text[command.end():] if command else text
     if command and not _EMPTY_TAIL.sub("", _FILLER.sub("", query)).strip(" ,.!?:"):
@@ -231,18 +243,20 @@ def _request(text: str) -> SearchRequest | None:
         return SearchRequest(f"GTA {number} {fact}"[:300],
                              f"Grand Theft Auto {number} {fact} latest announcement site:rockstargames.com", ("rockstargames.com",))
     query = re.sub(r"^\s*(?:о|об|про|about)\s+", "", query, flags=re.I)
-    query = " ".join(_FILLER.sub(" ", query).split()).strip(" ,.!?:")[:300]
+    query = _clean_query(query)
     query = re.sub(r"\b(?:в\s+)?(?:инете|интернете|можешь|прям|должно\s+быть)\b", " ", query, flags=re.I)
     query = " ".join(query.split()).strip(" ,.!?:")
+    if _CURRENT.search(text):
+        query = re.sub(r"\bпроизошл\w*\b", "новости", query, flags=re.I)
     entity = _ENTITY.search(query)
     if entity and _RECENT.search(query):
         period = " ".join(re.findall(r"\b(?:вчера|сегодня|недавно)\b", query))
         query = f"{entity[0]} {_fact(query)} {period}".strip()
     if not entity and re.search(r"(?:че|что)[ -]нибудь|вернемся к этому вопросу|\bдопустим\b", query, re.I):
         return None
-    if not _meaningful(query) or (not command and not _ENTITY.search(query)):
+    if not (_meaningful(query) or (_CURRENT.search(text) and terms(query))) or (not command and not (_ENTITY.search(query) or _CURRENT.search(text))):
         return None
-    return SearchRequest(query, force_refresh=bool(_RETRY.search(text)))
+    return SearchRequest(query, force_refresh=bool(_RETRY.search(text)), mode="news" if _CURRENT.search(text) else "web")
 
 
 def plan_search(user_text: str, recent_messages: Iterable = ()) -> SearchRequest | None:
@@ -267,6 +281,22 @@ def plan_search(user_text: str, recent_messages: Iterable = ()) -> SearchRequest
     if conversation_request is not None:
         return conversation_request
     request = _request(user_text)
+    if _REFERENCE.search(user_text) and request is not None:
+        for message in reversed(recent_messages[-8:]):
+            if getattr(message, "role", None) != "user":
+                continue
+            if internet_forbidden(message.content) or sensitive_query(message.content):
+                break
+            if _REFERENCE.search(message.content):
+                continue
+            prior = _request(message.content)
+            if prior is None:
+                break
+            # Inherit only overlapping topics; a different named request stands alone.
+            if query_anchors(request.query) & query_anchors(prior.query):
+                query = " ".join(dict.fromkeys((prior.query + " " + request.query).split()))[:300]
+                return replace(prior, query=query, force_refresh=bool(_RETRY.search(user_text)), reason="continuation")
+            break
     users = [m for m in recent_messages if getattr(m, "role", None) == "user"][-8:]
     # A request for a different anecdote needs the quoted fragment, not just
     # the generic word 'анекдот'. Other self-contained requests stand alone.
