@@ -30,7 +30,7 @@ const STATUS_COPY: Record<CoreStatus, { title: string; detail: string }> = {
 };
 
 export function StartupScreen({ status, stage = status === "ready" || status === "closing" ? 3 : 1,
-  retrying = false, subdetail, customTitle, onRetry, onReveal, onComplete, revealTarget, onClose,
+  retrying = false, subdetail, customTitle, onRetry, onRestoreBackup, onReveal, onComplete, revealTarget, onClose,
 }: {
   status: CoreStatus;
   stage?: StartupStage;
@@ -38,6 +38,7 @@ export function StartupScreen({ status, stage = status === "ready" || status ===
   subdetail?: string;
   customTitle?: string;
   onRetry?: () => void;
+  onRestoreBackup?: () => void;
   onReveal?: () => void;
   onComplete?: () => void;
   revealTarget?: RefObject<HTMLDivElement | null>;
@@ -308,12 +309,13 @@ export function StartupScreen({ status, stage = status === "ready" || status ===
             ))}
           </ol>
         )}
-        {failed && (
+        {failed && (<>
           <MaterialButton materialKey="StartupScreen.retry" className="primary-button" type="button" onClick={onRetry} disabled={retrying}>
             <IconInterfaceSpirals size={17} aria-hidden="true" />
             {retrying ? "Перезапускаю…" : "Попробовать снова"}
           </MaterialButton>
-        )}
+          {onRestoreBackup && <MaterialButton materialKey="StartupScreen.restore" className="secondary" type="button" onClick={onRestoreBackup} disabled={retrying}>Восстановить из копии</MaterialButton>}
+        </>)}
       </main>
       {gameAvailable && <div className="startup-game">
         {gameOpen ? <Suspense fallback={null}><StartupSnake autoStart /></Suspense>

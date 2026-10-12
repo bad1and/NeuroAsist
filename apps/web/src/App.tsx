@@ -51,6 +51,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 const AvatarDevStudioStandalonePage = lazy(() => import("./components/AvatarDevPanel").then(module => ({ default: module.AvatarDevStudioStandalonePage })));
+import { BackupControls } from "./components/BackupControls";
 import { EnvironmentSettings } from "./components/EnvironmentSettings";
 import { ApiKeysSettings, type CredentialTarget } from "./components/ApiKeysSettings";
 import { useRuntimeSettingsAutosave, type RuntimeSettingsPatch, type AutoSaveStatus } from "./settingsAutosave";
@@ -165,6 +166,8 @@ import {
   listenForAvatarVisibility,
   listenForCoreStatus,
   restartDesktopCore,
+  importDesktopBackup,
+  restoreDesktopBackup,
   restartAvatar,
   setDesktopInterfaceLocale,
   shouldWaitForInAppAvatar,
@@ -440,6 +443,9 @@ export default function App() {
 }
 
 function MainApp() {
+  const [recoveryBackup, setRecoveryBackup] = useState<string | null>(null);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const desktopManaged = isDesktopManaged();
   const [coreStatus, setCoreStatus] = useState<CoreStatus>(initialCoreStatus);
   const [showStartup, setShowStartup] = useState(desktopManaged);
@@ -1036,11 +1042,27 @@ function MainApp() {
     )}
     {showStartup && (
       <StartupScreen key={startupAttempt} status={startupReady ? "ready" : coreStatus}
-        stage={startupStage} subdetail={startupSubdetail} retrying={retryingCore}
+        stage={startupStage} subdetail={recoveryError || startupSubdetail} retrying={retryingCore || recoveryBusy}
+        onRestoreBackup={desktopManaged ? () => { void (async () => {
+          setRecoveryBusy(true); setRecoveryError(null);
+          try { const backup = await importDesktopBackup(); if (backup) setRecoveryBackup(backup.name); }
+          catch (error) { setRecoveryError(String(error)); }
+          finally { setRecoveryBusy(false); }
+        })(); } : undefined}
         onRetry={() => void retryCore()} onClose={handleAppClose} revealTarget={appShellRef}
         onReveal={() => setStartupRevealRequested(true)}
         onComplete={() => setShowStartup(false)} />
     )}
+    <AppDialog open={recoveryBackup !== null} title="Восстановить данные?" description="Iris сохранит текущие данные перед заменой. После восстановления приложение перезапустится." onClose={() => { if (!recoveryBusy) setRecoveryBackup(null); }} variant="danger">
+      {recoveryError && <p role="alert">{recoveryError}</p>}
+      <MaterialButton materialKey="startup.recovery.cancel" className="secondary" disabled={recoveryBusy} onClick={() => setRecoveryBackup(null)}>Отмена</MaterialButton>
+      <MaterialButton materialKey="startup.recovery.confirm" className="primary-button" disabled={recoveryBusy} onClick={() => { if (!recoveryBackup) return; void (async () => {
+        setRecoveryBusy(true); setRecoveryError(null);
+        try { await restoreDesktopBackup(recoveryBackup); window.location.reload(); }
+        catch (error) { setRecoveryError(String(error)); }
+        finally { setRecoveryBusy(false); }
+      })(); }}>{recoveryBusy ? "Выполняем операцию…" : "Восстановить"}</MaterialButton>
+    </AppDialog>
     </>
   );
 }
@@ -4571,74 +4593,6 @@ function ModelManager({
           {model.restart_required && model.installed && <small>Перезапустите Iris, чтобы использовать модель.</small>}
         </div>;
       })}
-      {message && <div className="notice">{message}</div>}
-    </section>
-  );
-}
-
-function BackupControls() {
-  const [backups, setBackups] = useState<Array<{ name: string; size_bytes: number; created_at: string }>>([]);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const listRef = useRef<HTMLDivElement | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      setBackups(await getBackups());
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Резервные копии недоступны.");
-    }
-  }, []);
-  useEffect(() => { void refresh(); }, [refresh]);
-
-  useEffect(() => {
-    if (listRef.current && backups.length > 0) {
-      animateStaggerCards(listRef.current, ".info-row", 35);
-    }
-  }, [backups.length]);
-
-  const create = async () => {
-    setBusy(true);
-    setMessage(null);
-    try {
-      await createBackup();
-      await refresh();
-      setMessage("Резервная копия создана. Ключи API в неё не попадают.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Не удалось создать резервную копию.");
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <section className="settings-card" aria-label="Резервные копии">
-      <div className="settings-card-header">
-        <div className="settings-card-header-main">
-          <div className="settings-card-title-group">
-            <h2 className="settings-card-title">Резервные копии</h2>
-            <p className="settings-card-subtitle">Память и настройки, срок хранения — 30 дней</p>
-          </div>
-        </div>
-        <div className="settings-card-header-actions">
-          <MaterialButton materialKey={"App.button-33"} className="primary-button" onClick={(e) => { animateButtonPress(e.currentTarget); void create(); }} disabled={busy}>
-            {busy ? "Создаём…" : "Создать копию"}
-          </MaterialButton>
-        </div>
-      </div>
-      {backups.length ? (
-        <div className="settings-card-grid" ref={listRef}>
-          {backups.slice(0, 3).map((backup) => (
-            <InfoRow key={backup.name} label={backup.name} value={`${Math.ceil(backup.size_bytes / 1024)} КБ · ${formatTime(backup.created_at)}`} />
-          ))}
-        </div>
-      ) : (
-        <div className="empty-state compact">
-          <IconInterfaceContentArchive size={24} aria-hidden="true" />
-          <strong>Резервных копий пока нет</strong>
-          <span>Создайте копию для сохранения памяти и настроек.</span>
-        </div>
-      )}
-      <small style={{ color: "var(--color-text-muted)" }}>Удаление Iris не удаляет эти данные из профиля Windows.</small>
       {message && <div className="notice">{message}</div>}
     </section>
   );

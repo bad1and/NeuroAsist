@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi.testclient import TestClient
 from types import SimpleNamespace
 
@@ -44,6 +46,27 @@ def test_readiness_keeps_text_available_when_voice_is_disabled(monkeypatch, tmp_
     assert readiness["stt"] == "disabled"
     assert readiness["tts"] == "disabled"
     assert readiness["live_ready"] is False
+
+
+def test_successful_storage_maintenance_does_not_report_failure(monkeypatch, tmp_path):
+    settings = Settings(_env_file=None, app_data_dir=str(tmp_path),
+                        sqlite_path=str(tmp_path / "data/neuroasist.sqlite3"),
+                        log_to_file=False, avatar_enabled=False, voice_stt_provider="mock",
+                        voice_tts_provider="mock", voice_preload_stt_model=False,
+                        voice_preload_tts_model=False, voice_vad_provider="energy")
+    monkeypatch.setattr(backend_main, "get_settings", lambda: settings)
+    events = []
+    original = backend_main.EventBus.publish
+    def capture(bus, event_type, level, message, metadata):
+        events.append((event_type, level, message))
+        return original(bus, event_type, level, message, metadata)
+    monkeypatch.setattr(backend_main.EventBus, "publish", capture)
+    with TestClient(backend_main.create_app()) as client:
+        async def wait_for_storage():
+            await asyncio.wait_for(client.app.state.storage_maintenance_ready.wait(), timeout=10)
+        client.portal.call(wait_for_storage)
+        assert client.get("/health").json() == {"status": "ok"}
+    assert not any("Deferred storage maintenance failed" in message for _, _, message in events)
 
 
 def test_readiness_degrades_voice_without_blocking_text(monkeypatch, tmp_path) -> None:

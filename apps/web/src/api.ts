@@ -130,6 +130,7 @@ async function requestJson<T>(
     throw new Error(detail);
   }
 
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
@@ -383,6 +384,8 @@ export function searchTimeline(query: string): Promise<{ items: TimelineMessage[
 export function deleteTimelineRange(before: string): Promise<{ deleted: number }> {
   return requestJson(`/timeline/range?before=${encodeURIComponent(before)}`, { method: "DELETE" });
 }
+
+export const deleteBackup = (name: string) => requestJson(`/backups/${encodeURIComponent(name)}`, { method: "DELETE" });
 
 export function deleteTimelineEpisode(episodeId: string): Promise<{ deleted_messages: number }> {
   return requestJson(`/episodes/${encodeURIComponent(episodeId)}`, { method: "DELETE" });

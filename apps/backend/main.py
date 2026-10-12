@@ -1035,6 +1035,9 @@ def create_app() -> FastAPI:
         else:
             readiness["phase"] = "text_ready"
 
+    storage_maintenance_ready = asyncio.Event()
+    app.state.storage_maintenance_ready = storage_maintenance_ready
+
     async def run_storage_maintenance() -> None:
         """Defer repair, reindex, and cleanup until after text UI is usable."""
         try:
@@ -1068,6 +1071,8 @@ def create_app() -> FastAPI:
                 "Deferred storage maintenance failed; text chat remains available",
                 {},
             )
+        finally:
+            storage_maintenance_ready.set()
 
     async def preload_stt() -> None:
         if not settings.voice_preload_stt_model:
