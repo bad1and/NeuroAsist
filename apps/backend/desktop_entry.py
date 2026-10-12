@@ -115,6 +115,7 @@ def main() -> None:
         host="127.0.0.1",
         port=port,
         log_level="info",
+        log_config=None,
         ws=WEBSOCKET_PROTOCOL,
         timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS,
     )

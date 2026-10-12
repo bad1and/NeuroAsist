@@ -8,6 +8,24 @@
 принимается после [условий выпуска](release-checklist.md).
 Номер `1.0.0` в исходниках сам по себе не подтверждает готовность установщика.
 
+## Каталог приложения без установщика
+
+```powershell
+$env:NEUROASIST_UNITY_EDITOR = "C:\Program Files\Unity\Hub\Editor\2022.3.62f3\Editor\Unity.exe"
+.\scripts\build-preinstaller-app.ps1 -ArtifactDirectory artifacts\preinstaller
+```
+
+Команда готовит CPU Python onedir, Unity и Tauri `--no-bundle`. Дополнительные
+ресурсы передаются отдельным override; исходный Tauri-конфиг не переписывается.
+Каталог `iris-1.0.0-app` содержит приложение, ядро, аватар, notices и SHA-256.
+Снимок исходников до и после сборки должен совпадать. Незакоммиченные изменения
+отражаются в манифесте; финальный кандидат следует собирать с `-RequireCleanWorktree`.
+`-SkipAvatarBuild` использует ранее проверенный Unity player.
+`-SkipDependencyInstall` допустим только для уже проверенного release-окружения.
+
+Пройдите [приёмку приложения](preinstaller-readiness.md) на этом каталоге.
+Установка, подпись, обновление и удаление ниже остаются следующим этапом.
+
 ## Подготовить исходники
 
 1. Согласуйте [версию](versioning.md), изменения и миграции.

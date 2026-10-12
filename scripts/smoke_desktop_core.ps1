@@ -12,9 +12,17 @@ if (-not (Test-Path -LiteralPath $Python)) { $Python = "python" }
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("neuroasist-desktop-core-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
 $core = $null
+$loopbackRequest = @{}
+$originalProxy = [System.Net.WebRequest]::DefaultWebProxy
+if ((Get-Command Invoke-RestMethod).Parameters.ContainsKey("NoProxy")) {
+    $loopbackRequest.NoProxy = $true
+} else {
+    [System.Net.WebRequest]::DefaultWebProxy = [System.Net.GlobalProxySelection]::GetEmptyWebProxy()
+}
 
 try {
     $token = [guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N")
+    $env:NEUROASIST_APP_DATA_DIR = $tempRoot
     $env:SQLITE_PATH = Join-Path $tempRoot "desktop.sqlite3"
     $env:NEUROASIST_PORT = $Port
     $env:NEUROASIST_DESKTOP_TOKEN = $token
@@ -31,7 +39,7 @@ try {
     do {
         if ($core.HasExited) { throw "Desktop core exited before health check." }
         try {
-            $health = Invoke-RestMethod "http://127.0.0.1:$Port/health" -Headers $headers -TimeoutSec 2
+            $health = Invoke-RestMethod @loopbackRequest "http://127.0.0.1:$Port/health" -Headers $headers -TimeoutSec 2
             break
         } catch {
             Start-Sleep -Milliseconds 250
@@ -40,13 +48,18 @@ try {
     if ($null -eq $health -or $health.status -ne "ok") { throw "Authenticated desktop health check failed." }
 
     $unauthorized = $false
-    try { Invoke-RestMethod "http://127.0.0.1:$Port/health" -TimeoutSec 2 | Out-Null } catch { $unauthorized = $_.Exception.Response.StatusCode.value__ -eq 401 }
+    try { Invoke-RestMethod @loopbackRequest "http://127.0.0.1:$Port/health" -TimeoutSec 2 | Out-Null } catch { $unauthorized = [int]$_.Exception.Response.StatusCode -eq 401 }
     if (-not $unauthorized) { throw "Desktop core accepted an unauthenticated request." }
 
-    Invoke-RestMethod "http://127.0.0.1:$Port/internal/shutdown" -Method Post -Headers $headers -TimeoutSec 2 | Out-Null
+    Invoke-RestMethod @loopbackRequest "http://127.0.0.1:$Port/internal/shutdown" -Method Post -Headers $headers -TimeoutSec 2 | Out-Null
     if (-not $core.WaitForExit(8000)) { throw "Desktop core did not exit gracefully." }
     Write-Host "Desktop core smoke passed: authenticated startup and graceful shutdown."
 } finally {
+    [System.Net.WebRequest]::DefaultWebProxy = $originalProxy
     if ($null -ne $core -and -not $core.HasExited) { & taskkill.exe /PID $core.Id /T /F *> $null }
-    Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+    $resolvedTemporary = [IO.Path]::GetFullPath($tempRoot)
+    $temporaryParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    if ($resolvedTemporary.StartsWith($temporaryParent, [StringComparison]::OrdinalIgnoreCase)) {
+        Remove-Item -LiteralPath $resolvedTemporary -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }

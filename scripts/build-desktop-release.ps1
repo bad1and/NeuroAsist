@@ -2,6 +2,7 @@
 param(
     [switch]$SkipDependencyInstall,
     [switch]$ReuseCore,
+    [switch]$AppOnly,
     [string]$ArtifactDirectory = "artifacts",
     [switch]$RequireCleanWorktree,
     [string]$SigningCertificateThumbprint,
@@ -85,12 +86,22 @@ if (-not (Test-Path -LiteralPath $avatarExecutable)) {
 
 & $bootstrapPython (Join-Path $root "scripts\check_docs.py")
 Assert-LastExitCode "Validating release metadata and documentation"
+$sourceRecord = Join-Path $root "build\preinstaller-source.json"
+if ($AppOnly) {
+    & $bootstrapPython (Join-Path $root "scripts\check_preinstaller_app.py") --record-source --output $sourceRecord
+    Assert-LastExitCode "Recording build sources"
+}
 
 if (-not $SkipDependencyInstall) {
     # Never package from the long-lived developer environment. PyInstaller can
     # discover optional packages that are not in the application manifest, so
     # even a harmless old experiment can silently increase the installer.
     if (Test-Path -LiteralPath $releaseEnvironment) {
+        $resolvedEnvironment = (Resolve-Path -LiteralPath $releaseEnvironment).Path
+        $buildRoot = [IO.Path]::GetFullPath((Join-Path $root "build")) + [IO.Path]::DirectorySeparatorChar
+        if (-not $resolvedEnvironment.StartsWith($buildRoot, [StringComparison]::OrdinalIgnoreCase) -or ((Get-Item -LiteralPath $releaseEnvironment).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Refusing to replace a release environment outside build/: $resolvedEnvironment"
+        }
         Remove-Item -LiteralPath $releaseEnvironment -Recurse -Force
     }
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $releaseEnvironment) | Out-Null
@@ -123,6 +134,8 @@ if ($ReuseCore) {
         --paths $root `
         --add-data "$(Join-Path $root 'VERSION');." `
         --add-data "$(Join-Path $root 'apps\protocol');apps\protocol" `
+        --add-data "$(Join-Path $root 'apps\backend\app\model_manager\catalog.json');apps\backend\app\model_manager" `
+        --add-data "$(Join-Path $root 'apps\backend\docker');apps\backend\docker" `
         --additional-hooks-dir (Join-Path $root "scripts\pyinstaller-hooks") `
         --collect-all silero_vad `
         --collect-all gigaam `
@@ -152,22 +165,36 @@ Remove-CudaLibraries $coreResource
 # Add the complete onedir tree as a Tauri resource only for the release build.
 # The Rust shell launches core/neuroasist-core.exe directly, so Windows does
 # not unpack a 442 MB onefile executable on every cold start.
-$configPath = Join-Path $tauri "tauri.conf.json"
-$originalConfig = Get-Content -Raw -LiteralPath $configPath
-try {
-    $config = $originalConfig | ConvertFrom-Json
-    $config.bundle.resources | Add-Member -NotePropertyName "../../../build/core/neuroasist-core" -NotePropertyValue "core"
-    $config | ConvertTo-Json -Depth 20 | Set-Content -Encoding utf8 -LiteralPath $configPath
-    npm --prefix $desktop run build
-    Assert-LastExitCode "Building the NSIS installer"
-}
-finally {
-    $originalConfig | Set-Content -Encoding utf8 -NoNewline -LiteralPath $configPath
-}
+$overridePath = Join-Path $root "build\tauri-release.config.json"
+$override = @{ bundle = @{ resources = @{ "../../../build/core/neuroasist-core" = "core" } } }
+$override | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 -LiteralPath $overridePath
+$buildArguments = @("--config", $overridePath)
+if ($AppOnly) { $buildArguments += "--no-bundle" }
+npm --prefix $desktop run build -- @buildArguments
+Assert-LastExitCode "Building the desktop application"
 
 $smokeScript = Join-Path $root "scripts\smoke_packaged_runtime.ps1"
 & $smokeScript -Executable $coreExecutable
 Assert-LastExitCode "Smoking the packaged core"
+
+if ($AppOnly) {
+    $applicationDirectory = Join-Path $artifactRoot "iris-$version-app"
+    New-Item -ItemType Directory -Force -Path $applicationDirectory | Out-Null
+    if (@(Get-ChildItem -LiteralPath $applicationDirectory -Force).Count -ne 0) {
+        throw "Application staging directory must be empty: $applicationDirectory. Choose a new -ArtifactDirectory."
+    }
+    Copy-Item -LiteralPath (Join-Path $tauri "target\release\neuroasist-desktop.exe") -Destination (Join-Path $applicationDirectory "Iris.exe")
+    Copy-Item -LiteralPath $coreResource -Destination (Join-Path $applicationDirectory "core") -Recurse
+    New-Item -ItemType Directory -Path (Join-Path $applicationDirectory "avatar") | Out-Null
+    Get-ChildItem -LiteralPath $avatarResource -Force | Where-Object { $_.Name -ne ".gitkeep" -and $_.Name -notlike "*DoNotShip*" } | Copy-Item -Destination (Join-Path $applicationDirectory "avatar") -Recurse
+    Copy-Item -LiteralPath (Join-Path $root "LICENSE"), (Join-Path $root "PRIVACY.md"), (Join-Path $root "THIRD_PARTY_ASSETS.md") -Destination $applicationDirectory
+    & $python (Join-Path $root "scripts\create_dependency_inventory.py") --output (Join-Path $applicationDirectory "licenses")
+    Assert-LastExitCode "Collecting dependency notices"
+    & $python (Join-Path $root "scripts\check_preinstaller_app.py") --app $applicationDirectory --source-record $sourceRecord --output (Join-Path $artifactRoot "iris-$version-app-manifest.json")
+    Assert-LastExitCode "Validating the staged application"
+    Write-Host "Application candidate without installer: $applicationDirectory"
+    return
+}
 
 $installerDirectory = Join-Path $tauri "target\release\bundle\nsis"
 $installer = Get-ChildItem -LiteralPath $installerDirectory -Filter "*.exe" -File |

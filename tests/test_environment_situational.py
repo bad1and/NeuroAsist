@@ -29,6 +29,22 @@ from apps.backend.app.environment.weather_service import (
 from apps.backend.app.memory.extraction_worker import MEMORY_EXTRACTION_PROMPT
 
 
+@pytest.fixture(autouse=True)
+def local_weather_and_news(monkeypatch):
+    """Context integration tests use fixed data; live HTTP is tested separately."""
+    async def weather(_self, *_args, **_kwargs):
+        return WeatherForecastSnapshot(CurrentWeatherSnapshot(14.2, 12.1, 55, 2, "переменная облачность", 4.5, True, 0, "Москва", 100.0), ())
+
+    async def news(_self, category="all", **_kwargs):
+        return NewsDigestSnapshot(category, (
+            NewsArticle("Релиз новой открытой нейросети", "Хабр", "Команда выпустила модель.", "2026-10-12", "tech", "https://example.test/news/one"),
+            NewsArticle("Запуск космического аппарата", "NASA", "Аппарат начал полёт.", "2026-10-12", "science", "https://example.test/news/two"),
+        ), 100.0)
+
+    monkeypatch.setattr(WeatherService, "get_weather", weather)
+    monkeypatch.setattr(NewsService, "get_news", news)
+
+
 def test_time_service_now() -> None:
     time_svc = TimeService()
     now = time_svc.now()
@@ -160,7 +176,7 @@ def test_situational_coordinator_ambient_header() -> None:
     async def run() -> None:
         coord = SituationalCoordinator()
         try:
-            header = await coord.get_ambient_header(manual_city="Москва", weather_enabled=False)
+            header = await coord.get_ambient_header(manual_city="Москва", location_mode="manual", weather_enabled=False)
             assert "[Контекст окружения:" in header
             assert "Москва" in header
             assert "UTC" in header
@@ -212,7 +228,7 @@ def test_character_agent_with_situational_context(tmp_path) -> None:
         async def generate(self, messages, **kwargs):
             self.last_messages = list(messages)
             return LLMResponse(
-                content='{"protocol_version":3,"reply":"Привет!","intent":"casual_chat"}',
+                content='{"reply":"Привет!","emotion":"neutral","intent":"casual_chat"}',
                 model="test-model",
             )
 
@@ -273,4 +289,3 @@ def test_character_agent_with_situational_context(tmp_path) -> None:
             await coord.close()
 
     asyncio.run(run())
-

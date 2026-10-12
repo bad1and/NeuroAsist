@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::{
     collections::HashSet,
     env,
@@ -174,11 +176,7 @@ struct AvatarProcess {
 
 impl DesktopState {
     fn new() -> Self {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .ancestors()
-            .nth(3)
-            .expect("desktop source must be nested below the repository root")
-            .to_path_buf();
+        let root = desktop_launch_root(&env::current_exe().expect("desktop executable path unavailable"), cfg!(debug_assertions));
         let port = available_loopback_port();
         let token = random_token();
         let api_base_url = format!("http://127.0.0.1:{port}");
@@ -450,7 +448,7 @@ impl DesktopState {
             .join("Builds")
             .join("NeuroAsistAvatar")
             .join("NeuroAsistAvatar.exe");
-        if development.exists() {
+        if cfg!(debug_assertions) && development.exists() {
             return Some(development);
         }
         app.path()
@@ -1701,6 +1699,15 @@ fn keyring_entry(account: &str) -> Result<Entry, String> {
         .map_err(|error| format!("Windows Credential Manager is unavailable: {error}"))
 }
 
+fn desktop_launch_root(executable: &PathBuf, development: bool) -> PathBuf {
+    if development {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).ancestors().nth(3)
+            .expect("desktop source must be nested below the repository root").to_path_buf()
+    } else {
+        executable.parent().expect("desktop executable must have a parent directory").to_path_buf()
+    }
+}
+
 fn desktop_data_root(root: &PathBuf) -> PathBuf {
     env::var_os("NEUROASIST_APP_DATA_DIR").map(PathBuf::from).unwrap_or_else(|| env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
@@ -2056,6 +2063,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn production_launch_root_follows_the_packaged_executable() {
+        let executable = PathBuf::from("C:/Program Files/Iris/Iris.exe");
+        assert_eq!(desktop_launch_root(&executable, false), executable.parent().unwrap());
+        assert_ne!(desktop_launch_root(&executable, false), desktop_launch_root(&executable, true));
+    }
+
+    #[test]
     fn retired_watchers_cannot_restart_during_maintenance_or_exit() {
         let state = DesktopState::new();
         assert!(state.core_watch_is_current(0));
@@ -2236,6 +2250,10 @@ fn configure_core_command(
     safe_mode: bool,
     avatar_enabled: bool,
 ) {
+    #[cfg(windows)] {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
     command
         .current_dir(root)
         .stdin(Stdio::piped())

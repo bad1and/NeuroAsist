@@ -115,7 +115,7 @@ The minimum is estimated for voice without the avatar or Docker and has not been
 
 ## Getting started
 
-Running from source requires Git, **Python 3.12**, **Node.js 24 / npm 11**, and FFmpeg and FFprobe in your `PATH`. The Tauri shell also needs the current stable Rust selected by `rust-toolchain.toml`, Microsoft C++ Build Tools with **Desktop development with C++**, and WebView2 Runtime. Rust 1.77.2 in Cargo is a lower compatibility bound, not the compiler version to install. [Tauri Windows prerequisites](https://v2.tauri.app/start/prerequisites/).
+Running from source requires Git, **Python 3.12**, **Node.js 24 / npm 11**. Audio decoding uses bundled PyAV; global FFmpeg/FFprobe commands are not required. The Tauri shell also needs the current stable Rust selected by `rust-toolchain.toml`, Microsoft C++ Build Tools with **Desktop development with C++**, and WebView2 Runtime. Rust 1.77.2 in Cargo is a lower compatibility bound, not the compiler version to install. [Tauri Windows prerequisites](https://v2.tauri.app/start/prerequisites/).
 
 ### Install dependencies
 
@@ -183,10 +183,10 @@ After the build, Tauri discovers it automatically. Text and voice are available 
 <details>
 <summary>Docker — the Coding Agent environment</summary>
 
-Start Docker Desktop and build the image:
+Start Docker Desktop. You can prepare the image from Coding Agent; this command is also available for development:
 
 ```powershell
-docker build -t neuroasist-coding:latest -f apps/backend/docker/coding.Dockerfile apps/backend/docker
+docker build -t neuroasist-coding:1.0.0 -f apps/backend/docker/coding.Dockerfile apps/backend/docker
 ```
 
 Save a separate Coding API key in the app settings and enable the agent. It does not use the dialogue model key. [Full instructions](Docs/coding-agent.md).
@@ -220,7 +220,7 @@ History, memory and settings stay on your computer. When launched through Tauri,
 
 To reply, the model receives your request text and selected conversation context. Search contacts external sources. [More on data](PRIVACY.md).
 
-Deleting a memory record and deleting its source message are separate actions. You can create backups in settings; restoring them through the interface is not available yet. Iris does not provide general desktop control, and Coding Agent runs in its own isolated environment.
+Deleting a memory record and deleting its source message are separate actions. Settings support creating, importing, exporting and restoring backups. The desktop shell stops the core before replacing data and preserves the previous copy. Iris does not provide general desktop control, and Coding Agent runs in its own isolated environment.
 
 [Security](SECURITY.md) · [Project status](Docs/MILESTONES.md) · [Release requirements](Docs/release-checklist.md)
 

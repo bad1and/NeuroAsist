@@ -894,6 +894,7 @@ async def test_ambiguous_observation_uses_structured_adjudicator(tmp_path: Path)
 
 
 @pytest.mark.anyio
+@pytest.mark.hardware
 async def test_installed_smart_turn_model_matches_synthetic_manifest() -> None:
     fixture_root = Path(__file__).parent / "fixtures" / "live_audio"
     manifest = json.loads((fixture_root / "manifest.json").read_text(encoding="utf-8"))

@@ -35,6 +35,10 @@ if (-not (Test-Path -LiteralPath $Python)) {
     --paths $repositoryRoot `
     --add-data "$(Join-Path $repositoryRoot 'VERSION');." `
     --add-data "$(Join-Path $repositoryRoot 'apps\protocol');apps\protocol" `
+    --add-data "$(Join-Path $repositoryRoot 'apps\backend\app\model_manager\catalog.json');apps\backend\app\model_manager" `
+    --add-data "$(Join-Path $repositoryRoot 'apps\backend\docker');apps\backend\docker" `
+    --workpath (Join-Path $repositoryRoot 'build\pyinstaller-work') `
+    --specpath (Join-Path $repositoryRoot 'build\pyinstaller-spec') `
     --additional-hooks-dir (Join-Path $repositoryRoot "scripts\pyinstaller-hooks") `
     --collect-all gigaam `
     --collect-all transformers `

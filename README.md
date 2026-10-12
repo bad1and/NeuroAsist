@@ -115,7 +115,7 @@
 
 ## Запуск
 
-Для запуска из исходников понадобятся Git, **Python 3.12**, **Node.js 24 / npm 11**, FFmpeg и FFprobe в `PATH`. Для оболочки Tauri нужны текущий stable Rust из `rust-toolchain.toml`, Microsoft C++ Build Tools с компонентом **Desktop development with C++** и WebView2 Runtime. Значение Rust 1.77.2 в Cargo задаёт нижнюю границу, а не версию для установки. [Подготовка Windows для Tauri](https://v2.tauri.app/start/prerequisites/).
+Для запуска из исходников понадобятся Git, **Python 3.12**, **Node.js 24 / npm 11**. Аудио декодируется через поставляемый PyAV; глобальные FFmpeg/FFprobe не требуются. Для оболочки Tauri нужны текущий stable Rust из `rust-toolchain.toml`, Microsoft C++ Build Tools с компонентом **Desktop development with C++** и WebView2 Runtime. Значение Rust 1.77.2 в Cargo задаёт нижнюю границу, а не версию для установки. [Подготовка Windows для Tauri](https://v2.tauri.app/start/prerequisites/).
 
 ### Установить зависимости
 
@@ -183,10 +183,10 @@ npm --prefix apps/desktop run build:avatar
 <details>
 <summary>Docker — среда для Coding Agent</summary>
 
-Запустите Docker Desktop и соберите образ:
+Запустите Docker Desktop. Образ можно подготовить из Coding Agent; для разработки доступна команда:
 
 ```powershell
-docker build -t neuroasist-coding:latest -f apps/backend/docker/coding.Dockerfile apps/backend/docker
+docker build -t neuroasist-coding:1.0.0 -f apps/backend/docker/coding.Dockerfile apps/backend/docker
 ```
 
 Сохраните отдельный Coding API-ключ в настройках приложения и включите агента. Ключ диалоговой модели вместо него не используется. [Полная инструкция](Docs/coding-agent.md).
@@ -220,7 +220,7 @@ npm --prefix apps/web run dev
 
 Для ответа модель получает текст запроса и выбранный контекст беседы. Поиск обращается к внешним источникам. [Подробнее о данных](PRIVACY.md).
 
-Удаление записи памяти и исходного сообщения — разные действия. Резервные копии можно создавать в настройках; восстановления через интерфейс пока нет. Ирис не предоставляет общего управления рабочим столом, а Coding Agent работает в своей изолированной среде.
+Удаление записи памяти и исходного сообщения — разные действия. В настройках доступны создание, импорт, экспорт и восстановление резервных копий. Desktop-оболочка останавливает ядро перед заменой данных и сохраняет предыдущую копию. Ирис не предоставляет общего управления рабочим столом, а Coding Agent работает в своей изолированной среде.
 
 [Безопасность](SECURITY.md) · [Текущий статус проекта](Docs/MILESTONES.md) · [Условия выпуска](Docs/release-checklist.md)
 
