@@ -204,6 +204,9 @@ def create_app() -> FastAPI:
     runtime_settings_store = RuntimeSettingsStore(settings.app_data_path / "settings.json")
     runtime_settings = runtime_settings_store.load(runtime_defaults)
     coding_agent_service = CodingAgentService(settings, runtime_settings, timeline_store, event_bus.publish)
+    from apps.backend.app.coding.setup import CodingImagePreparation
+    coding_image_preparation = CodingImagePreparation(settings)
+    app.state.coding_image_preparation = coding_image_preparation
     coding_bridge = CodingBridge(coding_agent_service)
     situational_coordinator = SituationalCoordinator(search_service=SearchService(
         runtime_settings=runtime_settings,
@@ -1333,6 +1336,7 @@ def create_app() -> FastAPI:
         situational_coordinator.news_service.start_background(lambda: runtime_settings.news_enabled)
 
     async def shutdown() -> None:
+        await coding_image_preparation.close()
         for task in (storage_maintenance_task, voice_preload_task, avatar_start_task):
             if task is not None and not task.done():
                 task.cancel()

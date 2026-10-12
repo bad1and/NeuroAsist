@@ -35,8 +35,8 @@ def coding_settings(tmp_path: Path, project: Path) -> Settings:
 def test_coding_defaults_are_portable_between_project_locations() -> None:
     settings = Settings(_env_file=None)
 
-    assert settings.coding_docker_image == "neuroasist-coding:latest"
-    assert settings.coding_workspace_path == (ROOT_DIR.parent / "CodingAgentWorkspace")
+    assert settings.coding_docker_image == "neuroasist-coding:1.0.0"
+    assert settings.coding_workspace_path == (settings.app_data_path / "coding-workspaces")
 
 
 def test_task_sandbox_copies_then_applies_only_after_explicit_review(tmp_path: Path) -> None:

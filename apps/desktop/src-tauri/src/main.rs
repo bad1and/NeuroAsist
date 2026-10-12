@@ -1147,6 +1147,12 @@ fn run_maintenance(app: &AppHandle, option: &str, value: &str, stop: bool) -> Re
 }
 
 #[tauri::command]
+async fn choose_coding_project(app: AppHandle) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || rfd::FileDialog::new().set_title(maintenance_copy(&app, "Выберите проект для Coding Agent", "Choose a Coding Agent project")).pick_folder()
+        .map(|path| path.to_string_lossy().into_owned())).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn choose_model_directory(app: AppHandle) -> Result<Option<serde_json::Value>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let Some(path) = rfd::FileDialog::new().set_title(maintenance_copy(&app, "Выберите папку для моделей Iris", "Choose a folder for Iris models")).pick_folder() else { return Ok(None); };
@@ -1544,6 +1550,7 @@ fn main() {
             reset_reference_window,
             desktop_runtime,
             restart_core,
+            choose_coding_project,
             choose_model_directory,
             import_backup,
             export_backup,

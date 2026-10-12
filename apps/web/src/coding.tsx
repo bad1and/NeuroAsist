@@ -38,6 +38,7 @@ import {
   updateRuntimeSettings,
 } from "./api";
 import { currentInterfaceLocale, interfaceIntlLocale, translateInterfaceText } from "./i18n";
+import { CodingSetup } from "./components/CodingSetup";
 import type { BackendEvent, CodingStatus, CodingTask, PublicSettings } from "./types";
 import { animateButtonPress, animatePageEnter, animateStaggerCards, useAnimeScope } from "./animations";
 
@@ -794,6 +795,7 @@ export function CodingAgentPage({
                 <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                   <div className="coding-field">
                     <label htmlFor="coding-target-project">Проект для контекста</label>
+                    <CodingSetup onSettingsChanged={onSettingsChanged} onProjectRegistered={path => { setTargetProjectRoot(path); void refresh(true); }} />
                     <CustomSelect
                       id="coding-target-project"
                       value={targetProjectRoot}
@@ -958,6 +960,7 @@ export function CodingAgentPage({
               <div className="settings-grid system-status-grid">
                 <InfoCard label="Docker CLI" value={status?.docker_cli_available ? "Доступен в PATH" : "Не найден"} />
                 <InfoCard label="Образ песочницы" value={status?.docker_image_name || "neuroasist-sandbox"} />
+                <CodingSetup includeImage onSettingsChanged={onSettingsChanged} onProjectRegistered={path => { setTargetProjectRoot(path); void refresh(true); }} />
                 <InfoCard label="Workspace Root" value={status?.workspace_root || "Не задан"} />
                 <InfoCard label="Текущая модель" value={status?.model || settings?.coding_model || "—"} />
                 <InfoCard label="Задач в очереди" value={String(status?.queued_count ?? 0)} />

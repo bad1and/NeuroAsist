@@ -73,7 +73,7 @@ def _resolved_coding_project_root(settings, runtime_settings) -> str:
             resolved = None
         if resolved in allowed_roots:
             return str(resolved)
-    return str(allowed_roots[0])
+    return str(allowed_roots[0]) if allowed_roots else ""
 
 
 @router.get("/settings/public", response_model=PublicSettingsResponse)
