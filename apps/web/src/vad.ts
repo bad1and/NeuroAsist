@@ -1,3 +1,5 @@
+import workletUrl from "./audio/neuro-vad.worklet.js?url&no-inline";
+
 export type VadState = "idle" | "listening" | "speech_candidate" | "speech" | "end_pending";
 export type VadEvent = "speech_started" | "speech_ended" | null;
 export type MicrophoneProfile = "headset" | "balanced" | "speakers";
@@ -64,53 +66,7 @@ export class VoiceActivityGate {
   }
 }
 
-const WORKLET_SOURCE = `
-class NeuroVadProcessor extends AudioWorkletProcessor {
-  constructor() {
-    super();
-    this.pending = [];
-    this.frameSamples = Math.max(1, Math.round(sampleRate * 0.020));
-    this.gain = 1;
-  }
-  process(inputs) {
-    const channels = inputs[0];
-    if (!channels?.length || !channels[0]?.length) return true;
-    for (let i = 0; i < channels[0].length; i++) {
-      let mono = 0;
-      for (let channel = 0; channel < channels.length; channel++) mono += channels[channel][i] || 0;
-      this.pending.push(mono / channels.length);
-    }
-    while (this.pending.length >= this.frameSamples) {
-      const samples = this.pending.splice(0, this.frameSamples);
-      const pcm = new Int16Array(samples.length);
-      let inputSum = 0;
-      for (let i = 0; i < samples.length; i++) inputSum += samples[i] * samples[i];
-      const inputRms = Math.sqrt(inputSum / samples.length);
-      if (inputRms > 0.0025) {
-        const targetGain = Math.max(0.65, Math.min(2.0, 0.045 / inputRms));
-        this.gain += (targetGain - this.gain) * 0.12;
-      } else {
-        this.gain += (1 - this.gain) * 0.04;
-      }
-      for (let i = 0; i < samples.length; i++) {
-        const amplified = Math.max(-1.2, Math.min(1.2, samples[i] * this.gain));
-        const value = Math.tanh(amplified * 1.25);
-        pcm[i] = Math.round(value * 32767);
-      }
-      this.port.postMessage({
-        // VAD needs the physical microphone level.  The adaptive gain below
-        // improves STT input, but using its amplified value here makes quiet
-        // breaths look like speech and causes accidental barge-ins.
-        rms: inputRms,
-        pcm: pcm.buffer,
-        sampleRate,
-        inputChannels: channels.length,
-      }, [pcm.buffer]);
-    }
-    return true;
-  }
-}
-registerProcessor('neuro-vad', NeuroVadProcessor);`;
+
 
 /**
  * Browser-only monitor. It emits PCM16 frames directly from AudioWorklet; no
@@ -121,7 +77,6 @@ export class BrowserVadRecorder {
   private context: AudioContext | null = null;
   private node: AudioWorkletNode | null = null;
   private sink: GainNode | null = null;
-  private objectUrl: string | null = null;
   private readonly gate = new VoiceActivityGate();
   private muted = false;
 
@@ -159,49 +114,53 @@ export class BrowserVadRecorder {
         throw err;
       }
     }
-    this.context = new AudioContext();
-    if (this.context.state === "suspended") {
-      await this.context.resume().catch(() => undefined);
-    }
-    this.objectUrl = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: "text/javascript" }));
-    await this.context.audioWorklet.addModule(this.objectUrl);
-    const source = this.context.createMediaStreamSource(this.stream);
-    this.node = new AudioWorkletNode(this.context, "neuro-vad");
-    this.sink = this.context.createGain();
-    this.sink.gain.value = 0;
-    source.connect(this.node);
-    this.node.connect(this.sink).connect(this.context.destination);
-    this.gate.start(performance.now());
-    this.muted = false;
-    onState("listening", null);
-    this.node.port.onmessage = ({ data }) => {
-      const pcm = data.pcm as ArrayBuffer;
-      // Keep feeding silence while muted so backend VAD can close a speech
-      // turn cleanly without tearing down the live session.
-      onPcm(
-        this.muted ? new ArrayBuffer(pcm.byteLength) : pcm,
-        Number(data.sampleRate) || this.context?.sampleRate || 48000,
-      );
-      if (this.muted) return;
-      const previousState = this.gate.snapshot();
-      const event = this.gate.feed(Number(data.rms) || 0, performance.now());
-      const nextState = this.gate.snapshot();
-      // AudioWorklet calls this about a hundred times per second.  Forward only
-      // meaningful VAD changes so consumers can safely attach one-shot actions
-      // such as barge-in to the confirmed speech_started event.
-      if (event || nextState !== previousState) {
-        onState(nextState, event);
+    try {
+      this.context = new AudioContext();
+      if (this.context.state === "suspended") {
+        await this.context.resume().catch(() => undefined);
       }
-    };
-    const track = this.stream.getAudioTracks()[0];
-    return {
-      sampleRate: this.context.sampleRate,
-      channels: 1,
-      profile,
-      settings: track?.getSettings() ?? {},
-      constraints: track?.getConstraints() ?? requestedConstraints,
-      supportedConstraints: navigator.mediaDevices.getSupportedConstraints(),
-    };
+      await this.context.audioWorklet.addModule(workletUrl);
+      const source = this.context.createMediaStreamSource(this.stream);
+      this.node = new AudioWorkletNode(this.context, "neuro-vad");
+      this.sink = this.context.createGain();
+      this.sink.gain.value = 0;
+      source.connect(this.node);
+      this.node.connect(this.sink).connect(this.context.destination);
+      this.gate.start(performance.now());
+      this.muted = false;
+      onState("listening", null);
+      this.node.port.onmessage = ({ data }) => {
+        const pcm = data.pcm as ArrayBuffer;
+        // Keep feeding silence while muted so backend VAD can close a speech
+        // turn cleanly without tearing down the live session.
+        onPcm(
+          this.muted ? new ArrayBuffer(pcm.byteLength) : pcm,
+          Number(data.sampleRate) || this.context?.sampleRate || 48000,
+        );
+        if (this.muted) return;
+        const previousState = this.gate.snapshot();
+        const event = this.gate.feed(Number(data.rms) || 0, performance.now());
+        const nextState = this.gate.snapshot();
+        // AudioWorklet calls this about a hundred times per second.  Forward only
+        // meaningful VAD changes so consumers can safely attach one-shot actions
+        // such as barge-in to the confirmed speech_started event.
+        if (event || nextState !== previousState) {
+          onState(nextState, event);
+        }
+      };
+      const track = this.stream.getAudioTracks()[0];
+      return {
+        sampleRate: this.context.sampleRate,
+        channels: 1,
+        profile,
+        settings: track?.getSettings() ?? {},
+        constraints: track?.getConstraints() ?? requestedConstraints,
+        supportedConstraints: navigator.mediaDevices.getSupportedConstraints(),
+      };
+    } catch (error) {
+      this.stop();
+      throw error;
+    }
   }
 
   setMuted(muted: boolean): void {
@@ -221,9 +180,8 @@ export class BrowserVadRecorder {
     this.node?.disconnect();
     this.sink?.disconnect();
     this.stream?.getTracks().forEach((track) => track.stop());
-    void this.context?.close();
-    if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
-    this.stream = null; this.context = null; this.node = null; this.sink = null; this.objectUrl = null;
+    void this.context?.close().catch(() => undefined);
+    this.stream = null; this.context = null; this.node = null; this.sink = null;
   }
 }
 

@@ -1,7 +1,25 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { microphoneConstraints, PcmInputClient, VoiceActivityGate } from "./vad";
+import { BrowserVadRecorder, microphoneConstraints, PcmInputClient, VoiceActivityGate } from "./vad";
 
 afterEach(() => vi.unstubAllGlobals());
+
+it("releases microphone and context after a failed worklet load and allows retry", async () => {
+  const stop = vi.fn();
+  const getUserMedia = vi.fn().mockResolvedValue({ getTracks: () => [{ stop }] });
+  const addModule = vi.fn().mockRejectedValue(new Error("Failed to load worklet module script"));
+  const close = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("navigator", { mediaDevices: { getUserMedia } });
+  vi.stubGlobal("AudioWorkletNode", vi.fn());
+  vi.stubGlobal("AudioContext", class { state = "running"; audioWorklet = { addModule }; close = close; });
+  const recorder = new BrowserVadRecorder();
+  await expect(recorder.start(vi.fn(), vi.fn())).rejects.toThrow("worklet");
+  expect(stop).toHaveBeenCalledOnce();
+  expect(close).toHaveBeenCalledOnce();
+  expect(addModule.mock.calls[0][0]).not.toMatch(/^(blob|data):/);
+  await expect(recorder.start(vi.fn(), vi.fn())).rejects.toThrow("worklet");
+  expect(getUserMedia).toHaveBeenCalledTimes(2);
+  expect(stop).toHaveBeenCalledTimes(2);
+});
 
 describe("VoiceActivityGate", () => {
   it("debounces speech onset and end", () => {
