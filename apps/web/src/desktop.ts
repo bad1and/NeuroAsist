@@ -148,6 +148,7 @@ export async function restartDesktopCore(): Promise<DesktopRuntime> {
 export const importDesktopBackup = () => invoke<{ name: string } | null>("import_backup");
 export const exportDesktopBackup = (name: string) => invoke<boolean>("export_backup", { name });
 export const restoreDesktopBackup = (name: string) => invoke("restore_backup", { name });
+export const removeManagedModel = (modelId: string) => invoke("remove_managed_model", { modelId });
 
 export async function getDesktopRuntime(): Promise<DesktopRuntime> {
   return invoke<DesktopRuntime>("desktop_runtime");
@@ -271,3 +272,5 @@ export async function listenForQaStudioState(
     channel?.close();
   };
 }
+
+export const chooseModelDirectory = () => invoke<{ directory: string } | null>("choose_model_directory");

@@ -1,3 +1,4 @@
+import { notificationStore, notify } from "./notifications";
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
@@ -113,6 +114,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  notify.dismissAll();
   cleanup();
   window.localStorage.clear();
   vi.clearAllMocks();
@@ -553,6 +555,7 @@ describe("русский интерфейс", () => {
 
     expect(await screen.findByRole("heading", { name: "Система" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Модели" }));
+    expect(screen.getByRole("button", { name: "Модели" })).not.toHaveClass("is-dev-dimmed");
     expect((await screen.findAllByRole("heading", { name: "Модели" })).length).toBeGreaterThanOrEqual(1);
     fireEvent.click(screen.getByRole("button", { name: "Журнал событий" }));
     expect(await screen.findByRole("button", { name: "Обновить журнал событий" })).toBeInTheDocument();
@@ -1066,7 +1069,7 @@ describe("русский интерфейс", () => {
     await waitFor(() => expect(api.clearTimelineHistory).toHaveBeenCalledOnce());
     expect(api.clearMemories).not.toHaveBeenCalled();
     expect(api.resetAllCompanionData).not.toHaveBeenCalled();
-    expect(await screen.findByText("Вся история диалогов удалена.")).toBeInTheDocument();
+    await waitFor(() => expect(notificationStore.getSnapshot().some(item => item.message === "Вся история диалогов удалена.")).toBe(true));
   });
 
   it("отображает двухпанельный интерфейс истории и загружает сообщения выбранного диалога", async () => {

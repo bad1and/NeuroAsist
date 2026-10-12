@@ -163,6 +163,9 @@ class VoiceService:
         await self._tts_provider.preload()
 
     async def close(self) -> None:
+        stt_closer = getattr(self._stt_provider, "close", None)
+        if stt_closer is not None:
+            await stt_closer()
         closer = getattr(self._tts_provider, "close", None)
         if closer is not None:
             await closer()

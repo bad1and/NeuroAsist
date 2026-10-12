@@ -339,7 +339,7 @@ export function interruptVoiceSession(
   });
 }
 
-export function getModels(): Promise<{ models: import("./types").ManagedModel[] }> {
+export function getModels(): Promise<{ models: import("./types").ManagedModel[]; directory?: string }> {
   return requestJson("/models");
 }
 
@@ -385,6 +385,7 @@ export function deleteTimelineRange(before: string): Promise<{ deleted: number }
   return requestJson(`/timeline/range?before=${encodeURIComponent(before)}`, { method: "DELETE" });
 }
 
+export const cancelModel = (modelId: string) => requestJson(`/models/${encodeURIComponent(modelId)}/cancel`, { method: "POST" });
 export const deleteBackup = (name: string) => requestJson(`/backups/${encodeURIComponent(name)}`, { method: "DELETE" });
 
 export function deleteTimelineEpisode(episodeId: string): Promise<{ deleted_messages: number }> {

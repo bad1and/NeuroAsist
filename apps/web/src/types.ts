@@ -129,6 +129,8 @@ export type StatusResponse = {
 };
 
 export type ReadinessResponse = {
+  models?: ManagedModel[];
+  api_key_configured?: boolean;
   phase: "starting" | "text_ready" | "ready" | "degraded";
   text_chat: "loading" | "ready" | "failed";
   stt: "loading" | "ready" | "failed" | "disabled";
@@ -386,7 +388,7 @@ export type ManagedModel = {
   location?: string | null;
   sha256: string;
   restart_required: boolean;
-  status: "not_installed" | "downloading" | "installed" | "failed";
+  status: "not_installed" | "downloading" | "verifying" | "installed" | "failed" | "cancelled";
   downloaded_bytes: number;
   total_bytes: number;
   error?: string | null;

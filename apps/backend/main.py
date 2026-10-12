@@ -9,6 +9,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 # Prevent OpenMP / Intel MKL worker threads from busy-waiting/spinning when idle.
@@ -47,6 +48,7 @@ from apps.backend.app.avatar.emotion_engine import EmotionEngine
 from apps.backend.app.avatar.schemas import OverlayPayload
 from apps.backend.app.runtime.settings import RuntimeSettings, RuntimeSettingsStore
 from apps.backend.app.model_manager.service import ModelManager
+from apps.backend.app.model_manager.location import model_root
 from apps.backend.app.storage.backups import BackupService
 from apps.backend.app.storage.sqlite_history import SQLiteMessageHistory
 from apps.backend.app.storage.timeline import (
@@ -210,7 +212,10 @@ def create_app() -> FastAPI:
     ))
     app.state.voice_tts_style = "auto"
     app.state.voice_tts_expression_level = "natural"
-    model_manager = ModelManager(settings.app_data_path / "models", event_bus.publish)
+    model_manager = ModelManager(model_root(settings.app_data_path), event_bus.publish)
+    if os.getenv("NEUROASIST_MANAGED_MODELS") == "1":
+        settings.voice_stt_onnx_model_path = str(model_manager.path_for("gigaam-v3-rnnt"))
+        settings.voice_teratts_model_path = str(model_manager.path_for("teratts-v2"))
     backup_service = BackupService(
         settings.app_data_path / "backups",
         settings.database_path,
@@ -1152,6 +1157,8 @@ def create_app() -> FastAPI:
             update_readiness("vad", "ready")
             return
         try:
+            from apps.backend.app.model_manager.service import require_managed_model
+            await asyncio.to_thread(require_managed_model, "silero-vad", Path(vad_model_path))
             provider = await asyncio.to_thread(SileroVadProvider, vad_model_path)
             if provider.ready:
                 voice_input_session_manager.set_vad_provider(provider)
@@ -1170,6 +1177,8 @@ def create_app() -> FastAPI:
 
     async def preload_turn_detector() -> None:
         try:
+            from apps.backend.app.model_manager.service import require_managed_model
+            await asyncio.to_thread(require_managed_model, "smart-turn-v3.2", model_manager.path_for("smart-turn-v3.2"))
             detector = await asyncio.to_thread(
                 SmartTurnDetector,
                 model_manager.path_for("smart-turn-v3.2"),
@@ -1282,6 +1291,7 @@ def create_app() -> FastAPI:
 
         storage_maintenance_task = asyncio.create_task(run_storage_maintenance())
         voice_preload_task = asyncio.create_task(preload_voice_runtime())
+        app.state.voice_preload_task = voice_preload_task
 
         async def start_avatar_after_ui() -> None:
             try:
@@ -1384,6 +1394,7 @@ def create_app() -> FastAPI:
         if voice_service_close is not None:
             await voice_service_close()
         await close_shared_clients()
+        await asyncio.to_thread(model_manager.close)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -1411,6 +1422,8 @@ def create_app() -> FastAPI:
             "vad": readiness["vad"],
             "live_ready": readiness["live_ready"],
             "errors": list(readiness["errors"]),
+            "models": model_manager.states(),
+            "api_key_configured": bool(settings.llm_api_key),
         }
 
     app.state.settings = settings

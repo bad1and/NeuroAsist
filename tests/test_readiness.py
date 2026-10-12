@@ -87,9 +87,41 @@ def test_readiness_degrades_voice_without_blocking_text(monkeypatch, tmp_path) -
     monkeypatch.setattr(backend_main, "VoiceService", FailingTtsService)
 
     with TestClient(backend_main.create_app()) as client:
+        async def wait_for_voice():
+            await asyncio.wait_for(asyncio.shield(client.app.state.voice_preload_task), timeout=10)
+        client.portal.call(wait_for_voice)
         readiness = client.get("/readiness").json()
 
     assert readiness["text_chat"] == "ready"
     assert readiness["tts"] == "failed"
     assert readiness["live_ready"] is False
     assert any(error.startswith("tts:") for error in readiness["errors"])
+
+
+def test_managed_vad_is_verified_and_becomes_ready(monkeypatch, tmp_path) -> None:
+    from pathlib import Path
+    from apps.backend.app.voice.input import VadProvider
+    verified = []
+    settings = Settings(_env_file=None, app_data_dir=str(tmp_path), sqlite_path=str(tmp_path / "data/neuroasist.sqlite3"),
+                        log_to_file=False, avatar_enabled=False, voice_stt_provider="mock", voice_tts_provider="mock",
+                        voice_preload_stt_model=False, voice_preload_tts_model=False, voice_vad_provider="silero")
+    class ReadyVad(VadProvider):
+        name = "silero"
+        ready = True
+        error = None
+        def __init__(self, path):
+            assert isinstance(path, Path)
+    def verify(model_id, path):
+        assert isinstance(path, Path)
+        verified.append(model_id)
+    monkeypatch.setenv("NEUROASIST_MANAGED_MODELS", "1")
+    monkeypatch.setattr(backend_main, "get_settings", lambda: settings)
+    monkeypatch.setattr(backend_main, "SileroVadProvider", ReadyVad)
+    monkeypatch.setattr("apps.backend.app.model_manager.service.require_managed_model", verify)
+    with TestClient(backend_main.create_app()) as client:
+        async def wait_for_voice():
+            await asyncio.wait_for(asyncio.shield(client.app.state.voice_preload_task), timeout=10)
+        client.portal.call(wait_for_voice)
+        readiness = client.get("/readiness").json()
+    assert readiness["vad"] == "ready"
+    assert "silero-vad" in verified

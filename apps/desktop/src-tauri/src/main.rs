@@ -1147,6 +1147,14 @@ fn run_maintenance(app: &AppHandle, option: &str, value: &str, stop: bool) -> Re
 }
 
 #[tauri::command]
+async fn choose_model_directory(app: AppHandle) -> Result<Option<serde_json::Value>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(path) = rfd::FileDialog::new().set_title(maintenance_copy(&app, "Выберите папку для моделей Iris", "Choose a folder for Iris models")).pick_folder() else { return Ok(None); };
+        run_maintenance(&app, "--maintenance-model-directory", &path.to_string_lossy(), true).map(Some)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn import_backup(app: AppHandle) -> Result<Option<serde_json::Value>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let Some(path) = rfd::FileDialog::new().set_title(maintenance_copy(&app, "Импорт резервной копии Iris", "Import an Iris backup")).add_filter("Iris ZIP", &["zip"]).pick_file() else { return Ok(None); };
@@ -1157,6 +1165,12 @@ async fn import_backup(app: AppHandle) -> Result<Option<serde_json::Value>, Stri
 #[tauri::command]
 async fn restore_backup(app: AppHandle, name: String) -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || run_maintenance(&app, "--maintenance-restore", &name, true))
+        .await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn remove_managed_model(app: AppHandle, model_id: String) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || run_maintenance(&app, "--maintenance-remove-model", &model_id, true))
         .await.map_err(|e| e.to_string())?
 }
 
@@ -1530,9 +1544,11 @@ fn main() {
             reset_reference_window,
             desktop_runtime,
             restart_core,
+            choose_model_directory,
             import_backup,
             export_backup,
             restore_backup,
+            remove_managed_model,
             start_graceful_shutdown,
             quit_app,
             set_interface_locale,
@@ -2236,6 +2252,9 @@ fn configure_core_command(
             "AVATAR_ENABLED",
             if avatar_enabled { "true" } else { "false" },
         );
+    if !cfg!(debug_assertions) {
+        command.env("NEUROASIST_MANAGED_MODELS", "1");
+    }
 }
 
 fn core_health_is_ready(runtime: &DesktopRuntime) -> bool {

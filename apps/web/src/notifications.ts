@@ -271,7 +271,14 @@ export const notify = {
   dismissAll: notificationStore.dismissAll,
 };
 
-export function notifyBackendEvent(event: BackendEvent): void {
+export function notifyBackendEvent(event: BackendEvent, openModels?: () => void): void {
+  if (event.type === "models.installed" || event.type === "models.download_failed") {
+    const options = { id: `models.${event.metadata.model_id}`, actions: openModels ? [{ label: "Открыть модели", onClick: openModels }] : undefined };
+    if (event.type === "models.installed") notify.success("Модели", "Модель загружена и проверена.", options);
+    else if (String(event.metadata.error).includes("Загрузка отменена")) notify.info("Модели", "Загрузка отменена.", options);
+    else notify.error("Не удалось загрузить модель", String(event.metadata.error ?? event.message), options);
+    return;
+  }
   // Transport diagnostics remain in Events. Playback failures have their own
   // events and UI, so a low-level dispatch message should never become a toast.
   if (event.type === "avatar.command_failed" || event.type === "avatar.command_sent") return;

@@ -345,10 +345,15 @@ class Settings(BaseSettings):
         return self.database_path.parent / "chroma"
 
     @property
+    def models_directory(self) -> Path:
+        from apps.backend.app.model_manager.location import model_root
+        return model_root(self.app_data_path)
+
+    @property
     def semantic_e5_model_directory(self) -> Path:
         if self.semantic_e5_model_path:
             return Path(self.semantic_e5_model_path).expanduser()
-        return self.app_data_path / "models" / "multilingual-e5-small"
+        return self.models_directory / "multilingual-e5-small"
 
     @property
     def avatar_emotion_mapping(self) -> Path:
@@ -374,14 +379,14 @@ class Settings(BaseSettings):
         if self.voice_teratts_cache_dir:
             path = Path(self.voice_teratts_cache_dir).expanduser()
             return path if path.is_absolute() else (ROOT_DIR / path).resolve()
-        return self.app_data_path / "models" / "huggingface"
+        return self.models_directory / "huggingface"
 
     @property
     def voice_stt_onnx_model_directory(self) -> Path:
         if self.voice_stt_onnx_model_path:
             path = Path(self.voice_stt_onnx_model_path).expanduser()
             return path if path.is_absolute() else (ROOT_DIR / path).resolve()
-        return self.app_data_path / "models" / "gigaam-v3-rnnt-onnx" / "322c3b29492673eb7d0b434bfa9dfb8653e34d02"
+        return self.models_directory / "gigaam-v3-rnnt-onnx" / "322c3b29492673eb7d0b434bfa9dfb8653e34d02"
 
     @property
     def voice_stt_terms_file(self) -> Path:

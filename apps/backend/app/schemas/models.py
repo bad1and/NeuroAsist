@@ -18,3 +18,4 @@ class ManagedModelResponse(BaseModel):
 
 class ManagedModelsResponse(BaseModel):
     models: list[ManagedModelResponse]
+    directory: str

@@ -1,0 +1,454 @@
+[
+  {
+    "id": "gigaam-v3-rnnt",
+    "name": "GigaAM v3 RNNT",
+    "revision": "322c3b29492673eb7d0b434bfa9dfb8653e34d02",
+    "repository": "istupakov/gigaam-v3-onnx",
+    "relative_path": "gigaam-v3-rnnt-onnx/322c3b29492673eb7d0b434bfa9dfb8653e34d02",
+    "files": [
+      {
+        "path": "LICENSE.txt",
+        "url": "https://huggingface.co/istupakov/gigaam-v3-onnx/resolve/322c3b29492673eb7d0b434bfa9dfb8653e34d02/LICENSE.txt",
+        "sha256": "f00de6715714c7a63d08639cdbfaa40224eefc407302614bd19f1a8b98c875aa",
+        "size_bytes": 1070
+      },
+      {
+        "path": "config.json",
+        "url": "https://huggingface.co/istupakov/gigaam-v3-onnx/resolve/322c3b29492673eb7d0b434bfa9dfb8653e34d02/config.json",
+        "sha256": "0641fcf73f4af791c73f05083e38a658ff5dcbee3534a0c61396c10f4b97f0fe",
+        "size_bytes": 135
+      },
+      {
+        "path": "v3_rnnt.yaml",
+        "url": "https://huggingface.co/istupakov/gigaam-v3-onnx/resolve/322c3b29492673eb7d0b434bfa9dfb8653e34d02/v3_rnnt.yaml",
+        "sha256": "8efdaad605803a38dc9cfcfb9a898b19ca749b04fe1390141205882f4b3d75aa",
+        "size_bytes": 1145
+      },
+      {
+        "path": "v3_rnnt_decoder.onnx",
+        "url": "https://huggingface.co/istupakov/gigaam-v3-onnx/resolve/322c3b29492673eb7d0b434bfa9dfb8653e34d02/v3_rnnt_decoder.onnx",
+        "sha256": "443c3b7bd42b453611618135d6b1e7d9467e5dd97c8a68501da4aa355750c0da",
+        "size_bytes": 3331429
+      },
+      {
+        "path": "v3_rnnt_encoder.onnx",
+        "url": "https://huggingface.co/istupakov/gigaam-v3-onnx/resolve/322c3b29492673eb7d0b434bfa9dfb8653e34d02/v3_rnnt_encoder.onnx",
+        "sha256": "7ae7509c3f1128369564df0b00e2ee4950adf539de2392ac5c800a5bc04c7132",
+        "size_bytes": 885084534
+      },
+      {
+        "path": "v3_rnnt_joint.onnx",
+        "url": "https://huggingface.co/istupakov/gigaam-v3-onnx/resolve/322c3b29492673eb7d0b434bfa9dfb8653e34d02/v3_rnnt_joint.onnx",
+        "sha256": "fd1d02f45c2ad3d6b67cc149811ad794ab4b020ed49a0a9e2790a8619d1cddd8",
+        "size_bytes": 1440448
+      },
+      {
+        "path": "v3_vocab.txt",
+        "url": "https://huggingface.co/istupakov/gigaam-v3-onnx/resolve/322c3b29492673eb7d0b434bfa9dfb8653e34d02/v3_vocab.txt",
+        "sha256": "a9143c30844d3c0bee3e9e927e4084774eb1b9eeaafc473b2c4521e4911a7c07",
+        "size_bytes": 198
+      }
+    ],
+    "size_bytes": 889858959
+  },
+  {
+    "id": "teratts-v2",
+    "name": "TeraTTS v2",
+    "revision": "f05ea799094571a3553904a555df3834fb0b963b",
+    "repository": "TeraSpace/TeraTTSv2",
+    "relative_path": "teratts-v2/f05ea799094571a3553904a555df3834fb0b963b",
+    "files": [
+      {
+        "path": "README.md",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/README.md",
+        "sha256": "11bb9d3e68b9f58bf492a1f7c15fd6a81a2957f786efc1520105c17738ae8267",
+        "size_bytes": 5180
+      },
+      {
+        "path": "RUACCENT_NOTICE.txt",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/RUACCENT_NOTICE.txt",
+        "sha256": "079aded52d6e28786b692c28ce8373412e8688490333d87588527b5b1ffe0da7",
+        "size_bytes": 1176
+      },
+      {
+        "path": "config.json",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/config.json",
+        "sha256": "9400b10eea09b333f53be7872b410189012f5f5a5d7af91bc269a30d899cdf8e",
+        "size_bytes": 569
+      },
+      {
+        "path": "configuration_teratts.py",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/configuration_teratts.py",
+        "sha256": "5cf0287951265c119f7ab9c5b745c5ada1195f53044ecf6c152d033304978a79",
+        "size_bytes": 963
+      },
+      {
+        "path": "modeling_teratts.py",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/modeling_teratts.py",
+        "sha256": "c934b75b75164251a672b064cd0a7fcfdebf5114abb1ee7541400070c56729ef",
+        "size_bytes": 5191
+      },
+      {
+        "path": "models/duration_predictor.onnx",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/models/duration_predictor.onnx",
+        "sha256": "15248b4751493fe48543f01164cd9b74d103b4483c63367a01c344442ebf03d8",
+        "size_bytes": 1572411
+      },
+      {
+        "path": "models/sampler_distilled_cfg3_8step.onnx",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/models/sampler_distilled_cfg3_8step.onnx",
+        "sha256": "921a050f19794bf97234ca8ffc0298559eaca466d9f7f3b72ec41dfefb37acc6",
+        "size_bytes": 256417643
+      },
+      {
+        "path": "models/sampler_teacher_8step.onnx",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/models/sampler_teacher_8step.onnx",
+        "sha256": "b38b6334cdc5fa228f260710a41082d52a581b29c1a474f87e2a0f70887258fb",
+        "size_bytes": 256528347
+      },
+      {
+        "path": "models/text_encoder.onnx",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/models/text_encoder.onnx",
+        "sha256": "d59b7911fe9e465988f26bedbf7c34ef9b2c5588d9b0da5f86d41340a3324a12",
+        "size_bytes": 27910305
+      },
+      {
+        "path": "models/vocoder.onnx",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/models/vocoder.onnx",
+        "sha256": "d4e4cf9a9b9de8cca28f309c4cb7735327322b5a764ba61dfc3706c3c7942c07",
+        "size_bytes": 101416199
+      },
+      {
+        "path": "requirements.txt",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/requirements.txt",
+        "sha256": "0e60389d2ef5f49111836475925c9e4b3260c426f0216208ae95f53b9db91afa",
+        "size_bytes": 117
+      },
+      {
+        "path": "ruaccent/dictionary/accents.json.gz",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/dictionary/accents.json.gz",
+        "sha256": "aa460ebba90de00fbbf3d41d121961f605b98667e45efb7920f127473b15515e",
+        "size_bytes": 20954156
+      },
+      {
+        "path": "ruaccent/dictionary/omographs.json.gz",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/dictionary/omographs.json.gz",
+        "sha256": "04a9e81c68d65f65ba493fe0110f99e79087548c2beeec3032e2b66e28706f36",
+        "size_bytes": 219047
+      },
+      {
+        "path": "ruaccent/dictionary/yo_homographs.json.gz",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/dictionary/yo_homographs.json.gz",
+        "sha256": "c4ee777bbbab87f9eac838f370ad92974e079d02b21903e480c54b5f0c8c60d1",
+        "size_bytes": 5747
+      },
+      {
+        "path": "ruaccent/dictionary/yo_words.json.gz",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/dictionary/yo_words.json.gz",
+        "sha256": "a19fa89a964a0691d9fe4ee384783e3934904891843d8f59a1c480d67947a82a",
+        "size_bytes": 548914
+      },
+      {
+        "path": "ruaccent/nn/nn_accent/big.onnx",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_accent/big.onnx",
+        "sha256": "47e69d9ae19f2a82e21b1c70f6a4bbfb1abc5759e98b2e67d009c5e9d7af18c9",
+        "size_bytes": 2285217
+      },
+      {
+        "path": "ruaccent/nn/nn_accent/config.json",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_accent/config.json",
+        "sha256": "e377f159a8fc8673e211f100d4a237d5fe3dceb3b6789a5a738bf50bda23be49",
+        "size_bytes": 841
+      },
+      {
+        "path": "ruaccent/nn/nn_accent/model.onnx",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_accent/model.onnx",
+        "sha256": "4e393144e45626f6f1062a0784ef06f921b97321a8e7b87ac2a09a892286500a",
+        "size_bytes": 803402
+      },
+      {
+        "path": "ruaccent/nn/nn_accent/ort_config.json",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_accent/ort_config.json",
+        "sha256": "31dd1c06997b2c5097b558829e46b4e91a5ef8e5c6bea07dfc67e48b3bbc8775",
+        "size_bytes": 727
+      },
+      {
+        "path": "ruaccent/nn/nn_accent/special_tokens_map.json",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_accent/special_tokens_map.json",
+        "sha256": "2acac3fb89054158ccbeff3c52744ca93979f738002709c0aea001597213024b",
+        "size_bytes": 99
+      },
+      {
+        "path": "ruaccent/nn/nn_accent/tokenizer_config.json",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_accent/tokenizer_config.json",
+        "sha256": "efea18a18af2809330eb0f431ab86979304d2559571e887de7b6359e3f18f0d8",
+        "size_bytes": 257
+      },
+      {
+        "path": "ruaccent/nn/nn_accent/vocab.txt",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_accent/vocab.txt",
+        "sha256": "242882b2f27800e49a6babf46867dabf6dc9b6535b600776a68815fe4d4f4382",
+        "size_bytes": 140
+      },
+      {
+        "path": "ruaccent/nn/nn_omograph/turbo3.1/added_tokens.json",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_omograph/turbo3.1/added_tokens.json",
+        "sha256": "071c01df9ba59b64b9d0d9af0eaac5412a5fc558d540a214ada4ee7531d38096",
+        "size_bytes": 279418
+      },
+      {
+        "path": "ruaccent/nn/nn_omograph/turbo3.1/config.json",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_omograph/turbo3.1/config.json",
+        "sha256": "fa47e006d2a15a164d36e0303b5f8344a795f2108a3e55724133a87710216136",
+        "size_bytes": 723
+      },
+      {
+        "path": "ruaccent/nn/nn_omograph/turbo3.1/merges.txt",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_omograph/turbo3.1/merges.txt",
+        "sha256": "120c75258d87ba748b2025f517819fd0e0386e8d31cc6b29a21f900d395dd825",
+        "size_bytes": 1213606
+      },
+      {
+        "path": "ruaccent/nn/nn_omograph/turbo3.1/model.onnx",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_omograph/turbo3.1/model.onnx",
+        "sha256": "2cb6a174c4cdb45bd3132b4f7c8a3779fc4b6869863180ed7d0e421bcd453dbd",
+        "size_bytes": 359306923
+      },
+      {
+        "path": "ruaccent/nn/nn_omograph/turbo3.1/special_tokens_map.json",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_omograph/turbo3.1/special_tokens_map.json",
+        "sha256": "06e405a36dfe4b9604f484f6a1e619af1a7f7d09e34a8555eb0b77b66318067f",
+        "size_bytes": 280
+      },
+      {
+        "path": "ruaccent/nn/nn_omograph/turbo3.1/tokenizer.json",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_omograph/turbo3.1/tokenizer.json",
+        "sha256": "eb84a77af38a91f6f327486c7827d8541f8d446250f8d408909999b6be817afa",
+        "size_bytes": 5532343
+      },
+      {
+        "path": "ruaccent/nn/nn_omograph/turbo3.1/tokenizer_config.json",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_omograph/turbo3.1/tokenizer_config.json",
+        "sha256": "f159df92d0b0be03e1ceb0768222aa4c21dcfd37c5763b6b395b6864e023c7fb",
+        "size_bytes": 492
+      },
+      {
+        "path": "ruaccent/nn/nn_omograph/turbo3.1/vocab.json",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_omograph/turbo3.1/vocab.json",
+        "sha256": "ba028ba89c029a473ac369716b4d52bb252a38004fc5dd085d18f4ada4a760b3",
+        "size_bytes": 1555282
+      },
+      {
+        "path": "ruaccent/nn/nn_stress_usage_predictor/config.json",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_stress_usage_predictor/config.json",
+        "sha256": "aa0638edf56254f123e593e96f034c2b5e68303ac207b29f64f0878dc4c22631",
+        "size_bytes": 822
+      },
+      {
+        "path": "ruaccent/nn/nn_stress_usage_predictor/model.onnx",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_stress_usage_predictor/model.onnx",
+        "sha256": "3d547500637b4ddfec8880ed6d1405fd50ee9d3f0131ef8a2a69dcf961dbefeb",
+        "size_bytes": 116473561
+      },
+      {
+        "path": "ruaccent/nn/nn_stress_usage_predictor/special_tokens_map.json",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_stress_usage_predictor/special_tokens_map.json",
+        "sha256": "b6d346be366a7d1d48332dbc9fdf3bf8960b5d879522b7799ddba59e76237ee3",
+        "size_bytes": 125
+      },
+      {
+        "path": "ruaccent/nn/nn_stress_usage_predictor/tokenizer.json",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_stress_usage_predictor/tokenizer.json",
+        "sha256": "ce51cde5df60ecb167abec4c90db11360482150628f7a91f3e316df6d6ff6f6f",
+        "size_bytes": 2413536
+      },
+      {
+        "path": "ruaccent/nn/nn_stress_usage_predictor/tokenizer_config.json",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_stress_usage_predictor/tokenizer_config.json",
+        "sha256": "4466c2e475c434d35bce0f4a46f918730155386b50582fa3742b7b7d67897e96",
+        "size_bytes": 368
+      },
+      {
+        "path": "ruaccent/nn/nn_stress_usage_predictor/vocab.txt",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_stress_usage_predictor/vocab.txt",
+        "sha256": "f056a69b097422652053bf87565c35543e5d81540ca4b7dddd28de4157a969e0",
+        "size_bytes": 1080667
+      },
+      {
+        "path": "ruaccent/nn/nn_yo_homograph_resolver/config.json",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_yo_homograph_resolver/config.json",
+        "sha256": "adf7fd2c67be1498071f447ec4a23dbe84904c49f95d1d3e6c7d9df269b9a2e9",
+        "size_bytes": 625
+      },
+      {
+        "path": "ruaccent/nn/nn_yo_homograph_resolver/model.onnx",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_yo_homograph_resolver/model.onnx",
+        "sha256": "42cc85bf0c4b319dfe3d89fa17b162a92fd5e1c651a657cb3d5f44978d4e70ac",
+        "size_bytes": 14332169
+      },
+      {
+        "path": "ruaccent/nn/nn_yo_homograph_resolver/special_tokens_map.json",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_yo_homograph_resolver/special_tokens_map.json",
+        "sha256": "b6d346be366a7d1d48332dbc9fdf3bf8960b5d879522b7799ddba59e76237ee3",
+        "size_bytes": 125
+      },
+      {
+        "path": "ruaccent/nn/nn_yo_homograph_resolver/tokenizer.json",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_yo_homograph_resolver/tokenizer.json",
+        "sha256": "f2bf174f2fe62ff11c28d56555f9c0cf16b24e162ef53bcf42ff85ebcf6ebfa8",
+        "size_bytes": 126952
+      },
+      {
+        "path": "ruaccent/nn/nn_yo_homograph_resolver/tokenizer_config.json",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_yo_homograph_resolver/tokenizer_config.json",
+        "sha256": "804b8a4b4a02c9d38af8c88706206718759061ff9a102ad8483e9ac00011188c",
+        "size_bytes": 401
+      },
+      {
+        "path": "ruaccent/nn/nn_yo_homograph_resolver/vocab.txt",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/ruaccent/nn/nn_yo_homograph_resolver/vocab.txt",
+        "sha256": "9276b81ff34cd9560563a476de6735abf5ed9a3871131644992230dc4e630056",
+        "size_bytes": 48576
+      },
+      {
+        "path": "styles/eng_f3/style_dp.npy",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/styles/eng_f3/style_dp.npy",
+        "sha256": "8471b25d2db5281feebc6e03af5bfb413c647368d75cdd8cebc44be36def7948",
+        "size_bytes": 640
+      },
+      {
+        "path": "styles/eng_f3/style_ttl.npy",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/styles/eng_f3/style_ttl.npy",
+        "sha256": "95fdfe490f5b3d3cf699495309177c405a38a89707bc9c711f93dc083fe099b6",
+        "size_bytes": 51328
+      },
+      {
+        "path": "styles/eng_f4_whisper/style_dp.npy",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/styles/eng_f4_whisper/style_dp.npy",
+        "sha256": "47031c5fbbea490cba67cfd82f1ffc8ee8ed64c68aa68260f13746c2174ffbfa",
+        "size_bytes": 640
+      },
+      {
+        "path": "styles/eng_f4_whisper/style_ttl.npy",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/styles/eng_f4_whisper/style_ttl.npy",
+        "sha256": "ae4a81c2459e4fccb6206b37c3bba518ac3e23fc91344b07516c5e6125257d59",
+        "size_bytes": 51328
+      },
+      {
+        "path": "styles/eng_f5/style_dp.npy",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/styles/eng_f5/style_dp.npy",
+        "sha256": "9629dce9db38b4ab5163429c1eeb9a5771786e58e98e343ea6251bf93a9dfd60",
+        "size_bytes": 640
+      },
+      {
+        "path": "styles/eng_f5/style_ttl.npy",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/styles/eng_f5/style_ttl.npy",
+        "sha256": "b4cc8b6d271d6ee587b13af7bef8f0151821b24d6af546a1167fa885bd962496",
+        "size_bytes": 51328
+      },
+      {
+        "path": "styles/eng_m2_whisper/style_dp.npy",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/styles/eng_m2_whisper/style_dp.npy",
+        "sha256": "1a2814cc92643cc102d438d0a70742bacbd01921a78cc0ff39b722ab78b2682c",
+        "size_bytes": 640
+      },
+      {
+        "path": "styles/eng_m2_whisper/style_ttl.npy",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/styles/eng_m2_whisper/style_ttl.npy",
+        "sha256": "e651551d547ca305256bc56062df24c2706308ffccfc5b8ad9735f057975f270",
+        "size_bytes": 51328
+      },
+      {
+        "path": "styles/eng_m3/style_dp.npy",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/styles/eng_m3/style_dp.npy",
+        "sha256": "dbcc78e880d2e7c6a45f4bff464ee90c9ba17a2599c9d3cc3dea2c0abcb94524",
+        "size_bytes": 640
+      },
+      {
+        "path": "styles/eng_m3/style_ttl.npy",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/styles/eng_m3/style_ttl.npy",
+        "sha256": "f0ffd38329830d1556e1096d396c2a807626b9308eb12af84ea4733c712d8d01",
+        "size_bytes": 51328
+      },
+      {
+        "path": "styles/eng_m4/style_dp.npy",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/styles/eng_m4/style_dp.npy",
+        "sha256": "526724e17a6d0d917c18db0bac6ac97af15ae63312375129ef294462fbbfc0a2",
+        "size_bytes": 640
+      },
+      {
+        "path": "styles/eng_m4/style_ttl.npy",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/styles/eng_m4/style_ttl.npy",
+        "sha256": "a8d5016c1aade83d2bdec1e3aa86d0e421ff9e2fb7a781637e64f8a0d8ef663e",
+        "size_bytes": 51328
+      },
+      {
+        "path": "styles/ru_f1/style_dp.npy",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/styles/ru_f1/style_dp.npy",
+        "sha256": "189e1eabfccf8f0f76a6b10d84ba0fdde18de2ecc2c2e16e3a790f961db95382",
+        "size_bytes": 640
+      },
+      {
+        "path": "styles/ru_f1/style_ttl.npy",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/styles/ru_f1/style_ttl.npy",
+        "sha256": "489cb6d10f3e2528d7ac4b3e4d8b01ca54d44b98d193dd26684b16c3a24bd9a7",
+        "size_bytes": 51328
+      },
+      {
+        "path": "styles/ru_f2/style_dp.npy",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/styles/ru_f2/style_dp.npy",
+        "sha256": "48c10c8c3e6f9016e4ff625425450b99772a9246ffed6b062d236f23863b27d1",
+        "size_bytes": 640
+      },
+      {
+        "path": "styles/ru_f2/style_ttl.npy",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/styles/ru_f2/style_ttl.npy",
+        "sha256": "4947fa632443f8ad8343399ac258f67f1e85e9594cf5d42ef7e18d6f6fa3e763",
+        "size_bytes": 51328
+      },
+      {
+        "path": "styles/ru_m1/style_dp.npy",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/styles/ru_m1/style_dp.npy",
+        "sha256": "0bbdbe5044f5682152b1fe399f7681424870e03023e857b9706863a6d73bf9e9",
+        "size_bytes": 640
+      },
+      {
+        "path": "styles/ru_m1/style_ttl.npy",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/styles/ru_m1/style_ttl.npy",
+        "sha256": "0a49356abab63262e3183518eacadd9e073681f87b8bfd86f7b5aed0317fbd0c",
+        "size_bytes": 51328
+      },
+      {
+        "path": "styles/ru_m5/style_dp.npy",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/styles/ru_m5/style_dp.npy",
+        "sha256": "79741747bb75e0dac2357c089bc923926c4a34fe46b5ce9f85376b14b8e59bf9",
+        "size_bytes": 640
+      },
+      {
+        "path": "styles/ru_m5/style_ttl.npy",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/styles/ru_m5/style_ttl.npy",
+        "sha256": "6eccc64350dcc23a8e790eebd7abbec24b0055e6451d975deffa899885e26e99",
+        "size_bytes": 51328
+      },
+      {
+        "path": "teratts.py",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/teratts.py",
+        "sha256": "a75273a935a0d938a2aef07365ef955a1ba5f08fdc1ba4d9fe3ee1ff68e768f8",
+        "size_bytes": 22443
+      },
+      {
+        "path": "teratts_ruaccent.py",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/teratts_ruaccent.py",
+        "sha256": "0e991d3a896187420635f81d4fc4ab0805c330d04a60508f5fb98d40e659ab67",
+        "size_bytes": 13767
+      },
+      {
+        "path": "unicode_indexer.json",
+        "url": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/unicode_indexer.json",
+        "sha256": "c1ed0c0804b836bd0e38170ae7b5b00647d818c5f659fcf21fa0feea950aa04d",
+        "size_bytes": 262171
+      }
+    ],
+    "size_bytes": 1171861703
+  }
+]
