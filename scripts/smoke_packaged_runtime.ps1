@@ -24,6 +24,13 @@ $previousEnvironment = @{}
 foreach ($key in $environmentKeys) { $previousEnvironment[$key] = [Environment]::GetEnvironmentVariable($key, "Process") }
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("neuroasist-packaged-runtime-" + [guid]::NewGuid())
 $process = $null
+$loopbackRequest = @{}
+$originalProxy = [System.Net.WebRequest]::DefaultWebProxy
+if ((Get-Command Invoke-WebRequest).Parameters.ContainsKey("NoProxy")) {
+    $loopbackRequest.NoProxy = $true
+} else {
+    [System.Net.WebRequest]::DefaultWebProxy = [System.Net.GlobalProxySelection]::GetEmptyWebProxy()
+}
 
 try {
     New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
@@ -45,7 +52,7 @@ try {
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
         Start-Sleep -Milliseconds 500
         try {
-            $health = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port/health" -Headers $headers -TimeoutSec 2
+            $health = Invoke-WebRequest @loopbackRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port/health" -Headers $headers -TimeoutSec 2
             if ($health.StatusCode -eq 200) { break }
         } catch {
             if ($process.HasExited) { throw "Packaged runtime exited before /health became ready (exit code $($process.ExitCode))." }
@@ -55,14 +62,14 @@ try {
 
     $unauthorized = $false
     try {
-        Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 2 | Out-Null
+        Invoke-WebRequest @loopbackRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 2 | Out-Null
     } catch {
         $response = $_.Exception.Response
         $unauthorized = $null -ne $response -and [int]$response.StatusCode -eq 401
     }
     if (-not $unauthorized) { throw "Packaged runtime accepted an unauthenticated request." }
 
-    $shutdown = Invoke-WebRequest -UseBasicParsing -Method Post -Uri "http://127.0.0.1:$Port/internal/shutdown" -Headers $headers -TimeoutSec 5
+    $shutdown = Invoke-WebRequest @loopbackRequest -UseBasicParsing -Method Post -Uri "http://127.0.0.1:$Port/internal/shutdown" -Headers $headers -TimeoutSec 5
     if (-not $process.WaitForExit(15000)) { throw "Packaged runtime did not exit after graceful shutdown." }
     [pscustomobject]@{
         health = $health.Content
@@ -71,6 +78,7 @@ try {
         exit_code = $process.ExitCode
     } | ConvertTo-Json -Compress
 } finally {
+    [System.Net.WebRequest]::DefaultWebProxy = $originalProxy
     if ($null -ne $process -and -not $process.HasExited) {
         Stop-Process -Id $process.Id -Force
     }

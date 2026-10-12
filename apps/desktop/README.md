@@ -71,3 +71,25 @@ The installer is written under
 packaging check. Release prerequisites and acceptance gates are documented in
 [`Docs/operations.md`](../../Docs/operations.md) and
 [`Docs/release-checklist.md`](../../Docs/release-checklist.md).
+
+## Приложение перед установщиком
+
+Из корня репозитория выполните `scripts/build-preinstaller-app.ps1`. Команда
+собирает Unity, CPU onedir и Tauri с `--no-bundle`; путь Unity Editor задаётся
+через `NEUROASIST_UNITY_EDITOR`. Для уже проверенного аватара доступен
+`-SkipAvatarBuild`. Python-окружение разработчика не изменяется.
+
+Все изменяемые данные находятся в `%LOCALAPPDATA%\NeuroAsist`. Веса загружаются
+через настройки; восстановление ZIP и удаление моделей выполняются при
+остановленном ядре. При ошибке запуска импорт и восстановление доступны
+на стартовом экране. Coding-проекты выбираются системным диалогом; задания
+хранятся в пользовательском профиле.
+
+[Приёмка каталога приложения](../../Docs/preinstaller-readiness.md) предшествует
+сборке и испытанию установщика. Лицензии и реальные аппаратные сценарии
+подтверждаются отдельно от автоматики.
+
+Production CSP разрешает статический CSS Paper Shaders по SHA-256 и inline
+атрибуты стилей для React/Anime.js. Скрипты, соединения и медиаресурсы ограничены
+явными источниками. После обновления Paper Shaders проверяйте CSP в реальном
+WebView: изменение CSS требует обновления разрешённого хеша.

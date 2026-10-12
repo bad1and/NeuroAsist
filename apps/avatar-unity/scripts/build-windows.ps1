@@ -45,7 +45,7 @@ $arguments = @(
 )
 Write-Host "Building Unity avatar with: $UnityEditor"
 try {
-    $process = Start-Process -FilePath $UnityEditor -ArgumentList $arguments -Wait -PassThru
+    $process = Start-Process -FilePath $UnityEditor -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru
 }
 catch {
     Show-BuildLog

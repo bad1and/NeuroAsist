@@ -1,4 +1,6 @@
 import logging
+import re
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from apps.backend.app.core.config import ROOT_DIR, Settings
@@ -13,6 +15,25 @@ SAFE_THIRD_PARTY_LOG_LEVELS = {
 }
 
 
+class SecretRedaction(logging.Filter):
+    def __init__(self, settings: Settings) -> None:
+        super().__init__()
+        self.secrets = tuple(value for name in ("llm_api_key", "coding_llm_api_key", "desktop_auth_token", "brave_api_key", "tavily_api_key", "serper_api_key")
+                             if (value := getattr(settings, name, None)))
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg, record.args = self.redact(record.getMessage()), ()
+        if record.exc_info:
+            record.exc_text = self.redact(logging.Formatter().formatException(record.exc_info))
+        return True
+
+    def redact(self, text: str) -> str:
+        text = re.sub(r"(?i)([?&](?:token|api_key|apikey)=)[^&\s]+", r"\1[redacted]", text)
+        for secret in self.secrets:
+            text = text.replace(secret, "[redacted]")
+        return text
+
+
 def configure_logging(settings: Settings) -> None:
     level = _parse_log_level(settings.log_level)
     formatter = logging.Formatter(LOG_FORMAT)
@@ -24,15 +45,17 @@ def configure_logging(settings: Settings) -> None:
     console_handler = logging.StreamHandler()
     console_handler.setLevel(level)
     console_handler.setFormatter(formatter)
+    console_handler.addFilter(SecretRedaction(settings))
     setattr(console_handler, MANAGED_HANDLER_ATTR, True)
     root_logger.addHandler(console_handler)
 
     if settings.log_to_file:
         log_file_path = _resolve_log_file_path(settings.log_file_path)
         log_file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(log_file_path, encoding="utf-8")
+        file_handler = RotatingFileHandler(log_file_path, maxBytes=5 * 1024 * 1024, backupCount=4, encoding="utf-8")
         file_handler.setLevel(level)
         file_handler.setFormatter(formatter)
+        file_handler.addFilter(SecretRedaction(settings))
         setattr(file_handler, MANAGED_HANDLER_ATTR, True)
         root_logger.addHandler(file_handler)
 

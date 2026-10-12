@@ -50,22 +50,25 @@ def resolved_closure(
     aliases: dict[str, str] | None = None,
 ) -> tuple[set[str], list[str]]:
     closure: set[str] = set()
+    evaluated: dict[str, set[str]] = {}
     missing: list[str] = []
-    pending = list(roots)
+    pending = [(name, set()) for name in roots]
     while pending:
-        name = pending.pop()
+        name, extras = pending.pop()
         name = (aliases or {}).get(name, name)
-        if name in closure:
+        extras = extras | {""}
+        if name in evaluated and extras <= evaluated[name]:
             continue
+        evaluated.setdefault(name, set()).update(extras)
         closure.add(name)
         distribution = installed.get(name)
         if distribution is None:
             missing.append(name)
             continue
         for raw_requirement in distribution.requires or ():
-            requirement = active_requirement(raw_requirement)
-            if requirement is not None:
-                pending.append(canonicalize_name(requirement.name))
+            requirement = Requirement(raw_requirement)
+            if not requirement.marker or any(requirement.marker.evaluate(default_environment() | {"extra": extra}) for extra in evaluated[name]):
+                pending.append((canonicalize_name(requirement.name), set(requirement.extras)))
     return closure, sorted(missing)
 
 

@@ -18,7 +18,7 @@
 | Node.js | [`.nvmrc`](../.nvmrc), `24.18.0`; npm `11.x` | React/Vite и Tauri CLI |
 | Rust | [`rust-toolchain.toml`](../rust-toolchain.toml), `stable` | Оболочка Tauri |
 | Unity | [`ProjectVersion.txt`](../apps/avatar-unity/ProjectSettings/ProjectVersion.txt), `2022.3.62f3` | Пересборка аватара |
-| FFmpeg / FFprobe | Исполняемые файлы в `PATH` для разработки | Обработка аудио |
+| PyAV / библиотеки FFmpeg | Закреплённый Python wheel, поставляемый с ядром | Декодирование аудио без глобальных CLI |
 | Microsoft C++ Build Tools и WebView2 | Windows-среда разработки Tauri; компонент Desktop development with C++ | Сборка и запуск оболочки |
 | Docker Desktop | Необязательный внешний компонент | Выполнение команд Coding Agent |
 

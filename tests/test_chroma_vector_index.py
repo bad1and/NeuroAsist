@@ -1,5 +1,7 @@
 from pathlib import Path
 import sqlite3
+import subprocess
+import sys
 
 from apps.backend.app.semantic.chroma_index import ChromaVectorIndex
 from apps.backend.app.semantic.embedding import HashEmbeddingProvider
@@ -27,14 +29,24 @@ def test_chroma_index_upserts_searches_deletes_and_rebuilds(tmp_path: Path) -> N
 
 def test_pending_reset_hard_deletes_chroma_before_next_client_starts(tmp_path: Path) -> None:
     directory = tmp_path / "chroma"
-    index = ChromaVectorIndex(directory, HashEmbeddingProvider(dimension=64), lambda _namespace: [])
-    index.upsert_sync("first", "пользователь любит кофе", "memory")
-
-    index.reset_storage_sync()
+    # A new core starts after the old process exits. Chroma can retain native
+    # collection handles after client.close() in the same Python process.
+    child = """
+import sys
+from pathlib import Path
+from apps.backend.app.semantic.chroma_index import ChromaVectorIndex
+from apps.backend.app.semantic.embedding import HashEmbeddingProvider
+index = ChromaVectorIndex(Path(sys.argv[1]), HashEmbeddingProvider(dimension=64), lambda _namespace: [])
+index.upsert_sync("first", "coffee preference", "memory")
+index.reset_storage_sync()
+index._client.close()
+"""
+    subprocess.run([sys.executable, "-c", child, str(directory)],
+                   cwd=Path(__file__).resolve().parents[1], check=True, capture_output=True,
+                   timeout=30, creationflags=0x08000000 if sys.platform == "win32" else 0)
     marker = ChromaVectorIndex.reset_marker_path(directory)
     assert marker.exists()
-
-    index._client.close()
+    assert directory.resolve().is_relative_to(tmp_path.resolve())
     assert ChromaVectorIndex.clear_pending_reset(directory) is True
     assert not directory.exists()
     assert not marker.exists()

@@ -42,6 +42,7 @@ Iris — голосовой AI-персонаж для Windows. Здесь оп�
 
 ## Выпуск и сопровождение
 
+- [Приёмка приложения перед установщиком](preinstaller-readiness.md)
 - [Запуск, сборка и диагностика](operations.md)
 - [Python-зависимости](dependencies.md) и [правила версий](versioning.md)
 - [Условия публикации](release-checklist.md) и [порядок выпуска](release-runbook.md)
