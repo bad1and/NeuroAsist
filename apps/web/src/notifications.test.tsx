@@ -26,6 +26,32 @@ describe("Unified Notification System", () => {
   });
 
   describe("notificationStore / notify helper", () => {
+    it("keeps the model warning visible until its settings action is used", () => {
+      const openModels = vi.fn();
+      act(() => { notify.warning("Голос пока недоступен", "Скачайте недостающие модели в настройках, чтобы включить голос.", {
+        id: "models.readiness", duration: "persistent", accent: "danger",
+        actions: [{ label: "Открыть модели", onClick: openModels }],
+      }); });
+      const { container } = render(<NotificationHost />);
+      act(() => { vi.advanceTimersByTime(60_000); });
+      expect(screen.getByText("Голос пока недоступен")).toBeInTheDocument();
+      expect(container.querySelector(".has-danger-outline")).not.toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Открыть модели" }));
+      expect(openModels).toHaveBeenCalledOnce();
+    });
+
+    it("opens models from download results and replaces the same model notification", () => {
+      const open = vi.fn();
+      const event = { id: "model", type: "models.download_failed", level: "error", message: "failed", metadata: { model_id: "silero-vad", error: "disk full" }, created_at: "2026-10-12" } as BackendEvent;
+      notifyBackendEvent(event, open);
+      expect(notificationStore.getSnapshot()[0].message).toBe("disk full");
+      notificationStore.getSnapshot()[0].actions![0].onClick();
+      expect(open).toHaveBeenCalledOnce();
+      notifyBackendEvent({ ...event, type: "models.installed", level: "info" }, open);
+      expect(notificationStore.getSnapshot()).toHaveLength(1);
+      expect(notificationStore.getSnapshot()[0].type).toBe("success");
+    });
+
     it("keeps avatar dispatch diagnostics out of toasts while showing playback failures", () => {
       const event = { id: "delivery", type: "avatar.command_failed", level: "warning", message: "Avatar command dispatched", metadata: {}, created_at: "2026-10-01T00:00:00Z" } as BackendEvent;
       notifyBackendEvent(event);

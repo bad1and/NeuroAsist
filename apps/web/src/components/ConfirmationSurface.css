@@ -6,7 +6,7 @@
   border: 0; border-radius: 28px; corner-shape: var(--corner-shape);
   background: var(--surface-toast);
   box-shadow: var(--depth-toast); overflow: visible; gap: 0;
-  animation: none !important; transition: none !important;
+  animation: none !important; transition: none;
 }
 .confirmation-surface.is-danger {
   --confirmation-icon: var(--color-danger-text);

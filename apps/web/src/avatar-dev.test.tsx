@@ -71,10 +71,10 @@ describe("AvatarDevStudioStandalonePage", () => {
     expect(screen.getByText("Конструктор произвольного уведомления")).toBeInTheDocument();
   });
 
-  it("renders App when isQaStudioWindow is true", () => {
+  it("renders App when isQaStudioWindow is true", async () => {
     (window as any).__IRIS_VIEW__ = "qa-studio";
     render(<App />);
-    expect(screen.getByText("Окно тестирования")).toBeInTheDocument();
+    expect(await screen.findByText("Окно тестирования")).toBeInTheDocument();
   });
 
   it("renders SettingsPage with QA Studio switch and toggles it", () => {

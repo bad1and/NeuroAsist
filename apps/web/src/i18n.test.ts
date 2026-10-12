@@ -20,6 +20,12 @@ function TranslationFixture({ locale }: { locale: InterfaceLocale }) {
 }
 
 describe("interface translations", () => {
+  it("translates model and backup actions and empty states", () => {
+    expect(translateInterfaceText("Скачать", "en")).toBe("Download");
+    expect(translateInterfaceText("Восстановить", "en")).toBe("Restore");
+    expect(translateInterfaceText("Резервных копий пока нет", "en")).toBe("No backups yet");
+    expect(translateInterfaceText("Окружение и гео", "en")).toBe("Environment & location");
+  });
   it("translates interface copy in both directions", () => {
     expect(translateInterfaceText("Настройки", "en")).toBe("Settings");
     expect(translateInterfaceText("Application language", "ru")).toBe("Язык приложения");

@@ -52,7 +52,7 @@
   white-space: nowrap;
   cursor: pointer;
   transform: none !important;
-  transition: none !important;
+  transition: none;
 }
 .iris-segments.iris-segments > button:is(.active, .is-active, [aria-pressed="true"], [aria-selected="true"]) { color: var(--color-accent-ink); }
 .iris-segments.iris-segments > button:hover:not(:disabled) { color: var(--color-text); }

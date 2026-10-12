@@ -7,7 +7,7 @@
   padding: var(--field-padding, 6px 10px) !important;
   box-shadow: var(--field-depth, inset 0 2px 4px rgb(0 0 0 / .65), inset 0 1px 2px rgb(0 0 0 / .45), 0 1px 0 rgb(255 255 255 / .05)) !important;
   outline: none !important;
-  transition: none !important;
+  transition: none;
 }
 #root :is(.settings-card, .settings-group, .coding-content, .coding-intervention-form, .memory-content, .memory-create-form, .state-dashboard) :is(input, textarea, select, .custom-select-trigger):not(.search-form *):not(.coding-search-form *):not(.chat-composer *):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(.custom-select-native-hidden) {
   padding: var(--field-padding, 9px 12px) !important;

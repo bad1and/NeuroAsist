@@ -124,7 +124,7 @@ export function NotificationCard({
       ref={cardRef}
       className={`notification-card notification-type-${notification.type}${
         isExiting ? " is-exiting" : ""
-      }${isExpanded ? " is-expanded" : ""}${notification.navigateView ? " is-clickable" : ""}${taskProgress !== null ? " has-task-progress" : ""}`}
+      }${isExpanded ? " is-expanded" : ""}${notification.accent === "danger" ? " has-danger-outline" : ""}${notification.navigateView ? " is-clickable" : ""}${taskProgress !== null ? " has-task-progress" : ""}`}
       data-countdown-paused={duration !== null ? isPaused : undefined}
       data-material-seed={seed}
       onMouseEnter={() => setIsHovered(true)}
