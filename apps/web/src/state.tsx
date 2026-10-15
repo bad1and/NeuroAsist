@@ -1,15 +1,20 @@
 import { AppCheckbox } from "./components/AppCheckbox";
 import { SlidingSegments } from "./components/SlidingSegments";
 import { LoadingRing } from "./components/LoadingRing";
-import { MaterialButton } from "./components/MaterialButton";
-import { useCallback, useEffect, useRef, useState, useMemo } from "react";
+import { ButtonMaterialLayers, MaterialButton } from "./components/MaterialButton";
+import { buttonSeed, materialStyle } from "./components/buttonMaterial";
+import { Fragment, useCallback, useEffect, useId, useRef, useState, useMemo, type ReactNode } from "react";
 import { deleteCharacterReflection, getCharacterReflections, getCharacterState, getCharacterStateEvents, getReflectionSettings, resetCharacterState, updateReflectionSettings } from "./api";
 import type { CharacterReflection, CharacterStateEvent, CharacterStateView } from "./types";
 import { interfaceIntlLocale } from "./i18n";
 import { animateButtonPress, animateCardRemove, animatePageEnter, animateStaggerCards, useAnimeScope } from "./animations";
 import { IrisMoodOrb } from "./components/IrisMoodOrb";
-import { getMoodVisuals, getStrengthLabel } from './mood-visuals';
-import { IconInterfaceSettingGaugeDashboard1, IconInterfaceCalendarMark, IconInterfaceEditMagicWand } from "./CustomIcons";
+import { getMoodVisuals } from './mood-visuals';
+import { IconInterfaceCalendarMark, IconInterfaceEditMagicWand } from "./CustomIcons";
+import { ArrowRight, Check, ChevronDown, Heart, HandHeart, Handshake, MessageCircle, RotateCcw, ShieldAlert, Smile, Sparkles, type LucideIcon } from "lucide-react";
+import { eventEmotion, groupMoodCauses, relationshipLevel, relationshipValue, stateEventKind, stateEventLabel, timelineEmotion } from "./state-presentation";
+import { useTimelineScrollFade } from "./state-timeline-scroll";
+import "./state.css";
 import { AppDialog } from "./components/AppDialog";
 import { notify } from "./notifications";
 
@@ -18,46 +23,44 @@ const labels: Record<string, string> = {
   familiarity_label: "Знакомство", trust_label: "Доверие", warmth_label: "Теплота", tension_label: "Напряжение", playfulness_label: "Игривость",
   current_dynamic: "Текущая динамика", unresolved_cause: "Нерешённая причина",
 };
-const show = (value: unknown) => Array.isArray(value) ? value.join(", ") || "нет" : String(value ?? "—");
-
-function formatTimelineDate(dateStr: string) {
-  const date = new Date(dateStr);
-  if (isNaN(date.getTime())) return dateStr;
-  const now = new Date();
-  
-  const isToday = date.getDate() === now.getDate() && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
-  
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  const isYesterday = date.getDate() === yesterday.getDate() && date.getMonth() === yesterday.getMonth() && date.getFullYear() === yesterday.getFullYear();
-  
-  const time = date.toLocaleTimeString(interfaceIntlLocale(), { hour: '2-digit', minute: '2-digit' });
-  
-  if (isToday) return interfaceIntlLocale() === "en-US" ? `Today at ${time}` : `Сегодня в ${time}`;
-  if (isYesterday) return interfaceIntlLocale() === "en-US" ? `Yesterday at ${time}` : `Вчера в ${time}`;
-  
-  const locale = interfaceIntlLocale();
-  return date
-    .toLocaleDateString(locale, { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
-    .replace(',', locale === "en-US" ? ' at' : ' в');
+function timelineDayKey(timestamp: number) {
+  return new Date(timestamp).toDateString();
 }
 
-const EVENT_KIND_META: Record<string, { label: string; markerClass: string; isImportant?: boolean }> = {
-  insult: { label: "Резкость / Защита границ", markerClass: "marker-rose", isImportant: true },
-  shared_success: { label: "Общий успех", markerClass: "marker-gold", isImportant: true },
-  "shared success": { label: "Общий успех", markerClass: "marker-gold", isImportant: true },
-  important_news: { label: "Яркая новость", markerClass: "marker-sky", isImportant: true },
-  "important news": { label: "Яркая новость", markerClass: "marker-sky", isImportant: true },
-  apology: { label: "Примирение", markerClass: "marker-green", isImportant: true },
-  broken_promise: { label: "Нарушенное обещание", markerClass: "marker-rose", isImportant: true },
-  promise_made: { label: "Обещание", markerClass: "marker-indigo", isImportant: true },
-  teasing: { label: "Шутка / Подкол", markerClass: "marker-purple", isImportant: true },
-  praise: { label: "Похвала", markerClass: "marker-gold", isImportant: true },
-  support: { label: "Поддержка", markerClass: "marker-teal", isImportant: true },
-  disagreement: { label: "Разногласие", markerClass: "marker-orange", isImportant: true },
-  vulnerability: { label: "Откровенность", markerClass: "marker-pink", isImportant: true },
-  neutral: { label: "Спокойная беседа", markerClass: "marker-neutral", isImportant: false },
+function formatTimelineDay(timestamp: number) {
+  const date = new Date(timestamp);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return "Сегодня";
+  if (date.toDateString() === yesterday.toDateString()) return "Вчера";
+  return date.toLocaleDateString(interfaceIntlLocale(), { day: "numeric", month: "long", ...(date.getFullYear() !== today.getFullYear() ? { year: "numeric" } : {}) });
+}
+
+function formatTimelineTime(dateStr: string) {
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return dateStr;
+  return date.toLocaleTimeString(interfaceIntlLocale(), { hour: "2-digit", minute: "2-digit" });
+}
+
+const EVENT_ICONS: Record<string, LucideIcon> = {
+  insult: ShieldAlert, broken_promise: ShieldAlert, important_negative_event: ShieldAlert,
+  shared_success: Sparkles, important_news: Sparkles, praise: Sparkles,
+  teasing: Smile, apology: Handshake, support: HandHeart, affection: Heart,
+  vulnerability: Heart, fulfilled_promise: Check,
 };
+
+function TimelineCard({ emotion, materialKey, children }: {
+  emotion: ReturnType<typeof timelineEmotion>; materialKey: string; children: ReactNode;
+}) {
+  const seed = buttonSeed(materialKey);
+  return <div className={`timeline-content card-glass${emotion ? " timeline-emotion-card dp-lens" : ""}`}
+    data-emotion-tone={emotion?.tone}
+    style={emotion ? materialStyle(seed, .35) : undefined}>
+    {emotion && <ButtonMaterialLayers />}
+    {children}
+  </div>;
+}
 
 type TimelineItem =
   | { type: "event"; timestamp: number; key: string; data: CharacterStateEvent }
@@ -80,6 +83,11 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
     el?: HTMLElement | null;
   } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [causesExpanded, setCausesExpanded] = useState(false);
+  const causesId = useId();
+  const causeListRef = useRef<HTMLUListElement>(null);
+  const causeGroups = useMemo(() => groupMoodCauses(state?.causes ?? []), [state?.causes]);
+  const visibleCauses = causesExpanded ? causeGroups : causeGroups.slice(0, 3);
 
   const containerRef = useAnimeScope<HTMLElement>((scope, root) => {
     animatePageEnter(root);
@@ -87,6 +95,8 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
 
   const [filterOnlyImportant, setFilterOnlyImportant] = useState(true);
   const timelineRef = useRef<HTMLDivElement | null>(null);
+  const timelineContentRef = useRef<HTMLDivElement | null>(null);
+  useTimelineScrollFade(timelineRef, timelineContentRef);
 
   const timelineItems = useMemo(() => {
     const rawItems: Array<
@@ -108,13 +118,14 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
     const filtered: TimelineItem[] = [];
     let neutralGroupCount = 0;
     let latestNeutralTimestamp = 0;
+    let latestNeutralKey = "";
 
     const flushNeutrals = () => {
       if (neutralGroupCount > 0) {
         filtered.push({
           type: "neutral_group",
           timestamp: latestNeutralTimestamp,
-          key: `neutrals-${latestNeutralTimestamp}-${neutralGroupCount}`,
+          key: `neutrals-${latestNeutralKey}`,
           count: neutralGroupCount,
         });
         neutralGroupCount = 0;
@@ -122,14 +133,17 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
     };
 
     for (const item of rawItems) {
-      if (item.type === "event" && (item.data.event_kind === "neutral" || !item.data.event_kind)) {
-        neutralGroupCount++;
-        if (latestNeutralTimestamp === 0) {
-          latestNeutralTimestamp = item.timestamp;
+      if (item.type === "event" && (!item.data.event_kind || stateEventKind(item.data.event_kind) === "neutral") && !eventEmotion(item.data)) {
+        if (neutralGroupCount > 0 && timelineDayKey(item.timestamp) !== timelineDayKey(latestNeutralTimestamp)) {
+          flushNeutrals();
         }
+        if (neutralGroupCount === 0) {
+          latestNeutralTimestamp = item.timestamp;
+          latestNeutralKey = item.key;
+        }
+        neutralGroupCount++;
       } else {
         flushNeutrals();
-        latestNeutralTimestamp = 0;
         filtered.push(item);
       }
     }
@@ -185,51 +199,70 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
         <aside className="state-sidebar">
           {state ? (
             <>
+              <div className="state-sidebar-panels" tabIndex={0} aria-label="Настроение и отношения">
               <div className="state-hero-card mood-card">
                 <div className="mood-visual">
                   <IrisMoodOrb
                     emotion={state.mood.primary_emotion}
                     strength={state.mood.expression_strength}
-                    size={80}
+                    size={72}
                   />
                   <div className="mood-info">
                     <h2>{getMoodVisuals(state.mood.primary_emotion).labelRu}</h2>
-                    <span className="mood-strength">{getStrengthLabel(state.mood.expression_strength)}</span>
                   </div>
                 </div>
-                {state.causes.length > 0 && (
+                {causeGroups.length > 0 && (
                   <div className="mood-causes">
-                    <h4>Причины:</h4>
-                    <ul>
-                      {state.causes.map((c, i) => (
-                        <li key={i}><strong>{c.label}</strong> <span>{c.status}</span></li>
-                      ))}
+                    <div className="mood-causes-heading"><h4>Что влияет на настроение</h4><span className="cause-group-total" title="Количество причин">{causeGroups.length}</span></div>
+                    <ul id={causesId} ref={causeListRef} tabIndex={causesExpanded && causeGroups.length > 3 ? 0 : undefined} aria-label="Причины настроения">
+                      {visibleCauses.map(cause => {
+                        const CauseIcon = EVENT_ICONS[stateEventKind(cause.label)] ?? MessageCircle;
+                        return (
+                        <li key={cause.key}>
+                          <CauseIcon className="cause-icon" size={16} strokeWidth={1.7} aria-hidden="true" />
+                          <div className="cause-copy"><strong title={cause.label}>{cause.label}</strong><span>{cause.status}</span></div>
+                          {cause.count > 1 && <span className="cause-count" title="Количество событий">×{cause.count}</span>}
+                        </li>
+                      ); })}
                     </ul>
+                    {causeGroups.length > 3 && (
+                      <MaterialButton appearance="plain" materialKey="state.causes-toggle" className="text-button cause-toggle" type="button" aria-expanded={causesExpanded} aria-controls={causesId}
+                        onClick={() => { if (causeListRef.current) causeListRef.current.scrollTop = 0; setCausesExpanded(value => !value); }}>
+                        {causesExpanded ? "Свернуть" : <><span>Ещё причины</span><span className="cause-extra-count">{causeGroups.length - 3}</span></>}
+                        <ChevronDown size={14} aria-hidden="true" />
+                      </MaterialButton>
+                    )}
                   </div>
                 )}
               </div>
 
               <div className="state-hero-card relationship-card">
+                <div className="relationship-heading">
                 <h3>Отношения</h3>
-                <div className="relationship-metrics">
-                  {relationshipKeys.map(k => (
+                </div>
+                <dl className="relationship-facets">
+                  {relationshipKeys.map(k => {
+                    const level = relationshipLevel(k, state.relationship[k]);
+                    return (
                     state.relationship[k] ? (
-                      <div className="metric-row" key={k}>
-                        <span className="metric-label">{labels[k] || k}</span>
-                        <span className="metric-value">{show(state.relationship[k])}</span>
+                      <div className="relationship-facet" key={k}>
+                        <dt>{labels[k] || k}</dt>
+                        <dd>
+                          <span className="relationship-level" role={level === null ? "img" : "meter"} aria-label={labels[k] || k}
+                            aria-valuemin={level === null ? undefined : 0} aria-valuemax={level === null ? undefined : 3} aria-valuenow={level ?? undefined}
+                            aria-valuetext={level === null ? undefined : relationshipValue(k, state.relationship[k])}>
+                            {level === null && <span className="relationship-level-unavailable">Оценка пока недоступна</span>}
+                            {[0, 1, 2].map(step => <i key={step} data-active={level !== null && step < level} aria-hidden="true" />)}
+                          </span>
+                        </dd>
                       </div>
                     ) : null
-                  ))}
-                  {Boolean(state.relationship.current_dynamic) && (
-                    <div className="metric-row relationship-dynamic-cell">
-                      <span className="metric-label">Динамика</span>
-                      <span className="metric-value">{String(state.relationship.current_dynamic)}</span>
-                    </div>
-                  )}
-                </div>
+                  ); })}
+                </dl>
+              </div>
               </div>
 
-              <div className="state-sidebar-actions">
+              <div className="state-sidebar-actions" role="group" aria-label="Сброс состояния">
                 <MaterialButton materialKey={"state.button-1"}
                   className="secondary danger-button state-action-mood"
                   type="button"
@@ -243,7 +276,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
                     });
                   }}
                 >
-                  Сбросить настроение
+                  <RotateCcw size={14} strokeWidth={1.8} aria-hidden="true" /><span>Сбросить настроение</span>
                 </MaterialButton>
                 <MaterialButton materialKey={"state.button-2"}
                   className="secondary danger-button state-action-relationship"
@@ -258,7 +291,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
                     });
                   }}
                 >
-                  Сбросить отношения
+                  <RotateCcw size={14} strokeWidth={1.8} aria-hidden="true" /><span>Сбросить отношения</span>
                 </MaterialButton>
               </div>
             </>
@@ -267,7 +300,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
           )}
         </aside>
 
-        <main className="state-timeline-container" ref={timelineRef}>
+        <main className="state-timeline-container">
           <div className="state-timeline-header">
             <h2>Живая история</h2>
             <div className="timeline-header-controls">
@@ -296,78 +329,85 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
 
           {!reflectionEnabled && <p className="notice">Создание новых личных заметок отключено.</p>}
 
-          <div className="state-timeline">
+          <div className="state-timeline-scroll-shell">
+          <div className="state-timeline-scroll" ref={timelineRef} tabIndex={0} aria-label="Лента событий">
+          <div className="state-timeline" ref={timelineContentRef}>
             {timelineItems.length === 0 ? (
               <div className="empty-state">
                 <IconInterfaceCalendarMark size={28} />
                 <strong>История пока пуста.</strong>
               </div>
             ) : (
-              timelineItems.map((item) => {
+              timelineItems.map((item, index) => {
+                const dayHeading = index === 0 || timelineDayKey(item.timestamp) !== timelineDayKey(timelineItems[index - 1].timestamp)
+                  ? <h3 className="timeline-day">{formatTimelineDay(item.timestamp)}</h3> : null;
                 if (item.type === "neutral_group") {
                   return (
-                    <article className="state-timeline-item type-neutral-group" key={item.key}>
-                      <div className="timeline-marker" />
-                      <div
-                        className="timeline-content card-glass neutral-summary"
+                    <Fragment key={item.key}>{dayHeading}<article className="state-timeline-item type-neutral-group">
+                      <div className="timeline-marker" aria-hidden="true" />
+                      <MaterialButton appearance="plain" materialKey={item.key} type="button"
+                        className="neutral-summary"
                         onClick={() => setFilterOnlyImportant(false)}
-                        title="Нажмите, чтобы развернуть все сообщения"
                       >
-                        <span>Спокойный диалог ({item.count} {item.count === 1 ? "реплика" : item.count < 5 ? "реплики" : "реплик"})</span>
-                        <span className="neutral-expand-hint">Показать всё →</span>
-                      </div>
-                    </article>
+                        <span>Спокойный диалог <span className="neutral-count">· {item.count}</span></span>
+                        <span className="neutral-expand-hint">Показать всё <ArrowRight size={13} aria-hidden="true" /></span>
+                      </MaterialButton>
+                    </article></Fragment>
                   );
                 }
                 if (item.type === "event") {
                   const ev = item.data;
-                  const meta = EVENT_KIND_META[ev.event_kind] || {
-                    label: ev.event_kind.split("_").join(" "),
-                    markerClass: "marker-neutral",
-                  };
+                  const kind = stateEventKind(ev.event_kind);
+                  const EventIcon = EVENT_ICONS[kind] ?? MessageCircle;
+                  const emotion = eventEmotion(ev);
                   return (
-                    <article className={`state-timeline-item type-event ${meta.markerClass}`} key={item.key}>
-                      <div className="timeline-marker">
-                        <IconInterfaceSettingGaugeDashboard1 size={14} />
+                    <Fragment key={item.key}>{dayHeading}<article className="state-timeline-item type-event" data-emotion={emotion?.key}>
+                      <div className="timeline-marker" aria-hidden="true">
+                        <EventIcon size={18} strokeWidth={1.8} />
                       </div>
-                      <div className="timeline-content card-glass">
+                      <TimelineCard emotion={emotion} materialKey={item.key}>
                         <div className="timeline-meta">
-                          <strong>Событие</strong>
-                          <time>{formatTimelineDate(ev.created_at)}</time>
+                          <div className="timeline-event-heading">
+                            <h4>{stateEventLabel(ev.event_kind)}</h4>
+                            {emotion && <span className="timeline-emotion">{emotion.label}</span>}
+                          </div>
+                          <time dateTime={ev.created_at}>{formatTimelineTime(ev.created_at)}</time>
                         </div>
-                        <h4 data-i18n-skip>{meta.label}</h4>
                         {ev.snippet && (
                           <blockquote className="timeline-quote" data-i18n-skip>
                             «{ev.snippet}»
                           </blockquote>
                         )}
-                      </div>
-                    </article>
+                      </TimelineCard>
+                    </article></Fragment>
                   );
                 } else {
                   const r = item.data;
+                  const emotion = timelineEmotion(r.primary_emotion);
                   return (
-                    <article className="state-timeline-item type-reflection" key={item.key}>
-                      <div className="timeline-marker">
-                        <IconInterfaceEditMagicWand size={14} />
+                    <Fragment key={item.key}>{dayHeading}<article className="state-timeline-item type-reflection" data-emotion={emotion?.key}>
+                      <div className="timeline-marker" aria-hidden="true">
+                        <IconInterfaceEditMagicWand size={18} />
                       </div>
-                      <div className="timeline-content card-glass">
+                      <TimelineCard emotion={emotion} materialKey={item.key}>
                         <div className="timeline-meta">
                           <strong>Заметка Iris</strong>
-                          <time>{formatTimelineDate(r.created_at)}</time>
+                          <time dateTime={r.created_at}>{formatTimelineTime(r.created_at)}</time>
                         </div>
                         <h4 data-i18n-skip>{r.trigger_label}</h4>
                         <p data-i18n-skip>{r.text}</p>
                         <div className="timeline-footer">
-                          <span className="reflection-emotion">{r.primary_emotion}</span>
+                          <span className="reflection-emotion">{getMoodVisuals(r.primary_emotion).labelRu}</span>
                           <MaterialButton materialKey={["state.button-5", item.key].join(":")} className="text-button" onClick={(e) => handleRemoveReflectionClick(e, r.id)}>Удалить</MaterialButton>
                         </div>
-                      </div>
-                    </article>
+                      </TimelineCard>
+                    </article></Fragment>
                   );
                 }
               })
             )}
+          </div>
+          </div>
           </div>
         </main>
       </div>
