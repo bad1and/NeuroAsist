@@ -12069,6 +12069,8 @@ button.danger-button:not(.secondary):active:not(:disabled) {
 /* 5. Inner Recessed Tiles & Substrates */
 .state-dashboard .metric-row,
 .state-dashboard .mood-causes li,
+.state-dashboard .mood-causes ul,
+.state-dashboard .relationship-facet,
 .state-dashboard .relationship-dynamic,
 .coding-event-item,
 .memory-audit {

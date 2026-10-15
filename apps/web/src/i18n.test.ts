@@ -53,6 +53,9 @@ describe("interface translations", () => {
     expect(translateInterfaceText("Сначала новые", "en")).toBe("Newest first");
     expect(translateInterfaceText("Целостность", "en")).toBe("Integrity");
     expect(translateInterfaceText("Живая история", "en")).toBe("Live history");
+    expect(translateInterfaceText("Что влияет на настроение", "en")).toBe("What affects the mood");
+    expect(translateInterfaceText("Шутка / Подкол", "en")).toBe("Joke / Teasing");
+    expect(translateInterfaceText("Влияет сейчас", "en")).toBe("Active now");
     expect(translateInterfaceText("Сегодня в 11:53 PM", "en")).toBe("Today at 11:53 PM");
     expect(translateInterfaceText("Docker daemon готов к запуску контейнеров", "en"))
       .toBe("Docker daemon is ready to start containers");

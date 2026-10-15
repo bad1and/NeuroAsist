@@ -1,0 +1,283 @@
+/* Match the workspace's measured height: cards scroll, actions keep their row. */
+.workspace.workspace-state { display: flex; overflow: hidden; padding-bottom: 0; }
+.workspace-state .state-dashboard { height: 100%; min-height: 0; padding-bottom: 0; }
+.workspace-state .state-layout { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+.state-dashboard .state-sidebar { position: static; min-height: 0; height: 100%; gap: 12px; padding-bottom: 24px; }
+.state-dashboard .state-sidebar-panels {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 14px;
+  /* Keep the shared surface shadow inside the scrollable paint area. */
+  padding: 16px 20px 40px;
+  margin: -16px -20px -40px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-rule) transparent;
+}
+.state-dashboard .state-sidebar-panels:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.state-dashboard .state-sidebar-panels > .state-hero-card { flex-shrink: 0; padding: 18px 20px !important; }
+.state-dashboard .state-hero-card { box-shadow: var(--shadow-surface) !important; }
+.state-dashboard .state-hero-card:hover { box-shadow: var(--shadow-surface-hover) !important; }
+.state-dashboard .timeline-content,
+.state-dashboard .timeline-content:hover { box-shadow: var(--shadow-row) !important; }
+.state-dashboard .state-sidebar-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  flex-shrink: 0;
+  gap: 10px;
+  margin: 0;
+  padding: 6px 0 2px;
+}
+.state-dashboard .state-sidebar-actions button.iris-button.dp-lens {
+  min-width: 0;
+  min-height: 44px !important;
+  height: auto !important;
+  gap: 8px !important;
+  padding: 10px 16px !important;
+  font-size: 13px !important;
+  line-height: 1.2 !important;
+  white-space: normal !important;
+}
+.state-dashboard .state-sidebar-actions button > svg { flex-shrink: 0; }
+.state-dashboard .state-sidebar-actions button > span:not([aria-hidden]) { min-width: 0; white-space: normal; }
+.workspace-state .state-timeline-container {
+  min-height: 0;
+  height: 100%;
+  overflow: visible;
+  gap: 0;
+  padding: 0;
+}
+.state-dashboard .state-timeline-header { position: static; flex-shrink: 0; padding: 2px 8px 16px 14px; }
+.state-dashboard .state-timeline-scroll-shell { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.state-dashboard .state-timeline-scroll {
+  --timeline-fade-top: 0px;
+  --timeline-fade-bottom: 0px;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  padding: 24px 8px 24px 14px;
+  scroll-padding-block: 48px 72px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-rule) transparent;
+  mask-image: linear-gradient(to bottom,
+    transparent 0,
+    rgb(0 0 0 / .12) calc(var(--timeline-fade-top) * .25),
+    rgb(0 0 0 / .55) calc(var(--timeline-fade-top) * .6),
+    #000 var(--timeline-fade-top),
+    #000 calc(100% - var(--timeline-fade-bottom)),
+    rgb(0 0 0 / .55) calc(100% - var(--timeline-fade-bottom) * .6),
+    rgb(0 0 0 / .12) calc(100% - var(--timeline-fade-bottom) * .25),
+    transparent 100%);
+}
+.state-dashboard .state-timeline-scroll:focus-visible { outline: 2px solid var(--color-focus); outline-offset: -3px; }
+
+/* Surface materials come from the shared inset-panel rules in styles.css. */
+.state-dashboard .mood-visual { gap: 16px; margin-bottom: 18px; }
+.state-dashboard .mood-info { min-width: 0; }
+.state-dashboard .mood-causes-heading { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
+.state-dashboard .mood-causes h4 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: none;
+  color: var(--color-text-muted);
+}
+.state-dashboard .cause-group-total { font-size: 11px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.state-dashboard .mood-causes ul {
+  display: block;
+  max-height: 144px;
+  padding: 0 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-rule) transparent;
+}
+.state-dashboard .mood-causes ul li {
+  height: 48px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 4px 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+.state-dashboard .cause-icon { color: var(--color-text-muted); flex-shrink: 0; }
+.state-dashboard .cause-copy { display: grid; flex: 1; gap: 2px; min-width: 0; }
+.state-dashboard .cause-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.state-dashboard .cause-copy > span { font-size: 11px; line-height: 1.3; }
+.state-dashboard .cause-count {
+  flex-shrink: 0;
+  min-width: 24px;
+  padding: 0;
+  text-align: center;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-soft);
+}
+.state-dashboard .cause-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 4px 0;
+  margin-top: 4px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.state-dashboard .cause-toggle:hover { color: var(--color-text); }
+.state-dashboard .cause-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+.state-dashboard .cause-extra-count { font-variant-numeric: tabular-nums; }
+.state-dashboard .mood-causes ul:focus-visible,
+.state-dashboard .cause-toggle:focus-visible,
+.state-dashboard .neutral-summary:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 4px;
+}
+
+.state-dashboard .relationship-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+.state-dashboard .relationship-card h3 { margin: 0; font-size: 15px; color: var(--color-text-soft); }
+.state-dashboard .relationship-facets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin: 0; }
+.state-dashboard .relationship-facet {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  padding: 12px;
+}
+.state-dashboard .relationship-facet:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.state-dashboard .relationship-facet dt { color: var(--color-text-muted); font-size: 12px; line-height: 1.2; }
+.state-dashboard .relationship-facet dd { margin: 0; }
+.state-dashboard .relationship-level { display: flex; width: 100%; gap: 4px; }
+.state-dashboard .relationship-level i { flex: 1; height: 8px; border-radius: var(--radius-control-sm); background: var(--color-rule); }
+.state-dashboard .relationship-level i[data-active="true"] { background: var(--color-text-soft); }
+.state-dashboard .relationship-level-unavailable { color: var(--color-text-muted); font-size: 11px; }
+.state-dashboard .relationship-level[role="img"] { flex-wrap: wrap; }
+.state-dashboard .relationship-level[role="img"] .relationship-level-unavailable { width: 100%; }
+
+.state-dashboard .state-timeline { gap: 18px; padding-left: 24px; }
+.state-dashboard .state-timeline::before {
+  left: 0;
+  top: 48px;
+  bottom: 32px;
+  width: 1px;
+  background: linear-gradient(var(--color-rule), var(--color-rule) 92%, transparent);
+}
+.state-dashboard .state-timeline:has(.empty-state)::before { display: none; }
+.state-dashboard .timeline-day {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 0 -2px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.state-dashboard .timeline-day:first-child { margin-top: 0; }
+.state-dashboard .state-timeline .timeline-marker {
+  left: -36px;
+  top: 21px;
+  width: 24px;
+  height: 28px;
+  transform: none;
+  border: 0;
+  border-radius: 0;
+  background: var(--color-base);
+  box-shadow: none;
+  color: var(--color-text-muted);
+}
+.state-dashboard .timeline-content { min-width: 0; padding: 20px 24px !important; }
+.state-dashboard .timeline-meta { align-items: baseline; gap: 12px; margin-bottom: 0; }
+.state-dashboard .timeline-meta time { flex-shrink: 0; font-size: 12px; font-weight: 400; }
+.state-dashboard .timeline-meta h4 { margin: 0; font-size: 15px; font-weight: 650; line-height: 1.4; color: var(--color-text); }
+.state-dashboard .timeline-event-heading { display: grid; gap: 5px; min-width: 0; }
+.state-dashboard .timeline-emotion { font-size: 12px; line-height: 1.3; color: var(--color-text-soft); }
+/* Reuse the button face at the card's existing radius, with the shared row shadow. */
+.state-dashboard .timeline-content.timeline-emotion-card { background: transparent !important; color: var(--color-text); }
+.state-dashboard .timeline-emotion-card[data-emotion-tone="accent"] { --dp-tone: var(--lens-accent); }
+.state-dashboard .timeline-emotion-card[data-emotion-tone="danger"] { --dp-tone: var(--color-danger); --lens-fill-center-share: 86%; }
+.state-dashboard .timeline-emotion-card[data-emotion-tone="warning"] { --dp-tone: color-mix(in srgb, var(--color-warning) 42%, var(--lens-graphite)); }
+.state-dashboard .timeline-emotion-card[data-emotion-tone="success"] { --dp-tone: color-mix(in srgb, var(--color-success) 42%, var(--lens-graphite)); }
+.state-dashboard .timeline-emotion-card[data-emotion-tone="quiet"] { --dp-tone: color-mix(in srgb, var(--lens-accent) 48%, var(--lens-graphite)); }
+.state-dashboard .timeline-emotion-card > .dp-hover-surface { z-index: -1; }
+.state-dashboard .timeline-emotion-card > .dp-hover-surface > .dp-depth { box-shadow: none; }
+.state-dashboard .timeline-emotion-card :is(time, .reflection-emotion, .timeline-footer .text-button) { color: var(--color-text-soft); }
+.state-dashboard .timeline-quote {
+  margin: 9px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-style: normal;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--color-text-soft);
+  overflow-wrap: anywhere;
+}
+.state-dashboard .type-reflection .timeline-meta { margin-bottom: 10px; }
+.state-dashboard .type-reflection .timeline-meta strong { font-weight: 500; }
+.state-dashboard .type-reflection h4 { margin-bottom: 8px; }
+.state-dashboard .timeline-content p { font-size: 14px; overflow-wrap: anywhere; }
+.state-dashboard .timeline-footer { margin-top: 14px; padding-top: 0; border: 0; }
+.state-dashboard .reflection-emotion { padding: 0; background: transparent; color: var(--color-text-muted); font-size: 12px; text-transform: none; }
+.state-dashboard .timeline-footer .text-button { color: var(--color-text-muted); font-size: 12px; }
+.state-dashboard .timeline-footer .text-button:hover { color: var(--color-text); }
+.state-dashboard .type-neutral-group { margin: 0; }
+.state-dashboard .type-neutral-group .timeline-marker {
+  left: -26px;
+  top: 16px;
+  width: 5px;
+  height: 5px;
+  background: var(--color-text-muted);
+  border-radius: 50%;
+}
+.state-dashboard .neutral-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  width: 100%;
+  min-width: 0;
+  padding: 9px 4px;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  box-shadow: none;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 400;
+  text-align: left;
+}
+.state-dashboard .neutral-summary:hover { color: var(--color-text-soft); }
+.state-dashboard .neutral-count { font-variant-numeric: tabular-nums; }
+.state-dashboard .neutral-expand-hint { display: flex; align-items: center; gap: 6px; opacity: 1; font-size: 12px; }
+
+@media (max-width: 48rem) {
+  .workspace.workspace-state { display: block; overflow-y: auto; }
+  .workspace-state .state-dashboard { height: auto; }
+  .workspace-state .state-layout { grid-template-rows: auto; }
+  .state-dashboard .state-sidebar { max-height: calc(100dvh - var(--titlebar-height, 44px) - 80px); height: auto; padding-bottom: 0; }
+  .workspace-state .state-timeline-container { height: auto; overflow: visible; padding-inline: 0; }
+  .state-dashboard .state-timeline-header { padding-inline: 0; }
+  .state-dashboard .state-timeline-scroll-shell { height: min(70dvh, 680px); flex: none; }
+}
+@media (max-width: 26rem) {
+  .state-dashboard { padding: 16px; }
+  .state-dashboard .timeline-content { padding: 16px 18px !important; }
+  .state-dashboard .timeline-marker { top: 17px; }
+  .state-dashboard .timeline-meta { flex-wrap: wrap; gap: 4px 12px; }
+}
