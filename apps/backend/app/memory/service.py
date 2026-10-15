@@ -299,6 +299,14 @@ class MemoryService:
         """Exclude overheard and incomplete live speech from factual memory."""
         if message is None:
             return False
+        tokens = message.metadata.get("tokens")
+        if message.metadata.get("response_failed") or isinstance(tokens, dict) and tokens.get("response_failed"):
+            return False
+        if message.role == "assistant" and message.effective_content in {
+            "Вот же заело: я опять тащу прошлый ответ вместо нового. Давай ещё раз.",
+            "Не получилось ответить по сути. Вопрос сохранился — можно вернуться к нему.",
+        }:
+            return False
         scope = str(message.metadata.get("dialogue_scope", ""))
         if scope in {"ambient", "incomplete"}:
             return False

@@ -57,9 +57,13 @@ class ContextManager:
         )
         name_only_followup = self._is_name_only_followup(user_text)
         explicit_readdressment = self._is_explicit_readdressment(user_text)
+        last_assistant = next((row for row in reversed(material["recent"]) if row.get("role") == "assistant"), None)
+        failed_followup = bool(last_assistant and self._failed_reply(last_assistant))
+        guard_recovery = failed_followup and bool(re.search(
+            r"(?iu)^\s*(?:ну\s+)?продолжи[.!? ]*$|\b(?:ответь|ответить|вернись|продолжи)\b.{0,90}\b(?:вопрос|прошл\w*|предыдущ\w*|реплик\w*)\b", user_text))
         pending_direct_rows = (
-            self._pending_followup_rows(material)
-            if name_only_followup
+            self._pending_followup_rows(material, maximum_seconds=120 if failed_followup else 30)
+            if name_only_followup or guard_recovery
             else self._readdressed_implicit_rows(material)
             if explicit_readdressment
             else []
@@ -270,6 +274,7 @@ class ContextManager:
             row
             for row in material["recent"]
             if not self._is_ambient_observation(row)
+            and not self._failed_reply(row)
             and row.get("decision_action") != "wait_more"
             and str(row.get("id")) not in pending_user_id_set
         ]
@@ -278,6 +283,7 @@ class ContextManager:
             (
                 row for row in reversed(material["recent"])
                 if row.get("role") == "assistant"
+                and not self._failed_reply(row)
                 and not self._is_ambient_observation(row)
             ),
             None,
@@ -534,6 +540,7 @@ class ContextManager:
     def _pending_followup_rows(
         cls,
         material: dict[str, object],
+        *, maximum_seconds: float = 30.0,
     ) -> list[dict[str, object]]:
         """Select one contiguous, recent Iris-directed thought.
 
@@ -543,11 +550,14 @@ class ContextManager:
         selected: list[dict[str, object]] = []
         current_created_at = material.get("current_created_at")
         for row in reversed(material["recent"]):
+            if cls._failed_reply(row):
+                continue
             if row.get("role") == "assistant":
                 break
             if not cls._within_followup_window(
                 row.get("created_at"),
                 current_created_at,
+                maximum_seconds=maximum_seconds,
             ):
                 break
             if row.get("role") != "user":
@@ -582,6 +592,15 @@ class ContextManager:
             break
         selected.reverse()
         return selected
+
+    @staticmethod
+    def _failed_reply(row: dict[str, object]) -> bool:
+        return row.get("role") == "assistant" and (
+            bool(row.get("response_failed")) or row.get("content") in {
+                "Вот же заело: я опять тащу прошлый ответ вместо нового. Давай ещё раз.",
+                "Не получилось ответить по сути. Вопрос сохранился — можно вернуться к нему.",
+            }
+        )
 
     @staticmethod
     def _within_followup_window(

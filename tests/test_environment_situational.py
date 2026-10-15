@@ -262,7 +262,8 @@ def test_character_agent_with_situational_context(tmp_path) -> None:
             assert "Character Protocol v3" in provider.last_messages[0].content
             # Situational ambient header should be present
             assert "Контекст окружения:" in combined_system
-            assert "Москва" in combined_system
+            assert "Москва" not in combined_system
+            assert "АКТУАЛЬНЫЕ ДАННЫЕ О ПОГОДЕ" not in combined_system
             # News should NOT be present on casual greeting
             assert "ДАЙДЖЕСТ НОВОСТЕЙ" not in combined_system
 
@@ -284,7 +285,7 @@ def test_character_agent_with_situational_context(tmp_path) -> None:
             live_system_texts = [m.content for m in provider.last_messages if m.role == "system"]
             live_combined = "\n".join(live_system_texts)
             assert "Контекст окружения:" in live_combined
-            assert "Москва" in live_combined
+            assert "Москва" not in live_combined
         finally:
             await coord.close()
 

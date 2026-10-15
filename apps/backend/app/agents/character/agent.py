@@ -20,9 +20,11 @@ from apps.backend.app.agents.character.prompts import (
     character_state_prompt,
 )
 from apps.backend.app.agents.character.dialogue_pacing import infer_dialogue_pacing
+from apps.backend.app.agents.character.memes import MemeLibrary
 from apps.backend.app.agents.character.dialogue_style import (
     DialogueStyleService,
     dialogue_style_prompt,
+    has_street_voice,
 )
 from apps.backend.app.agents.character.turn_intent import analyze_dialogue_turn, search_process_question
 from apps.backend.app.agents.character.persona import get_persona
@@ -107,6 +109,7 @@ class CharacterAgent:
         runtime_settings=None,
         dialogue_style_service: DialogueStyleService | None = None,
         skills: tuple[Skill, ...] = (),
+        meme_library: MemeLibrary | None = None,
     ) -> None:
         self._llm_provider = llm_provider
         self._history = history
@@ -120,6 +123,12 @@ class CharacterAgent:
         self._situational_coordinator = situational_coordinator
         self._runtime_settings = runtime_settings
         self._dialogue_style_service = dialogue_style_service
+        self._meme_library = meme_library
+        self._prompt_dialogue_style = "street"
+        self._meme_context_chars = 0
+        self._response_guard_failure: str | None = None
+        self._response_guard_reason: str | None = None
+        self._grounding_users: tuple[str, ...] = ()
         self.last_turn: CharacterTurn | None = None
         self.last_memory_updates: list[dict[str, str]] = []
         self.last_web_search_metadata: dict[str, object] | None = None
@@ -178,6 +187,27 @@ class CharacterAgent:
         )
         return episode_id, mode
 
+    def _meme_context(self, text, context, pacing, style, state_behavior=None):
+        self._meme_context_chars = 0
+        if self._meme_library is None:
+            return ""
+        cue = self._meme_library.prompt(
+            text, recent_messages=context, mode=pacing.mode, style=style,
+            allow_humor=getattr(state_behavior, "humor_policy", "normal") not in {"avoid", "restrained"},
+        )
+        self._meme_context_chars = len(cue)
+        return cue
+
+    async def _remember_meme_sources(self, snapshot):
+        if self._meme_library is None or getattr(self._runtime_settings, "memory_incognito", False):
+            return
+        try:
+            count = await asyncio.to_thread(self._meme_library.learn, snapshot)
+            if count and self.last_web_search_metadata is not None:
+                self.last_web_search_metadata["meme_library_added"] = count
+        except (OSError, ValueError):
+            logger.warning("Optional meme reference cache could not be saved")
+
     def _prepare_turn(
         self,
         session_id: str,
@@ -189,6 +219,8 @@ class CharacterAgent:
         voice_corrections: tuple[dict[str, object], ...] = (),
     ):
         """Perform synchronous persistence/context work outside the event loop."""
+        self._response_guard_failure = None
+        self._response_guard_reason = None
         self.last_web_search_metadata = None
         self.last_news_metadata = None
         self.last_skill_metadata = None
@@ -277,6 +309,14 @@ class CharacterAgent:
         manual_city = getattr(self._runtime_settings, "location_city", None)
         location_mode = getattr(self._runtime_settings, "location_mode", "auto")
         weather_enabled = getattr(self._runtime_settings, "weather_enabled", True)
+        # A short personal remark is not evidence that the person is outdoors.
+        # Unrequested weather/location repeatedly hijacked jokes in live chat.
+        environment_requested = bool(re.search(
+            r"(?iu)\b(?:погод\w*|температур\w*|градус\w*|дожд\w*|снег\w*|"
+            r"прогноз\w*|на\s+улице|(?:какой|каком|мо[её]м|мо[яй])\s+город\w*|"
+            r"местн\w*\s+новост\w*|где\s+я|мо[яй]\s+локаци\w*|weather)\b", user_text))
+        if not environment_requested:
+            manual_city, location_mode, weather_enabled = None, "off", False
         native = getattr(self._llm_provider, "supports_native_tools", False)
         if native:
             allow_search = False
@@ -309,6 +349,7 @@ class CharacterAgent:
                 self._search_performed = True
                 self._turn_search_snapshot = enrichment.search
                 self.last_web_search_metadata = enrichment.search.metadata()
+                await self._remember_meme_sources(enrichment.search)
             if enrichment.news is not None:
                 self.last_news_metadata = enrichment.news.metadata()
             if retrieving_news:
@@ -823,6 +864,7 @@ class CharacterAgent:
             snapshot = await self._run_search_cycle(search_service, _SearchRequest(query, reason="model_decision"), {}) if isinstance(search_service, SearchService) else await search_service.search(query)
         self._turn_search_snapshot = snapshot
         self.last_web_search_metadata = snapshot.metadata()
+        await self._remember_meme_sources(snapshot)
         self.last_web_search_metadata.update(reason=self._search_reason or "explicit", canonical_entity=self._search_entity)
         self.last_web_search_metadata["requested_query"] = query.query if isinstance(query, _SearchRequest) else query
         if self._turn_news_sources and self.last_news_metadata is not None:
@@ -966,6 +1008,15 @@ class CharacterAgent:
         """Return per-turn usage including the hidden search-decision response."""
         latest = token_metadata(self._llm_provider)
         first = self.web_search_usage_metadata
+        diagnostics = {"persona_version": self._persona.persona_version,
+                       "prompt_dialogue_style": self._prompt_dialogue_style,
+                       "meme_context_chars": self._meme_context_chars}
+        if self._response_guard_failure:
+            diagnostics.update(response_failed=True, response_failure_reason=self._response_guard_failure)
+            if self._response_guard_reason:
+                diagnostics["response_guard_reason"] = self._response_guard_reason
+        latest = {**(latest or {}), **diagnostics} if latest or self._response_guard_failure else None
+        first = {**first, **diagnostics} if first else None
         if not first:
             return latest
         if not latest:
@@ -1054,6 +1105,7 @@ class CharacterAgent:
             built_context.messages if built_context is not None
             else await asyncio.to_thread(self._history.get_recent_messages, session_id, limit=self._history_limit)
         )
+        self._grounding_users = tuple(m.content for m in context if m.role == "user")
         planned_search = await self._plan_turn_search(session_id, prompt_user_text, context)
         situational_context = await self._resolve_turn_context(prompt_user_text, planned_search, live=False)
         model_routing_candidate = await self._should_request_model_delegation(effective_text)
@@ -1090,6 +1142,7 @@ class CharacterAgent:
             ),
         ]
         _, dialogue_style = self._dialogue_style_context()
+        self._prompt_dialogue_style = dialogue_style
         skill_rule = self._skills.prompt(live=False, native=getattr(self._llm_provider, "supports_native_tools", False))
         if skill_rule:
             messages.append(ChatMessage(role="system", content=skill_rule))
@@ -1113,6 +1166,9 @@ class CharacterAgent:
                 )
             )
         pacing = infer_dialogue_pacing(prompt_user_text, context)
+        meme_context = self._meme_context(prompt_user_text, context, pacing, dialogue_style, state_behavior)
+        if meme_context:
+            messages.append(ChatMessage(role="system", content=meme_context))
         messages.append(
             ChatMessage(
                 role="system",
@@ -1124,7 +1180,8 @@ class CharacterAgent:
         if self._turn_lookup_suppressed:
             messages.append(ChatMessage(role="system", content=self._no_lookup_rule()))
         messages.append(
-            ChatMessage(role="system", content=dialogue_style_prompt(dialogue_style))
+            ChatMessage(role="system", content=dialogue_style_prompt(dialogue_style, turn_mode=pacing.mode,
+                        user_text=prompt_user_text, humor_policy=getattr(state_behavior, "humor_policy", "normal")))
         )
         if skill_rule:
             messages.append(ChatMessage(role="system", content=_SKILL_DECISION_RULE.format(date=datetime.now().astimezone().date().isoformat())))
@@ -1750,6 +1807,7 @@ class CharacterAgent:
         input_mode: str = "text",
         source_message=None,
         state_context: str | None = None,
+        state_behavior: "BehaviorGuide | None" = None,
         schedule_memory: bool = True,
         persist_reply: bool | None = None,
         raw_user_text: str | None = None,
@@ -1805,6 +1863,7 @@ class CharacterAgent:
             built_context.messages if built_context is not None
             else await asyncio.to_thread(self._history.get_recent_messages, session_id, limit=self._history_limit)
         )
+        self._grounding_users = tuple(m.content for m in context if m.role == "user")
         self._streaming_turn = True
         self._bridge_state = state_context or ""
         planned_search = await self._plan_turn_search(session_id, prompt_user_text, context)
@@ -1844,6 +1903,7 @@ class CharacterAgent:
             ChatMessage(role="system", content=system_prompt),
         ]
         _, dialogue_style = self._dialogue_style_context()
+        self._prompt_dialogue_style = dialogue_style
         skill_rule = self._skills.prompt(live=True, native=getattr(self._llm_provider, "supports_native_tools", False))
         if skill_rule:
             messages.append(ChatMessage(role="system", content=skill_rule))
@@ -1867,6 +1927,9 @@ class CharacterAgent:
                 )
             )
         pacing = infer_dialogue_pacing(prompt_user_text, context)
+        meme_context = self._meme_context(prompt_user_text, context, pacing, dialogue_style, state_behavior)
+        if meme_context:
+            messages.append(ChatMessage(role="system", content=meme_context))
         messages.append(
             ChatMessage(
                 role="system",
@@ -1876,7 +1939,8 @@ class CharacterAgent:
         if self._turn_lookup_suppressed:
             messages.append(ChatMessage(role="system", content=self._no_lookup_rule()))
         messages.append(
-            ChatMessage(role="system", content=dialogue_style_prompt(dialogue_style))
+            ChatMessage(role="system", content=dialogue_style_prompt(dialogue_style, turn_mode=pacing.mode,
+                        user_text=prompt_user_text, humor_policy=getattr(state_behavior, "humor_policy", "normal")))
         )
         if skill_rule:
             messages.append(ChatMessage(role="system", content=_SKILL_DECISION_RULE.format(date=datetime.now().astimezone().date().isoformat())))
@@ -2007,7 +2071,7 @@ class CharacterAgent:
                 self._memory_service.memory_update(memory) for memory in created
             )
 
-        # A visible fallback remains a durable assistant turn and memory anchor.
+        # A failed answer stays visible in history, but isn't an answer/memory anchor.
         if persist_reply_callback is not None:
             assistant_message = persist_reply_callback(parsed.payload["reply"])
         elif self._should_persist_timeline() and persist_reply:
@@ -2029,7 +2093,8 @@ class CharacterAgent:
                 self.last_memory_updates.extend(
                     self._memory_service.memory_update(memory) for memory in created
                 )
-            self._memory_service.schedule_extraction(assistant_message)
+            if not self._response_guard_failure:
+                self._memory_service.schedule_extraction(assistant_message)
             continuity = parsed.turn.continuity if parsed.valid and parsed.turn is not None else None
             apply_feedback = getattr(self._memory_service, "apply_continuity_feedback", None)
             if continuity is not None and built_context is not None and callable(apply_feedback):
@@ -2078,7 +2143,8 @@ class CharacterAgent:
                 self.last_memory_updates.extend(
                     self._memory_service.memory_update(memory) for memory in created
                 )
-            self._memory_service.schedule_extraction(assistant_message)
+            if not self._response_guard_failure:
+                self._memory_service.schedule_extraction(assistant_message)
         if (
             schedule_memory
             and self._memory_service is not None
@@ -2183,6 +2249,8 @@ class CharacterAgent:
             return self._history.save_message(
                 session_id, role, content, input_mode=input_mode,
                 turn_id=turn_id, reply_to_message_id=reply_to_message_id,
+                metadata={"response_failed": True, "response_failure_reason": self._response_guard_failure}
+                if role == "assistant" and self._response_guard_failure else None,
             )
         except TypeError:
             # V0.4 test doubles and the legacy history implementation only expose three arguments.
@@ -2459,6 +2527,10 @@ class CharacterAgent:
             normalized_opening = self._normalized_for_similarity(control)
             repeated_opening = bool(duplicate_guard and len(normalized_opening) >= 24
                                     and previous_normalized.startswith(normalized_opening))
+            if repeated_opening and len(opening) < 1024:
+                # A prefix isn't a completed duplicate. Hold it for a bounded
+                # chance to continue, rather than retrying a valid new answer.
+                continue
             required_sentences = 3 if status_check else 2 if suspicious_opener or require_pending_response or repeated_opening or required_anchors else 1
             if sentence_count < required_sentences and len(opening) < 220:
                 continue
@@ -2493,12 +2565,12 @@ class CharacterAgent:
                     response_target_text,
                     response_target_anchors or [],
                 )
-                if retry == self._stale_reply_fallback().payload["reply"]:
+                if self._response_guard_failure:
                     self._publish_relevance_guard("fallback", previous_assistant_id, duplicate, require_pending_response, "retry_rejected")
                 else:
                     self._publish_relevance_guard("applied", previous_assistant_id, duplicate, require_pending_response, "retry_accepted")
                 if guard_diagnostics is not None:
-                    guard_diagnostics["relevance_guard"]["outcome"] = "applied"
+                    guard_diagnostics["relevance_guard"]["outcome"] = "fallback" if self._response_guard_failure else "applied"
                 yield retry
                 return
             released = True
@@ -2541,7 +2613,7 @@ class CharacterAgent:
                     response_target_anchors or [],
                 )
                 if guard_diagnostics is not None:
-                    guard_diagnostics["relevance_guard"]["outcome"] = "applied"
+                    guard_diagnostics["relevance_guard"]["outcome"] = "fallback" if self._response_guard_failure else "applied"
                 yield retry
             else:
                 yield opening
@@ -2611,9 +2683,8 @@ class CharacterAgent:
             reply.lower(),
         ))
 
-    @classmethod
     def _has_unconfirmed_assistant_content_attribution(
-        cls, reply: str, previous_assistant_reply: str, user_text: str,
+        self, reply: str, previous_assistant_reply: str, user_text: str,
     ) -> bool:
         """Reject hallucinations that attribute Iris's example to the user.
 
@@ -2626,14 +2697,17 @@ class CharacterAgent:
             return False
         normalized_reply = reply.lower().replace("ё", "е")
         attribution = re.search(
-            r"\b(?:ты\s+)?(?:сам\s+)?(?:попросил|просил|хотел|сказал|назвал|принес|выдал)\b",
+            r"\b(?:ты\s+(?:(?:сам|же|ведь)\s+)*|сам\s+)(?:попросил|просил|хотел|сказал|назвал|принес|выдал)\b",
             normalized_reply,
         )
         if attribution is None:
             return False
-        assistant_terms = cls._content_stems(previous_assistant_reply)
-        user_terms = cls._content_stems(user_text)
-        reply_terms = cls._content_stems(reply)
+        assistant_terms = self._content_stems(previous_assistant_reply)
+        user_terms = self._content_stems(user_text + "\n" + "\n".join(self._grounding_users))
+        # The ownership claim and assistant-only detail must share a clause.
+        # Owning Iris's own example later in the answer isn't an accusation.
+        clause = re.split(r"[.!?;\n]|[,—]\s*(?:(?:а|но)\s+)?я\b", normalized_reply[attribution.end():], maxsplit=1)[0]
+        reply_terms = self._content_stems(clause)
         # Four/five-character stems deliberately handle normal Russian
         # inflection (ёжик/ёжика, скелеты/скелетами) without pretending to be
         # a semantic parser.  The attribution phrase keeps this conservative.
@@ -2647,13 +2721,15 @@ class CharacterAgent:
             "попрос", "просил", "хотел", "сказал", "назвал", "была", "было", "были",
             "тебе", "тебя", "твой", "твоя", "моей", "моя", "своей", "свою", "только",
             "анекд", "шутк", "бред", "какая", "какой", "полная", "следую",
+            "новости", "город", "погода", "ответ", "вопрос", "тема", "смысл",
+            "сводки", "разговор", "данные", "события", "мнение", "история",
         }
         words = re.findall(r"[^\W_]+", value.lower().replace("ё", "е"), flags=re.UNICODE)
         stop_stems = {word[:4] for word in stop_words}
         return {
             word[:4]
             for word in words
-            if len(word) >= 4 and word[:4] not in stop_stems
+            if len(word) >= 4 and word[:4] not in stop_stems and not has_street_voice(word)
         }
 
     @staticmethod
@@ -2803,7 +2879,9 @@ class CharacterAgent:
     @classmethod
     def _user_allows_repetition(cls, user_text: str, previous_assistant_reply: str) -> bool:
         normalized = cls._normalized_for_similarity(user_text)
-        if any(marker in normalized for marker in ("повтори", "повтор", "процитируй", "цитат", "перескажи", "пересказ")):
+        if re.search(r"\b(?:не\s+(?:надо\s+)?(?:повтор[яи]\w*|пересказ\w*|цитир\w*)|хватит\s+повтор\w*)\b", normalized):
+            return False
+        if re.search(r"\b(?:повтори(?:ть)?|процитируй|цитируй|перескажи|пересказать)\b|\b(?:дай|сделай)\s+(?:повтор|пересказ)\b", normalized):
             return True
         previous = cls._normalized_for_similarity(previous_assistant_reply)
         return (
@@ -2822,12 +2900,18 @@ class CharacterAgent:
             return {"stale": False, "similarity": 0.0, "reason": "exempt_or_empty"}
         shorter = min(len(candidate_normalized), len(previous_normalized))
         similarity = SequenceMatcher(None, candidate_normalized, previous_normalized).ratio()
+        if candidate_normalized.startswith(previous_normalized):
+            continuation = candidate_normalized[len(previous_normalized):].strip()
+            if len(continuation) >= 24 and len(continuation.split()) >= 4:
+                return {"stale": False, "similarity": round(similarity, 4), "reason": "new_continuation"}
         exact = candidate_normalized == previous_normalized and shorter >= 24
         repeated_prefix = (
             shorter >= 96
             and (candidate_normalized in previous_normalized or previous_normalized in candidate_normalized)
         )
-        near_duplicate = shorter >= 120 and similarity >= 0.90
+        changed_numbers = set(re.findall(r"\b\d+\b", candidate_normalized)) != set(re.findall(r"\b\d+\b", previous_normalized))
+        new_terms = cls._content_stems(candidate) - cls._content_stems(previous_assistant_reply)
+        near_duplicate = shorter >= 120 and similarity >= 0.90 and not changed_numbers and not new_terms
         return {
             "stale": exact or repeated_prefix or near_duplicate,
             "similarity": round(similarity, 4),
@@ -2838,6 +2922,8 @@ class CharacterAgent:
         self, outcome: str, previous_assistant_id: str | None, assessment: dict[str, object],
         pending_followup: bool, reason: str,
     ) -> None:
+        if outcome == "detected":
+            self._response_guard_reason = reason
         if self._event_publisher is None:
             return
         self._event_publisher(
@@ -2857,10 +2943,10 @@ class CharacterAgent:
             },
         )
 
-    @staticmethod
-    def _stale_reply_fallback() -> _ParseResult:
+    def _stale_reply_fallback(self) -> _ParseResult:
+        self._response_guard_failure = "response_guard_retry_failed"
         return _ParseResult(
-            {"reply": "Вот же заело: я опять тащу прошлый ответ вместо нового. Давай ещё раз.", "emotion": "neutral", "intent": "unknown"},
+            {"reply": "Не получилось ответить по сути. Вопрос сохранился — можно вернуться к нему.", "emotion": "neutral", "intent": "unknown"},
             valid=False,
             reason="stale_duplicate_retry_failed",
         )
@@ -2890,8 +2976,8 @@ class CharacterAgent:
             reason="ungrounded_status_retry_failed",
         )
 
-    @staticmethod
-    def _response_target_fallback(target_text: str) -> _ParseResult:
+    def _response_target_fallback(self, target_text: str) -> _ParseResult:
+        self._response_guard_failure = "response_target_retry_failed"
         normalized = target_text.casefold().replace("ё", "е")
         if "модел" in normalized or "посовет" in normalized:
             reply = (

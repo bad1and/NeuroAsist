@@ -65,6 +65,7 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
         situational_coordinator=getattr(request.app.state, "situational_coordinator", None),
         runtime_settings=runtime_settings,
         dialogue_style_service=getattr(request.app.state, "dialogue_style_service", None),
+        meme_library=getattr(request.app.state, "meme_library", None),
     )
     voice = request.app.state.voice_service.resolve_tts_voice(
         runtime_settings.voice_language,
@@ -234,6 +235,7 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             situational_coordinator=getattr(request.app.state, "situational_coordinator", None),
             runtime_settings=request.app.state.runtime_settings,
             dialogue_style_service=getattr(request.app.state, "dialogue_style_service", None),
+            meme_library=getattr(request.app.state, "meme_library", None),
         )
         coordinator = getattr(request.app.state, "turn_coordinator", None)
         if coordinator is not None:

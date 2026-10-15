@@ -592,6 +592,10 @@ class TimelineStore:
                 """
                 SELECT role, content, corrected_content FROM conversation_messages
                 WHERE timeline_id = ? AND session_id = ? AND status = 'completed' AND role IN ('user', 'assistant')
+                AND (role = 'user' OR (
+                    COALESCE(json_extract(metadata_json, '$.response_failed'), json_extract(metadata_json, '$.tokens.response_failed'), 0) = 0
+                    AND content NOT IN ('Вот же заело: я опять тащу прошлый ответ вместо нового. Давай ещё раз.',
+                                        'Не получилось ответить по сути. Вопрос сохранился — можно вернуться к нему.')))
                 ORDER BY sequence_no DESC LIMIT ?
                 """,
                 (PRIMARY_TIMELINE_ID, session_id, limit),
@@ -2939,6 +2943,7 @@ class TimelineStore:
                 """
                 SELECT m.id, m.role, m.content, m.corrected_content, m.input_mode, m.sequence_no,
                        m.created_at, m.completed_at,
+                       COALESCE(json_extract(m.metadata_json, '$.response_failed'), json_extract(m.metadata_json, '$.tokens.response_failed'), 0) AS response_failed,
                        o.decision_action, o.decision_reason, o.speaker_role,
                        o.addressedness
                 FROM conversation_messages m
@@ -4938,11 +4943,12 @@ class TimelineHistoryAdapter:
     def save_message(
         self, session_id: str, role: str, content: str, input_mode: str = "text",
         *, turn_id: str | None = None, reply_to_message_id: str | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> StoredTimelineMessage:
         message, _ = self._store.append_message(
             role=role, content=content, input_mode=input_mode,
             turn_id=turn_id, reply_to_message_id=reply_to_message_id,
-            metadata={"legacy_session_id": session_id}, session_id=session_id,
+            metadata={"legacy_session_id": session_id, **(metadata or {})}, session_id=session_id,
         )
         return message
 
