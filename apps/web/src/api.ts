@@ -22,6 +22,7 @@ import type {
   ReadinessResponse,
   TokenUsageStats,
   TokenRecordsResponse,
+  MemeCard,
 } from "./types";
 
 const DESKTOP_RUNTIME =
@@ -406,6 +407,20 @@ export function getMemories(status?: string, query?: string): Promise<{ items: M
   if (status) params.set("status", status);
   if (query) params.set("q", query);
   return requestJson(`/memory${params.size ? `?${params}` : ""}`);
+}
+
+export function getMemeLibrary(): Promise<{ items: MemeCard[]; limit: number }> {
+  return requestJson("/meme-library");
+}
+
+export function saveMemeCard(id: string | null, fields: Partial<Pick<MemeCard, "name" | "summary" | "tags" | "source" | "enabled">>): Promise<{ item: MemeCard }> {
+  return requestJson(`/meme-library${id ? `/${encodeURIComponent(id)}` : ""}`, {
+    method: id ? "PATCH" : "POST", body: JSON.stringify(fields),
+  });
+}
+
+export function deleteMemeCard(id: string): Promise<{ deleted: boolean }> {
+  return requestJson(`/meme-library/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 export function createMemory(payload: { predicate: string; value_text: string; source_message_ids: string[]; kind?: string }): Promise<{ memory: MemoryItem }> {

@@ -993,7 +993,7 @@ function MainApp() {
           {visitedViews.has("memory") && (
             <WorkspaceView active={activeView === "memory"}>
               <Suspense fallback={<LoadingRing className="page-loading" />}>
-                <MemoryPage />
+                <MemoryPage developerMode={settings?.developer_mode_enabled ?? false} />
               </Suspense>
             </WorkspaceView>
           )}

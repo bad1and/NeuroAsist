@@ -749,3 +749,15 @@ export type TokenRecordsResponse = {
   limit: number;
   offset: number;
 };
+
+export type MemeCard = {
+  id: string;
+  name: string;
+  summary: string;
+  tags: string;
+  source: string;
+  kind: "curated" | "search_excerpt" | "reviewed";
+  checked_at: string;
+  published_at: string;
+  enabled: boolean;
+};
