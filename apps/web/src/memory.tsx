@@ -1,4 +1,5 @@
 import { LoadingRing } from "./components/LoadingRing";
+import { MemeLibraryPanel } from "./meme-library";
 import { MaterialButton } from "./components/MaterialButton";
 import {
   IconCitiesPoliticsVote,
@@ -59,7 +60,7 @@ import {
 } from "./animations";
 import { currentInterfaceLocale, interfaceIntlLocale } from "./i18n";
 
-type MemorySection = "all" | "active" | "topics" | "commitments" | "archive" | "diagnostics";
+type MemorySection = "all" | "active" | "topics" | "commitments" | "archive" | "diagnostics" | "memes";
 
 const STATUS_LABELS: Record<MemoryStatus | "all", string> = {
   all: "Все",
@@ -210,7 +211,7 @@ function MemoryActionMenu({ children }: { children: ReactNode }) {
   </details>;
 }
 
-export function MemoryPage() {
+export function MemoryPage({ developerMode = false }: { developerMode?: boolean }) {
   const [loading, setLoading] = useState(true);
   const requestRevision = useRef(0);
   const loadedSection = useRef<MemorySection | null>(null);
@@ -227,6 +228,7 @@ export function MemoryPage() {
   const [pendingDeleteMemory, setPendingDeleteMemory] = useState<MemoryItem | null>(null);
   const [pendingEditMemory, setPendingEditMemory] = useState<MemoryItem | null>(null);
   const [editedValue, setEditedValue] = useState("");
+  useEffect(() => { if (!developerMode && section === "memes") setSection("all"); }, [developerMode, section]);
 
   const containerRef = useAnimeScope<HTMLElement>((scope, root) => {
     animatePageEnter(root);
@@ -251,6 +253,7 @@ export function MemoryPage() {
     const revision = ++requestRevision.current;
     if (loadedSection.current !== section) setLoading(true);
     try {
+      if (section === "memes") return;
       if (section === "topics") {
         const response = await getMemoryTopics();
         if (revision !== requestRevision.current) return;
@@ -357,7 +360,7 @@ export function MemoryPage() {
   return (
     <section className="memory-panel" ref={containerRef}>
       <nav className="settings-navigation memory-navigation" aria-label="Разделы памяти">
-        {MEMORY_SECTIONS.map(({ id, label, icon: Icon }) => (
+        {[...MEMORY_SECTIONS, ...(developerMode ? [{ id: "memes" as const, label: "Мемотека", icon: IconEntertainmentGamingEsports }] : [])].map(({ id, label, icon: Icon }) => (
           <MaterialButton materialKey={["memory.button-1", id].join(":")}
             key={id}
             type="button"
@@ -375,6 +378,7 @@ export function MemoryPage() {
       </nav>
 
       <div className="memory-content" ref={contentRef}>
+        {section === "memes" && developerMode ? <MemeLibraryPanel /> : <>
         <header className="memory-heading">
           <div className="memory-toolbar">
             <form
@@ -880,6 +884,7 @@ export function MemoryPage() {
             </>
           )}
         </div>
+        </>}
       </div>
 
       <AppDialog
