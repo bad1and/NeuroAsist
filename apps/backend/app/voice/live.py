@@ -780,6 +780,7 @@ class VoiceSessionManager:
                 input_mode=input_mode,
                 source_message=source_message,
                 state_context=state_context,
+                state_behavior=presentation_cue,
                 schedule_memory=source_message is None,
                 persist_reply=persist_reply,
                 raw_user_text=raw_transcript,

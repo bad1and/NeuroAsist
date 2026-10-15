@@ -271,6 +271,12 @@ def plan_search(user_text: str, recent_messages: Iterable = ()) -> SearchRequest
     if analyze_dialogue_turn(user_text, recent_messages).suppress_lookup:
         return None
     user_text = user_text.replace("ё", "е")
+    if (re.search(r"(?iu)\b(?:свеж\w*|нов\w*|актуальн\w*|обнови)\b.{0,35}\bмем\w*\b|\bмем\w*\b.{0,35}\b(?:сейчас|сегодня|недавно|нов\w*)\b", user_text)
+            and (analyze_dialogue_turn(user_text, recent_messages).kind == "request"
+                 or re.match(r"(?iu)^\s*(?:(?:ну|а|давай)\s+)*(?:обнови|покажи|пришли|кинь|дай|пошути)\b", user_text))):
+        # Public topic only. Never turn the user's actual story into a query.
+        month = datetime.now().astimezone().strftime("%Y-%m")
+        return SearchRequest(f"свежие мемы Рунета СНГ {month} значение", reason="meme_refresh")
     song = re.search(r"\b(?:спой|спеть|напеть|напой)\s+(?:пожалуйста\s+)?(?:песню\s+|трек\s+)?(.+)", user_text, re.I)
     if song:
         title = re.split(r"\b(?:если|пожалуйста|можешь)\b", song[1], maxsplit=1, flags=re.I)[0].strip(' .!?«»"')

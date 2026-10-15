@@ -31,6 +31,7 @@ from apps.backend.app.api.routes.episodes import router as episodes_router
 from apps.backend.app.api.routes.context_debug import router as context_debug_router
 from apps.backend.app.api.routes.llm_diagnostics import router as llm_diagnostics_router
 from apps.backend.app.api.routes.memory import router as memory_router
+from apps.backend.app.api.routes.meme_library import router as meme_library_router
 from apps.backend.app.api.routes.models import router as models_router
 from apps.backend.app.api.routes.maintenance import router as maintenance_router
 from apps.backend.app.api.routes.conversation import router as conversation_router
@@ -73,6 +74,7 @@ from apps.backend.app.voice.runtime import configure_torch_threads
 from apps.backend.app.voice.orchestrator import SpeechOrchestrator
 from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.agents.character.dialogue_style import DialogueStyleService
+from apps.backend.app.agents.character.memes import MemeLibrary
 from apps.backend.app.conversation.schemas import ConversationAction, ConversationPhase, SpeakerRole
 from apps.backend.app.conversation.service import LiveConversationService
 from apps.backend.app.conversation.state_service import CharacterStateService
@@ -316,6 +318,7 @@ def create_app() -> FastAPI:
         ),
     ) if timeline_store is not None else None
     dialogue_style_service = DialogueStyleService(timeline_store) if timeline_store is not None else None
+    meme_library = MemeLibrary(settings.app_data_path / "meme-library.json")
     if memory_service is not None and semantic_init_error:
         memory_service._semantic_degraded_reason = semantic_init_error
     conversation_service = LiveConversationService(
@@ -518,6 +521,7 @@ def create_app() -> FastAPI:
                 situational_coordinator=situational_coordinator,
                 runtime_settings=runtime_settings,
                 dialogue_style_service=dialogue_style_service,
+                meme_library=meme_library,
             )
             source_message = (
                 await asyncio.to_thread(
@@ -639,6 +643,7 @@ def create_app() -> FastAPI:
             situational_coordinator=situational_coordinator,
             runtime_settings=runtime_settings,
             dialogue_style_service=dialogue_style_service,
+            meme_library=meme_library,
         )
         utterance_id = uuid.uuid4().hex
         voice = voice_service.resolve_tts_voice(language, runtime_settings.voice_tts_voice)
@@ -1439,6 +1444,7 @@ def create_app() -> FastAPI:
     app.state.conversation_service = conversation_service
     app.state.character_state_service = character_state_service
     app.state.dialogue_style_service = dialogue_style_service
+    app.state.meme_library = meme_library
     app.state.event_bus = event_bus
     app.state.runtime_settings = runtime_settings
     app.state.runtime_settings_store = runtime_settings_store
@@ -1467,6 +1473,7 @@ def create_app() -> FastAPI:
     app.include_router(context_debug_router)
     app.include_router(llm_diagnostics_router)
     app.include_router(memory_router)
+    app.include_router(meme_library_router)
     app.include_router(models_router)
     app.include_router(maintenance_router)
     app.include_router(conversation_router)

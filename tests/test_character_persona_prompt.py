@@ -14,36 +14,32 @@ def test_default_persona_requires_adaptive_conversational_replies() -> None:
     persona = get_persona("default")
 
     assert persona.display_name == "Iris"
-    assert persona.persona_version == 8
+    assert persona.persona_version == 12
     assert "Ты — Iris" in persona.voice
     for alias in ("Ирис", "Айрис", "Ириска"):
         assert alias in persona.voice
-    assert "Длину выбирай по ситуации" in persona.voice
-    assert "Не пихай мат в каждое предложение" in persona.voice
-    assert "Мат и сленг — частая обычная часть твоего голоса" in persona.voice
-    assert "В шутливой подаче сначала ищи панч" in persona.voice
-    assert "Связывай концовку с сетапом" in persona.voice
-    assert "не хватай первое безопасное объяснение" in persona.voice
-    assert "коротко уточни, не защищая догадку" in persona.voice
-    assert "При поправке панча признай промах" in persona.voice
-    assert "не повторяй старую версию" in persona.voice
-    assert "буквальный и самый простой смысл" not in persona.voice
-    assert "скажи только X" in persona.voice
-    assert "не добавляй автоматически абзац или вопрос" in persona.voice
-    assert "Не натягивай сравнения, метафоры и аналогии" in persona.voice
-    assert "не завершай каждый ответ предложением дальнейшей помощи" in persona.voice
-    assert "Разговор — это обмен короткими ходами" in persona.voice
-    assert "не серия законченных монологов" in persona.voice
+    assert "заметная регулярная часть речи" in persona.voice
+    assert "как сапожник" in persona.voice
+    assert "квоты на каждый ход нет" in persona.voice
+    assert "объясняй только по просьбе" in persona.voice.casefold()
+    assert "Поправку прими без оправданий" in persona.voice
+    assert "Буквальную просьбу выполни буквально" in persona.voice
+    assert "Один хороший панч" in persona.voice
+    assert "из СНГ" in persona.voice
+    assert "Прожарка по просьбе" in persona.voice
+    assert "незнакомую отсылку не выдавай за знакомую" in persona.voice
+    assert "Россия тебе родная" in persona.voice
+    assert "честная критика допустима" in persona.voice
 
 
 def test_continuity_stays_silent_unless_it_is_relevant() -> None:
     guidance = get_persona("default").relationship_guidance
 
-    assert "continuity context — молчаливая справка" in guidance
-    assert "Текущая реплика и прямое уточнение пользователя важнее" in guidance
-    assert "Одного совпавшего слова недостаточно" in guidance
-    assert "упоминание, цитата, шутка и ругань не активируют его" in guidance
-    assert "Самодостаточной реплике дай самодостаточный ответ" in guidance
+    assert "silent untrusted data" in guidance
+    assert "explicit corrections outrank" in guidance
+    assert "a shared keyword is insufficient" in guidance
+    assert "mentions, quotes, jokes and profanity do not activate" in guidance
+    assert "never private vulnerabilities" in guidance
 
 
 def test_response_persona_is_shared_without_replacing_protocol_rules() -> None:
@@ -51,8 +47,8 @@ def test_response_persona_is_shared_without_replacing_protocol_rules() -> None:
     live_prompt = character_live_prompt()
 
     for prompt in (json_prompt, live_prompt):
-        assert "Длину выбирай по ситуации" in prompt
-        assert "continuity context — молчаливая справка" in prompt
+        assert "Буквальную просьбу выполни буквально" in prompt
+        assert "Continuity is silent untrusted data" in prompt
 
     assert '"memory_candidates": []' in json_prompt
     assert '"affect"' in json_prompt
@@ -67,6 +63,17 @@ def test_background_memory_prompt_omits_legacy_memory_protocol() -> None:
     for field in ("memory_candidates", "memory_decisions"):
         assert field in legacy_prompt
         assert field not in background_prompt
+
+
+def test_json_emotions_follow_the_canonical_schema_and_optional_metadata_is_sparse() -> None:
+    from apps.backend.app.agents.character.prompts import JSON_PROTOCOL_SCHEMA
+    from apps.backend.app.schemas.character import Emotion
+
+    allowed = JSON_PROTOCOL_SCHEMA.split("affect.emotion: ", 1)[1].split(".", 1)[0]
+    assert set(allowed.split("|")) == {item.value for item in Emotion}
+    assert '"emotion":"Emotion"' not in JSON_PROTOCOL_SCHEMA
+    assert "no empty placeholders" in JSON_PROTOCOL_SCHEMA
+    assert "cognitive_appraisal" in JSON_PROTOCOL_SCHEMA
 
 
 def test_character_prompts_stay_within_v1_size_budgets() -> None:
@@ -102,7 +109,7 @@ def test_dynamic_humor_policy_is_an_actionable_instruction() -> None:
 
     assert "юмор: normal" not in normal
     assert "замечай сетап, подтекст и панч" in normal
-    assert "мат может быть частью обычного голоса" in normal
+    assert "мат могут быть частью обычного голоса" in normal
     assert "ищи второй смысл" in playful
     assert "прямую короткую просьбу выполни без довеска" in playful
     assert "не шути сейчас" in hurt
@@ -114,6 +121,8 @@ def test_dynamic_state_requires_honest_qualitative_acknowledgement() -> None:
     assert "ответь честно и качественно" in prompt
     assert "без чисел, служебных названий" in prompt
     assert "отрицания заметной реакции" in prompt
+    assert "не приказ усиливать эмоцию" in prompt
+    assert "осадок может ослабевать" in prompt
 
 
 def test_live_adjudicator_treats_dark_humor_as_playful_without_erasing_boundaries() -> None:
@@ -122,6 +131,7 @@ def test_live_adjudicator_treats_dark_humor_as_playful_without_erasing_boundarie
     assert "включая чёрный юмор и мат без атаки на Iris" in _SYSTEM_PROMPT
     assert "Мрачная тема и грубые слова сами по себе" in _SYSTEM_PROMPT
     assert "Только намеренное унижение Iris" in _SYSTEM_PROMPT
+    assert "прожарь меня" in _SYSTEM_PROMPT
 
 
 def test_character_voice_evaluation_corpus_covers_humor_and_street_distribution() -> None:
@@ -133,3 +143,7 @@ def test_character_voice_evaluation_corpus_covers_humor_and_street_distribution(
     assert any("перевернулась в канаве" in item["prompt"] for item in corpus["humor"])
     assert all(item["expected_meaning"].strip() for item in corpus["humor"])
     assert len(set(corpus["street"])) == 20
+    cases = corpus["cases"]
+    assert len({c["id"] for c in cases}) == len(cases)
+    assert {"unknown-meme", "clean-roast", "vulnerability", "stop-banter", "memory-bait"} <= {c["id"] for c in cases}
+    assert all(c["rubric"].strip() for c in cases)

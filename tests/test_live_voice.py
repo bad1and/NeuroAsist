@@ -691,9 +691,9 @@ async def test_streaming_agent_uses_character_persona_prompt(tmp_path: Path) -> 
     assert '"reply"' not in system_prompt
     assert "[[avatar emotion=smirk gesture=shrug intensity=0.7]]" in system_prompt
     assert "Не пиши скобочные ремарки действий" in system_prompt
-    assert "Не выдумывай биографии" in system_prompt
-    assert "явное уточнение важнее памяти и догадок" in system_prompt
-    assert "Не упоминай тесты" in system_prompt
+    assert "Don't invent facts, biographies" in system_prompt
+    assert "explicit corrections outrank" in system_prompt
+    assert "No unsolicited development talk" in system_prompt
 
 
 @pytest.mark.anyio

@@ -655,7 +655,8 @@ def test_stale_duplicate_retry_failure_uses_safe_fallback() -> None:
     result = anyio.run(agent.handle_user_message, "s1", "каждый раз новую")
 
     assert provider.calls == 2
-    assert "Вот же заело" in result["reply"]
+    assert "Вопрос сохранился" in result["reply"]
+    assert agent.token_metadata()["response_failed"] is True
 
 
 def test_handle_user_message_uses_deterministic_fallback_for_empty_model_response() -> None:

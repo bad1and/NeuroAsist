@@ -55,10 +55,27 @@ def test_dialogue_style_never_enters_avatar_or_legacy_payload() -> None:
 def test_street_keeps_character_without_a_per_reply_vocabulary_quota() -> None:
     street = dialogue_style_prompt("street")
     assert "Можешь материться первой" in street
-    assert "Мат, шутка и сленг необязательны" in street
+    assert "делай это регулярно" in street
+    assert "короткое «Ага» допустимо" in street
     assert "Не вставляй мат механически" in street
     assert "матерись заметно меньше" in dialogue_style_prompt("restrained")
     assert "без мата" in dialogue_style_prompt("clean")
+
+
+@pytest.mark.parametrize("mode,text", [("micro", "Молодец кстати"), ("banter", "Шуткани"), ("conversational", "Опять всё сломалось")])
+def test_casual_street_turn_gets_an_active_profanity_cue(mode, text):
+    assert "Используй мат прямо в реплике" in dialogue_style_prompt("street", turn_mode=mode, user_text=text)
+
+
+@pytest.mark.parametrize("mode,text,policy", [
+    ("micro", "Ага", "normal"), ("focused", "Объясни RAM", "normal"),
+    ("conversational", "Сегодня умер мой кот", "normal"),
+    ("conversational", "Не шути, мне плохо", "avoid"),
+    ("micro", "Просто скажи огурец", "normal"),
+])
+def test_literal_quiet_and_vulnerable_turns_do_not_get_the_rough_cue(mode, text, policy):
+    assert "Используй мат прямо в реплике" not in dialogue_style_prompt("street", turn_mode=mode, user_text=text, humor_policy=policy)
+    assert "Используй мат прямо в реплике" not in dialogue_style_prompt("clean", turn_mode="banter", user_text="Прожарь")
 
 
 @pytest.mark.parametrize(

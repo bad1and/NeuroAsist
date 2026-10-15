@@ -75,3 +75,58 @@ def test_pacing_limits_length_without_flattening_personality() -> None:
     for text in ("окей", "я сегодня дома", "почему так?", "сделай подробный разбор"):
         prompt = infer_dialogue_pacing(text).prompt_block(input_mode="text")
         assert "ограничивает длину, а не характер" in prompt
+
+
+@pytest.mark.parametrize("text", [
+    "Прожарь меня за выбор темы редактора",
+    "Ну, подколи меня по-дружески",
+    "Можешь рассказать мне смешную шутку?",
+    "Расскажи анекдот",
+    "Давай пошути про мой баг",
+    "Шуткани как-нибудь, чтобы меня разъебало со смеху",
+    "Расскажи анекдотик",
+])
+def test_explicit_play_requests_get_punchline_pacing(text: str) -> None:
+    pacing = infer_dialogue_pacing(text)
+    assert pacing.mode == "banter"
+    assert "не добавляй совет после панча" in pacing.prompt_block(input_mode="text")
+
+
+@pytest.mark.parametrize("text", [
+    "Объясни, что означает «прожарь меня»",
+    "Вчера он сказал: прожарь меня",
+    "Не шути сейчас, помоги с ошибкой",
+    "Хватит подкалывать, я серьёзно",
+    "Знаешь, откуда взялся этот мем?",
+    "Подробно проанализируй, почему эта шутка смешная",
+])
+def test_mentions_and_serious_requests_do_not_activate_banter(text: str) -> None:
+    assert infer_dialogue_pacing(text).mode != "banter"
+
+
+def test_another_joke_followup_keeps_banter_without_inheriting_unrelated_offers():
+    from apps.backend.app.llm.base import ChatMessage
+    history = [ChatMessage(role="user", content="Шуткани что-нибудь"),
+               ChatMessage(role="assistant", content="Неудачная шутка.")]
+    assert infer_dialogue_pacing("Давай ещё какой-нибудь другой анекдотик", history).mode == "banter"
+    history = [ChatMessage(role="user", content="Расскажи про RAM"),
+               ChatMessage(role="assistant", content="RAM — оперативная память.")]
+    assert infer_dialogue_pacing("Давай ещё что-нибудь", history).mode != "banter"
+
+
+@pytest.mark.parametrize("text", [
+    "Не понял, откуда в твоём анекдоте синяки?",
+    "В чём смысл этого анекдота?",
+    "Не понимаю этот анекдот",
+])
+def test_questions_about_a_previous_joke_do_not_request_another_joke(text: str) -> None:
+    from apps.backend.app.llm.base import ChatMessage
+    history = [ChatMessage(role="user", content="Расскажи анекдот")]
+    assert infer_dialogue_pacing(text, history).mode != "banter"
+
+
+@pytest.mark.parametrize("text", ["Здорово заебало", "Здорово, заебал", "Ну здорово заебал"])
+def test_rough_greeting_is_a_greeting_instead_of_a_complaint(text: str) -> None:
+    from apps.backend.app.agents.character.turn_intent import analyze_dialogue_turn
+    assert analyze_dialogue_turn(text).kind == "greeting"
+    assert infer_dialogue_pacing(text).mode == "micro"
