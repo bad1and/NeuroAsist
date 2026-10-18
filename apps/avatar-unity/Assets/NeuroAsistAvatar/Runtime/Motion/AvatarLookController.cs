@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.Animations.Rigging;
+using UniVRM10;
 
 namespace NeuroAsist.Avatar
 {
@@ -28,6 +29,10 @@ namespace NeuroAsist.Avatar
         private float currentPitch;
         private float yawVelocity;
         private float pitchVelocity;
+        private Vrm10Instance vrm;
+        private float presenceSince, nextAttentionShift;
+        private Quaternion beforeLook, afterLook;
+        private bool appliedLook;
 
         public bool IsSpeaking => isSpeaking;
 
@@ -57,7 +62,10 @@ namespace NeuroAsist.Avatar
 
         public void SetPresence(AvatarState value)
         {
+            if (presence == value) return;
             presence = value;
+            presenceSince = Time.time;
+            nextAttentionShift = Time.time + (value == AvatarState.Thinking ? 1.2f : Random.Range(7f, 13f));
             if (presence == AvatarState.Listening)
             {
                 SetSpeaking(false);
@@ -85,7 +93,7 @@ namespace NeuroAsist.Avatar
             }
             // During speech: constrain glance duration to brief natural beats (~1.0 - 1.4s)
             // During idle: full authored duration (3.5 - 4.5s)
-            float actualDuration = isSpeaking ? Mathf.Min(durationSeconds * 0.35f, 1.4f) : durationSeconds;
+            float actualDuration = isSpeaking || presence == AvatarState.Listening ? Mathf.Min(durationSeconds * .35f, 1.2f) : durationSeconds;
             lookAroundRoutine = StartCoroutine(LookAround(actualDuration, pattern));
         }
 
@@ -97,7 +105,40 @@ namespace NeuroAsist.Avatar
                 : null;
         }
 
-        private void Awake() => FindHead();
+        private void Awake()
+        {
+            if (animator == null) animator = GetComponentInChildren<Animator>();
+            vrm = animator != null ? animator.GetComponent<Vrm10Instance>() : null;
+            if (vrm == null) vrm = GetComponentInChildren<Vrm10Instance>();
+            if (vrm != null && target != null)
+            {
+                vrm.LookAtTarget = target;
+                vrm.LookAtTargetType = VRM10ObjectLookAt.LookAtTargetTypes.SpecifiedTransform;
+            }
+            nextAttentionShift = Time.time + Random.Range(7f, 13f);
+            FindHead();
+        }
+
+        internal void RestoreLook()
+        {
+            if (appliedLook && head != null && Quaternion.Angle(head.localRotation, afterLook) < .01f) head.localRotation = beforeLook;
+            appliedLook = false;
+        }
+        private void Update()
+        {
+            RestoreLook();
+            if (Time.time < nextAttentionShift || lookAroundRoutine != null || suppression > .1f) return;
+            if (presence == AvatarState.Thinking || presence == AvatarState.Downloading)
+            {
+                if (Time.time - presenceSince >= 1.2f) PlayLookAround(2.2f, IdleLookPattern.Thoughtful);
+                nextAttentionShift = Time.time + Random.Range(12f, 20f);
+            }
+            else if (presence == AvatarState.Listening || presence == AvatarState.Speaking)
+            {
+                PlayLookAround(1.3f, IdleLookPattern.SideGlance);
+                nextAttentionShift = Time.time + Random.Range(8f, 16f);
+            }
+        }
 
         private void FindHead()
         {
@@ -133,17 +174,20 @@ namespace NeuroAsist.Avatar
                 pitch += 3.0f;
             }
 
-            var targetYaw = yaw * appliedWeight;
-            var targetPitch = pitch * appliedWeight;
+            var targetYaw = yaw * appliedWeight * .65f;
+            var targetPitch = pitch * appliedWeight * .6f;
 
             // Physical neck inertia via unconditionally stable spring-damper with natural pendulum elasticity
             // Frequency ~3.8 - 4.8 rad/s and underdamped ratio ~0.68 allows a clearly visible ~8% momentum overshoot and harmonic pendulum rebound
             float springFreq = Mathf.Lerp(3.8f, 4.8f, Mathf.Clamp01(turnSpeed / 3.25f));
-            currentYaw = SpringDamp(currentYaw, targetYaw, ref yawVelocity, springFreq, 0.68f, Time.deltaTime);
-            currentPitch = SpringDamp(currentPitch, targetPitch, ref pitchVelocity, springFreq, 0.70f, Time.deltaTime);
+            currentYaw = SpringDamp(currentYaw, targetYaw, ref yawVelocity, springFreq, .95f, Time.deltaTime);
+            currentPitch = SpringDamp(currentPitch, targetPitch, ref pitchVelocity, springFreq, .95f, Time.deltaTime);
 
             // Apply look orientation additively to animator's frame rotation, preserving natural posture
-            head.localRotation = head.localRotation * Quaternion.Euler(currentPitch, currentYaw, 0f);
+            beforeLook = head.localRotation;
+            afterLook = beforeLook * Quaternion.Euler(currentPitch, currentYaw, 0f);
+            head.localRotation = afterLook;
+            appliedLook = true;
         }
 
         private System.Collections.IEnumerator LookAround(float durationSeconds, IdleLookPattern pattern)
@@ -153,13 +197,15 @@ namespace NeuroAsist.Avatar
             {
                 // The target is a child of the camera. Moving this target changes only
                 // the head aim; it never changes the avatar root, hips, or feet.
-                yield return MoveTargetTo(lookTargetBaseLocalPosition + OffsetFor(pattern, isSpeaking));
+                var offset = OffsetFor(pattern, isSpeaking);
+                if (presence == AvatarState.Listening) offset *= .18f;
+                yield return MoveTargetTo(lookTargetBaseLocalPosition + offset);
                 var pause = isSpeaking
                     ? Random.Range(0.6f, 1.1f)
                     : Random.Range(Mathf.Lerp(1.9f, 1.25f, gazeInterest), Mathf.Lerp(3.1f, 2.1f, gazeInterest));
                 yield return new WaitForSeconds(pause);
                 elapsed += targetMoveSeconds + pause;
-                if (isSpeaking) break; // one brief conversational glance is enough, then return to user
+                if (isSpeaking || presence == AvatarState.Listening) break;
             }
             yield return MoveTargetTo(lookTargetBaseLocalPosition);
             lookAroundRoutine = null;
@@ -183,7 +229,8 @@ namespace NeuroAsist.Avatar
         {
             if (target == null) yield break;
             var initial = target.localPosition;
-            float moveDuration = isSpeaking ? Mathf.Min(targetMoveSeconds * 0.65f, 0.45f) : targetMoveSeconds;
+            // Eyes acquire the target first; the damped neck follows behind them.
+            float moveDuration = isSpeaking || presence == AvatarState.Listening ? .16f : .24f;
             for (var elapsed = 0f; elapsed < moveDuration; elapsed += Time.deltaTime)
             {
                 var t = Mathf.Clamp01(elapsed / Mathf.Max(.01f, moveDuration));
@@ -224,6 +271,7 @@ namespace NeuroAsist.Avatar
 
         private void OnDisable()
         {
+            RestoreLook();
             if (lookAroundRoutine != null) StopCoroutine(lookAroundRoutine);
             lookAroundRoutine = null;
             if (target != null && hasLookTargetBase) target.localPosition = lookTargetBaseLocalPosition;

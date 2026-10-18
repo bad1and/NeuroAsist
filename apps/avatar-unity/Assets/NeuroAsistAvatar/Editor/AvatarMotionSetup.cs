@@ -19,12 +19,19 @@ namespace NeuroAsist.AvatarEditor
             EnsureFolders();
             ConfigureIncludedClipImporters();
             var settings = EnsureSettings();
+            if (settings.BehaviorRevision < 1)
+            {
+                settings.AutoGestureIntervalMinSeconds = 4f; settings.AutoGestureIntervalMaxSeconds = 8f;
+                settings.AutoGestureProbability = .85f; settings.IdleSchedulingEnabled = true; settings.BehaviorRevision = 1;
+            }
             RepairLegacyIdleProfiles(settings);
             var controller = EnsureController();
             EnsureGestureVariants(settings, controller);
             var mask = EnsureMask();
             if (controller.layers.Length > 1) { var layers = controller.layers; layers[1].avatarMask = mask; controller.layers = layers; }
             AssignIncludedClips(controller);
+            EnsureChannelLayers(controller);
+            PopulateLibrary(settings, controller);
             EditorUtility.SetDirty(settings);
             EditorUtility.SetDirty(controller);
             AssetDatabase.SaveAssets();
@@ -230,6 +237,7 @@ namespace NeuroAsist.AvatarEditor
             if (!HasParameter(controller, "IsSpeaking")) controller.AddParameter("IsSpeaking", AnimatorControllerParameterType.Bool);
             if (!HasParameter(controller, "MotionIntensity")) controller.AddParameter("MotionIntensity", AnimatorControllerParameterType.Float);
             if (!HasParameter(controller, "BaseIdle")) controller.AddParameter("BaseIdle", AnimatorControllerParameterType.Int);
+            if (!HasParameter(controller, "GesturePlaybackSpeed")) controller.AddParameter(new AnimatorControllerParameter { name = "GesturePlaybackSpeed", type = AnimatorControllerParameterType.Float, defaultFloat = 1f });
 
             var baseMachine = controller.layers[0].stateMachine;
             AddStates(baseMachine, new[] { "IdleNeutral", "IdleRelaxed", "IdleEnergetic", "IdleSad", "IdleThinking", "IdleLookAround", "IdleShiftWeight", "IdleSmallStretch" }, "IdleNeutral");
@@ -350,6 +358,7 @@ namespace NeuroAsist.AvatarEditor
             foreach (var profile in profiles)
             {
                 if (profile == null || !repaired.Add(profile)) continue;
+                if (profile.AlternativeIdles.Count >= 3 && profile.AlternativeIdles.TrueForAll(idle => idle != null && !string.IsNullOrEmpty(idle.AnimatorState))) continue;
                 profile.AlternativeIdles.Clear();
                 profile.AlternativeIdles.Add(new AlternativeIdleDefinition { Id = "IdleLookWander", AnimatorState = AvatarMotionNames.DefaultIdleState, LookPattern = IdleLookPattern.Wander, Category = IdleCategory.Micro, DurationSeconds = 4.5f, CooldownSeconds = 25f });
                 profile.AlternativeIdles.Add(new AlternativeIdleDefinition { Id = "IdleSideGlance", AnimatorState = AvatarMotionNames.DefaultIdleState, LookPattern = IdleLookPattern.SideGlance, Category = IdleCategory.Micro, DurationSeconds = 3.5f, CooldownSeconds = 25f });
@@ -461,6 +470,59 @@ namespace NeuroAsist.AvatarEditor
             mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.RightHandIK, false);
             EditorUtility.SetDirty(mask);
             return mask;
+        }
+        private static void EnsureChannelLayers(AnimatorController controller)
+        {
+            foreach (var name in new[] { "Head Gesture Layer", "Arms Gesture Layer" })
+            {
+                var index = System.Array.FindIndex(controller.layers, layer => layer.name == name);
+                if (index < 0) { controller.AddLayer(name); index = controller.layers.Length - 1; }
+                var layers = controller.layers;
+                var path = Root + "/" + name.Replace(" ", "") + ".mask";
+                var mask = AssetDatabase.LoadAssetAtPath<AvatarMask>(path);
+                if (mask == null) { mask = new AvatarMask(); AssetDatabase.CreateAsset(mask, path); }
+                for (var part = 0; part < (int)AvatarMaskBodyPart.LastBodyPart; part++) mask.SetHumanoidBodyPartActive((AvatarMaskBodyPart)part, false);
+                if (name == "Head Gesture Layer") mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.Head, true);
+                else foreach (var part in new[] { AvatarMaskBodyPart.LeftArm, AvatarMaskBodyPart.RightArm, AvatarMaskBodyPart.LeftFingers, AvatarMaskBodyPart.RightFingers }) mask.SetHumanoidBodyPartActive(part, true);
+                AddStates(layers[index].stateMachine, new[] { "Empty" }, "Empty");
+                layers[index].avatarMask = mask;
+                layers[index].defaultWeight = 0;
+                controller.layers = layers;
+                EditorUtility.SetDirty(mask);
+            }
+        }
+        private static void PopulateLibrary(AvatarMotionSettings settings, AnimatorController controller)
+        {
+            var cache = new Dictionary<GestureTag, List<GestureVariant>>();
+            foreach (var definition in settings.GestureDefinitions)
+            {
+                if (definition == null) continue;
+                if (definition.Variants.Count > 0)
+                {
+                    foreach (var variant in definition.Variants)
+                        foreach (var layer in controller.layers)
+                            if (layer.name == variant.LayerName)
+                                foreach (var state in layer.stateMachine.states)
+                                    if (state.state.name == variant.AnimatorState)
+                                    {
+                                        var mirror = (variant.Side == GestureSide.Left) ^ AvatarGestureLibrary.SourceIsLeftHanded(AvatarBehaviorPolicy.Family(definition.Tag));
+                                        if (state.state.mirror != mirror) { state.state.mirror = mirror; EditorUtility.SetDirty(state.state); }
+                                    }
+                    continue;
+                }
+                var family = AvatarBehaviorPolicy.Family(definition.Tag);
+                if (!cache.TryGetValue(family, out var variants))
+                {
+                    var canonical = settings.GestureDefinitions.Find(d => d != null && d.Tag == family) ?? definition;
+                    AnimationClip source = null;
+                    foreach (var state in controller.layers[1].stateMachine.states)
+                        if (state.state.name == canonical.AnimatorState) source = state.state.motion as AnimationClip;
+                    variants = AvatarGestureLibrary.Create(family, source, controller);
+                    cache[family] = variants;
+                }
+                definition.Variants.AddRange(variants);
+                EditorUtility.SetDirty(definition);
+            }
         }
         private static void EnsureFolders()
         {

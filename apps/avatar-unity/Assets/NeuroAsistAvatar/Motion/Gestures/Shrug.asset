@@ -11,12 +11,217 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0f93fd627b5101f4aab8c90d088bcba2, type: 3}
   m_Name: Shrug
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier:
   Id: ShrugGesture
   Tag: 12
   AnimatorState: Shrug
   VariantAnimatorStates:
   - ShrugMirror
+  Variants:
+  - Id: Iris_Shrug_both_palms_Right
+    PatternId: Shrug_both_palms
+    AnimatorState: Iris_Shrug_both_palms_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 1318135159700506340, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.32
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.29999998}
+  - Id: Iris_Shrug_both_palms_Left
+    PatternId: Shrug_both_palms
+    AnimatorState: Iris_Shrug_both_palms_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 1318135159700506340, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.32
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.29999998}
+  - Id: Iris_Shrug_one_palm_Right
+    PatternId: Shrug_one_palm
+    AnimatorState: Iris_Shrug_one_palm_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -5781301459282378839, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.32
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.59999996}
+  - Id: Iris_Shrug_one_palm_Left
+    PatternId: Shrug_one_palm
+    AnimatorState: Iris_Shrug_one_palm_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -5781301459282378839, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.32
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.59999996}
+  - Id: Iris_Shrug_low_open_Right
+    PatternId: Shrug_low_open
+    AnimatorState: Iris_Shrug_low_open_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -3465005742854967424, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.32
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.25}
+  - Id: Iris_Shrug_low_open_Left
+    PatternId: Shrug_low_open
+    AnimatorState: Iris_Shrug_low_open_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -3465005742854967424, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.32
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.25}
+  - Id: Iris_Shrug_small_shoulders_Right
+    PatternId: Shrug_small_shoulders
+    AnimatorState: Iris_Shrug_small_shoulders_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 1270667296267566557, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.32
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.5}
+  - Id: Iris_Shrug_small_shoulders_Left
+    PatternId: Shrug_small_shoulders
+    AnimatorState: Iris_Shrug_small_shoulders_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 1270667296267566557, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.32
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.5}
+  - Id: Iris_Shrug_alternating_Right
+    PatternId: Shrug_alternating
+    AnimatorState: Iris_Shrug_alternating_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -9074324223946269307, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.6200001
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.425}
+  - Id: Iris_Shrug_alternating_Left
+    PatternId: Shrug_alternating
+    AnimatorState: Iris_Shrug_alternating_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -9074324223946269307, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.6200001
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.425}
+  - Id: Iris_Shrug_resigned_Right
+    PatternId: Shrug_resigned
+    AnimatorState: Iris_Shrug_resigned_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -4432716881497668896, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.32
+    HoldSeconds: 0.45
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.14999999}
+  - Id: Iris_Shrug_resigned_Left
+    PatternId: Shrug_resigned
+    AnimatorState: Iris_Shrug_resigned_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -4432716881497668896, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.32
+    HoldSeconds: 0.45
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.14999999}
   BlendInSeconds: 0.55
   DurationSeconds: 2
   BlendOutSeconds: 0.65
@@ -27,5 +232,5 @@ MonoBehaviour:
   CanInterrupt: 1
   Priority: 10
   HeadLookSuppression: 0
-  AllowedEmotions: 
-  DeniedEmotions: 
+  AllowedEmotions:
+  DeniedEmotions:

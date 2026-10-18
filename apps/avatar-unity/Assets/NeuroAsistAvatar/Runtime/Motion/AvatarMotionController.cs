@@ -1,14 +1,12 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
 namespace NeuroAsist.Avatar
 {
-    /// <summary>Coordinates body motion only; facial expressions and lip sync remain independent.</summary>
+    /// <summary>Conversation-aware director. All semantic and ambient body requests meet here.</summary>
     public sealed class AvatarMotionController : MonoBehaviour
     {
-        private const float MinimumAutomaticAccentSeconds = 1.7f;
         [SerializeField] private AvatarMotionSettings settings;
         [SerializeField] private Animator animator;
         [SerializeField] private Transform avatarRoot;
@@ -18,63 +16,51 @@ namespace NeuroAsist.Avatar
         [SerializeField] private AvatarGestureController gestureController;
         [SerializeField] private AvatarLookController lookController;
         [SerializeField] private AvatarLifeController lifeController;
-        [Range(.25f, 1.5f)] [SerializeField] private float transitionSeconds = .7f;
-        [Min(.001f)] [SerializeField] private float rootDriftWarningDistance = .02f;
-        private AvatarEmotion emotion = AvatarEmotion.Neutral;
-        private MotionProfile profile;
-        private Vector3 rootLocalPosition;
-        private Quaternion rootLocalRotation;
-        private Coroutine speechLoop;
-        private int speechGeneration;
-        private bool speaking;
+        private readonly AvatarBehaviorPolicy policy = new AvatarBehaviorPolicy();
+        private readonly IMotionRandom random = new UnityMotionRandom();
         private readonly Dictionary<int, SpeechMotionCue> speechCues = new Dictionary<int, SpeechMotionCue>();
-        private readonly Queue<string> recentAutomaticVariants = new Queue<string>();
-        private readonly List<float> automaticAccentTimes = new List<float>();
-        private Coroutine rootRestoreRoutine;
+        private readonly HashSet<int> playedSequences = new HashSet<int>();
+        private AvatarEmotion emotion;
+        private MotionProfile profile;
+        private Vector3 rootPosition;
+        private Quaternion rootRotation;
+        private Transform cachedRoot;
+        private string baseState;
+        private bool speaking;
+        private int speechGeneration;
+        private float segmentEnd, earliestNextGesture, segmentIntensity;
+        private GestureTag segmentGesture = GestureTag.None;
+        private GestureTag metadataGesture = GestureTag.Auto;
+        private float metadataIntensity = .75f;
+        private string lastMetadata;
+        private AudioSource speechAudio;
+        private PendingGesture pending;
+        private bool initialized;
+        private readonly float[] energyWindow = new float[512];
 
-        private struct SpeechMotionCue
-        {
-            public float Duration;
-            public GestureTag Requested;
-            public bool Emphasized;
-        }
-
+        private struct SpeechMotionCue { public float Duration; public GestureTag Requested; public bool Emphasized; public float Intensity; }
+        private sealed class PendingGesture { public GestureTag Tag; public float Intensity, Due, Expires; public bool Interrupt, SpeechScoped, ExplicitControl; public int Priority; }
         public event Action<MotionProfile> ProfileChanged;
         public AvatarEmotion CurrentEmotion => emotion;
         public MotionProfile CurrentProfile => profile;
-        public string CurrentGesture => gestureController != null && gestureController.Active != null ? gestureController.Active.Id : "none";
+        public string CurrentGesture => gestureController?.Active != null ? gestureController.Active.Id : "none";
         public bool IsSpeaking => speaking;
         public Animator Animator => animator;
+        public float QuietActivity => state != null && state.Current != AvatarState.Idle ? 1f : policy.QuietActivity(Time.time);
+        public int PendingCount => pending == null ? 0 : 1;
+        public bool CanPerformGesture(GestureTag tag) => settings != null && settings.MotionEnabled && tag != GestureTag.Auto && tag != GestureTag.None
+            && settings.GestureDefinitions.Exists(d => d != null && (d.Tag == tag || d.Tag == AvatarMotionNames.BaseGesture(tag)));
 
         public void Configure(AvatarMotionSettings value, Animator valueAnimator, Transform root, AvatarStateController valueState)
-        {
-            settings = value; animator = valueAnimator; avatarRoot = root; state = valueState;
-            Initialize();
-        }
-
+        { settings = value; animator = valueAnimator; avatarRoot = root; state = valueState; Initialize(); }
         private void Awake() => Initialize();
-
-        private void OnEnable()
-        {
-            if (state != null) state.Changed += OnStateChanged;
-            if (state != null) lookController?.SetPresence(state.Current);
-            if (idleScheduler != null) idleScheduler.StartScheduling();
-        }
-
-        private void OnDisable()
-        {
-            if (state != null) state.Changed -= OnStateChanged;
-            StopSpeechLoop();
-            if (idleScheduler != null) idleScheduler.StopScheduling();
-            if (rootRestoreRoutine != null) { StopCoroutine(rootRestoreRoutine); rootRestoreRoutine = null; }
-        }
-
         private void Initialize()
         {
             if (animator == null) animator = GetComponentInChildren<Animator>();
             if (avatarRoot == null && animator != null) avatarRoot = animator.transform;
             if (animator != null) animator.applyRootMotion = false;
-            if (avatarRoot != null) { rootLocalPosition = avatarRoot.localPosition; rootLocalRotation = avatarRoot.localRotation; }
+            if (avatarRoot != null && cachedRoot != avatarRoot) { cachedRoot = avatarRoot; rootPosition = avatarRoot.localPosition; rootRotation = avatarRoot.localRotation; }
+            if (state == null) state = GetComponent<AvatarStateController>();
             if (idleScheduler == null) idleScheduler = GetComponent<AvatarIdleScheduler>();
             if (gestureController == null) gestureController = GetComponent<AvatarGestureController>();
             if (lookController == null) lookController = GetComponent<AvatarLookController>();
@@ -82,233 +68,224 @@ namespace NeuroAsist.Avatar
             if (idleScheduler != null)
             {
                 idleScheduler.Configure(settings);
-                idleScheduler.IsBlocked = () => gestureController != null && gestureController.IsPlaying;
+                idleScheduler.IsBlocked = () => pending != null || gestureController != null && gestureController.IsPlaying;
                 idleScheduler.IsSpeaking = () => speaking;
+                idleScheduler.Activity = () => QuietActivity;
+                idleScheduler.Presence = () => state != null ? state.Current : AvatarState.Idle;
                 idleScheduler.OnIdleRequested = PlayAlternativeIdle;
+                idleScheduler.OnRestPoseRequested = () => lifeController?.ChangeRestPose();
             }
             if (gestureController != null)
             {
                 gestureController.Configure(settings, animator);
-                gestureController.SetHeadLookSuppression = value => { if (lookController != null) lookController.SetSuppression(value); };
-                gestureController.Finished += _ => RestoreRootAfterOneShot();
-                gestureController.Started += definition => client?.Send("avatar.gesture.started", new AvatarGesturePayload { gesture = definition.Tag.ToTransport(), intensity = definition.Weight });
-                gestureController.Finished += definition => client?.Send("avatar.gesture.finished", new AvatarGesturePayload { gesture = definition.Tag.ToTransport(), intensity = definition.Weight });
-                gestureController.Failed += (definition, _) => client?.Send("avatar.gesture.failed", new AvatarGesturePayload { gesture = definition.Tag.ToTransport(), intensity = 0f });
+                gestureController.SetPolicy(policy);
+                gestureController.SetHeadLookSuppression = amount => lookController?.SetSuppression(amount);
+                gestureController.Started -= GestureStarted; gestureController.Started += GestureStarted;
+                gestureController.Finished -= GestureFinished; gestureController.Finished += GestureFinished;
+                gestureController.Failed -= GestureFailed; gestureController.Failed += GestureFailed;
             }
-            SetEmotion(settings != null && settings.DefaultProfile != null ? AvatarEmotion.Neutral : emotion);
+            initialized = true;
+            SetEmotion(emotion);
         }
+        private void OnEnable()
+        {
+            if (state != null) { state.Changed -= OnStateChanged; state.Changed += OnStateChanged; lookController?.SetPresence(state.Current); }
+            policy.Touch(Time.time);
+            idleScheduler?.StartScheduling();
+        }
+        private void OnDisable()
+        {
+            if (state != null) state.Changed -= OnStateChanged;
+            CancelSpeechMotion();
+            idleScheduler?.StopScheduling();
+        }
+        private void GestureStarted(GestureDefinition definition)
+        {
+            DeferAutomatic(Time.time);
+            client?.Send("avatar.gesture.started", new AvatarGesturePayload { gesture = definition.Tag.ToTransport(), intensity = definition.Weight });
+        }
+        private void GestureFinished(GestureDefinition definition)
+        {
+            policy.Finished(definition.Tag, Time.time);
+            earliestNextGesture = Time.time + random.Range(.65f, 1.25f);
+            client?.Send("avatar.gesture.finished", new AvatarGesturePayload { gesture = definition.Tag.ToTransport(), intensity = definition.Weight });
+        }
+        private void GestureFailed(GestureDefinition definition, string reason)
+        { pending = null; client?.Send("avatar.gesture.failed", new AvatarGesturePayload { gesture = definition.Tag.ToTransport(), intensity = 0 }); }
 
         public void SetEmotion(string value) => SetEmotion(AvatarMotionNames.ParseEmotion(value));
-
         public void SetEmotion(AvatarEmotion value)
         {
-            var nextProfile = settings != null ? settings.FindProfile(value) : null;
-            if (nextProfile == null && settings != null) nextProfile = settings.DefaultProfile;
-            var changed = emotion != value || profile != nextProfile;
-            emotion = value;
-            profile = nextProfile;
+            var next = settings != null ? settings.FindProfile(value) ?? settings.DefaultProfile : null;
+            var changed = emotion != value || profile != next;
+            emotion = value; profile = next;
             if (profile == null) return;
             profile.ValidateValues();
             idleScheduler?.SetProfile(profile);
             lookController?.SetProfile(profile);
-            if (!changed) return;
-            PlayBaseIdle();
-            ProfileChanged?.Invoke(profile);
-            client?.Send("avatar.motion_profile_changed", new AvatarMotionProfilePayload { profile = profile.ProfileId });
+            // An updated expression must not reset the base clip's time.
+            if (baseState != profile.BaseIdleState) PlayBaseIdle();
+            if (changed) { ProfileChanged?.Invoke(profile); client?.Send("avatar.motion_profile_changed", new AvatarMotionProfilePayload { profile = profile.ProfileId }); }
         }
-
         public void SetSpeaking(bool value)
         {
             if (speaking == value) return;
             speaking = value;
             if (animator != null) animator.SetBool(AvatarMotionNames.IsSpeaking, value);
             lookController?.SetSpeaking(value);
-            if (value)
-            {
-                StartSpeechLoop();
-            }
-            else
-            {
-                StopSpeechLoop();
-                speechCues.Clear();
-                lifeController?.TriggerPendulumSettling(1.8f);
-                RestoreRootAfterOneShot();
-                PlayBaseIdle();
-            }
+            if (value) { policy.Touch(Time.time); DeferAutomatic(Time.time - 2f); }
+            else { CancelSpeechMotion(); gestureController?.Stop(false); }
         }
-
-        public void TriggerGesture(GestureTag tag, float intensity = 1f, bool interrupt = true)
+        public void SetSpeechAudio(AudioSource source) => speechAudio = source;
+        public void BeginSpeechMotion()
         {
-            var multiplier = profile == null ? 1f : profile.GestureIntensityMultiplier;
-            gestureController?.Trigger(tag, emotion, speaking, Mathf.Clamp01(intensity) * multiplier, interrupt);
+            CancelSpeechMotion();
+            pending = null;
+            lastMetadata = null; metadataGesture = GestureTag.Auto; metadataIntensity = .75f;
+            gestureController?.Stop(true);
         }
-
-        public void BeginSpeechMotion() => speechCues.Clear();
-
+        public void SetSpeechMetadata(GestureTag gesture, float intensity)
+        {
+            var signature = gesture + ":" + intensity.ToString("F3", System.Globalization.CultureInfo.InvariantCulture);
+            if (lastMetadata == signature) return;
+            lastMetadata = signature;
+            metadataGesture = gesture; metadataIntensity = Mathf.Clamp01(intensity);
+            // Metadata is a hint for the next audible segment, never a second trigger.
+        }
         public void QueueSpeechCue(int sequence, float durationSeconds, AvatarMotionCuePayload cue)
         {
-            var requestedTag = AvatarMotionNames.ParseGesture(cue != null ? cue.gesture : "auto");
-            if (requestedTag == GestureTag.Auto && cue != null && !string.IsNullOrEmpty(cue.emotion))
-            {
-                var parsedEmo = AvatarMotionNames.ParseEmotion(cue.emotion);
-                if (!AvatarMotionNames.IsFacialMicroEmotion(parsedEmo))
-                {
-                    var resolved = AvatarMotionNames.ResolveAutoGesture(parsedEmo);
-                    requestedTag = resolved != GestureTag.None ? resolved : GestureTag.Talk;
-                }
-            }
-            speechCues[sequence] = new SpeechMotionCue
-            {
-                Duration = Mathf.Max(0f, durationSeconds),
-                Requested = requestedTag,
-                Emphasized = cue != null && cue.emphasized,
-            };
+            if (playedSequences.Contains(sequence)) return;
+            speechCues[sequence] = new SpeechMotionCue { Duration = Mathf.Max(0, durationSeconds),
+                Requested = AvatarMotionNames.ParseGesture(cue?.gesture ?? "auto"), Emphasized = cue != null && cue.emphasized,
+                // Legacy protocol-v2 sends nullable intensity. JsonUtility reads
+                // null as zero, so inherit the utterance's strength in that case.
+                Intensity = cue != null && cue.intensity > 0 ? Mathf.Clamp01(cue.intensity) : metadataIntensity };
         }
-
         public void OnSpeechSegmentStarted(int sequence)
         {
+            if (!speaking || !playedSequences.Add(sequence)) return;
             if (!speechCues.TryGetValue(sequence, out var cue)) return;
             speechCues.Remove(sequence);
-            if (!speaking || gestureController == null) return;
-
-            var isSpeech = cue.Requested == GestureTag.Talk || cue.Requested == GestureTag.Talk_Right || cue.Requested == GestureTag.Talk_Left;
-            var isAction = cue.Requested != GestureTag.Auto && cue.Requested != GestureTag.None && !isSpeech;
-            if (!isAction)
-            {
-                if (gestureController.IsPlaying) return;
-                if (!CanScheduleAutomaticAccent(cue.Duration, cue.Requested, Time.unscaledTime, automaticAccentTimes)) return;
-            }
-
-            var tag = ResolveSpeechGesture(cue);
-            if (tag == GestureTag.None || tag == GestureTag.Auto) return;
-            var intensity = (cue.Emphasized ? .86f : .68f) * (profile == null ? 1f : profile.GestureIntensityMultiplier);
-            if (!gestureController.Trigger(tag, emotion, true, intensity, isAction, new List<string>(recentAutomaticVariants))) return;
-            if (!isAction)
-            {
-                RememberAutomaticVariant(gestureController.ActiveVariantId, Time.unscaledTime);
-            }
+            if (pending != null && pending.SpeechScoped) pending = null;
+            if (cue.Requested == GestureTag.Auto && metadataGesture != GestureTag.Auto)
+            { cue.Requested = metadataGesture; cue.Intensity = metadataIntensity; }
+            metadataGesture = GestureTag.Auto;
+            segmentGesture = cue.Requested;
+            segmentIntensity = cue.Intensity;
+            segmentEnd = Time.time + cue.Duration;
+            policy.Touch(Time.time);
+            if (cue.Requested != GestureTag.Auto && cue.Requested != GestureTag.None)
+                Request(cue.Requested, cue.Intensity, true, segmentEnd, true, "segment:" + speechGeneration + ":" + sequence, AccentDelay(cue.Duration, cue.Requested));
         }
-
-        public void StopGesture(bool immediate = false) => gestureController?.Stop(immediate);
-
-        public void ResetToNeutral()
+        public void TriggerGesture(GestureTag tag, float intensity = 1f, bool interrupt = true, bool controlled = false)
         {
-            speechCues.Clear();
-            StopGesture(false);
-            SetSpeaking(false);
-            SetEmotion(AvatarEmotion.Neutral);
-            lifeController?.TriggerPendulumSettling(1.6f);
-            RestoreRootAfterOneShot();
+            if (tag == GestureTag.None || tag == GestureTag.Auto) return;
+            policy.Touch(Time.time);
+            if (controlled) pending = null;
+            Request(tag, intensity, interrupt, Time.time + (controlled ? 14f : 6f), false, null, 0);
+            if (controlled && pending != null) pending.ExplicitControl = true;
         }
+        private void Request(GestureTag tag, float intensity, bool interrupt, float expires, bool speechScoped, string key, float delay)
+        {
+            if (settings == null || !settings.MotionEnabled || intensity <= 0 || !policy.AcceptCue(key)) return;
+            var priority = Priority(tag);
+            if (pending != null && pending.Priority > priority) return;
+            pending = new PendingGesture { Tag = tag, Intensity = Mathf.Clamp01(intensity), Due = Time.time + delay,
+                Expires = expires, Interrupt = interrupt, SpeechScoped = speechScoped, Priority = priority };
+        }
+        private int Priority(GestureTag tag)
+        {
+            var definition = settings != null ? settings.GestureDefinitions.Find(d => d != null && d.Tag == tag) : null;
+            if (definition != null) return definition.Priority;
+            var family = AvatarBehaviorPolicy.Family(tag);
+            if (tag == GestureTag.Auto || family == GestureTag.Talk) return 10;
+            if (family == GestureTag.Greeting || family == GestureTag.Farewell || family == GestureTag.Facepalm || family == GestureTag.Surprise) return 50;
+            return 30;
+        }
+        private void Update()
+        {
+            if (settings == null || !settings.MotionEnabled) { pending = null; gestureController?.Stop(false); return; }
+            if (pending != null && (Time.time >= pending.Expires || pending.SpeechScoped && !speaking)) pending = null;
+            var busy = gestureController != null && gestureController.IsPlaying;
+            if (pending != null && busy && pending.Interrupt && gestureController.Phase == GesturePhase.Hold && pending.Priority > Priority(gestureController.Active.Tag))
+                gestureController.Stop(false);
+            if (pending != null && !busy && Time.time >= pending.Due && (pending.ExplicitControl || Time.time >= earliestNextGesture))
+            {
+                var tag = pending.Tag;
+                var cooldown = AvatarBehaviorPolicy.IsSemantic(tag) ? 1.6f : .65f;
+                if ((pending.ExplicitControl || policy.FamilyReady(tag, Time.time, cooldown)) && gestureController != null)
+                {
+                    var strength = pending.Intensity * (pending.ExplicitControl ? 1 : profile != null ? profile.GestureIntensityMultiplier : 1f);
+                    if (gestureController.Trigger(tag, pending.ExplicitControl ? AvatarEmotion.Neutral : emotion, speaking, strength, false, ignoreCooldown: pending.ExplicitControl)) pending = null;
+                }
+            }
 
+        }
+        private void DeferAutomatic(float now) => policy.DeferAutomatic(now, random, profile != null ? profile.GestureFrequencyMultiplier : 1,
+            settings != null ? settings.AutoGestureIntervalMinSeconds : 4, settings != null ? settings.AutoGestureIntervalMaxSeconds : 8);
+        private float AccentDelay(float remaining, GestureTag tag)
+        {
+            if (remaining < 1.7f || speechAudio == null || speechAudio.clip == null) return 0;
+            var clip = speechAudio.clip;
+            var best = 0f; var peak = 0f;
+            var family = tag == GestureTag.Auto ? GestureTag.Talk : AvatarBehaviorPolicy.Family(tag);
+            var strokeAnchor = family == GestureTag.Talk || family == GestureTag.Explanation || family == GestureTag.Question ? 1.05f : .65f;
+            // Read PCM, not the muted output bus. A few bounded windows only
+            // refine the next stroke; syllables never trigger separate gestures.
+            for (var i = 1; i <= 6; i++)
+            {
+                var delay = i * .09f;
+                // Look ahead by preparation + the middle of the stroke, so the
+                // accent (rather than the hand's first movement) meets the peak.
+                var offset = speechAudio.timeSamples + Mathf.RoundToInt((delay + strokeAnchor) * clip.frequency);
+                if (offset + energyWindow.Length >= clip.samples) break;
+                if (!clip.GetData(energyWindow, offset)) break;
+                var energy = 0f; foreach (var sample in energyWindow) energy += sample * sample;
+                if (energy > peak) { peak = energy; best = delay; }
+            }
+            return best;
+        }
+        private void CancelSpeechMotion()
+        {
+            speechGeneration++; speechCues.Clear(); playedSequences.Clear();
+            segmentEnd = 0; segmentIntensity = 0; segmentGesture = GestureTag.None;
+            if (pending != null && pending.SpeechScoped) pending = null;
+        }
+        public void StopGesture(bool immediate = false) { pending = null; gestureController?.Stop(immediate); }
+        public void ResetToNeutral()
+        { CancelSpeechMotion(); StopGesture(true); SetSpeaking(false); SetEmotion(AvatarEmotion.Neutral); }
         private void OnStateChanged(AvatarState next)
         {
             lookController?.SetPresence(next);
+            policy.Touch(Time.time);
             SetSpeaking(next == AvatarState.Speaking);
-            if (next == AvatarState.Error || next == AvatarState.Disconnected) { StopGesture(false); SetSpeaking(false); }
+            if (next == AvatarState.Error || next == AvatarState.Disconnected) { StopGesture(true); GetComponent<AvatarBodyController>()?.ResetBody("disconnected"); }
         }
-
         private void PlayBaseIdle()
         {
-            if (animator == null || profile == null || string.IsNullOrWhiteSpace(profile.BaseIdleState)) return;
-            var statePath = AvatarMotionNames.StatePath(AvatarMotionNames.BaseLayer, profile.BaseIdleState);
-            if (!animator.HasState(0, Animator.StringToHash(statePath))) { Log("Base idle state is not configured: " + profile.BaseIdleState); return; }
-            animator.SetFloat(AvatarMotionNames.MotionIntensity, settings == null ? 1f : settings.DefaultMotionIntensity);
-            var transition = Mathf.Max(transitionSeconds, 0.95f);
-            animator.CrossFadeInFixedTime(statePath, transition, 0);
+            if (animator == null || profile == null || string.IsNullOrEmpty(profile.BaseIdleState)) return;
+            var path = AvatarMotionNames.StatePath(AvatarMotionNames.BaseLayer, profile.BaseIdleState);
+            if (!animator.HasState(0, Animator.StringToHash(path))) return;
+            baseState = profile.BaseIdleState;
+            animator.CrossFadeInFixedTime(path, .8f, 0);
         }
-
         private void PlayAlternativeIdle(AlternativeIdleDefinition idle)
         {
-            if (animator == null || idle == null || gestureController != null && gestureController.IsPlaying) return;
-            if ((idle.LookPattern != IdleLookPattern.None || idle.Id == "IdleLookAround") && lookController != null)
-            {
-                var pattern = idle.LookPattern == IdleLookPattern.None ? IdleLookPattern.Wander : idle.LookPattern;
-                lookController.PlayLookAround(idle.DurationSeconds, pattern);
-                return;
-            }
-            var statePath = AvatarMotionNames.StatePath(AvatarMotionNames.BaseLayer, idle.AnimatorState);
-            if (!animator.HasState(0, Animator.StringToHash(statePath))) { Log("Alternative idle state is not configured: " + idle.AnimatorState); return; }
-            animator.CrossFadeInFixedTime(statePath, transitionSeconds, 0);
-            StartCoroutine(ReturnToBaseAfter(idle.DurationSeconds / Mathf.Max(.1f, idle.Speed)));
+            if (idle == null || gestureController != null && gestureController.IsPlaying) return;
+            lookController?.PlayLookAround(idle.DurationSeconds, idle.LookPattern == IdleLookPattern.None ? IdleLookPattern.Wander : idle.LookPattern);
         }
-
-        private IEnumerator ReturnToBaseAfter(float seconds)
+        private void LateUpdate()
         {
-            yield return new WaitForSeconds(seconds);
-            if (!speaking || profile != null && profile.AllowLongIdleWhileSpeaking)
-            {
-                lifeController?.TriggerPendulumSettling(1.3f);
-                PlayBaseIdle();
-            }
-            RestoreRootAfterOneShot();
+            // Source clips never own world placement; correct an accidental root
+            // write before rendering instead of accumulating drift across one-shots.
+            if (avatarRoot != null && initialized) { avatarRoot.localPosition = rootPosition; avatarRoot.localRotation = rootRotation; }
         }
-
-        private void StartSpeechLoop() => StopSpeechLoop();
-
-        private void StopSpeechLoop()
-        {
-            speechGeneration++;
-            if (speechLoop != null) { StopCoroutine(speechLoop); speechLoop = null; }
-        }
-
-        private GestureTag ResolveSpeechGesture(SpeechMotionCue cue)
-        {
-            if (cue.Requested != GestureTag.Auto && cue.Requested != GestureTag.None) return cue.Requested;
-            // No scripted gestures: only neural network triggers gestures explicitly
-            return GestureTag.None;
-        }
-
-        private void RememberAutomaticVariant(string variant, float now)
-        {
-            if (!string.IsNullOrWhiteSpace(variant))
-            {
-                recentAutomaticVariants.Enqueue(variant);
-                while (recentAutomaticVariants.Count > 3) recentAutomaticVariants.Dequeue();
-            }
-            automaticAccentTimes.Add(now);
-            automaticAccentTimes.RemoveAll(value => now - value > 30f);
-        }
-
         public static bool CanScheduleAutomaticAccent(float durationSeconds, GestureTag requested, float now, IList<float> previous)
         {
-            // Only explicitly requested gestures are allowed; no automatic scripts
-            return requested != GestureTag.Auto && requested != GestureTag.None;
+            if (requested == GestureTag.None || requested == GestureTag.Auto) return false;
+            if (AvatarBehaviorPolicy.IsSemantic(requested)) return true;
+            if (durationSeconds < 1.7f) return false;
+            return previous == null || previous.Count == 0 || now - previous[previous.Count - 1] >= 4f;
         }
-
-        private void RestoreRootAfterOneShot()
-        {
-            if (avatarRoot == null) return;
-            var drift = Vector3.Distance(avatarRoot.localPosition, rootLocalPosition);
-            var angle = Quaternion.Angle(avatarRoot.localRotation, rootLocalRotation);
-            if (drift < 0.001f && angle < 0.1f) return;
-            if (drift > rootDriftWarningDistance) Log("Root motion drift detected; restoring avatar root smoothly.");
-            if (rootRestoreRoutine != null) StopCoroutine(rootRestoreRoutine);
-            rootRestoreRoutine = StartCoroutine(SmoothRestoreRoot(0.42f));
-        }
-
-        private IEnumerator SmoothRestoreRoot(float duration)
-        {
-            if (avatarRoot == null) yield break;
-            var startPos = avatarRoot.localPosition;
-            var startRot = avatarRoot.localRotation;
-            var elapsed = 0f;
-            while (elapsed < duration)
-            {
-                elapsed += Time.deltaTime;
-                var t = Mathf.Clamp01(elapsed / duration);
-                // Damped harmonic pendulum settling curve (subtle ~3% momentum continuation and soft elastic return)
-                var pendulumT = 1f - Mathf.Exp(-4.8f * t) * Mathf.Cos(Mathf.PI * 1.5f * t);
-                pendulumT = Mathf.Clamp(pendulumT, 0f, 1.05f);
-                avatarRoot.localPosition = Vector3.LerpUnclamped(startPos, rootLocalPosition, pendulumT);
-                avatarRoot.localRotation = Quaternion.SlerpUnclamped(startRot, rootLocalRotation, pendulumT);
-                yield return null;
-            }
-            avatarRoot.localPosition = rootLocalPosition;
-            avatarRoot.localRotation = rootLocalRotation;
-            rootRestoreRoutine = null;
-        }
-
-        private void Log(string message) { if (settings != null && settings.DebugLogging) Debug.Log("[AvatarMotion] " + message, this); }
     }
 }

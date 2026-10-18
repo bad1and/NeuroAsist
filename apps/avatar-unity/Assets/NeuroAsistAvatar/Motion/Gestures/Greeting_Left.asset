@@ -11,11 +11,216 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0f93fd627b5101f4aab8c90d088bcba2, type: 3}
   m_Name: Greeting_Left
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier:
   Id: Greeting_LeftGesture
   Tag: 16
   AnimatorState: GreetingMirror
   VariantAnimatorStates: []
+  Variants:
+  - Id: Iris_Greeting_open_wave_Right
+    PatternId: Greeting_open_wave
+    AnimatorState: Iris_Greeting_open_wave_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 7950977527979266802, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: -0.25}
+  - Id: Iris_Greeting_open_wave_Left
+    PatternId: Greeting_open_wave
+    AnimatorState: Iris_Greeting_open_wave_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 7950977527979266802, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: 0.25}
+  - Id: Iris_Greeting_wrist_wave_Right
+    PatternId: Greeting_wrist_wave
+    AnimatorState: Iris_Greeting_wrist_wave_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 8396749975288772593, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.5999999
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: -0.375}
+  - Id: Iris_Greeting_wrist_wave_Left
+    PatternId: Greeting_wrist_wave
+    AnimatorState: Iris_Greeting_wrist_wave_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 8396749975288772593, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.5999999
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: 0.375}
+  - Id: Iris_Greeting_double_wave_Right
+    PatternId: Greeting_double_wave
+    AnimatorState: Iris_Greeting_double_wave_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 1121910528944757436, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.5999999
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: -0.125}
+  - Id: Iris_Greeting_double_wave_Left
+    PatternId: Greeting_double_wave
+    AnimatorState: Iris_Greeting_double_wave_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 1121910528944757436, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.5999999
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: 0.125}
+  - Id: Iris_Greeting_low_wave_Right
+    PatternId: Greeting_low_wave
+    AnimatorState: Iris_Greeting_low_wave_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -5587665741680329017, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: -0.35}
+  - Id: Iris_Greeting_low_wave_Left
+    PatternId: Greeting_low_wave
+    AnimatorState: Iris_Greeting_low_wave_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -5587665741680329017, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: 0.35}
+  - Id: Iris_Greeting_greet_and_tilt_Right
+    PatternId: Greeting_greet_and_tilt
+    AnimatorState: Iris_Greeting_greet_and_tilt_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -45478805428448751, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.3
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: -0.19999999}
+  - Id: Iris_Greeting_greet_and_tilt_Left
+    PatternId: Greeting_greet_and_tilt
+    AnimatorState: Iris_Greeting_greet_and_tilt_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -45478805428448751, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.3
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: 0.19999999}
+  - Id: Iris_Greeting_palm_salute_Right
+    PatternId: Greeting_palm_salute
+    AnimatorState: Iris_Greeting_palm_salute_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -6647481519173138365, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.45
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: -0.25}
+  - Id: Iris_Greeting_palm_salute_Left
+    PatternId: Greeting_palm_salute
+    AnimatorState: Iris_Greeting_palm_salute_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -6647481519173138365, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.45
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: 0.25}
   BlendInSeconds: 0.55
   DurationSeconds: 1.5
   BlendOutSeconds: 0.65
@@ -26,5 +231,5 @@ MonoBehaviour:
   CanInterrupt: 1
   Priority: 50
   HeadLookSuppression: 0
-  AllowedEmotions: 
-  DeniedEmotions: 
+  AllowedEmotions:
+  DeniedEmotions:

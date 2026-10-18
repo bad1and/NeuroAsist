@@ -11,11 +11,216 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0f93fd627b5101f4aab8c90d088bcba2, type: 3}
   m_Name: Clapping
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier:
   Id: ClappingGesture
   Tag: 29
   AnimatorState: Clapping
   VariantAnimatorStates: []
+  Variants:
+  - Id: Iris_Clapping_direct_Right
+    PatternId: Clapping_direct
+    AnimatorState: Iris_Clapping_direct_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -3782444330132091668, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 3
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.2
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: -0.19999999}
+  - Id: Iris_Clapping_direct_Left
+    PatternId: Clapping_direct
+    AnimatorState: Iris_Clapping_direct_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -3782444330132091668, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 3
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.2
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: 0.19999999}
+  - Id: Iris_Clapping_supported_Right
+    PatternId: Clapping_supported
+    AnimatorState: Iris_Clapping_supported_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 658131614907984617, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 3
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.4
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: 0.55}
+  - Id: Iris_Clapping_supported_Left
+    PatternId: Clapping_supported
+    AnimatorState: Iris_Clapping_supported_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 658131614907984617, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 3
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.4
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: -0.55}
+  - Id: Iris_Clapping_brief_Right
+    PatternId: Clapping_brief
+    AnimatorState: Iris_Clapping_brief_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 1931512086062256268, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 3
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.05
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: -0.5}
+  - Id: Iris_Clapping_brief_Left
+    PatternId: Clapping_brief
+    AnimatorState: Iris_Clapping_brief_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 1931512086062256268, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 3
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.05
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: 0.5}
+  - Id: Iris_Clapping_inclined_Right
+    PatternId: Clapping_inclined
+    AnimatorState: Iris_Clapping_inclined_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -344435575501552479, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 3
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.25
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: -0.25}
+  - Id: Iris_Clapping_inclined_Left
+    PatternId: Clapping_inclined
+    AnimatorState: Iris_Clapping_inclined_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -344435575501552479, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 3
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.25
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: 0.25}
+  - Id: Iris_Clapping_two_stage_Right
+    PatternId: Clapping_two_stage
+    AnimatorState: Iris_Clapping_two_stage_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 4649766588492911983, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 3
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.5999999
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: 0.25}
+  - Id: Iris_Clapping_two_stage_Left
+    PatternId: Clapping_two_stage
+    AnimatorState: Iris_Clapping_two_stage_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 4649766588492911983, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 3
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.5999999
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: -0.25}
+  - Id: Iris_Clapping_settled_Right
+    PatternId: Clapping_settled
+    AnimatorState: Iris_Clapping_settled_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -3076804826368580174, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 3
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.55
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: -0.325}
+  - Id: Iris_Clapping_settled_Left
+    PatternId: Clapping_settled
+    AnimatorState: Iris_Clapping_settled_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -3076804826368580174, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 3
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.55
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: 0.325}
   BlendInSeconds: 0.55
   DurationSeconds: 1.5
   BlendOutSeconds: 0.65
@@ -26,5 +231,5 @@ MonoBehaviour:
   CanInterrupt: 1
   Priority: 10
   HeadLookSuppression: 0
-  AllowedEmotions: 
-  DeniedEmotions: 
+  AllowedEmotions:
+  DeniedEmotions:

@@ -19,6 +19,8 @@ namespace NeuroAsist.Avatar
         private GestureTag pendingStreamGesture = GestureTag.Auto;
         private float pendingStreamGestureIntensity = 1f;
         private string currentStreamEmotion = "neutral";
+        private float currentStreamIntensity = 1f;
+        private string lastStreamMetadata;
 
         private sealed class SegmentEmotionCue
         {
@@ -70,20 +72,13 @@ namespace NeuroAsist.Avatar
         private void ApplyEmotion(string emotionName, float intensity)
         {
             if (string.IsNullOrEmpty(emotionName)) return;
+            if (emotion.IsTransientActive && string.Equals(currentStreamEmotion, emotionName, StringComparison.OrdinalIgnoreCase)
+                && Mathf.Approximately(currentStreamIntensity, intensity)) return;
             currentStreamEmotion = emotionName;
+            currentStreamIntensity = intensity;
             emotion.SetEmotion(emotionName, intensity);
             motion?.SetEmotion(emotionName);
-            if (string.Equals(emotionName, "thinking", StringComparison.OrdinalIgnoreCase))
-            {
-                var look = lookController ?? (motion != null ? motion.GetComponent<AvatarLookController>() : null);
-                look?.PlayLookAround(2.5f, IdleLookPattern.Thoughtful);
-            }
-            else if (string.Equals(emotionName, "curious", StringComparison.OrdinalIgnoreCase) ||
-                     string.Equals(emotionName, "skeptical", StringComparison.OrdinalIgnoreCase))
-            {
-                var look = lookController ?? (motion != null ? motion.GetComponent<AvatarLookController>() : null);
-                look?.PlayLookAround(2.5f, IdleLookPattern.SideGlance);
-            }
+
         }
 
         private void OnStreamClipStarted(int sequence)
@@ -95,6 +90,7 @@ namespace NeuroAsist.Avatar
                 ApplyEmotion(cue.Emotion, cue.Intensity);
                 segmentEmotions.Remove(sequence);
             }
+            motion?.SetSpeechAudio(player.Source);
             motion?.OnSpeechSegmentStarted(sequence);
         }
 
@@ -110,9 +106,11 @@ namespace NeuroAsist.Avatar
         public void Speak(AvatarCommand command, AvatarCommandPayload payload)
         {
             generation++; currentUtterance = payload.utterance_id;
+            lastStreamMetadata = null;
             var targetIntensity = payload.intensity > 0f ? payload.intensity : (payload.gesture_intensity > 0f ? payload.gesture_intensity : 1f);
             ApplyEmotion(payload.emotion, targetIntensity);
-            motion?.StopGesture(false);
+            motion?.BeginSpeechMotion();
+            motion?.SetSpeechMetadata(AvatarMotionNames.ParseGesture(payload.gesture), payload.gesture_intensity);
             state.SetState(AvatarState.Downloading);
             fallback.SetActive(fallback.ShouldBeActive());
             var localGeneration = generation;
@@ -122,20 +120,10 @@ namespace NeuroAsist.Avatar
                     if (localGeneration != generation) return;
                     emotion.SetSpeaking(true);
                     state.SetState(AvatarState.Speaking);
-                    var gestureTag = AvatarMotionNames.ParseGesture(payload.gesture);
-                    if (gestureTag == GestureTag.Auto)
-                    {
-                        var parsedEmotion = AvatarMotionNames.ParseEmotion(payload.emotion);
-                        gestureTag = AvatarMotionNames.ResolveAutoGesture(parsedEmotion);
-                        if (gestureTag == GestureTag.None && !AvatarMotionNames.IsFacialMicroEmotion(parsedEmotion))
-                        {
-                            gestureTag = GestureTag.Talk;
-                        }
-                    }
-                    if (gestureTag != GestureTag.None)
-                    {
-                        motion?.TriggerGesture(gestureTag, payload.gesture_intensity, payload.interrupt);
-                    }
+                    motion?.SetSpeechAudio(player.Source);
+                    motion?.QueueSpeechCue(0, player.Source != null && player.Source.clip != null ? player.Source.clip.length : 0,
+                        new AvatarMotionCuePayload { gesture = payload.gesture, intensity = payload.gesture_intensity });
+                    motion?.OnSpeechSegmentStarted(0);
                     client.SendPlayback("avatar.playback.started", payload.utterance_id, command.message_id, null, AvatarProtocol.ClientLatencyMs(command));
                 },
                 () =>
@@ -174,6 +162,7 @@ namespace NeuroAsist.Avatar
         public void StreamStart(AvatarCommand command, AvatarCommandPayload payload)
         {
             generation++;
+            lastStreamMetadata = null;
             segmentEmotions.Clear();
             currentUtterance = payload.utterance_id;
             nextStreamSequence = 0;
@@ -193,19 +182,7 @@ namespace NeuroAsist.Avatar
                     if (localGeneration != generation) return;
                     emotion.SetSpeaking(true);
                     state.SetState(AvatarState.Speaking);
-                    if (pendingStreamGesture == GestureTag.Auto)
-                    {
-                        var emo = AvatarMotionNames.ParseEmotion(payload.emotion);
-                        pendingStreamGesture = AvatarMotionNames.ResolveAutoGesture(emo);
-                        if (pendingStreamGesture == GestureTag.None && !AvatarMotionNames.IsFacialMicroEmotion(emo))
-                        {
-                            pendingStreamGesture = GestureTag.Talk;
-                        }
-                    }
-                    if (pendingStreamGesture != GestureTag.None)
-                    {
-                        motion?.TriggerGesture(pendingStreamGesture, pendingStreamGestureIntensity, true);
-                    }
+                    motion?.SetSpeechAudio(player.Source);
                     client.SendPlayback("avatar.playback.started", currentUtterance, command.message_id, null, AvatarProtocol.ClientLatencyMs(command));
                 },
                 () =>
@@ -235,26 +212,13 @@ namespace NeuroAsist.Avatar
         {
             if (payload.utterance_id != currentUtterance) return;
             var intensity = payload.intensity > 0f ? payload.intensity : Mathf.Clamp01(payload.gesture_intensity);
+            var signature = payload.emotion + ":" + payload.gesture + ":" + intensity.ToString("F3", System.Globalization.CultureInfo.InvariantCulture);
+            if (lastStreamMetadata == signature) return;
+            lastStreamMetadata = signature;
             ApplyEmotion(payload.emotion ?? "neutral", intensity);
             pendingStreamGesture = AvatarMotionNames.ParseGesture(payload.gesture);
             pendingStreamGestureIntensity = intensity;
-            if (pendingStreamGesture == GestureTag.Auto)
-            {
-                var emo = AvatarMotionNames.ParseEmotion(payload.emotion);
-                pendingStreamGesture = AvatarMotionNames.ResolveAutoGesture(emo);
-                if (pendingStreamGesture == GestureTag.None && !AvatarMotionNames.IsFacialMicroEmotion(emo))
-                {
-                    pendingStreamGesture = GestureTag.Talk;
-                }
-            }
-            if (pendingStreamGesture == GestureTag.None)
-            {
-                motion?.StopGesture(false);
-            }
-            else if (player != null && player.IsPlaying)
-            {
-                motion?.TriggerGesture(pendingStreamGesture, pendingStreamGestureIntensity, true);
-            }
+            motion?.SetSpeechMetadata(pendingStreamGesture, pendingStreamGestureIntensity);
         }
 
         public void StreamSegment(AvatarCommand command, AvatarCommandPayload payload, byte[] audio)

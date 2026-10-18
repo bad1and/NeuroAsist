@@ -11,12 +11,217 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0f93fd627b5101f4aab8c90d088bcba2, type: 3}
   m_Name: Agreement
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier:
   Id: AgreementGesture
   Tag: 4
   AnimatorState: Agreement
   VariantAnimatorStates:
   - AgreementMirror
+  Variants:
+  - Id: Iris_Agreement_single_Right
+    PatternId: Agreement_single
+    AnimatorState: Iris_Agreement_single_Right
+    LayerName: Head Gesture Layer
+    Clip: {fileID: -2432398121688491052, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0}
+  - Id: Iris_Agreement_single_Left
+    PatternId: Agreement_single
+    AnimatorState: Iris_Agreement_single_Left
+    LayerName: Head Gesture Layer
+    Clip: {fileID: -2432398121688491052, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0}
+  - Id: Iris_Agreement_double_Right
+    PatternId: Agreement_double
+    AnimatorState: Iris_Agreement_double_Right
+    LayerName: Head Gesture Layer
+    Clip: {fileID: 8167664440655550360, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.5999999
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0}
+  - Id: Iris_Agreement_double_Left
+    PatternId: Agreement_double
+    AnimatorState: Iris_Agreement_double_Left
+    LayerName: Head Gesture Layer
+    Clip: {fileID: 8167664440655550360, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.5999999
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0}
+  - Id: Iris_Agreement_inclined_Right
+    PatternId: Agreement_inclined
+    AnimatorState: Iris_Agreement_inclined_Right
+    LayerName: Head Gesture Layer
+    Clip: {fileID: 2797728589212044383, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.3
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0}
+  - Id: Iris_Agreement_inclined_Left
+    PatternId: Agreement_inclined
+    AnimatorState: Iris_Agreement_inclined_Left
+    LayerName: Head Gesture Layer
+    Clip: {fileID: 2797728589212044383, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.3
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0}
+  - Id: Iris_Agreement_assured_Right
+    PatternId: Agreement_assured
+    AnimatorState: Iris_Agreement_assured_Right
+    LayerName: Head Gesture Layer
+    Clip: {fileID: -6728164974513217254, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.5999999
+    HoldSeconds: 0.25
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0}
+  - Id: Iris_Agreement_assured_Left
+    PatternId: Agreement_assured
+    AnimatorState: Iris_Agreement_assured_Left
+    LayerName: Head Gesture Layer
+    Clip: {fileID: -6728164974513217254, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.5999999
+    HoldSeconds: 0.25
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0}
+  - Id: Iris_Agreement_thankful_Right
+    PatternId: Agreement_thankful
+    AnimatorState: Iris_Agreement_thankful_Right
+    LayerName: Head Gesture Layer
+    Clip: {fileID: -2824039306772549945, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.55
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0}
+  - Id: Iris_Agreement_thankful_Left
+    PatternId: Agreement_thankful
+    AnimatorState: Iris_Agreement_thankful_Left
+    LayerName: Head Gesture Layer
+    Clip: {fileID: -2824039306772549945, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.55
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0}
+  - Id: Iris_Agreement_small_bow_Right
+    PatternId: Agreement_small_bow
+    AnimatorState: Iris_Agreement_small_bow_Right
+    LayerName: Head Gesture Layer
+    Clip: {fileID: 543504774268006285, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.35
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0}
+  - Id: Iris_Agreement_small_bow_Left
+    PatternId: Agreement_small_bow
+    AnimatorState: Iris_Agreement_small_bow_Left
+    LayerName: Head Gesture Layer
+    Clip: {fileID: 543504774268006285, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.35
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0}
   BlendInSeconds: 0.55
   DurationSeconds: 1.5
   BlendOutSeconds: 0.65
@@ -27,5 +232,5 @@ MonoBehaviour:
   CanInterrupt: 1
   Priority: 10
   HeadLookSuppression: 0.7
-  AllowedEmotions: 
-  DeniedEmotions: 
+  AllowedEmotions:
+  DeniedEmotions:

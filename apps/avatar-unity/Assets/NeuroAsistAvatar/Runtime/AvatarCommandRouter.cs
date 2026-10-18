@@ -47,16 +47,17 @@ namespace NeuroAsist.Avatar
                     client.SendAck(command.message_id, true);
                     emotion.SetEmotion(payload.emotion, payload.intensity);
                     motion?.SetEmotion(payload.emotion);
-                    var emo = AvatarMotionNames.ParseEmotion(payload.emotion);
-                    var autoTag = AvatarMotionNames.ResolveAutoGesture(emo);
-                    if (autoTag != GestureTag.None && autoTag != GestureTag.Talk && emo != AvatarEmotion.Neutral)
-                    {
-                        motion?.TriggerGesture(autoTag, payload.intensity, true);
-                    }
                     break;
                 case "avatar.gesture":
-                    client.SendAck(command.message_id, true);
-                    motion?.TriggerGesture(AvatarMotionNames.ParseGesture(payload.gesture), payload.intensity, payload.interrupt);
+                    var tag = AvatarMotionNames.ParseGesture(payload.gesture);
+                    var accepted = motion != null && motion.CanPerformGesture(tag);
+                    client.SendAck(command.message_id, accepted, accepted ? null : "gesture unavailable");
+                    if (accepted) motion.TriggerGesture(tag, payload.intensity, payload.interrupt);
+                    break;
+                case "avatar.action":
+                    var body = GetComponent<AvatarBodyController>();
+                    var actionAccepted = body != null && body.Execute(payload.action, command.message_id);
+                    client.SendAck(command.message_id, actionAccepted, actionAccepted ? null : "body action unavailable");
                     break;
                 case "avatar.stop": client.SendAck(command.message_id, true); speech.Stop(payload.utterance_id); motion?.ResetToNeutral(); break;
                 case "avatar.audio.mute": client.SendAck(command.message_id, true); speech.SetAudioMuted(payload.muted); break;

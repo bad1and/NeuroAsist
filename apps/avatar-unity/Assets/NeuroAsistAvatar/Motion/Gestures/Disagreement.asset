@@ -11,12 +11,217 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0f93fd627b5101f4aab8c90d088bcba2, type: 3}
   m_Name: Disagreement
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier:
   Id: DisagreementGesture
   Tag: 5
   AnimatorState: Disagreement
   VariantAnimatorStates:
   - DisagreementMirror
+  Variants:
+  - Id: Iris_Disagreement_single_Right
+    PatternId: Disagreement_single
+    AnimatorState: Iris_Disagreement_single_Right
+    LayerName: Head Gesture Layer
+    Clip: {fileID: 8945826902635457278, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0}
+  - Id: Iris_Disagreement_single_Left
+    PatternId: Disagreement_single
+    AnimatorState: Iris_Disagreement_single_Left
+    LayerName: Head Gesture Layer
+    Clip: {fileID: 8945826902635457278, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0}
+  - Id: Iris_Disagreement_double_Right
+    PatternId: Disagreement_double
+    AnimatorState: Iris_Disagreement_double_Right
+    LayerName: Head Gesture Layer
+    Clip: {fileID: 1955461963506459944, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.5999999
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0}
+  - Id: Iris_Disagreement_double_Left
+    PatternId: Disagreement_double
+    AnimatorState: Iris_Disagreement_double_Left
+    LayerName: Head Gesture Layer
+    Clip: {fileID: 1955461963506459944, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.5999999
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0}
+  - Id: Iris_Disagreement_skeptical_Right
+    PatternId: Disagreement_skeptical
+    AnimatorState: Iris_Disagreement_skeptical_Right
+    LayerName: Head Gesture Layer
+    Clip: {fileID: -3561532934956342155, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.4
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0}
+  - Id: Iris_Disagreement_skeptical_Left
+    PatternId: Disagreement_skeptical
+    AnimatorState: Iris_Disagreement_skeptical_Left
+    LayerName: Head Gesture Layer
+    Clip: {fileID: -3561532934956342155, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.4
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0}
+  - Id: Iris_Disagreement_averted_Right
+    PatternId: Disagreement_averted
+    AnimatorState: Iris_Disagreement_averted_Right
+    LayerName: Head Gesture Layer
+    Clip: {fileID: 8726970096427161795, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.3
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0}
+  - Id: Iris_Disagreement_averted_Left
+    PatternId: Disagreement_averted
+    AnimatorState: Iris_Disagreement_averted_Left
+    LayerName: Head Gesture Layer
+    Clip: {fileID: 8726970096427161795, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.3
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0}
+  - Id: Iris_Disagreement_firm_Right
+    PatternId: Disagreement_firm
+    AnimatorState: Iris_Disagreement_firm_Right
+    LayerName: Head Gesture Layer
+    Clip: {fileID: 7549463368776540401, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.5999999
+    HoldSeconds: 0.25
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0}
+  - Id: Iris_Disagreement_firm_Left
+    PatternId: Disagreement_firm
+    AnimatorState: Iris_Disagreement_firm_Left
+    LayerName: Head Gesture Layer
+    Clip: {fileID: 7549463368776540401, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.5999999
+    HoldSeconds: 0.25
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0}
+  - Id: Iris_Disagreement_soft_Right
+    PatternId: Disagreement_soft
+    AnimatorState: Iris_Disagreement_soft_Right
+    LayerName: Head Gesture Layer
+    Clip: {fileID: 3251003384408675574, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.5
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0}
+  - Id: Iris_Disagreement_soft_Left
+    PatternId: Disagreement_soft
+    AnimatorState: Iris_Disagreement_soft_Left
+    LayerName: Head Gesture Layer
+    Clip: {fileID: 3251003384408675574, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 4
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.3
+    HoldSeconds: 0.5
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0}
   BlendInSeconds: 0.55
   DurationSeconds: 1.5
   BlendOutSeconds: 0.65
@@ -27,5 +232,5 @@ MonoBehaviour:
   CanInterrupt: 1
   Priority: 10
   HeadLookSuppression: 0.7
-  AllowedEmotions: 
-  DeniedEmotions: 
+  AllowedEmotions:
+  DeniedEmotions:

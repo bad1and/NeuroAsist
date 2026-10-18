@@ -11,11 +11,284 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0f93fd627b5101f4aab8c90d088bcba2, type: 3}
   m_Name: Question_Right
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier:
   Id: Question_RightGesture
   Tag: 18
   AnimatorState: Question
   VariantAnimatorStates: []
+  Variants:
+  - Id: Iris_Question_palm_up_Right
+    PatternId: Question_palm_up
+    AnimatorState: Iris_Question_palm_up_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 8008857168046231854, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.25}
+  - Id: Iris_Question_palm_up_Left
+    PatternId: Question_palm_up
+    AnimatorState: Iris_Question_palm_up_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 8008857168046231854, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.25}
+  - Id: Iris_Question_both_palms_Right
+    PatternId: Question_both_palms
+    AnimatorState: Iris_Question_both_palms_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -562306297431105584, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.45000002}
+  - Id: Iris_Question_both_palms_Left
+    PatternId: Question_both_palms
+    AnimatorState: Iris_Question_both_palms_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -562306297431105584, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.45000002}
+  - Id: Iris_Question_half_shrug_Right
+    PatternId: Question_half_shrug
+    AnimatorState: Iris_Question_half_shrug_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -3231259722486752767, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.28
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.325}
+  - Id: Iris_Question_half_shrug_Left
+    PatternId: Question_half_shrug
+    AnimatorState: Iris_Question_half_shrug_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -3231259722486752767, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.28
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.325}
+  - Id: Iris_Question_offer_Right
+    PatternId: Question_offer
+    AnimatorState: Iris_Question_offer_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -7508580868292024078, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.14999999}
+  - Id: Iris_Question_offer_Left
+    PatternId: Question_offer
+    AnimatorState: Iris_Question_offer_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -7508580868292024078, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.14999999}
+  - Id: Iris_Question_to_self_Right
+    PatternId: Question_to_self
+    AnimatorState: Iris_Question_to_self_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -8013676269468555561, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.25}
+  - Id: Iris_Question_to_self_Left
+    PatternId: Question_to_self
+    AnimatorState: Iris_Question_to_self_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -8013676269468555561, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.25}
+  - Id: Iris_Question_alternatives_Right
+    PatternId: Question_alternatives
+    AnimatorState: Iris_Question_alternatives_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -1510643614772539847, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3.3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.39999998}
+  - Id: Iris_Question_alternatives_Left
+    PatternId: Question_alternatives
+    AnimatorState: Iris_Question_alternatives_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -1510643614772539847, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3.3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.39999998}
+  - Id: Iris_Question_small_tilt_Right
+    PatternId: Question_small_tilt
+    AnimatorState: Iris_Question_small_tilt_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 2554423242166195437, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.39999998}
+  - Id: Iris_Question_small_tilt_Left
+    PatternId: Question_small_tilt
+    AnimatorState: Iris_Question_small_tilt_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 2554423242166195437, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.39999998}
+  - Id: Iris_Question_clarify_Right
+    PatternId: Question_clarify
+    AnimatorState: Iris_Question_clarify_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 4559609548871106428, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3.3
+    HoldSeconds: 0.2
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.22500001}
+  - Id: Iris_Question_clarify_Left
+    PatternId: Question_clarify
+    AnimatorState: Iris_Question_clarify_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 4559609548871106428, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3.3
+    HoldSeconds: 0.2
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.22500001}
   BlendInSeconds: 0.55
   DurationSeconds: 1.5
   BlendOutSeconds: 0.65
@@ -26,5 +299,5 @@ MonoBehaviour:
   CanInterrupt: 1
   Priority: 10
   HeadLookSuppression: 0
-  AllowedEmotions: 
-  DeniedEmotions: 
+  AllowedEmotions:
+  DeniedEmotions:

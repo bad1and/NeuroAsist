@@ -22,20 +22,43 @@ namespace NeuroAsist.Avatar
         private string previousId;
         public Func<bool> IsBlocked;
         public Func<bool> IsSpeaking;
+        public Func<float> Activity;
+        public Func<AvatarState> Presence;
         public Action<AlternativeIdleDefinition> OnIdleRequested;
+        public Action OnRestPoseRequested;
+        private bool scheduling;
+        private float nextIdle;
 
         public void Configure(AvatarMotionSettings value) => settings = value;
         public void SetRandom(IMotionRandom value) => random = value ?? new UnityMotionRandom();
-        public void SetProfile(MotionProfile value) { profile = value; generation++; }
+        public void SetProfile(MotionProfile value) { if (profile != value) { profile = value; generation++; } }
 
         public void StartScheduling()
         {
-            // Pure neural mode: spontaneous scripted alternative idles are completely disabled.
             StopScheduling();
+            scheduling = true;
+            ScheduleNext();
+        }
+        private void ScheduleNext() => nextIdle = Time.time + random.Range(profile != null ? profile.IdleIntervalMinSeconds : 15f, profile != null ? profile.IdleIntervalMaxSeconds : 35f) / Mathf.Max(.5f, Activity != null ? Activity() : 1f);
+
+        private void Update()
+        {
+            if (!scheduling || settings == null || !settings.MotionEnabled || !settings.IdleSchedulingEnabled || profile == null || Time.time < nextIdle) return;
+            var presence = Presence != null ? Presence() : AvatarState.Idle;
+            if ((IsBlocked != null && IsBlocked()) || (IsSpeaking != null && IsSpeaking()) || presence != AvatarState.Idle)
+            { nextIdle = Time.time + random.Range(2f, 4f); return; }
+            ScheduleNext();
+            OnRestPoseRequested?.Invoke();
+            if (random.Range(0f, 1f) > profile.AlternativeIdleProbability) return;
+            var idle = Select(ResolveIdles(profile), previousId, Time.time, lastPlayed, random, false, false);
+            if (idle == null) return;
+            previousId = idle.Id; lastPlayed[idle.Id] = Time.time;
+            OnIdleRequested?.Invoke(idle);
         }
 
         public void StopScheduling()
         {
+            scheduling = false;
             generation++;
             if (loop != null) { StopCoroutine(loop); loop = null; }
         }

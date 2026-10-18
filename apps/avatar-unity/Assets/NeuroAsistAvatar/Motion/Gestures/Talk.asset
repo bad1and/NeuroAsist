@@ -11,12 +11,285 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0f93fd627b5101f4aab8c90d088bcba2, type: 3}
   m_Name: Talk
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier:
   Id: TalkGesture
   Tag: 2
   AnimatorState: TalkGesture01
   VariantAnimatorStates:
   - TalkGesture01Mirror
+  Variants:
+  - Id: Iris_Talk_open_palm_Right
+    PatternId: Talk_open_palm
+    AnimatorState: Iris_Talk_open_palm_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 1810484992629352896, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.099999994}
+  - Id: Iris_Talk_open_palm_Left
+    PatternId: Talk_open_palm
+    AnimatorState: Iris_Talk_open_palm_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 1810484992629352896, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.099999994}
+  - Id: Iris_Talk_measured_beat_Right
+    PatternId: Talk_measured_beat
+    AnimatorState: Iris_Talk_measured_beat_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -8066194069897980608, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.25}
+  - Id: Iris_Talk_measured_beat_Left
+    PatternId: Talk_measured_beat
+    AnimatorState: Iris_Talk_measured_beat_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -8066194069897980608, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.25}
+  - Id: Iris_Talk_two_points_Right
+    PatternId: Talk_two_points
+    AnimatorState: Iris_Talk_two_points_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -3561679200475773264, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3.3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.125}
+  - Id: Iris_Talk_two_points_Left
+    PatternId: Talk_two_points
+    AnimatorState: Iris_Talk_two_points_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -3561679200475773264, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3.3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.125}
+  - Id: Iris_Talk_inclusive_Right
+    PatternId: Talk_inclusive
+    AnimatorState: Iris_Talk_inclusive_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -4074839760789419327, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.35}
+  - Id: Iris_Talk_inclusive_Left
+    PatternId: Talk_inclusive
+    AnimatorState: Iris_Talk_inclusive_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -4074839760789419327, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.35}
+  - Id: Iris_Talk_low_sweep_Right
+    PatternId: Talk_low_sweep
+    AnimatorState: Iris_Talk_low_sweep_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 7921977163299863906, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.29999998}
+  - Id: Iris_Talk_low_sweep_Left
+    PatternId: Talk_low_sweep
+    AnimatorState: Iris_Talk_low_sweep_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 7921977163299863906, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.29999998}
+  - Id: Iris_Talk_weighing_Right
+    PatternId: Talk_weighing
+    AnimatorState: Iris_Talk_weighing_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 103201795407889057, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3.3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.29999998}
+  - Id: Iris_Talk_weighing_Left
+    PatternId: Talk_weighing
+    AnimatorState: Iris_Talk_weighing_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 103201795407889057, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3.3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.29999998}
+  - Id: Iris_Talk_precision_Right
+    PatternId: Talk_precision
+    AnimatorState: Iris_Talk_precision_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -4897852301591197925, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.28
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.375}
+  - Id: Iris_Talk_precision_Left
+    PatternId: Talk_precision
+    AnimatorState: Iris_Talk_precision_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -4897852301591197925, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.28
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.375}
+  - Id: Iris_Talk_hand_to_self_Right
+    PatternId: Talk_hand_to_self
+    AnimatorState: Iris_Talk_hand_to_self_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 3997208952841271712, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.3
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.19999999}
+  - Id: Iris_Talk_hand_to_self_Left
+    PatternId: Talk_hand_to_self
+    AnimatorState: Iris_Talk_hand_to_self_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 3997208952841271712, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.3
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.19999999}
   BlendInSeconds: 0.55
   DurationSeconds: 2
   BlendOutSeconds: 0.65
@@ -27,12 +300,5 @@ MonoBehaviour:
   CanInterrupt: 1
   Priority: 10
   HeadLookSuppression: 0
-  AllowedEmotions: []
-  DeniedEmotions:
-  - 12
-  - 13
-  - 14
-  - 21
-  - 17
-  - 6
-  - 19
+  AllowedEmotions:
+  DeniedEmotions: 0c0000000d0000000e00000015000000110000000600000013000000

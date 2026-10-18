@@ -11,8 +11,9 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 61d964236dfe50e4e9554d449f463af4, type: 3}
   m_Name: AvatarMotionSettings
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier:
   MotionEnabled: 1
+  BehaviorRevision: 1
   DefaultProfile: {fileID: 11400000, guid: 78c0df2bb02e28d448911bd8da1f63a4, type: 2}
   EmotionProfiles:
   - Emotion: 0
@@ -98,9 +99,9 @@ MonoBehaviour:
   - {fileID: 11400000, guid: ec9fb2c8e0155b1488f016428b839539, type: 2}
   - {fileID: 11400000, guid: da3f6121981fcfa4a981e9b0bf6adb62, type: 2}
   IdleSchedulingEnabled: 1
-  AutoGestureIntervalMinSeconds: 3
+  AutoGestureIntervalMinSeconds: 4
   AutoGestureIntervalMaxSeconds: 8
-  AutoGestureProbability: 0.3
+  AutoGestureProbability: 0.85
   DefaultMotionIntensity: 1
   HeadLookEnabled: 1
   HeadLookWeight: 1

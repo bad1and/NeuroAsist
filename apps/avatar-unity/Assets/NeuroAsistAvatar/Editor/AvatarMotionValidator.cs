@@ -2,6 +2,7 @@ using NeuroAsist.Avatar;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
+using System.Linq;
 
 namespace NeuroAsist.AvatarEditor
 {
@@ -19,10 +20,12 @@ namespace NeuroAsist.AvatarEditor
             if (animator == null || animator.runtimeAnimatorController == null) { Error("Animator controller is missing."); errors++; }
             else
             {
-                var gestureLayer = animator.GetLayerIndex(AvatarMotionNames.GestureLayer);
+                var controller = animator.runtimeAnimatorController as AnimatorController;
+                var gestureLayer = controller == null ? -1 : System.Array.FindIndex(controller.layers, layer => layer.name == AvatarMotionNames.GestureLayer);
                 if (gestureLayer < 0) { Error("Animator Gesture Layer is missing."); errors++; }
                 if (!HasParameter(animator, "IsSpeaking", AnimatorControllerParameterType.Bool)) { Error("Animator parameter IsSpeaking is missing."); errors++; }
-                if (gestureLayer >= 0 && animator.GetLayerWeight(gestureLayer) > 0.001f) Debug.LogWarning("[AvatarMotion] Gesture layer is weighted before runtime startup.");
+                if (!HasParameter(animator, "GesturePlaybackSpeed", AnimatorControllerParameterType.Float)) { Error("Animator parameter GesturePlaybackSpeed is missing."); errors++; }
+                if (gestureLayer >= 0 && controller.layers[gestureLayer].defaultWeight > .001f) Debug.LogWarning("[AvatarMotion] Gesture layer is weighted before runtime startup.");
             }
             if (AssetDatabase.LoadAssetAtPath<AvatarMask>(AvatarMotionSetup.MaskPath) == null) { Error("UpperBody AvatarMask is missing."); errors++; }
             if (settings != null)
@@ -30,13 +33,22 @@ namespace NeuroAsist.AvatarEditor
                 foreach (var profile in settings.EmotionProfiles) if (profile.Profile == null) { Error("Emotion profile mapping is empty: " + profile.Emotion); errors++; }
                 foreach (var definition in settings.GestureDefinitions)
                     if (definition == null) { Error("Gesture definition reference is empty."); errors++; }
-                    else if (!StateHasMotion(animator, definition.AnimatorState)) Debug.LogWarning("[AvatarMotion] Gesture slot has no assigned AnimationClip: " + definition.Id);
+                    else
+                    {
+                        var minimum = AvatarGestureLibrary.RequiredPatterns(definition.Tag);
+                        if (definition.Variants.Select(v => v.PatternId).Distinct().Count() < minimum) { Error("Insufficient distinct performances: " + definition.Id); errors++; }
+                        foreach (var variant in definition.Variants)
+                            if (variant.Clip == null || !variant.Clip.humanMotion || !StateHasMotion(animator, variant.AnimatorState)) { Error("Invalid Humanoid performance: " + variant.Id); errors++; }
+                    }
             }
-            Debug.Log(errors == 0 ? "[AvatarMotion] Validation passed; clip-slot warnings require manual Mixamo assignment." : "[AvatarMotion] Validation failed with " + errors + " error(s).");
+            if (errors > 0) throw new System.InvalidOperationException("[AvatarMotion] Validation failed with " + errors + " error(s).");
+            Debug.Log("[AvatarMotion] Validated all performance clips, variants and Animator states.");
         }
         private static bool HasParameter(Animator animator, string name, AnimatorControllerParameterType type)
         {
-            foreach (var parameter in animator.parameters) if (parameter.name == name && parameter.type == type) return true;
+            var controller = animator.runtimeAnimatorController as AnimatorController;
+            if (controller == null) return false;
+            foreach (var parameter in controller.parameters) if (parameter.name == name && parameter.type == type) return true;
             return false;
         }
         private static bool StateHasMotion(Animator animator, string stateName)

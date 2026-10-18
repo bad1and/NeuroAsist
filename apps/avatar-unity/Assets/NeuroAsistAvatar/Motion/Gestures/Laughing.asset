@@ -11,11 +11,216 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0f93fd627b5101f4aab8c90d088bcba2, type: 3}
   m_Name: Laughing
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier:
   Id: LaughingGesture
   Tag: 30
   AnimatorState: Laughing
   VariantAnimatorStates: []
+  Variants:
+  - Id: Iris_Laughing_direct_Right
+    PatternId: Laughing_direct
+    AnimatorState: Iris_Laughing_direct_Right
+    LayerName: Gesture Layer
+    Clip: {fileID: -8402321530539238616, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.2
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 1.5, y: 0, z: -0.19999999}
+  - Id: Iris_Laughing_direct_Left
+    PatternId: Laughing_direct
+    AnimatorState: Iris_Laughing_direct_Left
+    LayerName: Gesture Layer
+    Clip: {fileID: -8402321530539238616, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.2
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 1.5, y: 0, z: 0.19999999}
+  - Id: Iris_Laughing_supported_Right
+    PatternId: Laughing_supported
+    AnimatorState: Iris_Laughing_supported_Right
+    LayerName: Gesture Layer
+    Clip: {fileID: 4547847062197220593, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.4
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 1.5, y: 0, z: 0.55}
+  - Id: Iris_Laughing_supported_Left
+    PatternId: Laughing_supported
+    AnimatorState: Iris_Laughing_supported_Left
+    LayerName: Gesture Layer
+    Clip: {fileID: 4547847062197220593, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.4
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 1.5, y: 0, z: -0.55}
+  - Id: Iris_Laughing_brief_Right
+    PatternId: Laughing_brief
+    AnimatorState: Iris_Laughing_brief_Right
+    LayerName: Gesture Layer
+    Clip: {fileID: -2033018581846243550, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.05
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 1.5, y: 0, z: -0.5}
+  - Id: Iris_Laughing_brief_Left
+    PatternId: Laughing_brief
+    AnimatorState: Iris_Laughing_brief_Left
+    LayerName: Gesture Layer
+    Clip: {fileID: -2033018581846243550, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.05
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 1.5, y: 0, z: 0.5}
+  - Id: Iris_Laughing_inclined_Right
+    PatternId: Laughing_inclined
+    AnimatorState: Iris_Laughing_inclined_Right
+    LayerName: Gesture Layer
+    Clip: {fileID: -7103391189192021535, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.25
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 1.5, y: 0, z: -0.25}
+  - Id: Iris_Laughing_inclined_Left
+    PatternId: Laughing_inclined
+    AnimatorState: Iris_Laughing_inclined_Left
+    LayerName: Gesture Layer
+    Clip: {fileID: -7103391189192021535, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.25
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 1.5, y: 0, z: 0.25}
+  - Id: Iris_Laughing_two_stage_Right
+    PatternId: Laughing_two_stage
+    AnimatorState: Iris_Laughing_two_stage_Right
+    LayerName: Gesture Layer
+    Clip: {fileID: -6458022299473660323, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3.3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 1.5, y: 0, z: 0.25}
+  - Id: Iris_Laughing_two_stage_Left
+    PatternId: Laughing_two_stage
+    AnimatorState: Iris_Laughing_two_stage_Left
+    LayerName: Gesture Layer
+    Clip: {fileID: -6458022299473660323, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3.3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 1.5, y: 0, z: -0.25}
+  - Id: Iris_Laughing_settled_Right
+    PatternId: Laughing_settled
+    AnimatorState: Iris_Laughing_settled_Right
+    LayerName: Gesture Layer
+    Clip: {fileID: 4510035116674100982, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.55
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 1.5, y: 0, z: -0.325}
+  - Id: Iris_Laughing_settled_Left
+    PatternId: Laughing_settled
+    AnimatorState: Iris_Laughing_settled_Left
+    LayerName: Gesture Layer
+    Clip: {fileID: 4510035116674100982, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.55
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 0
+    TorsoAccent: {x: 1.5, y: 0, z: 0.325}
   BlendInSeconds: 0.55
   DurationSeconds: 1.5
   BlendOutSeconds: 0.65
@@ -26,5 +231,5 @@ MonoBehaviour:
   CanInterrupt: 1
   Priority: 10
   HeadLookSuppression: 0
-  AllowedEmotions: 
-  DeniedEmotions: 
+  AllowedEmotions:
+  DeniedEmotions:

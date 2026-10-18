@@ -11,12 +11,217 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0f93fd627b5101f4aab8c90d088bcba2, type: 3}
   m_Name: Bow
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier:
   Id: BowGesture
   Tag: 34
   AnimatorState: Bow
   VariantAnimatorStates:
   - BowMirror
+  Variants:
+  - Id: Iris_Bow_direct_Right
+    PatternId: Bow_direct
+    AnimatorState: Iris_Bow_direct_Right
+    LayerName: Gesture Layer
+    Clip: {fileID: -7392246687534122384, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.8040003
+    HoldSeconds: 0.2
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 5.5, y: 0, z: -0.19999999}
+  - Id: Iris_Bow_direct_Left
+    PatternId: Bow_direct
+    AnimatorState: Iris_Bow_direct_Left
+    LayerName: Gesture Layer
+    Clip: {fileID: -7392246687534122384, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.8040003
+    HoldSeconds: 0.2
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 5.5, y: 0, z: 0.19999999}
+  - Id: Iris_Bow_supported_Right
+    PatternId: Bow_supported
+    AnimatorState: Iris_Bow_supported_Right
+    LayerName: Gesture Layer
+    Clip: {fileID: -7301033706903402532, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.8040003
+    HoldSeconds: 0.4
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 5.5, y: 0, z: 0.55}
+  - Id: Iris_Bow_supported_Left
+    PatternId: Bow_supported
+    AnimatorState: Iris_Bow_supported_Left
+    LayerName: Gesture Layer
+    Clip: {fileID: -7301033706903402532, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.8040003
+    HoldSeconds: 0.4
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 5.5, y: 0, z: -0.55}
+  - Id: Iris_Bow_brief_Right
+    PatternId: Bow_brief
+    AnimatorState: Iris_Bow_brief_Right
+    LayerName: Gesture Layer
+    Clip: {fileID: 2691729921692128301, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.8040003
+    HoldSeconds: 0.05
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 5.5, y: 0, z: -0.5}
+  - Id: Iris_Bow_brief_Left
+    PatternId: Bow_brief
+    AnimatorState: Iris_Bow_brief_Left
+    LayerName: Gesture Layer
+    Clip: {fileID: 2691729921692128301, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.8040003
+    HoldSeconds: 0.05
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 5.5, y: 0, z: 0.5}
+  - Id: Iris_Bow_inclined_Right
+    PatternId: Bow_inclined
+    AnimatorState: Iris_Bow_inclined_Right
+    LayerName: Gesture Layer
+    Clip: {fileID: -5519136470242016911, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.8040003
+    HoldSeconds: 0.25
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 5.5, y: 0, z: -0.25}
+  - Id: Iris_Bow_inclined_Left
+    PatternId: Bow_inclined
+    AnimatorState: Iris_Bow_inclined_Left
+    LayerName: Gesture Layer
+    Clip: {fileID: -5519136470242016911, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.8040003
+    HoldSeconds: 0.25
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 5.5, y: 0, z: 0.25}
+  - Id: Iris_Bow_two_stage_Right
+    PatternId: Bow_two_stage
+    AnimatorState: Iris_Bow_two_stage_Right
+    LayerName: Gesture Layer
+    Clip: {fileID: 6579466427618865198, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 2.1040003
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 5.5, y: 0, z: 0.25}
+  - Id: Iris_Bow_two_stage_Left
+    PatternId: Bow_two_stage
+    AnimatorState: Iris_Bow_two_stage_Left
+    LayerName: Gesture Layer
+    Clip: {fileID: 6579466427618865198, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 2.1040003
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 5.5, y: 0, z: -0.25}
+  - Id: Iris_Bow_settled_Right
+    PatternId: Bow_settled
+    AnimatorState: Iris_Bow_settled_Right
+    LayerName: Gesture Layer
+    Clip: {fileID: -56667983101619030, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.8040003
+    HoldSeconds: 0.55
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 5.5, y: 0, z: -0.325}
+  - Id: Iris_Bow_settled_Left
+    PatternId: Bow_settled
+    AnimatorState: Iris_Bow_settled_Left
+    LayerName: Gesture Layer
+    Clip: {fileID: -56667983101619030, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 1.8040003
+    HoldSeconds: 0.55
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 5.5, y: 0, z: 0.325}
   BlendInSeconds: 0.55
   DurationSeconds: 1.5
   BlendOutSeconds: 0.65
@@ -27,5 +232,5 @@ MonoBehaviour:
   CanInterrupt: 1
   Priority: 50
   HeadLookSuppression: 0.7
-  AllowedEmotions: 
-  DeniedEmotions: 
+  AllowedEmotions:
+  DeniedEmotions:

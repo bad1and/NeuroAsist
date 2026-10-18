@@ -7,13 +7,14 @@ namespace NeuroAsist.Avatar
     public sealed class AvatarMotionSettings : ScriptableObject
     {
         public bool MotionEnabled = true;
+        public int BehaviorRevision;
         public MotionProfile DefaultProfile;
         public List<EmotionMotionProfile> EmotionProfiles = new List<EmotionMotionProfile>();
         public List<GestureDefinition> GestureDefinitions = new List<GestureDefinition>();
         public bool IdleSchedulingEnabled = true;
-        [Min(.1f)] public float AutoGestureIntervalMinSeconds = 3f;
+        [Min(.1f)] public float AutoGestureIntervalMinSeconds = 4f;
         [Min(.1f)] public float AutoGestureIntervalMaxSeconds = 8f;
-        [Range(0f, 1f)] public float AutoGestureProbability = .45f;
+        [Range(0f, 1f)] public float AutoGestureProbability = .85f;
         [Range(0f, 1f)] public float DefaultMotionIntensity = 1f;
         public bool HeadLookEnabled = true;
         [Range(0f, 1f)] public float HeadLookWeight = 1f;

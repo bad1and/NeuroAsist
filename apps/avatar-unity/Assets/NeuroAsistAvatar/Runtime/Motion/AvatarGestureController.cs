@@ -1,136 +1,148 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
 namespace NeuroAsist.Avatar
 {
+    /// <summary>One physical gesture at a time, with a clip-derived lifecycle and safe recovery.</summary>
     public sealed class AvatarGestureController : MonoBehaviour
     {
         [SerializeField] private Animator animator;
         [SerializeField] private AvatarMotionSettings settings;
-        [Range(0.01f, 1f)] [SerializeField] private float blendSeconds = .35f;
         private readonly Dictionary<string, float> lastPlayed = new Dictionary<string, float>();
-        private Coroutine activeRoutine;
-        private Coroutine fadeRoutine;
-        private GestureDefinition active;
-        private int generation;
-        private int layer = -1;
-        private string activeVariantId;
         private IMotionRandom random = new UnityMotionRandom();
+        private AvatarBehaviorPolicy policy = new AvatarBehaviorPolicy();
+        private GestureDefinition active;
+        private GestureVariant variant;
+        private int layer = -1;
+        private float started, speed = 1f, targetWeight, releaseStarted = -1, releaseDuration, releaseWeight;
+        private bool hasSpeedParameter;
         public event Action<GestureDefinition> Started;
         public event Action<GestureDefinition> Finished;
         public event Action<GestureDefinition, string> Failed;
         public Action<float> SetHeadLookSuppression;
         public bool IsPlaying => active != null;
+        public bool WasInterrupted { get; private set; }
         public GestureDefinition Active => active;
-        public string ActiveVariantId => activeVariantId;
+        public GestureVariant ActiveVariant => variant;
+        public string ActiveVariantId => variant?.Id;
+        public float PlaybackSpeed => speed;
+        public float Elapsed => Mathf.Max(0, Time.time - started) * speed;
+        public GesturePhase Phase => active == null ? GesturePhase.Rest : releaseStarted >= 0 ? GesturePhase.Recovery : variant.PhaseAt(Elapsed);
+        public MotionChannels OccupiedChannels => variant != null ? variant.Channels : MotionChannels.None;
+        public float GestureWeight => GetWeight();
 
         public void Configure(AvatarMotionSettings value, Animator valueAnimator) { settings = value; animator = valueAnimator; CacheLayer(); }
+        public void SetPolicy(AvatarBehaviorPolicy value) => policy = value ?? new AvatarBehaviorPolicy();
         public void SetRandom(IMotionRandom value) => random = value ?? new UnityMotionRandom();
         private void Awake() => CacheLayer();
-        private void CacheLayer() { layer = animator == null ? -1 : animator.GetLayerIndex(AvatarMotionNames.GestureLayer); }
-        public bool Trigger(GestureTag tag, AvatarEmotion emotion, bool speaking, float intensity, bool interrupt, ICollection<string> recentVariants = null)
+        private void CacheLayer()
         {
-            if (settings == null || !settings.MotionEnabled || tag == GestureTag.None) return false;
-            var isSpeech = tag == GestureTag.Talk || tag == GestureTag.Talk_Right || tag == GestureTag.Talk_Left;
-            var isExplicit = tag != GestureTag.Auto && tag != GestureTag.None && !isSpeech;
-            var ignoreCooldown = interrupt || isExplicit;
-            var currentPriority = (active == null || (isExplicit && interrupt)) ? -1 : active.Priority;
-            var next = Select(settings.GestureDefinitions, tag, emotion, speaking, currentPriority, Time.unscaledTime, lastPlayed, random, ignoreCooldown);
+            layer = animator == null ? -1 : animator.GetLayerIndex(AvatarMotionNames.GestureLayer);
+            hasSpeedParameter = false;
+            if (animator != null) foreach (var p in animator.parameters) if (p.name == "GesturePlaybackSpeed") hasSpeedParameter = true;
+        }
+        public bool Trigger(GestureTag tag, AvatarEmotion emotion, bool speaking, float intensity, bool interrupt, ICollection<string> recentVariants = null, bool ignoreCooldown = false)
+        {
+            // Interrupt permission is arbitrated by the director. A new clip must
+            // never erase a stroke or change the previous clip's playback speed.
+            if (IsPlaying || settings == null || !settings.MotionEnabled || tag == GestureTag.None || intensity <= 0) return false;
+            var next = Select(settings.GestureDefinitions, tag, emotion, speaking, -1, Time.unscaledTime, lastPlayed, random, ignoreCooldown);
             if (next == null) return false;
-            if (active != null && isSpeech && active.Priority > next.Priority) return false;
-            if (active != null && !interrupt) return false;
-            if (active != null && !isExplicit && (!active.CanInterrupt || next.Priority < active.Priority)) return false;
-            bool? preferMirror = null;
-            if (AvatarMotionNames.IsExplicitLeftHand(tag)) preferMirror = true;
-            else if (AvatarMotionNames.IsExplicitRightHand(tag)) preferMirror = false;
-            var variant = next.SelectAnimatorState(random, recentVariants, preferMirror);
-            if (string.IsNullOrWhiteSpace(variant)) return false;
-            Stop(false);
-            active = next;
-            activeVariantId = variant;
-            var token = ++generation;
-            activeRoutine = StartCoroutine(Run(next, variant, Mathf.Clamp01(intensity), token));
+            var presence = speaking ? AvatarState.Speaking : GetComponent<AvatarStateController>()?.Current ?? AvatarState.Idle;
+            var selected = next.Variants.Count > 0 ? policy.Select(next.Variants, tag, presence, intensity, random, tag == GestureTag.Auto) : null;
+            if (next.Variants.Count > 0 && selected == null) return false;
+            if (selected == null)
+            {
+                bool? mirror = AvatarMotionNames.IsExplicitLeftHand(tag) ? true : AvatarMotionNames.IsExplicitRightHand(tag) ? false : (bool?)null;
+                var state = next.SelectAnimatorState(random, recentVariants, mirror);
+                selected = new GestureVariant { Id = state, PatternId = state, AnimatorState = state,
+                    PreparationSeconds = next.BlendInSeconds, StrokeSeconds = Mathf.Max(.1f, next.DurationSeconds - next.BlendInSeconds),
+                    HoldSeconds = 0, RecoverySeconds = next.BlendOutSeconds, SpeedRange = Vector2.one * next.Speed };
+            }
+            layer = animator != null ? animator.GetLayerIndex(selected.LayerName) : -1;
+            var path = AvatarMotionNames.StatePath(selected.LayerName, selected.AnimatorState);
+            if (animator == null || layer < 0 || !animator.HasState(layer, Animator.StringToHash(path)))
+            { Failed?.Invoke(next, "Animator gesture state is missing: " + selected.AnimatorState); return false; }
+            active = next; variant = selected; started = Time.time; releaseStarted = -1; WasInterrupted = false;
+            speed = Mathf.Clamp(random.Range(selected.SpeedRange.x, selected.SpeedRange.y), .5f, 1.5f);
+            if (hasSpeedParameter) animator.SetFloat("GesturePlaybackSpeed", speed);
+            targetWeight = selected.ContactSensitive ? 1f : Mathf.Clamp01(next.Weight * intensity);
+            SetWeight(0);
+            // The layer is at zero weight and has finished its previous recovery.
+            // Start the clip clock exactly here: crossfading from Empty also
+            // blended a default pose and displaced its phase relative to Elapsed.
+            animator.Play(path, layer, 0f);
+            lastPlayed[next.Id] = Time.unscaledTime;
+            lastPlayed["@family:" + AvatarBehaviorPolicy.Family(tag == GestureTag.Auto ? GestureTag.Talk : tag)] = Time.unscaledTime;
+            policy.Remember(tag, selected);
+            SetHeadLookSuppression?.Invoke((selected.Channels & MotionChannels.Head) != 0 ? 1f : next.HeadLookSuppression);
+            Started?.Invoke(next);
             return true;
+        }
+        private void Update()
+        {
+            if (active == null) return;
+            if (releaseStarted >= 0)
+            {
+                var t = Mathf.Clamp01((Time.time - releaseStarted) / releaseDuration);
+                SetWeight(releaseWeight * (1f - Ease(t)));
+                if (t >= 1) Complete();
+                return;
+            }
+            var elapsed = Elapsed;
+            var duration = variant.Duration;
+            if (elapsed >= duration) { Complete(); return; }
+            var attack = Ease(Mathf.Clamp01(elapsed / Mathf.Max(.05f, variant.PreparationSeconds)));
+            var release = Ease(Mathf.Clamp01((duration - elapsed) / Mathf.Max(.05f, variant.RecoverySeconds)));
+            SetWeight(targetWeight * Mathf.Min(attack, release));
         }
         public void Stop(bool immediate)
         {
-            generation++;
-            if (activeRoutine != null) { StopCoroutine(activeRoutine); activeRoutine = null; }
-            if (fadeRoutine != null) { StopCoroutine(fadeRoutine); fadeRoutine = null; }
-            var old = active; active = null; activeVariantId = null;
-            if (immediate) SetWeight(0f); else fadeRoutine = StartCoroutine(FadeTo(0f, generation, old != null ? old.BlendOutSeconds : blendSeconds));
-            SetHeadLookSuppression?.Invoke(0f);
-            if (old != null) Finished?.Invoke(old);
+            if (active == null) return;
+            WasInterrupted = true;
+            if (!isActiveAndEnabled || !gameObject.activeInHierarchy) { Complete(); return; }
+            if (releaseStarted >= 0) return;
+            releaseStarted = Time.time;
+            releaseWeight = GetWeight();
+            releaseDuration = immediate ? .30f : Mathf.Min(.65f, variant.RecoverySeconds / speed);
         }
-        private IEnumerator Run(GestureDefinition definition, string animatorState, float intensity, int token)
+        private void Complete()
         {
-            var statePath = AvatarMotionNames.StatePath(AvatarMotionNames.GestureLayer, animatorState);
-            var hasPath = animator != null && layer >= 0 && animator.HasState(layer, Animator.StringToHash(statePath));
-            var hasShort = animator != null && layer >= 0 && animator.HasState(layer, Animator.StringToHash(animatorState));
-            if (animator == null || layer < 0 || (!hasPath && !hasShort))
-            {
-                if (token == generation) { active = null; Failed?.Invoke(definition, "Animator gesture state is missing"); }
-                yield break;
-            }
-            animator.CrossFadeInFixedTime(hasPath ? statePath : animatorState, definition.BlendInSeconds, layer, 0f);
-            lastPlayed[definition.Id] = Time.unscaledTime;
-            SetHeadLookSuppression?.Invoke(definition.HeadLookSuppression);
-            Started?.Invoke(definition);
-            if (fadeRoutine != null) { StopCoroutine(fadeRoutine); fadeRoutine = null; }
-            fadeRoutine = StartCoroutine(FadeTo(Mathf.Clamp01(definition.Weight * intensity), token, definition.BlendInSeconds));
-            yield return fadeRoutine;
-            yield return new WaitForSeconds(Mathf.Max(.05f, definition.DurationSeconds / definition.Speed));
-            if (token != generation) yield break;
-            fadeRoutine = StartCoroutine(FadeTo(0f, token, definition.BlendOutSeconds));
-            yield return fadeRoutine;
-            if (token != generation) yield break;
-            animator.CrossFadeInFixedTime(AvatarMotionNames.StatePath(AvatarMotionNames.GestureLayer, AvatarMotionNames.EmptyGestureState), definition.BlendOutSeconds, layer, 0f);
-            SetHeadLookSuppression?.Invoke(0f);
-            active = null; activeVariantId = null; activeRoutine = null; fadeRoutine = null;
-            Finished?.Invoke(definition);
+            var previous = active;
+            SetWeight(0);
+            if (animator != null && layer >= 0) animator.Play(AvatarMotionNames.StateHash(variant != null ? variant.LayerName : AvatarMotionNames.GestureLayer, AvatarMotionNames.EmptyGestureState), layer, 0);
+            active = null; variant = null; releaseStarted = -1;
+            SetHeadLookSuppression?.Invoke(0);
+            if (previous != null) Finished?.Invoke(previous);
         }
-        private IEnumerator FadeTo(float target, int token, float seconds)
-        {
-            var start = GetWeight();
-            var duration = Mathf.Max(.01f, seconds);
-            for (var elapsed = 0f; elapsed < duration; elapsed += Time.deltaTime)
-            {
-                if (token != generation) yield break;
-                var t = Mathf.Clamp01(elapsed / duration);
-                // Quintic smootherstep with zero initial and terminal jerk for physical inertia
-                var eased = t * t * t * (t * (6f * t - 15f) + 10f);
-                SetWeight(Mathf.Lerp(start, target, eased));
-                yield return null;
-            }
-            if (token == generation) SetWeight(target);
-        }
-        private float GetWeight() => animator != null && layer >= 0 ? animator.GetLayerWeight(layer) : 0f;
+        private void OnDisable() { if (active != null) WasInterrupted = true; Complete(); }
+        private float GetWeight() => animator != null && layer >= 0 ? animator.GetLayerWeight(layer) : 0;
         private void SetWeight(float value) { if (animator != null && layer >= 0) animator.SetLayerWeight(layer, value); }
-        private void OnDisable() => Stop(true);
-
+        private static float Ease(float t) => t * t * t * (t * (t * 6f - 15f) + 10f);
         public static GestureDefinition Select(IList<GestureDefinition> values, GestureTag tag, AvatarEmotion emotion, bool speaking,
             int currentPriority, float now, IDictionary<string, float> played, IMotionRandom random, bool ignoreCooldown = false)
         {
             if (values == null || tag == GestureTag.None) return null;
-            var effectiveTag = tag == GestureTag.Auto ? AvatarMotionNames.ResolveAutoGesture(emotion) : tag;
-            if (effectiveTag == GestureTag.None) return null;
-            var baseTag = AvatarMotionNames.BaseGesture(effectiveTag);
+            var effective = tag == GestureTag.Auto ? AvatarMotionNames.ResolveAutoGesture(emotion) : tag;
+            if (effective == GestureTag.None) return null;
+            var family = AvatarBehaviorPolicy.Family(effective);
+            var familyCooldown = -1f;
+            foreach (var definition in values) if (definition != null && definition.Tag == family) { familyCooldown = definition.CooldownSeconds; break; }
             var choices = new List<GestureDefinition>();
-            for (var i = 0; i < values.Count; i++)
+            foreach (var item in values)
             {
-                var item = values[i];
-                if (item == null || string.IsNullOrWhiteSpace(item.AnimatorState) || !item.Allows(emotion, speaking)) continue;
-                if (effectiveTag != item.Tag && baseTag != item.Tag) continue;
+                if (item == null || string.IsNullOrEmpty(item.AnimatorState) || !item.Allows(emotion, speaking)) continue;
+                if (item.Tag != effective && item.Tag != AvatarMotionNames.BaseGesture(effective)) continue;
                 if (item.Priority < currentPriority) continue;
-                if (!ignoreCooldown && played.TryGetValue(item.Id, out var last) && now - last < item.CooldownSeconds) continue;
+                var cooldown = familyCooldown >= 0 ? familyCooldown : item.CooldownSeconds;
+                var hasPlayed = played.TryGetValue("@family:" + family, out var last) || played.TryGetValue(item.Id, out last);
+                if (!ignoreCooldown && hasPlayed && now - last < cooldown) continue;
                 choices.Add(item);
             }
             if (choices.Count == 0) return null;
-            var exact = choices.FindAll(c => c.Tag == effectiveTag);
-            if (exact.Count > 0) return exact[random.Range(0, exact.Count)];
-            return choices[random.Range(0, choices.Count)];
+            var exact = choices.FindAll(v => v.Tag == effective);
+            return exact.Count > 0 ? exact[random.Range(0, exact.Count)] : choices[random.Range(0, choices.Count)];
         }
     }
 }

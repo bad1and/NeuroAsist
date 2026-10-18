@@ -14,6 +14,7 @@ namespace NeuroAsist.AvatarEditor
             AssetDatabase.ImportAsset("Assets/IRIS.vrm", ImportAssetOptions.ForceUpdate);
             AssetDatabase.SaveAssets();
             AvatarRuntimeSetup.Setup();
+            AvatarMotionValidator.Validate();
             var output = Path.GetFullPath(Path.Combine("Builds", "NeuroAsistAvatar", "NeuroAsistAvatar.exe"));
             // Allow verification builds beside an avatar currently owned by Tauri.
             var args = System.Environment.GetCommandLineArgs();

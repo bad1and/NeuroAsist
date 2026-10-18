@@ -11,11 +11,284 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0f93fd627b5101f4aab8c90d088bcba2, type: 3}
   m_Name: Thinking_Left
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier:
   Id: Thinking_LeftGesture
   Tag: 23
   AnimatorState: ThinkingMirror
   VariantAnimatorStates: []
+  Variants:
+  - Id: Iris_Thinking_chin_pause_Right
+    PatternId: Thinking_chin_pause
+    AnimatorState: Iris_Thinking_chin_pause_Right
+    LayerName: Gesture Layer
+    Clip: {fileID: 323278325177327536, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.85, y: 1}
+    PreparationSeconds: 0.72
+    StrokeSeconds: 2.7940004
+    HoldSeconds: 0.5
+    RecoverySeconds: 0.95
+    ContactSensitive: 1
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.25}
+  - Id: Iris_Thinking_chin_pause_Left
+    PatternId: Thinking_chin_pause
+    AnimatorState: Iris_Thinking_chin_pause_Left
+    LayerName: Gesture Layer
+    Clip: {fileID: 323278325177327536, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.85, y: 1}
+    PreparationSeconds: 0.72
+    StrokeSeconds: 2.7940004
+    HoldSeconds: 0.5
+    RecoverySeconds: 0.95
+    ContactSensitive: 1
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.25}
+  - Id: Iris_Thinking_elbow_support_Right
+    PatternId: Thinking_elbow_support
+    AnimatorState: Iris_Thinking_elbow_support_Right
+    LayerName: Gesture Layer
+    Clip: {fileID: 1030855011337731534, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.85, y: 1}
+    PreparationSeconds: 0.72
+    StrokeSeconds: 2.7940004
+    HoldSeconds: 0.65
+    RecoverySeconds: 0.95
+    ContactSensitive: 1
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.55}
+  - Id: Iris_Thinking_elbow_support_Left
+    PatternId: Thinking_elbow_support
+    AnimatorState: Iris_Thinking_elbow_support_Left
+    LayerName: Gesture Layer
+    Clip: {fileID: 1030855011337731534, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.85, y: 1}
+    PreparationSeconds: 0.72
+    StrokeSeconds: 2.7940004
+    HoldSeconds: 0.65
+    RecoverySeconds: 0.95
+    ContactSensitive: 1
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.55}
+  - Id: Iris_Thinking_brief_reflection_Right
+    PatternId: Thinking_brief_reflection
+    AnimatorState: Iris_Thinking_brief_reflection_Right
+    LayerName: Gesture Layer
+    Clip: {fileID: -7481030747213685739, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.85, y: 1}
+    PreparationSeconds: 0.72
+    StrokeSeconds: 2.7940004
+    HoldSeconds: 0.1
+    RecoverySeconds: 0.95
+    ContactSensitive: 1
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.425}
+  - Id: Iris_Thinking_brief_reflection_Left
+    PatternId: Thinking_brief_reflection
+    AnimatorState: Iris_Thinking_brief_reflection_Left
+    LayerName: Gesture Layer
+    Clip: {fileID: -7481030747213685739, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.85, y: 1}
+    PreparationSeconds: 0.72
+    StrokeSeconds: 2.7940004
+    HoldSeconds: 0.1
+    RecoverySeconds: 0.95
+    ContactSensitive: 1
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.425}
+  - Id: Iris_Thinking_inclined_Right
+    PatternId: Thinking_inclined
+    AnimatorState: Iris_Thinking_inclined_Right
+    LayerName: Gesture Layer
+    Clip: {fileID: 6427589830744911996, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.85, y: 1}
+    PreparationSeconds: 0.72
+    StrokeSeconds: 2.7940004
+    HoldSeconds: 0.45
+    RecoverySeconds: 0.95
+    ContactSensitive: 1
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.099999994}
+  - Id: Iris_Thinking_inclined_Left
+    PatternId: Thinking_inclined
+    AnimatorState: Iris_Thinking_inclined_Left
+    LayerName: Gesture Layer
+    Clip: {fileID: 6427589830744911996, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.85, y: 1}
+    PreparationSeconds: 0.72
+    StrokeSeconds: 2.7940004
+    HoldSeconds: 0.45
+    RecoverySeconds: 0.95
+    ContactSensitive: 1
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.099999994}
+  - Id: Iris_Thinking_consider_then_release_Right
+    PatternId: Thinking_consider_then_release
+    AnimatorState: Iris_Thinking_consider_then_release_Right
+    LayerName: Gesture Layer
+    Clip: {fileID: -4160534592631963478, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.85, y: 1}
+    PreparationSeconds: 0.72
+    StrokeSeconds: 2.7940004
+    HoldSeconds: 0.25
+    RecoverySeconds: 0.95
+    ContactSensitive: 1
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.29999998}
+  - Id: Iris_Thinking_consider_then_release_Left
+    PatternId: Thinking_consider_then_release
+    AnimatorState: Iris_Thinking_consider_then_release_Left
+    LayerName: Gesture Layer
+    Clip: {fileID: -4160534592631963478, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.85, y: 1}
+    PreparationSeconds: 0.72
+    StrokeSeconds: 2.7940004
+    HoldSeconds: 0.25
+    RecoverySeconds: 0.95
+    ContactSensitive: 1
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.29999998}
+  - Id: Iris_Thinking_temple_approach_Right
+    PatternId: Thinking_temple_approach
+    AnimatorState: Iris_Thinking_temple_approach_Right
+    LayerName: Gesture Layer
+    Clip: {fileID: -3298305919576938144, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.85, y: 1}
+    PreparationSeconds: 0.72
+    StrokeSeconds: 2.7940004
+    HoldSeconds: 0.4
+    RecoverySeconds: 0.95
+    ContactSensitive: 1
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.14999999}
+  - Id: Iris_Thinking_temple_approach_Left
+    PatternId: Thinking_temple_approach
+    AnimatorState: Iris_Thinking_temple_approach_Left
+    LayerName: Gesture Layer
+    Clip: {fileID: -3298305919576938144, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.85, y: 1}
+    PreparationSeconds: 0.72
+    StrokeSeconds: 2.7940004
+    HoldSeconds: 0.4
+    RecoverySeconds: 0.95
+    ContactSensitive: 1
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.14999999}
+  - Id: Iris_Thinking_folded_support_Right
+    PatternId: Thinking_folded_support
+    AnimatorState: Iris_Thinking_folded_support_Right
+    LayerName: Gesture Layer
+    Clip: {fileID: 1552155729490893473, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.85, y: 1}
+    PreparationSeconds: 0.72
+    StrokeSeconds: 2.7940004
+    HoldSeconds: 0.55
+    RecoverySeconds: 0.95
+    ContactSensitive: 1
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.7}
+  - Id: Iris_Thinking_folded_support_Left
+    PatternId: Thinking_folded_support
+    AnimatorState: Iris_Thinking_folded_support_Left
+    LayerName: Gesture Layer
+    Clip: {fileID: 1552155729490893473, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.85, y: 1}
+    PreparationSeconds: 0.72
+    StrokeSeconds: 2.7940004
+    HoldSeconds: 0.55
+    RecoverySeconds: 0.95
+    ContactSensitive: 1
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.7}
+  - Id: Iris_Thinking_quiet_realization_Right
+    PatternId: Thinking_quiet_realization
+    AnimatorState: Iris_Thinking_quiet_realization_Right
+    LayerName: Gesture Layer
+    Clip: {fileID: -736693910911016091, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.85, y: 1}
+    PreparationSeconds: 0.72
+    StrokeSeconds: 2.7940004
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.95
+    ContactSensitive: 1
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: -0.45000002}
+  - Id: Iris_Thinking_quiet_realization_Left
+    PatternId: Thinking_quiet_realization
+    AnimatorState: Iris_Thinking_quiet_realization_Left
+    LayerName: Gesture Layer
+    Clip: {fileID: -736693910911016091, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 15
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.85, y: 1}
+    PreparationSeconds: 0.72
+    StrokeSeconds: 2.7940004
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.95
+    ContactSensitive: 1
+    LargeMotion: 0
+    TorsoAccent: {x: 0.45, y: 0, z: 0.45000002}
   BlendInSeconds: 0.55
   DurationSeconds: 1.5
   BlendOutSeconds: 0.65
@@ -26,5 +299,5 @@ MonoBehaviour:
   CanInterrupt: 1
   Priority: 10
   HeadLookSuppression: 0.3
-  AllowedEmotions: 
-  DeniedEmotions: 
+  AllowedEmotions:
+  DeniedEmotions:

@@ -35,6 +35,14 @@ namespace NeuroAsist.AvatarEditor
             var sleep = Get<AvatarSleepController>(root);
             var presentation = Get<AvatarPresentationController>(root);
             var idle = Get<AvatarIdleScheduler>(root); var gesture = Get<AvatarGestureController>(root); var look = Get<AvatarLookController>(root); var motion = Get<AvatarMotionController>(root); var life = Get<AvatarLifeController>(root);
+            var contact = Get<AvatarContactController>(root);
+            contact.Configure(animator, gesture);
+            Link(contact, "animator", animator); Link(contact, "gestures", gesture);
+            var poseFilter = Get<AvatarPoseFilter>(root);
+            poseFilter.Configure(animator); Link(poseFilter, "animator", animator);
+            var armRig = Get<AvatarArmRig>(root);
+            armRig.Configure(animator); Link(armRig, "animator", animator);
+            Get<AvatarBodyController>(root);
             var target = GameObject.Find("AvatarHeadLookTarget") ?? new GameObject("AvatarHeadLookTarget");
             if (Camera.main != null) target.transform.SetParent(Camera.main.transform, false); else target.transform.position = vrm.transform.position + vrm.transform.forward * 2f + Vector3.up * 1.5f;
             player.Configure(settings, audio.GetComponent<AudioSource>());

@@ -68,6 +68,14 @@ namespace NeuroAsist.Avatar
         Facepalm = 32,
         Pointing = 33,
         Bow = 34,
+        Head_Scratch_Left = 35,
+        Head_Scratch_Right = 36,
+        Thumbs_Up_Left = 37,
+        Thumbs_Up_Right = 38,
+        Pointing_Left = 39,
+        Pointing_Right = 40,
+        Facepalm_Left = 41,
+        Facepalm_Right = 42,
     }
 
     public enum IdleCategory { Micro, Normal, Long }
@@ -114,6 +122,18 @@ namespace NeuroAsist.Avatar
         {
             switch (tag)
             {
+                case GestureTag.Head_Scratch_Left:
+                case GestureTag.Head_Scratch_Right:
+                    return GestureTag.Head_Scratch;
+                case GestureTag.Thumbs_Up_Left:
+                case GestureTag.Thumbs_Up_Right:
+                    return GestureTag.Thumbs_Up;
+                case GestureTag.Pointing_Left:
+                case GestureTag.Pointing_Right:
+                    return GestureTag.Pointing;
+                case GestureTag.Facepalm_Left:
+                case GestureTag.Facepalm_Right:
+                    return GestureTag.Facepalm;
                 case GestureTag.Greeting_Right:
                 case GestureTag.Greeting_Left:
                 case GestureTag.Greeting_Casual:
@@ -146,7 +166,11 @@ namespace NeuroAsist.Avatar
                    tag == GestureTag.Thinking_Left ||
                    tag == GestureTag.Question_Left ||
                    tag == GestureTag.Explanation_Left ||
-                   tag == GestureTag.Talk_Left;
+                   tag == GestureTag.Talk_Left ||
+                   tag == GestureTag.Head_Scratch_Left ||
+                   tag == GestureTag.Thumbs_Up_Left ||
+                   tag == GestureTag.Pointing_Left ||
+                   tag == GestureTag.Facepalm_Left;
         }
 
         public static bool IsExplicitRightHand(GestureTag tag)
@@ -156,7 +180,11 @@ namespace NeuroAsist.Avatar
                    tag == GestureTag.Thinking_Right ||
                    tag == GestureTag.Question_Right ||
                    tag == GestureTag.Explanation_Right ||
-                   tag == GestureTag.Talk_Right;
+                   tag == GestureTag.Talk_Right ||
+                   tag == GestureTag.Head_Scratch_Right ||
+                   tag == GestureTag.Thumbs_Up_Right ||
+                   tag == GestureTag.Pointing_Right ||
+                   tag == GestureTag.Facepalm_Right;
         }
 
         public static bool IsFacialMicroEmotion(AvatarEmotion emotion)
@@ -170,44 +198,7 @@ namespace NeuroAsist.Avatar
 
         public static GestureTag ResolveAutoGesture(AvatarEmotion emotion)
         {
-            switch (emotion)
-            {
-                case AvatarEmotion.Neutral:
-                case AvatarEmotion.Relaxed:
-                case AvatarEmotion.Sleepy:
-                case AvatarEmotion.Pouting:
-                case AvatarEmotion.Wink:
-                case AvatarEmotion.Wink_Left:
-                case AvatarEmotion.Teasing:
-                    return GestureTag.None;
-                case AvatarEmotion.Happy:
-                case AvatarEmotion.Playful:
-                    return GestureTag.Greeting_Casual;
-                case AvatarEmotion.Excited:
-                    return GestureTag.Greeting_Right;
-                case AvatarEmotion.Proud:
-                case AvatarEmotion.Touched:
-                    return GestureTag.Nod;
-                case AvatarEmotion.Thinking:
-                case AvatarEmotion.Curious:
-                case AvatarEmotion.Concerned:
-                    return GestureTag.Thinking;
-                case AvatarEmotion.Skeptical:
-                    return GestureTag.Disagreement;
-                case AvatarEmotion.Surprised:
-                case AvatarEmotion.Shocked:
-                    return GestureTag.Surprise;
-                case AvatarEmotion.Sad:
-                case AvatarEmotion.Confused:
-                case AvatarEmotion.Embarrassed:
-                case AvatarEmotion.Smirk:
-                    return GestureTag.Shrug;
-                case AvatarEmotion.Angry:
-                case AvatarEmotion.Annoyed:
-                    return GestureTag.Frustration;
-                default:
-                    return GestureTag.None;
-            }
+            return IsFacialMicroEmotion(emotion) ? GestureTag.None : GestureTag.Talk;
         }
     }
 

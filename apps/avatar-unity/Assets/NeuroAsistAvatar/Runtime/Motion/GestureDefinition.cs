@@ -12,6 +12,7 @@ namespace NeuroAsist.Avatar
         public string AnimatorState = "TalkGesture01";
         [Tooltip("Optional safe alternatives of the same upper-body clip (for example a mirrored state).")]
         public List<string> VariantAnimatorStates = new List<string>();
+        public List<GestureVariant> Variants = new List<GestureVariant>();
         [Min(.05f)] public float BlendInSeconds = .55f;
         [Min(.05f)] public float DurationSeconds = 1.5f;
         [Min(.05f)] public float BlendOutSeconds = .65f;

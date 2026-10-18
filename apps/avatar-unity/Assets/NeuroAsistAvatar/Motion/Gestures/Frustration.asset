@@ -11,12 +11,217 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0f93fd627b5101f4aab8c90d088bcba2, type: 3}
   m_Name: Frustration
-  m_EditorClassIdentifier: 
+  m_EditorClassIdentifier:
   Id: FrustrationGesture
   Tag: 10
   AnimatorState: Frustration
   VariantAnimatorStates:
   - FrustrationMirror
+  Variants:
+  - Id: Iris_Frustration_direct_Right
+    PatternId: Frustration_direct
+    AnimatorState: Iris_Frustration_direct_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -8988102551284840590, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.2
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: -0.19999999}
+  - Id: Iris_Frustration_direct_Left
+    PatternId: Frustration_direct
+    AnimatorState: Iris_Frustration_direct_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -8988102551284840590, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.2
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: 0.19999999}
+  - Id: Iris_Frustration_supported_Right
+    PatternId: Frustration_supported
+    AnimatorState: Iris_Frustration_supported_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -3213472157761219276, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.4
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: 0.55}
+  - Id: Iris_Frustration_supported_Left
+    PatternId: Frustration_supported
+    AnimatorState: Iris_Frustration_supported_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -3213472157761219276, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.4
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: -0.55}
+  - Id: Iris_Frustration_brief_Right
+    PatternId: Frustration_brief
+    AnimatorState: Iris_Frustration_brief_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 5059829985659120723, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.05
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: -0.5}
+  - Id: Iris_Frustration_brief_Left
+    PatternId: Frustration_brief
+    AnimatorState: Iris_Frustration_brief_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 5059829985659120723, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.05
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: 0.5}
+  - Id: Iris_Frustration_inclined_Right
+    PatternId: Frustration_inclined
+    AnimatorState: Iris_Frustration_inclined_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 5339076484989421997, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.25
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: -0.25}
+  - Id: Iris_Frustration_inclined_Left
+    PatternId: Frustration_inclined
+    AnimatorState: Iris_Frustration_inclined_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 5339076484989421997, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.25
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: 0.25}
+  - Id: Iris_Frustration_two_stage_Right
+    PatternId: Frustration_two_stage
+    AnimatorState: Iris_Frustration_two_stage_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 8719649624595113139, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3.3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: 0.25}
+  - Id: Iris_Frustration_two_stage_Left
+    PatternId: Frustration_two_stage
+    AnimatorState: Iris_Frustration_two_stage_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: 8719649624595113139, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3.3
+    HoldSeconds: 0.15
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: -0.25}
+  - Id: Iris_Frustration_settled_Right
+    PatternId: Frustration_settled
+    AnimatorState: Iris_Frustration_settled_Right
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -8313419322463304192, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 1
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.55
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: -0.325}
+  - Id: Iris_Frustration_settled_Left
+    PatternId: Frustration_settled
+    AnimatorState: Iris_Frustration_settled_Left
+    LayerName: Arms Gesture Layer
+    Clip: {fileID: -8313419322463304192, guid: febdebbdfba099543adc46b28187fa61, type: 2}
+    Side: 2
+    Channels: 11
+    AllowedPresence: 15
+    SpeedRange: {x: 0.92, y: 1.08}
+    IntensityRange: {x: 0.58, y: 0.92}
+    PreparationSeconds: 0.58
+    StrokeSeconds: 3
+    HoldSeconds: 0.55
+    RecoverySeconds: 0.82
+    ContactSensitive: 0
+    LargeMotion: 1
+    TorsoAccent: {x: 0.45, y: 0, z: 0.325}
   BlendInSeconds: 0.55
   DurationSeconds: 1.5
   BlendOutSeconds: 0.65
@@ -27,5 +232,5 @@ MonoBehaviour:
   CanInterrupt: 1
   Priority: 10
   HeadLookSuppression: 0
-  AllowedEmotions: 
-  DeniedEmotions: 
+  AllowedEmotions:
+  DeniedEmotions:

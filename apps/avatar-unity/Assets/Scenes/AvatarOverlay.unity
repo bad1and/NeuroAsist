@@ -332,6 +332,10 @@ GameObject:
   - component: {fileID: 975465929}
   - component: {fileID: 975465930}
   - component: {fileID: 975465931}
+  - component: {fileID: 975465932}
+  - component: {fileID: 975465933}
+  - component: {fileID: 975465934}
+  - component: {fileID: 975465935}
   m_Layer: 0
   m_Name: NeuroAsistAvatarRuntime
   m_TagString: Untagged
@@ -349,8 +353,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 6fb9af7cb17d54543aa796e337c74291, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   settings: {fileID: 11400000, guid: 05d2bd1b01ec876458e5a67500510f75, type: 2}
   router: {fileID: 975465918}
   state: {fileID: 975465921}
@@ -364,8 +368,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 4fccbc45d78573f4894a07447070297c, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   client: {fileID: 975465917}
   speech: {fileID: 975465919}
   emotion: {fileID: 975465920}
@@ -383,8 +387,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 788b8ab832599674cac29a010e7cfd0f, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   client: {fileID: 975465917}
   player: {fileID: 1897161021}
   emotion: {fileID: 975465920}
@@ -402,8 +406,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 43cc0d3ad52897b4881ea1a188c69549, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   settings: {fileID: 11400000, guid: 05d2bd1b01ec876458e5a67500510f75, type: 2}
   vrm: {fileID: 1949565771}
 --- !u!114 &975465921
@@ -416,8 +420,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 13d644f31eac9ed4bb98253f16204d32, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   client: {fileID: 975465917}
 --- !u!4 &975465922
 Transform:
@@ -444,8 +448,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 3f09d9175208ea74ca5edce83c827e7f, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   settings: {fileID: 11400000, guid: 4850463242dd7ae428af9e168fac217a, type: 2}
   animator: {fileID: 1949565772}
   avatarRoot: {fileID: 1949565773}
@@ -455,8 +459,6 @@ MonoBehaviour:
   gestureController: {fileID: 975465925}
   lookController: {fileID: 975465924}
   lifeController: {fileID: 0}
-  transitionSeconds: 0.7
-  rootDriftWarningDistance: 0.02
 --- !u!114 &975465924
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -467,8 +469,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: abf864b3ef285d645b8804b2383bf3b7, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   animator: {fileID: 1949565772}
   target: {fileID: 1594657434}
   headLookRig: {fileID: 0}
@@ -487,11 +489,10 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 6ab12b5bd093a364d9483bc6d3f35669, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   animator: {fileID: 1949565772}
   settings: {fileID: 11400000, guid: 4850463242dd7ae428af9e168fac217a, type: 2}
-  blendSeconds: 0.35
 --- !u!114 &975465926
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -502,8 +503,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 1e5c7c2d863f52a4dadc6e80f159a4d1, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   settings: {fileID: 11400000, guid: 4850463242dd7ae428af9e168fac217a, type: 2}
 --- !u!114 &975465927
 MonoBehaviour:
@@ -515,8 +516,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 5f6c6738d7604f3bb79d61fc49ec839e, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   settings: {fileID: 11400000, guid: 05d2bd1b01ec876458e5a67500510f75, type: 2}
 --- !u!114 &975465928
 MonoBehaviour:
@@ -528,8 +529,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 6e1adc696baf4d57908a0306850b4baf, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   visible: 1
   alwaysOnTop: 1
   locked: 1
@@ -545,8 +546,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: d73a85de0c817194fa7720a3e05d886f, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   avatarCamera: {fileID: 963194227}
   avatar: {fileID: 1949565771}
   verticalFieldOfView: 30
@@ -563,8 +564,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 12c0f52dbd4a4edc978bc917cf8a4bf1, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   animator: {fileID: 1949565772}
   vrm: {fileID: 1949565771}
   motion: {fileID: 975465923}
@@ -581,11 +582,65 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 441725de861a87240a0fe94dad8a5d02, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   avatarCamera: {fileID: 963194227}
   speech: {fileID: 975465919}
   client: {fileID: 975465917}
+--- !u!114 &975465932
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 975465916}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d15e4683447975f46b6b89f52841eab3, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  animator: {fileID: 1949565772}
+  gestures: {fileID: 975465925}
+--- !u!114 &975465933
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 975465916}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8bdc70028f17f4748a0fbd616a1bcc37, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  animator: {fileID: 1949565772}
+  wristSwingLimit: 50
+  wristTwistLimit: 20
+--- !u!114 &975465934
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 975465916}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8ae842378cc57dd43b860f3b033131dd, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  animator: {fileID: 1949565772}
+--- !u!114 &975465935
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 975465916}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 21ce555ce8f9fc746b98184538d15fc2, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
 --- !u!1 &1594657433
 GameObject:
   m_ObjectHideFlags: 0
@@ -648,8 +703,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 87560e04aa74c7a41acb9c87051c3b02, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   profile: {fileID: 11400000, guid: d0622910165464ec98bf667e4f571218, type: 2}
   onLipSyncUpdate:
     m_PersistentCalls:
@@ -660,10 +715,10 @@ MonoBehaviour:
         m_Mode: 0
         m_Arguments:
           m_ObjectArgument: {fileID: 0}
-          m_ObjectArgumentAssemblyTypeName: 
+          m_ObjectArgumentAssemblyTypeName:
           m_IntArgument: 0
           m_FloatArgument: 0
-          m_StringArgument: 
+          m_StringArgument:
           m_BoolArgument: 0
         m_CallState: 2
   outputSoundGain: 1
@@ -789,8 +844,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: c78b60f75011f9848a7e5b3cffee7fb1, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   settings: {fileID: 11400000, guid: 05d2bd1b01ec876458e5a67500510f75, type: 2}
   audioSource: {fileID: 1897161018}
   vrm: {fileID: 1949565771}
@@ -808,8 +863,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0d114aeedd531f643b2992a3609afcff, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   settings: {fileID: 11400000, guid: 05d2bd1b01ec876458e5a67500510f75, type: 2}
   audioSource: {fileID: 1897161018}
 --- !u!114 &1897161022
@@ -822,8 +877,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 8deb746cd9af8b64e810bfa6302d977b, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   vrm: {fileID: 1949565771}
   audioSource: {fileID: 1897161018}
   maxWeight: 0.78
@@ -842,7 +897,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 4870552773557632513, guid: 30f8e7038b1e4586b81e60fc7b4b6f11, type: 3}
       propertyPath: m_Controller
-      value: 
+      value:
       objectReference: {fileID: 9100000, guid: 8013cd4e618909a498a653807adf68d9, type: 2}
     - target: {fileID: 5159078012444724336, guid: 30f8e7038b1e4586b81e60fc7b4b6f11, type: 3}
       propertyPath: m_LocalPosition.x
@@ -898,8 +953,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: bfba4ccd3f854e64f868ce83553071a9, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
 --- !u!95 &1949565772 stripped
 Animator:
   m_CorrespondingSourceObject: {fileID: 4870552773557632513, guid: 30f8e7038b1e4586b81e60fc7b4b6f11, type: 3}
