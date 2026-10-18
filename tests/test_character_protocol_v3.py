@@ -94,8 +94,8 @@ def test_v3_turn_keeps_reply_when_only_metadata_is_invalid() -> None:
     assert valid_metadata is False
     assert reason == "invalid_metadata"
     assert turn.reply == "Текст должен остаться видимым."
-    assert turn.affect.emotion is Emotion.THINKING
-    assert turn.gesture.name is Gesture.QUESTION
+    assert turn.affect.emotion is Emotion.NEUTRAL
+    assert turn.gesture.name is Gesture.AUTO
 
 
 def test_v1_v2_flat_payload_adapts_to_canonical_turn() -> None:
@@ -132,7 +132,7 @@ def test_invalid_v3_metadata_emits_diagnostic_without_losing_reply() -> None:
     )
 
     assert result["reply"] == "Не теряй меня"
-    assert result["emotion"] == "thinking"
+    assert result["emotion"] == "neutral"
     assert events[0][0] == "llm.invalid_json"
     assert events[0][3]["reason"] == "invalid_metadata"
 
@@ -173,24 +173,11 @@ def test_avatar_directive_parsing_handles_quotes_and_brackets() -> None:
 def test_animation_directive_inference_handles_intent_and_morphs() -> None:
     from apps.backend.app.voice.directives import infer_animation_directive
 
-    d_greet = infer_animation_directive("Привет!", "Привет-привет!")
-    assert d_greet.gesture == "greeting_right"
-    assert d_greet.emotion == Emotion.HAPPY
-
-    d_quest = infer_animation_directive("Как твои дела?", "Всё отлично!")
-    assert d_quest.gesture == "question_right"
-    assert d_quest.emotion == Emotion.THINKING
-
-    d_disagree = infer_animation_directive("Ты не права", "Да нет, погоди...")
-    assert d_disagree.gesture == "disagreement"
-
-    d_tease = infer_animation_directive(None, "Бе-бе-бе, не угадал!")
-    assert d_tease.emotion == Emotion.TEASING
-    assert d_tease.gesture == "none"
-
-    d_wink = infer_animation_directive(None, "Сейчас всё сделаю, подмигиваю ;)")
-    assert d_wink.emotion == Emotion.WINK
-    assert d_wink.gesture == "none"
+    # Reply words and ordinary conversation no longer trigger body animation.
+    for user, reply in [("Привет!", "Привет-привет!"), ("Как твои дела?", "Всё отлично!"),
+                        ("Ты не права", "Да нет, погоди..."), (None, "Бе-бе-бе!"),
+                        (None, "Подмигиваю ;)")]:
+        assert infer_animation_directive(user, reply).gesture == "auto"
 
     d_scratch = infer_animation_directive("Почеши голову, пожалуйста", "Хм, дай подумать...")
     assert d_scratch.gesture == "head_scratch"
@@ -219,21 +206,20 @@ def test_animation_directive_inference_handles_intent_and_morphs() -> None:
     assert d_point.gesture == "pointing"
 
     d_pout = infer_animation_directive(None, "Вот так всегда, надула губки...")
-    assert d_pout.emotion == Emotion.POUTING
-    assert d_pout.gesture == "none"
+    assert d_pout.emotion == Emotion.NEUTRAL
+    assert d_pout.gesture == "auto"
 
 
-def test_speech_segment_resolves_auto_to_explicit_gesture() -> None:
+def test_speech_segment_preserves_auto_but_keeps_semantic_gestures() -> None:
     from apps.backend.app.voice.delivery import make_speech_segment, VoiceDirective
 
-    # Without directive: should resolve to talk_right or inferred gesture, never "auto"
+    # Unspecified speech leaves only idle movement.
     seg1 = make_speech_segment("Я рассказываю интересную историю.")
-    assert seg1.motion_gesture != "auto"
-    assert seg1.motion_gesture in ("talk_right", "talk")
+    assert seg1.motion_gesture == "auto"
 
-    # With directive gesture="auto": should also resolve away from "auto"
+    # Punctuation does not invent a model gesture.
     seg2 = make_speech_segment("Что ты думаешь?", directive=VoiceDirective(gesture="auto"))
-    assert seg2.motion_gesture != "auto"
+    assert seg2.motion_gesture == "auto"
 
     # Facial micro emotion: gesture should be none
     seg3 = make_speech_segment("Бе-бе!", directive=VoiceDirective(emotion="teasing", gesture="auto"))
@@ -256,12 +242,12 @@ def test_requested_action_never_uses_talk_gesture() -> None:
     assert d_wave2.gesture == "greeting_right"
     assert d_wave2.emotion == Emotion.HAPPY
 
-    # 2. In LiveDirectiveParser: header with neutral/auto or talk is overridden by requested action
+    # 2. An explicit model choice is never replaced by keyword inference.
     parser = LiveDirectiveParser(user_text="Помаши рукой")
     dir_parsed, _ = parser.feed('[[avatar emotion=neutral gesture=auto intensity=1.0]] Привет!')
     assert dir_parsed is not None
-    assert dir_parsed.gesture == "greeting_right"
-    assert dir_parsed.emotion == Emotion.HAPPY
+    assert dir_parsed.gesture == "auto"
+    assert dir_parsed.emotion == Emotion.NEUTRAL
 
     # 3. In parse_turn (JSON mode): if model returned generic "talk", it must be overridden
     turn, valid, _ = parse_turn(
@@ -275,8 +261,8 @@ def test_requested_action_never_uses_talk_gesture() -> None:
         },
         user_text="Помаши рукой",
     )
-    assert turn.gesture.name == Gesture.GREETING_RIGHT
-    assert turn.affect.emotion == Emotion.HAPPY
+    assert turn.gesture.name == Gesture.TALK
+    assert turn.affect.emotion == Emotion.NEUTRAL
 
     # 4. Nodding / shrug / wink requests
     d_nod = infer_animation_directive("Кивни головой", "Ага!")
@@ -318,7 +304,7 @@ def test_requested_action_never_uses_talk_gesture() -> None:
     assert d_bow.gesture == "bow"
     assert d_bow.emotion == Emotion.NEUTRAL
 
-    # 6. Override generic talk in parse_turn when user asked to scratch head
+    # 6. The compatibility adapter preserves the model metadata.
     turn_scratch, _, _ = parse_turn(
         {
             "protocol_version": 3,
@@ -330,8 +316,8 @@ def test_requested_action_never_uses_talk_gesture() -> None:
         },
         user_text="Почеши голову",
     )
-    assert turn_scratch.gesture.name == Gesture.HEAD_SCRATCH
-    assert turn_scratch.affect.emotion == Emotion.THINKING
+    assert turn_scratch.gesture.name == Gesture.TALK
+    assert turn_scratch.affect.emotion == Emotion.NEUTRAL
 
 
 

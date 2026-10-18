@@ -357,7 +357,15 @@
         "thumbs_up",
         "facepalm",
         "pointing",
-        "bow"
+        "bow",
+        "head_scratch_left",
+        "head_scratch_right",
+        "thumbs_up_left",
+        "thumbs_up_right",
+        "pointing_left",
+        "pointing_right",
+        "facepalm_left",
+        "facepalm_right"
       ],
       "title": "Gesture",
       "type": "string"

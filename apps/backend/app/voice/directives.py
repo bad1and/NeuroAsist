@@ -3,21 +3,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from apps.backend.app.schemas.character import Emotion
+from apps.backend.app.schemas.character import Emotion, Gesture
 
 
 _EMOTIONS = frozenset(item.value for item in Emotion)
-_GESTURES = frozenset({
-    "none", "auto", "talk", "talk_right", "talk_left",
-    "greeting", "greeting_right", "greeting_left", "greeting_casual",
-    "agreement", "disagreement", "question", "question_right", "question_left",
-    "explanation", "explanation_right", "explanation_left",
-    "thinking", "thinking_right", "thinking_left",
-    "surprise", "frustration",
-    "farewell", "farewell_right", "farewell_left", "farewell_casual",
-    "shrug", "nod",
-    "head_scratch", "clapping", "laughing", "thumbs_up", "facepalm", "pointing", "bow",
-})
+_GESTURES = frozenset(item.value for item in Gesture)
 _HEADER_RE = re.compile(
     r"^\[\[avatar\s+emotion=(?P<emotion>[a-z_]+)\s+gesture=(?P<gesture>[a-z_]+)\s+intensity=(?P<intensity>0(?:\.\d+)?|1(?:\.0+)?)\s*\]\]",
     re.IGNORECASE,
@@ -38,7 +28,7 @@ _ATTR_RE = re.compile(
 
 
 def infer_animation_directive(user_text: str = "", assistant_text: str = "") -> AvatarDirective:
-    """Infer a natural, expressive emotion and gesture when the model omits explicit tags."""
+    """Recognize explicit user action requests; never invent acting from reply prose."""
     text = (assistant_text or "").strip()
     u_text = (user_text or "").strip()
     lower = text.lower()
@@ -82,7 +72,7 @@ def infer_animation_directive(user_text: str = "", assistant_text: str = "") -> 
 
     # 3. Facial morphs (wink, pouting, teasing)
     if any(w in u_lower for w in ("подмигни", "моргни", "мигни")):
-        return AvatarDirective(Emotion.WINK, "none", 0.9)
+        return AvatarDirective(Emotion.WINK_LEFT if "лев" in u_lower else Emotion.WINK, "none", 0.9)
     if any(w in u_lower for w in ("надуй губки", "надуй щёчки", "надуй щечки", "обидься", "подуйся")):
         return AvatarDirective(Emotion.POUTING, "none", 0.9)
     if any(w in u_lower for w in ("покажи язык", "высуни язык", "покажи язычок", "дразнись", "подурачься")):
@@ -104,102 +94,12 @@ def infer_animation_directive(user_text: str = "", assistant_text: str = "") -> 
     if any(w in u_lower for w in ("рассердись", "разозлись", "поругайся")):
         return AvatarDirective(Emotion.ANGRY, "frustration", 0.85)
     if any(w in u_lower for w in ("улыбнись", "порадуйся", "сделай радост")):
-        return AvatarDirective(Emotion.HAPPY, "greeting_casual", 0.85)
+        return AvatarDirective(Emotion.HAPPY, "none", 0.85)
     if any(w in u_lower for w in ("зевни", "поспи", "усни", "покажи как ты спишь")):
         return AvatarDirective(Emotion.SLEEPY, "none", 0.85)
 
-    # 6. Assistant text and conversational matching
-    wave_reply = ("помаши", "помахай", "машу", "машет", "махает", "помахала", "помахал", "ручкой", "рукой")
-    if any(w in lower[:60] for w in wave_reply) and any(v in lower[:60] for v in ("машу", "машет", "махает", "помахала", "помаши", "помахай")):
-        return AvatarDirective(Emotion.HAPPY, "greeting_right", 0.9)
-    if any(lower.startswith(w) or f" {w}" in lower[:40] for w in ("привет", "здравствуй", "добрый день", "доброе утро", "добрый вечер", "хай", "hello", "hi", "hey")):
-        return AvatarDirective(Emotion.HAPPY, "greeting_right", 0.85)
-    if any(u_lower.startswith(w) for w in ("привет", "здравствуй", "хай", "hello", "hi")):
-        return AvatarDirective(Emotion.HAPPY, "greeting_right", 0.85)
-
-    if any(w in lower[:50] for w in ("пока", "до свидания", "до встречи", "спокойной ночи", "до скорого", "bye", "goodbye")):
-        return AvatarDirective(Emotion.NEUTRAL, "farewell_right", 0.85)
-
-    if any(w in lower[:50] for w in ("подмигива", "подмигнула", "подмигнул", "мигаю")):
-        return AvatarDirective(Emotion.WINK, "none", 0.85)
-    if any(w in lower[:50] for w in ("надула", "надулись", "щёчки", "щечки", "губки")):
-        return AvatarDirective(Emotion.POUTING, "none", 0.85)
-    if any(w in lower[:50] for w in ("бе-бе", "язык", "шучу", "пошутила", "ха-ха", "хи-хи")):
-        return AvatarDirective(Emotion.TEASING, "none", 0.9)
-
-    if any(w in lower[:50] for w in ("кива", "кивнула", "кивнул")):
-        return AvatarDirective(Emotion.HAPPY, "nod", 0.85)
-    if any(lower.startswith(w) for w in ("да,", "да!", "конечно", "согласна", "точно", "именно так", "верно", "абсолютно")):
-        return AvatarDirective(Emotion.HAPPY, "nod", 0.8)
-    if any(u_lower.startswith(w) for w in ("да,", "да!", "именно", "точно", "верно", "согласен", "согласна")):
-        return AvatarDirective(Emotion.HAPPY, "nod", 0.8)
-
-    if any(lower.startswith(w) for w in ("нет,", "нет!", "не согласна", "не думаю", "не так", "неверно", "нельзя")):
-        return AvatarDirective(Emotion.SKEPTICAL, "disagreement", 0.8)
-    if any(u_lower.startswith(w) for w in ("нет,", "нет!", "ты не", "не так", "не соглас")):
-        return AvatarDirective(Emotion.SKEPTICAL, "disagreement", 0.8)
-
-    if any(w in lower[:50] for w in ("пожима", "пожала плечами", "пожал плечами", "развожу руками")):
-        return AvatarDirective(Emotion.CONFUSED, "shrug", 0.8)
-    if any(lower.startswith(w) for w in ("не знаю", "сложно сказать", "пожалуй", "как знать", "может быть")):
-        return AvatarDirective(Emotion.CONFUSED, "shrug", 0.7)
-
-    if any(lower.startswith(w) or f" {w}" in lower[:30] for w in ("ого", "вау", "ничего себе", "невероятно", "вот это да")):
-        return AvatarDirective(Emotion.SURPRISED, "surprise", 0.85)
-
-    if any(w in lower[:50] for w in ("задумалась", "задумался")):
-        return AvatarDirective(Emotion.THINKING, "thinking_right", 0.85)
-    if any(lower.startswith(w) for w in ("хм", "дай подумать", "интересный вопрос", "секунду", "погоди", "так-так")):
-        return AvatarDirective(Emotion.THINKING, "thinking_right", 0.8)
-
-    if any(w in lower[:40] for w in ("да блин", "сколько можно", "бесит", "раздражает", "ужас", "надоело")):
-        return AvatarDirective(Emotion.ANNOYED, "frustration", 0.8)
-
-    if any(w in lower for w in (
-        "почесать затылок", "почешу затылок", "чешу затылок", "почесала затылок", "чешет затылок",
-        "почесать голову", "почешу голову", "чешу голову", "почесала голову", "почесать в затылке",
-        "чешу в затылке", "почесываю",
-    )):
-        return AvatarDirective(Emotion.THINKING, "head_scratch", 0.85)
-    if any(w in lower for w in (
-        "похлопать в ладоши", "хлопать в ладоши", "похлопать", "хлопаю в ладоши", "похлопаю",
-        "похлопала", "хлопаю", "поаплодировать", "поаплодирую", "аплодирую", "аплодисменты", "браво",
-    )):
-        return AvatarDirective(Emotion.HAPPY, "clapping", 0.9)
-    if any(w in lower for w in (
-        "посмеяться", "посмеюсь", "смеюсь", "посмеялась", "похихикать", "хихикаю", "похихикаю",
-        "рассмеяться", "рассмешил", "рассмешила", "ха-ха", "ахаха", "хи-хи", "смешно",
-    )):
-        return AvatarDirective(Emotion.HAPPY, "laughing", 0.85)
-    if any(w in lower for w in (
-        "палец вверх", "пальцы вверх", "показать класс", "покажу класс", "ставлю лайк",
-        "поставить лайк", "лайк!", "класс!", "супер!", "отличная работа!", "молодец!",
-    )):
-        return AvatarDirective(Emotion.PROUD, "thumbs_up", 0.85)
-    if any(w in lower for w in (
-        "фейспалм", "рукалицо", "рука лицо", "испанский стыд", "приложить руку к лицу",
-        "рука к лицу", "стыдно", "ой всё", "рука-лицо",
-    )):
-        return AvatarDirective(Emotion.EMBARRASSED, "facepalm", 0.85)
-    if any(w in lower for w in (
-        "поклон", "поклониться", "поклонюсь", "поклонилась", "кланяюсь", "мой поклон",
-        "отвесить поклон", "отвешу поклон", "реверанс",
-    )):
-        return AvatarDirective(Emotion.NEUTRAL, "bow", 0.85)
-    if any(w in lower for w in (
-        "указать пальцем", "показать пальцем", "указываю пальцем", "показываю пальцем",
-        "указываю", "укажу", "покажу туда", "смотри туда", "вон там", "вот там",
-    )):
-        return AvatarDirective(Emotion.NEUTRAL, "pointing", 0.85)
-
-    # Questions / Curiosity
-    if any(lower.startswith(w) for w in ("кто ", "что ", "где ", "когда ", "как ", "почему ", "зачем ", "откуда ", "куда ", "правда ли ")) or (len(text) < 80 and text.endswith("?")):
-        return AvatarDirective(Emotion.CURIOUS, "question_right", 0.75)
-    if any(u_lower.startswith(w) for w in ("кто ", "что ", "где ", "когда ", "как ", "почему ", "зачем ", "откуда ", "куда ", "расскажи ", "объясни ")) or (len(u_text) < 120 and u_text.endswith("?")):
-        return AvatarDirective(Emotion.THINKING, "question_right", 0.75)
-
-    # Default speech: conversational gesture so the character speaks with life
-    return AvatarDirective(Emotion.HAPPY, "talk_right", 0.7)
+    # Conversational gestures are selected by Iris, never inferred from reply words.
+    return AvatarDirective()
 
 
 def parse_avatar_directive(tag_text: str, default_emotion: Emotion | None = None, default_gesture: str | None = None) -> AvatarDirective:
@@ -258,28 +158,6 @@ def parse_avatar_directive(tag_text: str, default_emotion: Emotion | None = None
         gesture = raw_gesture
     elif default_gesture is not None and not raw_gesture:
         gesture = default_gesture
-    elif raw_emotion and raw_emotion not in ("neutral", "relaxed", "sleepy", "pouting", "wink", "wink_left", "teasing"):
-        # Auto-resolve gesture matching the emotion
-        auto_map = {
-            "happy": "greeting_casual",
-            "excited": "greeting_right",
-            "proud": "nod",
-            "touched": "nod",
-            "thinking": "thinking_right",
-            "curious": "question_right",
-            "concerned": "thinking_right",
-            "skeptical": "disagreement",
-            "surprised": "surprise",
-            "shocked": "surprise",
-            "sad": "shrug",
-            "confused": "shrug",
-            "embarrassed": "shrug",
-            "smirk": "shrug",
-            "angry": "frustration",
-            "annoyed": "frustration",
-            "playful": "greeting_casual",
-        }
-        gesture = auto_map.get(raw_emotion, "auto")
     else:
         gesture = "auto"
 
@@ -335,23 +213,13 @@ class LiveDirectiveParser:
                 self._resolved = True
                 self._buffer = ""
                 directive = parse_avatar_directive(header)
-                if directive.gesture in ("auto", "talk", "talk_right"):
-                    inferred = infer_animation_directive(self._user_text, remainder)
-                    if inferred.gesture not in ("auto", "talk", "talk_right"):
-                        directive = AvatarDirective(
-                            emotion=inferred.emotion if directive.emotion == Emotion.NEUTRAL else directive.emotion,
-                            gesture=inferred.gesture,
-                            intensity=inferred.intensity,
-                        )
-                    elif directive.gesture == "auto" and directive.emotion == Emotion.NEUTRAL:
-                        directive = inferred
                 return directive, self._parts(remainder)
             if not final and len(stripped) <= self._MAX_PREFIX:
                 return None, []
             self._resolved = True
             self._buffer = ""
             # A malformed machine header is never user-facing speech.
-            inferred = infer_animation_directive(self._user_text, source)
+            inferred = AvatarDirective()
             return inferred, []
 
         if stripped.startswith("("):
@@ -365,7 +233,7 @@ class LiveDirectiveParser:
 
         self._resolved = True
         self._buffer = ""
-        inferred = infer_animation_directive(self._user_text, source)
+        inferred = AvatarDirective()
         return inferred, self._parts(source)
 
     @staticmethod

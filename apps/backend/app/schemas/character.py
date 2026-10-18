@@ -92,6 +92,14 @@ class Gesture(str, Enum):
     FACEPALM = "facepalm"
     POINTING = "pointing"
     BOW = "bow"
+    HEAD_SCRATCH_LEFT = "head_scratch_left"
+    HEAD_SCRATCH_RIGHT = "head_scratch_right"
+    THUMBS_UP_LEFT = "thumbs_up_left"
+    THUMBS_UP_RIGHT = "thumbs_up_right"
+    POINTING_LEFT = "pointing_left"
+    POINTING_RIGHT = "pointing_right"
+    FACEPALM_LEFT = "facepalm_left"
+    FACEPALM_RIGHT = "facepalm_right"
 
 
 class ProtocolModel(BaseModel):

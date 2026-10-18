@@ -20,61 +20,8 @@ from apps.backend.app.schemas.character import (
 
 def deterministic_turn(reply: str, user_text: str = "") -> CharacterTurn:
     """Keep a valid reply when model metadata is absent or invalid."""
-    intent = classify_intent(user_text)
-    from apps.backend.app.voice.directives import infer_animation_directive
-    inferred = infer_animation_directive(user_text, reply)
-    action_gestures = (
-        "greeting_right", "farewell_right", "nod", "disagreement", "shrug",
-        "surprise", "frustration", "head_scratch", "clapping", "laughing",
-        "thumbs_up", "facepalm", "pointing", "bow",
-    )
-    if inferred.gesture in action_gestures:
-        try:
-            gesture = Gesture(inferred.gesture)
-            return CharacterTurn(
-                reply=reply,
-                intent=intent,
-                affect=AffectCue(emotion=inferred.emotion),
-                gesture=GestureCue(name=gesture),
-                delivery=DeliveryCue(),
-            )
-        except ValueError:
-            pass
-
-    if intent == Intent.QUESTION:
-        emotion = Emotion.THINKING
-        gesture = Gesture.QUESTION
-    elif intent == Intent.TASK_REQUEST:
-        emotion = Emotion.THINKING
-        gesture = Gesture.EXPLANATION
-    else:
-        lower = reply.lower()
-        if any(w in lower for w in ("привет", "здравствуй", "добрый", "хай", "hello", "hey")):
-            emotion = Emotion.HAPPY
-            gesture = Gesture.GREETING_RIGHT
-        elif any(w in lower for w in ("пока", "до свидания", "до встречи", "bye")):
-            emotion = Emotion.NEUTRAL
-            gesture = Gesture.FAREWELL_RIGHT
-        elif any(w in lower for w in ("да", "конечно", "согласна", "точно", "именно")):
-            emotion = Emotion.HAPPY
-            gesture = Gesture.AGREEMENT
-        elif any(w in lower for w in ("нет", "не согласна", "не думаю", "нельзя")):
-            emotion = Emotion.SKEPTICAL
-            gesture = Gesture.DISAGREEMENT
-        elif "?" in reply:
-            emotion = Emotion.CURIOUS
-            gesture = Gesture.QUESTION
-        else:
-            emotion = Emotion.NEUTRAL
-            gesture = Gesture.TALK
-
-    return CharacterTurn(
-        reply=reply,
-        intent=intent,
-        affect=AffectCue(emotion=emotion),
-        gesture=GestureCue(name=gesture),
-        delivery=DeliveryCue(),
-    )
+    return CharacterTurn(reply=reply, intent=classify_intent(user_text),
+                         affect=AffectCue(), gesture=GestureCue(name=Gesture.AUTO), delivery=DeliveryCue())
 
 
 def classify_intent(user_text: str) -> Intent:
@@ -112,23 +59,6 @@ def parse_turn(payload: dict[str, Any], *, user_text: str = "") -> tuple[Charact
     ):
         try:
             turn = CharacterTurn.model_validate(payload_copy)
-            from apps.backend.app.voice.directives import infer_animation_directive
-            inferred = infer_animation_directive(user_text, turn.reply)
-            action_gestures = (
-                "greeting_right", "farewell_right", "nod", "disagreement", "shrug",
-                "surprise", "frustration", "head_scratch", "clapping", "laughing",
-                "thumbs_up", "facepalm", "pointing", "bow",
-            )
-            if inferred.gesture in action_gestures:
-                if turn.gesture.name in (Gesture.AUTO, Gesture.TALK, Gesture.NONE) or turn.affect.emotion == Emotion.NEUTRAL:
-                    try:
-                        resolved_gesture = Gesture(inferred.gesture)
-                        turn = turn.model_copy(update={
-                            "gesture": GestureCue(name=resolved_gesture, intensity=turn.gesture.intensity),
-                            "affect": AffectCue(emotion=inferred.emotion if turn.affect.emotion == Emotion.NEUTRAL else turn.affect.emotion, intensity=turn.affect.intensity),
-                        })
-                    except ValueError:
-                        pass
             return turn, True, None
         except ValidationError as exc:
             reply = payload_copy.get("reply")

@@ -494,6 +494,17 @@ async def test_orchestrator_cancels_only_batch_speech_for_requested_session(tmp_
     assert voice.get_tts_job(second_job)["status"] == "cancelled"
 
 
+@pytest.mark.anyio
+async def test_orchestrator_marks_jobs_cancelled_before_their_first_step() -> None:
+    from types import SimpleNamespace
+    jobs = {}
+    voice = SimpleNamespace(set_tts_job=lambda request_id, payload: jobs.update({request_id: payload}))
+    orchestrator = SpeechOrchestrator(voice, None, None, None)
+    job = orchestrator.enqueue(session_id="s", reply="Привет", emotion="neutral", intent="test", voice="ru_f1")
+    await orchestrator.cancel_session("s")
+    assert jobs[job]["status"] == "cancelled"
+
+
 def test_avatar_http_status_and_test_commands(monkeypatch) -> None:
     service = app.state.avatar_service
     previous = service.enabled

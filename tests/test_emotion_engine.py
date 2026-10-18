@@ -88,13 +88,13 @@ def test_auto_gesture_resolves_cleanly_for_novel_and_micro_emotions() -> None:
     assert sleepy.gesture is Gesture.NONE
 
     thinking = engine.apply_metadata(emotion=Emotion.THINKING, gesture=Gesture.AUTO, intensity=.7, utterance_id="5", force=True)
-    assert thinking.gesture is Gesture.THINKING_RIGHT
+    assert thinking.gesture is Gesture.AUTO
 
     confused = engine.apply_metadata(emotion=Emotion.CONFUSED, gesture=Gesture.AUTO, intensity=.7, utterance_id="6", force=True)
-    assert confused.gesture is Gesture.SHRUG
+    assert confused.gesture is Gesture.AUTO
 
     proud = engine.apply_metadata(emotion=Emotion.PROUD, gesture=Gesture.AUTO, intensity=.8, utterance_id="7", force=True)
-    assert proud.gesture is Gesture.NOD
+    assert proud.gesture is Gesture.AUTO
 
 
 def test_explicit_hand_gestures_apply_under_any_emotion() -> None:

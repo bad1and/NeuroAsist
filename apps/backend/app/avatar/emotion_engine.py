@@ -233,7 +233,12 @@ class EmotionEngine:
             return self._state
         mapping = self.mapping[emotion]
         if gesture is Gesture.AUTO:
-            gesture = Gesture.AUTO if Gesture.AUTO in mapping.allowed_gestures else mapping.allowed_gestures[0]
+            # Mood changes the manner of motion, not its semantic meaning.
+            # Facial-only requests keep their hands quiet for this segment.
+            gesture = Gesture.NONE if emotion in {
+                Emotion.POUTING, Emotion.WINK, Emotion.WINK_LEFT,
+                Emotion.TEASING, Emotion.SLEEPY,
+            } else Gesture.AUTO
         self._state = EmotionState(
             current_emotion=self._state.target_emotion,
             target_emotion=emotion,
