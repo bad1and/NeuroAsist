@@ -52,10 +52,10 @@ namespace NeuroAsist.Avatar.Tests
             var profile = ScriptableObject.CreateInstance<MotionProfile>(); profile.IdleIntervalMinSeconds = 8f; profile.IdleIntervalMaxSeconds = 2f; profile.ValidateValues();
             Assert.That(profile.IdleIntervalMaxSeconds, Is.EqualTo(8f)); Object.DestroyImmediate(profile);
         }
-        [Test] public void AutomaticSpeechAccentRespectsExplicitNeuralControl()
+        [Test] public void AutomaticSpeechAccentRespectsDurationAndRest()
         {
             var history = new List<float> { 0f };
-            // Auto/None gestures are never scheduled automatically
+            // Short speech and explicit none remain quiet; longer auto speech may move.
             Assert.That(AvatarMotionController.CanScheduleAutomaticAccent(1.6f, GestureTag.Auto, 10f, history), Is.False);
             Assert.That(AvatarMotionController.CanScheduleAutomaticAccent(3f, GestureTag.Auto, 5f, history), Is.False);
             Assert.That(AvatarMotionController.CanScheduleAutomaticAccent(1.8f, GestureTag.None, 7f, history), Is.False);
@@ -150,7 +150,7 @@ namespace NeuroAsist.Avatar.Tests
             Object.DestroyImmediate(talk);
         }
 
-        [Test] public void SelectAutoGestureResolvesThinkingToThinkingGesture()
+        [Test] public void SelectAutoGestureLeavesMeaningToExplicitDirectives()
         {
             var talk = ScriptableObject.CreateInstance<GestureDefinition>();
             talk.Id = "talk"; talk.AnimatorState = "Talk"; talk.Tag = GestureTag.Talk;
@@ -159,7 +159,7 @@ namespace NeuroAsist.Avatar.Tests
             var definitions = new List<GestureDefinition> { talk, thinking };
 
             var picked = AvatarGestureController.Select(definitions, GestureTag.Auto, AvatarEmotion.Thinking, true, -1, 0f, new Dictionary<string, float>(), new FixedRandom());
-            Assert.That(picked, Is.SameAs(thinking));
+            Assert.That(picked, Is.SameAs(talk));
             Object.DestroyImmediate(talk);
             Object.DestroyImmediate(thinking);
         }
@@ -199,22 +199,11 @@ namespace NeuroAsist.Avatar.Tests
             Object.DestroyImmediate(left);
         }
 
-        [Test] public void ResolveAutoGestureProvidesDistinctGesturesAcrossEmotions()
+        [Test] public void AutoDoesNotInventSemanticActionsFromMood()
         {
-            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Angry), Is.EqualTo(GestureTag.Frustration));
-            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Sad), Is.EqualTo(GestureTag.Shrug));
-            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Surprised), Is.EqualTo(GestureTag.Surprise));
-            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Thinking), Is.EqualTo(GestureTag.Thinking));
-            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Proud), Is.EqualTo(GestureTag.Nod));
-            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Skeptical), Is.EqualTo(GestureTag.Disagreement));
-            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Curious), Is.EqualTo(GestureTag.Thinking));
-            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Confused), Is.EqualTo(GestureTag.Shrug));
-            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Excited), Is.EqualTo(GestureTag.Greeting_Right));
-            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Neutral), Is.EqualTo(GestureTag.None));
-            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Pouting), Is.EqualTo(GestureTag.None));
-            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Wink), Is.EqualTo(GestureTag.None));
-            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Teasing), Is.EqualTo(GestureTag.None));
-            Assert.That(AvatarMotionNames.ResolveAutoGesture(AvatarEmotion.Sleepy), Is.EqualTo(GestureTag.None));
+            foreach (AvatarEmotion emotion in System.Enum.GetValues(typeof(AvatarEmotion)))
+                Assert.That(AvatarMotionNames.ResolveAutoGesture(emotion), Is.EqualTo(
+                    AvatarMotionNames.IsFacialMicroEmotion(emotion) ? GestureTag.None : GestureTag.Talk));
         }
     }
 }

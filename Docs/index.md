@@ -38,6 +38,7 @@ Iris — голосовой AI-персонаж для Windows. Здесь оп�
 
 [Оболочка Windows](../apps/desktop/README.md) ·
 [Unity-аватар](../apps/avatar-unity/README.md) ·
+[Движения и поведение аватара](avatar-behavior.md) ·
 [Дизайн-система](../design.md) ·
 [Правила для агентов](../AGENTS.md)
 

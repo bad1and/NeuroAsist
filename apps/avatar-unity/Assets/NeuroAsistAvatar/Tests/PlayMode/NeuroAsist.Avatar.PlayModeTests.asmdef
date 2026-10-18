@@ -1,0 +1,5 @@
+{
+  "name": "NeuroAsist.Avatar.PlayModeTests",
+  "references": ["NeuroAsist.Avatar.Runtime", "VRM10"],
+  "optionalUnityReferences": ["TestAssemblies"]
+}

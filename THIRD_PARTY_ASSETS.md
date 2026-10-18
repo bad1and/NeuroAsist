@@ -36,6 +36,11 @@ Iris в AI-сценарии. Текст отдельного разрешени�
 
 ## Анимации Mixamo
 
+Сгенерированная библиотека `Motion/Generated/Performances.asset` содержит
+переработанные Humanoid-кривые включённых Mixamo-клипов. Авторские рецепты
+траекторий находятся в `AvatarGestureLibrary.cs`; наличие этих рецептов не
+меняет условия использования исходных анимаций.
+
 FBX в [`Animations/`](apps/avatar-unity/Assets/NeuroAsistAvatar/Animations/)
 происходят из Mixamo. Настройку назначений определяет Unity-код проекта.
 

@@ -8,8 +8,8 @@ namespace NeuroAsist.Avatar.Tests
         [Test]
         public void TransientEmotionsIdentifiedCorrectly()
         {
-            Assert.That(AvatarEmotionController.IsTransient("surprised"), Is.True);
-            Assert.That(AvatarEmotionController.IsTransient("SURPRISED"), Is.True);
+            Assert.That(AvatarEmotionController.IsTransient("surprised"), Is.False);
+            Assert.That(AvatarEmotionController.IsTransient("SURPRISED"), Is.False);
             Assert.That(AvatarEmotionController.IsTransient("happy"), Is.False);
             Assert.That(AvatarEmotionController.IsTransient("neutral"), Is.False);
         }
@@ -261,7 +261,7 @@ namespace NeuroAsist.Avatar.Tests
             controller.SetEmotion("teasing", 1f);
             Assert.That(controller.GetTargetWeight("teasing"), Is.EqualTo(0.80f));
 
-            Assert.That(AvatarEmotionController.IsTransient("shocked"), Is.True);
+            Assert.That(AvatarEmotionController.IsTransient("shocked"), Is.False);
             Assert.That(AvatarEmotionController.IsTransient("wink"), Is.True);
             Assert.That(AvatarEmotionController.IsTransient("teasing"), Is.True);
             Assert.That(AvatarEmotionController.IsTransient("pouting"), Is.False);
@@ -270,6 +270,24 @@ namespace NeuroAsist.Avatar.Tests
             Object.DestroyImmediate(go);
         }
 
+        [TestCase("surprised")]
+        [TestCase("shocked")]
+        public void ModelReactionHoldsUntilAnExplicitEmotionChange(string emotion)
+        {
+            var go = new GameObject("Model-owned reaction");
+            var controller = go.AddComponent<AvatarEmotionController>();
+            controller.Configure(null, null);
+            controller.SetEmotion(emotion, 1);
+            for (var frame = 0; frame < 600; frame++) controller.ManualUpdate(1f / 60);
+            Assert.That(controller.CurrentEmotion, Is.EqualTo(emotion));
+            Assert.That(controller.IsTransientActive, Is.False);
+            controller.SetEmotion("neutral", 1);
+            Assert.That(controller.CurrentEmotion, Is.EqualTo("neutral"));
+            for (var frame = 0; frame < 600; frame++) controller.ManualUpdate(1f / 60);
+            Assert.That(controller.GetTargetWeight(emotion), Is.Zero);
+            Assert.That(controller.GetWeight(emotion), Is.LessThan(.05f));
+            Object.DestroyImmediate(go);
+        }
         [Test]
         public void TransientWinkAnimatesSnappilyAndAutoReleases()
         {
