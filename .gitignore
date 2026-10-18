@@ -230,6 +230,9 @@ data/stt-*.json
 /apps/web/public/upload*.png
 
 # Unity IDE-generated project files
+# Temporary bootstrap scenes created by Unity Test Runner
+apps/avatar-unity/Assets/InitTestScene*.unity
+apps/avatar-unity/Assets/InitTestScene*.unity.meta
 apps/avatar-unity/*.csproj
 apps/avatar-unity/*.sln
 apps/avatar-unity/.vsconfig
