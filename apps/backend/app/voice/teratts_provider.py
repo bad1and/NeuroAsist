@@ -11,6 +11,8 @@ import asyncio
 import contextlib
 import gc
 import logging
+import re
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -32,6 +34,7 @@ from apps.backend.app.voice.style import (
     coerce_voice_style,
 )
 from apps.backend.app.voice.teratts_normalizer import normalize_for_teratts
+from apps.backend.app.voice.lexicon import load_pronunciations
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +141,14 @@ class TeraTTSProvider(TTSProvider):
         self._model: Any | None = None
         self._load_lock = asyncio.Lock()
         self._infer_lock = asyncio.Lock()
-        self._pronunciations: dict[str, str] = {}
+        # Cancelling to_thread only cancels the awaiter. The native worker must
+        # retain exclusive access until it actually exits, including on timeout.
+        self._model_lock = threading.RLock()
+        self._closed = False
+        self._pronunciations = (
+            load_pronunciations(pronunciation_dictionary_path)
+            if pronunciation_dictionary_path is not None else {}
+        )
         self._expression_level = VoiceExpressionLevel.NATURAL
         self._selected_device = "cpu"
         self._warmed_up = False
@@ -152,6 +162,10 @@ class TeraTTSProvider(TTSProvider):
     @property
     def output_format(self) -> str:
         return "wav"
+
+    @property
+    def sample_rate(self) -> int:
+        return TERATTS_SAMPLE_RATE
 
     @property
     def available_speakers(self) -> list[str]:
@@ -206,13 +220,18 @@ class TeraTTSProvider(TTSProvider):
 
     async def close(self) -> None:
         """Stop inference and release the remote-code/ONNX model resources."""
+        self._closed = True
         async with self._load_lock:
             async with self._infer_lock:
-                model = self._model
-                self._model = None
-                self._warmed_up = False
-                if model is not None:
-                    await asyncio.to_thread(self._close_model_sync, model)
+                await asyncio.to_thread(self._release_model_sync)
+
+    def _release_model_sync(self) -> None:
+        with self._model_lock:
+            model = self._model
+            self._model = None
+            self._warmed_up = False
+            if model is not None:
+                self._close_model_sync(model)
 
     @staticmethod
     def _close_model_sync(model: Any) -> None:
@@ -226,14 +245,18 @@ class TeraTTSProvider(TTSProvider):
         gc.collect()
 
     async def _ensure_model(self) -> Any:
-        if self._model is not None:
-            return self._model
         async with self._load_lock:
+            return await asyncio.to_thread(self._ensure_model_sync)
+
+    def _ensure_model_sync(self) -> Any:
+        with self._model_lock:
+            if self._closed:
+                raise RuntimeError("TeraTTS provider is closed")
             if self._model is not None:
                 return self._model
             started = time.perf_counter()
             try:
-                self._model = await asyncio.to_thread(self._load_model_sync)
+                self._model = self._load_model_sync()
                 self._last_load_ms = int((time.perf_counter() - started) * 1000)
                 self._last_error = None
                 logger.info(
@@ -242,14 +265,12 @@ class TeraTTSProvider(TTSProvider):
                     self.model_path or self.cache_dir or "huggingface-default",
                 )
                 if self.warmup_enabled and not self._warmed_up:
-                    await asyncio.to_thread(self._warmup_sync)
+                    self._warmup_sync()
                     self._warmed_up = True
                 return self._model
-            except asyncio.CancelledError:
-                raise
             except Exception as exc:
                 self._last_error = f"{type(exc).__name__}: {exc}"
-                self._model = None
+                self._release_model_sync()
                 raise self._friendly_load_error(exc) from exc
 
     def _load_model_sync(self) -> Any:
@@ -306,10 +327,11 @@ class TeraTTSProvider(TTSProvider):
     def _warmup_sync(self) -> None:
         try:
             import torch
-            with torch.inference_mode():
+        except ImportError:
+            torch = None
+        try:
+            with torch.inference_mode() if torch is not None else contextlib.nullcontext():
                 self._render_sync("Привет.", self.voice, VoiceStyle.NORMAL, 1.0)
-        except Exception:
-            self._render_sync("Привет.", self.voice, VoiceStyle.NORMAL, 1.0)
         finally:
             gc.collect()
 
@@ -340,7 +362,7 @@ class TeraTTSProvider(TTSProvider):
         tempo = _clamp(request.tempo, MIN_SPEECH_TEMPO, MAX_SPEECH_TEMPO)
         # ``tempo > 1`` means faster in the existing delivery contract;
         # TeraTTS uses the inverse convention: larger duration_scale is slower.
-        return _clamp(base / tempo, 0.75, 1.30)
+        return _clamp(base, 0.75, 1.30) / tempo
 
     def _render_sync(
         self,
@@ -348,12 +370,22 @@ class TeraTTSProvider(TTSProvider):
         voice: str,
         style: VoiceStyle | str,
         tempo: float,
+        cancelled: threading.Event | None = None,
+    ) -> tuple[bytes, str, float]:
+        with self._model_lock:
+            if self._closed or (cancelled is not None and cancelled.is_set()):
+                raise RuntimeError("TTS synthesis cancelled")
+            return self._render_unlocked_sync(text, voice, style, tempo, cancelled)
+
+    def _render_unlocked_sync(
+        self, text: str, voice: str, style: VoiceStyle | str, tempo: float,
+        cancelled: threading.Event | None = None,
     ) -> tuple[bytes, str, float]:
         if self._model is None:
             raise RuntimeError("TeraTTS model is not loaded")
         import numpy as np
 
-        normalized = normalize_for_teratts(text, self._pronunciations)
+        normalized = self._prepare_model_text(normalize_for_teratts(text, self._pronunciations))
         duration_scale = self._duration_scale(
             TTSRequest(text=text, language="ru", voice=voice, style=style, tempo=tempo)
         )
@@ -366,11 +398,13 @@ class TeraTTSProvider(TTSProvider):
                 seed=self.seed,
                 chunk_frames=self.chunk_frames,
             )
-            arrays = [
-                np.asarray(chunk, dtype=np.float32).reshape(-1)
-                for chunk in chunks
-                if np.asarray(chunk).size
-            ]
+            arrays = []
+            for chunk in chunks:
+                if cancelled is not None and cancelled.is_set():
+                    raise RuntimeError("TTS synthesis cancelled")
+                value = np.asarray(chunk, dtype=np.float32).reshape(-1)
+                if value.size:
+                    arrays.append(value)
             if not arrays:
                 raise RuntimeError("TeraTTS returned empty audio stream")
             waveform = np.concatenate(arrays)
@@ -387,6 +421,35 @@ class TeraTTSProvider(TTSProvider):
             raise RuntimeError("TeraTTS returned empty audio")
         return waveform_to_wav_bytes(waveform, TERATTS_SAMPLE_RATE), normalized, duration_scale
 
+    def _prepare_model_text(self, normalized: str) -> str:
+        # Bundled RUAccent removes the typographic ellipsis. ASCII dots survive
+        # its punctuation filter and reach Tera's encoder as a real pause.
+        normalized = normalized.replace("…", "...")
+        accentizer = getattr(getattr(self._model, "runtime", None), "accentizer", None)
+        process = getattr(accentizer, "process_all", None)
+        if not self.russian_stress or "+" not in normalized or not callable(process):
+            return normalized
+        # The model skips RUAccent for an entire <ru> span containing '+'. Fill
+        # only the unmarked runs here, leaving each explicitly stressed word
+        # intact, including hyphenated words with several stress markers.
+        content = normalized[4:-5]
+        parts = []
+        cursor = 0
+
+        def accent_run(run: str) -> str:
+            if not re.search(r"[а-яё]", run, flags=re.IGNORECASE):
+                return run
+            leading = run[: len(run) - len(run.lstrip())]
+            trailing = run[len(run.rstrip()):]
+            return leading + process(run.strip()) + trailing
+
+        for match in re.finditer(r"(?<![\w+])[а-яё+\-]*\+[а-яё+\-]+(?![\w+])", content, re.IGNORECASE):
+            parts.append(accent_run(content[cursor:match.start()]))
+            parts.append(match.group())
+            cursor = match.end()
+        parts.append(accent_run(content[cursor:]))
+        return "<ru>" + "".join(parts) + "</ru>"
+
     async def _synthesize_request(self, request: TTSRequest) -> tuple[bytes, dict[str, Any]]:
         text = " ".join(request.text.strip().split())
         if not text:
@@ -394,11 +457,15 @@ class TeraTTSProvider(TTSProvider):
         voice = self.resolve_voice(request.language, request.voice)
         await self._ensure_model()
         started = time.perf_counter()
+        cancelled = threading.Event()
         async with self._infer_lock:
-            wav_bytes, normalized, duration_scale = await asyncio.wait_for(
-                asyncio.to_thread(self._render_sync, text, voice, request.style, request.tempo),
-                timeout=self.timeout_seconds,
-            )
+            try:
+                wav_bytes, normalized, duration_scale = await asyncio.wait_for(
+                    asyncio.to_thread(self._render_sync, text, voice, request.style, request.tempo, cancelled),
+                    timeout=self.timeout_seconds,
+                )
+            finally:
+                cancelled.set()
         synthesis_ms = int((time.perf_counter() - started) * 1000)
         delivery_started = time.perf_counter()
         wav_bytes = await asyncio.to_thread(

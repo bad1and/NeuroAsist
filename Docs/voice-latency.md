@@ -110,4 +110,4 @@ PCM-повтор через `VoiceService` на GTX 1660 SUPER:
 
 ---
 
-[Условия выпуска](release-checklist.md) · [Сравнение STT](stt-comparison.md)
+[Условия выпуска](release-checklist.md) · [Сравнение STT](stt-comparison.md) · [Качество TTS](tts-quality.md)

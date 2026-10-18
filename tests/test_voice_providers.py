@@ -66,6 +66,53 @@ def test_atempo_changes_duration_without_changing_pitch() -> None:
     assert peak_hz == pytest.approx(440, rel=0.01)
 
 
+def _deliver_samples(samples, *, postprocess=True):
+    wav = apply_wav_delivery(
+        waveform_to_wav_bytes(samples, 44100), postprocess=postprocess,
+        pause_before_ms=30, pause_after_ms=50, highpass_cutoff_hz=0,
+        loudness_target_dbfs=-18,
+    )
+    with wave.open(io.BytesIO(wav)) as audio:
+        return np.frombuffer(audio.readframes(audio.getnframes()), dtype='<i2').astype(float) / 32768
+
+
+@pytest.mark.parametrize('edge', ['head', 'tail'])
+def test_delivery_suppresses_isolated_edge_pop_after_a_long_quiet_gap(edge):
+    sr = 44100
+    samples = np.zeros(sr, dtype=np.float32)
+    samples[sr//5:sr*4//5] = .15*np.sin(2*np.pi*220*np.arange(sr*3//5)/sr)
+    pulse = (.2*np.sin(np.linspace(0,2*np.pi,round(sr*.006)))).astype(np.float32)
+    if edge == 'head':
+        samples[round(sr*.003):round(sr*.003)+len(pulse)] = pulse
+    else:
+        samples[-round(sr*.003)-len(pulse):-round(sr*.003)] = pulse
+    delivered = _deliver_samples(samples)
+    core = delivered[round(sr*.03):-round(sr*.05)]
+    probe = core[:round(sr*.012)] if edge == 'head' else core[-round(sr*.012):]
+    assert np.max(np.abs(probe)) <= 1/32768
+    assert len(delivered) == len(samples)+round(sr*.08)
+    assert np.max(np.abs(core[sr//3:sr//2])) > .1
+
+
+def test_delivery_keeps_a_final_consonant_burst_and_quiet_fricative():
+    sr = 44100
+    samples = np.zeros(sr, dtype=np.float32)
+    # A word ending: broad 50 ms release, not an isolated 6 ms edge defect.
+    samples[-round(sr*.08):-round(sr*.03)] = .05*np.random.default_rng(7).uniform(-1,1,round(sr*.08)-round(sr*.03))
+    # Quiet but sustained /sh/ must remain audible right to the short edge fade.
+    samples[-round(sr*.1):] += .004*np.random.default_rng(8).uniform(-1,1,round(sr*.1))
+    core = _deliver_samples(samples)[round(sr*.03):-round(sr*.05)]
+    assert np.max(np.abs(core[-round(sr*.08):-round(sr*.03)])) > .03
+    assert np.sqrt(np.mean(core[-round(sr*.03):-round(sr*.016)]**2)) > .001
+
+
+def test_delivery_smooths_wave_edges_even_without_optional_tone_processing():
+    samples = np.full(44100, .2, dtype=np.float32)
+    core = _deliver_samples(samples, postprocess=False)[1323:-2205]
+    assert core[0] == core[-1] == 0
+    assert np.max(np.abs(core[1000:-1000]-.2)) < .0001
+
+
 def test_tts_cleanup_keeps_only_recent_wavs(tmp_path) -> None:
     settings = Settings(
         voice_audio_dir=str(tmp_path / "audio"),

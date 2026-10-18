@@ -823,6 +823,39 @@ def wav_duration_seconds(wav_bytes: bytes) -> float:
         return frames / rate
 
 
+def suppress_isolated_edge_impulses(samples: Any, sample_rate: int):
+    """Mute a tiny boundary burst separated from speech by sustained silence.
+
+    Some Tera utterances end in a 5-8 ms vocoder pop after >100 ms of silence.
+    A fade at the file boundary alone leaves its peak intact. Require a short
+    burst, a quiet 80 ms guard and >30 dB contrast; consonant releases and
+    fricatives extending through that guard are kept. Duration never changes.
+    """
+    import numpy as np
+
+    burst = max(1, round(sample_rate * .012))
+    guard = max(1, round(sample_rate * .080))
+    ramp_size = max(1, round(sample_rate * .008))
+    if len(samples) < 2 * (burst + guard):
+        return samples
+    for edge in (samples, samples[::-1]):
+        candidate = edge[:burst]
+        quiet = edge[burst:burst + guard]
+        peak = float(np.max(np.abs(candidate)))
+        rms = float(np.sqrt(np.mean(candidate ** 2)))
+        quiet_peak = float(np.max(np.abs(quiet)))
+        quiet_rms = float(np.sqrt(np.mean(quiet ** 2)))
+        if (
+            peak >= .01 and rms >= .002
+            and quiet_peak <= min(.0032, max(3 / 32768, peak / 32))
+            and quiet_rms <= max(2 / 32768, rms / 32)
+        ):
+            edge[:burst] = 0
+            ramp = np.sin(np.linspace(0, np.pi / 2, ramp_size, dtype=np.float32)) ** 2
+            edge[burst:burst + ramp_size] *= ramp
+    return samples
+
+
 def apply_wav_delivery(
     wav_bytes: bytes,
     *,
@@ -888,6 +921,7 @@ def apply_wav_delivery(
         rendered -= float(np.mean(rendered))
         if highpass_cutoff_hz > 0 and len(rendered) > 1:
             rendered = one_pole_highpass(rendered, sample_rate, highpass_cutoff_hz)
+        rendered = suppress_isolated_edge_impulses(rendered, sample_rate)
         active = np.abs(rendered) >= 10 ** (-45 / 20)
         if active.any():
             rms = float(np.sqrt(np.mean(np.square(rendered[active]))))
@@ -896,12 +930,15 @@ def apply_wav_delivery(
                 target = 10 ** (loudness_target_dbfs / 20)
                 ceiling = 10 ** (peak_ceiling_dbfs / 20)
                 rendered *= min(target / rms, ceiling / peak)
-        fade_samples = min(max(1, round(sample_rate * 0.008)), len(rendered) // 2)
-        if fade_samples:
-            fade = np.linspace(0.0, 1.0, fade_samples, endpoint=False, dtype=np.float32)
-            rendered[:fade_samples] *= fade
-            rendered[-fade_samples:] *= fade[::-1]
         samples = (np.clip(rendered, -1.0, 1.0) * 32767).astype("<i2")
+
+    # Smooth joins are part of the WAV contract, including when optional tone /
+    # loudness processing is disabled. Work before adding requested pauses.
+    fade_samples = min(max(1, round(sample_rate * .016)), len(samples) // 2)
+    if fade_samples:
+        fade = np.sin(np.linspace(0, np.pi / 2, fade_samples, dtype=np.float32)) ** 2
+        samples[:fade_samples] = (samples[:fade_samples] * fade).astype("<i2")
+        samples[-fade_samples:] = (samples[-fade_samples:] * fade[::-1]).astype("<i2")
 
     before = np.zeros(max(0, round(sample_rate * pause_before_ms / 1000)), dtype="<i2")
     after = np.zeros(max(0, round(sample_rate * pause_after_ms / 1000)), dtype="<i2")
