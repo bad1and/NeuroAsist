@@ -8,7 +8,7 @@ from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.agents.character.prompts import character_live_prompt
 from apps.backend.app.llm.base import ChatMessage, LLMProvider, LLMResponse
 from apps.backend.app.storage.sqlite_history import SQLiteMessageHistory
-from apps.backend.app.voice.text import TextChunker, TextNormalizer
+from apps.backend.app.voice.text import FencedCodeFilter, TextChunker, TextNormalizer
 from apps.backend.app.voice.directives import LiveDirectiveParser, AvatarDirective, clean_live_reply, make_live_directive_expressive
 from apps.backend.app.voice.live import VoiceSessionManager
 from apps.backend.app.voice.live import UtteranceContext
@@ -21,6 +21,7 @@ from apps.backend.app.voice.delivery import (
     clean_voice_directives,
     make_speech_segment,
     plan_speech,
+    split_spoken_sentences,
 )
 
 
@@ -322,6 +323,141 @@ def test_chunker_protects_decimal_and_russian_abbreviation() -> None:
         "Дальше текст.",
     ]
     assert chunker.flush_idle() == []
+
+
+def test_batch_sentence_split_keeps_quotes_and_abbreviations() -> None:
+    assert split_spoken_sentences('Он сказал: «Готово!» Затем т. е. объяснил.\nВторая строка.') == [
+        'Он сказал: «Готово!»', 'Затем т. е. объяснил.', 'Вторая строка.',
+    ]
+
+
+def test_plan_cleans_markdown_before_sentence_splitting() -> None:
+    segments = plan_speech('**Проверь** [настройки](https://example.com).\n```python\nsecret().\n```\nГотово!')
+    assert [s.text for s in segments] == ['Проверь настройки.', 'Готово!']
+
+
+@pytest.mark.parametrize("size", [1, 7, 1000])
+def test_fenced_code_filter_never_sends_fragmented_code_to_tts(size) -> None:
+    text = "До.\n```python\nsecret().\n```\nПосле. ~~~js\nalert(1);\n~~~ Готово."
+    code_filter = FencedCodeFilter()
+    spoken = "".join(code_filter.feed(text[i:i+size]) for i in range(0, len(text), size)) + code_filter.finish()
+    assert TextNormalizer().normalize(spoken) == "До. После. Готово."
+
+
+@pytest.mark.anyio
+async def test_live_speech_omits_code_but_keeps_it_in_the_visible_reply() -> None:
+    text = "Смотри.\n```python\nsecret().\n```\nГотово!"
+
+    class Agent:
+        def classify_intent(self, _text):
+            return "casual_chat"
+
+        async def stream_user_message(self, *args, **kwargs):
+            for char in text:
+                yield char
+
+    manager = VoiceSessionManager(MockTTSProvider())
+    connection = FakeVoiceConnection()
+    manager._connections["code"] = connection
+    task = await manager.start(session_id="code", utterance_id="u", transcript="Покажи", language="ru", voice="ru_f1", agent=Agent())
+    await task
+    assert not any(e["type"] == "voice.error" for e in connection.events)
+    assert "secret" not in " ".join(s[0]["text"] for s in connection.segments)
+    assert next(e["reply"] for e in connection.events if e["type"] == "voice.text.completed") == text
+
+
+def test_spoken_copy_preserves_multiplication() -> None:
+    assert TextNormalizer().normalize("**Считаю:** 2*3 = 6") == "Считаю: 2 × 3 = 6"
+
+
+def test_chunker_does_not_split_a_decimal_arriving_in_separate_deltas() -> None:
+    chunker = TextChunker()
+    chunks = chunker.feed("Версия 3.")
+    assert chunker.flush_idle() == []
+    chunks += chunker.feed("12 работает. ")
+    chunks += chunker.flush()
+    assert chunks == ["Версия 3.12 работает."]
+
+
+def test_chunker_protects_fragmented_abbreviations() -> None:
+    text = "Затем т. е. объяснила."
+    chunker = TextChunker()
+    chunks = []
+    for char in text:
+        chunks.extend(chunker.feed(char))
+    chunks.extend(chunker.flush())
+    assert chunks == [text]
+
+
+def test_leading_line_break_does_not_count_as_spoken_text() -> None:
+    chunker = TextChunker()
+    assert chunker.feed("\nПривет") == []
+    assert not chunker.emitted
+    assert chunker.flush() == ["Привет"]
+
+
+def test_chunker_preserves_complete_words_with_fragmented_input() -> None:
+    text = "Теперь электрификация железнодорожных путей завершена. Всё готово."
+    chunker = TextChunker(max_chars=28)
+    chunks = []
+    for char in text:
+        chunks.extend(chunker.feed(char))
+    chunks.extend(chunker.flush())
+    assert " ".join(chunks) == text
+
+
+def test_quoted_endings_keep_the_correct_pause() -> None:
+    from apps.backend.app.voice.delivery import pause_after_ms
+    assert pause_after_ms('Он сказал: «Подожди…»') == 220
+    assert pause_after_ms('«Ты готов?»') == 145
+
+
+def test_wav_validation_rejects_missing_pcm_even_with_large_metadata_chunk() -> None:
+    wav = bytearray(_wav_bytes(0.01))
+    # Twelve absent PCM bytes used to fit inside the 44-byte header allowance.
+    truncated = wav[:-12]
+    manager = VoiceSessionManager(MockTTSProvider())
+    with pytest.raises(RuntimeError, match="undecodable"):
+        manager._validate_audio(bytes(truncated), "wav", "текст")
+
+
+@pytest.mark.anyio
+async def test_adaptive_split_cancels_right_branch_on_parent_cancellation(monkeypatch) -> None:
+    entered, stopped = asyncio.Event(), asyncio.Event()
+    manager = VoiceSessionManager(MockTTSProvider())
+
+    async def blocked_parts(*args, **kwargs):
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    async def blocked_stream(*args, **kwargs):
+        await entered.wait()
+        await asyncio.Event().wait()
+        yield
+
+    monkeypatch.setattr(manager, "_synthesize_parts", blocked_parts)
+    monkeypatch.setattr(manager, "_synthesize_part_stream", blocked_stream)
+
+    async def run():
+        return [part async for part in manager._split_and_synthesize(
+            make_speech_segment("один два три четыре пять шесть"), "ru", "ru_f1", 0, "auto")]
+
+    task = asyncio.create_task(run())
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert stopped.is_set()
+    finally:
+        # Clean up the deliberately blocked branch on the unfixed implementation.
+        leaked = [t for t in asyncio.all_tasks() if t.get_name().startswith("tts-adaptive-right-")]
+        for child in leaked:
+            child.cancel()
+        await asyncio.gather(*leaked, return_exceptions=True)
 
 
 def test_chunker_splits_long_text_and_flushes_tail() -> None:

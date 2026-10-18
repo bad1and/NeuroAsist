@@ -20,7 +20,7 @@ from apps.backend.app.voice.providers import (
     TTSRequest,
     _minimum_tts_duration_seconds,
 )
-from apps.backend.app.voice.text import TextChunker, TextNormalizer
+from apps.backend.app.voice.text import FencedCodeFilter, TextChunker, TextNormalizer
 from apps.backend.app.voice.directives import (
     AvatarDirective, LiveDirectiveParser, clean_live_reply, make_live_directive_expressive,
     infer_animation_directive,
@@ -90,7 +90,7 @@ class TTSJob:
 
 class VoiceSessionManager:
     _FINAL_PUNCTUATION_RE = re.compile(r"[.!?…]$")
-    _SOFT_PAUSE_RE = re.compile(r"\s*[,;:—–-]+\s*")
+    _SOFT_PAUSE_RE = re.compile(r"\s*[,;:—–]+\s*|\s+-\s+")
     _SPACE_RE = re.compile(r"\s+")
 
     def __init__(
@@ -495,7 +495,7 @@ class VoiceSessionManager:
             normalizer = TextNormalizer()
             chunker = TextChunker(**self._chunker_options)
             sequence = 0
-            for raw_segment in [*chunker.feed(reply), *chunker.flush()]:
+            for raw_segment in [*chunker.feed(normalizer.normalize(reply, preserve_newlines=True)), *chunker.flush()]:
                 text = normalizer.normalize(raw_segment)
                 if not text:
                     continue
@@ -595,6 +595,7 @@ class VoiceSessionManager:
         reply_parts: list[str] = []
         chunker = TextChunker(**self._chunker_options)
         normalizer = TextNormalizer()
+        code_filter = FencedCodeFilter()
         pending: asyncio.Task | None = None
         first_delta_seen = False
         directive_parser = LiveDirectiveParser(user_text=transcript)
@@ -619,14 +620,6 @@ class VoiceSessionManager:
             nonlocal directive_sent, latest_applied_directive, active_emotion, active_emotion_intensity, pending_voice_directive
             effective_gesture = directive.gesture
             effective_emotion = directive.emotion
-            if effective_gesture in ("auto", None, ""):
-                inferred = infer_animation_directive(transcript, None)
-                if inferred.gesture and inferred.gesture != "auto":
-                    effective_gesture = inferred.gesture
-                    if effective_emotion == Emotion.NEUTRAL:
-                        effective_emotion = inferred.emotion
-                else:
-                    effective_gesture = "talk_right"
 
             directive = AvatarDirective(
                 emotion=effective_emotion,
@@ -752,7 +745,7 @@ class VoiceSessionManager:
                         continue
                     reply_parts.append(item)
                     await self._send(context, "voice.text.delta", delta=item)
-                    for raw_segment in chunker.feed(item):
+                    for raw_segment in chunker.feed(code_filter.feed(item)):
                         await enqueue_spoken_segment(raw_segment)
 
         try:
@@ -844,12 +837,12 @@ class VoiceSessionManager:
                 elif item:
                     reply_parts.append(item)
                     await self._send(context, "voice.text.delta", delta=item)
-                    for raw_segment in chunker.feed(item):
+                    for raw_segment in chunker.feed(code_filter.feed(item)):
                         await enqueue_spoken_segment(raw_segment)
             if not directive_sent:
-                inferred = infer_animation_directive(transcript, "".join(reply_parts))
+                inferred = AvatarDirective()
                 await apply_directive(inferred)
-            for raw_segment in chunker.flush():
+            for raw_segment in [*chunker.feed(code_filter.finish()), *chunker.flush()]:
                 await enqueue_spoken_segment(raw_segment)
             completed_reply = re.sub(r"[ \t]+", " ", "".join(reply_parts)).strip()
             completed_reply = re.sub(r" ([.,!?:;…])", r"\1", completed_reply)
@@ -1243,13 +1236,12 @@ class VoiceSessionManager:
                 style,
             ):
                 yield part
-        except Exception:
-            right_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await right_task
-            raise
-        for part in await right_task:
-            yield part
+            for part in await right_task:
+                yield part
+        finally:
+            if not right_task.done():
+                right_task.cancel()
+            await asyncio.gather(right_task, return_exceptions=True)
 
     def _split_tts_jobs(self, text: str) -> list[str]:
         text = self._SPACE_RE.sub(" ", text).strip()
@@ -1409,11 +1401,12 @@ class VoiceSessionManager:
             frames = container.getnframes()
             frame_rate = container.getframerate()
             block_align = max(1, container.getnchannels() * container.getsampwidth())
+            payload_bytes = len(container.readframes(frames))
         if frame_rate <= 0:
             raise RuntimeError("WAV header declares a non-positive sample rate")
         # `getnframes()` reflects the declared data-chunk size; if the provider
         # truncated the stream mid-chunk the buffer is shorter than that.
-        if frames * block_align > len(audio):
+        if frames * block_align != payload_bytes:
             raise RuntimeError("WAV payload is shorter than its declared data chunk")
         return frames / frame_rate
 

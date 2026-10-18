@@ -74,6 +74,11 @@ class SpeechOrchestrator:
         self._request_ids[task] = request_id
 
         def discard(completed: asyncio.Task[None]) -> None:
+            # A task cancelled before its first step never enters _run's except.
+            if completed.cancelled():
+                self.voice_service.set_tts_job(
+                    request_id, {"status": "cancelled", "audio_url": None, "voice": voice}
+                )
             self._tasks.discard(completed)
             self._request_ids.pop(completed, None)
             session_tasks = self._tasks_by_session.get(session_id)
@@ -124,7 +129,6 @@ class SpeechOrchestrator:
         delivery,
         playback_rate: float,
     ) -> None:
-        output_path = self.voice_service.next_tts_path(self.settings.voice_tts_provider)
         text = reply.strip()[: self.settings.voice_tts_max_chars]
         self.event_bus.publish(
             "voice.tts_started", "info", "Voice synthesis started",
@@ -132,6 +136,7 @@ class SpeechOrchestrator:
              "text_length": len(text), "chunks_count": len(split_tts_chunks(text))},
         )
         try:
+            output_path = self.voice_service.next_tts_path(self.settings.voice_tts_provider)
             result = await asyncio.wait_for(
                 self._synthesize_plan(
                     text,
@@ -184,13 +189,16 @@ class SpeechOrchestrator:
                     resolved_gesture = planned[0].motion_gesture
                 else:
                     inferred = infer_animation_directive(None, text)
-                    resolved_gesture = inferred.gesture if inferred.gesture and inferred.gesture != "auto" else "talk_right"
+                    resolved_gesture = inferred.gesture or "auto"
 
-            await self.avatar_service.speak(
-                session_id=session_id, utterance_id=voice_request_id, text=text, audio_url=audio_url,
-                emotion=emotion, intent=intent, gesture=resolved_gesture,
-                gesture_intensity=gesture_intensity, interrupt=interrupt,
-            )
+            try:
+                await self.avatar_service.speak(
+                    session_id=session_id, utterance_id=voice_request_id, text=text, audio_url=audio_url,
+                    emotion=emotion, intent=intent, gesture=resolved_gesture,
+                    gesture_intensity=gesture_intensity, interrupt=interrupt,
+                )
+            except Exception:
+                logger.warning("Avatar could not accept synthesized speech: voice_request_id=%s", voice_request_id, exc_info=True)
 
     async def _synthesize_plan(
         self,

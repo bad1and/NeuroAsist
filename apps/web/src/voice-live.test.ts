@@ -260,6 +260,38 @@ describe("TTSStreamPlayer", () => {
     await tick();
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: "bad mp3" }));
   });
+
+  it("does not report playback callbacks from stopped sources or timers", async () => {
+    vi.useFakeTimers();
+    const started = vi.fn();
+    const segmentFinished = vi.fn();
+    const player = new TTSStreamPlayer(started, vi.fn(), vi.fn(), {}, vi.fn(), segmentFinished);
+    player.begin("old");
+    const pending = player.enqueue("old", 0, audio());
+    await Promise.resolve();
+    await Promise.resolve();
+    const context = FakeAudioContext.instance;
+    context.deferred[0].resolve(buffer(1));
+    await pending;
+    const ended = context.sources[0].onended;
+    player.begin("new");
+    ended?.();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(started).not.toHaveBeenCalled();
+    expect(segmentFinished).not.toHaveBeenCalled();
+  });
+
+  it("ignores decoded callbacks from cancelled generations", async () => {
+    const decoded = vi.fn();
+    const player = new TTSStreamPlayer(vi.fn(), vi.fn(), vi.fn(), {}, vi.fn(), vi.fn(), decoded);
+    player.begin("old");
+    const pending = player.enqueue("old", 0, audio());
+    await tick();
+    player.begin("new");
+    FakeAudioContext.instance.deferred[0].resolve(buffer(1));
+    await pending;
+    expect(decoded).not.toHaveBeenCalled();
+  });
 });
 
 afterEach(() => {

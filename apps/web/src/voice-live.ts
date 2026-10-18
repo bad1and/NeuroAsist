@@ -159,9 +159,9 @@ export class TTSStreamPlayer {
       await this.unlock();
       const context = this.context!;
       const buffer = await context.decodeAudioData(data.slice(0));
-      this.onDecoded(segmentId, Math.round(performance.now() - decodeStarted));
       const decoded = { buffer, text: audio.text ?? "", segmentId };
       if (generation !== this.generation || utteranceId !== this.activeUtteranceId) return;
+      this.onDecoded(segmentId, Math.round(performance.now() - decodeStarted));
       this.decodedBySegment.set(segmentId, decoded);
       this.flushDecodedInOrder();
     })();
@@ -191,6 +191,7 @@ export class TTSStreamPlayer {
     this.generation += 1;
     this.clearPrebufferTimer();
     for (const source of this.sources) {
+      source.onended = null;
       try { source.stop(); } catch { /* already stopped */ }
       source.disconnect();
     }
@@ -295,15 +296,16 @@ export class TTSStreamPlayer {
     const startAt = Math.max(context.currentTime + this.startLeadMs / 1000, this.scheduledUntil);
     this.scheduledUntil = startAt + buffer.duration;
     this.sources.add(source);
+    const gen = this.generation;
+    const utterance = this.activeUtteranceId;
     source.onended = () => {
+      if (this.generation !== gen || this.activeUtteranceId !== utterance) return;
       this.sources.delete(source);
       source.disconnect();
       this.onSegmentFinished(text);
       this.maybeFinished();
     };
     source.start(startAt);
-    const gen = this.generation;
-    const utterance = this.activeUtteranceId;
     const segmentStartDelay = Math.max(0, (startAt - context.currentTime) * 1000);
     globalThis.setTimeout(() => {
       if (this.generation === gen && this.activeUtteranceId === utterance) {
@@ -313,7 +315,11 @@ export class TTSStreamPlayer {
     if (!this.started) {
       this.started = true;
       const startedUtteranceId = utterance;
-      globalThis.setTimeout(() => this.onStarted(startedUtteranceId), Math.max(0, (startAt - context.currentTime) * 1000));
+      globalThis.setTimeout(() => {
+        if (this.generation === gen && this.activeUtteranceId === utterance) {
+          this.onStarted(startedUtteranceId);
+        }
+      }, Math.max(0, (startAt - context.currentTime) * 1000));
     }
   }
 
