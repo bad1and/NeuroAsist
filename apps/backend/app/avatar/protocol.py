@@ -3,6 +3,7 @@ from __future__ import annotations
 from pydantic import ValidationError
 
 from .schemas import (
+    BodyActionResultPayload,
     AckPayload,
     ClientStatePayload,
     GesturePayload,
@@ -23,6 +24,7 @@ class AvatarProtocolError(ValueError):
 
 
 _PAYLOADS = {
+    "avatar.action.result": BodyActionResultPayload,
     "avatar.hello": HelloPayload,
     "avatar.ready": ReadyPayload,
     "avatar.pong": PongPayload,

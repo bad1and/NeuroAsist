@@ -110,7 +110,8 @@ class SkillRegistry:
                 fields = {name: {key: value for key, value in spec.items() if key != "title"}
                           for name, spec in schema["properties"].items()}
                 entries.append({"name": skill.name, "description": skill.description,
-                                "arguments": fields, "required": schema.get("required", [])})
+                                "arguments": fields, "required": schema.get("required", []),
+                                **({"$defs": schema["$defs"]} if "$defs" in schema else {})})
         if not entries:
             return ""
         if native:

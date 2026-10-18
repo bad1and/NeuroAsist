@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from apps.backend.app.agents.character.prompts import (
     CHARACTER_REPAIR_PROMPT,
+    AVATAR_CONTROL_RULES,
     character_coding_routing_prompt,
     character_json_prompt,
     character_live_prompt,
@@ -110,6 +111,7 @@ class CharacterAgent:
         dialogue_style_service: DialogueStyleService | None = None,
         skills: tuple[Skill, ...] = (),
         meme_library: MemeLibrary | None = None,
+        avatar_service=None,
     ) -> None:
         self._llm_provider = llm_provider
         self._history = history
@@ -167,7 +169,12 @@ class CharacterAgent:
         self._retrieval_sources = ()
         self._retrieval_id = uuid4().hex
         self._bridge_state = ""
+        self._avatar_service = avatar_service
+        self._body_session_id = "default"
         self._skills = SkillRegistry()
+        if avatar_service is not None:
+            from apps.backend.app.avatar.body import body_skill
+            self._skills.register(body_skill(avatar_service, lambda: self._body_session_id))
         self._skills.register(Skill(
             "web_search", "Проверка фактов и свежих событий в интернете; запрос: объект + искомый факт + период. Не угадывай даты и релизы.",
             SearchArguments, self._execute_search_skill,
@@ -222,6 +229,7 @@ class CharacterAgent:
         self._response_guard_failure = None
         self._response_guard_reason = None
         self.last_web_search_metadata = None
+        self._body_session_id = session_id
         self.last_news_metadata = None
         self.last_skill_metadata = None
         self._turn_search_snapshot = None
@@ -622,6 +630,8 @@ class CharacterAgent:
         result = await self._skills.execute(call)
         self.last_skill_metadata = {"name": result.name, "status": result.status,
                                     "latency_ms": round((time.monotonic() - started) * 1000)}
+        if result.name == "avatar_body":
+            self.last_skill_metadata["body_result"] = result.value
         if (result.name == "web_search" or legacy_search) and result.status != "ok" and self.last_web_search_metadata is None and not self._turn_lookup_suppressed:
             self.last_web_search_metadata = {"query": "", "status": "invalid" if result.status == "invalid" else "unavailable",
                                              "sources": [], "attempts": [], "cached": False}
@@ -649,6 +659,13 @@ class CharacterAgent:
                     ]
                     break
         followup.append(ChatMessage(role="system", content="Операция навыка завершена. Ответь по результату; при ошибке честно назови отсутствие проверки. Не вызывай навыки повторно и не обещай будущую проверку."))
+        if result.name == "avatar_body":
+            followup.append(ChatMessage(role="system", content=
+                "Ответь коротко по запрошенному действию. Не перечисляй состояние остальных частей тела и не придумывай следующую просьбу. "
+                "Успех подтверждён только для шагов с reached=true. При reached=false не говори, что выполнила. "
+                "Данные Unity не дают тебе зрения: не утверждай, что видишь себя на экране. Если пользователь говорит, что жеста не видно, "
+                "признай расхождение между измеренной позой и тем, что он видит. Причина неизвестна: не придумывай задержку, паузу, сбой, "
+                "не обвиняй пользователя или renderer и не оправдывайся 'это не я'. Слова 'подтверждено' и 'телеметрия' не нужны при обычном успешном жесте."))
         return followup
 
     async def _skill_model_generate(self, messages):
@@ -1143,6 +1160,8 @@ class CharacterAgent:
         ]
         _, dialogue_style = self._dialogue_style_context()
         self._prompt_dialogue_style = dialogue_style
+        if self._avatar_service is not None:
+            messages.append(ChatMessage(role="system", content=AVATAR_CONTROL_RULES + "\nСостояние твоего аватара сейчас (телеметрия): " + json.dumps(await self._avatar_service.body_status(), ensure_ascii=False)))
         skill_rule = self._skills.prompt(live=False, native=getattr(self._llm_provider, "supports_native_tools", False))
         if skill_rule:
             messages.append(ChatMessage(role="system", content=skill_rule))
@@ -1205,6 +1224,22 @@ class CharacterAgent:
                                                               command=llm_response.content)
             with llm_call_purpose("chat_web_search"):
                 llm_response = await self._llm_provider.generate(search_messages)
+            if skill_result.name == "avatar_body":
+                from apps.backend.app.avatar.body import action_succeeded, measured_reply
+                grounded_reply = measured_reply(skill_result.status, skill_result.value)
+                try:
+                    acted = json.loads(llm_response.content)
+                except ValueError:
+                    acted = None
+                if not isinstance(acted, dict):
+                    acted = {"emotion": "neutral", "intent": "task_request"}
+                acted["reply"] = grounded_reply
+                acted["gesture"] = {"name": "none", "intensity": 0, "interrupt": True} if "affect" in acted or isinstance(acted.get("gesture"), dict) else "none"
+                if not action_succeeded(skill_result.status, skill_result.value) or acted.get("emotion") in {"wink", "wink_left"}:
+                    acted["emotion"] = "neutral"
+                if isinstance(acted.get("affect"), dict) and (not action_succeeded(skill_result.status, skill_result.value) or acted["affect"].get("emotion") in {"wink", "wink_left"}):
+                    acted["affect"]["emotion"] = "neutral"
+                llm_response = llm_response.model_copy(update={"content": json.dumps(acted, ensure_ascii=False)})
             messages = search_messages
             try:
                 final_reply = json.loads(llm_response.content).get("reply", "")
@@ -1483,6 +1518,18 @@ class CharacterAgent:
         guard_options: dict[str, Any],
     ) -> AsyncIterator[str]:
         """Prevent a repeated or malformed search directive from reaching UI/TTS."""
+        if (self.last_skill_metadata or {}).get("name") == "avatar_body":
+            from apps.backend.app.avatar.body import action_succeeded, measured_reply
+            grounded = measured_reply(self.last_skill_metadata["status"], self.last_skill_metadata.get("body_result"))
+            # This short acknowledgement follows an already performed action.
+            # Buffer it so it cannot replay the same gesture or leak a false claim.
+            raw = "".join([delta async for delta in self._guarded_live_stream(messages, **guard_options)])
+            from apps.backend.app.voice.directives import LiveDirectiveParser, clean_live_reply
+            directive, _ = LiveDirectiveParser().feed(raw)
+            mood = directive.emotion.value if directive is not None and directive.emotion not in {Emotion.WINK, Emotion.WINK_LEFT} else "neutral"
+            if not action_succeeded(self.last_skill_metadata["status"], self.last_skill_metadata.get("body_result")): mood = "neutral"
+            yield f"[[avatar emotion={mood} gesture=none intensity=0.7]] " + (grounded or clean_live_reply(raw) or "Готово.")
+            return
         buffered = ""
         async for delta in self._without_repeated_search_bridge(self._guarded_live_stream(messages, **guard_options)):
             buffered += delta
@@ -1904,6 +1951,8 @@ class CharacterAgent:
         ]
         _, dialogue_style = self._dialogue_style_context()
         self._prompt_dialogue_style = dialogue_style
+        if self._avatar_service is not None:
+            messages.append(ChatMessage(role="system", content=AVATAR_CONTROL_RULES + "\nСостояние твоего аватара сейчас (телеметрия): " + json.dumps(await self._avatar_service.body_status(), ensure_ascii=False)))
         skill_rule = self._skills.prompt(live=True, native=getattr(self._llm_provider, "supports_native_tools", False))
         if skill_rule:
             messages.append(ChatMessage(role="system", content=skill_rule))
@@ -2032,6 +2081,23 @@ class CharacterAgent:
         persist_reply_callback: Callable[[str], Any] | None,
     ) -> dict[str, Any]:
         """Commit a batch reply and memory effects on an I/O worker thread."""
+        if (self.last_skill_metadata or {}).get("name") == "avatar_body":
+            from apps.backend.app.avatar.body import action_succeeded, measured_reply
+            grounded = measured_reply(self.last_skill_metadata["status"], self.last_skill_metadata.get("body_result"))
+            source_turn = parsed.turn or deterministic_turn(grounded or parsed.payload["reply"])
+            updates: dict[str, Any] = {"gesture": GestureCue(name=Gesture.NONE, intensity=0)}
+            if source_turn.affect.emotion in {Emotion.WINK, Emotion.WINK_LEFT}:
+                updates["affect"] = source_turn.affect.model_copy(update={"emotion": Emotion.NEUTRAL})
+            if grounded is not None:
+                updates.update(reply=grounded, memory_candidates=[], memory_decisions=[], diary_note=None, cognitive_appraisal=None)
+            if not action_succeeded(self.last_skill_metadata["status"], self.last_skill_metadata.get("body_result")):
+                updates["affect"] = AffectCue()
+            turn = source_turn.model_copy(update=updates)
+            payload = {**parsed.payload, **legacy_result(turn)}
+            if grounded is not None:
+                payload.pop("diary_note", None)
+                payload.pop("cognitive_appraisal", None)
+            parsed = _ParseResult(payload, parsed.valid, parsed.reason, turn)
         if (
             parsed.valid
             and parsed.turn is not None

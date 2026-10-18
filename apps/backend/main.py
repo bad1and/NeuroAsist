@@ -522,6 +522,7 @@ def create_app() -> FastAPI:
                 runtime_settings=runtime_settings,
                 dialogue_style_service=dialogue_style_service,
                 meme_library=meme_library,
+                avatar_service=avatar_service,
             )
             source_message = (
                 await asyncio.to_thread(
@@ -644,6 +645,7 @@ def create_app() -> FastAPI:
             runtime_settings=runtime_settings,
             dialogue_style_service=dialogue_style_service,
             meme_library=meme_library,
+            avatar_service=avatar_service,
         )
         utterance_id = uuid.uuid4().hex
         voice = voice_service.resolve_tts_voice(language, runtime_settings.voice_tts_voice)

@@ -30,6 +30,7 @@ class AvatarClient:
     current_motion_profile: str | None = None
     current_gesture: str | None = None
     protocol_version: int = 1
+    body_actions: list[str] = field(default_factory=list)
 
     def status(self) -> AvatarStatusClient:
         return AvatarStatusClient(

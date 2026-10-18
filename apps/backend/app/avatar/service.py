@@ -65,6 +65,42 @@ class AvatarService:
         self._playback_failed_handler: PlaybackFailedHandler | None = None
         self._playback_started_handler: PlaybackStartedHandler | None = None
         self._presence_by_session: dict[str, str] = {}
+        self._body_waiters: dict[tuple[str, str], asyncio.Future] = {}
+        self._body_expected: dict[tuple[str, str], str] = {}
+        self._body_results: dict[str, dict] = {}
+        self._body_lock = asyncio.Lock()
+
+    async def body_status(self) -> dict:
+        clients = [c for c in await self.manager.snapshot() if c.renderer_ready]
+        return {"connected": self.enabled and bool(clients), "clients": [
+            {"actions": c.body_actions, "last_measured": self._body_results.get(c.client_id)} for c in clients
+        ]}
+
+    async def perform_body_action(self, *, session_id: str, action: str, timeout: float | None = None) -> dict:
+        action = getattr(action, "value", action)
+        async with self._body_lock:
+            if not self.enabled:
+                return {"action": action, "reached": False, "reason": "disabled"}
+            clients = [c for c in await self.manager.snapshot() if c.renderer_ready]
+            client = next((c for c in clients if action in c.body_actions), None)
+            if client is None:
+                return {"action": action, "reached": False, "reason": "unsupported_renderer" if clients else "disconnected"}
+            frame = OutgoingMessage(protocol_version=2, type="avatar.action", session_id=session_id, payload={"action": action})
+            key = (client.client_id, frame.message_id)
+            future = asyncio.get_running_loop().create_future()
+            self._body_waiters[key] = future
+            self._body_expected[key] = action
+            try:
+                if not await self.manager.send_to(client.client_id, frame.model_dump(mode="json")):
+                    return {"action": action, "reached": False, "reason": "delivery_failed"}
+                wait_seconds = timeout if timeout is not None else 18 if action in {g.value for g in Gesture} else 10
+                async with asyncio.timeout(wait_seconds):
+                    return await future
+            except TimeoutError:
+                return {"action": action, "reached": False, "reason": "renderer_timeout"}
+            finally:
+                self._body_waiters.pop(key, None)
+                self._body_expected.pop(key, None)
 
     def bind_playback_finished_handler(
         self,
@@ -95,6 +131,9 @@ class AvatarService:
             self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
     async def close(self) -> None:
+        for waiter in self._body_waiters.values():
+            if not waiter.done():
+                waiter.set_result({"reached": False, "reason": "service_closed"})
         if self._heartbeat_task is not None:
             self._heartbeat_task.cancel()
             try:
@@ -286,6 +325,7 @@ class AvatarService:
             await self.manager.update(
                 client_id, client_name=payload.client_name, client_version=payload.client_version,
                 platform=payload.platform, protocol_version=envelope.protocol_version,
+                body_actions=payload.body_actions,
             )
             self.event_bus.publish("avatar.hello", "info", "Avatar client hello", {"client_id": client_id})
             frame = OutgoingMessage(
@@ -315,6 +355,10 @@ class AvatarService:
         elif envelope.type == "avatar.pong":
             return
         elif envelope.type == "avatar.ack":
+            if not payload.accepted:
+                waiter = self._body_waiters.get((client_id, payload.reply_to))
+                if waiter is not None and not waiter.done():
+                    waiter.set_result({"reached": False, "reason": "renderer_rejected"})
             self.event_bus.publish("avatar.command_sent", "info", "Avatar command acknowledged", {"client_id": client_id, "message_id": payload.reply_to, "accepted": payload.accepted})
         elif envelope.type == "avatar.playback.started":
             await self.manager.update(client_id, current_utterance_id=payload.utterance_id, state="speaking")
@@ -350,6 +394,17 @@ class AvatarService:
             # same state back to every connected avatar.
             self._presence_by_session[envelope.session_id] = payload.state
             self.event_bus.publish("avatar.state_changed", "info", "Avatar state changed", {"client_id": client_id, "state": payload.state})
+        elif envelope.type == "avatar.action.result":
+            expected = self._body_expected.get((client_id, payload.reply_to))
+            if expected is not None and expected != payload.action:
+                return
+            result = payload.model_dump(mode="json")
+            self._body_results[client_id] = result
+            key = (client_id, payload.reply_to)
+            waiter = self._body_waiters.get(key)
+            if waiter is not None and not waiter.done() and self._body_expected.get(key) == payload.action:
+                waiter.set_result(result)
+            self.event_bus.publish(envelope.type, "info", "Avatar measured body result", {"client_id": client_id, **result})
         elif envelope.type == "avatar.gesture.started":
             await self.manager.update(client_id, current_gesture=payload.gesture)
             self.event_bus.publish(envelope.type, "info", "Avatar motion event", {"client_id": client_id, **payload.model_dump(mode="json")})
