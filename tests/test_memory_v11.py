@@ -244,8 +244,8 @@ def test_v20_slot_registry_upgrades_newly_supported_profile_facts(tmp_path: Path
     assert first["newly_supported"] == 1
     assert second["idempotent_noop"] is True
     assert upgraded["slot_key"] == "user.occupation"
-    assert upgraded["normalization_version"] == 20
-    assert upgraded["expires_at"]
+    assert upgraded["normalization_version"] == 21
+    assert upgraded["expires_at"] is None
 
 
 def test_v17_assigns_ttl_and_closes_name_loop_when_slot_is_filled(tmp_path: Path) -> None:

@@ -29,23 +29,35 @@ MEMORY_SLOT_POLICIES: dict[str, MemorySlotPolicy] = {
     "user.preference": MemorySlotPolicy("multi", search_aliases="предпочтение любит нравится preference likes"),
     "user.dislike": MemorySlotPolicy("multi", search_aliases="не любит ненавидит избегает dislike hates avoids"),
     "user.interest": MemorySlotPolicy("multi", search_aliases="интерес увлечение хобби interest hobby"),
-    "user.habit": MemorySlotPolicy("multi", "period", 180, "привычка распорядок routine habit usually"),
+    "user.habit": MemorySlotPolicy("multi", "period", search_aliases="привычка распорядок routine habit usually"),
     "user.note": MemorySlotPolicy("multi", search_aliases="явно запомнить заметка remember note"),
     "user.relationship.friend": MemorySlotPolicy("multi", search_aliases="друг друзья friend relationship"),
     "user.pet": MemorySlotPolicy("multi", search_aliases="питомец кот кошка собака pet cat dog"),
     "user.game_detail": MemorySlotPolicy("multi", search_aliases="детали игры особенности улучшения game features upgrades"),
     "user.current_mood": MemorySlotPolicy("single", "current", 1, "настроение mood сейчас"),
     "user.current_activity": MemorySlotPolicy("single", "current", 1, "занятие activity doing сейчас"),
-    "user.current_goal": MemorySlotPolicy("single", "current", 30, "цель план goal objective сейчас"),
-    "user.occupation": MemorySlotPolicy("single", "current", 365, "работа профессия occupation job works as"),
+    "user.current_goal": MemorySlotPolicy("multi", "current", search_aliases="цель план goal objective сейчас"),
+    "user.occupation": MemorySlotPolicy("single", "current", search_aliases="работа профессия occupation job works as"),
     "user.skill": MemorySlotPolicy("multi", search_aliases="навык умеет технология skill knows uses"),
-    "user.learning": MemorySlotPolicy("multi", "current", 90, "учится изучает осваивает learning studying"),
-    "user.project": MemorySlotPolicy("multi", "current", 120, "проект разрабатывает работает над project working on"),
-    "user.location": MemorySlotPolicy("single", "current", 365, "город живет находится location lives city"),
+    "user.learning": MemorySlotPolicy("multi", "current", search_aliases="учится изучает осваивает learning studying"),
+    "user.project": MemorySlotPolicy("multi", "current", search_aliases="проект разрабатывает работает над project working on"),
+    "user.location": MemorySlotPolicy("single", "current", search_aliases="город живет находится location lives city"),
     "user.prefers_response_length": MemorySlotPolicy("single", search_aliases="длина ответов короткие длинные response length"),
     "user.health_constraint": MemorySlotPolicy("multi", search_aliases="здоровье аллергия диагноз ограничение health allergy"),
     "user.constraint": MemorySlotPolicy("multi", search_aliases="ограничение constraint restriction"),
+    "user.family": MemorySlotPolicy("multi", search_aliases="семья мама папа брат сестра жена муж family partner relatives"),
+    "user.birthday": MemorySlotPolicy("single", search_aliases="день рождения birthday born date"),
+    "user.age": MemorySlotPolicy("single", "current", search_aliases="возраст сколько лет age years old"),
+    "user.important_date": MemorySlotPolicy("multi", search_aliases="важная дата годовщина anniversary date"),
+    "user.device": MemorySlotPolicy("multi", search_aliases="устройство компьютер телефон оборудование device hardware phone computer"),
+    "user.schedule": MemorySlotPolicy("multi", "period", search_aliases="расписание график по дням schedule routine"),
+    "user.personal_fact": MemorySlotPolicy("multi", search_aliases="личный факт повседневная информация personal fact"),
+    "user.life_event": MemorySlotPolicy("multi", search_aliases="важное событие жизни life event milestone"),
 }
+
+# Recency is a retrieval/answering concern. Only genuinely short-lived state
+# expires automatically; silence is not evidence that a personal fact is false.
+TRANSIENT_MEMORY_SLOTS = frozenset({"user.current_mood", "user.current_activity"})
 
 
 SINGLE_VALUE_MEMORY_SLOTS = frozenset(

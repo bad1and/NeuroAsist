@@ -109,4 +109,6 @@ def test_memory_extractor_receives_trusted_message_occurrence_time(tmp_path: Pat
 
     assert redacted is False
     assert "@time is trusted backend occurrence time" in prompt
-    assert f"[{source.id} @2026-09-24T07:30:00+00:00] U:" in prompt
+    from datetime import datetime
+    expected_time = datetime.fromisoformat(source.created_at).astimezone().isoformat()
+    assert f"[{source.id} @{expected_time}] U:" in prompt

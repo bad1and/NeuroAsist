@@ -14,10 +14,12 @@ from typing import Any, Literal
 
 from apps.backend.app.runtime.settings import RuntimeSettings
 from apps.backend.app.memory.consolidation import CommitmentProposal, ConsolidationResult, FactProposal, TopicProposal
+from apps.backend.app.memory.signals import MEMORY_CORRECTION_CUE
 from apps.backend.app.memory.slots import (
     KNOWN_MEMORY_SLOTS,
     MEMORY_SLOT_POLICIES,
     SINGLE_VALUE_MEMORY_SLOTS,
+    TRANSIENT_MEMORY_SLOTS,
 )
 from apps.backend.app.semantic.vector_index import NullVectorIndex, VectorDimensionMismatch
 from apps.backend.app.storage.timeline import StoredTimelineMessage, TimelineStore
@@ -40,8 +42,8 @@ class MemoryService:
         "адрес", "паспорт", "карта", "банков", "полит",
     )
     _SECRET_WORDS = ("парол", "password", "код подтверждения", "код из смс", "cvv", "токен", "token", "api key")
-    _SINGLE_VALUE_PREDICATES = {"name", "current_statement", "current_goal", "prefers_response_length"}
-    _CANONICAL_VERSION = 20
+    _SINGLE_VALUE_PREDICATES = {"name", "current_statement", "prefers_response_length"}
+    _CANONICAL_VERSION = 21
     _SINGLE_VALUE_SLOTS = SINGLE_VALUE_MEMORY_SLOTS
     _KNOWN_SLOTS = KNOWN_MEMORY_SLOTS
     _NAME_PREFIX = re.compile(
@@ -117,12 +119,7 @@ class MemoryService:
         r"[^.!?\n]{0,160}\b(?:диагноз|аллерг|болез|лекар|симптом|адрес)\w*"
         r"[^.!?\n]*"
     )
-    _EXPLICIT_CORRECTION_CUE = re.compile(
-        r"(?iu)(?:"
-        r"\bне\s+[^.!?\n]{1,120}?\s*,?\s+а\s+[^.!?\n]+"
-        r"|\b(?:на\s+самом\s+деле|теперь\s+я|я\s+больше\s+не)\b"
-        r")"
-    )
+    _EXPLICIT_CORRECTION_CUE = MEMORY_CORRECTION_CUE
     _EXPLICIT_MEMORY_CUE = re.compile(
         r"(?iu)\b(?:запомни|сохрани\s+в\s+памяти|не\s+забудь|важно|remember)\b"
     )
@@ -136,10 +133,17 @@ class MemoryService:
         r"|\b(?:я\s+(?:люблю|предпочитаю|ненавижу|хочу|планирую|собираюсь|работаю|живу|учусь|занимаюсь)"
         r"|мне\s+(?:нрав\w*|удобн\w*|нужн\w*|важн\w*)|мой\s+любим\w*|моя\s+(?:текущая\s+)?(?:цель|работа)|у\s+меня)\b"
         r"|\b(?:напомни|не\s+забудь|обещаю|дедлайн|i\s+(?:like|prefer|want|plan|work|live))\b"
+        r"|\b(?:я\s+)?(?:изучаю|учу|осваиваю|делаю|разрабатываю|пишу|работаю|живу|учусь|люблю|предпочитаю|обожаю|ненавижу|терпеть\s+не\s+могу)\b"
+        r"|\b(?:мо[йяеиё]\s+\w+|по\s+(?:понедельникам|вторникам|средам|четвергам|пятницам|субботам|воскресеньям)|кажд\w+\s+(?:день|недел\w+|утро|вечер))\b"
+        r"|\b(?:день\s+рождения|у\s+(?:моего|моей)\s+\w+)\b"
+        r"|\bмне\s+\d{1,3}\b|\b(?:жену|мужа|сына|дочь|дочку|брата|сестру)\s+зовут\b"
         r")"
     )
     _PENDING_CONTINUATION_CUE = re.compile(
         r"(?iu)^\s*(?:а\s+)?(?:особенно|также|ещ[её]|например|точнее|конкретно|это)\b"
+    )
+    _NON_FACTUAL_CUE = re.compile(
+        r"(?iu)\b(?:цитат\w*|персонаж\w*|герой\s+говорит|представь|если\s+бы|это\s+шутка)\b"
     )
 
     def __init__(
@@ -190,6 +194,25 @@ class MemoryService:
     def uses_background_extraction(self) -> bool:
         """Whether this service should use the one asynchronous LLM write path."""
         return self._llm_extraction_enabled and self._async_extraction_enabled
+
+    @property
+    def context_max_tokens(self) -> int:
+        return self._context_max_tokens
+
+    @property
+    def automatic_writes_enabled(self) -> bool:
+        return self._enabled and not self.incognito and self._runtime.memory_mode != "off"
+
+    def core_profile(self) -> list[dict[str, object]]:
+        """Two small anchors keep identity and answer style available locally."""
+        if not self._enabled or self.incognito or self._runtime.memory_mode == "off":
+            return []
+        return [
+            {**item, "namespace": "factual_memory", "retrieval": {"reasons": ["core_profile"]}}
+            for slot in ("user.name", "user.prefers_response_length")
+            for item in self._store.memory_slot_items(slot)
+            if self._memory_has_eligible_source(item)
+        ][:2]
 
     @property
     def incognito(self) -> bool:
@@ -243,6 +266,8 @@ class MemoryService:
             self._DURABLE_NOVELTY_CUE.search(text)
             or self._SENSITIVE_SELF_FACT.search(text)
             or self._DEVELOPER_FACT.match(text.strip())
+            or self._substantive_statement(text)
+            or self._answers_personal_question(source, text)
         )
         if has_durable_novelty:
             return self._store.enqueue_consolidation_job(message.id)
@@ -260,6 +285,47 @@ class MemoryService:
         # calls and retried the same malformed model output independently.
         return self._store.enqueue_consolidation_job(
             message.id, create_if_missing=False,
+        )
+
+    @staticmethod
+    def _substantive_statement(text: str) -> bool:
+        """Let the extractor judge ordinary narrative, beyond an I/my regex.
+
+        Questions and short acknowledgements do not need a separate classifier
+        call. Eligible narrative shares the existing durable debounce window.
+        """
+        words = re.findall(r"[^\W_]+", text, flags=re.UNICODE)
+        if len(words) < 6 or "?" in text:
+            return False
+        return re.match(
+            r"(?iu)^\s*(?:пожалуйста[, ]+)?(?:расскажи|объясни|покажи|найди|проверь|"
+            r"сделай|напиши|сравни|помоги|давай|можешь|можно|как|почему|зачем|что|"
+            r"кто|где|когда|сколько|какой|какая|какие|в\s+ч[её]м)\b",
+            text,
+        ) is None
+
+    def _answers_personal_question(self, source: StoredTimelineMessage, text: str) -> bool:
+        """A short answer can carry a fact through the preceding question."""
+        if len(text) > 250 or "?" in text:
+            return False
+        context = self._store.memory_extraction_context(source.id, 4)
+        question = next((
+            row for row in reversed(context)
+            if row.sequence_no < source.sequence_no and row.role == "assistant"
+        ), None)
+        if question is None or not self.is_eligible_automatic_source(question):
+            return False
+        question_text = question.effective_content
+        if self._NON_FACTUAL_CUE.search(question_text):
+            return False
+        return bool(
+            "?" in question_text
+            and re.search(r"(?iu)\b(?:ты|теб[ея]|тво\w*|у\s+тебя)\b", question_text)
+            and re.search(
+                r"(?iu)\b(?:зовут|имя|лет|жив[её]шь|работаешь|учишься|изучаешь|"
+                r"предпочитаешь|нравится|любишь|сестр\w*|брат\w*|питом\w*|"
+                r"професс\w*|расписан\w*|привыч\w*)\b", question_text,
+            )
         )
 
     def _scheduling_user_source(
@@ -287,10 +353,23 @@ class MemoryService:
             return False
         # A category plus concrete examples still has durable novelty the local
         # high-precision writer cannot represent as individual games.
-        if any(str(candidate.get("predicate")) == "likes_category" for candidate in candidates):
-            if re.search(r"(?iu)\b(?:например|вроде|такие\s+как)\b", text):
-                return False
-        return True
+        # Evidence for one clause does not mean the whole turn was handled.
+        # Keep the no-LLM fast path only for a single, fully matched statement.
+        if len(candidates) != 1:
+            return False
+        candidate = candidates[0]
+        if candidate["predicate"] == "name":
+            name = re.escape(str(candidate["value_text"]))
+            return re.fullmatch(
+                rf"\s*(?:меня\s+зовут\s+|мо[её]\s+имя\s+(?:это\s+)?|my\s+name\s+is\s+|call\s+me\s+){name}[.!\s]*",
+                text, flags=re.IGNORECASE,
+            ) is not None
+        if candidate["predicate"] == "likes_category":
+            match = self._DURABLE_GAME_GENRE.search(text)
+            return bool(match and not re.sub(r"(?iu)\bя\b|[.!\s]", "", text[:match.start()] + text[match.end():]))
+        # A free-form developer list can contain extra clauses; let the model
+        # inspect it rather than treating the first relation as full coverage.
+        return False
 
     @staticmethod
     def is_eligible_automatic_source(
@@ -298,6 +377,11 @@ class MemoryService:
     ) -> bool:
         """Exclude overheard and incomplete live speech from factual memory."""
         if message is None:
+            return False
+        if message.role == "user" and re.search(
+            r"(?iu)\b(?:не\s+запоминай|не\s+сохраняй|don['’]t\s+(?:remember|save))\b",
+            message.effective_content,
+        ):
             return False
         tokens = message.metadata.get("tokens")
         if message.metadata.get("response_failed") or isinstance(tokens, dict) and tokens.get("response_failed"):
@@ -361,7 +445,7 @@ class MemoryService:
         }
 
     def retrieve(self, query: str, limit: int = 6) -> list[dict[str, object]]:
-        if not self._enabled or self.incognito:
+        if not self._enabled or self.incognito or self._runtime.memory_mode == "off":
             return []
         self.expire_due_memories()
         normalized_query = self._normalize(query)
@@ -371,9 +455,7 @@ class MemoryService:
             normalized_query,
         ))
         if developer_query:
-            active_profile = self._store.list_memories(
-                status="active", limit=250, include_enrichment=False,
-            )
+            active_profile = self._store.memory_slot_items("assistant.developer") + self._store.memory_slot_items("assistant.developer_count")
             memories = [
                 item for item in active_profile
                 if item.get("slot_key") in {"assistant.developer", "assistant.developer_count"}
@@ -382,9 +464,7 @@ class MemoryService:
                 memories, {str(item["id"]): 1.0 for item in memories}, {}, temporal=False,
             )
         elif self._is_identity_query(normalized_query):
-            active_profile = self._store.list_memories(
-                status="active", limit=250, include_enrichment=False,
-            )
+            active_profile = self._store.memory_slot_items("user.name") + self._store.memory_slot_items("assistant.developer")
             memories = [
                 item for item in active_profile
                 if item.get("slot_key") == "user.name"
@@ -722,6 +802,7 @@ class MemoryService:
                 "source_message_ids": [source_message.id],
                 "source_episode_id": source_message.episode_id,
                 "extractor_version": "deepseek-character-v1",
+                "supersedes_id": candidate.get("supersedes_id"),
             }
             try:
                 created = self._apply_source_candidate(values, source_message, sync_vector=False)
@@ -741,10 +822,17 @@ class MemoryService:
         *,
         model: str | None = None,
         run_record: dict[str, object] | None = None,
+        additional_batches: list[tuple[ConsolidationResult, list[StoredTimelineMessage], str]] | None = None,
     ) -> dict[str, int]:
         """Apply accepted proposals and their run record in one writer transaction."""
         with self._write_lock, self._store.consolidation_transaction():
+            if not self.automatic_writes_enabled:
+                return {"facts": 0, "topics": 0, "commitments": 0, "conflicts": 0}
             counts = self._apply_consolidation_sections(result, messages, model=model)
+            for batch_result, batch_messages, batch_model in additional_batches or []:
+                batch_counts = self._apply_consolidation_sections(batch_result, batch_messages, model=batch_model)
+                for key, count in batch_counts.items():
+                    counts[key] += count
             if run_record is not None:
                 base_result = dict(run_record.get("result", {}))
                 self._store.record_consolidation_run(
@@ -1466,6 +1554,68 @@ class MemoryService:
             "predicate": str(memory["predicate"]),
         }
 
+    def repair_v21_memory_retention(self) -> dict[str, object]:
+        """Recover demonstrable policy losses without undoing user actions."""
+        repair_key = "memory-retention-v21"
+        previous = self._store.memory_repair_run(repair_key)
+        if previous is not None and previous.get("status") == "completed":
+            return dict(previous.get("result", {})) | {"idempotent_noop": True}
+        counts = {"canonicalized": 0, "restored": 0}
+        with self._write_lock, self._store.consolidation_transaction():
+            for item in self._store.list_memories(limit=100000, include_enrichment=False):
+                if item["status"] not in {"active", "expired", "superseded", "rejected"}:
+                    continue
+                canonical = self._canonicalize_single(item)
+                slot = str(canonical.get("slot_key") or "")
+                if slot not in self._KNOWN_SLOTS:
+                    continue
+                if item["status"] != "active":
+                    audit = self._store.memory_audit(str(item["id"]))
+                    if item.get("user_locked") or any(entry.get("actor") == "user" for entry in audit):
+                        continue
+                    source_backed = any(
+                        (source := self._store.get_message(str(source_id))) is not None
+                        and source.role == "user" and self.is_eligible_automatic_source(source)
+                        for source_id in item.get("source_message_ids", [])
+                    )
+                    if not source_backed:
+                        continue
+                    recoverable = (
+                        item["status"] == "expired" and slot not in TRANSIENT_MEMORY_SLOTS
+                        and any(entry["action"] == "expired" and entry["actor"] == "policy" for entry in audit)
+                    ) or (
+                        item["status"] == "rejected"
+                        and any(entry["action"] == "autonomous_rejected_unknown_slot" for entry in audit)
+                    )
+                    if item["status"] == "superseded" and slot in {"user.learning", "user.project", "user.habit"}:
+                        target = self._store.get_memory(str(item.get("superseded_by_id") or ""))
+                        recoverable = bool(
+                            target and target.get("slot_key") == slot
+                            and target.get("status") == "active" and not target.get("user_locked")
+                            and target.get("object_key") != canonical.get("object_key")
+                            and not self._has_explicit_correction(target)
+                        )
+                    if not recoverable:
+                        continue
+                    exact, conflict = self._match_existing(canonical)
+                    if exact is not None or conflict is not None or self._autonomous_decision(canonical, None).action != "accept":
+                        continue
+                    self._store.update_memory(
+                        str(item["id"]), {**self._canonical_fields(canonical), "superseded_by_id": None},
+                        actor="migration", action="retention_recovered_v21",
+                    )
+                    self._store.set_memory_status(str(item["id"]), "active", actor="migration", action="retention_restored_v21")
+                    counts["restored"] += 1
+                else:
+                    self._store.update_memory(
+                        str(item["id"]), self._canonical_fields(canonical),
+                        actor="migration", action="retention_canonicalized_v21",
+                    )
+                    counts["canonicalized"] += 1
+                self._schedule_vector_sync({**canonical, "id": item["id"]})
+            self._store.finish_memory_repair(repair_key, counts)
+        return counts
+
     def clarification_prompt(self, current_message_id: str | None) -> str | None:
         clarification = self._store.next_memory_clarification(current_message_id)
         if clarification is None:
@@ -1680,6 +1830,13 @@ class MemoryService:
             canonical = self._canonicalize_single({
                 **existing,
                 **changes,
+                "object_key": (
+                    existing.get("object_key")
+                    if "value_text" not in changes or (
+                        existing.get("slot_key") == "assistant.developer"
+                        and existing.get("object_key") == "user"
+                    ) else None
+                ),
                 "user_locked": changes.get("user_locked", True),
             })
             exact, conflict = self._match_existing(canonical, exclude_id=memory_id)
@@ -1771,6 +1928,15 @@ class MemoryService:
         action: str = "autonomous_accepted", sync_vector: bool = True,
     ) -> dict[str, object] | None:
         with self._write_lock, self._store.consolidation_transaction():
+            if actor == "extractor":
+                if self._contains_secret(str(values.get("value_text", "")).lower()) or self._is_secret_predicate(str(values.get("predicate", ""))):
+                    return None
+                if not any(
+                    (source := self._store.get_message(str(source_id))) is not None
+                    and source.role == "user" and self.is_eligible_automatic_source(source)
+                    for source_id in values.get("source_message_ids", [])
+                ):
+                    return None
             self._validate_sources(
                 list(values.get("source_message_ids", [])),
                 manual=actor in {"user", "migration"},
@@ -1781,6 +1947,15 @@ class MemoryService:
                 "predicate": self._normalize(str(values["predicate"])),
             })
             exact, conflict = self._match_existing(values)
+            if actor == "extractor" and exact is None:
+                source_ids = set(values.get("source_message_ids", []))
+                if any(
+                    item["status"] in {"deleted", "superseded", "rejected", "expired"}
+                    and self._normalize(str(self._canonicalize_single(item)["value_text"])) == self._normalize(str(values["value_text"]))
+                    and source_ids and source_ids <= set(item.get("source_message_ids", []))
+                    for item in self._store.memory_slot_items(str(values.get("slot_key") or ""), active_only=False)
+                ):
+                    return None
             if exact is not None:
                 exact = self._store.reinforce_memory_evidence(
                     str(exact["id"]),
@@ -1880,14 +2055,22 @@ class MemoryService:
             }
             or importance >= 0.8
         )
-        transient = (
-            slot in {"user.current_mood", "user.current_activity"}
-            or values.get("temporal_semantics") in {"current", "period"}
-        )
+        transient = slot in TRANSIENT_MEMORY_SLOTS
         if slot not in self._KNOWN_SLOTS:
             return MemoryDecision("reject", "unknown_slot")
+        if slot.startswith("user.") and values.get("subject") != "user":
+            return MemoryDecision("reject", "subject_mismatch")
+        if self._contains_secret(str(values.get("value_text", "")).lower()) or self._is_secret_predicate(str(values.get("predicate", ""))):
+            return MemoryDecision("reject", "secret")
+        if conflict is not None:
+            candidate_sequence = self._latest_user_source_sequence(values)
+            existing_sequence = self._latest_user_source_sequence(conflict)
+            if candidate_sequence and existing_sequence and candidate_sequence <= existing_sequence:
+                return MemoryDecision("reject", "stale_conflict")
         if sensitive and not explicit:
             return MemoryDecision("clarify", "sensitive_consent")
+        if confidence < self._llm_min_confidence:
+            return MemoryDecision("clarify" if high_impact else "reject", "low_confidence")
         if source_quality < 0.80:
             return MemoryDecision(
                 "clarify" if high_impact else "reject",
@@ -1934,13 +2117,21 @@ class MemoryService:
                 continue
             text = self._normalize(source.effective_content)
             if re.search(
-                r"\b(?:нет|исправ|теперь|на самом деле|вообще-то|зови меня)\b",
+                r"\b(?:нет|исправ\w*|теперь|на самом деле|вообще-то|зови меня)\b",
                 text,
             ):
                 return True
             if slot == "user.name" and self._NAME_PREFIX.search(text):
                 return True
         return False
+
+    def _latest_user_source_sequence(self, values: dict[str, object]) -> int:
+        return max((
+            source.sequence_no
+            for source_id in values.get("source_message_ids", [])
+            if (source := self._store.get_message(str(source_id))) is not None
+            and source.role == "user"
+        ), default=0)
 
     @staticmethod
     def _clarification_question(
@@ -2060,6 +2251,44 @@ class MemoryService:
         fts_scores = {str(item["id"]): 1.0 / (position + 1) for position, item in enumerate(fts)}
         semantic_scores: dict[str, float] = {}
         candidates = {str(item["id"]): item for item in fts}
+        # Slot-level backoff covers Russian inflection (кот/кота, сестра/сестру)
+        # even with FTS-only or hash embeddings, without an LLM query rewrite.
+        slot_queries = {
+            "user.pet": r"\b(?:кот|кошк|собак|питом|п[её]с)",
+            "user.family": r"\b(?:семь|семе|мам|пап|сестр|брат|жен[аыу]|муж|родител)",
+            "user.birthday": r"\bд[её]н[ьяе]\s+рожден",
+            "user.age": r"\b(?:возраст|сколько\s+мне\s+лет)",
+            "user.device": r"\b(?:устройств|компьютер|ноутбук|телефон|видеокарт|оборудован)",
+            "user.project": r"\bпроект",
+            "user.learning": r"\b(?:изуча|учусь|уч[иу]ть|осваива)",
+            "user.occupation": r"\b(?:професси|кем\s+.*работа|где\s+.*работа)",
+            "user.location": r"\b(?:город|где\s+.*живу|место\s+жительств|прожива)",
+            "user.preference": r"\b(?:предпочтени|предпочита|что\s+я\s+люблю|что\s+мне\s+нрав|любим)",
+            "user.likes_game": r"\b(?:игр|играю|во\s+что)",
+            "user.likes_category": r"\b(?:жанр|игр)",
+            "user.interest": r"\b(?:увлека|интерес|хобби)",
+            "user.dislike": r"\b(?:ненавиж|не\s+люблю|не\s+переношу|мне\s+не\s+нрав)",
+            "user.skill": r"\b(?:навык|умею|владею)",
+            "user.relationship.friend": r"\b(?:друг|друз|друж)",
+            "user.life_event": r"\b(?:событи|случил|произошло|получил|достижени)",
+            "user.habit": r"\b(?:привыч|обычно|распоряд)",
+            "user.schedule": r"\b(?:расписан|график|по\s+каким\s+дням)",
+            "user.current_goal": r"\b(?:цел[ьи]|планы)",
+            "user.health_constraint": r"\b(?:здоров|аллерг|ограничени|диагноз|лекар|болез|диабет)",
+            "user.constraint": r"\bограничени",
+        }
+        normalized = self._normalize(query)
+        profile_query = re.search(r"\bчто\s+(?:ты\s+)?(?:знаешь|помнишь)\s+обо?\s+мне\b", normalized)
+        if profile_query:
+            for item in self._store.list_memories(status="active", limit=limit, include_enrichment=False):
+                candidates[str(item["id"])] = item
+                fts_scores.setdefault(str(item["id"]), .8)
+        else:
+            for slot, pattern in slot_queries.items():
+                if re.search(pattern, normalized):
+                    for item in self._store.memory_slot_items(slot):
+                        candidates[str(item["id"])] = item
+                        fts_scores.setdefault(str(item["id"]), .65)
         semantic_scores = self._semantic_namespace_scores(query, "memory", self._semantic_limit)
         for memory_id in semantic_scores:
             memory = self._store.get_memory(memory_id)
@@ -2132,7 +2361,11 @@ class MemoryService:
             return True
         return (
             float(values.get("confidence", 0.0)) >= self._auto_min_confidence
-            and float(values.get("importance", 0.0)) >= self._auto_min_importance
+            and float(values.get("importance", 0.0)) >= (
+                self._auto_min_importance
+                if values.get("slot_key") in TRANSIENT_MEMORY_SLOTS
+                else min(self._auto_min_importance, .45)
+            )
         )
 
     def _relationship_is_unambiguous(self, values: dict[str, object]) -> bool:
@@ -2207,18 +2440,17 @@ class MemoryService:
             self._store.supersede_memory(str(conflict["id"]), memory_id)
 
     def _match_existing(self, values: dict[str, object], exclude_id: str | None = None) -> tuple[dict[str, object] | None, dict[str, object] | None]:
-        active = self._store.list_memories(
-            status="active", limit=250, include_enrichment=False,
-        )
         subject, predicate = str(values["subject"]), str(values["predicate"])
         candidate_value = self._normalize(str(values["value_text"]))
         slot_key = str(values.get("slot_key") or "")
         object_key = str(values.get("object_key") or "")
+        active = self._store.memory_slot_items(slot_key) if slot_key else self._store.list_memories(
+            status="active", limit=10000, include_enrichment=False,
+        )
         single = (
             slot_key in self._SINGLE_VALUE_SLOTS
             or predicate in self._SINGLE_VALUE_PREDICATES
             or values.get("cardinality") == "single"
-            or values.get("temporal_semantics") in {"current", "period"}
         )
         exact = conflict = None
         for item in active:
@@ -2243,6 +2475,11 @@ class MemoryService:
                 single or (slot_key and object_key and item_object == object_key)
             ):
                 conflict = item
+        replacement_id = values.get("supersedes_id")
+        if replacement_id and exact is None and self._has_explicit_correction(values):
+            target = next((item for item in active if item["id"] == replacement_id), None)
+            if target is not None:
+                conflict = target
         return exact, conflict
 
     def _validate_sources(self, source_ids: list[str], *, manual: bool) -> None:
@@ -2333,9 +2570,13 @@ class MemoryService:
         )
         predicate = self._normalize(str(values.get("predicate", "")))
         subject = self._normalize(str(values.get("subject", "")))
+        is_developer_candidate = predicate in {
+            "developer", "developers", "assistant.developer", "assistant.developers",
+            "is_developer_of", "developer_of",
+        } or (predicate in {"note", "explicit_memory"} and "разработчик" in str(values.get("value_text", "")).lower())
         developer_names_raw = (
             developer_list.group(1)
-            if developer_list is not None
+            if developer_list is not None and is_developer_candidate
             else str(values.get("value_text", ""))
             if subject == "assistant" and predicate == "developers"
             else None
@@ -2402,7 +2643,7 @@ class MemoryService:
             and predicate in {"is_developer_of", "developer_of"}
             and any(marker in legacy_value for marker in ("iris", "ирис", "assistant"))
         )
-        if user_developer or explicit_developer_relation:
+        if (user_developer and predicate in {"developer", "developers", "is_developer_of", "developer_of", "assistant.developer"}) or explicit_developer_relation:
             name = self._canonical_person_name(self._active_user_name() or "пользователь")
             developer_count = 2 if (
                 known_second_developer
@@ -2438,7 +2679,7 @@ class MemoryService:
                     "confidence": .95,
                 },
             ]
-        if second_developer is not None or (
+        if (second_developer is not None and is_developer_candidate) or (
             subject not in {"user", "assistant"} and predicate == "name"
             and ("разработ" in text or subject in {"oleg", "олег"})
         ):
@@ -2506,6 +2747,10 @@ class MemoryService:
             "assistant.developers": ("assistant", "developer"),
             "assistant.developer_count": ("assistant", "developer_count"),
         }
+        # Accept the same vocabulary with and without the user namespace.
+        # Released extractors used both; rejecting user.preference lost facts.
+        if predicate.startswith("user.") and predicate in self._KNOWN_SLOTS:
+            subject, predicate = "user", predicate.removeprefix("user.")
         if predicate in qualified_aliases:
             subject, predicate = qualified_aliases[predicate]
         predicate = {
@@ -2514,6 +2759,8 @@ class MemoryService:
             "предпочтение": "preference",
             "имя": "name",
             "цель": "current_goal",
+            "current_mood": "mood",
+            "relationship.friend": "friend",
         }.get(predicate, predicate)
         value = str(result.get("value_text", "")).strip()
         slot = str(result.get("slot_key") or "")
@@ -2528,8 +2775,10 @@ class MemoryService:
         elif subject == "assistant" and predicate == "developer_count":
             slot, object_key = "assistant.developer_count", f"count:{value}"
         elif predicate in {"likes_game_genre", "plays_genre", "likes_category"}:
-            slot, object_key, predicate = "user.likes_category", "genre:shooter", "likes_category"
+            slot, predicate = "user.likes_category", "likes_category"
+            value = re.sub(r"(?iu)^(?:играть\s+в|игры\s+жанра|жанр)\s+", "", value)
             value = "шутеры" if self._normalize(value) in {"shooters", "shooter", "шутеры"} else value
+            object_key = f"genre:{self._normalize(value)}"
             result["cardinality"] = "multi"
         elif predicate in {"likes_game", "plays_game", "plays"}:
             slot, predicate = "user.likes_game", "likes_game"
@@ -2550,7 +2799,7 @@ class MemoryService:
         elif predicate in {"current_activity", "activity"} and subject == "user":
             slot, object_key, predicate = "user.current_activity", "user", "current_activity"
         elif predicate in {"current_goal", "goal"} and subject == "user":
-            slot, object_key, predicate = "user.current_goal", "user", "current_goal"
+            slot, object_key, predicate = "user.current_goal", f"goal:{self._normalize(value)}", "current_goal"
         elif predicate == "prefers_response_length" and subject == "user":
             slot, object_key = "user.prefers_response_length", "user"
         elif predicate in {"likes", "prefers", "preference", "style"} and subject == "user":
@@ -2565,14 +2814,26 @@ class MemoryService:
         elif predicate in {"habit", "routine", "usually"} and subject == "user":
             slot, predicate = "user.habit", "habit"
             object_key = object_key or f"habit:{self._normalize(value)}"
-        elif predicate == "explicit_memory" and subject == "user":
+        elif predicate in {"explicit_memory", "note"} and subject == "user":
+            predicate = "explicit_memory"
             slot, object_key = "user.note", f"note:{self._normalize(value)}"
         elif predicate in {
-            "allergy", "diagnosis", "health_condition", "medical_constraint",
+            "allergy", "diagnosis", "health_condition", "medical_constraint", "health_constraint",
         } and subject == "user":
             slot, predicate = "user.health_constraint", "health_constraint"
             object_key = object_key or f"health:{self._normalize(value)}"
             result["cardinality"] = "multi"
+            result["sensitivity"] = "sensitive"
+        elif subject == "user" and (
+            str(result.get("kind", "")) in {"health", "medical"}
+            or re.search(r"(?i)(?:diabet|insulin|allerg|diagnos|medical|health_)", predicate)
+        ):
+            # Preserve the attribute as well as its value (e.g. duration vs
+            # equipment), while keeping medical facts behind consent policy.
+            value = f"{predicate}: {value}"
+            slot, predicate = "user.health_constraint", "health_constraint"
+            object_key = f"health:{self._normalize(value)}"
+            result["sensitivity"] = "sensitive"
         elif predicate in {"constraint", "restriction"} and subject == "user":
             slot, predicate = "user.constraint", "constraint"
             object_key = object_key or f"constraint:{self._normalize(value)}"
@@ -2597,16 +2858,41 @@ class MemoryService:
             object_key = object_key or f"project:{self._normalize(value)}"
         elif predicate in {"location", "lives_in", "city", "current_location"} and subject == "user":
             slot, predicate, object_key = "user.location", "location", "user"
+        elif subject == "user" and predicate in {
+            "family", "family_member", "partner", "birthday", "birth_date",
+            "age",
+            "important_date", "anniversary", "device", "hardware", "schedule",
+            "personal_fact", "life_event",
+        }:
+            predicate = {
+                "family_member": "family", "partner": "family", "birth_date": "birthday",
+                "anniversary": "important_date", "hardware": "device",
+            }.get(predicate, predicate)
+            slot = f"user.{predicate}"
+            object_key = "user" if predicate in {"birthday", "age"} else f"{predicate}:{self._normalize(value)}"
         policy = MEMORY_SLOT_POLICIES.get(slot)
+        if self._contains_sensitive(value.lower()):
+            result["sensitivity"] = "sensitive"
+        if str(result.get("kind", "")) in {"fact", "health", "medical", "note", "state", "situation"}:
+            result["kind"] = (
+                "constraint" if slot in {"user.health_constraint", "user.constraint"}
+                else "relationship" if slot in {"user.family", "user.pet", "user.relationship.friend"}
+                else "goal" if slot in {"user.current_goal", "user.project"}
+                else "skill" if slot in {"user.occupation", "user.learning", "user.skill"}
+                else "identity" if slot in {"user.name", "user.birthday", "user.location"}
+                else "preference"
+            )
         if policy is not None:
             result["cardinality"] = policy.cardinality
             result["temporal_semantics"] = policy.temporal_semantics
-            if policy.ttl_days is not None:
+            if policy.ttl_days is not None and not result.get("expires_at"):
                 result["expires_at"] = (
                     datetime.now(UTC) + timedelta(days=policy.ttl_days)
                 ).isoformat(timespec="milliseconds")
+            elif policy.ttl_days is None:
+                result["expires_at"] = None
         temporal = str(result.get("temporal_semantics", "atemporal"))
-        if not result.get("expires_at") and temporal in {"current", "period"}:
+        if policy is None and not result.get("expires_at") and temporal in {"current", "period"}:
             days = 7 if temporal == "current" else 30
             result["expires_at"] = (datetime.now(UTC) + timedelta(days=days)).isoformat(timespec="milliseconds")
         aliases = policy.search_aliases if policy is not None else ""
@@ -2630,19 +2916,20 @@ class MemoryService:
         return {
             key: values.get(key)
             for key in (
-                "subject", "predicate", "value_text", "slot_key", "object_key",
+                "subject", "predicate", "value_text", "slot_key", "object_key", "kind",
                 "normalization_version", "search_text", "claim_fingerprint",
                 "canonical_text", "expires_at", "cardinality",
                 "temporal_semantics",
+                "sensitivity",
             )
-            if values.get(key) is not None
+            if key in values
         }
 
     def _active_user_name(self) -> str | None:
         return next(
             (
                 str(item["value_text"])
-                for item in self._store.list_memories(status="active", limit=250)
+                for item in self._store.memory_slot_items("user.name")
                 if item.get("slot_key") == "user.name" or (
                     item.get("subject") == "user" and item.get("predicate") == "name"
                 )
@@ -2680,6 +2967,8 @@ class MemoryService:
         for item in self._store.list_memories(
             status="active", limit=500, include_enrichment=False,
         ):
+            if item.get("slot_key") not in TRANSIENT_MEMORY_SLOTS or item.get("user_locked"):
+                continue
             raw = item.get("expires_at")
             if not raw:
                 continue
@@ -2713,6 +3002,8 @@ class MemoryService:
         self._store.record_memory_retrieval(str(memory["id"]))
 
     def _extract_candidates(self, text: str) -> list[dict[str, object]]:
+        if self._NON_FACTUAL_CUE.search(text):
+            return []
         cleaned = text.strip()
         lower = cleaned.lower()
         value: str | None = None
@@ -2774,6 +3065,8 @@ class MemoryService:
         }
 
     def _extract_resilient_candidates(self, text: str) -> list[dict[str, object]]:
+        if self._NON_FACTUAL_CUE.search(text):
+            return []
         candidates: list[dict[str, object]] = []
         developer = self._developer_candidate(text.strip())
         if developer is not None:

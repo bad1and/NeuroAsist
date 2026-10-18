@@ -24,6 +24,7 @@ class FactProposal(BaseModel):
     source_message_ids: list[str] = Field(default_factory=list, max_length=20)
     cardinality: Literal["single", "multi"] = "multi"
     temporal_semantics: Literal["atemporal", "current", "period"] = "atemporal"
+    supersedes_id: str | None = Field(default=None, max_length=64)
 
 
 class TopicProposal(BaseModel):

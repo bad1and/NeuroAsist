@@ -14,6 +14,7 @@ from typing import Any, Callable, Iterator
 from uuid import uuid4
 
 from apps.backend.app.llm.base import ChatMessage
+from apps.backend.app.memory.signals import MEMORY_CORRECTION_CUE
 
 
 PRIMARY_RELATIONSHIP_ID = "primary"
@@ -1037,7 +1038,7 @@ class TimelineStore:
             if episode_id is None and user_source is not None:
                 episode_id = user_source["episode_id"]
             user_text = str(user_source["content"] if user_source is not None else "")
-            immediate = bool(_MEMORY_IMMEDIATE_CUE.search(user_text))
+            immediate = bool(_MEMORY_IMMEDIATE_CUE.search(user_text) or MEMORY_CORRECTION_CUE.search(user_text))
             pending_rows = connection.execute(
                 """SELECT j.* FROM background_jobs j
                    LEFT JOIN conversation_messages m
@@ -2120,7 +2121,17 @@ class TimelineStore:
             ).fetchall()
         return [self._row_to_message(row) for row in reversed(rows)]
 
-    def memory_consolidation_context(self, message_id: str, limit: int = 40) -> list[StoredTimelineMessage]:
+    def renew_background_job_lease(self, job_id: str, owner: str, seconds: int = 120) -> bool:
+        now = datetime.now(UTC)
+        with self._connect() as connection:
+            updated = connection.execute(
+                """UPDATE background_jobs SET lease_until = ?, updated_at = ?
+                   WHERE id = ? AND status = 'running' AND lease_owner = ?""",
+                ((now + timedelta(seconds=seconds)).isoformat(timespec="milliseconds"), now.isoformat(timespec="milliseconds"), job_id, owner),
+            ).rowcount
+        return bool(updated)
+
+    def memory_consolidation_context(self, message_id: str, limit: int | None = 40) -> list[StoredTimelineMessage]:
         """Return the unprocessed delta with one complete prior turn of overlap."""
         with self._connect() as connection:
             target = connection.execute(
@@ -2167,7 +2178,7 @@ class TimelineStore:
                     target["upper_sequence"],
                     lower_sequence,
                     lower_sequence,
-                    max(2, min(limit, 100)),
+                    -1 if limit is None else max(2, min(limit, 100)),
                 ),
             ).fetchall()
         return [self._row_to_message(row) for row in reversed(rows)]
@@ -2196,6 +2207,15 @@ class TimelineStore:
             if include_enrichment:
                 return [self._enrich_memory_row(connection, row) for row in rows]
             return [self._memory_row(row) for row in rows]
+
+    def memory_slot_items(self, slot_key: str, *, active_only: bool = True) -> list[dict[str, object]]:
+        """Find canonical siblings without a top-N profile cutoff."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM memory_items WHERE relationship_id = ? AND slot_key = ? AND (? = 0 OR status = 'active')",
+                (PRIMARY_RELATIONSHIP_ID, slot_key, int(active_only)),
+            ).fetchall()
+        return [self._memory_row(row) for row in rows]
 
     def create_memory(self, values: dict[str, object], *, actor: str, action: str = "autonomous_accepted") -> dict[str, object]:
         now = self._now()
@@ -2236,12 +2256,17 @@ class TimelineStore:
 
     def update_memory(self, memory_id: str, changes: dict[str, object], *, actor: str = "user", action: str = "edited") -> dict[str, object]:
         allowed = {
-            "value_text", "importance", "confidence", "user_locked", "expires_at",
+            "value_text", "importance", "confidence", "user_locked", "expires_at", "kind",
             "slot_key", "object_key", "normalization_version", "search_text",
             "claim_fingerprint", "canonical_text", "subject", "predicate",
             "cardinality", "temporal_semantics",
+            "superseded_by_id",
+            "sensitivity",
         }
-        updates = {key: value for key, value in changes.items() if key in allowed and value is not None}
+        updates = {
+            key: value for key, value in changes.items()
+            if key in allowed and (value is not None or key in {"expires_at", "superseded_by_id"})
+        }
         if not updates:
             memory = self.get_memory(memory_id)
             if memory is None:

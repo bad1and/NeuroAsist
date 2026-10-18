@@ -7,6 +7,7 @@ from apps.backend.app.llm.base import LLMProvider, LLMResponse
 from apps.backend.app.memory.consolidation import ConsolidationResult
 from apps.backend.app.memory.extraction_worker import (
     MEMORY_EXTRACTION_INPUT_CHAR_BUDGET,
+    MEMORY_EXTRACTION_MAX_INPUT_CHARS,
     MEMORY_EXTRACTION_PROMPT,
     MEMORY_REPAIR_INPUT_CHAR_BUDGET,
     MemoryExtractionWorker,
@@ -14,9 +15,6 @@ from apps.backend.app.memory.extraction_worker import (
 from apps.backend.app.memory.service import MemoryService
 from apps.backend.app.runtime.settings import RuntimeSettings
 from apps.backend.app.storage.timeline import TimelineStore
-
-
-_LEGACY_MEMORY_SYSTEM_CHARS = 2_665
 
 
 class CaptureProvider(LLMProvider):
@@ -42,47 +40,7 @@ def _service(tmp_path):
     return store, service
 
 
-def _legacy_request_chars(store, service, message_id: str) -> int:
-    context = store.memory_consolidation_context(message_id, 40)
-    rendered: list[str] = []
-    user_burst: list[tuple[str, str]] = []
-
-    def flush_user_burst() -> None:
-        if not user_burst:
-            return
-        ids = ",".join(item[0] for item in user_burst)
-        text = "\n".join(item[1] for item in user_burst)
-        rendered.append(f"[{ids}] user-burst: {text}")
-        user_burst.clear()
-
-    for item in context[-20:]:
-        safe, _ = service.sanitize_for_llm_extraction(item.effective_content)
-        if item.role == "user":
-            user_burst.append((item.id, safe))
-        else:
-            flush_user_burst()
-            rendered.append(f"[{item.id}] {item.role}: {safe}")
-    flush_user_burst()
-    topic_catalog = [
-        {"id": item["id"], "title": item["title"]}
-        for item in store.list_topics(status="active", limit=50)
-    ]
-    legacy_prompt = (
-        "Существующие темы (переиспользуй topic_id вместо дубля):\n"
-        + json.dumps(topic_catalog, ensure_ascii=False)
-        + "\nОкно завершённого диалога:\n"
-        + "\n".join(rendered)
-    )
-    schema = json.dumps(ConsolidationResult.model_json_schema(), ensure_ascii=False)
-    user_content = (
-        f"JSON_SCHEMA:\n{schema}\n"
-        f"ALLOWED_SOURCE_IDS: {json.dumps([item.id for item in context])}\n"
-        f"{legacy_prompt}"
-    )
-    return _LEGACY_MEMORY_SYSTEM_CHARS + len(user_content)
-
-
-def test_representative_request_is_at_least_40_percent_smaller_and_hard_bounded(
+def test_large_unprocessed_window_is_bounded_per_call_without_source_loss(
     tmp_path,
 ) -> None:
     store, service = _service(tmp_path)
@@ -124,7 +82,6 @@ def test_representative_request_is_at_least_40_percent_smaller_and_hard_bounded(
         input_mode="text",
     )
     assert latest_user is not None
-    before_chars = _legacy_request_chars(store, service, current.id)
     provider = CaptureProvider(
         '{"facts":[],"topics":[],"commitments":[],"conflicts":[],"decisions":[]}'
     )
@@ -132,20 +89,26 @@ def test_representative_request_is_at_least_40_percent_smaller_and_hard_bounded(
 
     assert asyncio.run(MemoryExtractionWorker(store, service, provider).run_once()) is True
 
-    request = provider.calls[0]
-    after_chars = sum(len(item.content) for item in request)
-    submitted = request[-1].content
-    assert before_chars == 18_348
-    assert after_chars == 4_199
-    assert after_chars <= MEMORY_EXTRACTION_INPUT_CHAR_BUDGET
-    assert after_chars <= before_chars * 0.60
-    assert len(MEMORY_EXTRACTION_PROMPT) <= 2_300
+    assert len(provider.calls) > 1
+    assert all(sum(len(item.content) for item in request) <= MEMORY_EXTRACTION_MAX_INPUT_CHARS for request in provider.calls)
+    submitted = "\n".join(request[-1].content for request in provider.calls)
     assert "JSON_SCHEMA" not in submitted
     assert "latest-head" in submitted and "latest-tail" in submitted
-    assert "very-old-marker" not in submitted
+    assert "very-old-marker" in submitted
+    assert submitted.count("Содержательная деталь текущего сообщения.") == 80
     assert "Игровые предпочтения" in submitted
-    assert "Архивная тема" not in submitted
-    assert submitted.count('"id":') <= 5
+    assert "Архивная тема" not in next(request[-1].content for request in provider.calls if "latest-head" in request[-1].content)
+    assert all(request[-1].content.count('"id":') <= 9 for request in provider.calls)
+
+
+def test_short_everyday_turn_keeps_one_compact_call(tmp_path) -> None:
+    store, service = _service(tmp_path)
+    source, _ = store.append_message(role="user", content="Моя сестра Аня живёт в Туле", input_mode="text")
+    service.schedule_extraction(source)
+    provider = CaptureProvider('{"facts":[]}')
+    assert asyncio.run(MemoryExtractionWorker(store, service, provider).run_once())
+    assert len(provider.calls) == 1
+    assert sum(len(item.content) for item in provider.calls[0]) <= MEMORY_EXTRACTION_INPUT_CHAR_BUDGET
 
 
 def test_context_contains_only_new_delta_and_one_prior_turn(tmp_path) -> None:

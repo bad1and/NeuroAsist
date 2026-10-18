@@ -448,8 +448,8 @@ def test_extended_profile_slots_are_accepted_and_temporal_policy_is_canonical(tm
     assert saved_slots == [item[4] for item in proposals]
     learning = next(item for item in store.list_memories(status="active") if item["slot_key"] == "user.learning")
     project = next(item for item in store.list_memories(status="active") if item["slot_key"] == "user.project")
-    assert learning["temporal_semantics"] == "current" and learning["expires_at"]
-    assert project["temporal_semantics"] == "current" and project["expires_at"]
+    assert learning["temporal_semantics"] == "current" and learning["expires_at"] is None
+    assert project["temporal_semantics"] == "current" and project["expires_at"] is None
 
 
 def test_clean_install_defaults_enable_background_memory_and_chroma() -> None:

@@ -990,6 +990,12 @@ def create_app() -> FastAPI:
             "Memory slot registry v20 repair checked",
             memory_service.repair_v20_slot_registry(),
         ))
+        events.append((
+            "memory.v21_repair",
+            "info",
+            "Memory retention v21 repair checked",
+            memory_service.repair_v21_memory_retention(),
+        ))
         expired = memory_service.expire_due_memories()
         if expired:
             events.append((

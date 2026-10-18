@@ -61,14 +61,14 @@ _PROFILE_SETTINGS: dict[str, tuple[str, int]] = {
     "chat_search_assess": ("llm_search_assess_max_tokens", 400),
     "chat_json": ("llm_chat_json_max_tokens", 900),
     "chat_live": ("llm_chat_live_max_tokens", 500),
-    "memory": ("llm_memory_max_tokens", 1_000),
+    "memory": ("llm_memory_max_tokens", 1_600),
     "reflection": ("llm_reflection_max_tokens", 300),
     "adjudication": ("llm_adjudication_max_tokens", 350),
     "coding": ("llm_coding_max_tokens", 8_192),
     "chat_json_repair": ("llm_chat_json_max_tokens", 900),
     "chat_json_guard_retry": ("llm_chat_json_max_tokens", 900),
     "chat_live_guard_retry": ("llm_chat_live_max_tokens", 500),
-    "memory_repair": ("llm_memory_max_tokens", 1_000),
+    "memory_repair": ("llm_memory_max_tokens", 1_600),
     "reflection_repair": ("llm_reflection_max_tokens", 300),
 }
 

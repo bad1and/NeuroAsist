@@ -386,7 +386,7 @@ def test_full_unpunctuated_acquaintance_creates_cards_topic_and_one_note(tmp_pat
 
     active = {(item["predicate"], item["value_text"]) for item in store.list_memories(status="active")}
     assert ("name", "федор") in active or ("name", "Федор") in active
-    assert ("likes_category", "играть в шутеры") in active
+    assert ("likes_category", "шутеры") in active
     assert {value for predicate, value in active if predicate == "likes_game"} == {
         "Deadlock", "Valorant", "Counter-Strike", "R.E.P.O.",
     }
