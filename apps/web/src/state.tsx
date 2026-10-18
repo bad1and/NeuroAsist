@@ -201,12 +201,12 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
             <>
               <div className="state-sidebar-panels" tabIndex={0} aria-label="Настроение и отношения">
               <div className="state-hero-card mood-card">
-                <div className="mood-visual">
-                  <IrisMoodOrb
+                <IrisMoodOrb
                     emotion={state.mood.primary_emotion}
                     strength={state.mood.expression_strength}
-                    size={72}
+                    variant="surface"
                   />
+                <div className="mood-visual">
                   <div className="mood-info">
                     <h2>{getMoodVisuals(state.mood.primary_emotion).labelRu}</h2>
                   </div>

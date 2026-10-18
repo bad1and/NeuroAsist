@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
+import { createTimer } from "animejs";
 import { getMoodVisuals } from "../mood-visuals";
 
 export interface IrisMoodOrbProps {
@@ -6,6 +7,7 @@ export interface IrisMoodOrbProps {
   strength?: string;
   className?: string;
   size?: number;
+  variant?: "orb" | "surface";
 }
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -106,6 +108,7 @@ uniform vec3 u_colorAccent;
 uniform float u_radius;
 uniform float u_warp;
 uniform float u_intensity;
+uniform float u_surface;
 
 vec2 hash( vec2 p ) {
     p = vec2( dot(p,vec2(127.1,311.7)), dot(p,vec2(269.5,183.3)) );
@@ -134,6 +137,40 @@ float sdArc(vec2 p, vec2 center, float radius, float width, float warp) {
 
 void main() {
     vec2 uv = gl_FragCoord.xy / u_resolution.xy;
+    if (u_surface > 0.5) {
+        // A broad, off-centre liquid orbit: the card is the viewport, not a
+        // scaled-up square icon. All distances are normalised to the card.
+        float t = u_time * 0.48;
+        vec2 p = (uv - vec2(0.70, 0.55)) / vec2(0.63, 0.76);
+        float agitation = u_warp * (0.65 + u_intensity * 0.35);
+        p.x += sin(p.y * 2.8 + t * 0.7) * agitation * 0.42;
+        p.y += noise(p * 1.5 + vec2(t * 0.23, -t * 0.17)) * agitation;
+        float angle = atan(p.y, p.x);
+        float radius = length(p);
+        float breath = sin(t * 0.9) * 0.035 * u_intensity;
+        float wave = sin(angle * 3.0 + t) * agitation * 0.20;
+        float orbit = radius - (0.84 + breath + wave);
+        float fold = orbit + 0.16 + sin(angle * 2.0 - t * 0.6) * 0.065;
+        // Broad pigment planes, with no bright centre line or specular rim.
+        // The orbit still drives the movement, but now carries actual colour.
+        float plane = 1.0 - smoothstep(0.08, 0.52, abs(orbit + 0.04));
+        float echo = 1.0 - smoothstep(0.05, 0.32, abs(fold));
+        float atmosphere = exp(-abs(orbit) * 2.4);
+        float flow = 0.5 + 0.5 * sin(angle * 2.0 - t * 0.65 + radius * 2.0);
+        vec3 ribbon = mix(u_colorFringe, u_colorCore, flow);
+        ribbon = mix(ribbon, u_colorAccent, (0.5 + 0.5 * sin(angle * 3.0 + t * 0.4)) * 0.48);
+        vec3 pigment = mix(ribbon, mix(u_colorAccent, u_colorFringe, flow), echo * 0.36);
+        // A quiet colour wash links both edges; the left remains readable.
+        float mist = exp(-length((uv - vec2(0.45, 0.48)) * vec2(1.2, 2.0)) * 2.0);
+        float grain = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+        pigment *= 0.80 + grain * 0.12;
+        float veil = mix(0.38, 1.0, smoothstep(0.05, 0.70, uv.x));
+        float coverage = clamp(plane * 0.66 + echo * 0.18 + atmosphere * 0.12 + mist * 0.10, 0.0, 1.0);
+        // Fine static grain breaks up the pigment, as on the dialogue portal.
+        float alpha = clamp((coverage + (grain - 0.5) * 0.10 * coverage) * veil * u_intensity, 0.0, 0.82);
+        gl_FragColor = vec4(pigment, alpha);
+        return;
+    }
     vec2 st = uv;
     float aspect = u_resolution.x / u_resolution.y;
     st.x *= aspect;
@@ -200,13 +237,23 @@ function createProgram(
 ): WebGLProgram | null {
   const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexSource);
   const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
-  if (!vertexShader || !fragmentShader) return null;
+  if (!vertexShader || !fragmentShader) {
+    if (vertexShader) gl.deleteShader(vertexShader);
+    if (fragmentShader) gl.deleteShader(fragmentShader);
+    return null;
+  }
 
   const program = gl.createProgram();
-  if (!program) return null;
+  if (!program) {
+    gl.deleteShader(vertexShader);
+    gl.deleteShader(fragmentShader);
+    return null;
+  }
   gl.attachShader(program, vertexShader);
   gl.attachShader(program, fragmentShader);
   gl.linkProgram(program);
+  gl.deleteShader(vertexShader);
+  gl.deleteShader(fragmentShader);
 
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
     gl.deleteProgram(program);
@@ -220,15 +267,17 @@ export function IrisMoodOrb({
   strength = "medium",
   className = "",
   size = 80,
+  variant = "orb",
 }: IrisMoodOrbProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const animationFrameRef = useRef<number | null>(null);
+  const redrawRef = useRef<(() => void) | null>(null);
 
-  const stateRef = useRef({ emotion, strength });
+  const stateRef = useRef({ emotion, strength, variant });
 
   useEffect(() => {
-    stateRef.current = { emotion, strength };
-  }, [emotion, strength]);
+    stateRef.current = { emotion, strength, variant };
+    redrawRef.current?.();
+  }, [emotion, strength, variant]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -238,9 +287,11 @@ export function IrisMoodOrb({
     try {
       gl = canvas.getContext("webgl", {
         alpha: true,
-        antialias: true,
+        antialias: false,
+        depth: false,
+        stencil: false,
         premultipliedAlpha: false,
-        powerPreference: "high-performance",
+        powerPreference: "low-power",
       });
     } catch {
       return undefined;
@@ -273,6 +324,7 @@ export function IrisMoodOrb({
     const uRadiusLoc = gl.getUniformLocation(program, "u_radius");
     const uWarpLoc = gl.getUniformLocation(program, "u_warp");
     const uIntensityLoc = gl.getUniformLocation(program, "u_intensity");
+    const uSurfaceLoc = gl.getUniformLocation(program, "u_surface");
 
     const visuals = getMoodVisuals(emotion);
     let currCore = hexToRgb(visuals.colors[0]);
@@ -285,9 +337,12 @@ export function IrisMoodOrb({
 
     let lastTime = performance.now();
     let accumulatedTime = 0;
+    let visible = true;
+    let contextLost = false;
+    const motion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
 
     const resize = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
       const displayWidth = Math.max(1, Math.floor(canvas.clientWidth * dpr));
       const displayHeight = Math.max(1, Math.floor(canvas.clientHeight * dpr));
 
@@ -298,15 +353,11 @@ export function IrisMoodOrb({
       }
     };
 
-    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
-    observer?.observe(canvas);
-    resize();
-
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-
-    const render = (now: number) => {
-      const dt = Math.min(0.1, (now - lastTime) / 1000);
+    // The shader returns straight alpha. Let the browser composite it once;
+    // blending into the transparent buffer would apply its alpha twice.
+    const render = (now: number, immediate = false) => {
+      if (document.hidden || !visible || contextLost) return;
+      const dt = immediate ? 0 : Math.min(0.1, (now - lastTime) / 1000);
       lastTime = now;
 
       const state = stateRef.current;
@@ -317,23 +368,26 @@ export function IrisMoodOrb({
       const targetAccent = hexToRgb(currentVisuals.colors[2]);
       const targetWarp = currentVisuals.warp;
       const targetSpeed = currentVisuals.speed;
-      const targetIntensity = state.strength === "strong" ? 1.25 : state.strength === "muted" ? 0.8 : 1.0;
+      const targetIntensity = ({
+        muted: 0.65, subtle: 0.78, low: 0.78, moderate: 1, medium: 1,
+        noticeable: 1.15, high: 1.25, strong: 1.3, intense: 1.45,
+      } as Record<string, number>)[state.strength] ?? 1;
 
-      const fringeFactor = Math.min(1.0, dt * 5.4);
+      const fringeFactor = immediate ? 1 : Math.min(1.0, dt * 5.4);
       currFringe = lerpOklab(currFringe, targetFringe, fringeFactor);
 
-      const coreFactor = Math.min(1.0, dt * 3.8);
+      const coreFactor = immediate ? 1 : Math.min(1.0, dt * 3.8);
       currCore = lerpOklab(currCore, targetCore, coreFactor);
 
-      const accentFactor = Math.min(1.0, dt * 2.4);
+      const accentFactor = immediate ? 1 : Math.min(1.0, dt * 2.4);
       currAccent = lerpOklab(currAccent, targetAccent, accentFactor);
 
-      const dynamicFactor = Math.min(1.0, dt * 4.2);
+      const dynamicFactor = immediate ? 1 : Math.min(1.0, dt * 4.2);
       currWarp = lerp(currWarp, targetWarp, dynamicFactor);
       currSpeed = lerp(currSpeed, targetSpeed, dynamicFactor);
       currIntensity = lerp(currIntensity, targetIntensity, dynamicFactor);
 
-      accumulatedTime += dt * currSpeed;
+      if (!motion?.matches) accumulatedTime += dt * currSpeed * (0.7 + currIntensity * 0.3);
 
       gl.uniform2f(uResLoc, canvas.width, canvas.height);
       gl.uniform1f(uTimeLoc, accumulatedTime);
@@ -346,19 +400,55 @@ export function IrisMoodOrb({
       gl.uniform1f(uRadiusLoc, currRadius);
       gl.uniform1f(uWarpLoc, currWarp);
       gl.uniform1f(uIntensityLoc, currIntensity);
+      gl.uniform1f(uSurfaceLoc, state.variant === "surface" ? 1 : 0);
 
       gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-      animationFrameRef.current = requestAnimationFrame(render);
     };
 
-    animationFrameRef.current = requestAnimationFrame(render);
+    const timer = createTimer({
+      loop: true, frameRate: 30, autoplay: false,
+      onUpdate: () => render(performance.now()),
+    });
+    const syncPlayback = () => {
+      lastTime = performance.now();
+      if (document.hidden || !visible || contextLost) {
+        timer.pause();
+      } else if (motion?.matches) {
+        timer.pause();
+        render(lastTime, true);
+      } else {
+        timer.resume();
+      }
+    };
+    redrawRef.current = () => {
+      if (motion?.matches) render(performance.now(), true);
+    };
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => {
+      resize();
+      render(performance.now(), Boolean(motion?.matches));
+    }) : null;
+    observer?.observe(canvas);
+    const intersection = typeof IntersectionObserver !== "undefined" ? new IntersectionObserver(entries => {
+      visible = entries[0]?.isIntersecting ?? true;
+      syncPlayback();
+    }) : null;
+    intersection?.observe(canvas);
+    const onContextLost = () => { contextLost = true; timer.pause(); };
+    canvas.addEventListener("webglcontextlost", onContextLost);
+    document.addEventListener("visibilitychange", syncPlayback);
+    motion?.addEventListener("change", syncPlayback);
+    resize();
+    render(performance.now(), true);
+    syncPlayback();
 
     return () => {
+      redrawRef.current = null;
       observer?.disconnect();
-      if (animationFrameRef.current !== null) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
+      intersection?.disconnect();
+      document.removeEventListener("visibilitychange", syncPlayback);
+      motion?.removeEventListener("change", syncPlayback);
+      canvas.removeEventListener("webglcontextlost", onContextLost);
+      timer.cancel();
       gl.deleteBuffer(positionBuffer);
       gl.deleteProgram(program);
     };
@@ -366,9 +456,14 @@ export function IrisMoodOrb({
 
   return (
     <div
-      className={`iris-mood-orb-container ${className}`}
-      style={{ width: size, height: size }}
-      aria-label={`Эмоция: ${getMoodVisuals(emotion).labelRu}`}
+      className={`iris-mood-orb-container ${variant === "surface" ? "iris-mood-surface" : ""} ${className}`.trim()}
+      style={{
+        ...(variant === "orb" ? { width: size, height: size } : {}),
+        "--mood-core": getMoodVisuals(emotion).colors[0],
+        "--mood-fringe": getMoodVisuals(emotion).colors[1],
+        "--mood-accent": getMoodVisuals(emotion).colors[2],
+      } as CSSProperties}
+      aria-hidden="true"
     >
       <canvas ref={canvasRef} className="iris-mood-orb-canvas" />
     </div>
