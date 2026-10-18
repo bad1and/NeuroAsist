@@ -55,6 +55,8 @@ def load_pronunciations(path: Path) -> dict[str, str]:
         )
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("pronunciations must be an object")
         values = payload.get("pronunciations", payload)
         if not isinstance(values, dict):
             raise ValueError("pronunciations must be an object")

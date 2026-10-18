@@ -13,6 +13,7 @@ import unicodedata
 from decimal import Decimal, InvalidOperation
 
 from num2words import num2words
+from apps.backend.app.voice.lexicon import split_pronunciation_overrides
 
 
 _MONTHS = (
@@ -142,7 +143,10 @@ def normalize_unicode_for_model(text: str) -> str:
     normalized = unicodedata.normalize("NFC", "".join(output))
     # Keep semantic dashes until ranges have been recognized.  A prose dash is
     # converted to a pause later, while a dash between numbers means "from/to".
-    return normalized.replace("‑", "-").replace("\u00a0", " ")
+    # U+2212 is an unambiguous math minus; keep its meaning before mapping
+    # remaining unary minus signs to the numeric normalizer's ASCII spelling.
+    normalized = re.sub(r"(?<=[\d)])\s*−\s*(?=[\d(])", " минус ", normalized)
+    return normalized.replace("‑", "-").replace("−", "-").replace("\u00ad", "").replace("\u00a0", " ")
 
 
 def _cardinal(value: int, *, feminine: bool = False) -> str:
@@ -150,8 +154,7 @@ def _cardinal(value: int, *, feminine: bool = False) -> str:
 
 
 def _cardinal_genitive(value: int) -> str:
-    words = _cardinal(value)
-    return " ".join(_CARDINAL_GENITIVE.get(word, word) for word in words.split())
+    return str(num2words(value, lang="ru", case="genitive"))
 
 
 def _ordinal(value: int, *, form: str = "masculine") -> str:
@@ -247,7 +250,7 @@ def normalize_years(text: str) -> str:
         return f"с {_ordinal(start, form='genitive')} по {_ordinal(end)} год"
 
     text = re.sub(
-        rf"\b(?:с\s+)?({year})\s*(?:[-–—]\s*|по\s+)({year})(?:\s+(?:годы|годах|год))?\b",
+        rf"\b(?:(?:с|в|за)\s+)?({year})\s*(?:[-–—]\s*|по\s+)({year})\s+(?:годы|годах|год)\b",
         replace_range,
         text,
         flags=re.IGNORECASE,
@@ -304,8 +307,8 @@ def normalize_versions(text: str) -> str:
         return " точка ".join(_VERSION_DIGITS.get(part, part) for part in raw.split("."))
 
     text = re.sub(
-        r"\bверсии\s+[vV](\d+(?:\.\d+)+)\b",
-        lambda m: f"версии {words(m.group(1))}",
+        r"\b(версия|версии|версию|версией|сборка|сборки|релиз)\s+[vV]?(\d+(?:\.\d+)+)\b",
+        lambda m: f"{m.group(1)} {words(m.group(2))}",
         text,
         flags=re.IGNORECASE,
     )
@@ -316,7 +319,7 @@ def normalize_versions(text: str) -> str:
 
 def normalize_numeric_ranges(text: str) -> str:
     """Turn dash ranges into explicit Russian ``от … до …`` constructions."""
-    pattern = r"(?<![\w.])(?:(от|с)\s+)?(-?\d+)\s*[-–—]\s*(-?\d+)(?![\w.])"
+    pattern = r"(?<![\w.])(?:(от|с)\s+)?(-?\d+)\s*[-–—]\s*(-?\d+)(?!\w|\.\d)"
 
     def replace(match: re.Match[str]) -> str:
         prefix = match.group(1)
@@ -373,13 +376,18 @@ def normalize_ordinals(text: str) -> str:
 
 def normalize_quantities(text: str) -> str:
     """Expand remaining decimals and integers after contextual rules ran."""
-    def replace_decimal_percent(match: re.Match[str]) -> str:
-        value = Decimal(match.group(1).replace(",", "."))
-        return f"{num2words(value, lang='ru')} процента"
+    def decimal_words(raw: str) -> str:
+        value = Decimal(raw.replace(",", "."))
+        # num2words loses the sign of -0.x when it converts its integer part.
+        sign = "минус " if value < 0 else ""
+        return sign + str(num2words(abs(value), lang="ru"))
 
-    text = re.sub(r"(?<![\w.])(\d+[,.]\d+)\s*%", replace_decimal_percent, text)
+    def replace_decimal_percent(match: re.Match[str]) -> str:
+        return f"{decimal_words(match.group(1))} процента"
+
+    text = re.sub(r"(?<![\w.])(-?\d+[,.]\d+)\s*%", replace_decimal_percent, text)
     text = re.sub(
-        r"(?<![\w.])(\d+)\s*%",
+        r"(?<![\w.])(-?\d+)\s*%",
         lambda m: f"{_cardinal(int(m.group(1)))} {_plural(int(m.group(1)), 'процент', 'процента', 'процентов')}",
         text,
     )
@@ -395,17 +403,25 @@ def normalize_quantities(text: str) -> str:
     def replace_decimal(match: re.Match[str]) -> str:
         raw = match.group(0).replace(",", ".")
         try:
-            return str(num2words(Decimal(raw), lang="ru"))
+            return decimal_words(raw)
         except (InvalidOperation, ValueError):
             return match.group(0)
 
-    text = re.sub(r"(?<![\w.])-?\d+[,.]\d+(?![\w.])", replace_decimal, text)
+    text = re.sub(r"(?<![\w.])-?\d+[,.]\d+(?!\w|\.\d)", replace_decimal, text)
     text = re.sub(
-        r"(?<![\w.])-?\d+(?![\w.])",
+        r"(?<![\w.])-?\d+(?!\w|\.\d)",
         lambda m: _cardinal(int(m.group(0))),
         text,
     )
     return text
+
+
+def normalize_abbreviations(text: str) -> str:
+    expansions = {"е": "то есть", "д": "так далее", "п": "тому подобное", "к": "так как"}
+    return re.sub(
+        r"(?<!\w)т\.\s*([едпк])\.(?!\w)",
+        lambda m: expansions[m.group(1).lower()], text, flags=re.IGNORECASE,
+    )
 
 
 def normalize_punctuation(text: str) -> str:
@@ -423,12 +439,33 @@ def normalize_punctuation(text: str) -> str:
 
 
 def normalize_math_symbols(text: str) -> str:
+    left = r"(?<=[\d)])"
+    right = r"(?=[+-]?\s*\d|\()"
+    math_only = re.fullmatch(r"[\d\s().,+*/×÷^=\-]+", text) is not None
+
+    def formula_minus(match: re.Match[str]) -> str:
+        formula = match.group()
+        if math_only or re.search(r"[+*/×÷^=]", formula):
+            return re.sub(left + r"\s*-\s*" + right, " минус ", formula)
+        return formula
+
+    # Keep nested subtraction in a numeric formula distinct from prose ranges.
+    text = re.sub(r"(?<!\w)[\d(](?:[\d.\s()+*/×÷^=\-]|(?<=\d),(?=\d))*", formula_minus, text)
+
+    def spaced_minus(match: re.Match[str]) -> str:
+        # An explicit range preposition still wins over ASCII typography.
+        if re.search(r"\b(?:от|с)\s+-?\d+(?:[.,]\d+)?$", text[:match.start()], re.IGNORECASE):
+            return match.group()
+        return " минус "
+
+    text = re.sub(left + r"\s+-\s+" + right, spaced_minus, text)
     substitutions = (
-        (r"(?<=\d)\s*\+\s*(?=\d)", " плюс "),
+        (left + r"\s*\+\s*" + right, " плюс "),
         (r"(?<=\d)\s*[−-]\s*(?=\d+\s*=)", " минус "),
-        (r"(?<=\d)\s*[×*]\s*(?=\d)", " умножить на "),
-        (r"(?<=\d)\s*/\s*(?=\d)", " разделить на "),
-        (r"(?<=\d)\s*=\s*(?=\d)", " равно "),
+        (left + r"\s*(?:\^|\*\*)\s*" + right, " в степени "),
+        (left + r"\s*[×*·]\s*" + right, " умножить на "),
+        (left + r"\s*[/÷]\s*" + right, " разделить на "),
+        (left + r"\s*=\s*" + right, " равно "),
     )
     for pattern, replacement in substitutions:
         text = re.sub(pattern, replacement, text)
@@ -444,20 +481,25 @@ def normalize_tech_terms(text: str) -> str:
 def normalize_for_teratts(text: str, pronunciations: dict[str, str] | None = None) -> str:
     """Return exactly one balanced Russian TeraTTSv2 span."""
     clean = re.sub(r"</?(?:ru|en)\b[^>]*>", "", str(text or ""), flags=re.IGNORECASE)
-    clean = re.sub(r"<[^>]+>", "", clean)
-    clean = normalize_unicode_for_model(clean)
-    clean = normalize_dates(clean)
-    clean = normalize_years(clean)
-    clean = normalize_time(clean)
-    clean = normalize_versions(clean)
-    clean = normalize_math_symbols(clean)
-    clean = normalize_numeric_ranges(clean)
-    clean = normalize_ordinals(clean)
-    clean = normalize_tech_terms(clean)
-    for source, replacement in (pronunciations or {}).items():
-        if source.strip():
-            clean = re.sub(re.escape(source), replacement, clean, flags=re.IGNORECASE)
-    clean = normalize_quantities(clean)
+    clean = re.sub(r"</?[a-zA-Z][^>]*>", "", clean)
+    parts = []
+    # Match the original words once, longest phrase first. User replacements
+    # take precedence over built-ins and are never fed into another replacement.
+    for part, overridden in split_pronunciation_overrides(clean, pronunciations or {}):
+        part = normalize_unicode_for_model(part)
+        if not overridden:
+            part = normalize_dates(part)
+            part = normalize_years(part)
+            part = normalize_time(part)
+            part = normalize_versions(part)
+            part = normalize_math_symbols(part)
+            part = normalize_numeric_ranges(part)
+            part = normalize_ordinals(part)
+            part = normalize_tech_terms(part)
+            part = normalize_quantities(part)
+            part = normalize_abbreviations(part)
+        parts.append(part)
+    clean = "".join(parts)
     clean = normalize_punctuation(clean)
     if not clean:
         raise ValueError("TTS text is empty after normalization")

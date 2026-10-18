@@ -88,13 +88,13 @@ class SpeechSegment:
         )
 
 
-_SENTENCE_BOUNDARY_RE = re.compile(r"(?:(?<=[.!?…])(?:[\"'»)]*)[ \t]+|\n+)")
+_SENTENCE_BOUNDARY_RE = re.compile(r"[.!?…][\"'»”)]*(?:[ \t]+|$)|\n+")
 _MAX_EXPLICIT_PAUSE_MS = 1_200
 _NAMED_PAUSES_MS = {"none": 0, "short": 180, "medium": 350, "long": 650}
 
 
 def pause_after_ms(text: str, *, forced_clause_split: bool = False) -> int:
-    stripped = text.rstrip()
+    stripped = text.rstrip().rstrip('\"\'»”)]}').rstrip()
     if "\n\n" in text:
         return 220
     if stripped.endswith(("…", "...")):
@@ -117,7 +117,18 @@ def split_spoken_sentences(text: str) -> list[str]:
     normalized = re.sub(r"[ \t]+", " ", text).strip()
     if not normalized:
         return []
-    return [part.strip() for part in _SENTENCE_BOUNDARY_RE.split(normalized) if part.strip()]
+    from apps.backend.app.voice.text import protect_sentence_boundaries
+
+    parts = []
+    start = 0
+    for match in _SENTENCE_BOUNDARY_RE.finditer(protect_sentence_boundaries(normalized)):
+        part = normalized[start:match.end()].strip()
+        if part:
+            parts.append(part)
+        start = match.end()
+    if normalized[start:].strip():
+        parts.append(normalized[start:].strip())
+    return parts
 
 
 def make_speech_segment(
@@ -151,7 +162,7 @@ def make_speech_segment(
             if inferred.gesture and inferred.gesture not in ("auto", "talk_right", "talk"):
                 motion_gesture = inferred.gesture
             else:
-                motion_gesture = "talk_right" if sequence == 0 else "none"
+                motion_gesture = "auto"
 
     return SpeechSegment(
         text=text.strip(),
@@ -177,7 +188,12 @@ def make_speech_segment(
 
 def plan_speech(text: str, delivery=None) -> list[SpeechSegment]:
     """Build a deterministic batch plan from Character Protocol delivery cues and inline directives."""
-    # First extract any inline directives
+    from apps.backend.app.voice.text import TextNormalizer
+
+    normalizer = TextNormalizer()
+    # Remove fenced code before interpreting tags so examples cannot control
+    # the delivery of the surrounding answer.
+    text = normalizer.remove_code_blocks(text)
     parser = LiveVoiceDirectiveParser(max_directives=64, max_motion_directives=64)
     tokens = [*parser.feed(text), *parser.finish()]
 
@@ -189,7 +205,7 @@ def plan_speech(text: str, delivery=None) -> list[SpeechSegment]:
         if isinstance(item, VoiceDirective):
             current_directive = item
         elif isinstance(item, str) and item.strip():
-            for sentence in split_spoken_sentences(item):
+            for sentence in split_spoken_sentences(normalizer.normalize(item, preserve_newlines=True)):
                 sentences_with_directives.append((sentence, current_directive))
 
     if not sentences_with_directives:
