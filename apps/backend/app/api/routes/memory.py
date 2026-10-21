@@ -32,14 +32,16 @@ def list_memory(
     status: str | None = Query(default=None),
     q: str | None = Query(default=None, max_length=200),
     limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ) -> dict[str, object]:
     if status == "candidate":
-        return {"items": []}
+        return {"items": [], "next_offset": None}
     items = _service(request).store.list_memories(
-        status=status, query=q, limit=limit,
+        status=status, query=q, limit=limit + 1, offset=offset, exclude_candidates=True,
     )
     return {
-        "items": [item for item in items if item["status"] != "candidate"],
+        "items": items[:limit],
+        "next_offset": offset + limit if len(items) > limit else None,
     }
 
 

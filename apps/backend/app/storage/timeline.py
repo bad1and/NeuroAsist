@@ -2190,20 +2190,30 @@ class TimelineStore:
         query: str | None = None,
         limit: int = 100,
         include_enrichment: bool = True,
+        offset: int = 0,
+        exclude_candidates: bool = False,
     ) -> list[dict[str, object]]:
+        clauses = ["m.relationship_id = ?"]
+        params: list[object] = [PRIMARY_RELATIONSHIP_ID]
+        if status == "archive":
+            clauses.append("m.status NOT IN ('active', 'candidate')")
+        elif status is not None:
+            clauses.append("m.status = ?")
+            params.append(status)
+        if exclude_candidates:
+            clauses.append("m.status != 'candidate'")
+        fts_query = self._fts_query(query) if query else None
+        if fts_query:
+            clauses.append("memory_fts MATCH ?")
+            params.append(fts_query)
+        join = "JOIN memory_fts f ON m.id = f.memory_id" if fts_query else ""
+        ranking = "bm25(memory_fts), " if fts_query else ""
         with self._connect() as connection:
-            if query and self._fts_query(query):
-                rows = connection.execute(
-                    """SELECT m.* FROM memory_fts f JOIN memory_items m ON m.id = f.memory_id
-                       WHERE memory_fts MATCH ? AND (? IS NULL OR m.status = ?)
-                       ORDER BY bm25(memory_fts), m.importance DESC, m.updated_at DESC LIMIT ?""",
-                    (self._fts_query(query), status, status, limit),
-                ).fetchall()
-            else:
-                rows = connection.execute(
-                    "SELECT * FROM memory_items WHERE relationship_id = ? AND (? IS NULL OR status = ?) ORDER BY importance DESC, updated_at DESC LIMIT ?",
-                    (PRIMARY_RELATIONSHIP_ID, status, status, limit),
-                ).fetchall()
+            rows = connection.execute(
+                f"SELECT m.* FROM memory_items m {join} WHERE {' AND '.join(clauses)} "
+                f"ORDER BY {ranking}m.importance DESC, m.updated_at DESC, m.id DESC LIMIT ? OFFSET ?",
+                (*params, limit, offset),
+            ).fetchall()
             if include_enrichment:
                 return [self._enrich_memory_row(connection, row) for row in rows]
             return [self._memory_row(row) for row in rows]

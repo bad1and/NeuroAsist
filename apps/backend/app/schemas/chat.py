@@ -9,6 +9,7 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
+    status: str = "completed"
     emotion: str = "neutral"
     intent: str = "casual_chat"
     voice_request_id: str | None = None

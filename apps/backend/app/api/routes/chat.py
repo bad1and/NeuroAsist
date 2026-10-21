@@ -94,13 +94,16 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
                 request.app.state.timeline_store.assistant_for_user,
                 source_message.id,
             )
+            if existing is None:
+                raise HTTPException(status_code=409, detail="This message is already being processed")
             return VoiceLiveResponse(
-                session_id=payload.session_id, utterance_id=utterance_id,
-                voice_request_id=voice_request_id, transcript=payload.message,
+                session_id=payload.session_id, utterance_id=existing.utterance_id or existing.id,
+                voice_request_id=str(existing.metadata.get("voice_request_id") or existing.utterance_id or existing.id), transcript=payload.message,
                 message_id=source_message.id, turn_id=source_message.turn_id,
-                status=existing.status if existing is not None else "streaming",
+                status=existing.status, assistant_message_id=existing.id,
+                reply=existing.effective_content, replayed=True,
             )
-        lease = await coordinator.begin_assistant(accepted, commit_policy="generated_text")
+        lease = await coordinator.begin_assistant(accepted, commit_policy="generated_text", metadata={"voice_request_id": voice_request_id})
         state_service = getattr(request.app.state, "character_state_service", None)
         if state_service is not None:
             state_turn = await asyncio.to_thread(
@@ -205,6 +208,7 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
         transcript=payload.message,
         message_id=source_message.id if source_message is not None else None,
         turn_id=source_message.turn_id if source_message is not None else None,
+        assistant_message_id=lease.assistant_message_id if lease is not None else None,
     )
 
 
@@ -264,14 +268,16 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
                     request.app.state.timeline_store.assistant_for_user,
                     accepted.user_message_id,
                 )
-                if previous is not None and previous.status == "completed":
+                if previous is not None and previous.status != "streaming":
                     return ChatResponse(
                         reply=previous.effective_content,
+                        status=previous.status,
                         message_id=accepted.user_message_id,
                         assistant_message_id=previous.id,
                         turn_id=accepted.turn_id,
                         generation=accepted.generation,
                     )
+                raise HTTPException(status_code=409, detail="This message is already being processed")
             lease = await coordinator.begin_assistant(accepted)
             coordinator.register_generation_task(lease)
             state_service = getattr(request.app.state, "character_state_service", None)

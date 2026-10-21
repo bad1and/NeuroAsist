@@ -25,6 +25,9 @@ class VoiceLiveResponse(BaseModel):
     message_id: str | None = None
     turn_id: str | None = None
     status: str = "streaming"
+    assistant_message_id: str | None = None
+    reply: str | None = None
+    replayed: bool = False
 
 
 class VoiceInterruptRequest(BaseModel):

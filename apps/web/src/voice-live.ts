@@ -332,12 +332,14 @@ export class VoiceSocketClient {
   private reconnectTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
   private reconnectAttempt = 0;
   private manuallyClosed = true;
+  private recovering = false;
   activeUtteranceId: string | null = null;
 
   constructor(
     private readonly url: string,
     private readonly onEvent: (event: VoiceServerEvent) => void,
     private readonly onAudio: (audio: ArrayBuffer, segment: VoiceServerEvent) => void,
+    private readonly onConnectionState: (state: "connected" | "disconnected") => void = () => undefined,
   ) {}
 
   async connect(): Promise<void> {
@@ -348,11 +350,12 @@ export class VoiceSocketClient {
       globalThis.clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    this.connecting = this.openSocket();
+    const connection = this.openSocket();
+    this.connecting = connection;
     try {
-      await this.connecting;
+      await connection;
     } finally {
-      this.connecting = null;
+      if (this.connecting === connection) this.connecting = null;
     }
   }
 
@@ -363,28 +366,39 @@ export class VoiceSocketClient {
     await new Promise<void>((resolve, reject) => {
       let opened = false;
       const fail = () => {
-        if (!opened) reject(new Error(`Live voice connection failed: ${this.url}`));
+        if (!opened) reject(new Error("Live voice connection failed"));
       };
       socket.onopen = () => {
+        if (this.socket !== socket || this.manuallyClosed) { socket.close(); return; }
         opened = true;
         this.reconnectAttempt = 0;
         resolve();
+        if (this.recovering) {
+          this.recovering = false;
+          this.onConnectionState("connected");
+        }
       };
       socket.onerror = () => {
         fail();
         socket.close();
       };
       socket.onclose = () => {
-        this.pendingSegment = null;
         const isCurrent = this.socket === socket;
-        if (isCurrent) this.socket = null;
         fail();
+        if (!isCurrent) return;
+        this.socket = null;
+        this.clearActive();
+        if (opened && !this.manuallyClosed) {
+          this.recovering = true;
+          this.onConnectionState("disconnected");
+        }
         // The microphone WebSocket already reconnects itself. Keep the output
         // socket in the same lifecycle, otherwise STT can succeed while the
         // backend has nowhere to stream the response after a transient reset.
-        if (opened && isCurrent && !this.manuallyClosed) this.scheduleReconnect();
+        if (!this.manuallyClosed) this.scheduleReconnect();
       };
       socket.onmessage = (message) => {
+        if (this.socket !== socket || this.manuallyClosed) return;
         if (message.data instanceof ArrayBuffer) {
           if (this.pendingSegment) {
             this.onAudio(message.data, this.pendingSegment);
@@ -443,6 +457,7 @@ export class VoiceSocketClient {
     this.socket?.close();
     this.socket = null;
     this.connecting = null;
-    this.pendingSegment = null;
+    this.clearActive();
+    this.recovering = false;
   }
 }

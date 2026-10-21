@@ -300,6 +300,48 @@ afterEach(() => {
 });
 
 describe("VoiceSocketClient", () => {
+  it("keeps retrying failed reconnects, clears the interrupted turn and stops on manual close", async () => {
+    vi.useFakeTimers();
+    class Socket {
+      static sockets: Socket[] = [];
+      static OPEN = 1;
+      readyState = 0;
+      onopen?: () => void;
+      onclose?: () => void;
+      onerror?: () => void;
+      onmessage?: (event: { data: string }) => void;
+      constructor(_url: string) { Socket.sockets.push(this); }
+      open() { this.readyState = 1; this.onopen?.(); }
+      close() { this.readyState = 3; this.onclose?.(); }
+      send() {}
+    }
+    vi.stubGlobal("WebSocket", Socket);
+    const state = vi.fn();
+    const events = vi.fn();
+    const client = new VoiceSocketClient("ws://voice?token=private", events, vi.fn(), state);
+    const first = client.connect();
+    Socket.sockets[0].open();
+    await first;
+    client.activate("interrupted");
+    Socket.sockets[0].close();
+    expect(client.activeUtteranceId).toBeNull();
+    expect(state).toHaveBeenCalledWith("disconnected");
+    await vi.advanceTimersByTimeAsync(250);
+    Socket.sockets[1].onerror?.();
+    await vi.advanceTimersByTimeAsync(500);
+    Socket.sockets[2].onerror?.();
+    await vi.advanceTimersByTimeAsync(1000);
+    Socket.sockets[3].open();
+    await Promise.resolve();
+    expect(state).toHaveBeenLastCalledWith("connected");
+    Socket.sockets[0].onmessage?.({ data: JSON.stringify({ type: "voice.utterance.started", utterance_id: "old" }) });
+    expect(events).not.toHaveBeenCalled();
+    Socket.sockets[3].close();
+    client.close();
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(Socket.sockets).toHaveLength(4);
+  });
+
   it("reconnects the output socket after an unexpected close", async () => {
     vi.useFakeTimers();
 

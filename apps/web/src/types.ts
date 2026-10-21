@@ -25,6 +25,7 @@ export type BackendEvent = {
 
 export type ChatResponse = {
   reply: string;
+  status?: "streaming" | "completed" | "interrupted" | "failed";
   emotion: string;
   intent: string;
   voice_request_id?: string | null;
@@ -63,6 +64,9 @@ export type VoiceLiveResponse = {
   message_id?: string | null;
   turn_id?: string | null;
   status: "streaming" | "completed" | "interrupted" | "failed";
+  assistant_message_id?: string | null;
+  reply?: string | null;
+  replayed?: boolean;
 };
 
 export type CharacterStateView = {
@@ -392,10 +396,15 @@ export type ManagedModel = {
   downloaded_bytes: number;
   total_bytes: number;
   error?: string | null;
+  license?: string | null;
+  delivery?: string | null;
+  source_url?: string | null;
+  terms_url?: string | null;
 };
 
 export type ChatMessage = {
   id: string;
+  clientMessageId?: string;
   role: "user" | "assistant";
   content: string;
   emotion?: string;
@@ -502,6 +511,8 @@ export type ExternalSourceMetadata = {
 
 export type TimelineMessage = {
   id: string;
+  client_message_id?: string | null;
+  utterance_id?: string | null;
   role: "user" | "assistant" | "system_event";
   content: string;
   original_content: string;
@@ -514,6 +525,7 @@ export type TimelineMessage = {
 
 export type TimelineJournalItem = {
   id?: string;
+  session_id?: string;
   day: string;
   message_count: number;
   started_at: string;
@@ -577,6 +589,8 @@ export type MemoryTopic = {
 };
 
 export type MemoryCommitment = {
+  created_at?: string;
+  updated_at?: string;
   id: string;
   kind: string;
   title: string;
