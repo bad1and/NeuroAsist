@@ -7,6 +7,38 @@ from apps.backend.app.schemas.voice import VoiceInterruptRequest, VoiceTTSStatus
 router = APIRouter()
 
 
+@router.post("/voice/preview")
+async def preview_voice(request: Request):
+    """A fixed, local test phrase; never enters conversation or memory."""
+    import asyncio
+    from starlette.background import BackgroundTask
+
+    lock = getattr(request.app.state, "voice_preview_lock", None)
+    if lock is None:
+        lock = request.app.state.voice_preview_lock = asyncio.Lock()
+    if lock.locked():
+        raise HTTPException(429, "Проба голоса уже готовится")
+    service = request.app.state.voice_service
+    runtime = request.app.state.runtime_settings
+    path = service.next_tts_path("preview")
+    try:
+        async with lock:
+            voice = service.resolve_tts_voice(runtime.voice_language, runtime.voice_tts_voice)
+            result = await asyncio.wait_for(service.tts_provider.synthesize(
+                "Привет! Это проверка голоса Ирис. Если ты меня слышишь, звук настроен.",
+                voice, path, style=getattr(request.app.state, "voice_tts_style", "auto")), timeout=45)
+        return FileResponse(result.audio_path, media_type="audio/wav", background=BackgroundTask(result.audio_path.unlink, missing_ok=True))
+    except asyncio.TimeoutError as exc:
+        path.unlink(missing_ok=True)
+        raise HTTPException(504, "Голос не успел подготовиться. Проверьте локальную модель.") from exc
+    except asyncio.CancelledError:
+        path.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        path.unlink(missing_ok=True)
+        raise HTTPException(503, "Проба голоса недоступна. Проверьте модель синтеза речи.") from exc
+
+
 @router.post("/voice/interrupt")
 async def interrupt_voice(payload: VoiceInterruptRequest, request: Request) -> dict[str, object]:
     """Stop all current speech for a session as soon as user speech begins."""

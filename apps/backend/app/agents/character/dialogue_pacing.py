@@ -59,7 +59,7 @@ class DialoguePacing:
     mode: DialogueMode
     turn_kind: str = ""
 
-    def prompt_block(self, *, input_mode: str, recent_messages=()) -> str:
+    def prompt_block(self, *, input_mode: str, recent_messages=(), user_text: str = "") -> str:
         recent_messages = list(recent_messages)
         rules = {
             "micro": (
@@ -75,6 +75,7 @@ class DialoguePacing:
             "banter": (
                 "Пользователь просит шутку или прожарку: дай сетап и панч либо один острый ответ, "
                 "обычно 1-3 предложения. Не объясняй, почему это смешно, не начинай с объявления "
+                "У развязки должна быть понятная связь с сетапом; случайная нелепость и мат не заменяют панч. "
                 "режима и не добавляй совет после панча. Регистр clean/restrained и эмоциональные "
                 "границы сохраняются; просьба разрешает игру, а не выдумывание фактов."
             ),
@@ -107,10 +108,14 @@ class DialoguePacing:
                 "Когда просят замену, меняй сюжет, не латая отсутствующую причину случайной деталью. "
                 "При критике не оправдывай неудачную шутку и не защищай свою роль."
             )
+            if len(user_text.split()) <= 8 and re.search(r"(?iu)\b(?:там|это|а ч[её] так|почему)\b", user_text) and not re.search(r"(?iu)\b(?:кстати|серь[её]зно|новост\w*|поищи)\b", user_text):
+                repair_rule += " Короткое уточнение сейчас относится к последней шутке; не возобновляй старую новость по слову из реплики."
         intent_rule = (
             "\nЭто приветствие, не жалоба: «здорово, заебал» и STT «здорово заебало» — дружеская "
             "формула. Поздоровайся; не спрашивай, что заебало."
         ) if self.turn_kind == "greeting" else ""
+        if self.turn_kind == "address":
+            intent_rule = "\nЭто обращение к Iris, включая ошибку распознавания имени. Коротко отзовись; не сочиняй происхождение имени."
         return (
             "Ритм Iris (скрыто):\n"
             f"- режим: {self.mode}. {rules}\n"
@@ -127,6 +132,8 @@ def infer_dialogue_pacing(user_text: str, recent_messages=()) -> DialoguePacing:
 
     text = " ".join(user_text.strip().split())
     words = _WORD_RE.findall(text)
+    if text.casefold().strip(" ,.!?") in {"ирис", "айрис", "ириска", "люрис"}:
+        return DialoguePacing("micro", turn_kind="address")
     if _DEEP_REQUEST_RE.search(text):
         return DialoguePacing("deep")
     if _BANTER_REQUEST_RE.search(text):

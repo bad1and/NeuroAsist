@@ -378,6 +378,10 @@ class MemoryService:
         """Exclude overheard and incomplete live speech from factual memory."""
         if message is None:
             return False
+        if message.role == "assistant" and message.metadata.get("document_context"):
+            # File answers must stay excluded when a later ordinary turn
+            # consolidates the entire unprocessed conversation window.
+            return False
         if message.role == "user" and re.search(
             r"(?iu)\b(?:не\s+запоминай|не\s+сохраняй|don['’]t\s+(?:remember|save))\b",
             message.effective_content,

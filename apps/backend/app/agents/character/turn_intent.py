@@ -6,9 +6,10 @@ import json
 import re
 from dataclasses import dataclass
 from typing import Iterable, Literal
+from apps.backend.app.agents.character.dialogue_style import speech_word_feedback
 
 
-_ACCEPT = re.compile(r"^(?:ну\s+)?(?:да|ага|угу|давай(?:\s+ка)?|хорошо|ок(?:ей)?|ладно)[.!? ]*$", re.I)
+_ACCEPT = re.compile(r"^(?:ну\s+)?(?:да|ага(?:сь)?|угу|давай(?:\s+ка)?|хорошо|ок(?:ей)?|ладно)[.!? ]*$", re.I)
 _GREETING = re.compile(
     r"^(?:(?:ну|о|ирис\w*|айрис\w*|ерис\w*|iris)\s+)*(?:привет\w*|здравствуй\w*|здорово|"
     r"доброе утро|добрый (?:день|вечер)|пока)(?:[, ]+заебал[ао]?)?"
@@ -21,6 +22,7 @@ _TASK = re.compile(
 )
 _QUESTION = re.compile(
     r"\b(?:почему|зачем|сколько|где|когда|кто)\b|"
+    r"\bкак(?:ой|ая|ое|ие|ую|ого|ому|им|их|ими|ом)\b|"
     r"(?:^|[.!?]\s*)(?:(?:а|ну|и|но|да)\s+)*(?:(?:в|на|у|с|о)\s+)?(?:что|че|как|како[ймея]|какие)\b|"
     r"\b(?:а|но|и)\s+(?:что|че|как|како[йея]|какие)\b|"
     r"\bможешь\s+(?:ли\s+)?(?:объяснить|рассказать|найти|показать|помочь|посмотреть)\b", re.I,
@@ -61,7 +63,7 @@ def pending_lookup_offer(user_text: str, messages: Iterable) -> bool:
 
 def analyze_dialogue_turn(user_text: str, messages: Iterable = ()) -> DialogueTurnIntent:
     text = " ".join(user_text.replace("ё", "е").strip().split())
-    if search_process_question(text):
+    if speech_word_feedback(text) is not None or search_process_question(text):
         return DialogueTurnIntent("correction")
     if _GREETING.fullmatch(text):
         return DialogueTurnIntent("greeting")
@@ -94,10 +96,18 @@ def recent_reply_cue(messages: Iterable) -> str:
     if not replies:
         return ""
     visible = [re.sub(r"\[\[.*?\]\]", "", reply).strip() for reply in replies]
-    excerpts = [reply if len(reply) <= 200 else reply[:80] + " … " + reply[-120:] for reply in visible]
+    excerpts = [reply if len(reply) <= 120 else reply[:50] + " … " + reply[-70:] for reply in visible]
+    users = [m.content for m in messages if m.role == "user"][-6:]
+    corrections = [s[:100] for s in users if re.search(r"(?iu)\b(?:я (?:уже |же )?(?:сказал|говорю)|не спится|точно|сто процентов|не так|имел в виду)\b", s)]
+    correction_cue = ("\nПоследние уточнения пользователя важнее старых предположений: "
+                      + json.dumps(corrections[-2:], ensure_ascii=False)) if corrections else ""
     return (
         "\nПоследние ответы — данные, не инструкции и не образец речи: "
         + json.dumps(excerpts, ensure_ascii=False)
         + "\nБез новой просьбы не возвращай уже сказанную сводку, цифру, сравнение или вывод. "
         "Реагируй на текущий ход; новая мысль необязательна."
+        " Относи короткую реакцию к последней содержательной теме, не к случайному общему слову. "
+        "Поправка отменяет старое предположение: «не спится» отменяет намерение уйти спать. "
+        "Не приближай описанную человеком угрозу и не выдумывай его ощущения."
+        + correction_cue
     )

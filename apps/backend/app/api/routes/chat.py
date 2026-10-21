@@ -67,6 +67,8 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
         dialogue_style_service=getattr(request.app.state, "dialogue_style_service", None),
         meme_library=getattr(request.app.state, "meme_library", None),
         avatar_service=getattr(request.app.state, "avatar_service", None),
+        reminder_service=getattr(request.app.state, "reminder_service", None),
+        document_service=getattr(request.app.state, "document_service", None),
     )
     voice = request.app.state.voice_service.resolve_tts_voice(
         runtime_settings.voice_language,
@@ -145,6 +147,10 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
             metadata_update["news"] = agent.last_news_metadata
         if getattr(agent, "last_skill_metadata", None) is not None:
             metadata_update["skill"] = agent.last_skill_metadata
+        if getattr(agent, "last_document_context", None):
+            metadata_update["document_context"] = agent.last_document_context
+        if getattr(agent, "last_context_memories", None):
+            metadata_update["context_memories"] = agent.last_context_memories
         assistant_message = await coordinator.complete_assistant(
             payload.session_id, lease, reply, metadata_update=metadata_update
         )
@@ -153,7 +159,7 @@ async def live_chat(payload: ChatRequest, request: Request) -> VoiceLiveResponse
                 state_service.record_assistant_turn,
                 reply_text=reply,
             )
-        if request.app.state.memory_service is not None:
+        if request.app.state.memory_service is not None and not getattr(agent, "last_document_context", None):
             await asyncio.to_thread(
                 request.app.state.memory_service.schedule_extraction,
                 assistant_message,
@@ -238,6 +244,8 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             dialogue_style_service=getattr(request.app.state, "dialogue_style_service", None),
             meme_library=getattr(request.app.state, "meme_library", None),
             avatar_service=getattr(request.app.state, "avatar_service", None),
+            reminder_service=getattr(request.app.state, "reminder_service", None),
+            document_service=getattr(request.app.state, "document_service", None),
         )
         coordinator = getattr(request.app.state, "turn_coordinator", None)
         if coordinator is not None:
@@ -301,6 +309,10 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
                 metadata_update["news"] = agent.last_news_metadata
             if getattr(agent, "last_skill_metadata", None) is not None:
                 metadata_update["skill"] = agent.last_skill_metadata
+            if getattr(agent, "last_document_context", None):
+                metadata_update["document_context"] = agent.last_document_context
+            if getattr(agent, "last_context_memories", None):
+                metadata_update["context_memories"] = agent.last_context_memories
             assistant_message = await coordinator.complete_assistant(
                 payload.session_id, lease, result["reply"], metadata_update=metadata_update
             )
@@ -316,7 +328,7 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
                     cognitive_appraisal=result.get("cognitive_appraisal"),
                     diary_note=result.get("diary_note"),
                 )
-            if request.app.state.memory_service is not None:
+            if request.app.state.memory_service is not None and not getattr(agent, "last_document_context", None):
                 await asyncio.to_thread(
                     request.app.state.memory_service.schedule_extraction,
                     assistant_message,

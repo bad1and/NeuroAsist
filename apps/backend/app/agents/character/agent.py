@@ -26,6 +26,7 @@ from apps.backend.app.agents.character.dialogue_style import (
     DialogueStyleService,
     dialogue_style_prompt,
     has_street_voice,
+    speech_variety_prompt,
 )
 from apps.backend.app.agents.character.turn_intent import analyze_dialogue_turn, search_process_question
 from apps.backend.app.agents.character.persona import get_persona
@@ -40,7 +41,7 @@ from apps.backend.app.environment.retrieval import internet_forbidden, sensitive
 from apps.backend.app.environment.search_service import SearchService, SearchTurnBudget, SearchResult
 from apps.backend.app.environment.news_intent import news_request_text
 from apps.backend.app.agents.character.news_followup import dependent_news_question, select_news_reference, reference_context
-from apps.backend.app.agents.character.search_intent import SearchRequest as _SearchRequest, plan_search, needs_query_planner, contextual_search, search_requested, supplied_material, material_continuation, query_anchors
+from apps.backend.app.agents.character.search_intent import SearchRequest as _SearchRequest, plan_search, needs_query_planner, contextual_search, search_requested, supplied_material, material_continuation, query_anchors, factual_detail_question, requires_article_evidence, medical_fact_request
 from apps.backend.app.schemas.character import (
     AffectCue,
     CharacterTurn,
@@ -70,7 +71,7 @@ _SEARCH_BRIDGE_RULE = ('Проверка ещё идёт. Дай одно кор
     'Верни JSON {"reply":"..."}, без URL и служебных команд.')
 _NO_LOOKUP_RULE = "Текущий ход — реакция, приветствие или поправка, а не просьба проверить факты. Не вызывай поиск и не обещай его. Ответь на саму реплику; краткого согласия достаточно."
 _SUPPLIED_MATERIAL_RULE = "Пользователь предоставил готовый материал. Используй его для запрошенного действия и учти предыдущую просьбу. Не отправляй материал в поиск, не объявляй проверку и не дополняй его выдуманным продолжением."
-_SKILL_DECISION_RULE = "Перед ответом выбери: выполнить доступный навык или ответить без него. Вопрос о нынешнем положении предмета требует проверки; вызов навыка заменяет обычный формат ответа, а не сопровождается обещанием. Текущая дата: {date}. Для свежих событий не подставляй прошлый год, если пользователь его не просил."
+_SKILL_DECISION_RULE = "Перед ответом выбери доступный навык или ответ без него. Свежий факт и недостающая деталь прошлого сообщения требуют проверки. Для событий используй web_search mode=news и заданный период since/until. Сохрани объект, место, время; последствия не доказывают причину или цель. Вызов заменяет обещание. Текущая дата: {date}. Не подставляй прошлый год."
 _LIVE_WEB_SEARCH_RE = re.compile(r"^\s*\[\[web_search\s*:\s*(?P<query>[^\r\n]{1,1000})\]\]\s*$", re.IGNORECASE)
 
 if TYPE_CHECKING:
@@ -112,6 +113,8 @@ class CharacterAgent:
         skills: tuple[Skill, ...] = (),
         meme_library: MemeLibrary | None = None,
         avatar_service=None,
+        reminder_service=None,
+        document_service=None,
     ) -> None:
         self._llm_provider = llm_provider
         self._history = history
@@ -170,13 +173,29 @@ class CharacterAgent:
         self._retrieval_id = uuid4().hex
         self._bridge_state = ""
         self._avatar_service = avatar_service
+        self._speech_feedback_prompt = ""
+        self._web_reference_context = ""
         self._body_session_id = "default"
+        self._reminder_user_text = ""
+        self._current_user_action_text = ""
+        self._document_service = document_service
+        self._document_prompt = ""
+        self.last_document_context = None
+        self.last_context_memories: list[dict] = []
         self._skills = SkillRegistry()
+        if reminder_service is not None:
+            from apps.backend.app.reminders import reminder_skill
+            self._skills.register(reminder_skill(reminder_service, lambda: {
+                "text": self._reminder_user_text,
+                "source_id": getattr(self._last_user_message, "id", None) or self._active_turn_id,
+            }))
         if avatar_service is not None:
             from apps.backend.app.avatar.body import body_skill
-            self._skills.register(body_skill(avatar_service, lambda: self._body_session_id))
+            body = body_skill(avatar_service, lambda: self._body_session_id)
+            self._skills.register(replace(body, available=lambda: not self._document_prompt or bool(re.search(
+                r"\b(?:подними|опусти|поверни|наклони|закрой|открой|вытяни|покажи|сделай|подмигни)\b.{0,60}\b(?:рук\w*|глаз\w*|голов\w*|аватар\w*|жест\w*)", self._current_user_action_text, re.I))))
         self._skills.register(Skill(
-            "web_search", "Проверка фактов и свежих событий в интернете; запрос: объект + искомый факт + период. Не угадывай даты и релизы.",
+            "web_search", "Проверка фактов и свежих событий; запрос: объект + искомый факт + период. Для медицинских фактов проверяй профильные источники, передавай публичную тему без личного рассказа. Не угадывай даты и релизы.",
             SearchArguments, self._execute_search_skill,
             lambda: self._web_search_enabled() and getattr(self._situational_coordinator, "search_service", None) is not None and not self._search_performed,
         ))
@@ -226,6 +245,8 @@ class CharacterAgent:
         voice_corrections: tuple[dict[str, object], ...] = (),
     ):
         """Perform synchronous persistence/context work outside the event loop."""
+        self._reminder_user_text = user_text
+        self._current_user_action_text = user_text
         self._response_guard_failure = None
         self._response_guard_reason = None
         self.last_web_search_metadata = None
@@ -260,6 +281,7 @@ class CharacterAgent:
         self._retrieval_sources = ()
         self._retrieval_id = uuid4().hex
         self._bridge_state = ""
+        self._web_reference_context = ""
         interpreted = (
             VoiceInputInterpretation(user_text, len(voice_corrections), voice_corrections)
             if input_mode == "voice" and raw_user_text is not None
@@ -308,6 +330,15 @@ class CharacterAgent:
             if self._context_manager
             else None
         )
+        self._document_prompt = ""
+        self.last_document_context = None
+        if self._document_service is not None:
+            document_context = self._document_service.current_context(session_id, effective_text)
+            if document_context is not None:
+                self._document_prompt, self.last_document_context = document_context
+                if not re.search(r"\b(?:в\s+интернете|в\s+сети|web\s+search|сверь\s+с\s+(?:сайтом|источниками)|найди\s+(?:внешние\s+источники|новости))\b", user_text, re.I):
+                    self._turn_web_forbidden = True
+        self.last_context_memories = list(built_context.diagnostics.get("selected_memory_records", [])) if built_context else []
         return interpreted, effective_text, built_context
 
     async def _resolve_situational_context(self, user_text: str, *, allow_search: bool = True) -> str | None:
@@ -386,6 +417,8 @@ class CharacterAgent:
     async def _resolve_turn_context(self, user_text, request, *, live):
         if request is None:
             result = await self._resolve_situational_context(user_text)
+            if self._web_reference_context:
+                result = (result or "") + "\n" + self._web_reference_context
             if self._turn_news_sources:
                 result = (result or "") + "\n" + reference_context(self._turn_news_sources)
                 if not self._web_search_enabled():
@@ -418,6 +451,10 @@ class CharacterAgent:
         return plan_search(user_text, context)
 
     async def _plan_turn_search(self, session_id, user_text, context):
+        from apps.backend.app.reminders import reminder_request_from_context
+        self._reminder_user_text = reminder_request_from_context(self._reminder_user_text, context)
+        feedback = getattr(self._dialogue_style_service, "word_feedback_prompt", None)
+        self._speech_feedback_prompt = await asyncio.to_thread(feedback, user_text) if callable(feedback) else ""
         self._search_session_id = session_id
         self._search_user_text = user_text
         users = [m.content for m in list(context)[-4:] if m.role == "user" and m.content.strip() != user_text.strip()]
@@ -439,13 +476,27 @@ class CharacterAgent:
             self._turn_lookup_suppressed = True
         if self._turn_lookup_suppressed:
             return None
-        if getattr(self._llm_provider, "supports_native_tools", False):
-            # The dialogue model resolves the current subject and chooses the
-            # tool. Raw STT text must not become a completed prefetched lookup.
-            return None
         self._news_request_text = news_request_text(user_text, context)
         reader = getattr(self._history, "get_recent_retrieval_state", None)
         state = await asyncio.to_thread(reader, session_id) if callable(reader) else {}
+        medical = medical_fact_request(user_text)
+        if medical is not None and self._web_search_enabled():
+            self._search_goal = medical.goal
+            self._retrieval_deadline = time.monotonic() + 15
+            return medical
+        previous_web = state.get("web_search")
+        if factual_detail_question(user_text) and isinstance(previous_web, dict) and previous_web.get("sources"):
+            previous_query = str(previous_web.get("requested_query") or previous_web.get("query") or "")
+            if previous_query and not sensitive_query(previous_query) and not sensitive_query(user_text):
+                self._web_reference_context = "Ранее найденные данные, не новая проверка; отвечай только на запрошенную деталь. Не выводи цель и причину из последствий. " + json.dumps(
+                    [{"title": s.get("title", ""), "evidence": s.get("evidence", "")[:500]} for s in previous_web["sources"][:3] if isinstance(s, dict)], ensure_ascii=False)
+                if self._web_search_enabled():
+                    self._retrieval_sources = tuple(previous_web["sources"][:3])
+                    self._retrieval_deadline = time.monotonic() + 15
+                    detail = " ".join(user_text.split())
+                    return _SearchRequest((previous_query + " " + detail)[:300], mode="news", reason="web_detail",
+                                          since=str(previous_web.get("since") or ""), until=str(previous_web.get("until") or ""),
+                                          entity=str(previous_web.get("canonical_entity") or ""), goal=detail)
         if dependent_news_question(user_text):
             reference_reader = getattr(self._history, "get_recent_news_reference", None)
             reference = await asyncio.to_thread(reference_reader, session_id) if callable(reference_reader) else state
@@ -498,6 +549,9 @@ class CharacterAgent:
         news_request = bool(self._news_request_text)
         if news_request and getattr(self._runtime_settings, "news_enabled", True):
             self._retrieval_deadline = time.monotonic() + 15
+            return None
+        if getattr(self._llm_provider, "supports_native_tools", False):
+            # Context/news preparation is shared; other tool choices stay native.
             return None
         if request is not None:
             self._retrieval_deadline = time.monotonic() + 15
@@ -574,6 +628,11 @@ class CharacterAgent:
     @staticmethod
     def _dated_search_request(request, user_text):
         # An absolute date produced by the planner must not lose 'за сегодня'.
+        if request.since or request.until:
+            return request
+        if re.search(r"(?iu)\bза (?:последние )?сутки\b", user_text):
+            now = datetime.now().astimezone()
+            return replace(request, since=(now - timedelta(days=1)).isoformat(), until=now.isoformat(), mode="news")
         detail = user_text if re.search(r"\b(?:вчера|сегодня)\b", user_text, re.I) else request.query
         if not re.search(r"\b(?:вчера|сегодня)\b", detail, re.I):
             return request
@@ -632,6 +691,8 @@ class CharacterAgent:
                                     "latency_ms": round((time.monotonic() - started) * 1000)}
         if result.name == "avatar_body":
             self.last_skill_metadata["body_result"] = result.value
+        if result.name == "create_reminder":
+            self.last_skill_metadata["reminder_result"] = result.value
         if (result.name == "web_search" or legacy_search) and result.status != "ok" and self.last_web_search_metadata is None and not self._turn_lookup_suppressed:
             self.last_web_search_metadata = {"query": "", "status": "invalid" if result.status == "invalid" else "unavailable",
                                              "sources": [], "attempts": [], "cached": False}
@@ -699,9 +760,14 @@ class CharacterAgent:
             return None
         if not query:
             return None
-        if not fallback and not domains:
+        try:
+            validated = SearchArguments.model_validate(request)
+        except ValueError:
+            return None
+        if not fallback and not domains and validated.mode == "web" and not validated.since and not validated.until:
             return query
-        return _SearchRequest(query, " ".join(fallback.split())[:300] if fallback else None, tuple(domains))
+        return _SearchRequest(query, " ".join(fallback.split())[:300] if fallback else None, tuple(domains),
+                              mode=validated.mode, since=validated.since, until=validated.until)
 
     @staticmethod
     def _json_web_search_request(raw_content: str):
@@ -767,8 +833,8 @@ class CharacterAgent:
         self._search_entity = request.entity
         self._search_progress("searching")
         try:
-            if request.reason == "material_detail" and self._retrieval_sources:
-                source_pages = [SearchResult(s["title"], s.get("evidence", ""), s["url"]) for s in self._retrieval_sources if s.get("url")]
+            if request.reason in {"material_detail", "web_detail"} and self._retrieval_sources:
+                source_pages = [SearchResult(s["title"], s.get("evidence", ""), s["url"], published_at=s.get("published_at", "")) for s in self._retrieval_sources if s.get("url")]
                 snapshot = await service.read_sources(initial_query, source_pages, budget=self._search_budget, progress=self._search_progress)
             elif request.reason == "news_detail" and self._turn_news_sources:
                 sources_to_read = [SearchResult(s["title"], s.get("summary", ""), s["url"],
@@ -792,7 +858,7 @@ class CharacterAgent:
                     'Нужен именно искомый факт, а не совпадение темы. Дата статьи не равна дате релиза. '
                     'Исправления имени — гипотезы; canonical_entity разрешено только из выбранных источников. '
                     'Верни JSON {"enough":true|false,"source_ids":["S1"],"canonical_entity":"",'
-                    '"query":"уточнённый самостоятельный запрос или пусто"}. '
+                    '"query":"уточнённый самостоятельный запрос или пусто","supporting_quote":"точная цитата с нужным фактом из выбранной прочитанной статьи"}. '
                     'Если доказательств мало, уточни имя, действие или дату; не повторяй запрос. '
                     'Не отправляй личные данные. Если ответ частичный, enough=false. '
                     'Оцени исходную просьбу, а не только существование предмета. '
@@ -818,10 +884,15 @@ class CharacterAgent:
                 if isinstance(canonical, str) and canonical and not sensitive_query(canonical) and normalize_entity(canonical) in normalize_entity(evidence_text):
                     self._search_entity = canonical[:100]
                 goal = request.goal or self._search_goal or initial_query
-                needs_text = bool(re.search(r"биограф|подроб|полны.{0,15}текст|текст.{0,15}песн|спой|спеть|напеть|куплет|последн.{0,35}(?:песн|трек|релиз)|удал", goal, re.I))
+                strict_evidence = requires_article_evidence(goal) or request.reason == "medical_fact"
+                needs_text = strict_evidence or bool(re.search(r"биограф|подроб|полны.{0,15}текст|текст.{0,15}песн|спой|спеть|напеть|куплет|последн.{0,35}(?:песн|трек|релиз)|удал", goal, re.I))
                 exact_text = bool(re.search(r"полны.{0,15}текст|текст.{0,15}песн|спой|спеть|напеть|куплет", goal, re.I))
                 content_found = any(r.page_status == "read" and (not exact_text or (len(r.page_text.split()) >= 12 and not r.content_truncated)) for r in selected)
-                if assessment.get("enough") is True and valid_ids and selected and snapshot.metadata()["evidence_status"] not in {"topic_only", "provisional"} and (not needs_text or content_found):
+                quote = assessment.get("supporting_quote")
+                quote_found = isinstance(quote, str) and len(quote.strip()) >= 16 and any(
+                    " ".join(quote.split()).casefold() in " ".join(r.page_text.split()).casefold()
+                    for r in selected if r.page_status == "read")
+                if assessment.get("enough") is True and valid_ids and selected and snapshot.metadata()["evidence_status"] not in {"topic_only", "provisional"} and (not needs_text or content_found) and (not strict_evidence or quote_found):
                     snapshot = replace(snapshot, evidence_status="sufficient")
                     break
                 refined = assessment.get("query")
@@ -841,6 +912,7 @@ class CharacterAgent:
             if not snapshot.evidence_status:
                 snapshot = replace(snapshot, evidence_status="partial" if sources else "none")
             return replace(snapshot, status="ok" if sources else snapshot.status, requested_fact=request.goal or self._search_goal,
+                           mode=request.mode, since=request.since or snapshot.since, until=request.until or snapshot.until,
                            latency_ms=round((time.monotonic() - started) * 1000))
         except BaseException as exc:
             self._search_progress("finished", status="cancelled" if isinstance(exc, asyncio.CancelledError) else "error")
@@ -904,6 +976,7 @@ class CharacterAgent:
             "Дай результат сейчас, не обещай будущий поиск и не жди нового сообщения. "
             "Найденный вариант не объявляй единственным каноном. Не приписывай пользователю забывчивость. "
             "Не добавляй неподтверждённые даты, имена, отсылки и жанры. Мнение отделяй от проверенных фактов. "
+            "Отключение света не доказывает попадание по сетям; цель и причина требуют прямых данных. Слабая выдача не означает тишину в мире. "
             "На уточнение дай запрошенную деталь. Отсутствие детали не опровергает всю прошлую новость; "
             "не заменяй ответ извинением или пересказом другой статьи. "
             "Не рассказывай о сниппетах, счётчиках, нулевой выдаче и внутренних статусах. "
@@ -1162,6 +1235,8 @@ class CharacterAgent:
         self._prompt_dialogue_style = dialogue_style
         if self._avatar_service is not None:
             messages.append(ChatMessage(role="system", content=AVATAR_CONTROL_RULES + "\nСостояние твоего аватара сейчас (телеметрия): " + json.dumps(await self._avatar_service.body_status(), ensure_ascii=False)))
+        if self._document_prompt:
+            messages.append(ChatMessage(role="system", content=self._document_prompt))
         skill_rule = self._skills.prompt(live=False, native=getattr(self._llm_provider, "supports_native_tools", False))
         if skill_rule:
             messages.append(ChatMessage(role="system", content=skill_rule))
@@ -1191,7 +1266,7 @@ class CharacterAgent:
         messages.append(
             ChatMessage(
                 role="system",
-                content=pacing.prompt_block(input_mode=input_mode, recent_messages=context),
+                content=pacing.prompt_block(input_mode=input_mode, recent_messages=context, user_text=prompt_user_text),
             )
         )
         # Keep the active register adjacent to the user turn. Long continuity
@@ -1202,6 +1277,9 @@ class CharacterAgent:
             ChatMessage(role="system", content=dialogue_style_prompt(dialogue_style, turn_mode=pacing.mode,
                         user_text=prompt_user_text, humor_policy=getattr(state_behavior, "humor_policy", "normal")))
         )
+        variety = speech_variety_prompt(context, getattr(self._runtime_settings, "speech_discouraged_words", ()))
+        if variety or self._speech_feedback_prompt:
+            messages.append(ChatMessage(role="system", content=variety + "\n" + self._speech_feedback_prompt))
         if skill_rule:
             messages.append(ChatMessage(role="system", content=_SKILL_DECISION_RULE.format(date=datetime.now().astimezone().date().isoformat())))
         messages.append(ChatMessage(role="user", content=prompt_user_text))
@@ -1518,6 +1596,11 @@ class CharacterAgent:
         guard_options: dict[str, Any],
     ) -> AsyncIterator[str]:
         """Prevent a repeated or malformed search directive from reaching UI/TTS."""
+        from apps.backend.app.reminders import failed_reminder_reply
+        reminder_reply = failed_reminder_reply(self.last_skill_metadata)
+        if reminder_reply is not None:
+            yield reminder_reply
+            return
         if (self.last_skill_metadata or {}).get("name") == "avatar_body":
             from apps.backend.app.avatar.body import action_succeeded, measured_reply
             grounded = measured_reply(self.last_skill_metadata["status"], self.last_skill_metadata.get("body_result"))
@@ -1639,7 +1722,9 @@ class CharacterAgent:
         if audit:
             attempts = [a for item in self._search_operations if not item.get("cached") for a in item.get("attempts", []) if a.get("searched") is True and not a.get("cached", False)]
         positive = re.sub(r"\bне\s+(?:искала|гуглила|погуглила|отправляла|отправила)\b", "", content, flags=re.I)
-        web_claim = bool(re.search(r"искала|гуглила|погуглила|нарыла|вытащила|выдач\w*.{0,45}(?:нет|пуст|плю|общ|наш)|(?:новост\w*|конкретик\w*).{0,30}(?:не\s+наш|в\s+выдаче\s+нет)|(?:запрос|поиск).{0,30}(?:отправила|отправляла)|(?:отправила|отправляла).{0,30}(?:запрос|раза|раз)|поиск\s+(?:выдал|нашел|нашёл|показал)|проверила\s+в\s+интернете", positive, re.I))
+        web_claim = bool(re.search(r"искала|гуглила|погуглила|выдач\w*.{0,45}(?:нет|пуст|плю|общ|наш)|(?:новост\w*|конкретик\w*).{0,30}(?:не\s+наш|в\s+выдаче\s+нет)|(?:запрос|поиск).{0,30}(?:отправила|отправляла)|(?:отправила|отправляла).{0,30}(?:запрос|раза|раз)|поиск\s+(?:выдал|нашел|нашёл|показал)|проверила\s+в\s+интернете", positive, re.I))
+        web_claim = web_claim or bool(re.search(r"нарыла|вытащила", positive, re.I) and re.search(
+            r"новост|конкретик|выдач|поиск|интернет|сайт|источник|сводк", positive, re.I))
         news_verified = bool(self.last_news_metadata and self.last_news_metadata.get("sources"))
         claims = web_claim or bool(re.search(r"проверила\s+по\s+свежим", content, re.I) and not news_verified)
         repeated = bool(re.search(r"дважды|два\s+раза|два\s+прогона|повторно\s+искала|второй\s+(?:поиск|прогон)", content, re.I))
@@ -1675,7 +1760,10 @@ class CharacterAgent:
             while (match := re.search(r"[.!?](?:\s|$)|\n", buffered)):
                 end = match.end()
                 sentence, buffered = buffered[:end], buffered[end:]
-                ready.append(self._truthful_search_reply(sentence))
+                checked = self._truthful_search_reply(sentence)
+                if checked != sentence and (space := re.search(r"\s+$", sentence)):
+                    checked += space[0]
+                ready.append(checked)
             if ready:
                 yield "".join(ready)
             if len(buffered) > 1000:
@@ -1953,6 +2041,8 @@ class CharacterAgent:
         self._prompt_dialogue_style = dialogue_style
         if self._avatar_service is not None:
             messages.append(ChatMessage(role="system", content=AVATAR_CONTROL_RULES + "\nСостояние твоего аватара сейчас (телеметрия): " + json.dumps(await self._avatar_service.body_status(), ensure_ascii=False)))
+        if self._document_prompt:
+            messages.append(ChatMessage(role="system", content=self._document_prompt))
         skill_rule = self._skills.prompt(live=True, native=getattr(self._llm_provider, "supports_native_tools", False))
         if skill_rule:
             messages.append(ChatMessage(role="system", content=skill_rule))
@@ -1982,7 +2072,7 @@ class CharacterAgent:
         messages.append(
             ChatMessage(
                 role="system",
-                content=pacing.prompt_block(input_mode=input_mode, recent_messages=context),
+                content=pacing.prompt_block(input_mode=input_mode, recent_messages=context, user_text=prompt_user_text),
             )
         )
         if self._turn_lookup_suppressed:
@@ -1991,12 +2081,17 @@ class CharacterAgent:
             ChatMessage(role="system", content=dialogue_style_prompt(dialogue_style, turn_mode=pacing.mode,
                         user_text=prompt_user_text, humor_policy=getattr(state_behavior, "humor_policy", "normal")))
         )
+        variety = speech_variety_prompt(context, getattr(self._runtime_settings, "speech_discouraged_words", ()))
+        if variety or self._speech_feedback_prompt:
+            messages.append(ChatMessage(role="system", content=variety + "\n" + self._speech_feedback_prompt))
         if skill_rule:
             messages.append(ChatMessage(role="system", content=_SKILL_DECISION_RULE.format(date=datetime.now().astimezone().date().isoformat())))
         messages.append(ChatMessage(role="user", content=prompt_user_text))
         if self._search_bridge_spoken:
             messages.append(self._bridge_continuation_message())
         chunks: list[str] = [search_acknowledgement] if search_acknowledgement else []
+        from apps.backend.app.reminders import explicit_reminder, failed_reminder_reply
+        hold_reminder = explicit_reminder(self._reminder_user_text)
         route_buffer = ""
         route_checked = not model_routing_candidate
         guard_options: dict[str, Any] = {
@@ -2047,17 +2142,24 @@ class CharacterAgent:
                         yield str(result["reply"])
                         return
             chunks.append(delta)
-            yield delta
+            if not hold_reminder:
+                yield delta
         if not route_checked and route_buffer:
             _, _, remainder = self._extract_live_coding_delegation(route_buffer, final=True)
             if remainder:
                 chunks.append(remainder)
-                yield remainder
+                if not hold_reminder:
+                    yield remainder
         reply = "".join(chunks).strip()
+        if hold_reminder:
+            reply = failed_reminder_reply(self.last_skill_metadata, self._reminder_user_text, reply) or reply
         if stored_reply_transform is not None:
             reply = stored_reply_transform(reply)
         if not reply:
             reply = self._empty_model_fallback(effective_text)
+            if not hold_reminder:
+                yield reply
+        if hold_reminder:
             yield reply
         if persist_reply is None:
             persist_reply = source_message is None
@@ -2081,6 +2183,11 @@ class CharacterAgent:
         persist_reply_callback: Callable[[str], Any] | None,
     ) -> dict[str, Any]:
         """Commit a batch reply and memory effects on an I/O worker thread."""
+        from apps.backend.app.reminders import failed_reminder_reply
+        reminder_reply = failed_reminder_reply(self.last_skill_metadata, self._reminder_user_text, parsed.payload.get("reply", ""))
+        if reminder_reply is not None:
+            turn = deterministic_turn(reminder_reply)
+            parsed = _ParseResult(legacy_result(turn), True, None, turn)
         if (self.last_skill_metadata or {}).get("name") == "avatar_body":
             from apps.backend.app.avatar.body import action_succeeded, measured_reply
             grounded = measured_reply(self.last_skill_metadata["status"], self.last_skill_metadata.get("body_result"))
@@ -2116,6 +2223,7 @@ class CharacterAgent:
             and self._memory_service is not None
             and self._memory_service.llm_extraction_enabled
             and not self._memory_service.uses_background_extraction
+            and not self.last_document_context
         ):
             created = self._memory_service.apply_llm_candidates(
                 parsed.turn.memory_candidates,
@@ -2131,6 +2239,7 @@ class CharacterAgent:
             and self._memory_service is not None
             and self._memory_service.llm_extraction_enabled
             and not self._memory_service.uses_background_extraction
+            and not self.last_document_context
         ):
             created = self._memory_service.extract_from_message(self._last_user_message)
             self.last_memory_updates.extend(
@@ -2311,12 +2420,16 @@ class CharacterAgent:
     ):
         if not self._should_persist_timeline():
             return None
+        metadata = {}
+        if role == "assistant" and self._response_guard_failure:
+            metadata.update(response_failed=True, response_failure_reason=self._response_guard_failure)
+        if role == "assistant" and self.last_document_context:
+            metadata["document_context"] = self.last_document_context
         try:
             return self._history.save_message(
                 session_id, role, content, input_mode=input_mode,
                 turn_id=turn_id, reply_to_message_id=reply_to_message_id,
-                metadata={"response_failed": True, "response_failure_reason": self._response_guard_failure}
-                if role == "assistant" and self._response_guard_failure else None,
+                metadata=metadata or None,
             )
         except TypeError:
             # V0.4 test doubles and the legacy history implementation only expose three arguments.

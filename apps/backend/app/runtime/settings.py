@@ -5,7 +5,7 @@ import os
 import re
 import tempfile
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from threading import Lock, RLock
 from typing import Iterator
@@ -28,6 +28,22 @@ def _shared_store_lock(path: Path) -> RLock:
         return _STORE_LOCKS.setdefault(key, RLock())
 
 
+def normalize_speech_words(value: object) -> list[str]:
+    """Only individual words may enter the hidden speech preference prompt."""
+    if not isinstance(value, list):
+        return []
+    words = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        word = item.strip().casefold().replace("ё", "е")
+        if word in {"бля", "блядь"}:
+            word = "блять"
+        if re.fullmatch(r"[^\W\d_]{1,32}", word) and word not in words:
+            words.append(word)
+    return words[:8]
+
+
 @dataclass
 class RuntimeSettings:
     # This controls only the application chrome and visible UI copy.  It must
@@ -37,6 +53,7 @@ class RuntimeSettings:
     background_conversation_notifications_enabled: bool = True
     developer_mode_enabled: bool = False
     personality: str = "default"
+    speech_discouraged_words: list[str] = field(default_factory=list)
     voice_language: str = "ru"
     voice_microphone_profile: str = "balanced"
     # Browser/Windows device IDs are opaque, machine-local identifiers. An
@@ -131,6 +148,9 @@ class RuntimeSettingsStore:
                 if key in defaults_dict
                 and (defaults_dict[key] is None or isinstance(value, type(defaults_dict[key])))
             }
+            values["speech_discouraged_words"] = normalize_speech_words(
+                values.get("speech_discouraged_words", defaults.speech_discouraged_words)
+            )
             # V0.5 originally defaulted to ``ask`` but never surfaced a useful
             # confirmation prompt in the conversation.  Treat persisted values as
             # the new guided policy so existing local users receive the intended

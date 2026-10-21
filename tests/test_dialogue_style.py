@@ -63,8 +63,11 @@ def test_street_keeps_character_without_a_per_reply_vocabulary_quota() -> None:
 
 
 @pytest.mark.parametrize("mode,text", [("micro", "Молодец кстати"), ("banter", "Шуткани"), ("conversational", "Опять всё сломалось")])
-def test_casual_street_turn_gets_an_active_profanity_cue(mode, text):
-    assert "Используй мат прямо в реплике" in dialogue_style_prompt("street", turn_mode=mode, user_text=text)
+def test_casual_street_keeps_active_voice_without_forcing_profanity(mode, text):
+    prompt = dialogue_style_prompt("street", turn_mode=mode, user_text=text)
+    assert "делай это регулярно" in prompt
+    assert "Используй мат прямо в реплике" not in prompt
+    assert "не делай одно слово пунктуацией" in prompt
 
 
 @pytest.mark.parametrize("mode,text,policy", [

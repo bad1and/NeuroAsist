@@ -4,6 +4,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from threading import Lock
 
 from apps.backend.app.conversation.decision import ConversationDecisionEngine
 from apps.backend.app.llm.base import ChatMessage
@@ -39,6 +40,12 @@ class ContextManager:
         self._recent_turns = recent_turns
         self._memory_service = memory_service
         self.last: BuiltContext | None = None
+        self._next_exclusions: dict[str, set[str]] = {}
+        self._exclusion_lock = Lock()
+
+    def exclude_memory_once(self, session_id: str, memory_id: str) -> None:
+        with self._exclusion_lock:
+            self._next_exclusions.setdefault(session_id, set()).add(memory_id)
 
     def build(self, user_text: str, *, session_id: str | None = None, current_message_id: str | None = None) -> BuiltContext:
         # One build fans out into eight independent store calls (timeline
@@ -200,6 +207,9 @@ class ContextManager:
                 core = core_profile()
                 core_ids = {str(item["id"]) for item in core}
                 retrieved_memories = core + [item for item in retrieved_memories if str(item["id"]) not in core_ids]
+            with self._exclusion_lock:
+                excluded = self._next_exclusions.pop(session_id or "", set())
+            retrieved_memories = [item for item in retrieved_memories if str(item["id"]) not in excluded]
             source_timestamps = self._store.message_timestamps([
                 str(source_id)
                 for memory in retrieved_memories
@@ -470,6 +480,8 @@ class ContextManager:
             "checkpoint_through_sequence": checkpoint["through_sequence"] if checkpoint is not None else None,
             "selected_summary_ids": [summary_id for summary_id, _ in selected_summaries],
             "selected_memory_ids": [memory_id for memory_id, _ in selected_memories],
+            # These are the actual, fully selected prompt records after trimming.
+            "selected_memory_records": [json.loads(message.content[message.content.index("{"):]) for _, message in selected_memories],
             "selected_topic_ids": [topic_id for topic_id, _ in selected_topics],
             "selected_open_loop_ids": [loop_id for loop_id, _ in selected_loops],
             "subjective_reflection_id": subjective_reflection[0] if subjective_reflection else None,

@@ -4,6 +4,25 @@ from pydantic import BaseModel
 router = APIRouter(tags=["maintenance"])
 
 
+@router.get("/maintenance/preview")
+def maintenance_preview(request: Request) -> dict[str, int]:
+    """Counts only; no personal contents or filesystem paths leave this preview."""
+    store = request.app.state.timeline_store
+    if store is None:
+        raise HTTPException(503, "Timeline V2 is disabled")
+    from apps.backend.app.storage.timeline import PRIMARY_RELATIONSHIP_ID, PRIMARY_TIMELINE_ID
+    with store._connect() as connection:
+        def count(table, clause, value):
+            return int(connection.execute(f"SELECT COUNT(*) FROM {table} WHERE {clause}", (value,)).fetchone()[0])
+        return {
+            "messages": count("conversation_messages", "timeline_id = ?", PRIMARY_TIMELINE_ID),
+            "episodes": count("conversation_episodes", "timeline_id = ?", PRIMARY_TIMELINE_ID),
+            "memories": count("memory_items", "relationship_id = ? AND status NOT IN ('deleted', 'rejected', 'superseded')", PRIMARY_RELATIONSHIP_ID),
+            "archived_memories": count("memory_items", "relationship_id = ? AND status IN ('deleted', 'rejected', 'superseded')", PRIMARY_RELATIONSHIP_ID),
+            "plans": int(connection.execute("SELECT COUNT(*) FROM memory_commitments").fetchone()[0]),
+        }
+
+
 class BackupItem(BaseModel):
     name: str
     size_bytes: int

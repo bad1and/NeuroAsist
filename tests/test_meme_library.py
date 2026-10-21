@@ -237,5 +237,5 @@ async def test_usage_records_the_actual_persona_and_register():
     provider = ReplayLLM(['{"reply":"Заебись.","emotion":"smirk","intent":"casual_chat"}'])
     agent = CharacterAgent(provider, History(), 8, meme_library=MemeLibrary())
     await agent.handle_user_message("s", "Покажи смешной подкол", persist_reply=False)
-    assert agent.token_metadata()["persona_version"] == 12
+    assert agent.token_metadata()["persona_version"] == 13
     assert agent.token_metadata()["prompt_dialogue_style"] == "street"

@@ -196,6 +196,10 @@ def create_app() -> FastAPI:
         event_bus.publish,
     ) if settings.timeline_v2_enabled else None
     history = TimelineHistoryAdapter(timeline_store) if timeline_store is not None else SQLiteMessageHistory(settings.database_path)
+    from apps.backend.app.documents import DocumentService
+    document_service = DocumentService()
+    from apps.backend.app.reminders import ReminderService
+    reminder_service = ReminderService(timeline_store, event_bus.publish) if timeline_store is not None else None
     runtime_defaults = RuntimeSettings(
         voice_language=settings.voice_default_language,
         voice_tts_voice=settings.voice_tts_default_voice,
@@ -227,7 +231,7 @@ def create_app() -> FastAPI:
         runtime_settings_store.path,
         settings.backup_retention_days,
     )
-    semantic_mode_enabled = settings.semantic_retrieval_enabled and settings.semantic_retrieval_eval_passed
+    semantic_mode_enabled = settings.semantic_retrieval_enabled and settings.semantic_retrieval_eval_passed and os.getenv("NEUROASIST_SAFE_MODE") != "1"
     if settings.semantic_vector_backend == "chroma":
         installed_data_dir = (settings.app_data_path / "data").resolve()
         if settings.database_path.parent.resolve() == installed_data_dir:
@@ -317,7 +321,7 @@ def create_app() -> FastAPI:
             else None
         ),
     ) if timeline_store is not None else None
-    dialogue_style_service = DialogueStyleService(timeline_store) if timeline_store is not None else None
+    dialogue_style_service = DialogueStyleService(timeline_store, runtime_settings, runtime_settings_store) if timeline_store is not None else None
     meme_library = MemeLibrary(settings.app_data_path / "meme-library.json")
     if memory_service is not None and semantic_init_error:
         memory_service._semantic_degraded_reason = semantic_init_error
@@ -477,6 +481,10 @@ def create_app() -> FastAPI:
                     metadata["news"] = agent.last_news_metadata
                 if getattr(agent, "last_skill_metadata", None) is not None:
                     metadata["skill"] = agent.last_skill_metadata
+                if getattr(agent, "last_document_context", None):
+                    metadata["document_context"] = agent.last_document_context
+                if getattr(agent, "last_context_memories", None):
+                    metadata["context_memories"] = agent.last_context_memories
                 if metadata:
                     await conversation_service.assistant_metadata_generated(
                         session_id,
@@ -523,6 +531,8 @@ def create_app() -> FastAPI:
                 dialogue_style_service=dialogue_style_service,
                 meme_library=meme_library,
                 avatar_service=avatar_service,
+                reminder_service=reminder_service,
+                document_service=document_service,
             )
             source_message = (
                 await asyncio.to_thread(
@@ -646,6 +656,8 @@ def create_app() -> FastAPI:
             dialogue_style_service=dialogue_style_service,
             meme_library=meme_library,
             avatar_service=avatar_service,
+            reminder_service=reminder_service,
+            document_service=document_service,
         )
         utterance_id = uuid.uuid4().hex
         voice = voice_service.resolve_tts_voice(language, runtime_settings.voice_tts_voice)
@@ -1219,6 +1231,14 @@ def create_app() -> FastAPI:
 
     async def preload_voice_runtime() -> None:
         nonlocal torch_threading
+        if os.getenv("NEUROASIST_SAFE_MODE") == "1":
+            # Safe Mode must also skip Torch, VAD and Smart Turn. Disabling
+            # only STT/TTS preloads still initialized the other model runtimes.
+            update_readiness("stt", "disabled")
+            update_readiness("tts", "disabled")
+            update_readiness("vad", "fallback")
+            event_bus.publish("voice.safe_mode", "info", "Voice model preload skipped in Safe Mode", {})
+            return
         async def configure_torch() -> None:
             nonlocal torch_threading
             try:
@@ -1419,9 +1439,16 @@ def create_app() -> FastAPI:
         # Same ordering contract the deprecated on_event handlers had: a failed
         # startup propagates and shutdown does not run.
         await startup()
+        reminder_task = asyncio.create_task(reminder_service.run()) if reminder_service is not None else None
         try:
             yield
         finally:
+            if reminder_task is not None:
+                reminder_task.cancel()
+                try:
+                    await reminder_task
+                except asyncio.CancelledError:
+                    pass
             await shutdown()
 
     app.router.lifespan_context = lifespan
@@ -1447,6 +1474,8 @@ def create_app() -> FastAPI:
     app.state.settings = settings
     app.state.history = history
     app.state.timeline_store = timeline_store
+    app.state.reminder_service = reminder_service
+    app.state.document_service = document_service
     app.state.turn_coordinator = turn_coordinator
     app.state.context_manager = context_manager
     app.state.memory_service = memory_service
@@ -1482,6 +1511,12 @@ def create_app() -> FastAPI:
     app.include_router(context_debug_router)
     app.include_router(llm_diagnostics_router)
     app.include_router(memory_router)
+    from apps.backend.app.api.routes.reminders import router as reminders_router
+    app.include_router(reminders_router)
+    from apps.backend.app.api.routes.documents import router as documents_router
+    app.include_router(documents_router)
+    from apps.backend.app.api.routes.memory_context import router as memory_context_router
+    app.include_router(memory_context_router)
     app.include_router(meme_library_router)
     app.include_router(models_router)
     app.include_router(maintenance_router)

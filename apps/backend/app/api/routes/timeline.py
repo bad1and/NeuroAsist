@@ -6,6 +6,36 @@ from apps.backend.app.schemas.timeline import TimelineCorrection, TimelineMessag
 router = APIRouter(prefix="/timeline", tags=["timeline"])
 
 
+def _message_view(message, request: Request):
+    result = message.as_dict()
+    if not getattr(getattr(request.app.state, "runtime_settings", None), "developer_mode_enabled", False):
+        result["metadata"] = {key: value for key, value in result.get("metadata", {}).items() if key != "context_memories"}
+    return result
+
+
+@router.get("/messages/{message_id}/context")
+def message_context(message_id: str, request: Request):
+    store = _store(request)
+    message = store.get_message(message_id)
+    if message is None:
+        raise HTTPException(404, "Сообщение не найдено")
+    scope_column = "episode_id" if message.episode_id else "session_id"
+    scope_value = message.episode_id or message.session_id
+    with store._connect() as connection:
+        counts = connection.execute(f"""SELECT COUNT(*) AS total,
+            COALESCE(SUM(CASE WHEN sequence_no > ? THEN 1 ELSE 0 END), 0) AS newer
+            FROM conversation_messages WHERE timeline_id = ? AND {scope_column} IS ?""",
+            (message.sequence_no, message.timeline_id, scope_value)).fetchone()
+    offset = max(0, int(counts["newer"]) - 30)
+    messages, next_offset = store.list_messages(80, offset, episode_id=message.episode_id, session_id=None if message.episode_id else message.session_id)
+    episode = store.get_episode(message.episode_id) if message.episode_id else None
+    episode = episode or {}
+    return {"items": [_message_view(item, request) for item in messages], "next_offset": next_offset, "offset": offset,
+        "episode": {"id": message.episode_id, "session_id": message.session_id, "day": message.created_at[:10], "title": episode.get("title") or "Найденное сообщение",
+            "message_count": counts["total"], "started_at": episode.get("started_at") or message.created_at,
+            "last_activity_at": episode.get("last_activity_at") or message.created_at}}
+
+
 def _store(request: Request):
     store = request.app.state.timeline_store
     if store is None:
@@ -29,7 +59,7 @@ def get_messages(
     messages, next_offset = _store(request).list_messages(
         limit, offset, session_id=session_id, episode_id=episode_id
     )
-    return {"items": [message.as_dict() for message in messages], "next_offset": next_offset}
+    return {"items": [_message_view(message, request) for message in messages], "next_offset": next_offset}
 
 
 @router.post("/messages")
@@ -75,7 +105,7 @@ def get_journal(request: Request) -> dict[str, object]:
 
 @router.get("/search")
 def search_timeline(request: Request, q: str = Query(min_length=1, max_length=200), limit: int = Query(default=20, ge=1, le=100)) -> dict[str, object]:
-    return {"items": [message.as_dict() for message in _store(request).search_messages(q, limit)]}
+    return {"items": [_message_view(message, request) for message in _store(request).search_messages(q, limit)]}
 
 
 @router.delete("/range")

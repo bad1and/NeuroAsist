@@ -431,6 +431,7 @@ class SearchService:
         self._budget = SearchBudget(budget_path)
         self._quota = None
         self._admission_lock = asyncio.Lock()
+        self._eligibility_denials = {}
 
     def selected_provider(self) -> str:
         provider = getattr(self._runtime_settings, "web_search_provider", "free")
@@ -573,6 +574,9 @@ class SearchService:
         _API_SENT.set(False)
         if provider != "tavily":
             return [], "free_only"
+        denied = self._eligibility_denials.get(provider)
+        if denied and denied[1] > time.monotonic():
+            return [], denied[0]
         key = self._credentials.get(provider)
         if not key:
             return [], "unconfigured"
@@ -580,13 +584,18 @@ class SearchService:
             return [], "cooldown"
         try:
             async with self._admission_lock:
+                denied = self._eligibility_denials.get(provider)
+                if denied and denied[1] > time.monotonic():
+                    return [], denied[0]
                 async with asyncio.timeout(2.5):
                     response = await (await self._get_client()).get("https://api.tavily.com/usage", headers={"Authorization": f"Bearer {key}"})
                     response.raise_for_status()
                     if len(response.content) > 64_000:
+                        self._eligibility_denials[provider] = ("unverified_free_plan", time.monotonic() + 60)
                         return [], "unverified_free_plan"
                     self._quota = await asyncio.to_thread(self._budget.reserve, response.json())
                 if self._quota["status"] != "reserved":
+                    self._eligibility_denials[provider] = (self._quota["status"], time.monotonic() + 60)
                     return [], self._quota["status"]
             async with asyncio.timeout(2.5):
                 _API_SENT.set(True)
@@ -744,7 +753,7 @@ class SearchService:
                             providers[1], providers[2] = providers[2], providers[1]
                         elif not conflict or (attempt_index > 0 and self._rank(query, results, preferred_domains)):
                             break
-                needs_pages = topical or bool(re.search(r"биограф|подроб|релиз|выход|выйдет|верси|release|version|\bкогда\b|\bdate\b|полны|текст|анекдот|вариант|joke|full text|геро|перс", query, re.I))
+                needs_pages = topical or bool(re.search(r"причин|последств|объект|цел[ьиь]|диабет|инсулин|медицин|биограф|подроб|релиз|выход|выйдет|верси|release|version|\bкогда\b|\bdate\b|полны|текст|анекдот|вариант|joke|full text|геро|перс", query, re.I))
                 date_claims = {m.group(0) for r in ranked for m in re.finditer(r"\b20\d{2}\b", r.snippet)}
                 if ranked and (needs_pages or len(date_claims) > 1):
                     to_read = [r for r in ranked if r.page_status != "read" and r.url not in budget.page_results][:min(2, 3 - budget.pages)]

@@ -76,8 +76,34 @@ _EMPTY_TAIL = re.compile(r"\b(?:в|принципе|да|попробуй|мож
 
 
 def contextual_search(text: str) -> bool:
-    return bool(_FOLLOWUP.search(text) or _RETRY.search(text) or _ACCEPT.fullmatch(text) or _DETAIL.search(text) or
+    return bool(factual_detail_question(text) or _FOLLOWUP.search(text) or _RETRY.search(text) or _ACCEPT.fullmatch(text) or _DETAIL.search(text) or
                 ((_LOOKUP.search(text) or _CHANGING.search(text)) and re.search(r"\b(?:его|нее|него|нем|ней|это|еще|заново)\b", text, re.I)))
+
+
+def factual_detail_question(text: str) -> bool:
+    """A missing field in an adjacent report, not every sentence mentioning it."""
+    return len(text) <= 300 and not re.search(r"(?iu)\b(?:кстати|сменим тему|в моем коде|в этом тексте)\b", text) and bool(re.search(
+        r"(?iu)\b(?:по каким|каки[емх]|како[йем]|какая|какую)\b.{0,60}\b(?:объект\w*|цел\w*|причин\w*|последств\w*)\b|"
+        r"\b(?:почему|из-за чего|что (?:именно )?пострадало)\b", text))
+
+
+def requires_article_evidence(text: str) -> bool:
+    return bool(re.search(r"(?iu)\b(?:причин\w*|цел[ьиь]\w*|объект\w*|последств\w*|почему|из-за чего|по каким)\b", text))
+
+
+def medical_fact_request(text: str) -> SearchRequest | None:
+    """Public educational facts only; never include a personal disclosure."""
+    if internet_forbidden(text) or sensitive_query(text):
+        return None
+    fact = re.search(r"(?iu)\b(?:факт\w*|что такое|как работает|что значит|почему|объясни)\b", text)
+    medical_topic = re.compile(r"(?iu)\b(?:диабет\w*|инсулин\w*|гипогликеми\w*|гипергликеми\w*|астм\w*|мигрен\w*|вакцин\w*|псориаз\w*|онкологи\w*|рак(?:а|е|ом)?|медицин\w*)\b")
+    subject = (medical_topic.search(text, fact.start()) or medical_topic.search(text)) if fact else None
+    if not subject or not fact:
+        return None
+    topic = "диабет" if subject[0].casefold().startswith("диабет") else subject[0]
+    detail = "медовый месяц фаза" if re.search(r"(?iu)медов\w*\s+месяц", text) else "интересные факты" if re.search(r"(?iu)факт", text) else "объяснение"
+    return SearchRequest(f"{topic} {detail}", preferred_domains=("diabetes.org", "niddk.nih.gov", "who.int") if topic == "диабет" else ("who.int", "nhs.uk", "nih.gov"),
+                         reason="medical_fact", goal=f"{topic} {detail}")
 
 
 def search_subject(text: str) -> str:
@@ -173,7 +199,7 @@ def search_requested(text: str, recent_messages: Iterable = ()) -> bool:
     if analyze_dialogue_turn(text, recent_messages).suppress_lookup:
         return False
     return not (internet_forbidden(text) or sensitive_query(text) or _LOCAL.search(text)) and bool(
-        _COMMAND.search(text) or _LOOKUP.search(text) or _CHANGING.search(text) or _RETRY.search(text) or _ACCEPT.fullmatch(text) or _FRESH.search(text) or _RECENT.search(text) or _CURRENT.search(text) or _FOLLOWUP.search(text) or _DETAIL.search(text) or (_EVENT.search(text) and _OUTCOME.search(text)))
+        medical_fact_request(text) or factual_detail_question(text) or _COMMAND.search(text) or _LOOKUP.search(text) or _CHANGING.search(text) or _RETRY.search(text) or _ACCEPT.fullmatch(text) or _FRESH.search(text) or _RECENT.search(text) or _CURRENT.search(text) or _FOLLOWUP.search(text) or _DETAIL.search(text) or (_EVENT.search(text) and _OUTCOME.search(text)))
 
 
 def needs_query_planner(text: str, recent_messages: Iterable = ()) -> bool:
@@ -270,6 +296,9 @@ def plan_search(user_text: str, recent_messages: Iterable = ()) -> SearchRequest
     recent_messages = list(recent_messages)
     if analyze_dialogue_turn(user_text, recent_messages).suppress_lookup:
         return None
+    medical = medical_fact_request(user_text)
+    if medical is not None:
+        return medical
     user_text = user_text.replace("ё", "е")
     if (re.search(r"(?iu)\b(?:свеж\w*|нов\w*|актуальн\w*|обнови)\b.{0,35}\bмем\w*\b|\bмем\w*\b.{0,35}\b(?:сейчас|сегодня|недавно|нов\w*)\b", user_text)
             and (analyze_dialogue_turn(user_text, recent_messages).kind == "request"
