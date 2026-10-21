@@ -11,6 +11,16 @@ export async function openApiKeyPortal(provider: "deepseek" | "tavily"): Promise
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
+export async function openModelInformation(modelId: string, kind: "source" | "terms", url: string): Promise<void> {
+  if (isDesktopApp()) {
+    await invoke("open_model_information", { modelId, kind });
+    return;
+  }
+  const target = new URL(url);
+  if (target.protocol !== "https:" || target.hostname !== "huggingface.co") throw new Error("Unsupported model information URL");
+  window.open(target.href, "_blank", "noopener,noreferrer");
+}
+
 export type CoreStatus = "starting" | "ready" | "failed" | "crashed" | "closing";
 
 export type DesktopRuntime = {
@@ -19,6 +29,7 @@ export type DesktopRuntime = {
   wsEventsUrl: string;
   safeMode: boolean;
   coreStatus: CoreStatus;
+  coreError?: string | null;
 };
 
 export type AvatarInAppBounds = {

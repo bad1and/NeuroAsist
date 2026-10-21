@@ -78,10 +78,14 @@ describe("desktop chrome и запуск", () => {
 
   it("оставляет ошибку на экране и запускает retry", () => {
     const retry = vi.fn();
-    render(<StartupScreen status="failed" retrying={false} onRetry={retry} />);
+    const restore = vi.fn();
+    render(<StartupScreen status="failed" retrying={false} subdetail="Bundled Neuro Core is missing" onRetry={retry} onRestoreBackup={restore} />);
+    expect(screen.getByText("Bundled Neuro Core is missing")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Не удалось запустить ядро" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Попробовать снова/ }));
     expect(retry).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Восстановить из копии" }));
+    expect(restore).toHaveBeenCalledOnce();
   });
 
   it("раскрывает лепестки по готовности и завершает только после третьего", async () => {

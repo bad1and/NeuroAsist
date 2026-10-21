@@ -16,6 +16,7 @@
   "dependencies": {
     "@paper-design/shaders": "^0.0.81",
     "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-notification": "2.3.3",
     "@visx/responsive": "^4.0.0",
     "@visx/scale": "^4.0.0",
     "@visx/shape": "^4.0.0",

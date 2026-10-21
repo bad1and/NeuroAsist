@@ -83,7 +83,8 @@ namespace NeuroAsist.Avatar
                 // performance profile configured the 60 FPS, low-overhead path.
                 if (avatarCamera != null)
                 {
-                    avatarCamera.allowHDR = true; // Enabled for better MToon bloom/shading
+                    // Preserve coverage alpha in the embedded swapchain.
+                    avatarCamera.allowHDR = false;
                     avatarCamera.allowMSAA = AvatarPerformanceProfile.EmbeddedAntiAliasing > 1;
                     avatarCamera.allowDynamicResolution = false;
                     avatarCamera.clearFlags = CameraClearFlags.SolidColor;

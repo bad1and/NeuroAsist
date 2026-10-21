@@ -1198,7 +1198,7 @@ select { appearance: auto; }
   left: 50%;
   transform: translateX(-50%);
   bottom: calc(var(--dock-base-toolbar-height, 121px) * var(--dock-scale, 1));
-  width: calc(var(--avatar-base-width, 500px) * var(--dock-scale, 1));
+  width: min(100%, calc(var(--avatar-base-width, 500px) * var(--dock-scale, 1)));
   height: calc(100% - calc(var(--dock-base-toolbar-height, 121px) * var(--dock-scale, 1) + 20px));
   max-height: calc(var(--avatar-base-height, 520px) * var(--dock-scale, 1));
   min-height: 240px;
@@ -1223,10 +1223,16 @@ select { appearance: auto; }
 
 .chat-panel.is-active.has-in-app-avatar .in-app-avatar-stage {
   position: absolute;
-  left: calc(50% - 182px * var(--dock-scale, 1));
+  /* Unity is a native popup; CSS overflow cannot clip it at the sidebar.
+     Keep its measured slot inside the chat without changing its vertical fit. */
+  left: clamp(
+    min(50%, calc(var(--avatar-base-width, 500px) * var(--dock-scale, 1) / 2)),
+    calc(50% - 182px * var(--dock-scale, 1)),
+    max(50%, calc(100% - var(--avatar-base-width, 500px) * var(--dock-scale, 1) / 2))
+  );
   transform: translateX(-50%);
   bottom: calc(var(--dock-base-toolbar-height, 121px) * var(--dock-scale, 1) + 20px);
-  width: calc(var(--avatar-base-width, 500px) * var(--dock-scale, 1));
+  width: min(100%, calc(var(--avatar-base-width, 500px) * var(--dock-scale, 1)));
   height: calc(100% - calc(var(--dock-base-toolbar-height, 121px) * var(--dock-scale, 1) + 35px));
   max-height: calc(var(--avatar-base-height, 520px) * var(--dock-scale, 1));
   min-height: 240px;

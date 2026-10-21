@@ -5,10 +5,6 @@ namespace NeuroAsist.Avatar
     public sealed class AvatarPerformanceProfile : MonoBehaviour
     {
         public const int EmbeddedFrameRate = 60;
-        // Neutral #1d2022 is deliberately close to Iris' in-app surface.
-        // The native fallback still uses a colour key, and a neutral matte
-        // prevents the former blue fringe from reading as visual grain.
-        private static readonly Color EmbeddedColorKey = new Color(29f / 255f, 32f / 255f, 34f / 255f, 0f);
         // Two samples clean up hair and clothing silhouettes at the narrow
         // in-app size without materially competing with the WebView GPU work.
         public const int EmbeddedAntiAliasing = 4;
@@ -37,17 +33,18 @@ namespace NeuroAsist.Avatar
             var camera = Camera.main;
             if (camera != null)
             {
-                camera.allowHDR = true;
+                camera.allowHDR = !embeddedInIris;
                 camera.allowMSAA = true;
                 camera.farClipPlane = Mathf.Min(camera.farClipPlane, 20f);
                 camera.clearFlags = CameraClearFlags.SolidColor;
-                // InApp uses the same neutral clear colour as Tauri's native
-                // colour key. It has no saturated blue component to leak into
-                // anti-aliased hair or clothing pixels.
+                // The DWM compositor consumes real coverage alpha. Transparent
+                // black avoids a matte in anti-aliased hair and the edge blur.
                 var background = camera.backgroundColor;
                 camera.backgroundColor = embeddedInIris
-                    ? EmbeddedColorKey
+                    ? Color.clear
                     : new Color(background.r, background.g, background.b, 0f);
+                if (embeddedInIris && camera.GetComponent<AvatarEdgeFeather>() == null)
+                    camera.gameObject.AddComponent<AvatarEdgeFeather>();
             }
 
             var keptLight = false;

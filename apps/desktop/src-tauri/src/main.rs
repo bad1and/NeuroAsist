@@ -8,7 +8,7 @@ use std::{
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Mutex,
     },
     thread,
@@ -33,12 +33,14 @@ use window_preferences::{
 use windows::core::BOOL;
 #[cfg(windows)]
 use windows::Win32::{
-    Foundation::{COLORREF, HWND, LPARAM, POINT},
+    Foundation::{HWND, LPARAM, POINT},
+    Graphics::Dwm::DwmExtendFrameIntoClientArea,
     Graphics::Gdi::ClientToScreen,
+    UI::Controls::MARGINS,
     UI::WindowsAndMessaging::{
         EnumWindows, GetClassNameW, GetParent, GetWindowLongPtrW, GetWindowThreadProcessId,
         SetLayeredWindowAttributes, SetParent, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-        GWLP_HWNDPARENT, GWL_EXSTYLE, GWL_STYLE, HWND_TOP, LWA_COLORKEY, SWP_ASYNCWINDOWPOS,
+        GWLP_HWNDPARENT, GWL_EXSTYLE, GWL_STYLE, HWND_TOP, LWA_ALPHA, SWP_ASYNCWINDOWPOS,
         SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_SHOWNA,
         WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
     },
@@ -68,11 +70,6 @@ const UNITY_WARMUP_SIZE: i32 = 64;
 const KEYRING_SERVICE: &str = "NeuroAsist";
 const DEEPSEEK_KEYRING_ACCOUNT: &str = "deepseek_api_key";
 const CODING_KEYRING_ACCOUNT: &str = "coding_api_key";
-// Matches the embedded Unity camera clear colour (#1d2022). A neutral matte
-// makes the unavoidable colour-key transition much less visible at hair and
-// clothing edges than the previous saturated blue key.
-#[cfg(windows)]
-const EMBEDDED_AVATAR_COLOR_KEY: COLORREF = COLORREF(29 | (32 << 8) | (34 << 16));
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -134,11 +131,12 @@ struct DesktopRuntime {
     ws_events_url: String,
     safe_mode: bool,
     core_status: String,
+    core_error: Option<String>,
 }
 
 struct DesktopState {
     root: PathBuf,
-    safe_mode: bool,
+    safe_mode: AtomicBool,
     runtime: Mutex<DesktopRuntime>,
     core: Mutex<Option<CoreProcess>>,
     avatar: Mutex<Option<AvatarProcess>>,
@@ -182,13 +180,14 @@ impl DesktopState {
         let api_base_url = format!("http://127.0.0.1:{port}");
         Self {
             root,
-            safe_mode: env::args().any(|arg| arg == "--safe-mode"),
+            safe_mode: AtomicBool::new(env::args().any(|arg| arg == "--safe-mode")),
             runtime: Mutex::new(DesktopRuntime {
                 ws_events_url: format!("ws://127.0.0.1:{port}/ws/events?token={token}"),
                 api_base_url,
                 api_token: token,
                 safe_mode: env::args().any(|arg| arg == "--safe-mode"),
                 core_status: "starting".into(),
+                core_error: None,
             }),
             core: Mutex::new(None),
             avatar: Mutex::new(None),
@@ -246,6 +245,21 @@ impl DesktopState {
     }
 
     fn start_core(&self, app: &AppHandle) -> Result<(), String> {
+        if let Ok(mut runtime) = self.runtime.lock() { runtime.core_error = None; }
+        let result = self.try_start_core(app);
+        if let Err(error) = &result {
+            if self.runtime().core_status != "closing" {
+                self.stop_core();
+                if let Ok(mut runtime) = self.runtime.lock() {
+                    record_core_failure(&mut runtime, error);
+                }
+                self.set_core_status(app, "failed");
+            }
+        }
+        result
+    }
+
+    fn try_start_core(&self, app: &AppHandle) -> Result<(), String> {
         if self.runtime().core_status == "closing" { return Err("Iris is closing".into()); }
         if self
             .core
@@ -269,7 +283,8 @@ impl DesktopState {
             read_credential("tavily_api_key", "Tavily")?,
             read_credential("serper_api_key", "Serper")?,
         ];
-        let avatar_enabled = self.avatar_executable(app).is_some() && !self.safe_mode;
+        let safe_mode = self.safe_mode.load(Ordering::SeqCst);
+        let avatar_enabled = self.avatar_executable(app).is_some() && !safe_mode;
         let process =
             if cfg!(debug_assertions) || env::var_os("NEUROASIST_CORE_EXECUTABLE").is_some() {
                 let mut command = core_command(&self.root)?;
@@ -279,7 +294,7 @@ impl DesktopState {
                     &data_root,
                     port,
                     &runtime.api_token,
-                    self.safe_mode,
+                    safe_mode,
                     avatar_enabled,
                 );
                 let mut child = command
@@ -307,7 +322,7 @@ impl DesktopState {
                     &data_root,
                     port,
                     &runtime.api_token,
-                    self.safe_mode,
+                    safe_mode,
                     avatar_enabled,
                 );
                 // PyInstaller onedir resolves its bundled DLLs relative to
@@ -471,7 +486,7 @@ impl DesktopState {
         app: &AppHandle,
         placement: AvatarPlacement,
     ) -> Result<bool, String> {
-        if self.safe_mode {
+        if self.safe_mode.load(Ordering::SeqCst) {
             self.set_avatar_lifecycle(app, AvatarLifecyclePhase::Disabled, None);
             return Ok(false);
         }
@@ -508,9 +523,8 @@ impl DesktopState {
                 },
             );
         if placement == AvatarPlacement::InApp {
-            // Colour-key transparency is unsupported by Unity's DXGI flip
-            // swapchain. The BitBlt D3D11 path is deliberate here: it keeps
-            // the native avatar surface transparent over the Iris UI.
+            // DWM coverage alpha requires Unity's BitBlt D3D11 swapchain.
+            // Flip-model surfaces do not preserve this window transparency.
             //
             // Do not use Unity's `-parentHWND ... delayed` option here. With
             // this player and the Tauri WebView parent it never creates the
@@ -930,7 +944,7 @@ impl DesktopState {
             {
                 // CRITICAL SAFETY GUARD:
                 // NEVER reveal or resize the window onto the screen if Unity is not ready.
-                // An unready Unity player has not cleared its backbuffer to EMBEDDED_AVATAR_COLOR_KEY
+                // An unready Unity player has not cleared its backbuffer to transparent black
                 // and its main thread is blocked loading VRM/shaders, which causes an opaque black box
                 // and freezes the desktop message loop ("Iris (Не отвечает)").
                 let should_show = is_ready && requested_visible && has_current_bounds;
@@ -1056,6 +1070,11 @@ impl DesktopState {
         } else {
             self.start_avatar_locked(app, configured_placement)
         }
+    }
+
+    fn enable_safe_mode(&self) {
+        self.safe_mode.store(true, Ordering::SeqCst);
+        if let Ok(mut runtime) = self.runtime.lock() { runtime.safe_mode = true; }
     }
 
     fn shutdown(&self) {
@@ -1287,6 +1306,32 @@ fn open_api_key_portal(provider: String) -> Result<(), String> {
         "tavily" => "https://app.tavily.com/home",
         _ => return Err("Unsupported API key provider".into()),
     };
+    open_browser_url(url)
+}
+
+fn model_information_url(model_id: &str, kind: &str) -> Result<String, String> {
+    let key = match kind {
+        "source" => "source_url",
+        "terms" => "terms_url",
+        _ => return Err("Unsupported model information kind".into()),
+    };
+    let catalog: Vec<serde_json::Value> = serde_json::from_str(include_str!("../../../backend/app/model_manager/catalog.json"))
+        .map_err(|error| error.to_string())?;
+    let url = catalog.iter().find(|item| item["id"].as_str() == Some(model_id))
+        .and_then(|item| item[key].as_str())
+        .ok_or("Unknown model information link")?;
+    if !url.starts_with("https://huggingface.co/") {
+        return Err("Unsupported model information host".into());
+    }
+    Ok(url.to_string())
+}
+
+#[tauri::command]
+fn open_model_information(model_id: String, kind: String) -> Result<(), String> {
+    open_browser_url(&model_information_url(&model_id, &kind)?)
+}
+
+fn open_browser_url(url: &str) -> Result<(), String> {
     #[cfg(windows)]
     {
         use windows::{core::PCWSTR, Win32::UI::Shell::ShellExecuteW};
@@ -1295,12 +1340,12 @@ fn open_api_key_portal(provider: String) -> Result<(), String> {
             ShellExecuteW(None, windows::core::w!("open"), PCWSTR(wide_url.as_ptr()),
                 PCWSTR::null(), PCWSTR::null(), windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL)
         };
-        if result.0 as isize > 32 { Ok(()) } else { Err("Could not open API key portal".into()) }
+        if result.0 as isize > 32 { Ok(()) } else { Err("Could not open browser".into()) }
     }
     #[cfg(not(windows))]
     {
         let _ = url;
-        Err("Opening API key portals requires Windows".into())
+        Err("Opening browser links requires Windows".into())
     }
 }
 
@@ -1446,6 +1491,7 @@ async fn is_qa_studio_open(app: AppHandle) -> bool {
 
 fn main() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             show_main_window(app)
         }))
@@ -1566,6 +1612,7 @@ fn main() {
             is_avatar_ready,
             save_api_key,
             open_api_key_portal,
+            open_model_information,
             save_coding_api_key,
             remove_api_key,
             remove_coding_api_key,
@@ -1672,12 +1719,26 @@ fn show_main_window(app: &AppHandle) {
 }
 
 fn restart_in_safe_mode(app: &AppHandle) {
-    let executable = match env::current_exe() {
-        Ok(path) => path,
-        Err(_) => return,
-    };
-    let _ = Command::new(executable).arg("--safe-mode").spawn();
-    app.exit(0);
+    // Keep the shell and its single-instance ownership. Restart only managed
+    // children; spawning another shell before releasing the mutex loses it.
+    show_main_window(app);
+    let handle = app.clone();
+    thread::spawn(move || {
+        let state = handle.state::<DesktopState>();
+        let Ok(_guard) = state.maintenance.lock() else { return; };
+        if state.runtime().core_status == "closing" { return; }
+        state.enable_safe_mode();
+        state.stop_avatar();
+        state.stop_core();
+        let _ = state.start_core(&handle);
+    });
+}
+
+fn record_core_failure(runtime: &mut DesktopRuntime, error: &str) {
+    if runtime.core_status != "closing" {
+        runtime.core_status = "failed".into();
+        runtime.core_error = Some(error.to_owned());
+    }
 }
 
 fn available_loopback_port() -> u16 {
@@ -1834,8 +1895,8 @@ fn attach_embedded_avatar_window(app: &AppHandle, window: usize) -> Result<(), S
         // hiding and converting the window can no longer stall cold startup.
         let _ = ShowWindow(window, SW_HIDE);
 
-        // A layered Direct3D child window cannot reliably apply a colour key
-        // on Windows. Convert it to a popup before detaching it, following
+        // Direct3D child windows cannot reliably expose their coverage alpha
+        // through DWM. Convert it to a popup before detaching it, following
         // Win32's child/popup transition rules.
         // Replace the complete overlapped-window style, not only WS_CHILD.
         // Keeping Unity's caption bits was the source of the white native
@@ -1858,9 +1919,17 @@ fn attach_embedded_avatar_window(app: &AppHandle, window: usize) -> Result<(), S
             | WS_EX_NOACTIVATE.0;
         SetWindowLongPtrW(window, GWL_EXSTYLE, embedded_extended as isize);
         SetWindowLongPtrW(window, GWLP_HWNDPARENT, parent.0 as isize);
-        SetLayeredWindowAttributes(window, EMBEDDED_AVATAR_COLOR_KEY, 0, LWA_COLORKEY).map_err(
-            |error| format!("Could not make Unity avatar background transparent: {error}"),
-        )?;
+        // A colour key discards only exact background pixels, leaving the dark
+        // matte in every anti-aliased hair pixel. DWM instead composes Unity's
+        // premultiplied RGBA directly over the live WebView visualizer.
+        SetLayeredWindowAttributes(window, Default::default(), 255, LWA_ALPHA)
+            .map_err(|error| format!("Could not configure Unity avatar opacity: {error}"))?;
+        DwmExtendFrameIntoClientArea(window, &MARGINS {
+            cxLeftWidth: -1,
+            cxRightWidth: -1,
+            cyTopHeight: -1,
+            cyBottomHeight: -1,
+        }).map_err(|error| format!("Could not enable Unity avatar alpha composition: {error}"))?;
         SetWindowPos(
             window,
             Some(HWND_TOP),
@@ -2061,6 +2130,48 @@ unsafe fn is_unity_render_window(window: HWND) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_information_uses_only_catalogued_links() {
+        let source = model_information_url("teratts-v2", "source").unwrap();
+        assert!(source.starts_with("https://huggingface.co/TeraSpace/TeraTTSv2/tree/"));
+        assert!(source.ends_with("f05ea799094571a3553904a555df3834fb0b963b"));
+        assert_eq!(model_information_url("teratts-v2", "terms").unwrap(), "https://huggingface.co/terms-of-service");
+        assert!(model_information_url("https://example.com/", "source").is_err());
+        assert!(model_information_url("teratts-v2", "https://example.com/").is_err());
+    }
+
+    #[test]
+    fn startup_failures_keep_diagnostics_and_closing_cannot_be_revived() {
+        let state = DesktopState::new();
+        for error in ["Could not create Iris data directory", "Windows Credential Manager is unavailable", "Bundled Neuro Core is missing", "Could not start Neuro Core"] {
+            let mut runtime = state.runtime();
+            record_core_failure(&mut runtime, error);
+            assert_eq!(runtime.core_status, "failed");
+            assert_eq!(runtime.core_error.as_deref(), Some(error));
+        }
+        let mut runtime = state.runtime();
+        runtime.core_status = "closing".into();
+        record_core_failure(&mut runtime, "late startup failure");
+        assert_eq!(runtime.core_status, "closing");
+        assert!(runtime.core_error.is_none());
+    }
+
+    #[test]
+    fn safe_mode_keeps_shell_ownership_and_configures_only_managed_children() {
+        let state = DesktopState::new();
+        state.enable_safe_mode();
+        assert!(state.safe_mode.load(Ordering::SeqCst));
+        assert!(state.runtime().safe_mode);
+        assert!(state.core.lock().unwrap().is_none());
+        assert!(state.avatar.lock().unwrap().is_none());
+        let mut command = Command::new("unused-test-core");
+        configure_core_command(&mut command, &state.root, &PathBuf::from("qa-profile"), "12345", "qa-token", state.safe_mode.load(Ordering::SeqCst), false);
+        let environment: std::collections::HashMap<_, _> = command.get_envs().map(|(key, value)| (key.to_string_lossy().into_owned(), value.map(|value| value.to_string_lossy().into_owned()))).collect();
+        assert_eq!(environment["NEUROASIST_SAFE_MODE"].as_deref(), Some("1"));
+        assert_eq!(environment["AVATAR_ENABLED"].as_deref(), Some("false"));
+        assert_eq!(environment["NEUROASIST_APP_DATA_DIR"].as_deref(), Some("qa-profile"));
+    }
 
     #[test]
     fn production_launch_root_follows_the_packaged_executable() {
