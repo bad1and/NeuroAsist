@@ -293,6 +293,28 @@ class CodingAgentService:
         self.store.append_coding_event(task_id, "task.applied", "info", "Reviewed changes applied to source project", {"files": result["applied_files"]})
         return self.store.get_coding_task(task_id) or task
 
+    def recover_apply_transactions(self) -> None:
+        if self.store is None:
+            return
+        for journal in self.settings.coding_workspace_path.glob("*/*/apply-transaction.json"):
+            task_id = journal.parent.name
+            task = self.store.get_coding_task(task_id, include_events=False)
+            if task is None:
+                continue
+            try:
+                sandbox = self._sandbox_from_task(task)
+                if sandbox.base != journal.parent.resolve():
+                    continue
+                recovered = sandbox.recover_apply()
+                if recovered == "committed" and task["status"] == "review_ready":
+                    result = dict(task["result"])
+                    result["applied_files"] = [change.path for change in sandbox._apply_journal()["changes"]]
+                    self.store.update_coding_task(task_id, status="applied", result=result)
+                elif recovered == "rolled_back":
+                    self.store.append_coding_event(task_id, "task.apply_recovered", "warning", "Interrupted file application was rolled back", {})
+            except (OSError, ValueError, RuntimeError, KeyError, TypeError) as error:
+                self.store.update_coding_task(task_id, status="conflicted", error=str(error))
+
     async def _run_task(self, task: dict[str, object]) -> None:
         assert self.store is not None
         task_id = str(task["id"])

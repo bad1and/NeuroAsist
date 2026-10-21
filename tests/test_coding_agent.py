@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from apps.backend import main as backend_main
 from apps.backend.app.coding import runner as runner_module
+from apps.backend.app.coding import sandbox as sandbox_module
 from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.coding.orchestration import CodingBridge
 from apps.backend.app.coding.runner import DockerAvailability, DockerSandboxRunner
@@ -72,6 +73,117 @@ def test_task_sandbox_blocks_apply_when_original_source_changed(tmp_path: Path) 
     with pytest.raises(RuntimeError, match="changed since the task snapshot"):
         sandbox.apply_to_source()
     assert source.read_text(encoding="utf-8") == "ANSWER = 3\n"
+
+
+@pytest.mark.parametrize("crash", [False, True])
+def test_apply_rolls_back_modified_deleted_and_created_files(tmp_path, monkeypatch, crash):
+    project = tmp_path / "project"
+    project.mkdir()
+    for name in ("b.py", "c.py", "d.py"):
+        (project / name).write_text(f"old {name}", encoding="utf-8")
+    sandbox = TaskSandbox(coding_settings(tmp_path, project), task_id="transaction", project_root=project, workspace_name="default")
+    sandbox.create_snapshot()
+    sandbox.write_text("a.py", "created")
+    sandbox.write_text("b.py", "modified")
+    sandbox.delete_file("c.py")
+    sandbox.write_text("d.py", "last")
+    original_replace = sandbox_module._replace_file
+
+    def fail_last(source, destination):
+        if source == sandbox.work_root / "d.py":
+            if crash:
+                raise KeyboardInterrupt("simulated process interruption")
+            raise OSError("simulated write failure")
+        return original_replace(source, destination)
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(sandbox_module, "_replace_file", fail_last)
+        with pytest.raises(KeyboardInterrupt if crash else OSError):
+            sandbox.apply_to_source()
+    if crash:
+        # Rehydrate exactly as startup does; no state from the old object survives.
+        restored = TaskSandbox(sandbox.settings, task_id="transaction", project_root=project, workspace_name="default")
+        restored.open_existing(sandbox.manifest)
+        assert restored.recover_apply() == "rolled_back"
+    assert not (project / "a.py").exists()
+    for name in ("b.py", "c.py", "d.py"):
+        assert (project / name).read_text(encoding="utf-8") == f"old {name}"
+    sandbox.apply_to_source()
+    assert (project / "a.py").read_text() == "created"
+    assert (project / "b.py").read_text() == "modified"
+    assert not (project / "c.py").exists()
+    # Completed journal makes a repeated apply safe after a lost response.
+    sandbox.apply_to_source()
+
+
+def test_apply_recovery_preserves_later_manual_edits(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "a.py").write_text("old")
+    sandbox = TaskSandbox(coding_settings(tmp_path, project), task_id="manual-edit", project_root=project, workspace_name="default")
+    sandbox.create_snapshot()
+    sandbox.write_text("a.py", "agent")
+    original_write = sandbox_module._write_json_atomic
+
+    def crash_before_commit(path, payload):
+        if payload["state"] == "committed":
+            raise KeyboardInterrupt()
+        original_write(path, payload)
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(sandbox_module, "_write_json_atomic", crash_before_commit)
+        with pytest.raises(KeyboardInterrupt):
+            sandbox.apply_to_source()
+    (project / "a.py").write_text("later user edit")
+    with pytest.raises(RuntimeError, match="source was edited"):
+        sandbox.recover_apply()
+    assert (project / "a.py").read_text() == "later user edit"
+
+
+@pytest.mark.parametrize("crash_point", ["during_files", "before_database_commit"])
+def test_service_recovers_file_transaction_before_resuming_tasks(tmp_path, monkeypatch, crash_point):
+    project = tmp_path / "project"
+    project.mkdir()
+    for name in ("a.py", "b.py"):
+        (project / name).write_text("old")
+    settings = coding_settings(tmp_path, project)
+    store = TimelineStore(settings.database_path)
+    store.init_db()
+    runtime = RuntimeSettings(coding_agent_enabled=True)
+    service = CodingAgentService(settings, runtime, store, lambda *_: None)
+    task = service.create_task("change files", project_root=str(project))
+    sandbox = TaskSandbox(settings, task_id=task["id"], project_root=project, workspace_name="default")
+    manifest = sandbox.create_snapshot()
+    for name in ("a.py", "b.py"):
+        sandbox.write_text(name, "new")
+    store.update_coding_task(task["id"], status="review_ready", base_manifest=manifest)
+    replace = sandbox_module._replace_file
+    update = store.update_coding_task
+
+    def crash_file(source, destination):
+        if source == sandbox.work_root / "b.py":
+            raise KeyboardInterrupt()
+        replace(source, destination)
+
+    def crash_database(*args, **kwargs):
+        if kwargs.get("status") == "applied":
+            raise KeyboardInterrupt()
+        update(*args, **kwargs)
+
+    with monkeypatch.context() as scoped:
+        if crash_point == "during_files":
+            scoped.setattr(sandbox_module, "_replace_file", crash_file)
+        else:
+            scoped.setattr(store, "update_coding_task", crash_database)
+        with pytest.raises(KeyboardInterrupt):
+            service.apply(task["id"])
+    recovered_store = TimelineStore(settings.database_path)
+    recovered_store.init_db()
+    recovered_service = CodingAgentService(settings, runtime, recovered_store, lambda *_: None)
+    recovered_service.recover_apply_transactions()
+    expected = "old" if crash_point == "during_files" else "new"
+    assert [(project / name).read_text() for name in ("a.py", "b.py")] == [expected, expected]
+    assert recovered_store.get_coding_task(task["id"])["status"] == ("review_ready" if crash_point == "during_files" else "applied")
 
 
 def test_task_sandbox_reports_the_limit_that_was_exceeded(tmp_path: Path) -> None:
@@ -704,6 +816,12 @@ def test_coding_notification_marks_live_voice_utterance_instead_of_batch_tts(tmp
 
 
 def test_coding_settings_and_task_api_contract(monkeypatch, tmp_path: Path) -> None:
+    # This test controls pending/failed states through the API and store. A real
+    # worker could fail on a machine without Docker before DELETE asserts 409.
+    async def idle_coding_worker(_self):
+        return False
+
+    monkeypatch.setattr(CodingAgentService, "run_once", idle_coding_worker)
     project = tmp_path / "project"
     project.mkdir()
     (project / "module.py").write_text("x = 1\n", encoding="utf-8")

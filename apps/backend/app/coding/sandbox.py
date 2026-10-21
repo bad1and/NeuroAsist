@@ -2,13 +2,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
-from dataclasses import dataclass
+import tempfile
+from threading import RLock
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from apps.backend.app.coding.policy import CodingPolicyError, PathPolicy
 from apps.backend.app.core.config import Settings
+
+
+_APPLY_LOCK = RLock()
 
 
 class SnapshotLimitError(RuntimeError):
@@ -177,29 +183,102 @@ class TaskSandbox:
             # In standalone mode the reviewed files already live in the
             # configured task workspace; applying only acknowledges review.
             return self.changed_files()
-        if not self.source_unchanged():
-            raise RuntimeError("Source project changed since the task snapshot; review/apply is blocked")
-        changes = self.changed_files()
-        backup_root = self.base / "apply-backup"
-        backup_root.mkdir(parents=True, exist_ok=True)
+        with _APPLY_LOCK:
+            recovered = self.recover_apply()
+            if recovered == "committed":
+                return self._apply_journal()["changes"]
+            if not self.source_unchanged():
+                raise RuntimeError("Source project changed since the task snapshot; review/apply is blocked")
+            changes = self.changed_files()
+            backup_root = self.base / "apply-backup"
+            backup_root.mkdir(parents=True, exist_ok=True)
+            # Finish and verify every backup before touching any source file.
+            for change in changes:
+                source = self._source_path(change.path)
+                if change.before_hash is not None:
+                    backup = backup_root / change.path
+                    backup.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, backup)
+                    if self._sha256(backup) != change.before_hash:
+                        raise RuntimeError("Source changed while preparing the apply backup")
+                if change.after_hash is not None and self._sha256(self._work_path(change.path)) != change.after_hash:
+                    raise RuntimeError("Task files changed while preparing apply")
+            journal = {"version": 1, "project_root": str(self.project_root), "state": "applying", "changes": [asdict(change) for change in changes]}
+            _write_json_atomic(self.base / "apply-transaction.json", journal)
+            try:
+                for change in changes:
+                    source = self._source_path(change.path)
+                    current = self._sha256(source) if source.exists() else None
+                    if current != change.before_hash:
+                        raise RuntimeError(f"Source changed during apply: {change.path}")
+                    if change.change == "deleted":
+                        source.unlink()
+                    else:
+                        _replace_file(self._work_path(change.path), source)
+                journal["state"] = "committed"
+                _write_json_atomic(self.base / "apply-transaction.json", journal)
+            except Exception:
+                try:
+                    self.recover_apply()
+                except Exception as error:
+                    raise RuntimeError("Apply failed and recovery needs review; journal and original backups were preserved") from error
+                raise
+            return changes
+
+    def _source_path(self, relative: str) -> Path:
+        assert self.project_root is not None
+        safe = self.policy.relative(relative)
+        target = self.project_root / safe
+        if safe.suffix.casefold() not in self.policy.extensions or target.is_symlink():
+            raise CodingPolicyError("Unsupported source path in apply transaction")
+        try:
+            target.resolve().relative_to(self.project_root)
+        except ValueError as error:
+            raise CodingPolicyError("Apply path is outside the approved project") from error
+        return target
+
+    def _apply_journal(self) -> dict:
+        path = self.base / "apply-transaction.json"
+        journal = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(journal, dict) or journal.get("version") != 1 or journal.get("project_root") != str(self.project_root) or journal.get("state") not in {"applying", "committed", "rolled_back"} or not isinstance(journal.get("changes"), list):
+            raise RuntimeError("Invalid apply transaction journal; source files preserved")
+        changes = [ChangedFile(**item) for item in journal["changes"]]
         for change in changes:
-            source = self.project_root / change.path
-            work = self.work_root / change.path
-            if source.exists():
-                backup = backup_root / change.path
-                backup.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source, backup)
-            if change.change == "deleted":
-                if source.exists():
-                    source.unlink()
-                continue
-            source.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(work, source)
-        (backup_root / "README.txt").write_text(
-            "Pre-apply backup created by NeuroAsist Coding Agent. Keep it until the reviewed change is accepted.\n",
-            encoding="utf-8",
-        )
-        return changes
+            self._source_path(change.path)
+            if change.before_hash != self._manifest.get(change.path):
+                raise RuntimeError("Apply transaction does not match the approved snapshot")
+        return {**journal, "changes": changes}
+
+    def recover_apply(self) -> str | None:
+        """Recover an interrupted application, without overwriting later user edits."""
+        with _APPLY_LOCK:
+            if self.project_root is None or not (self.base / "apply-transaction.json").exists():
+                return None
+            journal = self._apply_journal()
+            if journal["state"] != "applying":
+                return "committed" if journal["state"] == "committed" else None
+            restore: list[tuple[ChangedFile, Path]] = []
+            for change in journal["changes"]:
+                source = self._source_path(change.path)
+                current = self._sha256(source) if source.exists() else None
+                if current == change.before_hash:
+                    continue
+                if current != change.after_hash:
+                    raise RuntimeError(f"Apply recovery needs review; source was edited: {change.path}")
+                if change.before_hash is not None:
+                    backup = self.base / "apply-backup" / change.path
+                    if not backup.is_file() or self._sha256(backup) != change.before_hash:
+                        raise RuntimeError(f"Apply backup is unavailable: {change.path}")
+                restore.append((change, source))
+            for change, source in reversed(restore):
+                if change.before_hash is None:
+                    source.unlink(missing_ok=True)
+                else:
+                    _replace_file(self.base / "apply-backup" / change.path, source)
+            journal["state"] = "rolled_back"
+            journal["changes"] = [asdict(change) for change in journal["changes"]]
+            _write_json_atomic(self.base / "apply-transaction.json", journal)
+            return "rolled_back"
 
     def diff_text(self, max_bytes: int) -> str:
         import difflib
@@ -255,3 +334,33 @@ def _paths_overlap(first: Path, second: Path) -> bool:
             return True
         except ValueError:
             return False
+
+
+def _replace_file(source: Path, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(prefix=".iris-apply-", suffix=".tmp", dir=destination.parent, delete=False) as handle:
+        temporary = Path(handle.name)
+    try:
+        shutil.copy2(source, temporary)
+        with temporary.open("r+b") as handle:
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _write_json_atomic(path: Path, payload: dict) -> None:
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix=".iris-journal-", suffix=".tmp", dir=path.parent, delete=False) as handle:
+        temporary = Path(handle.name)
+        try:
+            json.dump(payload, handle, ensure_ascii=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        except BaseException:
+            handle.close()
+            temporary.unlink(missing_ok=True)
+            raise
+    try:
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)

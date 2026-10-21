@@ -925,6 +925,7 @@ def create_app() -> FastAPI:
             timeline_store.recover_active_episode()
             timeline_store.recover_memory_index_jobs()
             timeline_store.recover_coding_task_jobs()
+            coding_agent_service.recover_apply_transactions()
         if memory_service is None:
             return events
 
