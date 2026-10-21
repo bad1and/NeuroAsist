@@ -31,6 +31,14 @@ For now, Iris runs from source. [Release status](Docs/MILESTONES.md).
 
 **Memory.** Iris keeps useful details from your conversations. You can read, edit or delete records in the memory section. [How memory works](Docs/chroma-memory.md).
 
+**Plans and documents.** Memory includes plans and reminders, search and sorting.
+Attach TXT, MD or a text-based PDF to a conversation and inspect answer sources.
+Attachments are temporary; new history records retain the answer and source
+references. [User guide](Docs/user-guide.md).
+
+**Getting started and navigation.** Setup helps prepare your first conversation;
+**Ctrl+K** searches history, memory, plans and settings. Start with text and enable voice later.
+
 **Search.** Iris can search when you need to check information or find news. Results and sources stay in history. Search notifications are off by default. [Search and news](Docs/awareness.md).
 
 **Avatar.** An optional Unity avatar can appear on your desktop or inside the dialogue window. Lip movement and gestures accompany speech. [Avatar setup](apps/avatar-unity/README.md).

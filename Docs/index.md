@@ -35,6 +35,7 @@ Iris — голосовой AI-персонаж для Windows. Здесь оп�
 - [Разработка навыков](skill-development.md) — контракт, пример локального инструмента, регистрация и проверки.
 - [Coding Agent](coding-agent.md) — задачи в Docker и применение изменений.
 - [HTTP и WebSocket API](api.md) — авторизация и версии протоколов.
+- [Три этапа развития](feature-implementation-plan.md) — реализованный объём функций и границы проверки.
 
 [Оболочка Windows](../apps/desktop/README.md) ·
 [Unity-аватар](../apps/avatar-unity/README.md) ·
@@ -45,6 +46,8 @@ Iris — голосовой AI-персонаж для Windows. Здесь оп�
 ## Выпуск и сопровождение
 
 - [Приёмка приложения перед установщиком](preinstaller-readiness.md)
+- [Второй этап подготовки](release-stage-2-plan.md), [результат](release-stage-2-result.md), [разбор зависимостей](security-dependencies-2026-10-20.md)
+  и [карточка следующего кандидата](release-candidate-next.md)
 - [Запуск, сборка и диагностика](operations.md)
 - [Python-зависимости](dependencies.md) и [правила версий](versioning.md)
 - [Условия публикации](release-checklist.md) и [порядок выпуска](release-runbook.md)
