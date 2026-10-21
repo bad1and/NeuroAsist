@@ -7,6 +7,7 @@ import { IrisPetals } from "./IrisPetals";
 import petals from "../brand/iris-petals.json";
 import { shapePetal } from "../brand/irisPetalGeometry";
 import { WindowChrome } from "./WindowChrome";
+import { compactStartup } from "./StartupSpeedSetting";
 import { animate, createTimeline, isTestEnvironment, prefersReducedMotion } from "../animations";
 import "./StartupScreen.css";
 
@@ -182,6 +183,7 @@ export function StartupScreen({ status, stage = status === "ready" || status ===
     const timeline = createTimeline({ onComplete: () => {
       if (active) setFinishPhase("preparing");
     } });
+    if (compactStartup() && !reduced) timeline.speed = 2.5;
     // Ease out of each petal's actual waiting pose instead of snapping to zero.
     // Keep the full logo visible for the complete closing gesture and pause.
     root.querySelectorAll<SVGGElement>("[data-petal]").forEach((petal, index) => {
@@ -247,6 +249,7 @@ export function StartupScreen({ status, stage = status === "ready" || status ===
       completed = true;
       completeRef.current?.();
     } });
+    if (compactStartup() && !reduced) timeline.speed = 2.5;
     timeline.add(root.querySelector(".startup-copy")!, {
       opacity: [1, 0], duration: reduced ? 120 : 620, ease: "inOutSine",
     }, 0);

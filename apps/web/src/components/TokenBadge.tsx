@@ -1,9 +1,19 @@
 import { MaterialButton } from "./MaterialButton";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useId } from "react";
 import { createPortal } from "react-dom";
-import { Zap, Copy, Check, X, ChevronDown, ChevronRight, Terminal } from "lucide-react";
+import {
+  IconInterfaceLightning as Zap,
+  IconInterfaceCopy as Copy,
+  IconInterfaceCheck as Check,
+  IconInterfaceCross as X,
+  IconInterfaceChevronDown as ChevronDown,
+  IconInterfaceChevronRight as ChevronRight,
+  IconInterfaceTerminal as Terminal,
+  IconInterfaceClock as Clock3,
+} from "../CustomIcons";
 import type { TokenMetadata } from "../types";
 import { calculateDeepSeekCostUsd } from "../deepseek";
+import { interfaceIntlLocale } from "../i18n";
 
 export function formatTokens(count?: number): string {
   if (count === undefined || count === null || isNaN(count)) return "0";
@@ -26,60 +36,63 @@ export interface TokenDialogContentProps {
 export function TokenDialogContent({ tokens, role, onClose }: TokenDialogContentProps) {
   const [showRawJson, setShowRawJson] = useState(false);
   const [copied, setCopied] = useState(false);
+  const rawJsonId = useId();
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current);
+  }, []);
 
   const isUser = role === "user";
-  const promptTokens = tokens?.prompt_tokens ?? 0;
-  const completionTokens = tokens?.completion_tokens ?? 0;
-  const totalTokens = tokens?.total_tokens ?? (promptTokens + completionTokens);
+  const promptTokens = tokens.prompt_tokens;
+  const completionTokens = tokens.completion_tokens;
+  const totalTokens = tokens.total_tokens ?? (
+    promptTokens !== undefined && completionTokens !== undefined ? promptTokens + completionTokens
+      : isUser ? promptTokens : undefined
+  );
+  const formatCount = (value?: number) => value !== undefined && Number.isFinite(value)
+    ? value.toLocaleString(interfaceIntlLocale()) : "—";
 
   const handleCopyJson = async () => {
     const rawData = tokens.raw_usage || tokens;
     try {
       await navigator.clipboard.writeText(JSON.stringify(rawData, null, 2));
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
     } catch {
       // Fallback
     }
   };
 
   const cost = calculateCostUsd(tokens);
-  const cacheHit = tokens.prompt_cache_hit_tokens ?? 0;
-  const cacheMiss = tokens.prompt_cache_miss_tokens ?? 0;
-  const cacheTotal = cacheHit + cacheMiss;
-  const cacheHitPercent = cacheTotal > 0 ? Math.round((cacheHit / cacheTotal) * 100) : null;
+  const cacheHit = tokens.prompt_cache_hit_tokens;
+  const cacheMiss = tokens.prompt_cache_miss_tokens;
+  const hasCache = cacheHit !== undefined || cacheMiss !== undefined;
+  const cacheTotal = promptTokens ?? (cacheHit !== undefined && cacheMiss !== undefined ? cacheHit + cacheMiss : 0);
+  const cacheHitPercent = cacheHit !== undefined && cacheTotal > 0 && cacheHit >= 0 && cacheHit <= cacheTotal
+    ? Math.round((cacheHit / cacheTotal) * 100) : null;
 
   return (
     <div className="app-dialog-body token-dialog-body">
       <div className="token-popover-grid">
         {/* Input Tokens */}
         <div className="token-metric-card">
-          <span className="token-metric-label">Входящие (Prompt)</span>
-          <span className="token-metric-value text-prompt">
-            {promptTokens > 0 ? promptTokens.toLocaleString() : (tokens.prompt_tokens?.toLocaleString() ?? "—")}
+          <span className="token-metric-label">На входе</span>
+          <span className="token-metric-value" data-i18n-skip>
+            {formatCount(promptTokens)}
           </span>
-          {cacheTotal > 0 && (
-            <div className="token-submetric">
-              <span className="cache-tag hit">Hit: {cacheHit.toLocaleString()}</span>
-              <span className="cache-tag miss">Miss: {cacheMiss.toLocaleString()}</span>
-              {cacheHitPercent !== null && (
-                <span className="cache-rate">({cacheHitPercent}%)</span>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Output Tokens */}
         <div className="token-metric-card">
-          <span className="token-metric-label">Исходящие (Output)</span>
-          <span className="token-metric-value text-completion">
-            {completionTokens > 0 ? completionTokens.toLocaleString() : (isUser ? "—" : tokens.completion_tokens?.toLocaleString() ?? "—")}
+          <span className="token-metric-label">В ответе</span>
+          <span className="token-metric-value" data-i18n-skip>
+            {formatCount(completionTokens)}
           </span>
           {(tokens.reasoning_tokens ?? 0) > 0 && (
             <div className="token-submetric">
-              <span className="reasoning-tag">
-                Мысли: {tokens.reasoning_tokens?.toLocaleString()}
-              </span>
+              <span>Рассуждения: <span data-i18n-skip>{formatCount(tokens.reasoning_tokens)}</span></span>
             </div>
           )}
         </div>
@@ -87,44 +100,53 @@ export function TokenDialogContent({ tokens, role, onClose }: TokenDialogContent
         {/* Total Tokens */}
         <div className="token-metric-card">
           <span className="token-metric-label">Всего токенов</span>
-          <span className="token-metric-value text-total">
-            {totalTokens.toLocaleString()}
+          <span className="token-metric-value" data-i18n-skip>
+            {formatCount(totalTokens)}
           </span>
-          {tokens.latency_ms !== undefined && tokens.latency_ms > 0 && (
-            <div className="token-submetric">
-              <span>Задержка: {tokens.latency_ms} мс</span>
-            </div>
-          )}
         </div>
 
         {/* Estimated Cost */}
         <div className="token-metric-card">
-          <span className="token-metric-label">Стоимость (DeepSeek)</span>
-          <span className="token-metric-value text-cost">
-            {cost > 0 ? `$${cost < 0.0001 ? "<0.0001" : cost.toFixed(5)}` : "—"}
+          <span className="token-metric-label">Оценка стоимости</span>
+          <span className="token-metric-value token-cost-value" data-i18n-skip>
+            {cost > 0 ? cost < 0.0001 ? "< $0.0001" : `$${cost.toFixed(5)}` : "—"}
           </span>
-          <div className="token-submetric">
-            <span>Ориентировочно</span>
-          </div>
         </div>
       </div>
+
+      {hasCache && (
+        <section className="token-cache-section" aria-label="Кэш запроса">
+          <div className="token-cache-heading"><span>Кэш запроса</span>{cacheHitPercent !== null && <span data-i18n-skip>{cacheHitPercent}%</span>}</div>
+          {cacheHitPercent !== null && <div className="token-cache-meter" aria-hidden="true"><span style={{ width: `${cacheHitPercent}%` }} /></div>}
+          <dl className="token-cache-breakdown">
+            <div><dt>Из кэша</dt><dd data-i18n-skip>{formatCount(cacheHit)}</dd></div>
+            <div><dt>Без кэша</dt><dd data-i18n-skip>{formatCount(cacheMiss)}</dd></div>
+          </dl>
+        </section>
+      )}
+
+      {tokens.latency_ms !== undefined && tokens.latency_ms >= 0 && (
+        <div className="token-response-time"><span><Clock3 size={14} aria-hidden="true" />Время ответа</span><span data-i18n-skip>{new Intl.NumberFormat(interfaceIntlLocale(), { maximumFractionDigits: 2 }).format(tokens.latency_ms / 1000)} {interfaceIntlLocale() === "en-US" ? "s" : "с"}</span></div>
+      )}
 
       {/* Raw JSON toggle */}
       <div className="token-raw-section">
         <MaterialButton materialKey={"TokenBadge.button-1"}
           type="button"
-          className="token-raw-toggle-btn"
+          className="secondary token-raw-toggle-btn"
+          aria-expanded={showRawJson}
+          aria-controls={rawJsonId}
           onClick={() => setShowRawJson((prev) => !prev)}
         >
-          <div className="token-raw-toggle-label">
-            <Terminal size={12} />
-            <span>Сырой JSON ответа</span>
-          </div>
-          {showRawJson ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          <span className="token-raw-toggle-label">
+            <Terminal size={15} aria-hidden="true" />
+            <span>JSON ответа</span>
+          </span>
+          <ChevronDown size={15} aria-hidden="true" />
         </MaterialButton>
 
-        {showRawJson && (
-          <div className="token-raw-content">
+        <div id={rawJsonId} className="token-raw-content" hidden={!showRawJson}>
+          {showRawJson && <>
             <div className="token-raw-actions">
               <MaterialButton materialKey={"TokenBadge.button-2"}
                 type="button"
@@ -132,20 +154,20 @@ export function TokenDialogContent({ tokens, role, onClose }: TokenDialogContent
                 onClick={handleCopyJson}
                 title="Скопировать сырой JSON"
               >
-                {copied ? <Check size={12} /> : <Copy size={12} />}
+                {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
                 <span>{copied ? "Скопировано!" : "Копировать"}</span>
               </MaterialButton>
             </div>
-            <pre className="token-json-viewer">
+            <pre className="token-json-viewer" data-i18n-skip tabIndex={0}>
               <code>
                 {JSON.stringify(tokens.raw_usage || tokens, null, 2)}
               </code>
             </pre>
-          </div>
-        )}
+          </>}
+        </div>
       </div>
 
-      <div className="dialog-actions" style={{ marginTop: "14px", display: "flex", justifyContent: "flex-end" }}>
+      <div className="dialog-actions token-dialog-actions">
         <MaterialButton materialKey={"TokenBadge.button-3"}
           type="button"
           className="secondary"

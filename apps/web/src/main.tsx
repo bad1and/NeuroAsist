@@ -3,12 +3,12 @@ import ReactDOM from "react-dom/client";
 
 import App from "./App";
 import { MaterialButtonContours } from "./components/MaterialButtonContours";
-import "./fonts/proxima-nova.css";
 import "./tokens.css";
 import "./styles.css";
 import "./components/StartupScreen.css";
 import "./components/MaterialButton.css";
 import "./components/FieldMaterial.css";
+import "./product-improvements.css";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

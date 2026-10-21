@@ -11,7 +11,20 @@ import { animateButtonPress, animateCardRemove, animatePageEnter, animateStagger
 import { IrisMoodOrb } from "./components/IrisMoodOrb";
 import { getMoodVisuals } from './mood-visuals';
 import { IconInterfaceCalendarMark, IconInterfaceEditMagicWand } from "./CustomIcons";
-import { ArrowRight, Check, ChevronDown, Heart, HandHeart, Handshake, MessageCircle, RotateCcw, ShieldAlert, Smile, Sparkles, type LucideIcon } from "lucide-react";
+import {
+  IconInterfaceArrowRight as ArrowRight,
+  IconInterfaceCheck as Check,
+  IconInterfaceChevronDown as ChevronDown,
+  IconInterfaceHeart as Heart,
+  IconHealthMedicalHeartCare1 as HandHeart,
+  IconUsersFeedback as Handshake,
+  IconMailChatBubbleTextSquare as MessageCircle,
+  IconInterfaceReset as RotateCcw,
+  IconInterfaceSecurityShield4 as ShieldAlert,
+  IconMailSmileyHappyFace as Smile,
+  IconInterfaceSparkles as Sparkles,
+  type CustomIconComponent,
+} from "./CustomIcons";
 import { eventEmotion, groupMoodCauses, relationshipLevel, relationshipValue, stateEventKind, stateEventLabel, timelineEmotion } from "./state-presentation";
 import { useTimelineScrollFade } from "./state-timeline-scroll";
 import "./state.css";
@@ -43,7 +56,7 @@ function formatTimelineTime(dateStr: string) {
   return date.toLocaleTimeString(interfaceIntlLocale(), { hour: "2-digit", minute: "2-digit" });
 }
 
-const EVENT_ICONS: Record<string, LucideIcon> = {
+const EVENT_ICONS: Record<string, CustomIconComponent> = {
   insult: ShieldAlert, broken_promise: ShieldAlert, important_negative_event: ShieldAlert,
   shared_success: Sparkles, important_news: Sparkles, praise: Sparkles,
   teasing: Smile, apology: Handshake, support: HandHeart, affection: Heart,
@@ -219,7 +232,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
                         const CauseIcon = EVENT_ICONS[stateEventKind(cause.label)] ?? MessageCircle;
                         return (
                         <li key={cause.key}>
-                          <CauseIcon className="cause-icon" size={16} strokeWidth={1.7} aria-hidden="true" />
+                          <CauseIcon className="cause-icon" size={16} aria-hidden="true" />
                           <div className="cause-copy"><strong title={cause.label}>{cause.label}</strong><span>{cause.status}</span></div>
                           {cause.count > 1 && <span className="cause-count" title="Количество событий">×{cause.count}</span>}
                         </li>
@@ -276,7 +289,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
                     });
                   }}
                 >
-                  <RotateCcw size={14} strokeWidth={1.8} aria-hidden="true" /><span>Сбросить настроение</span>
+                  <RotateCcw size={14} aria-hidden="true" /><span>Сбросить настроение</span>
                 </MaterialButton>
                 <MaterialButton materialKey={"state.button-2"}
                   className="secondary danger-button state-action-relationship"
@@ -291,7 +304,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
                     });
                   }}
                 >
-                  <RotateCcw size={14} strokeWidth={1.8} aria-hidden="true" /><span>Сбросить отношения</span>
+                  <RotateCcw size={14} aria-hidden="true" /><span>Сбросить отношения</span>
                 </MaterialButton>
               </div>
             </>
@@ -363,7 +376,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
                   return (
                     <Fragment key={item.key}>{dayHeading}<article className="state-timeline-item type-event" data-emotion={emotion?.key}>
                       <div className="timeline-marker" aria-hidden="true">
-                        <EventIcon size={18} strokeWidth={1.8} />
+                        <EventIcon size={18} />
                       </div>
                       <TimelineCard emotion={emotion} materialKey={item.key}>
                         <div className="timeline-meta">

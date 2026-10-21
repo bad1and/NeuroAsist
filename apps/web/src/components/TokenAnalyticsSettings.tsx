@@ -2,18 +2,18 @@ import { SlidingSegments } from "./SlidingSegments";
 import { MaterialButton } from "./MaterialButton";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import {
-  Zap,
-  RefreshCw,
-  Trash2,
-  TrendingUp,
-  Server,
-  ChevronLeft,
-  ChevronRight,
-  Check,
-  Copy,
-  Terminal,
-  Layers,
-} from "lucide-react";
+  IconInterfaceLightning as Zap,
+  IconInterfaceRefresh as RefreshCw,
+  IconInterfaceDeleteBin3 as Trash2,
+  IconInterfaceTrendingUp as TrendingUp,
+  IconInterfaceServer as Server,
+  IconInterfaceChevronLeft as ChevronLeft,
+  IconInterfaceChevronRight as ChevronRight,
+  IconInterfaceCheck as Check,
+  IconInterfaceCopy as Copy,
+  IconInterfaceTerminal as Terminal,
+  IconInterfaceLayers as Layers,
+} from "../CustomIcons";
 import { getLlmTokenStats, getLlmTokenRecords, resetLlmTokenStats } from "../api";
 import { AppDialog } from "./AppDialog";
 import { TokenUsageChart } from "./TokenUsageChart";
@@ -55,7 +55,7 @@ function formatNum(num?: number): string {
 }
 
 function formatCost(usd?: number): string {
-  if (usd === undefined || usd === null || isNaN(usd)) return "$0.00";
+  if (usd === undefined || usd === null || isNaN(usd)) return "Нет данных";
   if (usd > 0 && usd < 0.0001) return "<$0.0001";
   return `$${usd.toFixed(4)}`;
 }
@@ -171,6 +171,7 @@ export function TokenAnalyticsSettings() {
 
   return (
     <div className="token-analytics-page">
+      <p className="settings-apply-note">Стоимость рассчитана по учтённым токенам. Итог у провайдера может отличаться; это оценка расходов.</p>
       {/* Top Header */}
       <div className="token-analytics-header">
         <div className="token-analytics-title-group">

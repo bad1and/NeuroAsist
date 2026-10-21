@@ -1,6 +1,13 @@
 import { MaterialButton } from "./MaterialButton";
 import { useEffect, useState, type RefObject } from "react";
-import { Copy, Menu, Minus, Square, X } from "lucide-react";
+import {
+  IconInterfaceCopy as Copy,
+  IconInterfaceMenu as Menu,
+  IconInterfaceMinus as Minus,
+  IconInterfaceWindowMaximize as Square,
+  IconInterfaceCross as X,
+  IconInterfaceSearch as Search,
+} from "../CustomIcons";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { isDesktopApp, quitDesktopApp } from "../desktop";
@@ -14,6 +21,7 @@ export function WindowChrome({
   navigationButtonRef,
   compact = false,
   onClose,
+  onOpenSearch,
 }: {
   title: string;
   onOpenNavigation?: () => void;
@@ -21,6 +29,7 @@ export function WindowChrome({
   navigationButtonRef?: RefObject<HTMLButtonElement | null>;
   compact?: boolean;
   onClose?: () => void;
+  onOpenSearch?: () => void;
 }) {
   const desktop = isDesktopApp();
   const { available: mainWindow, preferences } = useDesktopWindowPreferences();
@@ -77,6 +86,7 @@ export function WindowChrome({
         {title && <h1 data-tauri-drag-region>{title}</h1>}
       </div>
       <div className="window-chrome-actions">
+        {onOpenSearch && <MaterialButton materialKey="window.search" appearance="quiet" className="icon-button" type="button" aria-label="Найти в Iris (Ctrl+K)" title="Найти в Iris · Ctrl+K" onClick={onOpenSearch}><Search size={16} /></MaterialButton>}
         {desktop && (
           <div className="window-controls" aria-label="Управление окном">
             <MaterialButton materialKey={"WindowChrome.button-2"} appearance="quiet" tone="success" onClick={(e) => { animateButtonPress(e.currentTarget); void getCurrentWindow().minimize(); }} aria-label="Свернуть окно"><Minus size={14} /></MaterialButton>

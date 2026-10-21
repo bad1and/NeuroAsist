@@ -1,12 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cancelModel, getModels, installModel, removeModel } from "../api";
-import { chooseModelDirectory, isDesktopApp, removeManagedModel, restartDesktopCore } from "../desktop";
+import { chooseModelDirectory, isDesktopApp, openModelInformation, removeManagedModel, restartDesktopCore } from "../desktop";
 import type { ManagedModel } from "../types";
 import { notify } from "../notifications";
 import { AppDialog } from "./AppDialog";
 import { MaterialButton } from "./MaterialButton";
 
 const active = (model: ManagedModel) => ["downloading", "verifying"].includes(model.status);
+function modelPurpose(model: ManagedModel): string {
+  const name = `${model.id} ${model.name}`.toLowerCase();
+  if (/gigaam|whisper|\bstt\b/.test(name)) return "Распознаёт речь с микрофона";
+  if (/teratts|\btts\b/.test(name)) return "Озвучивает ответы Iris";
+  if (/smart.?turn/.test(name)) return "Определяет конец реплики";
+  if (/silero|\bvad\b/.test(name)) return "Определяет начало речи";
+  if (/embed|\bbge\b|\be5\b/.test(name)) return "Помогает искать сведения в памяти";
+  return "Локальная модель";
+}
 export function ModelManager(_props: { developerMode?: boolean; onUnlockRequest?: () => void }) {
   const connectionFailed = useRef(false);
   const operationBusy = useRef(false);
@@ -56,6 +65,14 @@ export function ModelManager(_props: { developerMode?: boolean; onUnlockRequest?
       const percent = model.total_bytes ? Math.min(100, Math.round(100 * model.downloaded_bytes / model.total_bytes)) : 0;
       return <div className="model-item-card" key={model.id}>
         <strong data-i18n-skip>{model.name}</strong>
+        <p className="settings-apply-note">{modelPurpose(model)}</p>
+        {model.delivery === "upstream_download" && <>
+          <p className="settings-apply-note">Скачивается напрямую с Hugging Face</p>
+          <div className="model-actions">
+            {model.source_url && <MaterialButton materialKey="models.source" className="text-button settings-inline-link" disabled={busy} onClick={() => void run(() => openModelInformation(model.id, "source", model.source_url!))}>Источник модели</MaterialButton>}
+            {model.terms_url && <MaterialButton materialKey="models.terms" className="text-button settings-inline-link" disabled={busy} onClick={() => void run(() => openModelInformation(model.id, "terms", model.terms_url!))}>Условия использования</MaterialButton>}
+          </div>
+        </>}
         <p>{(model.size_bytes / 1024**2).toFixed(1)} MiB · {model.installed ? "Установлена и проверена" : model.status === "verifying" ? "Проверяем файлы" : active(model) ? "Загрузка модели" : "Не установлена"}</p>
         {active(model) && <progress aria-label={model.name} value={percent} max={100}>{percent}%</progress>}
         {model.error && <p className="notice" role="status">{model.error}</p>}

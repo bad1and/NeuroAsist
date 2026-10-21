@@ -1,6 +1,7 @@
 import { MaterialButton, MaterialButtonGroup } from "./components/MaterialButton";
 import { BackgroundConversationControls, BackgroundConversationExpandButton } from "./components/BackgroundConversationControls";
 import { CustomSelect } from "./components/CustomSelect";
+import { DictionaryEditor } from "./components/DictionaryEditor";
 import { CorpusSurface } from "./components/CorpusSurface";
 import { useDockScale } from "./components/useDockScale";
 import {
@@ -26,30 +27,30 @@ import {
 } from "./CustomIcons";
 import { FormEvent, KeyboardEvent as ReactKeyboardEvent, Activity as ViewActivity, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  ChevronDown,
-  SendHorizontal,
-  Sparkles,
-  Key,
-  Terminal,
-  MessageSquare,
-  MessageSquarePlus,
-  Timer,
-  Volume2,
-  Mic,
-  Headphones,
-  Activity,
-  BookOpen,
-  Sliders,
-  Brain,
-  Globe,
-  Code2,
-  HardDrive,
-  Database,
-  Archive,
-  Eye,
-  SlidersHorizontal,
-  RefreshCw,
-} from "lucide-react";
+  IconInterfaceChevronDown as ChevronDown,
+  IconInterfaceCursorArrow2 as SendHorizontal,
+  IconInterfaceSparkles as Sparkles,
+  IconInterfaceKey as Key,
+  IconInterfaceTerminal as Terminal,
+  IconMailChatBubbleTextSquare as MessageSquare,
+  IconMailChatBubblePlus as MessageSquarePlus,
+  IconInterfaceTimeStopWatchCircle as Timer,
+  IconEntertainmentVolumeLevelHigh as Volume2,
+  IconInterfaceMicrophone as Mic,
+  IconInterfaceHelpCustomerSupport5 as Headphones,
+  IconInterfaceActivity as Activity,
+  IconInterfaceBookOpen as BookOpen,
+  IconInterfaceSliders as Sliders,
+  IconInterfaceBrain as Brain,
+  IconTravelMapEarth1 as Globe,
+  IconProgrammingScript2 as Code2,
+  IconInterfaceHardDrive as HardDrive,
+  IconComputerDatabase as Database,
+  IconInterfaceContentArchive as Archive,
+  IconInterfaceEye as Eye,
+  IconInterfaceSliders as SlidersHorizontal,
+  IconInterfaceRefresh as RefreshCw,
+} from "./CustomIcons";
 const AvatarDevStudioStandalonePage = lazy(() => import("./components/AvatarDevPanel").then(module => ({ default: module.AvatarDevStudioStandalonePage })));
 import { ModelManager } from "./components/ModelSettings";
 import { BackupControls } from "./components/BackupControls";
@@ -74,6 +75,7 @@ function IrisPetalsIcon({ size = 20, className = "" }: { size?: number; classNam
 }
 
 import {
+  requestJson,
   getAvatarStatus,
   getAvatarOverlay,
   clearMemories,
@@ -156,6 +158,14 @@ import {
 import { LoadingRing } from "./components/LoadingRing";
 import { WorkspaceView } from "./components/WorkspaceView";
 import { OverviewPage } from "./overview";
+import { GlobalSearch } from "./components/GlobalSearch";
+import type { SearchFocus } from "./search-navigation";
+import { FirstConversationSetup } from "./components/FirstConversationSetup";
+import { ReminderDelivery } from "./components/ReminderDelivery";
+import { AudioCheck } from "./components/AudioCheck";
+import { ConversationProfiles, ConversationSettingsDetails } from "./components/ConversationProfiles";
+import { StartupSpeedSetting } from "./components/StartupSpeedSetting";
+import { DocumentAttachment } from "./components/DocumentAttachment";
 import {
   configureAvatarPlacement,
   getAvatarHostStatus,
@@ -252,7 +262,7 @@ type SettingsSection =
   | "backups"
   | "maintenance"
   | "events";
-type SettingsNavigationRequest = { section: SettingsSection; target?: CredentialTarget; id: number };
+type SettingsNavigationRequest = { section: SettingsSection; target?: CredentialTarget; focusId?: string; id: number };
 type LiveConversationSettings = Pick<
   PublicSettings,
   | "live_conversation_enabled"
@@ -449,6 +459,7 @@ function MainApp() {
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const desktopManaged = isDesktopManaged();
   const [coreStatus, setCoreStatus] = useState<CoreStatus>(initialCoreStatus);
+  const [coreError, setCoreError] = useState<string | null>(window.__NEUROASIST_DESKTOP_CONFIG__?.coreError ?? null);
   const [showStartup, setShowStartup] = useState(desktopManaged);
   const [startupRevealRequested, setStartupRevealRequested] = useState(false);
   const [avatarHostStatus, setAvatarHostStatus] = useState<AvatarHostStatus | null>(null);
@@ -458,6 +469,16 @@ function MainApp() {
   const appShellRef = useRef<HTMLDivElement>(null);
   const readinessEpoch = useRef(0);
   const [activeView, setActiveView] = useState<AppView>("overview");
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
+  const [historyFocus, setHistoryFocus] = useState<SearchFocus>();
+  const [memoryFocus, setMemoryFocus] = useState<SearchFocus>();
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setGlobalSearchOpen(true); }
+    };
+    window.addEventListener("keydown", shortcut);
+    return () => window.removeEventListener("keydown", shortcut);
+  }, []);
   const [visitedViews, setVisitedViews] = useState<Set<AppView>>(() => new Set<AppView>(["overview", "chat"]));
   const [settingsNavigationRequest, setSettingsNavigationRequest] = useState<SettingsNavigationRequest>();
   const [navigationOpen, setNavigationOpen] = useState(false);
@@ -491,6 +512,7 @@ function MainApp() {
   const [avatarStatus, setAvatarStatus] = useState<AvatarStatusResponse | null>(null);
   const [avatarOverlay, setAvatarOverlay] = useState<AvatarOverlaySettings | null>(null);
   const [settings, setSettings] = useState<PublicSettings | null>(null);
+  const [setupOpen, setSetupOpen] = useState(false);
   const retrievalNotifications = useRef(new RetrievalNotifications());
   useEffect(() => {
     retrievalNotifications.current.setEnabled(settings?.web_search_notifications_enabled ?? false);
@@ -634,30 +656,43 @@ function MainApp() {
 
   useEffect(() => {
     let stop: (() => void) | undefined;
+    let disposed = false;
+    let revision = 0;
+    const syncRuntime = () => {
+      const request = ++revision;
+      void getDesktopRuntime().then(runtime => {
+        if (disposed || request !== revision) return;
+        setCoreError(runtime.coreError ?? null);
+        setCoreStatus(runtime.coreStatus);
+        if (runtime.coreStatus !== "ready") setShowStartup(true);
+      }).catch(() => { /* Preserve the status delivered by the shell. */ });
+    };
     void listenForCoreStatus((nextStatus) => {
+      revision++;
       setCoreStatus(nextStatus);
       setRetryingCore(false);
       if (nextStatus !== "ready") setShowStartup(true);
       if (nextStatus === "starting") {
+        setCoreError(null);
         setStartupRevealRequested(false);
         readinessEpoch.current += 1;
         setReadiness(null);
         setReadinessUnavailable(false);
         setStartupAttempt((value) => value + 1);
       }
+      if (nextStatus === "failed" && desktopManaged) syncRuntime();
     }).then((unlisten) => {
+      if (disposed) { unlisten(); return; }
       stop = unlisten;
       if (desktopManaged) {
-        void getDesktopRuntime().then((runtime) => {
-          setCoreStatus(runtime.coreStatus);
-          if (runtime.coreStatus !== "ready") setShowStartup(true);
-        });
+        syncRuntime();
       }
     });
-    return () => stop?.();
+    return () => { disposed = true; revision++; stop?.(); };
   }, [desktopManaged]);
 
   const retryCore = async () => {
+    setCoreError(null);
     setRetryingCore(true);
     setCoreStatus("starting");
     setShowStartup(true);
@@ -672,7 +707,8 @@ function MainApp() {
       setCoreStatus(runtime.coreStatus);
       const nextAvatarStatus = await restartAvatar();
       if (nextAvatarStatus) setAvatarHostStatus(nextAvatarStatus);
-    } catch {
+    } catch (cause) {
+      setCoreError(cause instanceof Error ? cause.message : String(cause));
       setCoreStatus("failed");
       setRetryingCore(false);
     }
@@ -943,6 +979,7 @@ function MainApp() {
       />
       {navigationOpen && <button className="navigation-scrim" type="button" aria-label="Закрыть меню" onClick={closeNavigation} />}
       <WindowChrome
+        onOpenSearch={() => setGlobalSearchOpen(true)}
         title=""
         navigationOpen={navigationOpen}
         navigationButtonRef={menuToggleRef}
@@ -955,11 +992,13 @@ function MainApp() {
             <OverviewPage
               status={status}
               avatarStatus={avatarStatus}
+              readiness={readiness}
               onOpenChat={() => switchView("chat")}
               onOpenHistory={() => switchView("journal")}
               onOpenMemory={() => switchView("memory")}
               onOpenSettings={() => switchView("settings")}
-            />
+              onOpenPlans={() => { setMemoryFocus({ id: "", section: "commitments", query: "", requestId: crypto.randomUUID() }); switchView("memory"); }}
+              />
           </WorkspaceView>
           <div className="chat-view" hidden={activeView !== "chat"}>
             <Suspense fallback={<LoadingRing className="page-loading" />}>
@@ -986,14 +1025,14 @@ function MainApp() {
           {visitedViews.has("journal") && (
             <WorkspaceView active={activeView === "journal"}>
               <Suspense fallback={<LoadingRing className="page-loading" />}>
-                <JournalPage onOpenChat={() => switchView("chat")} isActive={activeView === "journal"} />
+                <JournalPage focusRequest={historyFocus} developerMode={settings?.developer_mode_enabled ?? false} currentSessionId={sessionId} onOpenChat={() => switchView("chat")} isActive={activeView === "journal"} />
               </Suspense>
             </WorkspaceView>
           )}
           {visitedViews.has("memory") && (
             <WorkspaceView active={activeView === "memory"}>
               <Suspense fallback={<LoadingRing className="page-loading" />}>
-                <MemoryPage developerMode={settings?.developer_mode_enabled ?? false} />
+                <MemoryPage focusRequest={memoryFocus} developerMode={settings?.developer_mode_enabled ?? false} onOpenSource={id => { setHistoryFocus({ id, query: "", requestId: crypto.randomUUID() }); switchView("journal"); }} />
               </Suspense>
             </WorkspaceView>
           )}
@@ -1028,6 +1067,7 @@ function MainApp() {
               <Suspense fallback={<LoadingRing className="page-loading" />}>
                 <LazySettingsPage
                   settings={settings}
+                  onOpenSetup={() => setSetupOpen(true)}
                   navigationRequest={settingsNavigationRequest}
                   avatarStatus={avatarStatus}
                   avatarOverlay={avatarOverlay}
@@ -1056,13 +1096,20 @@ function MainApp() {
             </WorkspaceView>
           )}
         </main>
-        <NotificationHost pinnedContentRef={backgroundConversationRef} onNavigate={(view) => switchView(view as AppView)} />
+        <GlobalSearch open={globalSearchOpen} developerMode={settings?.developer_mode_enabled ?? false} onClose={() => setGlobalSearchOpen(false)} onSelect={destination => {
+          if (destination.kind === "history") { setHistoryFocus(destination.focus); switchView("journal"); }
+          else if (destination.kind === "memory") { setMemoryFocus(destination.focus); switchView("memory"); }
+          else { setSettingsNavigationRequest({ section: destination.section as SettingsSection, focusId: `settings-${destination.section}`, id: Date.now() }); switchView("settings"); }
+        }} />
+        <ReminderDelivery enabled={status?.backend === "ok"} />
+        <FirstConversationSetup open={setupOpen} settings={settings} onSettingsChanged={setSettings} onClose={() => setSetupOpen(false)} onStart={() => switchView("chat")} />
+        <NotificationHost pinnedContentRef={backgroundConversationRef} onNavigate={(view) => { if (view === "reminders") { setMemoryFocus({ id: "", section: "commitments", query: "", requestId: crypto.randomUUID() }); switchView("memory"); } else switchView(view as AppView); }} />
       </section>
     </div>
     )}
     {showStartup && (
       <StartupScreen key={startupAttempt} status={startupReady ? "ready" : coreStatus}
-        stage={startupStage} subdetail={recoveryError || startupSubdetail} retrying={retryingCore || recoveryBusy}
+        stage={startupStage} subdetail={recoveryError || coreError || startupSubdetail} retrying={retryingCore || recoveryBusy}
         onRestoreBackup={desktopManaged ? () => { void (async () => {
           setRecoveryBusy(true); setRecoveryError(null);
           try { const backup = await importDesktopBackup(); if (backup) setRecoveryBackup(backup.name); }
@@ -1145,7 +1192,7 @@ function Sidebar({
       </nav>
       <div className="sidebar-footer">
         <div className="sidebar-footer-row">
-          <NavigationButton materialKey="navigation.settings" icon={FigmaSettingsIcon} label="Настройки" active={activeView === "settings"} compact={isCollapsed} iconSize={24} onClick={() => onNavigate("settings")} />
+          <NavigationButton materialKey="navigation.settings" icon={FigmaSettingsIcon} label="Настройки" active={activeView === "settings"} compact={isCollapsed} iconSize={20} onClick={() => onNavigate("settings")} />
           <MaterialButton materialKey={"App.button-2"}
             appearance="quiet"
             className="icon-button sidebar-collapse-toggle"
@@ -1238,6 +1285,7 @@ export function ChatPage({
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
+  const [documentBusy, setDocumentBusy] = useState(false);
   const [liveSttTranscript, setLiveSttTranscript] = useState("");
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [composerExtraHeight, setComposerExtraHeight] = useState(0);
@@ -1316,6 +1364,13 @@ export function ChatPage({
   const pendingTextDeltasRef = useRef(new Map<string, string>());
   const pendingTextDeltaTimerRef = useRef<number | null>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
+  const submissionRef = useRef<{ id: string; text: string; sessionId: string } | null>(null);
+  const chatRevisionRef = useRef(0);
+  const currentSessionRef = useRef(sessionId);
+  currentSessionRef.current = sessionId;
+  const replyRecoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestStartedUtteranceRef = useRef<string | null>(null);
+  const outputDisconnectRevisionRef = useRef(0);
   const handledCodingReviewEventIdsRef = useRef<Set<string>>(new Set());
   const handledCodingSpeechRequestIdsRef = useRef<Set<string>>(new Set());
   messagesRef.current = messages;
@@ -1547,11 +1602,18 @@ export function ChatPage({
     pendingTextDeltaTimerRef.current = window.setTimeout(flushPendingTextDeltas, 16);
   }, [flushPendingTextDeltas]);
 
-  const refreshTimelineMessages = useCallback(() => {
-    return getTimelineMessages(50).then((payload) => {
-      setMessages(payload.items
+  const refreshTimelineMessages = useCallback((targetSessionId?: string) => {
+    const revision = chatRevisionRef.current;
+    const activeUtterance = liveSocketRef.current?.activeUtteranceId;
+    return (targetSessionId ? getTimelineMessages(50, targetSessionId) : getTimelineMessages(50)).then((payload) => {
+      if (revision !== chatRevisionRef.current || activeUtterance !== liveSocketRef.current?.activeUtteranceId || (targetSessionId && targetSessionId !== currentSessionRef.current)) return;
+      const restored = payload.items
         .filter((message) => message.role === "user" || message.role === "assistant")
-        .map((message) => ({ id: message.id, role: message.role as "user" | "assistant", content: message.content })));
+        .map((message) => ({ id: message.id, role: message.role as "user" | "assistant", content: message.content,
+          clientMessageId: message.client_message_id ?? undefined, utteranceId: message.utterance_id ?? undefined }));
+      setMessages(current => [...restored, ...current.filter(message =>
+        submissionRef.current !== null && message.role === "user" && message.clientMessageId === submissionRef.current.id
+        && !restored.some(item => item.id === message.id || item.clientMessageId === message.clientMessageId))]);
       if (payload.items.length > 0) {
         setIsStarted(true);
       }
@@ -1887,6 +1949,7 @@ export function ChatPage({
     if (!liveSocketRef.current) {
       const onEvent = (event: VoiceServerEvent) => {
         if (event.type === "voice.utterance.started") {
+          latestStartedUtteranceRef.current = event.utterance_id;
           clearLiveSttTranscript();
           clearAvatarSubtitleTimer();
           playbackSegmentTextsRef.current = [];
@@ -2019,14 +2082,33 @@ export function ChatPage({
             ).catch(() => undefined);
           }
         },
+        (state) => {
+          if (currentSessionRef.current !== sessionId) return;
+          if (state === "disconnected") {
+            outputDisconnectRevisionRef.current++;
+            flushPendingTextDeltas();
+            clearAvatarSubtitleTimer();
+            setLivePlaybackSegment("");
+            livePlayerRef.current?.stop();
+            stopVoicePlayback();
+            playbackCoordinatorRef.current.cancel();
+            setLoading(false);
+            setVoiceState("idle");
+            setError("Соединение прервано. Восстанавливаем связь с Ирис.");
+          } else {
+            void refreshTimelineMessages(sessionId);
+          }
+        },
       );
       liveSocketSessionIdRef.current = sessionId;
     }
     await player.unlock();
     await liveSocketRef.current.connect();
-  }, [clearAvatarSubtitleTimer, clearLiveSttTranscript, ensureLivePlayer, flushPendingTextDeltas, queueTextDelta, sessionId, showMemoryUpdates, speakTextInBrowser, startAvatarSubtitleFallback, stopVoicePlayback]);
+  }, [clearAvatarSubtitleTimer, clearLiveSttTranscript, ensureLivePlayer, flushPendingTextDeltas, queueTextDelta, refreshTimelineMessages, sessionId, showMemoryUpdates, speakTextInBrowser, startAvatarSubtitleFallback, stopVoicePlayback]);
 
   useEffect(() => () => {
+    chatRevisionRef.current++;
+    if (replyRecoveryTimerRef.current !== null) clearTimeout(replyRecoveryTimerRef.current);
     livePlayerRef.current?.stop();
     liveSocketRef.current?.close();
     liveSocketRef.current = null;
@@ -2258,18 +2340,26 @@ export function ChatPage({
     event.preventDefault();
     clearLiveSttTranscript();
     const text = draft.trim();
-    if (!text || !sessionId) {
+    if (!text || !sessionId || loading || documentBusy) {
       return;
     }
+    flushPendingTextDeltas();
+    if (replyRecoveryTimerRef.current !== null) clearTimeout(replyRecoveryTimerRef.current);
     stopVoicePlayback();
     livePlayerRef.current?.stop();
 
+    const previousSubmission = submissionRef.current;
+    const clientId = previousSubmission?.sessionId === sessionId && previousSubmission.text === text
+      ? previousSubmission.id : crypto.randomUUID();
+    submissionRef.current = { id: clientId, text, sessionId };
+    const revision = ++chatRevisionRef.current;
     const userMessage: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: clientId,
+      clientMessageId: clientId,
       role: "user",
       content: text,
     };
-    setMessages((current) => [...current, userMessage]);
+    setMessages((current) => current.some(message => message.clientMessageId === clientId || message.id === clientId) ? current : [...current, userMessage]);
     setDraft("");
     setManualComposerExtraHeight(null);
     setComposerExtraHeight(0);
@@ -2286,13 +2376,63 @@ export function ChatPage({
         await ensureLiveVoice();
         liveSocketRef.current?.clearActive();
         liveAudioStartedRef.current = false;
-        const response = await sendLiveTextMessage(sessionId, text, userMessage.id);
+        const disconnectRevision = outputDisconnectRevisionRef.current;
+        const response = await sendLiveTextMessage(sessionId, text, clientId);
+        if (revision !== chatRevisionRef.current || currentSessionRef.current !== sessionId) return;
+        submissionRef.current = null;
         if (response.message_id) {
           setMessages((current) => current.map((message) =>
-            message.id === userMessage.id ? { ...message, id: response.message_id! } : message,
+            message.clientMessageId === clientId ? { ...message, id: response.message_id! } : message,
           ));
         }
+        if (disconnectRevision !== outputDisconnectRevisionRef.current) {
+          void refreshTimelineMessages(sessionId);
+          return;
+        }
+        if (response.replayed && response.reply) {
+          setMessages(current => [...current.filter(message => message.id !== response.assistant_message_id && message.utteranceId !== response.utterance_id), {
+            id: response.assistant_message_id ?? response.utterance_id, role: "assistant", content: response.reply!, utteranceId: response.utterance_id,
+          }]);
+        }
+        if (response.status && response.status !== "streaming") {
+          liveSocketRef.current?.clearActive();
+          if (response.status !== "completed") setError("Предыдущий ответ был прерван. Его сохранённая часть восстановлена.");
+          return;
+        }
+        const activeUtterance = liveSocketRef.current?.activeUtteranceId;
+        if ((latestStartedUtteranceRef.current === response.utterance_id && activeUtterance !== response.utterance_id)
+          || (activeUtterance && activeUtterance !== response.utterance_id)) return;
         liveSocketRef.current?.activate(response.utterance_id);
+        if (response.replayed && response.assistant_message_id) {
+          let attempts = 0;
+          const check = async () => {
+            if (revision !== chatRevisionRef.current || currentSessionRef.current !== sessionId || liveSocketRef.current?.activeUtteranceId !== response.utterance_id) return;
+            try {
+              const snapshot = await getTimelineMessages(50, sessionId);
+              if (revision !== chatRevisionRef.current || currentSessionRef.current !== sessionId || liveSocketRef.current?.activeUtteranceId !== response.utterance_id) return;
+              const saved = snapshot.items.find(item => item.id === response.assistant_message_id);
+              if (saved && saved.status !== "streaming") {
+                flushPendingTextDeltas();
+                setMessages(current => [...current.filter(item => item.id !== saved.id && item.utteranceId !== response.utterance_id), {
+                  id: saved.id, role: "assistant", content: saved.content, utteranceId: response.utterance_id,
+                }]);
+                liveSocketRef.current?.clearActive();
+                setLoading(false);
+                setVoiceState("idle");
+                return;
+              }
+            } catch { /* A later read can recover a transient failure. */ }
+            if (revision !== chatRevisionRef.current || currentSessionRef.current !== sessionId || liveSocketRef.current?.activeUtteranceId !== response.utterance_id) return;
+            if (++attempts < 180) replyRecoveryTimerRef.current = setTimeout(() => void check(), 1000);
+            else {
+              liveSocketRef.current?.clearActive();
+              setLoading(false);
+              setVoiceState("idle");
+              setError("Не удалось восстановить ответ. Проверьте историю диалога.");
+            }
+          };
+          void check();
+        }
         setVoiceState("thinking");
         return;
       } catch (liveError) {
@@ -2303,13 +2443,15 @@ export function ChatPage({
         liveSocketRef.current = null;
         setError("Потоковый режим недоступен: использован обычный ответ.");
       }
-      const response = await sendChatMessage(sessionId, text, userMessage.id);
+      const response = await sendChatMessage(sessionId, text, clientId);
+      if (revision !== chatRevisionRef.current || currentSessionRef.current !== sessionId) return;
+      submissionRef.current = null;
       showMemoryUpdates(response.memory_updates);
       if (response.emotion && response.emotion !== "neutral") {
         setPersistentEmotion(response.emotion);
       }
       setMessages((current) => [
-        ...current.map((message) => message.id === userMessage.id && response.message_id
+        ...current.filter(message => message.id !== response.assistant_message_id).map((message) => message.clientMessageId === clientId && response.message_id
           ? { ...message, id: response.message_id }
           : message),
         {
@@ -2322,18 +2464,20 @@ export function ChatPage({
           ttsStatus: response.tts_status ?? undefined,
         },
       ]);
+      if (response.status && response.status !== "completed") setError("Предыдущий ответ был прерван. Его сохранённая часть восстановлена.");
       if (response.voice_request_id && response.tts_status === "queued") {
         void pollVoiceTtsStatus(response.voice_request_id);
       }
       await onRefreshEvents();
     } catch (requestError) {
+      if (revision !== chatRevisionRef.current || currentSessionRef.current !== sessionId) return;
       setError(requestError instanceof Error ? requestError.message : "Не удалось отправить сообщение");
       setRetryText(text);
       // A transport failure is ambiguous: the server may already have
       // accepted the client id.  Keep the optimistic user bubble so retry
       // cannot silently erase a durable turn.
     } finally {
-      if (!liveSocketRef.current?.activeUtteranceId) {
+      if (revision === chatRevisionRef.current && currentSessionRef.current === sessionId && !liveSocketRef.current?.activeUtteranceId) {
         setLoading(false);
         setVoiceState("idle");
       }
@@ -2600,6 +2744,8 @@ export function ChatPage({
   };
 
   const handleFinish = async () => {
+    chatRevisionRef.current++;
+    submissionRef.current = null;
     clearLiveSttTranscript();
     cancelPendingBargeIn();
     vadRecorderRef.current?.stop();
@@ -2626,6 +2772,8 @@ export function ChatPage({
 
   const startNewDialog = async () => {
     if (!sessionId || newDialogPending) return;
+    chatRevisionRef.current++;
+    submissionRef.current = null;
     setNewDialogPending(true);
     setError(null);
     clearLiveSttTranscript();
@@ -2826,6 +2974,7 @@ export function ChatPage({
           className="chat-composer-container"
           style={{ "--composer-extra-height": `${composerExtraHeight}px` } as React.CSSProperties}
         >
+          {settings?.memory_incognito && <span className="chat-memory-mode" title="Новые реплики и факты не сохраняются. Прежняя история и память остаются. Запросы по-прежнему отправляются выбранной модели.">Инкогнито</span>}
           <form className="chat-form" onSubmit={onSubmit}>
             <div className={`chat-composer ${isResizingComposer ? "is-resizing" : ""}`}>
               <div
@@ -2841,6 +2990,7 @@ export function ChatPage({
                 extraHeight={composerExtraHeight}
               />
               <div className="chat-composer-inner">
+                <DocumentAttachment sessionId={sessionId} disabled={loading || voiceState === "thinking" || sessionStarting} onBusyChange={setDocumentBusy} />
                 <textarea
                   ref={composerTextareaRef}
                   value={liveSttTranscript || draft}
@@ -2867,7 +3017,7 @@ export function ChatPage({
                 <MaterialButton materialKey={"App.button-8"}
                   className="send-button"
                   type="submit"
-                  disabled={!sessionId || sessionStarting || loading || !draft.trim().length}
+                  disabled={!sessionId || sessionStarting || loading || documentBusy || !draft.trim().length}
                   onClick={(e) => animateButtonPress(e.currentTarget)}
                   aria-label={sessionStarting ? "Подготавливаем сессию" : loading ? "Отправка сообщения" : "Отправить сообщение"}
                   title={sessionStarting ? "Подготавливаем сессию" : loading ? "Отправка сообщения" : "Отправить сообщение"}
@@ -3034,13 +3184,12 @@ function EventsPage({
   compact?: boolean;
 }) {
   const [levelFilter, setLevelFilter] = useState<LevelFilter>("all");
-  const filteredEvents = useMemo(
-    () =>
-      levelFilter === "all"
-        ? events
-        : events.filter((event) => event.level === levelFilter),
-    [events, levelFilter],
-  );
+  const filteredEvents = useMemo(() => {
+    const rows = levelFilter === "all" ? events : events.filter(event => event.level === levelFilter);
+    const grouped = new Map<string, BackendEvent & { repeat_count: number }>();
+    rows.forEach(event => { const key = JSON.stringify([event.type, event.level, event.message]); const previous = grouped.get(key); grouped.set(key, { ...event, repeat_count: (previous?.repeat_count || 0) + 1 }); });
+    return [...grouped.values()].sort((left, right) => left.created_at.localeCompare(right.created_at));
+  }, [events, levelFilter]);
 
   const listRef = useRef<HTMLDivElement | null>(null);
 
@@ -3118,7 +3267,7 @@ function EventsPage({
                 <span className="event-time">{formatTime(event.created_at)}</span>
                 <span className="event-level">{event.level}</span>
                 <span className="event-type">{event.type}</span>
-                <strong data-i18n-skip>{event.message}</strong>
+                <strong data-i18n-skip>{event.message}{event.repeat_count > 1 && <small> · повторилось {event.repeat_count} раз</small>}</strong>
               </div>
               <details className="event-details"><summary>Технические данные</summary><pre>{JSON.stringify(event.metadata, null, 2)}</pre></details>
             </article>
@@ -3171,6 +3320,7 @@ function DevBadge({
 
 export function SettingsPage({
   settings,
+  onOpenSetup,
   initialSection,
   navigationRequest,
   avatarStatus,
@@ -3186,6 +3336,7 @@ export function SettingsPage({
   onOpenQaStudio,
 }: {
   settings: PublicSettings | null;
+  onOpenSetup?: () => void;
   initialSection?: SettingsSection;
   navigationRequest?: SettingsNavigationRequest;
   avatarStatus: AvatarStatusResponse | null;
@@ -3278,7 +3429,7 @@ export function SettingsPage({
   }, [autosave.flush]);
   useEffect(() => {
     if (navigationRequest) openSettingsSection(navigationRequest.section,
-      navigationRequest.target ? `credential-${navigationRequest.target}` : undefined);
+      navigationRequest.focusId || (navigationRequest.target ? `credential-${navigationRequest.target}` : undefined));
   }, [navigationRequest, openSettingsSection]);
 
   useEffect(() => {
@@ -3536,7 +3687,7 @@ export function SettingsPage({
         <header className="settings-heading" hidden={activeSection === "token-usage"}>
           <div className="settings-heading-row">
             <div>
-              <h2>{activeSettingsMeta.title}</h2>
+              <h2 id={`settings-${activeSection}`} tabIndex={-1}>{activeSettingsMeta.title}</h2>
               <p>{activeSettingsMeta.description}</p>
             </div>
             {!["system-window", "api-keys", "token-usage", "system-overview", "models", "backups", "maintenance", "events", "avatar"].includes(activeSection) && <AutoSaveStatus status={autosave.status} onRetry={autosave.retry} />}
@@ -3548,7 +3699,25 @@ export function SettingsPage({
             onSettingsChanged={onSettingsChanged} />
         </div>
 
-        <div className="settings-grid system-status-grid" hidden={activeSection !== "system-overview"}>
+        {onOpenSetup && <section className="settings-card" hidden={activeSection !== "system-overview"}>
+          <div className="settings-card-header">
+            <div className="settings-card-title-group">
+              <h3 className="settings-card-title">Первый разговор</h3>
+              <p className="settings-card-subtitle">Ключ модели, голос и устройства — в одном мастере настройки.</p>
+            </div>
+          </div>
+          <div className="settings-card-actions">
+            <MaterialButton materialKey="system.first-conversation" className="primary-button" onClick={onOpenSetup}>Подготовить первый разговор</MaterialButton>
+          </div>
+        </section>}
+        <div className="settings-scenario-grid" hidden={activeSection !== "system-overview"}>
+          <article className="settings-scenario"><strong>Ответы</strong><p>{settings.api_key_configured ? "Ключ модели настроен" : "Нужен ключ модели"}</p><MaterialButton materialKey="system.open-keys" className="text-button" onClick={() => openSettingsSection("api-keys")}>API-ключи</MaterialButton></article>
+          <article className="settings-scenario"><strong>Голос</strong><p>Готовность локальных моделей и выбранных устройств.</p><MaterialButton materialKey="system.open-audio" className="text-button" onClick={() => openSettingsSection("voice-devices")}>Проверить устройства</MaterialButton></article>
+          <article className="settings-scenario"><strong>Аватар</strong><p>Размещение и состояние подключения.</p><MaterialButton materialKey="system.open-avatar" className="text-button" onClick={() => openSettingsSection("avatar")}>Открыть аватар</MaterialButton></article>
+          <article className="settings-scenario"><strong>Поиск</strong><p>{settings.web_search_enabled ? "Поиск включён" : "Поиск выключен"}</p><MaterialButton materialKey="system.open-search" className="text-button" onClick={() => openSettingsSection("environment")}>Источники информации</MaterialButton></article>
+        </div>
+        <details hidden={activeSection !== "system-overview"}><summary>Технические данные системы</summary>
+        <div className="settings-grid system-status-grid">
           <InfoRow label="DeepSeek API" value={settings.api_key_configured ? "Настроен" : "Не настроен"} />
           <InfoRow label="Coding API" value={settings.coding_api_key_configured ? "Настроен" : "Не настроен"} />
           <InfoRow label="Провайдер" value={settings.provider} />
@@ -3559,7 +3728,7 @@ export function SettingsPage({
             label="Голос"
             value={`${settings.voice_language} / ${settings.voice_tts_voice} / ${settings.voice_playback_rate.toFixed(2)}x`}
           />
-        </div>
+        </div></details>
 
         {activeSection === "system-window" && <WindowSettings />}
 
@@ -3616,6 +3785,7 @@ export function SettingsPage({
             />
           </div>
 
+          {activeSection === "system-interface" && <StartupSpeedSetting />}
           {/* Developer Tools & QA Studio Card */}
           <div className="settings-card">
             <div className="settings-card-header">
@@ -3705,7 +3875,7 @@ export function SettingsPage({
             <div className="settings-card-header">
               <div className="settings-card-header-main">
                 <div className="settings-card-title-group">
-                  <h3 className="settings-card-title">Язык голосового ввода</h3>
+                  <h3 className="settings-card-title">Распознавание речи</h3>
                   <p className="settings-card-subtitle">Основной язык распознавания речи в режиме Live</p>
                 </div>
               </div>
@@ -3740,17 +3910,15 @@ export function SettingsPage({
                   <p className="settings-card-subtitle">Выбор голоса Iris, темп речи и эмоциональная подача</p>
                 </div>
               </div>
-              <div className="settings-card-header-actions">
-                <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
-              </div>
+
             </div>
 
             <div className="settings-card-grid">
-              <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
-                Голос {ttsProviderLabel}
+              <label>
+                Голос {ttsProviderLabel}{settings.available_tts_voices.length === 1 && <small>Установлен один голос</small>}
                 <CustomSelect
                   value={voiceTtsVoice}
-                  disabled={saving || !developerModeEnabled}
+                  disabled={saving || settings.available_tts_voices.length < 2}
                   onChange={(event) => {
                     const nextValue = event.target.value;
                     const previousValue = voiceTtsVoice;
@@ -3766,15 +3934,15 @@ export function SettingsPage({
                 </CustomSelect>
               </label>
 
-              <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+              <label>
                 Скорость воспроизведения <strong>{voicePlaybackRate.toFixed(2)}×</strong>
                 <input
                   min="0.70"
                   max="1.30"
-                  step="0.05"
+                  step="0.01"
                   type="range"
                   value={voicePlaybackRate}
-                  disabled={saving || !developerModeEnabled}
+                  disabled={saving}
                   onChange={(event) => {
                     const nextValue = Number(event.target.value);
                     const previousValue = voicePlaybackRate;
@@ -3784,9 +3952,9 @@ export function SettingsPage({
                 />
               </label>
 
-              <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+              <label>
                 Подача голоса
-                <CustomSelect value={voiceTtsStyle} onChange={(event) => void changeVoiceStyle(event.target.value)} disabled={saving || !developerModeEnabled}>
+                <CustomSelect value={voiceTtsStyle} onChange={(event) => void changeVoiceStyle(event.target.value)} disabled={saving}>
                   <option value="auto">Авто — по эмоции нейросети</option>
                   <option value="calm">Спокойно</option>
                   <option value="normal">Обычно</option>
@@ -3797,9 +3965,9 @@ export function SettingsPage({
                 <small>Действует до перезапуска приложения.</small>
               </label>
 
-              <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+              <label>
                 Выразительность
-                <CustomSelect value={voiceExpressionLevel} onChange={(event) => void changeVoiceExpression(event.target.value)} disabled={saving || !developerModeEnabled}>
+                <CustomSelect value={voiceExpressionLevel} onChange={(event) => void changeVoiceExpression(event.target.value)} disabled={saving}>
                   <option value="minimal">Минимальная — почти нейтрально</option>
                   <option value="natural">Естественная — рекомендовано</option>
                   <option value="noticeable">Заметная — сильнее эмоции</option>
@@ -3829,7 +3997,7 @@ export function SettingsPage({
             </div>
 
             <div className="settings-card-grid">
-              <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+              <label>
                 Профиль микрофона
                 <CustomSelect
                   value={voiceMicrophoneProfile}
@@ -3901,7 +4069,7 @@ export function SettingsPage({
             </div>
 
             <div className="settings-card-grid">
-              <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+              <label>
                 Защита от собственного голоса
                 <CustomSelect
                   value={liveSettings.live_conversation_echo_mode}
@@ -3931,6 +4099,7 @@ export function SettingsPage({
             </div>
           </div>
 
+          {(activeSection === "voice" || activeSection === "voice-devices") && <AudioCheck inputDeviceId={voiceInputDeviceId} outputDeviceId={voiceOutputDeviceId} playbackRate={voicePlaybackRate} />}
           {/* VOICE-RECOGNITION: VAD Card */}
           <div className="settings-card" hidden={activeSection !== "voice-recognition"}>
             <div className="settings-card-header">
@@ -3965,24 +4134,12 @@ export function SettingsPage({
                   <p className="settings-card-subtitle">Канонические термины и правила замены распознанных слов</p>
                 </div>
               </div>
-              <div className="settings-card-header-actions">
-                <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
-              </div>
+
             </div>
 
-            <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
-              Канонический термин = точный вариант | точный вариант
-              <textarea
-                rows={7}
-                value={sttTermsText}
-                onChange={(event) => setSttTermsText(event.target.value)}
-                placeholder={"NeuroAsist = Нейро Асист | нейроасист\nGigaAM = Гига АМ | гигаэм"}
-                disabled={saving || !developerModeEnabled}
-              />
-              <small>Исправляются только перечисленные варианты. Нечёткий поиск и LLM не используются.</small>
-            </label>
+            <DictionaryEditor value={sttTermsText} onChange={setSttTermsText} leftLabel="Правильный термин" rightLabel="Как может распознаться (варианты через |)" disabled={saving} /><p className="settings-apply-note">Например: NeuroAsist → Нейро Асист | нейроасист. Применяются только перечисленные точные замены.</p>
             <div className="settings-card-actions">
-              <MaterialButton materialKey={"App.button-24"} className="secondary" type="button" onClick={() => void saveSttTerms()} disabled={saving || !developerModeEnabled}>
+              <MaterialButton materialKey={"App.button-24"} className="secondary" type="button" onClick={() => void saveSttTerms()} disabled={saving}>
                 Сохранить словарь распознавания
               </MaterialButton>
             </div>
@@ -3997,27 +4154,12 @@ export function SettingsPage({
                   <p className="settings-card-subtitle">Транскрипция и ударения для естественного синтеза речи</p>
                 </div>
               </div>
-              <div className="settings-card-header-actions">
-                <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
-              </div>
+
             </div>
 
-            <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
-              Термин = как произносить
-              <textarea
-                rows={7}
-                value={pronunciationsText}
-                onChange={(event) => setPronunciationsText(event.target.value)}
-                placeholder={"OpenAI = Оупен Эй Ай\nКак-то = к+ак-то\nМука = му́ка"}
-                disabled={saving || !developerModeEnabled}
-              />
-              <small>
-                Одна пара на строку. Ударение можно задать как «к+ак-то» или «ка́к-то».
-                Изменения применяются к следующей фразе без перезапуска.
-              </small>
-            </label>
+            <DictionaryEditor value={pronunciationsText} onChange={setPronunciationsText} leftLabel="Слово" rightLabel="Как произносить" disabled={saving} /><p className="settings-apply-note">Изменения применяются после сохранения словаря. Пример: Iris → Ирис.</p>
             <div className="settings-card-actions">
-              <MaterialButton materialKey={"App.button-25"} className="secondary" type="button" onClick={() => void savePronunciations()} disabled={saving || !developerModeEnabled}>
+              <MaterialButton materialKey={"App.button-25"} className="secondary" type="button" onClick={() => void savePronunciations()} disabled={saving}>
                 Сохранить словарь
               </MaterialButton>
             </div>
@@ -4093,21 +4235,27 @@ export function SettingsPage({
             <GuidedSttCapture profile={voiceMicrophoneProfile} inputDeviceId={voiceInputDeviceId} />
           )}
 
+          {activeSection === "conversation" && <ConversationProfiles engagement={liveSettings.live_conversation_engagement} initiative={liveSettings.live_conversation_initiative} onChange={patch => {
+            const previous = liveSettings;
+            setLiveSettings(current => ({ ...current, ...patch }));
+            saveRuntimeSetting(patch, () => setLiveSettings(previous));
+          }} />}
           {/* CONVERSATION: Card 1 - Format & Initiative */}
+          <ConversationSettingsDetails hidden={activeSection !== "conversation"}>
           <div className="settings-card" hidden={activeSection !== "conversation"}>
             <div className="settings-card-header">
               <div className="settings-card-header-main">
                 <div className="settings-card-title-group">
                   <h3 className="settings-card-title">Формат и инициатива диалога</h3>
                   <p className="settings-card-subtitle">
-                    Live — единственный голосовой режим. Реплики распознаются автоматически, без кнопки записи
+                    Кто участвует в беседе и как часто Iris проявляет инициативу.
                   </p>
                 </div>
               </div>
             </div>
 
             <div className="settings-card-grid">
-              <label>
+              <label className="settings-field-full">
                 Участники
                 <CustomSelect
                   value={liveSettings.live_conversation_participant_mode}
@@ -4136,7 +4284,7 @@ export function SettingsPage({
                 </CustomSelect>
               </label>
 
-              <label className="settings-field-full">
+              <label>
                 Инициативность
                 <CustomSelect
                   value={liveSettings.live_conversation_initiative}
@@ -4286,6 +4434,7 @@ export function SettingsPage({
           </div>
 
           {/* MEMORY: Long-term Memory Card */}
+          </ConversationSettingsDetails>
           <div className="settings-card" hidden={activeSection !== "memory"}>
             <div className="settings-card-header">
               <div className="settings-card-header-main">
@@ -4294,16 +4443,14 @@ export function SettingsPage({
                   <p className="settings-card-subtitle">Сохранение важных фактов и предпочтений между диалогами</p>
                 </div>
               </div>
-              <div className="settings-card-header-actions">
-                <DevBadge active={developerModeEnabled} onClick={() => setActiveSection("system-interface")} />
-              </div>
+
             </div>
 
-            <label className={!developerModeEnabled ? "dev-locked-field" : ""}>
+            <label>
               Режим сохранения
               <CustomSelect
                 value={memoryMode}
-                disabled={!developerModeEnabled}
+                disabled={saving}
                 onChange={(event) => {
                   const nextValue = event.target.value;
                   const previousValue = memoryMode;
@@ -4320,7 +4467,7 @@ export function SettingsPage({
             <SettingsSwitch
               checked={memoryIncognito}
               label="Не сохранять текущий разговор"
-              description="Режим инкогнито не добавляет новые данные в долгосрочную память."
+              description="Новые реплики и факты не сохраняются. Прежняя история и память остаются. Запросы по-прежнему отправляются выбранной модели."
               onChange={(checked) => {
                 const previousValue = memoryIncognito;
                 setMemoryIncognito(checked);
@@ -4365,7 +4512,7 @@ const SETTINGS_NAVIGATION: Array<{
     items: [
       { section: "voice", label: "Основное" },
       { section: "voice-devices", label: "Устройства" },
-      { section: "voice-recognition", label: "Распознавание", devOnly: true },
+      { section: "voice-recognition", label: "Распознавание" },
       { section: "voice-advanced", label: "Дополнительно", devOnly: true },
     ],
   },
@@ -4520,6 +4667,15 @@ function SystemMaintenance({
   } | null>(null);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [confirmPhrase, setConfirmPhrase] = useState("");
+  const [maintenanceCounts, setMaintenanceCounts] = useState<{ messages: number; episodes: number; memories: number; archived_memories: number; plans: number } | null>(null);
+  useEffect(() => {
+    if (!pendingAction && !resetDialogOpen) return;
+    const controller = new AbortController();
+    setMaintenanceCounts(null);
+    void requestJson<NonNullable<typeof maintenanceCounts>>("/maintenance/preview", { signal: controller.signal })
+      .then(result => { if (!controller.signal.aborted) setMaintenanceCounts(result); }).catch(() => {});
+    return () => controller.abort();
+  }, [pendingAction, resetDialogOpen]);
 
   const isPhraseMatched =
     confirmPhrase.trim().toLowerCase() === "сбросить все данные" ||
@@ -4636,7 +4792,7 @@ function SystemMaintenance({
             <div className="maintenance-row-copy">
               <strong className="maintenance-row-title">Очистить долгосрочную память</strong>
               <p className="maintenance-row-desc">
-                История диалогов сохранится, но восстановить записи памяти будет нельзя.
+                Текущие факты переместятся в архив и перестанут использоваться. История диалогов сохранится. «Забыть навсегда» удаляет запись отдельно в центре памяти.
               </p>
             </div>
             <MaterialButton materialKey={"App.button-35"}
@@ -4647,7 +4803,7 @@ function SystemMaintenance({
                 animateButtonPress(e.currentTarget);
                 setPendingAction({
                   title: "Очистить долгосрочную память?",
-                  description: "История диалогов сохранится, но восстановить записи памяти будет нельзя.",
+                  description: "Факты будут архивированы и перестанут использоваться. История диалогов и исходные сообщения сохранятся; отдельную запись можно восстановить в архиве.",
                   action: clearMemories,
                   success: "Долгосрочная память очищена.",
                 });
@@ -4690,6 +4846,7 @@ function SystemMaintenance({
         onClose={() => !busy && setPendingAction(null)}
         variant="danger"
       >
+        <p className="settings-apply-note">{maintenanceCounts ? `Объём профиля сейчас: ${maintenanceCounts.messages} сообщений, ${maintenanceCounts.episodes} диалогов, ${maintenanceCounts.memories} текущих фактов, ${maintenanceCounts.archived_memories} записей архива, ${maintenanceCounts.plans} планов.` : "Проверяю объём данных…"}</p>
         <div className="dialog-actions">
           <MaterialButton materialKey={"App.button-37"} className="secondary" type="button" disabled={busy} onClick={() => setPendingAction(null)}>
             Отмена
@@ -4719,6 +4876,7 @@ function SystemMaintenance({
         variant="danger"
       >
         <div className="maintenance-confirm-dialog">
+          <p className="settings-apply-note">{maintenanceCounts ? `Будут затронуты: ${maintenanceCounts.messages} сообщений, ${maintenanceCounts.episodes} диалогов, ${maintenanceCounts.memories} текущих фактов, ${maintenanceCounts.archived_memories} записей архива и ${maintenanceCounts.plans} планов с напоминаниями.` : "Проверяю объём данных…"}</p>
           <p className="maintenance-confirm-prompt">
             Для подтверждения введите <strong>сбросить все данные</strong>:
           </p>
@@ -4917,29 +5075,33 @@ function AvatarControls({
             onChange={(checked) => void (placement === "in_app" ? updateInAppVisibility(checked) : updateOverlay({ visible: checked }))}
           />
           {placement === "desktop_overlay" && (
-            <div className={!developerMode ? "dev-locked-field" : ""} style={{ display: "grid", gap: 6, width: "100%" }}>
+            <div className="avatar-overlay-options" style={{ display: "grid", gap: 6, width: "100%" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <small style={{ color: "var(--color-text-muted)" }}>Опции оверлея</small>
-                <DevBadge active={developerMode} onClick={onUnlockRequest} />
+
               </div>
               <SettingsSwitch
                 checked={overlay?.always_on_top ?? true}
                 label="Поверх окон"
-                disabled={!enabled || busy || !developerMode}
+                disabled={!enabled || busy}
                 onChange={(checked) => void updateOverlay({ always_on_top: checked })}
               />
               <SettingsSwitch
                 checked={overlay?.locked ?? true}
                 label="Заблокировать клики"
-                disabled={!enabled || busy || !developerMode}
+                disabled={!enabled || busy}
                 onChange={(checked) => void updateOverlay({ locked: checked })}
               />
+              <label>
+                Масштаб оверлея {overlay?.scale?.toFixed(1) ?? "1.0"}
+                <input min="0.5" max="2" step="0.1" type="range" value={overlay?.scale ?? 1} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ scale: Number(event.target.value) })} />
+              </label>
             </div>
           )}
         </div>
       </div>
 
-      <div className="avatar-qa-studio-callout" style={{ padding: "18px 22px", borderRadius: "18px", background: "linear-gradient(135deg, rgba(139, 92, 246, 0.12), rgba(99, 102, 241, 0.06))", border: "1px solid rgba(139, 92, 246, 0.25)", boxShadow: "var(--shadow-surface)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px", flexWrap: "wrap" }}>
+      <div hidden={!developerMode} className="avatar-qa-studio-callout" style={{ padding: "18px 22px", borderRadius: "18px", background: "linear-gradient(135deg, rgba(139, 92, 246, 0.12), rgba(99, 102, 241, 0.06))", border: "1px solid rgba(139, 92, 246, 0.25)", boxShadow: "var(--shadow-surface)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px", flexWrap: "wrap" }}>
         <div>
           <strong style={{ display: "flex", alignItems: "center", gap: 6, color: "#fff", fontSize: "13.5px" }}>
             <Sparkles size={15} style={{ color: "#a78bfa" }} />
@@ -4960,7 +5122,7 @@ function AvatarControls({
         </MaterialButton>
       </div>
 
-      <details className="avatar-technical">
+      <details hidden={!developerMode} className="avatar-technical">
         <summary style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span>Технические данные</span>
           <DevBadge active={developerMode} onClick={onUnlockRequest} />
@@ -4973,7 +5135,7 @@ function AvatarControls({
         </div>
       </details>
 
-      <details className="avatar-test-disclosure">
+      <details hidden={!developerMode} className="avatar-test-disclosure">
         <summary style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             Тест эмоций и жестов <ChevronDown size={16} aria-hidden="true" />
@@ -4981,10 +5143,6 @@ function AvatarControls({
           <DevBadge active={developerMode} onClick={onUnlockRequest} />
         </summary>
         <div className={`avatar-test-grid${!developerMode ? " dev-locked-field" : ""}`} style={{ marginTop: 14 }}>
-        {placement === "desktop_overlay" && <label>
-          Масштаб оверлея {overlay?.scale?.toFixed(1) ?? "1.0"}
-          <input min="0.5" max="2" step="0.1" type="range" value={overlay?.scale ?? 1} disabled={!enabled || busy || !developerMode} onChange={(event) => void updateOverlay({ scale: Number(event.target.value) })} />
-        </label>}
         <label>
           Тестовая фраза
           <input value={phrase} onChange={(event) => setPhrase(event.target.value)} disabled={!enabled || busy || !developerMode} />

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
@@ -100,6 +100,44 @@ const mockSettings = {
 } as unknown as PublicSettings;
 
 describe("CodingAgentPage", () => {
+  it("keeps the newer task selected when an earlier apply finishes", async () => {
+    const tasks = mockTasks.map(task => ({ ...task, status: "review_ready" as const }));
+    api.getCodingTasks.mockResolvedValue(tasks);
+    api.getCodingTask.mockImplementation(async (id: string) => tasks.find(task => task.id === id));
+    let finish!: (task: CodingTask) => void;
+    api.applyCodingTask.mockReturnValue(new Promise<CodingTask>(resolve => { finish = resolve; }));
+    render(<CodingAgentPage settings={mockSettings} events={[]} sessionId="s" onOpenApiSettings={vi.fn()} onSettingsChanged={vi.fn()} />);
+    fireEvent.click(await screen.findByText(tasks[0].objective));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Применить изменения" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Применить изменения" }));
+    fireEvent.click(screen.getByRole("button", { name: /Назад к списку задач/ }));
+    fireEvent.click(await screen.findByText(tasks[1].objective));
+    await act(async () => finish({ ...tasks[0], status: "applied" }));
+    expect(screen.getByRole("heading", { name: tasks[1].objective })).toBeInTheDocument();
+    expect(api.applyCodingTask).toHaveBeenCalledExactlyOnceWith(tasks[0].id);
+  });
+
+  it.each(["success", "error"])("ignores a late %s from a previous task before applying the current task", async outcome => {
+    api.getCodingStatus.mockResolvedValue(mockStatus);
+    const tasks = mockTasks.map(task => ({ ...task, status: "review_ready" as const }));
+    api.getCodingTasks.mockResolvedValue(tasks);
+    let resolve!: (task: CodingTask) => void;
+    let reject!: (error: Error) => void;
+    const oldRequest = new Promise<CodingTask>((yes, no) => { resolve = yes; reject = no; });
+    api.getCodingTask.mockImplementation((id: string) => id === tasks[0].id ? oldRequest : Promise.resolve(tasks[1]));
+    api.applyCodingTask.mockResolvedValue(tasks[1]);
+    render(<CodingAgentPage settings={mockSettings} events={[]} sessionId="s" onOpenApiSettings={vi.fn()} onSettingsChanged={vi.fn()} />);
+    fireEvent.click(await screen.findByText(tasks[0].objective));
+    expect(screen.getByRole("button", { name: "Применить изменения" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /Назад к списку задач/ }));
+    fireEvent.click(await screen.findByText(tasks[1].objective));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Применить изменения" })).toBeEnabled());
+    await act(async () => { if (outcome === "success") resolve(tasks[0]); else reject(new Error("Late error")); });
+    expect(screen.getByRole("heading", { name: tasks[1].objective })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Применить изменения" }));
+    await waitFor(() => expect(api.applyCodingTask).toHaveBeenCalledExactlyOnceWith(tasks[1].id));
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     api.getCodingStatus.mockResolvedValue(mockStatus);

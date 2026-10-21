@@ -1,4 +1,6 @@
-import { SlidingSegments } from "./components/SlidingSegments";
+import { requestJson } from "./api";
+import type { SearchFocus } from "./search-navigation";
+import { MemoryContextDetails, DocumentSources } from "./components/MemoryContextDetails";
 import { LoadingRing } from "./components/LoadingRing";
 import { MaterialButton } from "./components/MaterialButton";
 import {
@@ -10,6 +12,13 @@ import {
   IconInterfaceCursorArrow2,
   IconInterfaceCalendarMark,
   IconComputerRobotCyborg1,
+  IconMailSmileyHappyFace,
+  IconInterfaceFaceNeutral,
+  IconInterfaceFaceSad,
+  IconInterfaceAlertCircle,
+  IconInterfaceHandGesturesOneFingerTap,
+  IconShoppingBusinessTarget,
+  type CustomIconComponent,
 } from "./CustomIcons";
 import { FormEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -18,23 +27,25 @@ import type { TimelineJournalItem, TimelineMessage, TokenMetadata } from "./type
 import { calculateDeepSeekCostUsd } from "./deepseek";
 import { AppDialog } from "./components/AppDialog";
 import {
-  ChevronLeft,
-  ChevronDown,
-  ChevronRight,
-  X,
-  Zap,
-  Eye,
-  Sliders,
-  Sparkles,
-  Brain,
-  Terminal,
-  Copy,
-  Check,
-  ExternalLink,
-} from "lucide-react";
-import { TokenBadge, TokenDialogContent } from "./components/TokenBadge";
+  IconInterfaceChevronLeft as ChevronLeft,
+  IconInterfaceChevronDown as ChevronDown,
+  IconInterfaceChevronRight as ChevronRight,
+  IconInterfaceCross as X,
+  IconInterfaceLightning as Zap,
+  IconInterfaceEye as Eye,
+  IconInterfaceSliders as Sliders,
+  IconInterfaceSparkles as Sparkles,
+  IconInterfaceBrain as Brain,
+  IconInterfaceTerminal as Terminal,
+  IconInterfaceCopy as Copy,
+  IconInterfaceCheck as Check,
+  IconInterfaceExternalLink as ExternalLink,
+  IconMailChatBubbleTextSquare as MessageSquare,
+  IconInterfaceClock as Clock3,
+} from "./CustomIcons";
+import { TokenDialogContent } from "./components/TokenBadge";
 import { notify } from "./notifications";
-import { interfaceIntlLocale } from "./i18n";
+import { currentInterfaceLocale, interfaceIntlLocale } from "./i18n";
 import { animateButtonPress, animatePageEnter, animateStaggerCards, useAnimeScope } from "./animations";
 
 function formatDate(value?: string | null): string {
@@ -43,6 +54,15 @@ function formatDate(value?: string | null): string {
   return Number.isNaN(date.getTime())
     ? value
     : new Intl.DateTimeFormat(interfaceIntlLocale(), { day: "numeric", month: "long", year: "numeric" }).format(date);
+}
+
+function memoryContextCount(value: unknown) { return Array.isArray(value) ? value.length : 0; }
+
+function formatMessageCount(count: number): string {
+  const value = new Intl.NumberFormat(interfaceIntlLocale()).format(count);
+  if (currentInterfaceLocale() === "en") return `${value} ${count === 1 ? "message" : "messages"}`;
+  const form = new Intl.PluralRules("ru").select(count);
+  return `${value} ${form === "one" ? "сообщение" : form === "few" ? "сообщения" : "сообщений"}`;
 }
 
 function formatTime(value?: string | null): string {
@@ -126,19 +146,19 @@ function groupTimelineItems(items: TimelineJournalItem[]): PeriodGroup[] {
   return groups;
 }
 
-const EMOTION_META: Record<string, { label: string; icon: string }> = {
-  neutral: { label: "Спокойствие", icon: "😐" },
-  happy: { label: "Радость", icon: "😊" },
-  sad: { label: "Грусть", icon: "😔" },
-  curious: { label: "Любопытство", icon: "🤔" },
-  thinking: { label: "Размышление", icon: "🧐" },
-  surprised: { label: "Удивление", icon: "😲" },
-  skeptical: { label: "Скепсис", icon: "🤨" },
-  teasing: { label: "Игривость", icon: "😜" },
-  pouting: { label: "Обида", icon: "😤" },
-  frustrated: { label: "Досада", icon: "😣" },
-  shy: { label: "Смущение", icon: "😳" },
-  excited: { label: "Восторг", icon: "🤩" },
+const EMOTION_META: Record<string, { label: string; icon: CustomIconComponent }> = {
+  neutral: { label: "Спокойствие", icon: IconInterfaceFaceNeutral },
+  happy: { label: "Радость", icon: IconMailSmileyHappyFace },
+  sad: { label: "Грусть", icon: IconInterfaceFaceSad },
+  curious: { label: "Любопытство", icon: Brain },
+  thinking: { label: "Размышление", icon: Brain },
+  surprised: { label: "Удивление", icon: IconInterfaceAlertCircle },
+  skeptical: { label: "Скепсис", icon: Eye },
+  teasing: { label: "Игривость", icon: IconMailSmileyHappyFace },
+  pouting: { label: "Обида", icon: IconInterfaceFaceSad },
+  frustrated: { label: "Досада", icon: IconInterfaceFaceSad },
+  shy: { label: "Смущение", icon: IconInterfaceFaceNeutral },
+  excited: { label: "Восторг", icon: Sparkles },
 };
 
 const GESTURE_LABELS: Record<string, string> = {
@@ -176,6 +196,42 @@ function formatCost(usd: number): string {
   return `$${usd.toFixed(4)}`;
 }
 
+function JournalMessageFooter({ message, expanded, showToggle, detailsId, onToggle, onOpenTokens }: {
+  message: TimelineMessage;
+  expanded: boolean;
+  showToggle: boolean;
+  detailsId: string;
+  onToggle: () => void;
+  onOpenTokens: (tokens: TokenMetadata) => void;
+}) {
+  const tokens = message.metadata?.tokens;
+  const hasTokens = Boolean(tokens && ((tokens.prompt_tokens ?? 0) > 0 || (tokens.completion_tokens ?? 0) > 0 || (tokens.total_tokens ?? 0) > 0));
+  const tokenCount = message.role === "user" ? tokens?.prompt_tokens ?? tokens?.total_tokens ?? 0 : tokens?.completion_tokens ?? tokens?.total_tokens ?? 0;
+  const tokenLabel = message.role === "user" ? "Токены запроса" : "Токены ответа";
+  const emotion = message.metadata?.companion?.emotion;
+  const memoryCount = message.metadata?.memory_updates?.length ?? 0;
+  const hasDetails = Boolean(tokens || message.metadata?.companion || message.metadata?.web_search || message.metadata?.news || memoryCount);
+  const date = message.created_at ? new Date(message.created_at) : null;
+
+  return <footer className="journal-message-footer">
+    <div className="journal-message-meta">
+      {message.created_at && <time className="message-time" dateTime={message.created_at} title={date && !Number.isNaN(date.getTime()) ? date.toLocaleString(interfaceIntlLocale()) : undefined} data-i18n-skip>{formatTime(message.created_at)}</time>}
+      {emotion && <span className="journal-emotion-micro-pill" title={`Эмоция: ${EMOTION_META[emotion]?.label || emotion}`}><Sparkles size={13} aria-hidden="true" />{EMOTION_META[emotion]?.label || emotion}</span>}
+      {memoryCount > 0 && <span className="journal-memory-micro-pill"><Brain size={13} aria-hidden="true" /><span>Память: {memoryCount}</span></span>}
+    </div>
+    {(hasTokens || (showToggle && hasDetails)) && <div className="journal-message-actions">
+      {hasTokens && tokens && <MaterialButton materialKey={`journal.tokens.${message.id}`} type="button" className="secondary journal-message-action journal-token-button" appearance="lens"
+        aria-label={tokenLabel} title={`${tokenLabel}: ${tokenCount.toLocaleString(interfaceIntlLocale())}`} onClick={() => onOpenTokens(tokens)}>
+        <Zap size={14} aria-hidden="true" /><span data-i18n-skip>{new Intl.NumberFormat(interfaceIntlLocale(), { notation: "compact", maximumFractionDigits: 1 }).format(tokenCount)} {currentInterfaceLocale() === "en" ? "tokens" : "ток."}</span>
+      </MaterialButton>}
+      {showToggle && hasDetails && <MaterialButton materialKey={`journal.details.${message.id}`} type="button" className="secondary journal-message-action journal-message-details-toggle" appearance="lens"
+        aria-expanded={expanded} aria-controls={detailsId} onClick={onToggle}>
+        <span>{expanded ? "Свернуть" : "Подробнее"}</span><ChevronDown size={14} aria-hidden="true" />
+      </MaterialButton>}
+    </div>}
+  </footer>;
+}
+
 function JournalMessageDetails({
   message,
   onInspectJson,
@@ -202,7 +258,7 @@ function JournalMessageDetails({
   }
 
   const emotionInfo = companion?.emotion
-    ? EMOTION_META[companion.emotion] || { label: companion.emotion, icon: "✨" }
+    ? EMOTION_META[companion.emotion] || { label: companion.emotion, icon: Sparkles }
     : null;
   const gestureLabel = companion?.gesture
     ? GESTURE_LABELS[companion.gesture] || companion.gesture
@@ -219,34 +275,34 @@ function JournalMessageDetails({
           <div className="details-section-title">
             <Zap size={13} className="text-accent" />
             <span>Параметры вызова LLM</span>
-            <span className="details-model-tag">{tokens.model || "deepseek"}</span>
+            {tokens.model && <span className="details-model-tag">{tokens.model}</span>}
           </div>
 
           <div className="details-metrics-grid">
             <div className="metric-cell">
-              <span className="cell-label">Prompt (ввод)</span>
+              <span className="cell-label">На входе</span>
               <span className="cell-val text-prompt">
-                {tokens.prompt_tokens?.toLocaleString() ?? 0}
+                {tokens.prompt_tokens?.toLocaleString(interfaceIntlLocale()) ?? "—"}
                 {Boolean(tokens.prompt_cache_hit_tokens) && (
                   <small className="cache-hit-ratio">
-                    {" "}(+{tokens.prompt_cache_hit_tokens?.toLocaleString()} кэш)
+                    <span>Из кэша:</span> {tokens.prompt_cache_hit_tokens?.toLocaleString(interfaceIntlLocale())}
                   </small>
                 )}
               </span>
             </div>
 
             <div className="metric-cell">
-              <span className="cell-label">Output (генерация)</span>
+              <span className="cell-label">В ответе</span>
               <span className="cell-val text-completion">
-                {tokens.completion_tokens?.toLocaleString() ?? 0}
+                {tokens.completion_tokens?.toLocaleString(interfaceIntlLocale()) ?? "—"}
               </span>
             </div>
 
             {Boolean(tokens.reasoning_tokens) && (
               <div className="metric-cell">
-                <span className="cell-label">Reasoning</span>
+                <span className="cell-label">Рассуждения</span>
                 <span className="cell-val text-reasoning">
-                  {tokens.reasoning_tokens?.toLocaleString()}
+                  {tokens.reasoning_tokens?.toLocaleString(interfaceIntlLocale())}
                 </span>
               </div>
             )}
@@ -254,7 +310,7 @@ function JournalMessageDetails({
             <div className="metric-cell">
               <span className="cell-label">Всего</span>
               <span className="cell-val text-total">
-                {tokens.total_tokens?.toLocaleString() ?? 0}
+                {tokens.total_tokens?.toLocaleString(interfaceIntlLocale()) ?? "—"}
               </span>
             </div>
 
@@ -266,7 +322,7 @@ function JournalMessageDetails({
             )}
 
             <div className="metric-cell">
-              <span className="cell-label">Расход</span>
+              <span className="cell-label">Оценка стоимости</span>
               <span className="cell-val text-cost">
                 {formatCost(calculateDeepSeekCostUsd(tokens))}
               </span>
@@ -286,7 +342,7 @@ function JournalMessageDetails({
           <div className="companion-cues-row">
             {emotionInfo && (
               <div className="cue-badge emotion-cue" title={`Эмоция: ${companion.emotion}`}>
-                <span className="cue-icon">{emotionInfo.icon}</span>
+                <span className="cue-icon"><emotionInfo.icon size={14} aria-hidden="true" /></span>
                 <span className="cue-text">
                   <strong>{emotionInfo.label}</strong>
                   {companion.intensity !== undefined && (
@@ -298,14 +354,14 @@ function JournalMessageDetails({
 
             {gestureLabel && (
               <div className="cue-badge gesture-cue" title={`Жест: ${companion.gesture}`}>
-                <span className="cue-icon">👋</span>
+                <span className="cue-icon"><IconInterfaceHandGesturesOneFingerTap size={14} aria-hidden="true" /></span>
                 <span className="cue-text">Жест: <strong>{gestureLabel}</strong></span>
               </div>
             )}
 
             {intentLabel && (
               <div className="cue-badge intent-cue" title={`Намерение: ${companion.intent}`}>
-                <span className="cue-icon">🎯</span>
+                <span className="cue-icon"><IconShoppingBusinessTarget size={14} aria-hidden="true" /></span>
                 <span className="cue-text">Режим: <strong>{intentLabel}</strong></span>
               </div>
             )}
@@ -373,13 +429,12 @@ function JournalMessageDetails({
       ))}
 
       {/* 3. Memory Updates */}
-      <div className="details-section details-memory-section">
+      {memoryUpdates && memoryUpdates.length > 0 && <div className="details-section details-memory-section">
         <div className="details-section-title">
           <Brain size={13} className="text-cyan" />
           <span>Долгосрочная память хода</span>
         </div>
 
-        {memoryUpdates && memoryUpdates.length > 0 ? (
           <div className="memory-updates-list">
             {memoryUpdates.map((mem, i) => {
               if (typeof mem === "string") {
@@ -404,18 +459,13 @@ function JournalMessageDetails({
               );
             })}
           </div>
-        ) : (
-          <div className="memory-empty-note">
-            <span>В этом ходе новые факты в память не заносились</span>
-          </div>
-        )}
-      </div>
+      </div>}
 
       {/* 4. Raw JSON Inspection Button */}
       <div className="details-footer-actions">
         <MaterialButton materialKey={"journal.button-1"}
           type="button"
-          className="details-json-btn"
+          className="secondary journal-message-action details-json-btn"
           onClick={() =>
             onInspectJson(
               (message.metadata as Record<string, unknown>) || {},
@@ -425,7 +475,7 @@ function JournalMessageDetails({
           title="Просмотреть сырой JSON объект хода"
         >
           <Terminal size={12} />
-          <span>Сырой JSON хода</span>
+          <span>JSON сообщения</span>
         </MaterialButton>
       </div>
     </div>
@@ -435,9 +485,15 @@ function JournalMessageDetails({
 export function JournalPage({
   onOpenChat,
   isActive = true,
+  focusRequest,
+  developerMode = false,
+  currentSessionId,
 }: {
   onOpenChat?: () => void;
   isActive?: boolean;
+  focusRequest?: SearchFocus;
+  developerMode?: boolean;
+  currentSessionId?: string | null;
 } = {}) {
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<TimelineJournalItem[]>([]);
@@ -455,25 +511,9 @@ export function JournalPage({
   const [pendingDelete, setPendingDelete] = useState<TimelineJournalItem | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const [detailMode, setDetailMode] = useState<"simple" | "detailed">(() => {
-    try {
-      return (
-        (window.localStorage.getItem("journal_detail_mode") as "simple" | "detailed") ||
-        "simple"
-      );
-    } catch {
-      return "simple";
-    }
-  });
-
-  const handleToggleDetailMode = (mode: "simple" | "detailed") => {
-    setDetailMode(mode);
-    try {
-      window.localStorage.setItem("journal_detail_mode", mode);
-    } catch {
-      // Ignored
-    }
-  };
+  // Keep the readable view independent of the removed global preference.
+  // Individual messages still expose their existing details disclosure.
+  const [detailMode] = useState<"simple" | "detailed">("simple");
 
   const [inspectModalData, setInspectModalData] = useState<{
     title: string;
@@ -485,7 +525,15 @@ export function JournalPage({
     role: "user" | "assistant" | "system_event";
   } | null>(null);
 
+  const searchContextRef = useRef(false);
+  const lastFocusedRequest = useRef("");
   const activeRequestIdRef = useRef(0);
+  const searchRequestIdRef = useRef(0);
+  useEffect(() => () => {
+    activeRequestIdRef.current++;
+    searchRequestIdRef.current++;
+    lastFocusedRequest.current = "";
+  }, []);
 
   const containerRef = useAnimeScope<HTMLElement>((scope, root) => {
     animatePageEnter(root);
@@ -509,15 +557,17 @@ export function JournalPage({
   }, [selectedEpisode]);
 
   const onSelectEpisode = useCallback(async (episode: TimelineJournalItem) => {
+    searchContextRef.current = false;
     const requestId = ++activeRequestIdRef.current;
     setSelectedEpisode(episode);
     setExpandedMessageIds(new Set());
     setLoadingMessages(true);
+    setLoadingMoreMessages(false);
     setMessagesError(null);
     setHasMoreMessages(false);
     setMessageOffset(null);
     try {
-      const response = await getTimelineMessages(200, undefined, episode.id);
+      const response = await getTimelineMessages(200, episode.session_id, episode.id);
       if (activeRequestIdRef.current === requestId) {
         setMessages(response.items);
         setHasMoreMessages(response.next_offset !== null && response.next_offset !== undefined);
@@ -547,7 +597,7 @@ export function JournalPage({
             (item) => (item.id && item.id === current.id) || (!item.id && item.day === current.day),
           );
           if (updated) {
-            if (updated.message_count !== current.message_count || !updated.ended_at) {
+            if (!searchContextRef.current && (updated.message_count !== current.message_count || !updated.ended_at)) {
               void onSelectEpisode(updated);
             }
             return updated;
@@ -568,19 +618,41 @@ export function JournalPage({
     }
   }, [isActive, refresh]);
 
+  useEffect(() => {
+    if (!isActive || !focusRequest || lastFocusedRequest.current === focusRequest.requestId) return;
+    lastFocusedRequest.current = focusRequest.requestId;
+    searchContextRef.current = true;
+    const revision = ++activeRequestIdRef.current;
+    setResults(null); setQuery(""); setLoadingMessages(true); setMessagesError(null);
+    void requestJson<{ items: TimelineMessage[]; episode: TimelineJournalItem; next_offset: number | null }>(`/timeline/messages/${encodeURIComponent(focusRequest.id)}/context`).then(response => {
+      if (revision !== activeRequestIdRef.current) return;
+      setSelectedEpisode(response.episode); setMessages(response.items);
+      setMessageOffset(response.next_offset); setHasMoreMessages(response.next_offset !== null);
+    }).catch(cause => { if (revision === activeRequestIdRef.current) { const message = cause instanceof Error ? cause.message : "Не удалось открыть сообщение"; setMessagesError(message); setError(message); } }).finally(() => { if (revision === activeRequestIdRef.current) setLoadingMessages(false); });
+  }, [focusRequest, isActive]);
+
+  useEffect(() => {
+    if (loadingMessages || !searchContextRef.current || !focusRequest) return;
+    const target = document.getElementById(`history-message-${focusRequest.id}`);
+    if (target) { target.classList.add("search-focus-target"); if (!target.hasAttribute("tabindex")) target.tabIndex = -1; target.scrollIntoView?.({ block: "center", behavior: "instant" }); target.focus({ preventScroll: true }); }
+  }, [messages, loadingMessages, focusRequest]);
+
   const onLoadMoreMessages = async () => {
-    if (!selectedEpisode?.id || messageOffset === null || loadingMoreMessages) return;
+    if (!selectedEpisode || (!selectedEpisode.id && !selectedEpisode.session_id) || messageOffset === null || loadingMoreMessages) return;
+    const requestId = activeRequestIdRef.current;
     setLoadingMoreMessages(true);
     try {
-      const response = await getTimelineMessages(100, undefined, selectedEpisode.id, messageOffset);
-      setMessages((prev) => [...response.items, ...prev]);
+      const response = await getTimelineMessages(100, selectedEpisode.session_id, selectedEpisode.id, messageOffset);
+      if (requestId !== activeRequestIdRef.current) return;
+      setMessages((prev) => [...new Map([...response.items, ...prev].map(message => [message.id, message])).values()]);
       setHasMoreMessages(response.next_offset !== null && response.next_offset !== undefined);
       setMessageOffset(response.next_offset ?? null);
     } catch (cause) {
+      if (requestId !== activeRequestIdRef.current) return;
       const msg = cause instanceof Error ? cause.message : "Не удалось загрузить ранние сообщения";
       notify.error("Журнал", msg);
     } finally {
-      setLoadingMoreMessages(false);
+      if (requestId === activeRequestIdRef.current) setLoadingMoreMessages(false);
     }
   };
 
@@ -597,15 +669,18 @@ export function JournalPage({
 
   const onSearch = async (event: FormEvent) => {
     event.preventDefault();
+    const requestId = ++searchRequestIdRef.current;
     if (!query.trim()) {
       setResults(null);
       return;
     }
     try {
       const response = await searchTimeline(query);
+      if (requestId !== searchRequestIdRef.current) return;
       setResults(response.items);
       setError(null);
     } catch (cause) {
+      if (requestId !== searchRequestIdRef.current) return;
       const msg = cause instanceof Error ? cause.message : "Не удалось выполнить поиск";
       setError(msg);
       notify.error("Журнал", msg);
@@ -613,6 +688,7 @@ export function JournalPage({
   };
 
   const handleResetSearch = () => {
+    searchRequestIdRef.current++;
     setQuery("");
     setResults(null);
   };
@@ -671,7 +747,7 @@ export function JournalPage({
             <form className="search-form compact journal-search-form" onSubmit={onSearch}>
               <input
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => { searchRequestIdRef.current++; setQuery(event.target.value); }}
                 placeholder="Поиск по истории"
                 aria-label="Поиск по истории"
               />
@@ -680,7 +756,7 @@ export function JournalPage({
                   appearance="quiet"
                   className="search-clear-btn"
                   type="button"
-                  onClick={() => setQuery("")}
+                  onClick={handleResetSearch}
                   aria-label="Очистить поле поиска"
                   title="Очистить"
                 >
@@ -723,46 +799,14 @@ export function JournalPage({
                   const isAssistant = message.role === "assistant";
                   const roleLabel = isUser ? "Вы" : isAssistant ? "Iris" : "Событие";
                   const roleClass = isUser ? "user" : isAssistant ? "assistant" : "system";
-                  const messageTokens = message.metadata?.tokens;
-                  const hasTokens = Boolean(
-                    messageTokens &&
-                      ((messageTokens.prompt_tokens ?? 0) > 0 ||
-                        (messageTokens.completion_tokens ?? 0) > 0 ||
-                        (messageTokens.total_tokens ?? 0) > 0)
-                  );
+                  const isExpanded = detailMode === "detailed" || expandedMessageIds.has(message.id);
 
-                  const handleMessageClick = (e: React.MouseEvent) => {
-                    const target = e.target as HTMLElement;
-                    if (target.closest("button") || target.closest("a") || target.closest("input")) {
-                      return;
-                    }
-                    const selection = window.getSelection()?.toString();
-                    if (selection && selection.trim().length > 0) {
-                      return;
-                    }
-                    if (hasTokens && messageTokens) {
-                      setTokenDialogData({ tokens: messageTokens, role: message.role });
-                    }
-                  };
 
                   return (
                     <article
-                      className={`journal-message ${roleClass} ${hasTokens ? "is-clickable has-tokens" : ""}`}
+                      className={`journal-message ${roleClass}${isExpanded ? " is-expanded" : ""}`}
                       key={message.id}
-                      onClick={handleMessageClick}
-                      role={hasTokens ? "button" : undefined}
-                      tabIndex={hasTokens ? 0 : undefined}
-                      onKeyDown={
-                        hasTokens
-                          ? (e) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.preventDefault();
-                                setTokenDialogData({ tokens: messageTokens!, role: message.role });
-                              }
-                            }
-                          : undefined
-                      }
-                      title={hasTokens ? "Нажмите для просмотра статистики токенов" : undefined}
+                      id={`history-message-${message.id}`}
                     >
                       <div className="message-role">
                         {isAssistant && (
@@ -773,41 +817,21 @@ export function JournalPage({
                         <span>{roleLabel}</span>
                       </div>
                       <p data-i18n-skip>{message.content || message.corrected_content || message.original_content || ""}</p>
-                      <div className="journal-message-footer">
-                        {message.created_at && (
-                          <span className="message-time">{formatTime(message.created_at)}</span>
-                        )}
-                        {detailMode === "simple" && message.metadata?.companion?.emotion && (
-                          <span
-                            className="journal-emotion-micro-pill"
-                            title={`Эмоция: ${EMOTION_META[message.metadata.companion.emotion]?.label || message.metadata.companion.emotion}${message.metadata.companion.intensity !== undefined ? ` (${Math.round(message.metadata.companion.intensity * 100)}%)` : ""}`}
-                          >
-                            {EMOTION_META[message.metadata.companion.emotion]?.icon || "✨"}{" "}
-                            {EMOTION_META[message.metadata.companion.emotion]?.label || message.metadata.companion.emotion}
-                          </span>
-                        )}
-                        {detailMode === "simple" && Boolean(message.metadata?.memory_updates?.length) && (
-                          <span
-                            className="journal-memory-micro-pill"
-                            title={`Новых записей памяти: ${message.metadata?.memory_updates?.length}`}
-                          >
-                            🧠 {message.metadata?.memory_updates?.length}
-                          </span>
-                        )}
-                        {messageTokens && (
-                          <TokenBadge
-                            tokens={messageTokens}
-                            role={message.role}
-                            onOpen={() => setTokenDialogData({ tokens: messageTokens, role: message.role })}
-                          />
-                        )}
-                      </div>
-                      {detailMode === "detailed" && (
+                      {developerMode && memoryContextCount(message.metadata?.context_memories) > 0 && <MemoryContextDetails messageId={message.id} count={memoryContextCount(message.metadata?.context_memories)} sessionId={currentSessionId} />}
+                      <DocumentSources value={message.metadata?.document_context} />
+                      <JournalMessageFooter message={message} expanded={isExpanded} showToggle={detailMode === "simple"} detailsId={`journal-search-message-details-${message.id}`}
+                        onOpenTokens={tokens => setTokenDialogData({ tokens, role: message.role })}
+                        onToggle={() => setExpandedMessageIds(current => {
+                          const next = new Set(current);
+                          if (next.has(message.id)) next.delete(message.id); else next.add(message.id);
+                          return next;
+                        })} />
+                      <div id={`journal-search-message-details-${message.id}`} className="journal-message-details" hidden={!isExpanded} role="region" aria-label="Подробности сообщения">{isExpanded && (
                         <JournalMessageDetails
                           message={message}
                           onInspectJson={(json, title) => setInspectModalData({ json, title })}
                         />
-                      )}
+                      )}</div>
                     </article>
                   );
                 })
@@ -839,25 +863,33 @@ export function JournalPage({
                     title="Назад к списку"
                   >
                     <ChevronLeft size={16} aria-hidden="true" />
-                    <span>Назад</span>
                   </MaterialButton>
                   <div className="journal-header-title-group">
-                    <h2>{selectedEpisode.title || formatDate(selectedEpisode.day)}</h2>
+                    <h2 data-i18n-skip title={selectedEpisode.title || formatDate(selectedEpisode.day)}>{selectedEpisode.title || formatDate(selectedEpisode.day)}</h2>
                     <div className="journal-header-meta">
-                      <span>
-                        {selectedEpisode.message_count}{" "}
-                        {selectedEpisode.message_count === 1 ? "сообщение" : "сообщений"}
+                      <span className="journal-header-stat" data-i18n-skip title={formatMessageCount(selectedEpisode.message_count)}>
+                        <MessageSquare size={14} aria-hidden="true" />
+                        <span className="journal-header-count-label">{formatMessageCount(selectedEpisode.message_count)}</span>
+                        <span className="journal-header-count-short" aria-hidden="true">{selectedEpisode.message_count.toLocaleString(interfaceIntlLocale())}</span>
                       </span>
                       {selectedEpisode.last_activity_at ? (
-                        <span>· {formatTime(selectedEpisode.last_activity_at)}</span>
+                        <time className="journal-header-stat" dateTime={selectedEpisode.last_activity_at} title={formatDate(selectedEpisode.last_activity_at)}>
+                          <Clock3 size={14} aria-hidden="true" />
+                          {formatTime(selectedEpisode.last_activity_at)}
+                        </time>
                       ) : selectedEpisode.started_at ? (
-                        <span>· {formatShortDate(selectedEpisode.started_at)}</span>
+                        <time className="journal-header-stat" dateTime={selectedEpisode.started_at}>
+                          <Clock3 size={14} aria-hidden="true" />
+                          {formatShortDate(selectedEpisode.started_at)}
+                        </time>
                       ) : null}
                       {Boolean(selectedEpisode.token_estimate && selectedEpisode.token_estimate > 0) && (
                         <MaterialButton materialKey={"journal.button-6"}
                           type="button"
-                          className="journal-header-tokens"
+                          className="secondary journal-episode-tokens"
+                          appearance="lens"
                           title="Нажмите для просмотра статистики токенов диалога"
+                          aria-label={`${currentInterfaceLocale() === "en" ? "Conversation token statistics" : "Статистика токенов диалога"}: ${selectedEpisode.token_estimate?.toLocaleString(interfaceIntlLocale())}`}
                           onClick={() => {
                             const lastMsgWithTokens = [...messages].reverse().find((m) => m.metadata?.tokens);
                             if (lastMsgWithTokens?.metadata?.tokens) {
@@ -878,8 +910,9 @@ export function JournalPage({
                             }
                           }}
                         >
-                          · <Zap size={11} style={{ display: "inline-block", verticalAlign: "middle", marginRight: 2 }} />
-                          {selectedEpisode.token_estimate?.toLocaleString()}
+                          <Zap size={14} aria-hidden="true" />
+                          <span data-i18n-skip>{selectedEpisode.token_estimate?.toLocaleString(interfaceIntlLocale())}<span className="journal-header-token-unit"> {currentInterfaceLocale() === "en" ? "tokens" : "ток."}</span></span>
+                          <ChevronRight className="journal-header-token-chevron" size={13} aria-hidden="true" />
                         </MaterialButton>
                       )}
                     </div>
@@ -887,29 +920,6 @@ export function JournalPage({
                 </div>
 
                 <div className="journal-header-actions">
-                  <SlidingSegments className="journal-view-toggle" value={detailMode} aria-label="Режим детализации">
-                    <MaterialButton appearance="plain" materialKey={"journal.button-7"}
-                      type="button"
-                      className={`journal-view-toggle-btn ${detailMode === "simple" ? "active" : ""}`}
-                      onClick={() => handleToggleDetailMode("simple")}
-                      title="Простой режим (только сообщения и компактные бейджи)"
-                      aria-pressed={detailMode === "simple"}
-                    >
-                      <Eye size={13} />
-                      <span>Простой</span>
-                    </MaterialButton>
-                    <MaterialButton appearance="plain" materialKey={"journal.button-8"}
-                      type="button"
-                      className={`journal-view-toggle-btn ${detailMode === "detailed" ? "active" : ""}`}
-                      onClick={() => handleToggleDetailMode("detailed")}
-                      title="Подробный режим (параметры LLM, эмоции, жесты, память и сырой JSON)"
-                      aria-pressed={detailMode === "detailed"}
-                    >
-                      <Sliders size={13} />
-                      <span>Подробный</span>
-                    </MaterialButton>
-                  </SlidingSegments>
-
                   <MaterialButton materialKey={"journal.button-9"}
                     className="secondary journal-delete-action"
                     type="button"
@@ -921,10 +931,10 @@ export function JournalPage({
                       setPendingDelete(selectedEpisode);
                     }}
                   >
-                    <IconInterfaceDeleteBin3 size={15} />
-                    <span>Удалить</span>
+                    <IconInterfaceDeleteBin3 size={17} aria-hidden="true" />
                   </MaterialButton>
                 </div>
+                {searchContextRef.current && <MaterialButton materialKey="journal.full-context" type="button" className="secondary journal-full-context" onClick={() => void onSelectEpisode(selectedEpisode)}>Показать полный диалог</MaterialButton>}
               </header>
 
               <div className="journal-messages-container" ref={messagesContainerRef}>
@@ -951,35 +961,8 @@ export function JournalPage({
                       const roleClass = isUser ? "user" : isAssistant ? "assistant" : "system";
                       const prevDate = idx > 0 ? messages[idx - 1].created_at : null;
                       const showDateSep = shouldShowDateSeparator(prevDate, message.created_at);
-                      const messageTokens = message.metadata?.tokens;
-                      const hasDetails = Boolean(
-                        messageTokens ||
-                        message.metadata?.companion ||
-                        message.metadata?.web_search ||
-                        message.metadata?.news ||
-                        message.metadata?.memory_updates?.length
-                      );
                       const isExpanded = detailMode === "detailed" || expandedMessageIds.has(message.id);
-                      const hasTokens = Boolean(
-                        messageTokens &&
-                          ((messageTokens.prompt_tokens ?? 0) > 0 ||
-                            (messageTokens.completion_tokens ?? 0) > 0 ||
-                            (messageTokens.total_tokens ?? 0) > 0)
-                      );
 
-                      const handleMessageClick = (e: React.MouseEvent) => {
-                        const target = e.target as HTMLElement;
-                        if (target.closest("button") || target.closest("a") || target.closest("input")) {
-                          return;
-                        }
-                        const selection = window.getSelection()?.toString();
-                        if (selection && selection.trim().length > 0) {
-                          return;
-                        }
-                        if (hasTokens && messageTokens) {
-                          setTokenDialogData({ tokens: messageTokens, role: message.role });
-                        }
-                      };
 
                       return (
                         <Fragment key={message.id}>
@@ -989,21 +972,8 @@ export function JournalPage({
                             </div>
                           )}
                           <article
-                            className={`journal-message ${roleClass} ${hasTokens ? "is-clickable has-tokens" : ""}`}
-                            onClick={handleMessageClick}
-                            role={hasTokens ? "button" : undefined}
-                            tabIndex={hasTokens ? 0 : undefined}
-                            onKeyDown={
-                              hasTokens
-                                ? (e) => {
-                                    if (e.key === "Enter" || e.key === " ") {
-                                      e.preventDefault();
-                                      setTokenDialogData({ tokens: messageTokens!, role: message.role });
-                                    }
-                                  }
-                                : undefined
-                            }
-                            title={hasTokens ? "Нажмите для просмотра статистики токенов" : undefined}
+                            id={`history-message-${message.id}`}
+                            className={`journal-message ${roleClass}${isExpanded ? " is-expanded" : ""}`}
                           >
                             <div className="message-role">
                               {isAssistant && (
@@ -1014,64 +984,21 @@ export function JournalPage({
                               <span>{roleLabel}</span>
                             </div>
                             <p data-i18n-skip>{message.content || message.corrected_content || message.original_content || ""}</p>
-                            <div className="journal-message-footer">
-                              {message.created_at && (
-                                <span className="message-time">{formatTime(message.created_at)}</span>
-                              )}
-                              {detailMode === "simple" && message.metadata?.companion?.emotion && (
-                                <span
-                                  className="journal-emotion-micro-pill"
-                                  title={`Эмоция: ${EMOTION_META[message.metadata.companion.emotion]?.label || message.metadata.companion.emotion}${message.metadata.companion.intensity !== undefined ? ` (${Math.round(message.metadata.companion.intensity * 100)}%)` : ""}`}
-                                >
-                                  {EMOTION_META[message.metadata.companion.emotion]?.icon || "✨"}{" "}
-                                  {EMOTION_META[message.metadata.companion.emotion]?.label || message.metadata.companion.emotion}
-                                </span>
-                              )}
-                              {detailMode === "simple" && Boolean(message.metadata?.memory_updates?.length) && (
-                                <span
-                                  className="journal-memory-micro-pill"
-                                  title={`Новых записей памяти: ${message.metadata?.memory_updates?.length}`}
-                                >
-                                  🧠 {message.metadata?.memory_updates?.length}
-                                </span>
-                              )}
-                              {messageTokens && (
-                                <TokenBadge
-                                  tokens={messageTokens}
-                                  role={message.role}
-                                  onOpen={() => setTokenDialogData({ tokens: messageTokens, role: message.role })}
-                                />
-                              )}
-                              {detailMode === "simple" && hasDetails && (
-                                <MaterialButton materialKey={["journal.button-11", message.id].join(":")}
-                                  type="button"
-                                  className="journal-message-details-toggle"
-                                  aria-expanded={isExpanded}
-                                  aria-controls={`journal-message-details-${message.id}`}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    animateButtonPress(event.currentTarget);
-                                    setExpandedMessageIds((current) => {
-                                      const next = new Set(current);
-                                      if (next.has(message.id)) next.delete(message.id);
-                                      else next.add(message.id);
-                                      return next;
-                                    });
-                                  }}
-                                >
-                                  {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                                  <span>{isExpanded ? "Свернуть" : "Подробнее"}</span>
-                                </MaterialButton>
-                              )}
-                            </div>
-                            {isExpanded && (
-                              <div id={`journal-message-details-${message.id}`}>
+                            {developerMode && memoryContextCount(message.metadata?.context_memories) > 0 && <MemoryContextDetails messageId={message.id} count={memoryContextCount(message.metadata?.context_memories)} sessionId={currentSessionId} />}
+                            <DocumentSources value={message.metadata?.document_context} />
+                            <JournalMessageFooter message={message} expanded={isExpanded} showToggle={detailMode === "simple"} detailsId={`journal-message-details-${message.id}`}
+                              onOpenTokens={tokens => setTokenDialogData({ tokens, role: message.role })}
+                              onToggle={() => setExpandedMessageIds(current => {
+                                const next = new Set(current);
+                                if (next.has(message.id)) next.delete(message.id); else next.add(message.id);
+                                return next;
+                              })} />
+                            <div id={`journal-message-details-${message.id}`} className="journal-message-details" hidden={!isExpanded} role="region" aria-label="Подробности сообщения">{isExpanded && (
                                 <JournalMessageDetails
                                   message={message}
                                   onInspectJson={(json, title) => setInspectModalData({ json, title })}
                                 />
-                              </div>
-                            )}
+                            )}</div>
                           </article>
                         </Fragment>
                       );
@@ -1143,8 +1070,7 @@ export function JournalPage({
                   setMessagesError(null);
                 }
                 setPendingDelete(null);
-                setResults(null);
-                setQuery("");
+                handleResetSearch();
                 await refresh();
               } catch (cause) {
                 notify.error("Журнал", cause instanceof Error ? cause.message : "Не удалось удалить диалог.");

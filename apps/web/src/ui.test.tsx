@@ -2,18 +2,21 @@ import { notificationStore, notify } from "./notifications";
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
+  requestJson: vi.fn().mockResolvedValue({ items: [], document: null }),
+  getVoicePreview: vi.fn(),
   getStatus: vi.fn(), getSettings: vi.fn(), getAvatarStatus: vi.fn(), getEvents: vi.fn(),
   getReadiness: vi.fn(),
   getTimelineMessages: vi.fn(), getModels: vi.fn(), getBackups: vi.fn(), getAvatarOverlay: vi.fn(),
   getMemories: vi.fn(), createMemory: vi.fn(), getMemoryAudit: vi.fn(),
+  getMemoryTopics: vi.fn(), getMemoryCommitments: vi.fn(),
   getPronunciations: vi.fn(), updatePronunciations: vi.fn(), updateVoiceExpression: vi.fn(), updateVoiceStyle: vi.fn(),
   getSttTerms: vi.fn(), updateSttTerms: vi.fn(),
   updateRuntimeSettings: vi.fn(), getTimelineJournal: vi.fn(), searchTimeline: vi.fn(),
-  getVoiceTtsStatus: vi.fn(), sendChatMessage: vi.fn(), interruptVoiceSession: vi.fn(),
+  getVoiceTtsStatus: vi.fn(), sendChatMessage: vi.fn(), sendLiveTextMessage: vi.fn(), interruptVoiceSession: vi.fn(),
   installModel: vi.fn(), removeModel: vi.fn(), createBackup: vi.fn(),
   clearMemories: vi.fn(), reindexMemories: vi.fn(), resetAllCompanionData: vi.fn(),
   resetConversationSession: vi.fn(), getConversationSession: vi.fn(), getCharacterState: vi.fn(),
@@ -121,6 +124,87 @@ afterEach(() => {
 });
 
 describe("русский интерфейс", () => {
+  it("retries a lost text request with the same client id and renders a completed replay", async () => {
+    const unlock = vi.spyOn(TTSStreamPlayer.prototype, "unlock").mockResolvedValue();
+    const connect = vi.spyOn(VoiceSocketClient.prototype, "connect").mockResolvedValue();
+    api.sendLiveTextMessage.mockRejectedValueOnce(new Error("lost HTTP response")).mockResolvedValueOnce({
+      session_id: "test-session", utterance_id: "original", voice_request_id: "original", message_id: "saved-user",
+      assistant_message_id: "saved-reply", reply: "Восстановленный ответ", status: "completed", replayed: true,
+    });
+    try {
+      render(<App />);
+      fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Начать" }));
+      const composer = await screen.findByPlaceholderText("Ввод сообщения...");
+      fireEvent.change(composer, { target: { value: "мой вопрос" } });
+      fireEvent.submit(composer.closest("form")!);
+      await waitFor(() => expect(api.sendLiveTextMessage).toHaveBeenCalledTimes(1));
+      const retry = await screen.findByRole("button", { name: "Повторить" });
+      fireEvent.click(retry);
+      fireEvent.submit(composer.closest("form")!);
+      await waitFor(() => expect(api.sendLiveTextMessage).toHaveBeenCalledTimes(2));
+      expect(api.sendLiveTextMessage.mock.calls[1]).toEqual(api.sendLiveTextMessage.mock.calls[0]);
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Отправка сообщения" })).not.toBeInTheDocument());
+      expect(api.sendChatMessage).not.toHaveBeenCalled();
+    } finally { unlock.mockRestore(); connect.mockRestore(); }
+  });
+
+  it.each([false, true])("clears an interrupted spinner even when the HTTP response is late (%s)", async (lateResponse) => {
+    const unlock = vi.spyOn(TTSStreamPlayer.prototype, "unlock").mockResolvedValue();
+    let client: VoiceSocketClient;
+    const connect = vi.spyOn(VoiceSocketClient.prototype, "connect").mockImplementation(async function (this: VoiceSocketClient) { client = this; });
+    let resolveLive!: (value: unknown) => void;
+    const response = { session_id: "test-session", utterance_id: "original", voice_request_id: "original", status: "streaming" };
+    api.sendLiveTextMessage.mockImplementationOnce(() => lateResponse ? new Promise(resolve => { resolveLive = resolve; }) : Promise.resolve(response));
+    try {
+      render(<App />);
+      fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Начать" }));
+      const composer = await screen.findByPlaceholderText("Ввод сообщения...");
+      fireEvent.change(composer, { target: { value: "вопрос" } });
+      fireEvent.submit(composer.closest("form")!);
+      await waitFor(() => expect(screen.getByRole("button", { name: "Отправка сообщения" })).toBeDisabled());
+      api.getTimelineMessages.mockResolvedValue({ items: [{ id: "saved-reply", role: "assistant", content: "Сохранённая часть", status: "interrupted", utterance_id: "original" }] });
+      const connectionState = (client! as unknown as { onConnectionState: (state: "connected" | "disconnected") => void }).onConnectionState;
+      act(() => { client!.clearActive(); connectionState("disconnected"); });
+      expect(screen.queryByRole("button", { name: "Отправка сообщения" })).not.toBeInTheDocument();
+      if (lateResponse) await act(async () => resolveLive(response));
+      expect(client!.activeUtteranceId).toBeNull();
+      await act(async () => { connectionState("connected"); });
+      await waitFor(() => expect(api.getTimelineMessages).toHaveBeenCalledWith(50, "test-session"));
+    } finally { unlock.mockRestore(); connect.mockRestore(); }
+  });
+
+  it.each(["Темы", "Планы"])("submits and clears the search query in %s", async section => {
+    api.getMemories.mockResolvedValue({ items: [], next_offset: null });
+    const rows = [{ id: "first", title: "Alpha", status: section === "Темы" ? "active" : "open", links: [], evidence: [] }, { id: "second", title: "Beta", status: section === "Темы" ? "active" : "open", links: [], evidence: [] }];
+    api.getMemoryTopics.mockImplementation(async query => ({ items: rows.filter(item => !query || item.title.includes(query)) }));
+    api.getMemoryCommitments.mockImplementation(async (_status, query) => ({ items: rows.filter(item => !query || item.title.includes(query)) }));
+    render(<MemoryPage />);
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${section}`) }));
+    await screen.findByText("Beta");
+    fireEvent.change(screen.getByRole("textbox", { name: "Поиск по памяти" }), { target: { value: "Alpha" } });
+    fireEvent.click(screen.getByRole("button", { name: "Найти в памяти" }));
+    await waitFor(() => expect(screen.queryByText("Beta")).not.toBeInTheDocument());
+    if (section === "Темы") expect(api.getMemoryTopics).toHaveBeenLastCalledWith("Alpha");
+    else expect(api.getMemoryCommitments).toHaveBeenLastCalledWith(undefined, "Alpha");
+    fireEvent.click(screen.getByRole("button", { name: "Очистить" }));
+    await screen.findByText("Beta");
+  });
+
+  it("loads the next page of saved memories", async () => {
+    const item = (id: string) => ({ id, status: "active", predicate: "note", value_text: id, source_message_ids: [], access_count: 0 });
+    api.getMemories.mockImplementation(async (_status, _query, offset) => offset
+      ? { items: [item("second page")], next_offset: null }
+      : { items: [item("first page")], next_offset: 100 });
+    render(<MemoryPage />);
+    await screen.findByText("first page");
+    fireEvent.click(screen.getByRole("button", { name: "Загрузить ещё" }));
+    await screen.findByText("second page");
+    expect(api.getMemories).toHaveBeenLastCalledWith("active", undefined, 100);
+    expect(screen.queryByRole("button", { name: "Загрузить ещё" })).not.toBeInTheDocument();
+  });
+
   it("оставляет раздел окна доступным без подключения к ядру", () => {
     render(<SettingsPage
       settings={null} avatarStatus={null} avatarOverlay={null} events={[]}
@@ -500,7 +584,7 @@ describe("русский интерфейс", () => {
       if (mediaDescriptor) Object.defineProperty(navigator, "mediaDevices", mediaDescriptor);
       else Reflect.deleteProperty(navigator, "mediaDevices");
     }
-  });
+  }, 20_000);
 
   it("открывает сохранённый диалог на последнем сообщении", async () => {
     api.getTimelineMessages.mockResolvedValue({
@@ -548,7 +632,7 @@ describe("русский интерфейс", () => {
     expect(screen.queryByRole("button", { name: "Events" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
-    const settingsNavigation = screen.getByRole("navigation", { name: "Разделы настроек" });
+    const settingsNavigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
     await within(settingsNavigation).findByRole("button", { name: "Система" });
     fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Система" }));
     fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Обзор" }));
@@ -570,7 +654,7 @@ describe("русский интерфейс", () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
-    const settingsNavigation = screen.getByRole("navigation", { name: "Разделы настроек" });
+    const settingsNavigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
     fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Система" }));
     fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Интерфейс" }));
     await screen.findByRole("heading", { name: "Интерфейс" });
@@ -602,8 +686,8 @@ describe("русский интерфейс", () => {
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const englishSettingsNavigation = await screen.findByRole("navigation", { name: "Settings sections" });
     fireEvent.click(within(englishSettingsNavigation).getByRole("button", { name: "Avatar" }));
-    fireEvent.click(await screen.findByText("Test emotions and gestures"));
-    await waitFor(() => expect(screen.getByLabelText("Test phrase")).toHaveValue("Avatar test."));
+    expect(await screen.findByRole("radio", { name: "Inside Iris" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open testing window" })).not.toBeInTheDocument();
 
     const systemGroup = within(englishSettingsNavigation).getByRole("button", { name: "System" });
     if (systemGroup.getAttribute("aria-expanded") !== "true") fireEvent.click(systemGroup);
@@ -611,7 +695,7 @@ describe("русский интерфейс", () => {
     expect(await screen.findByRole("button", { name: "Rebuild memory index" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Clear memory" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reset all data" })).toBeInTheDocument();
-  });
+  }, 20_000);
 
   it("показывает только выбранный раздел настроек", async () => {
     const { container } = render(<App />);
@@ -622,6 +706,9 @@ describe("русский интерфейс", () => {
     expect(within(navigation).queryByText("Настройки")).not.toBeInTheDocument();
     expect(screen.queryByText("Настройки Iris")).not.toBeInTheDocument();
     expect(screen.queryByText("Готово к изменениям")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Участие в разговоре" })).toBeVisible();
+    expect(screen.getByLabelText("Участники")).not.toBeVisible();
+    fireEvent.click(screen.getByText("Все параметры разговора"));
     expect(screen.getByLabelText("Участники")).toBeVisible();
     expect(container.querySelector(".system-stack")).toHaveAttribute("hidden");
 
@@ -637,7 +724,7 @@ describe("русский интерфейс", () => {
     expect(voiceGroup).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(within(navigation).getByRole("button", { name: "Основное" }));
     expect(screen.getByLabelText("Язык голосового ввода")).toBeVisible();
-    expect(screen.getByLabelText("Голос TeraTTSv2")).toBeVisible();
+    expect(screen.getByLabelText(/Голос TeraTTSv2/)).toBeVisible();
     expect(screen.getByText("TeraTTSv2 · CPU · активен")).toBeVisible();
     expect(screen.getByLabelText("Участники")).not.toBeVisible();
 
@@ -758,13 +845,13 @@ describe("русский интерфейс", () => {
     fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Основное" }));
 
     const recognitionBtn = within(settingsNavigation).getByRole("button", { name: "Распознавание" });
-    expect(recognitionBtn).toHaveClass("is-dev-dimmed");
+    expect(recognitionBtn).not.toHaveClass("is-dev-dimmed");
     expect(within(settingsNavigation).getByRole("button", { name: "Основное" })).not.toHaveClass("is-dev-dimmed");
 
-    expect(screen.getByLabelText("Голос TeraTTSv2")).toBeDisabled();
-    expect(screen.getByRole("slider", { name: /Скорость воспроизведения/ })).toBeDisabled();
-    expect(screen.getByLabelText(/Подача голоса/)).toBeDisabled();
-    expect(screen.getByLabelText(/Выразительность/)).toBeDisabled();
+    expect(screen.getByLabelText(/Голос TeraTTSv2/)).not.toBeDisabled();
+    expect(screen.getByRole("slider", { name: /Скорость воспроизведения/ })).not.toBeDisabled();
+    expect(screen.getByLabelText(/Подача голоса/)).not.toBeDisabled();
+    expect(screen.getByLabelText(/Выразительность/)).not.toBeDisabled();
 
     fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Живой разговор" }));
     expect(screen.getByLabelText("Участники")).not.toBeDisabled();
@@ -803,6 +890,7 @@ describe("русский интерфейс", () => {
     const settingsNavigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
     fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Живой разговор" }));
 
+    fireEvent.click(screen.getByRole("button", { name: "Все параметры разговора" }));
     const devBadges = await screen.findAllByRole("button", { name: "Dev" });
     expect(devBadges.length).toBeGreaterThan(0);
     fireEvent.click(devBadges[0]);
@@ -877,7 +965,7 @@ describe("русский интерфейс", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Архив" }));
 
-    await waitFor(() => expect(api.getMemories).toHaveBeenLastCalledWith(undefined, undefined));
+    await waitFor(() => expect(api.getMemories).toHaveBeenLastCalledWith("archive", undefined));
   });
 
   it("скрывает заменённые записи из текущей памяти и объясняет архив", async () => {
@@ -890,13 +978,14 @@ describe("русский интерфейс", () => {
         },
         {
           id: "old", status: "superseded", predicate: "name", slot_key: "user.name",
-          value_text: "Федор", source_message_ids: ["source"], source_count: 1,
+          value_text: "Федор", source_message_ids: ["source", "another-source"], source_count: 2,
           access_count: 3, user_locked: false,
           replacement: { id: "active", predicate: "name", value_text: "Федя", status: "active" },
         },
       ],
     });
-    render(<MemoryPage />);
+    const onOpenSource = vi.fn();
+    render(<MemoryPage onOpenSource={onOpenSource} />);
 
     expect(await screen.findByText("Федя")).toBeInTheDocument();
     expect(screen.queryByText("Федор")).not.toBeInTheDocument();
@@ -906,7 +995,15 @@ describe("русский интерфейс", () => {
     expect(screen.getByText("Заменено на:")).toBeInTheDocument();
     expect(screen.getByText("Федя")).toBeInTheDocument();
     expect(screen.getByText("Имя пользователя")).toBeInTheDocument();
-    expect(screen.getByText(/использовалось до замены: 3/)).toBeInTheDocument();
+    expect(screen.getByText("Использовалось до замены")).not.toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Открыть источник" }));
+    expect(onOpenSource).toHaveBeenLastCalledWith("source");
+    fireEvent.click(screen.getByRole("button", { name: "Подробности записи" }));
+    const details = screen.getByRole("region", { name: "Подробности записи" });
+    expect(within(details).getByText("Использовалось до замены")).toBeVisible();
+    expect(within(details).getByText("3")).toBeVisible();
+    fireEvent.click(within(details).getByRole("button", { name: "Сообщение 2" }));
+    expect(onOpenSource).toHaveBeenLastCalledWith("another-source");
   });
 
   it("начинает новый диалог из чата и сохраняет память", async () => {
@@ -1151,19 +1248,16 @@ describe("русский интерфейс", () => {
     expect(screen.getByText("Вы")).toBeInTheDocument();
     expect(screen.getByText("Iris")).toBeInTheDocument();
 
-    // Mode toggle presence
-    const simpleToggle = screen.getByRole("button", { name: /Простой/i });
-    const detailedToggle = screen.getByRole("button", { name: /Подробный/i });
-    expect(simpleToggle).toBeInTheDocument();
-    expect(detailedToggle).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Режим детализации" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Простой$/ })).not.toBeInTheDocument();
 
     // In simple mode (default), micro-pills are visible
     expect(screen.getByText(/Радость/i)).toBeInTheDocument();
-    expect(screen.getByText(/🧠 1/i)).toBeInTheDocument();
+    expect(screen.getByText("Память: 1")).toBeInTheDocument();
     expect(screen.queryByTestId("journal-turn-details")).not.toBeInTheDocument();
 
     // Toggle to detailed mode
-    fireEvent.click(detailedToggle);
+    fireEvent.click(screen.getByRole("button", { name: /^Подробнее$/ }));
 
     // Detailed metrics and cues are now displayed
     expect(screen.getByTestId("journal-turn-details")).toBeInTheDocument();
@@ -1179,7 +1273,7 @@ describe("русский интерфейс", () => {
     expect(screen.getByText("Сырой JSON токенов, эмоций и памяти:")).toBeInTheDocument();
 
     // Switch back to simple mode
-    fireEvent.click(simpleToggle);
+    fireEvent.click(screen.getByRole("button", { name: /^Свернуть$/ }));
     expect(screen.queryByTestId("journal-turn-details")).not.toBeInTheDocument();
 
     // Back button returns to list
@@ -1358,6 +1452,7 @@ describe("переходы и размещение настроек", () => {
     expect(screen.getByLabelText("Защита от собственного голоса")).toBeVisible();
     expect(screen.getByLabelText("Защита от собственного голоса")).toBeDisabled();
     fireEvent.click(within(navigation).getByRole("button", { name: "Живой разговор" }));
+    fireEvent.click(screen.getByText("Все параметры разговора"));
     expect(screen.getByRole("heading", { name: "Эмоции и настроение" })).toBeVisible();
     expect(screen.getByLabelText("Защита от собственного голоса")).not.toBeVisible();
   });

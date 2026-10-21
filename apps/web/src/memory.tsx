@@ -1,6 +1,8 @@
+import type { SearchFocus } from "./search-navigation";
 import { LoadingRing } from "./components/LoadingRing";
 import { MemeLibraryPanel } from "./meme-library";
 import { MaterialButton } from "./components/MaterialButton";
+import { RemindersPanel } from "./components/RemindersPanel";
 import {
   IconCitiesPoliticsVote,
   IconComputerDatabase,
@@ -26,8 +28,15 @@ import {
 } from "./CustomIcons";
 import { CustomSelect } from "./components/CustomSelect";
 import { AppDialog } from "./components/AppDialog";
-import { MoreHorizontal, X } from "lucide-react";
-import { startTransition, useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
+import {
+  IconInterfaceArrowUpRight as ArrowUpRight,
+  IconInterfaceChevronDown as ChevronDown,
+  IconInterfaceClock as Clock3,
+  IconMailChatBubbleTextSquare as MessagesSquare,
+  IconInterfaceMore as MoreHorizontal,
+  IconInterfaceCross as X,
+} from "./CustomIcons";
+import { startTransition, useEffect, useId, useRef, useState, type ComponentType, type ReactNode } from "react";
 
 import {
   deleteMemory,
@@ -38,7 +47,6 @@ import {
   getMemoryConflicts,
   getMemoryDiagnostics,
   getMemoryTopics,
-  closeMemoryCommitment,
   restoreMemory,
   updateMemory,
 } from "./api";
@@ -56,6 +64,8 @@ import {
   animatePageEnter,
   animateStaggerCards,
   animateTabSwitch,
+  animate,
+  prefersReducedMotion,
   useAnimeScope,
 } from "./animations";
 import { currentInterfaceLocale, interfaceIntlLocale } from "./i18n";
@@ -198,6 +208,64 @@ function formatMemoryDate(dateString?: string | null, id?: string | null) {
   return `${dateStr}, ${timeStr}`;
 }
 
+function memorySourceCount(count: number): string {
+  if (currentInterfaceLocale() === "en") return `${count} ${count === 1 ? "message" : "messages"}`;
+  const last = count % 10, lastTwo = count % 100;
+  const word = last === 1 && lastTwo !== 11 ? "сообщение" : last >= 2 && last <= 4 && (lastTwo < 12 || lastTwo > 14) ? "сообщения" : "сообщений";
+  return `${count} ${word}`;
+}
+
+function MemoryRecordFooter({ memory, archived, onOpenSource }: {
+  memory: MemoryItem; archived: boolean; onOpenSource?: (id: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const detailsId = useId();
+  const detailsRef = useRef<HTMLDivElement>(null);
+  const sourceIds = [...new Set(memory.source_message_ids ?? [])];
+  const sourceCount = memory.source_count ?? sourceIds.length;
+  const createdAt = formatMemoryDate(memory.created_at, memory.id);
+  const preciseDate = (value: string) => {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? undefined : date.toLocaleString(interfaceIntlLocale(), { dateStyle: "long", timeStyle: "short" });
+  };
+  useEffect(() => {
+    if (!expanded || !detailsRef.current || prefersReducedMotion()) return;
+    const motion = animate(detailsRef.current, { opacity: [0, 1], translateY: [-4, 0], duration: 180, ease: "outQuad" });
+    return () => { motion.revert(); };
+  }, [expanded]);
+
+  return <div className="memory-record-footer">
+    <div className="memory-record-meta">
+      {createdAt && <time dateTime={memory.created_at || undefined} title={preciseDate(memory.created_at)} data-i18n-skip>
+        <Clock3 size={14} aria-hidden="true" />{createdAt}
+      </time>}
+      <span><MessagesSquare size={14} aria-hidden="true" />{sourceCount > 0 ? <span data-i18n-skip>{memorySourceCount(sourceCount)}</span> : "Источник не указан"}</span>
+    </div>
+    <div className="memory-record-controls">
+      {sourceIds.length > 0 && onOpenSource && <MaterialButton materialKey={`memory.source.${memory.id}`} className="secondary memory-source-button" type="button" onClick={() => onOpenSource(sourceIds[0])}>
+        <MessagesSquare size={16} aria-hidden="true" />Открыть источник<ArrowUpRight size={14} aria-hidden="true" />
+      </MaterialButton>}
+      <MaterialButton materialKey={`memory.details.${memory.id}`} className="secondary memory-details-toggle" type="button" aria-expanded={expanded} aria-controls={detailsId} onClick={() => setExpanded(value => !value)}>
+        Подробности записи<ChevronDown size={16} aria-hidden="true" />
+      </MaterialButton>
+    </div>
+    <div className="memory-record-details" id={detailsId} ref={detailsRef} hidden={!expanded} role="region" aria-label="Подробности записи">
+      <dl className="memory-record-facts">
+        {createdAt && <div><dt>Создана</dt><dd data-i18n-skip>{preciseDate(memory.created_at) || createdAt}</dd></div>}
+        {memory.updated_at && preciseDate(memory.updated_at) !== preciseDate(memory.created_at) && <div><dt>Обновлена</dt><dd data-i18n-skip>{preciseDate(memory.updated_at) || formatMemoryDate(memory.updated_at)}</dd></div>}
+        <div><dt>{archived ? "Использовалось до замены" : "Использовано"}</dt><dd>{memory.access_count ?? 0}</dd></div>
+      </dl>
+      {archived && <p className="memory-archive-reason">{memory.status === "superseded" ? "Прежний факт заменён более новым." : memory.status === "rejected" ? "Предложение отклонено пользователем." : "Запись перенесена в архив и не используется как текущий факт."}</p>}
+      {expanded && sourceIds.length > 1 && onOpenSource && <div className="memory-record-sources">
+        <h4>Источники</h4>
+        <div>{sourceIds.map((id, index) => <MaterialButton materialKey={`memory.source.${memory.id}.${id}`} className="secondary" type="button" key={id} onClick={() => onOpenSource(id)}>
+          <MessagesSquare size={14} aria-hidden="true" /><span data-i18n-skip>{currentInterfaceLocale() === "en" ? `Message ${index + 1}` : `Сообщение ${index + 1}`}</span><ArrowUpRight size={14} aria-hidden="true" />
+        </MaterialButton>)}</div>
+      </div>}
+    </div>
+  </div>;
+}
+
 /** Closed menus should not mount five material controls for every record. */
 function MemoryActionMenu({ children }: { children: ReactNode }) {
   const [prepared, setPrepared] = useState(false);
@@ -211,11 +279,16 @@ function MemoryActionMenu({ children }: { children: ReactNode }) {
   </details>;
 }
 
-export function MemoryPage({ developerMode = false }: { developerMode?: boolean }) {
+export function MemoryPage({ developerMode = false, focusRequest, onOpenSource }: { developerMode?: boolean; focusRequest?: SearchFocus; onOpenSource?: (id: string) => void }) {
   const [loading, setLoading] = useState(true);
+  const [focusApplied, setFocusApplied] = useState("");
+  const focused = useRef("");
   const requestRevision = useRef(0);
   const loadedSection = useRef<MemorySection | null>(null);
   const [items, setItems] = useState<MemoryItem[]>([]);
+  const [nextOffset, setNextOffset] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadedQuery = useRef("");
   const [topics, setTopics] = useState<MemoryTopic[]>([]);
   const [commitments, setCommitments] = useState<MemoryCommitment[]>([]);
   const [conflicts, setConflicts] = useState<Array<{ id: string; reason: string; status: string }>>([]);
@@ -228,7 +301,16 @@ export function MemoryPage({ developerMode = false }: { developerMode?: boolean 
   const [pendingDeleteMemory, setPendingDeleteMemory] = useState<MemoryItem | null>(null);
   const [pendingEditMemory, setPendingEditMemory] = useState<MemoryItem | null>(null);
   const [editedValue, setEditedValue] = useState("");
-  useEffect(() => { if (!developerMode && section === "memes") setSection("all"); }, [developerMode, section]);
+  useEffect(() => {
+    if (!focusRequest) return;
+    setSection(focusRequest.section || "all"); setQuery(focusRequest.query); setFocusApplied(focusRequest.requestId);
+  }, [focusRequest]);
+  useEffect(() => {
+    if (loading || !focusRequest || focused.current === focusRequest.requestId) return;
+    const target = document.getElementById(`memory-record-${focusRequest.id}`);
+    if (target) { target.classList.add("search-focus-target"); target.tabIndex = -1; target.scrollIntoView?.({ block: "center", behavior: "instant" }); target.focus({ preventScroll: true }); focused.current = focusRequest.requestId; }
+  }, [items, commitments, loading, focusApplied, focusRequest]);
+  useEffect(() => { if (!developerMode && (section === "memes" || section === "diagnostics")) setSection("all"); }, [developerMode, section]);
 
   const containerRef = useAnimeScope<HTMLElement>((scope, root) => {
     animatePageEnter(root);
@@ -241,7 +323,7 @@ export function MemoryPage({ developerMode = false }: { developerMode?: boolean 
     if (contentRef.current) {
       animatePageEnter(contentRef.current);
     }
-  }, [section]);
+  }, [section, focusApplied]);
 
   useEffect(() => {
     if (!loading && listRef.current) {
@@ -249,21 +331,25 @@ export function MemoryPage({ developerMode = false }: { developerMode?: boolean 
     }
   }, [loading, section, items, topics, commitments, diagnostics, conflicts]);
 
-  const refresh = async () => {
+  const refresh = async (searchQuery = query) => {
     const revision = ++requestRevision.current;
+    setLoadingMore(false);
+    setNextOffset(null);
     if (loadedSection.current !== section) setLoading(true);
     try {
       if (section === "memes") return;
       if (section === "topics") {
-        const response = await getMemoryTopics();
+        const response = await getMemoryTopics(searchQuery || undefined);
         if (revision !== requestRevision.current) return;
+        loadedQuery.current = searchQuery;
         setTopics(response.items);
         setMessage(null);
         return;
       }
       if (section === "commitments") {
-        const response = await getMemoryCommitments();
+        const response = await getMemoryCommitments(undefined, searchQuery || undefined);
         if (revision !== requestRevision.current) return;
+        loadedQuery.current = searchQuery;
         setCommitments(response.items);
         setMessage(null);
         return;
@@ -277,16 +363,13 @@ export function MemoryPage({ developerMode = false }: { developerMode?: boolean 
         return;
       }
       const result = await getMemories(
-        section === "all" || section === "archive" ? undefined : section,
-        query || undefined,
+        section === "all" ? "active" : section,
+        searchQuery || undefined,
       );
       if (revision !== requestRevision.current) return;
-      const nextItems =
-        section === "archive"
-          ? result.items.filter((item) => item.status !== "active")
-          : section === "all"
-            ? result.items.filter((item) => item.status === "active")
-            : result.items;
+      const nextItems = result.items.filter(item => section === "archive" ? item.status !== "active" : item.status === "active");
+      loadedQuery.current = searchQuery;
+      setNextOffset(result.next_offset ?? null);
       startTransition(() => setItems(current => JSON.stringify(current) === JSON.stringify(nextItems) ? current : nextItems));
       setMessage(null);
     } catch (error) {
@@ -296,10 +379,26 @@ export function MemoryPage({ developerMode = false }: { developerMode?: boolean 
     }
   };
 
+  const loadMore = async () => {
+    if (nextOffset === null || loadingMore) return;
+    const revision = requestRevision.current;
+    setLoadingMore(true);
+    try {
+      const result = await getMemories(section === "all" ? "active" : section, loadedQuery.current || undefined, nextOffset);
+      if (revision !== requestRevision.current) return;
+      setItems(current => [...new Map([...current, ...result.items].map(item => [item.id, item])).values()]);
+      setNextOffset(result.next_offset ?? null);
+    } catch (error) {
+      if (revision === requestRevision.current) setMessage(error instanceof Error ? error.message : "Память недоступна");
+    } finally {
+      if (revision === requestRevision.current) setLoadingMore(false);
+    }
+  };
+
   useEffect(() => {
     void refresh();
     return () => { requestRevision.current += 1; };
-  }, [section]);
+  }, [section, focusApplied]);
 
   const action = async (run: () => Promise<unknown>, successMsg?: string) => {
     try {
@@ -360,7 +459,7 @@ export function MemoryPage({ developerMode = false }: { developerMode?: boolean 
   return (
     <section className="memory-panel" ref={containerRef}>
       <nav className="settings-navigation memory-navigation" aria-label="Разделы памяти">
-        {[...MEMORY_SECTIONS, ...(developerMode ? [{ id: "memes" as const, label: "Мемотека", icon: IconEntertainmentGamingEsports }] : [])].map(({ id, label, icon: Icon }) => (
+        {[...MEMORY_SECTIONS.filter(item => developerMode || item.id !== "diagnostics"), ...(developerMode ? [{ id: "memes" as const, label: "Мемотека", icon: IconEntertainmentGamingEsports }] : [])].map(({ id, label, icon: Icon }) => (
           <MaterialButton materialKey={["memory.button-1", id].join(":")}
             key={id}
             type="button"
@@ -378,6 +477,13 @@ export function MemoryPage({ developerMode = false }: { developerMode?: boolean 
       </nav>
 
       <div className="memory-content" ref={contentRef}>
+        {section !== "commitments" && <p className="memory-section-description">{({
+          all: "Все актуальные сведения, которые Iris извлекла из разговоров.",
+          active: "Сохранённые факты профиля. Закреплённые записи отмечены закладкой.",
+          topics: "Общие темы: краткое содержание и связанные сведения.",
+          archive: "Заменённые, истёкшие и удалённые записи. Здесь можно проверить причину и замену.",
+          diagnostics: "Состояние индексов и извлечения памяти.", memes: "Библиотека выражений и контекст их использования.",
+        } as Record<string,string>)[section]}</p>}
         {section === "memes" && developerMode ? <MemeLibraryPanel /> : <>
         <header className="memory-heading">
           <div className="memory-toolbar">
@@ -401,7 +507,7 @@ export function MemoryPage({ developerMode = false }: { developerMode?: boolean 
                   className="search-clear-btn"
                   onClick={() => {
                     setQuery("");
-                    void refresh();
+                    void refresh("");
                   }}
                   aria-label="Очистить"
                 >
@@ -474,14 +580,7 @@ export function MemoryPage({ developerMode = false }: { developerMode?: boolean 
                       <p data-i18n-skip>
                         {topic.summary_text || "Краткое описание ещё не сформировано."}
                       </p>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: "8px", marginTop: "auto" }}>
-                        <small>Связи: {topic.links.length} · доказательства: {topic.evidence.length}</small>
-                      </div>
-                      {formatMemoryDate((topic as any).created_at, topic.id) && (
-                        <small style={{ position: "absolute", bottom: "14px", right: "18px", color: "var(--color-text-soft)", whiteSpace: "nowrap" }}>
-                          {formatMemoryDate((topic as any).created_at, topic.id)}
-                        </small>
-                      )}
+                      <div className="memory-provenance"><small>{formatMemoryDate((topic as any).created_at, topic.id)}</small><details><summary>Связи и основания</summary><p>Связи: {topic.links.length} · доказательства: {topic.evidence.length}</p></details></div>
                     </div>
                   </article>
                 ))
@@ -495,61 +594,7 @@ export function MemoryPage({ developerMode = false }: { developerMode?: boolean 
             </>
           )}
 
-          {section === "commitments" && (
-            <>
-              {sortedCommitments.length ? (
-                sortedCommitments.map((commitment) => (
-                  <article className="memory-card" key={commitment.id}>
-                    <div className="memory-card-main">
-                      <div className="memory-card-heading">
-                        <div className="memory-card-label">
-                          <IconInterfaceCalendarMark size={14} aria-hidden="true" />
-                          <strong>{commitment.kind || "План"}</strong>
-                        </div>
-                        <div className="memory-heading-badges">
-                          <span className={`memory-status ${commitment.status === "open" ? "active" : "deleted"}`}>
-                            {commitment.status}
-                          </span>
-                        </div>
-                      </div>
-                      <strong data-i18n-skip>
-                        {commitment.title}
-                      </strong>
-                      <p data-i18n-skip>
-                        {commitment.details}
-                      </p>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: "8px", marginTop: "auto" }}>
-                        <small>{commitment.kind} · уверенность: {Math.round(commitment.confidence * 100)}%</small>
-                      </div>
-                      {formatMemoryDate((commitment as any).created_at, commitment.id) && (
-                        <small style={{ position: "absolute", bottom: "14px", right: "18px", color: "var(--color-text-soft)", whiteSpace: "nowrap" }}>
-                          {formatMemoryDate((commitment as any).created_at, commitment.id)}
-                        </small>
-                      )}
-                    </div>
-                    {commitment.status === "open" && (
-                      <div className="memory-actions">
-                        <MaterialButton materialKey={["memory.button-5", commitment.id].join(":")}
-                          className="secondary memory-close-btn"
-                          type="button"
-                          onClick={() => void action(() => closeMemoryCommitment(commitment.id), "Обязательство закрыто.")}
-                          title="Отметить выполненным"
-                        >
-                          Завершить
-                        </MaterialButton>
-                      </div>
-                    )}
-                  </article>
-                ))
-              ) : (
-                <div className="empty-state">
-                  <IconInterfaceCalendarMark size={28} aria-hidden="true" />
-                  <strong>Планов и обещаний пока нет</strong>
-                  <span>Договорённости и задачи из разговоров появятся здесь автоматически.</span>
-                </div>
-              )}
-            </>
-          )}
+          {section === "commitments" && <RemindersPanel plans={sortedCommitments} query={loadedQuery.current} sortOrder={sortOrder} onChanged={() => void refresh()} />}
 
           {section === "diagnostics" && (
             <>
@@ -744,9 +789,8 @@ export function MemoryPage({ developerMode = false }: { developerMode?: boolean 
               {sortedItems.length ? (
                 sortedItems.map((memory) => {
                   const SlotIcon = getSlotIcon(memory);
-                  const createdAt = formatMemoryDate(memory.created_at, memory.id);
                   return (
-                    <article className="memory-card" key={memory.id}>
+                    <article className="memory-card memory-fact-card" id={`memory-record-${memory.id}`} key={memory.id}>
                       <div className="memory-card-main">
                         <div className="memory-card-heading">
                           <div className="memory-card-label">
@@ -763,7 +807,7 @@ export function MemoryPage({ developerMode = false }: { developerMode?: boolean 
                           </div>
                         </div>
 
-                        <p data-i18n-skip>
+                        <p className="memory-fact-value" data-i18n-skip>
                           {memory.value_text}
                         </p>
 
@@ -774,20 +818,7 @@ export function MemoryPage({ developerMode = false }: { developerMode?: boolean 
                           </p>
                         )}
 
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: "8px", marginTop: "auto" }}>
-                          <small>
-                            {(memory.source_count ?? memory.source_message_ids.length)
-                              ? `Источник: ${memory.source_count ?? memory.source_message_ids.length} сообщ.`
-                              : "Источник не указан"}{" "}
-                            · {section === "archive" ? "использовалось до замены" : "использовано"}:{" "}
-                            {memory.access_count}
-                          </small>
-                        </div>
-                        {createdAt && (
-                          <small style={{ position: "absolute", bottom: "14px", right: "18px", color: "var(--color-text-soft)", whiteSpace: "nowrap" }}>
-                            {createdAt}
-                          </small>
-                        )}
+                        <MemoryRecordFooter memory={memory} archived={section === "archive"} onOpenSource={onOpenSource} />
                       </div>
 
                       <div className="memory-actions">
@@ -795,7 +826,8 @@ export function MemoryPage({ developerMode = false }: { developerMode?: boolean 
                           <div>
                             <MaterialButton materialKey={["memory.button-6", memory.id].join(":")}
                               type="button"
-                              onClick={async () => {
+                              onClick={async (event) => {
+                                event.currentTarget.closest("details")?.removeAttribute("open");
                                 const nextAudit = await getMemoryAudit(memory.id);
                                 setAudit((current) => ({ ...current, [memory.id]: nextAudit.items }));
                               }}
@@ -881,6 +913,9 @@ export function MemoryPage({ developerMode = false }: { developerMode?: boolean 
                   <span>Помощник предложит факты для сохранения после разговора.</span>
                 </div>
               )}
+              {nextOffset !== null && <MaterialButton materialKey="memory.load-more" type="button" disabled={loadingMore} onClick={() => void loadMore()}>
+                {loadingMore ? "Загрузка…" : "Загрузить ещё"}
+              </MaterialButton>}
             </>
           )}
         </div>

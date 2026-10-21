@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { ExternalLink } from "lucide-react";
+import {
+  IconInterfaceExternalLink as ExternalLink,
+} from "../CustomIcons";
 import {
   checkSearchProvider, getSettings, removeDesktopApiKey, removeDesktopCodingApiKey,
   removeDesktopSearchApiKey, saveDesktopApiKey, saveDesktopCodingApiKey, saveDesktopSearchApiKey,
@@ -28,8 +30,8 @@ const DETAILS: Record<Credential, { title: string; label: string; description: s
   serper: { title: "Serper API", label: "API-ключ Serper", description: "Сервис сейчас не используется. Ранее сохранённый ключ можно удалить." },
 };
 
-export function ApiKeysSettings({ settings, active, onSettingsChanged }:
-  { settings: PublicSettings; active: boolean; onSettingsChanged: (settings: PublicSettings) => void }) {
+export function ApiKeysSettings({ settings, active, onSettingsChanged, only, idPrefix = "" }:
+  { settings: PublicSettings; active: boolean; onSettingsChanged: (settings: PublicSettings) => void; only?: CredentialTarget[]; idPrefix?: string }) {
   const [inputs, setInputs] = useState<Partial<Record<Credential, string>>>({});
   const [messages, setMessages] = useState<Partial<Record<Credential, { text: string; error?: boolean }>>>({});
   const [busy, setBusy] = useState<Credential | null>(null);
@@ -95,15 +97,15 @@ export function ApiKeysSettings({ settings, active, onSettingsChanged }:
   return <>
     {!desktop && <div className="notice" role="status">Управление ключами доступно в установленном приложении Iris.</div>}
     {(["deepseek", "coding", "tavily", "brave", "serper"] as Credential[]).filter(kind =>
-      kind !== "brave" && kind !== "serper" || configured(kind)).map(kind => {
+      (kind !== "brave" && kind !== "serper" || configured(kind)) && (!only || only.includes(kind as CredentialTarget))).map(kind => {
       const detail = DETAILS[kind];
       const legacy = kind === "brave" || kind === "serper";
       const hasKey = configured(kind);
       const result = messages[kind];
-      return <section className="settings-card settings-credential-card" key={kind} aria-labelledby={`credential-${kind}`}>
+      return <section className="settings-card settings-credential-card" key={kind} aria-labelledby={`${idPrefix}credential-${kind}`}>
         <div className="settings-card-header">
           <div className="settings-card-header-main"><div className="settings-card-title-group">
-            <h3 className="settings-card-title settings-target-heading" id={`credential-${kind}`} tabIndex={-1}>{detail.title}</h3>
+            <h3 className="settings-card-title settings-target-heading" id={`${idPrefix}credential-${kind}`} tabIndex={-1}>{detail.title}</h3>
             <p className="settings-card-subtitle">{detail.description}</p>
           </div></div>
           <div className="settings-card-header-actions">
@@ -112,8 +114,8 @@ export function ApiKeysSettings({ settings, active, onSettingsChanged }:
             </span>
           </div>
         </div>
-        {!legacy && <label htmlFor={`${kind}-api-key-input`}>
-          <input id={`${kind}-api-key-input`} type="password" autoComplete="new-password"
+        {!legacy && <label htmlFor={`${idPrefix}${kind}-api-key-input`}>
+          <input id={`${idPrefix}${kind}-api-key-input`} type="password" autoComplete="new-password"
             aria-label={detail.label}
             value={inputs[kind] ?? ""} disabled={Boolean(busy) || !desktop}
             onChange={event => setInputs(current => ({ ...current, [kind]: event.target.value }))}

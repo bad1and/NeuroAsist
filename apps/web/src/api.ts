@@ -98,7 +98,7 @@ export function voiceInputWebSocketUrl(sessionId: string, version: 3 = 3): strin
   return `${base}/ws/voice-input/${encodeURIComponent(sessionId)}?version=${version}${token ? `&token=${encodeURIComponent(token)}` : ""}`;
 }
 
-async function requestJson<T>(
+export async function requestJson<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
@@ -402,11 +402,22 @@ export function clearTimelineHistory(): Promise<{ deleted: number }> {
   return requestJson("/timeline/history", { method: "DELETE" });
 }
 
-export function getMemories(status?: string, query?: string): Promise<{ items: MemoryItem[] }> {
+export function getMemories(status?: string, query?: string, offset = 0): Promise<{ items: MemoryItem[]; next_offset?: number | null }> {
   const params = new URLSearchParams();
   if (status) params.set("status", status);
   if (query) params.set("q", query);
+  if (offset > 0) params.set("offset", String(offset));
   return requestJson(`/memory${params.size ? `?${params}` : ""}`);
+}
+
+export async function getVoicePreview(signal: AbortSignal): Promise<Blob> {
+  const response = await fetch(`${API_BASE_URL}/voice/preview`, { method: "POST", signal,
+    headers: DESKTOP_RUNTIME?.apiToken ? { "X-NeuroAsist-Token": DESKTOP_RUNTIME.apiToken } : {} });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(typeof error.detail === "string" ? error.detail : "Проба голоса недоступна");
+  }
+  return response.blob();
 }
 
 export function getMemeLibrary(): Promise<{ items: MemeCard[]; limit: number }> {
@@ -478,12 +489,15 @@ export function updateSttTerms(terms: Record<string, string[]>): Promise<{ terms
   });
 }
 
-export function getMemoryTopics(): Promise<{ items: MemoryTopic[] }> {
-  return requestJson("/memory/topics");
+export function getMemoryTopics(query?: string): Promise<{ items: MemoryTopic[] }> {
+  return requestJson(`/memory/topics${query ? `?q=${encodeURIComponent(query)}` : ""}`);
 }
 
-export function getMemoryCommitments(status?: string): Promise<{ items: MemoryCommitment[] }> {
-  return requestJson(`/memory/commitments${status ? `?status=${encodeURIComponent(status)}` : ""}`);
+export function getMemoryCommitments(status?: string, query?: string): Promise<{ items: MemoryCommitment[] }> {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  if (query) params.set("q", query);
+  return requestJson(`/memory/commitments${params.size ? `?${params}` : ""}`);
 }
 
 export function closeMemoryCommitment(id: string): Promise<{ commitment: MemoryCommitment }> {

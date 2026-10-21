@@ -1,11 +1,15 @@
 import { SlidingSegments } from "./components/SlidingSegments";
 import { LoadingRing } from "./components/LoadingRing";
 import { MaterialButton } from "./components/MaterialButton";
+import { PatchReview } from "./components/PatchReview";
 import { CustomSelect } from "./components/CustomSelect";
 import { AppSwitch } from "./components/AppSwitch";
 import { AppDialog } from "./components/AppDialog";
 import { InfoRow } from "./components/InfoRow";
-import { ChevronLeft, X } from "lucide-react";
+import {
+  IconInterfaceChevronLeft as ChevronLeft,
+  IconInterfaceCross as X,
+} from "./CustomIcons";
 import { notify } from "./notifications";
 import {
   IconProgrammingScript2,
@@ -119,6 +123,9 @@ export function CodingAgentPage({
   const [tasks, setTasks] = useState<CodingTask[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<CodingTask | null>(null);
+  const [loadedTaskId, setLoadedTaskId] = useState<string | null>(null);
+  const selectionRef = useRef(selectedId);
+  selectionRef.current = selectedId;
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -180,11 +187,20 @@ export function CodingAgentPage({
   }, [events, refresh]);
 
   useEffect(() => {
+    let current = true;
+    setLoadedTaskId(null);
     if (!selectedId) {
       setSelected(null);
       return;
     }
-    void getCodingTask(selectedId).then(setSelected).catch(() => setSelected(null));
+    void getCodingTask(selectedId).then(task => {
+      if (!current || selectionRef.current !== selectedId || task.id !== selectedId) return;
+      setSelected(task);
+      setLoadedTaskId(task.id);
+    }).catch(() => {
+      if (current && selectionRef.current === selectedId) setSelected(null);
+    });
+    return () => { current = false; };
   }, [selectedId, tasks]);
 
   useEffect(() => {
@@ -274,11 +290,14 @@ export function CodingAgentPage({
   };
 
   const act = async (operation: () => Promise<CodingTask>) => {
+    const taskId = selected?.id;
+    if (busy || !taskId || loadedTaskId !== taskId || selectionRef.current !== taskId) return;
     setBusy(true);
     try {
       const task = await operation();
-      setSelected(task);
-      setSelectedId(task.id);
+      if (selectionRef.current === taskId && task.id === taskId) {
+        setSelected(task);
+      }
       await refresh();
     } catch (cause) {
       const msg = cause instanceof Error ? cause.message : "Операция не выполнена.";
@@ -374,7 +393,7 @@ export function CodingAgentPage({
                       <MaterialButton materialKey={"coding.button-3"}
                         className="danger-button"
                         type="button"
-                        disabled={busy}
+                        disabled={busy || loadedTaskId !== selected.id || selectedId !== selected.id}
                         onClick={(e) => {
                           animateButtonPress(e.currentTarget);
                           void act(() => cancelCodingTask(selected.id));
@@ -387,7 +406,7 @@ export function CodingAgentPage({
                       <MaterialButton materialKey={"coding.button-4"}
                         className="secondary"
                         type="button"
-                        disabled={busy}
+                        disabled={busy || loadedTaskId !== selected.id || selectedId !== selected.id}
                         onClick={(e) => {
                           animateButtonPress(e.currentTarget);
                           void act(() => retryCodingTask(selected.id));
@@ -400,7 +419,7 @@ export function CodingAgentPage({
                       <MaterialButton materialKey={"coding.button-5"}
                         className="primary-button"
                         type="button"
-                        disabled={busy}
+                        disabled={busy || loadedTaskId !== selected.id || selectedId !== selected.id}
                         onClick={(e) => {
                           animateButtonPress(e.currentTarget);
                           void act(() => applyCodingTask(selected.id));
@@ -476,7 +495,7 @@ export function CodingAgentPage({
                     <summary>
                       <IconInterfaceFilesFolderCopy2 size={16} /> Diff и изменённые файлы
                     </summary>
-                    <pre>{selected.patch_text}</pre>
+                    <PatchReview patch={selected.patch_text} />
                   </details>
                 )}
 
@@ -530,12 +549,12 @@ export function CodingAgentPage({
                         value={instruction}
                         onChange={(event) => setInstruction(event.target.value)}
                         placeholder="Например: проверь также обработку пустой строки или добавь комментарии к коду"
-                        disabled={busy || !ACTIVE_TASKS.has(selected.status)}
+                        disabled={busy || loadedTaskId !== selected.id || selectedId !== selected.id || !ACTIVE_TASKS.has(selected.status)}
                       />
                       <MaterialButton materialKey={"coding.button-6"}
                         className="secondary"
                         type="submit"
-                        disabled={busy || !ACTIVE_TASKS.has(selected.status) || !instruction.trim()}
+                        disabled={busy || loadedTaskId !== selected.id || selectedId !== selected.id || !ACTIVE_TASKS.has(selected.status) || !instruction.trim()}
                       >
                         Отправить указание
                       </MaterialButton>
@@ -557,6 +576,7 @@ export function CodingAgentPage({
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                     <MaterialButton materialKey={"coding.button-7"}
+                      hidden={tasks.length === 0}
                       className="primary-button"
                       type="button"
                       onClick={(e) => {
@@ -567,6 +587,7 @@ export function CodingAgentPage({
                       <IconInterfaceCursorArrow2 size={16} /> Новая задача
                     </MaterialButton>
                     <MaterialButton materialKey={"coding.button-8"}
+                      hidden={tasks.length === 0}
                       className="secondary"
                       type="button"
                       disabled={busy || tasks.length === 0 || Boolean(active)}
@@ -581,7 +602,7 @@ export function CodingAgentPage({
                   </div>
                 </header>
 
-                <div className="coding-toolbar">
+                <div className="coding-toolbar" hidden={tasks.length === 0}>
                   <form
                     className="search-form compact coding-search-form"
                     onSubmit={(e) => {

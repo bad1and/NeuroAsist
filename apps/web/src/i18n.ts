@@ -1,6 +1,7 @@
 import { useLayoutEffect } from "react";
 
 import type { InterfaceLocale } from "./types";
+import { PRODUCT_TRANSLATIONS } from "./product-translations";
 
 export const INTERFACE_LOCALE_STORAGE_KEY = "iris.interface.locale";
 export const INTERFACE_LOCALE_CHANGED_EVENT = "iris-interface-locale-changed";
@@ -13,6 +14,12 @@ type TranslationPair = readonly [ru: string, en: string];
 // chrome; user messages, memories, event payloads, and Iris replies are
 // excluded by `data-i18n-skip` at their render sites.
 const RU_TO_EN: readonly TranslationPair[] = [
+  ...PRODUCT_TRANSLATIONS,
+  ["Загрузить ещё", "Load more"],
+  ["Загрузка…", "Loading…"],
+  ["Соединение прервано. Восстанавливаем связь с Ирис.", "Connection interrupted. Reconnecting to Iris."],
+  ["Предыдущий ответ был прерван. Его сохранённая часть восстановлена.", "The previous reply was interrupted. Its saved part has been restored."],
+  ["Не удалось восстановить ответ. Проверьте историю диалога.", "The reply could not be restored. Check the conversation history."],
   ["Не удалось запустить обработку звука. Перезапустите Iris и попробуйте ещё раз.", "Audio processing could not start. Restart Iris and try again."],
   ["Общий объём моделей", "Total model size"],
   ["Проверьте папку перед загрузкой.", "Check the folder before downloading."],
@@ -1097,15 +1104,17 @@ function localizeAddedNode(node: Node, locale: InterfaceLocale): void {
 export function useInterfaceLocale(locale: InterfaceLocale): void {
   useLayoutEffect(() => {
     document.documentElement.lang = locale;
-    // Vite mounts Iris into #root. Falling back to body also keeps embedded
-    // hosts and UI tests localized when they provide their own mount node.
-    const root = document.getElementById("root") ?? document.body;
+    // Dialogs and popovers are portaled beside #root. Observe the same DOM
+    // surface that contains both the app and its portals; skip markers still
+    // protect user content and source text.
+    const root = document.body;
     localizeRoot(root, locale);
     const pendingNodes = new Set<Node>();
     let scheduled = false;
+    let active = true;
     const applyPending = () => {
       scheduled = false;
-      pendingNodes.forEach((node) => localizeAddedNode(node, locale));
+      if (active) pendingNodes.forEach((node) => { if (node.isConnected) localizeAddedNode(node, locale); });
       pendingNodes.clear();
     };
     const observer = new MutationObserver((records) => {
@@ -1123,6 +1132,6 @@ export function useInterfaceLocale(locale: InterfaceLocale): void {
       queueMicrotask(applyPending);
     });
     observer.observe(root, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: LOCALIZED_ATTRIBUTES });
-    return () => observer.disconnect();
+    return () => { active = false; pendingNodes.clear(); observer.disconnect(); };
   }, [locale]);
 }

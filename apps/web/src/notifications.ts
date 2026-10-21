@@ -272,6 +272,12 @@ export const notify = {
 };
 
 export function notifyBackendEvent(event: BackendEvent, openModels?: () => void): void {
+  if (event.type === "reminder.created") {
+    const title = typeof event.metadata.title === "string" ? event.metadata.title : "Напоминание";
+    const due = typeof event.metadata.due_at === "string" ? new Date(event.metadata.due_at).toLocaleString() : "";
+    notify.success("Напоминание сохранено", `${title}${due ? ` · ${due}` : ""}`, { id: `reminder.created.${event.metadata.id}`, navigateView: "reminders" });
+    return;
+  }
   if (event.type === "models.installed" || event.type === "models.download_failed") {
     const options = { id: `models.${event.metadata.model_id}`, actions: openModels ? [{ label: "Открыть модели", onClick: openModels }] : undefined };
     if (event.type === "models.installed") notify.success("Модели", "Модель загружена и проверена.", options);

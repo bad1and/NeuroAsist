@@ -8,7 +8,8 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { getMemories, getTimelineJournal } from "./api";
-import type { AvatarStatusResponse, MemoryItem, StatusResponse, TimelineJournalItem } from "./types";
+import type { AvatarStatusResponse, MemoryItem, ReadinessResponse, StatusResponse, TimelineJournalItem } from "./types";
+import { getReminders, type Reminder } from "./product-api";
 import { LoadingRing } from "./components/LoadingRing";
 import { notify } from "./notifications";
 import { interfaceIntlLocale } from "./i18n";
@@ -45,20 +46,26 @@ function formatRelative(value: string): string {
 export function OverviewPage({
   status,
   avatarStatus,
+  readiness,
   onOpenChat,
   onOpenHistory,
   onOpenMemory,
   onOpenSettings,
+  onOpenPlans,
 }: {
   status: StatusResponse | null;
   avatarStatus: AvatarStatusResponse | null;
+  readiness?: ReadinessResponse | null;
   onOpenChat: () => void;
   onOpenHistory: () => void;
   onOpenMemory: () => void;
   onOpenSettings: () => void;
+  onOpenPlans?: () => void;
 }) {
   const [journal, setJournal] = useState<TimelineJournalItem[]>([]);
   const [memories, setMemories] = useState<MemoryItem[]>([]);
+  const [hasMoreMemories, setHasMoreMemories] = useState(false);
+  const [reminder, setReminder] = useState<Reminder | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -110,9 +117,11 @@ export function OverviewPage({
   const refresh = async () => {
     setLoading(true);
     try {
-      const [history, memory] = await Promise.all([getTimelineJournal(), getMemories()]);
+      const [history, memory] = await Promise.all([getTimelineJournal(), getMemories("active")]);
       setJournal(history.items);
+      try { const scheduled = await getReminders(); setReminder(scheduled.items.find(item => item.status === "open") || null); } catch { /* Core without reminders still supports the overview. */ }
       setMemories(memory.items);
+      setHasMoreMemories(memory.next_offset != null);
       setError(null);
     } catch (cause) {
       const msg = cause instanceof TypeError ? "Не удалось обновить обзор. Проверь подключение к Iris." : cause instanceof Error ? cause.message : "Данные обзора недоступны";
@@ -176,7 +185,7 @@ export function OverviewPage({
             <h3>
               {activeCount ? (
                 <>
-                  <span ref={memoryCountRef}>{activeCount}</span> сохранено
+                  <span ref={memoryCountRef}>{activeCount}</span>{hasMoreMemories ? "+" : ""} сохранено
                 </>
               ) : (
                 "Нет сохранённых записей"
@@ -193,15 +202,16 @@ export function OverviewPage({
           <div className="overview-card-icon"><IconInterfaceSpirals size={20} /></div>
           <div>
             <span>Система</span>
-            <h3>{backendReady ? `${status?.llm_provider} · ${status?.llm_model}` : "Backend недоступен"}</h3>
-            <p>{avatarStatus?.enabled ? (avatarConnected ? `Аватар подключён: ${avatarStatus.client_count}` : "Аватар ожидает подключения") : "Аватар отключён"}</p>
+            <h3>{!backendReady ? "Нет связи с Iris" : !status?.api_key_configured ? "Нужен ключ модели" : readiness?.live_ready ? "Можно говорить" : readiness?.text_chat === "ready" ? "Текстовый диалог готов" : "Проверяем готовность"}</h3>
+            <p>{avatarStatus?.enabled ? (avatarConnected ? "Аватар подключён" : "Аватар ожидает подключения") : "Аватар отключён"}</p>
           </div>
           <MaterialButton materialKey={"overview.button-5"} className="card-link" onClick={(e) => { animateButtonPress(e.currentTarget); onOpenSettings(); }}>
-            Диагностика<IconInterfaceCursorArrow2 size={15} />
+            Проверить готовность<IconInterfaceCursorArrow2 size={15} />
           </MaterialButton>
         </article>
       </div>
 
+      {reminder && <section className="overview-plan"><h3>Ближайшее напоминание</h3><p data-i18n-skip>{reminder.title}</p><p>{new Date(reminder.due_at).toLocaleString()}</p><MaterialButton materialKey="overview.open-reminders" className="text-button" onClick={onOpenPlans || onOpenMemory}>Планы и обещания</MaterialButton></section>}
       {loading && (
         <span className="overview-loading" style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
           <LoadingRing className="is-inline" label="Обновляю обзор…" />

@@ -13,7 +13,7 @@ import { NotificationHost } from "./NotificationHost";
 
 vi.mock("../api", () => ({ getBackups: vi.fn(), createBackup: vi.fn(), deleteBackup: vi.fn(), getModels: vi.fn(), installModel: vi.fn(), cancelModel: vi.fn(), removeModel: vi.fn() }));
 vi.mock("./WindowChrome", () => ({ WindowChrome: () => null }));
-vi.mock("../desktop", () => ({ isDesktopApp: () => true, exportDesktopBackup: vi.fn(), importDesktopBackup: vi.fn(), restoreDesktopBackup: vi.fn(), chooseModelDirectory: vi.fn(), removeManagedModel: vi.fn(), restartDesktopCore: vi.fn() }));
+vi.mock("../desktop", () => ({ isDesktopApp: () => true, exportDesktopBackup: vi.fn(), importDesktopBackup: vi.fn(), restoreDesktopBackup: vi.fn(), chooseModelDirectory: vi.fn(), removeManagedModel: vi.fn(), restartDesktopCore: vi.fn(), openModelInformation: vi.fn() }));
 
 afterEach(() => { cleanup(); notify.dismissAll(); vi.clearAllMocks(); });
 beforeEach(() => { vi.mocked(api.getBackups).mockResolvedValue([]); vi.mocked(api.getModels).mockResolvedValue({ models: [] }); });
@@ -80,6 +80,25 @@ describe("release settings", () => {
     const message = await screen.findByText("Резервная копия создана.");
     expect(message.closest(".notification-card")).not.toBeNull();
     expect(container.querySelector(".notice")).toBeNull();
+  });
+
+  it("offers optional upstream information without adding a download gate", async () => {
+    const source = "https://huggingface.co/TeraSpace/TeraTTSv2/tree/revision";
+    const terms = "https://huggingface.co/terms-of-service";
+    vi.mocked(api.getModels).mockResolvedValue({ models: [{ id: "teratts-v2", name: "TeraTTS", version: "revision", installed: false, size_bytes: 1000, sha256: "hash", restart_required: true, status: "not_installed", downloaded_bytes: 0, total_bytes: 1000, delivery: "upstream_download", source_url: source, terms_url: terms }] });
+    render(<ModelManager />);
+    expect(await screen.findByText("Скачивается напрямую с Hugging Face")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(api.installModel).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("Источник модели"));
+    await waitFor(() => expect(desktop.openModelInformation).toHaveBeenCalledWith("teratts-v2", "source", source));
+    await waitFor(() => expect(screen.getByText("Скачать")).toBeEnabled());
+    fireEvent.click(screen.getByText("Условия использования"));
+    await waitFor(() => expect(desktop.openModelInformation).toHaveBeenCalledWith("teratts-v2", "terms", terms));
+    await waitFor(() => expect(screen.getByText("Скачать")).toBeEnabled());
+    fireEvent.click(screen.getByText("Скачать"));
+    fireEvent.click(screen.getByText("Начать загрузку"));
+    expect(api.installModel).toHaveBeenCalledWith("teratts-v2");
   });
 
   it("waits for core reconnection after choosing storage without a false error", async () => {

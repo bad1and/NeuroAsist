@@ -2,9 +2,10 @@
 
 import "@testing-library/jest-dom/vitest";
 import { describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { createElement } from "react";
+import { createPortal } from "react-dom";
 
 import { translateInterfaceText, useInterfaceLocale } from "./i18n";
 import type { InterfaceLocale } from "./types";
@@ -20,6 +21,28 @@ function TranslationFixture({ locale }: { locale: InterfaceLocale }) {
 }
 
 describe("interface translations", () => {
+  it("localizes portals beside the real root, including newly opened content, without touching user text", async () => {
+    const root = document.createElement("div");
+    root.id = "root"; document.body.append(root);
+    function PortalFixture({ locale, open }: { locale: InterfaceLocale; open: boolean }) {
+      useInterfaceLocale(locale);
+      return createElement("section", null, "Настройки", open && createPortal(createElement("aside", null,
+        createElement("strong", null, "Подготовить первый разговор"),
+        createElement("input", { placeholder: "Поиск по памяти" }),
+        createElement("p", { "data-i18n-skip": true }, "Настройки — пользовательский текст"),
+        createElement("pre", null, "Настройки")), document.body));
+    }
+    const view = render(createElement(PortalFixture, { locale: "en", open: false }), { container: root });
+    expect(screen.getByText("Settings")).toBeInTheDocument();
+    view.rerender(createElement(PortalFixture, { locale: "en", open: true }));
+    await waitFor(() => expect(screen.getByText("Prepare your first conversation")).toBeInTheDocument());
+    expect(screen.getByPlaceholderText("Search memory")).toBeInTheDocument();
+    expect(screen.getByText("Настройки — пользовательский текст")).toBeInTheDocument();
+    await act(async () => view.rerender(createElement(PortalFixture, { locale: "ru", open: true })));
+    expect(screen.getByText("Подготовить первый разговор")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Поиск по памяти")).toBeInTheDocument();
+    view.unmount(); root.remove();
+  });
   it("translates model and backup actions and empty states", () => {
     expect(translateInterfaceText("Скачать", "en")).toBe("Download");
     expect(translateInterfaceText("Восстановить", "en")).toBe("Restore");

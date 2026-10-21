@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { describe, it, expect } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
-import { TokenBadge } from "./TokenBadge";
+import { afterEach, describe, it, expect } from "vitest";
+import { cleanup, render, screen, fireEvent, within } from "@testing-library/react";
+import { TokenBadge, TokenDialogContent } from "./TokenBadge";
 import type { TokenMetadata } from "../types";
+
+afterEach(cleanup);
 
 describe("TokenBadge component", () => {
   it("renders null if tokens are null or empty", () => {
@@ -61,24 +63,38 @@ describe("TokenBadge component", () => {
     // Popover is opened in portal
     expect(screen.getByText("Статистика токенов")).toBeInTheDocument();
     expect(screen.getByText("deepseek-flash")).toBeInTheDocument();
-    expect(screen.getByText("Входящие (Prompt)")).toBeInTheDocument();
+    expect(screen.getByText("На входе")).toBeInTheDocument();
     expect(screen.getByText(/1[\s\u00a0,.]?000/)).toBeInTheDocument();
-    expect(screen.getByText(/Hit:\s*800/)).toBeInTheDocument();
-    expect(screen.getByText(/Miss:\s*200/)).toBeInTheDocument();
-    expect(screen.getByText("(80%)")).toBeInTheDocument();
-    expect(screen.getByText("Исходящие (Output)")).toBeInTheDocument();
-    expect(screen.getByText("200")).toBeInTheDocument();
-    expect(screen.getByText(/Мысли:\s*50/)).toBeInTheDocument();
-    expect(screen.getByText("Задержка: 420 мс")).toBeInTheDocument();
+    const cache = screen.getByRole("region", { name: "Кэш запроса" });
+    expect(within(cache).getByText("800")).toBeInTheDocument();
+    expect(within(cache).getByText("200")).toBeInTheDocument();
+    expect(within(cache).getByText("80%")).toBeInTheDocument();
+    expect(screen.getByText("В ответе")).toBeInTheDocument();
+    expect(screen.getByText("Рассуждения:")).toBeInTheDocument();
+    expect(screen.getByText("50")).toBeInTheDocument();
+    expect(screen.getByText("Время ответа")).toBeInTheDocument();
+    expect(screen.getByText("0,42 с")).toBeInTheDocument();
 
     // Toggle raw JSON
-    const rawBtn = screen.getByRole("button", { name: /Сырой JSON ответа/i });
+    const rawBtn = screen.getByRole("button", { name: "JSON ответа" });
+    expect(rawBtn).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(rawBtn);
+    expect(rawBtn).toHaveAttribute("aria-expanded", "true");
+    expect(document.getElementById(rawBtn.getAttribute("aria-controls")!)).toBeVisible();
     expect(screen.getByText("Копировать")).toBeInTheDocument();
 
     // Close button
     const closeBtn = screen.getByRole("button", { name: /Закрыть/i });
     fireEvent.click(closeBtn);
     expect(screen.queryByText("Статистика токенов")).not.toBeInTheDocument();
+  });
+
+  it("keeps missing usage unknown and does not treat partial cache data as a full cache hit", () => {
+    render(<TokenDialogContent tokens={{ prompt_tokens: 1000, prompt_cache_hit_tokens: 400 }} role="assistant" onClose={() => {}} />);
+    const cache = screen.getByRole("region", { name: "Кэш запроса" });
+    expect(within(cache).getByText("40%")).toBeInTheDocument();
+    expect(within(cache).getByText("Без кэша").nextElementSibling).toHaveTextContent("—");
+    expect(screen.getByText("В ответе").nextElementSibling).toHaveTextContent("—");
+    expect(screen.getByText("Всего токенов").nextElementSibling).toHaveTextContent("—");
   });
 });

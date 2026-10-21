@@ -1,5 +1,5 @@
 import { MaterialButton } from "./MaterialButton";
-import { useEffect, useLayoutEffect, useState, useRef, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useState, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { IconInterfaceCross, IconInterfaceAlertTriangle } from "../CustomIcons";
 import { animateButtonPress, animateNotification } from "../animations";
@@ -14,6 +14,7 @@ export interface AppDialogProps {
   onClose: () => void;
   icon?: ReactNode;
   variant?: "warning" | "danger" | "info";
+  size?: "compact" | "wide";
 }
 
 export function AppDialog({
@@ -24,11 +25,30 @@ export function AppDialog({
   onClose,
   icon,
   variant = "warning",
+  size = "compact",
 }: AppDialogProps) {
   const [isExiting, setIsExiting] = useState(false);
   const [rendered, setRendered] = useState(open);
   const exitTimerRef = useRef<number | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const titleId = useId();
+  const descriptionId = useId();
+  useLayoutEffect(() => {
+    if (open) {
+      const active = document.activeElement;
+      if (!openerRef.current && active instanceof HTMLElement && !cardRef.current?.contains(active)) openerRef.current = active;
+      if (rendered && cardRef.current && !cardRef.current.contains(active)) {
+        (cardRef.current.querySelector<HTMLElement>("[autofocus], input:not([disabled]), button:not([disabled]), [tabindex='0']") || cardRef.current).focus();
+      }
+    } else if (openerRef.current) {
+      const active = document.activeElement;
+      if (active === document.body || cardRef.current?.contains(active)) {
+        if (openerRef.current.isConnected) openerRef.current.focus();
+      }
+      openerRef.current = null;
+    }
+  }, [open, rendered]);
   useLayoutEffect(() => {
     if (!rendered || !cardRef.current) return;
     const motion = animateNotification(cardRef.current, isExiting ? "exit" : "enter");
@@ -81,9 +101,18 @@ export function AppDialog({
     if (!open) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      const dialogs = document.querySelectorAll(".app-dialog-card:not(.is-exiting)");
+      if (dialogs[dialogs.length - 1] !== cardRef.current) return;
       if (e.key === "Escape") {
         e.preventDefault();
         onClose();
+      }
+      if (e.key === "Tab" && cardRef.current) {
+        const controls = [...cardRef.current.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled]):not([type='hidden']), select:not([disabled]), textarea:not([disabled]), a[href], summary, [tabindex='0']")].filter(element => !element.closest("[hidden], [inert]") && !element.closest("details:not([open]) > :not(summary)"));
+        const first = controls[0], last = controls[controls.length - 1];
+        if (!first) { e.preventDefault(); cardRef.current.focus(); }
+        else if (e.shiftKey && (document.activeElement === first || !cardRef.current.contains(document.activeElement))) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && (document.activeElement === last || !cardRef.current.contains(document.activeElement))) { e.preventDefault(); first.focus(); }
       }
     };
 
@@ -125,14 +154,15 @@ export function AppDialog({
   const currentVariant = open ? variant : cachedContentRef.current.variant;
 
   const content = (
-    <aside className="app-dialog-host" aria-label="Диалог подтверждения" aria-live="assertive">
+    <aside className={`app-dialog-host${size === "wide" ? " is-wide" : ""}`} aria-label={currentVariant === "info" ? "Диалог" : "Диалог подтверждения"} aria-live={currentVariant === "info" ? "off" : "assertive"}>
       <div
         ref={cardRef}
-        className={`notification-card app-dialog-card confirmation-surface is-${currentVariant}${isExiting ? " is-exiting" : ""}`}
-        role="alertdialog"
+        className={`notification-card app-dialog-card confirmation-surface is-${currentVariant}${size === "wide" ? " is-wide" : ""}${isExiting ? " is-exiting" : ""}`}
+        role={currentVariant === "info" ? "dialog" : "alertdialog"}
+        tabIndex={-1}
         aria-modal="true"
-        aria-labelledby="app-dialog-title"
-        aria-describedby={currentDescription ? "app-dialog-desc" : undefined}
+        aria-labelledby={titleId}
+        aria-describedby={currentDescription ? descriptionId : undefined}
       >
         <div className="notification-card-header">
           <div className="notification-icon-box">
@@ -141,13 +171,13 @@ export function AppDialog({
 
           <div className="notification-header-content">
             <div className="notification-title-row">
-              <h2 id="app-dialog-title" className="notification-title">
+              <h2 id={titleId} className="notification-title">
                 {currentTitle}
               </h2>
             </div>
 
             {currentDescription && (
-              <p id="app-dialog-desc" className="notification-message is-dialog-message">
+              <p id={descriptionId} className="notification-message is-dialog-message">
                 {currentDescription}
               </p>
             )}
