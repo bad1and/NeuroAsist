@@ -1,0 +1,400 @@
+{
+  "review_date": "2026-10-20",
+  "target": "x86_64-pc-windows-msvc",
+  "artifact_revalidated": false,
+  "source_sha256": {
+    "requirements/runtime.txt": "1073a584a6038c1bb6a49ab290c1810bd206d07a615ed2fe02d546d64f3eb9d0",
+    "requirements/build.txt": "53d0ceeed05c17eaab50627cb75d9bb131caa4d51c5d040ec3a99b2eb1630088",
+    "requirements/torch-cpu.txt": "789fea12374a53dc2046bd777df8b516c9fcd1a1373475b446cd883b9adb1a96",
+    "requirements/constraints.txt": "26144f7aab994bc5b27f16006911af1bc03096f4664c53d52f5995f4a94d37cc",
+    "apps/desktop/src-tauri/Cargo.lock": "1fb7d2c01bcb4893b1a4ffdc4623a9e35932cd8885816cceaf3b0e653ed99e4d"
+  },
+  "conditions": [
+    "Desktop managed-model profile only; no untrusted model import or exposed Chroma/OAuth service.",
+    "Re-run on final build environment and inspect packaged artifact before release."
+  ],
+  "decisions": [
+    {
+      "package": {
+        "ecosystem": "PyPI",
+        "name": "chromadb"
+      },
+      "version": "1.5.2",
+      "advisory_ids": [
+        "GHSA-2wm9-hf6c-p5cr",
+        "GHSA-36p7-vc44-83pf",
+        "GHSA-f4j7-r4q5-qw2c",
+        "GHSA-xph7-9rjv-w5fr",
+        "PYSEC-2026-311",
+        "PYSEC-2026-3813",
+        "PYSEC-2026-3814",
+        "PYSEC-2026-3815"
+      ],
+      "in_target_graph": null,
+      "decision": "not_reachable_in_windows_profile",
+      "reason": "Embedded PersistentClient only; no Chroma HTTP server, tenant RBAC or remote embedding-function configuration. Collections use embedding_function=None and caller-supplied vectors.",
+      "evidence_paths": [
+        "apps/backend/app/semantic/chroma_index.py"
+      ],
+      "sources": [
+        "https://osv.dev/vulnerability/GHSA-2wm9-hf6c-p5cr",
+        "https://osv.dev/vulnerability/GHSA-36p7-vc44-83pf",
+        "https://osv.dev/vulnerability/GHSA-f4j7-r4q5-qw2c",
+        "https://osv.dev/vulnerability/GHSA-xph7-9rjv-w5fr",
+        "https://osv.dev/vulnerability/PYSEC-2026-311",
+        "https://osv.dev/vulnerability/PYSEC-2026-3813",
+        "https://osv.dev/vulnerability/PYSEC-2026-3814",
+        "https://osv.dev/vulnerability/PYSEC-2026-3815"
+      ]
+    },
+    {
+      "package": {
+        "ecosystem": "PyPI",
+        "name": "oauthlib"
+      },
+      "version": "3.3.1",
+      "advisory_ids": [
+        "GHSA-hj66-6f7g-4r5v",
+        "GHSA-xpv3-w29h-x7cv",
+        "PYSEC-2026-4113",
+        "PYSEC-2026-4114"
+      ],
+      "in_target_graph": null,
+      "decision": "not_reachable_in_windows_profile",
+      "reason": "Transitive Kubernetes/client dependency. Iris exposes no OAuth authorization/revocation server, JSONP RevocationEndpoint or PKCE validator. API-key auth uses the local desktop token.",
+      "evidence_paths": [
+        "apps/backend/main.py"
+      ],
+      "sources": [
+        "https://osv.dev/vulnerability/GHSA-hj66-6f7g-4r5v",
+        "https://osv.dev/vulnerability/GHSA-xpv3-w29h-x7cv",
+        "https://osv.dev/vulnerability/PYSEC-2026-4113",
+        "https://osv.dev/vulnerability/PYSEC-2026-4114"
+      ]
+    },
+    {
+      "package": {
+        "ecosystem": "PyPI",
+        "name": "onnx"
+      },
+      "version": "1.19.1",
+      "advisory_ids": [
+        "GHSA-3r9x-f23j-gc73",
+        "GHSA-538c-55jv-c5g9",
+        "GHSA-cmw6-hcpp-c6jp",
+        "GHSA-hqmj-h5c6-369m",
+        "GHSA-hwpq-hmq9-wj77",
+        "GHSA-p433-9wv8-28xj",
+        "GHSA-p893-rvq9-2xf9",
+        "GHSA-q56x-g2fj-4rj6",
+        "PYSEC-2026-103",
+        "PYSEC-2026-104",
+        "PYSEC-2026-2239",
+        "PYSEC-2026-2240",
+        "PYSEC-2026-2241",
+        "PYSEC-2026-2689",
+        "PYSEC-2026-3587",
+        "PYSEC-2026-3876"
+      ],
+      "in_target_graph": null,
+      "decision": "not_reachable_in_windows_profile",
+      "reason": "Pinned GigaAM requires onnx==1.19.*. Iris inference uses ONNX Runtime, not ONNX Python hub/checker/version_converter/external-data/save/export APIs. Managed weights are SHA-256 checked; arbitrary uploaded models are unsupported. Reassess before enabling export or untrusted model loading.",
+      "evidence_paths": [
+        "apps/backend/app/voice/gigaam_onnx.py",
+        "apps/backend/app/model_manager/service.py"
+      ],
+      "sources": [
+        "https://osv.dev/vulnerability/GHSA-3r9x-f23j-gc73",
+        "https://osv.dev/vulnerability/GHSA-538c-55jv-c5g9",
+        "https://osv.dev/vulnerability/GHSA-cmw6-hcpp-c6jp",
+        "https://osv.dev/vulnerability/GHSA-hqmj-h5c6-369m",
+        "https://osv.dev/vulnerability/GHSA-hwpq-hmq9-wj77",
+        "https://osv.dev/vulnerability/GHSA-p433-9wv8-28xj",
+        "https://osv.dev/vulnerability/GHSA-p893-rvq9-2xf9",
+        "https://osv.dev/vulnerability/GHSA-q56x-g2fj-4rj6",
+        "https://osv.dev/vulnerability/PYSEC-2026-103",
+        "https://osv.dev/vulnerability/PYSEC-2026-104",
+        "https://osv.dev/vulnerability/PYSEC-2026-2239",
+        "https://osv.dev/vulnerability/PYSEC-2026-2240",
+        "https://osv.dev/vulnerability/PYSEC-2026-2241",
+        "https://osv.dev/vulnerability/PYSEC-2026-2689",
+        "https://osv.dev/vulnerability/PYSEC-2026-3587",
+        "https://osv.dev/vulnerability/PYSEC-2026-3876"
+      ]
+    },
+    {
+      "package": {
+        "ecosystem": "PyPI",
+        "name": "setuptools"
+      },
+      "version": "78.1.1",
+      "advisory_ids": [
+        "GHSA-h35f-9h28-mq5c",
+        "PYSEC-2026-3447"
+      ],
+      "in_target_graph": null,
+      "decision": "not_applicable_to_windows_target",
+      "reason": "Remaining advisory concerns macOS APFS/HFS+ Unicode collisions when building sdists. Target is Windows; no runtime sdist construction. PackageIndex traversal was fixed by 78.1.1.",
+      "evidence_paths": [
+        "requirements/constraints.txt"
+      ],
+      "sources": [
+        "https://osv.dev/vulnerability/GHSA-h35f-9h28-mq5c",
+        "https://osv.dev/vulnerability/PYSEC-2026-3447"
+      ]
+    },
+    {
+      "package": {
+        "ecosystem": "PyPI",
+        "name": "torch"
+      },
+      "version": "2.11.0",
+      "advisory_ids": [
+        "GHSA-rrmf-rvhw-rf47"
+      ],
+      "in_target_graph": null,
+      "decision": "not_reachable_in_windows_profile",
+      "reason": "Advisory targets torch.jit.script compilation of locally supplied code. Iris does not expose this API; Silero uses an existing hash-verified JIT model via jit.load. This is not a blanket safety claim for arbitrary PyTorch models.",
+      "evidence_paths": [
+        "apps/backend/app/voice/input.py",
+        "apps/backend/app/model_manager/service.py"
+      ],
+      "sources": [
+        "https://osv.dev/vulnerability/GHSA-rrmf-rvhw-rf47"
+      ]
+    },
+    {
+      "package": {
+        "ecosystem": "PyPI",
+        "name": "transformers"
+      },
+      "version": "4.57.3",
+      "advisory_ids": [
+        "GHSA-29pf-2h5f-8g72",
+        "GHSA-69w3-r845-3855",
+        "GHSA-fgcw-684q-jj6r",
+        "GHSA-x9r9-c232-4q39",
+        "GHSA-xrqw-3rrv-vx5w",
+        "PYSEC-2025-217",
+        "PYSEC-2026-2288",
+        "PYSEC-2026-2289",
+        "PYSEC-2026-2290",
+        "PYSEC-2026-3929",
+        "PYSEC-2026-4174"
+      ],
+      "in_target_graph": null,
+      "decision": "conditional_on_trusted_models",
+      "reason": "No Trainer/checkpoint restoration, LightGlue, custom_generate download or tokenizer save_pretrained API. TeraTTS custom code is intentionally trusted, pinned and hash-verified by Model Manager in desktop mode; local E5 is owner-provided offline data. Malicious/edited third-party configs invalidate this decision. Major-version migration requires real model qualification.",
+      "evidence_paths": [
+        "apps/backend/app/voice/teratts_provider.py",
+        "apps/backend/app/semantic/embedding.py",
+        "apps/backend/app/model_manager/service.py"
+      ],
+      "sources": [
+        "https://osv.dev/vulnerability/GHSA-29pf-2h5f-8g72",
+        "https://osv.dev/vulnerability/GHSA-69w3-r845-3855",
+        "https://osv.dev/vulnerability/GHSA-fgcw-684q-jj6r",
+        "https://osv.dev/vulnerability/GHSA-x9r9-c232-4q39",
+        "https://osv.dev/vulnerability/GHSA-xrqw-3rrv-vx5w",
+        "https://osv.dev/vulnerability/PYSEC-2025-217",
+        "https://osv.dev/vulnerability/PYSEC-2026-2288",
+        "https://osv.dev/vulnerability/PYSEC-2026-2289",
+        "https://osv.dev/vulnerability/PYSEC-2026-2290",
+        "https://osv.dev/vulnerability/PYSEC-2026-3929",
+        "https://osv.dev/vulnerability/PYSEC-2026-4174"
+      ]
+    },
+    {
+      "package": {
+        "ecosystem": "crates.io",
+        "name": "glib"
+      },
+      "version": "0.18.5",
+      "advisory_ids": [
+        "GHSA-wrw7-89jp-8q8g",
+        "RUSTSEC-2024-0429"
+      ],
+      "in_target_graph": false,
+      "decision": "outside_windows_dependency_graph",
+      "reason": "Not present in cargo tree --locked --target x86_64-pc-windows-msvc --edges normal,build. Re-review for any non-Windows release.",
+      "evidence_paths": [
+        "apps/desktop/src-tauri/Cargo.lock"
+      ],
+      "sources": [
+        "https://osv.dev/vulnerability/GHSA-wrw7-89jp-8q8g",
+        "https://osv.dev/vulnerability/RUSTSEC-2024-0429"
+      ]
+    },
+    {
+      "package": {
+        "ecosystem": "crates.io",
+        "name": "proc-macro-error"
+      },
+      "version": "1.0.4",
+      "advisory_ids": [
+        "RUSTSEC-2024-0370"
+      ],
+      "in_target_graph": false,
+      "decision": "outside_windows_dependency_graph",
+      "reason": "Not present in cargo tree --locked --target x86_64-pc-windows-msvc --edges normal,build. Re-review for any non-Windows release.",
+      "evidence_paths": [
+        "apps/desktop/src-tauri/Cargo.lock"
+      ],
+      "sources": [
+        "https://osv.dev/vulnerability/RUSTSEC-2024-0370"
+      ]
+    },
+    {
+      "package": {
+        "ecosystem": "crates.io",
+        "name": "unic-char-property"
+      },
+      "version": "0.9.0",
+      "advisory_ids": [
+        "RUSTSEC-2025-0081"
+      ],
+      "in_target_graph": true,
+      "decision": "maintenance_warning",
+      "reason": "Unmaintained unic Unicode crates in Tauri/html parser dependency graph; advisory is maintenance status, not a demonstrated memory-safety flaw. Track upstream replacement and rescan before release.",
+      "evidence_paths": [
+        "apps/desktop/src-tauri/Cargo.lock"
+      ],
+      "sources": [
+        "https://osv.dev/vulnerability/RUSTSEC-2025-0081"
+      ]
+    },
+    {
+      "package": {
+        "ecosystem": "crates.io",
+        "name": "unic-char-range"
+      },
+      "version": "0.9.0",
+      "advisory_ids": [
+        "RUSTSEC-2025-0075"
+      ],
+      "in_target_graph": true,
+      "decision": "maintenance_warning",
+      "reason": "Unmaintained unic Unicode crates in Tauri/html parser dependency graph; advisory is maintenance status, not a demonstrated memory-safety flaw. Track upstream replacement and rescan before release.",
+      "evidence_paths": [
+        "apps/desktop/src-tauri/Cargo.lock"
+      ],
+      "sources": [
+        "https://osv.dev/vulnerability/RUSTSEC-2025-0075"
+      ]
+    },
+    {
+      "package": {
+        "ecosystem": "crates.io",
+        "name": "unic-common"
+      },
+      "version": "0.9.0",
+      "advisory_ids": [
+        "RUSTSEC-2025-0080"
+      ],
+      "in_target_graph": true,
+      "decision": "maintenance_warning",
+      "reason": "Unmaintained unic Unicode crates in Tauri/html parser dependency graph; advisory is maintenance status, not a demonstrated memory-safety flaw. Track upstream replacement and rescan before release.",
+      "evidence_paths": [
+        "apps/desktop/src-tauri/Cargo.lock"
+      ],
+      "sources": [
+        "https://osv.dev/vulnerability/RUSTSEC-2025-0080"
+      ]
+    },
+    {
+      "package": {
+        "ecosystem": "crates.io",
+        "name": "unic-ucd-ident"
+      },
+      "version": "0.9.0",
+      "advisory_ids": [
+        "RUSTSEC-2025-0100"
+      ],
+      "in_target_graph": true,
+      "decision": "maintenance_warning",
+      "reason": "Unmaintained unic Unicode crates in Tauri/html parser dependency graph; advisory is maintenance status, not a demonstrated memory-safety flaw. Track upstream replacement and rescan before release.",
+      "evidence_paths": [
+        "apps/desktop/src-tauri/Cargo.lock"
+      ],
+      "sources": [
+        "https://osv.dev/vulnerability/RUSTSEC-2025-0100"
+      ]
+    },
+    {
+      "package": {
+        "ecosystem": "crates.io",
+        "name": "unic-ucd-version"
+      },
+      "version": "0.9.0",
+      "advisory_ids": [
+        "RUSTSEC-2025-0098"
+      ],
+      "in_target_graph": true,
+      "decision": "maintenance_warning",
+      "reason": "Unmaintained unic Unicode crates in Tauri/html parser dependency graph; advisory is maintenance status, not a demonstrated memory-safety flaw. Track upstream replacement and rescan before release.",
+      "evidence_paths": [
+        "apps/desktop/src-tauri/Cargo.lock"
+      ],
+      "sources": [
+        "https://osv.dev/vulnerability/RUSTSEC-2025-0098"
+      ]
+    },
+    {
+      "package": {
+        "ecosystem": "crates.io",
+        "name": "zbus_names"
+      },
+      "version": "4.3.3",
+      "advisory_ids": [
+        "RUSTSEC-2026-0371"
+      ],
+      "in_target_graph": false,
+      "decision": "outside_windows_dependency_graph",
+      "reason": "Not present in cargo tree --locked --target x86_64-pc-windows-msvc --edges normal,build. Re-review for any non-Windows release.",
+      "evidence_paths": [
+        "apps/desktop/src-tauri/Cargo.lock"
+      ],
+      "sources": [
+        "https://osv.dev/vulnerability/RUSTSEC-2026-0371"
+      ]
+    },
+    {
+      "package": {
+        "ecosystem": "crates.io",
+        "name": "zvariant"
+      },
+      "version": "5.13.0",
+      "advisory_ids": [
+        "RUSTSEC-2026-0370"
+      ],
+      "in_target_graph": false,
+      "decision": "outside_windows_dependency_graph",
+      "reason": "Not present in cargo tree --locked --target x86_64-pc-windows-msvc --edges normal,build. Re-review for any non-Windows release.",
+      "evidence_paths": [
+        "apps/desktop/src-tauri/Cargo.lock"
+      ],
+      "sources": [
+        "https://osv.dev/vulnerability/RUSTSEC-2026-0370"
+      ]
+    },
+    {
+      "package": {
+        "ecosystem": "crates.io",
+        "name": "zvariant_derive"
+      },
+      "version": "5.13.0",
+      "advisory_ids": [
+        "RUSTSEC-2026-0372"
+      ],
+      "in_target_graph": false,
+      "decision": "outside_windows_dependency_graph",
+      "reason": "Not present in cargo tree --locked --target x86_64-pc-windows-msvc --edges normal,build. Re-review for any non-Windows release.",
+      "evidence_paths": [
+        "apps/desktop/src-tauri/Cargo.lock"
+      ],
+      "sources": [
+        "https://osv.dev/vulnerability/RUSTSEC-2026-0372"
+      ]
+    }
+  ]
+}

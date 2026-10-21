@@ -14,6 +14,10 @@ class ManagedModelResponse(BaseModel):
     downloaded_bytes: int
     total_bytes: int
     error: str | None = None
+    license: str | None = None
+    delivery: str | None = None
+    source_url: str | None = None
+    terms_url: str | None = None
 
 
 class ManagedModelsResponse(BaseModel):

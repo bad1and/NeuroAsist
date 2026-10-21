@@ -1,0 +1,28 @@
+{
+  "status": "selected_profile_not_built_or_qualified",
+  "ffmpeg_version": "8.1.2",
+  "source_url": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz",
+  "source_sha256": "464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c",
+  "source_hash_reference": "https://github.com/PyAV-Org/pyav-ffmpeg/blob/8.1.2-1/scripts/pkg.py",
+  "configure_flags": [
+    "--disable-static",
+    "--enable-shared",
+    "--disable-gpl",
+    "--disable-nonfree",
+    "--disable-version3",
+    "--disable-autodetect",
+    "--disable-libx264",
+    "--disable-libx265",
+    "--disable-programs",
+    "--disable-doc",
+    "--disable-network"
+  ],
+  "patch_policy": "Use unmodified upstream source; do not apply the pyav-ffmpeg GPL-classification patch.",
+  "qualification": [
+    "Build shared Windows x64 libraries and a matching PyAV wheel in an isolated builder.",
+    "Verify the emitted library configuration and bundled DLL hashes.",
+    "Verify streaming resampling, atempo, WAV/MP3/FLAC/OGG/WebM/AAC decoding and actual voice latency.",
+    "Deliver exact source archive, build instructions, compiler versions and complete license texts with the release source materials.",
+    "Keep PyAV/FFmpeg dynamic linking and license rights intact; provide source access in release notes and optional legal information."
+  ]
+}

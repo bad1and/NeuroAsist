@@ -6,7 +6,7 @@ import json
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
-from check_release_artifact import ROOT, private_paths, retired_dependency_paths, sha256
+from check_release_artifact import ROOT, private_paths, retired_dependency_paths, download_only_model_paths, sha256
 
 
 def source_snapshot() -> dict:
@@ -23,6 +23,9 @@ def manifest(directory: Path, source_record: Path | None = None) -> dict:
     findings = private_paths([directory / "core", directory / "avatar"]) + retired_dependency_paths([directory / "core"])
     if findings:
         raise ValueError("Unexpected runtime data: " + ", ".join(findings))
+    model_files = download_only_model_paths([directory])
+    if model_files:
+        raise ValueError("Download-only model resources are present: " + ", ".join(model_files))
     files = {path.relative_to(directory).as_posix(): {"bytes": path.stat().st_size, "sha256": sha256(path)} for path in sorted(directory.rglob("*")) if path.is_file()}
     source = source_snapshot()
     if source_record and source != json.loads(source_record.read_text(encoding="utf-8")):

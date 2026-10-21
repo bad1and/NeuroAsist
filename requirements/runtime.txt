@@ -9,7 +9,7 @@
 av==18.0.0
 chromadb==1.5.2
 ctranslate2==4.8.1
-fastapi==0.116.0
+fastapi==0.135.2
 faster-whisper==1.2.1
 gigaam @ git+https://github.com/salute-developers/GigaAM.git@559d88d6b72541412743929f633a6ae7c9950b85
 huggingface-hub==0.36.2
@@ -22,9 +22,10 @@ openai==2.44.0
 pydantic==2.13.4
 pydantic-settings==2.10.1
 python-dotenv==1.2.2
-python-multipart==0.0.20
+python-multipart==0.0.32
+pypdf==6.21.1
 sentencepiece==0.2.2
-sentence-transformers==3.4.1
+sentence-transformers==5.6.0
 silero-vad==6.2.1
 soundfile==0.14.0
 torch==2.11.0

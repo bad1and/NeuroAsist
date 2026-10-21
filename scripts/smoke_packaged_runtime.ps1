@@ -71,6 +71,8 @@ try {
 
     $shutdown = Invoke-WebRequest @loopbackRequest -UseBasicParsing -Method Post -Uri "http://127.0.0.1:$Port/internal/shutdown" -Headers $headers -TimeoutSec 5
     if (-not $process.WaitForExit(15000)) { throw "Packaged runtime did not exit after graceful shutdown." }
+    $process.WaitForExit()
+    if ($null -eq $process.ExitCode -or $process.ExitCode -ne 0) { throw "Packaged runtime exited with code $($process.ExitCode) after shutdown; expected 0." }
     [pscustomobject]@{
         health = $health.Content
         shutdown = $shutdown.Content
@@ -89,5 +91,9 @@ try {
             Set-Item "Env:$key" $previousEnvironment[$key]
         }
     }
-    Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+    $resolvedTemporary = [IO.Path]::GetFullPath($tempRoot)
+    $temporaryParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    if ($resolvedTemporary.StartsWith($temporaryParent, [StringComparison]::OrdinalIgnoreCase)) {
+        Remove-Item -LiteralPath $resolvedTemporary -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }

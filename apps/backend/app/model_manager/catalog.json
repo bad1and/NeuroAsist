@@ -4,6 +4,10 @@
     "name": "GigaAM v3 RNNT",
     "revision": "322c3b29492673eb7d0b434bfa9dfb8653e34d02",
     "repository": "istupakov/gigaam-v3-onnx",
+    "delivery": "upstream_download",
+    "source_url": "https://huggingface.co/istupakov/gigaam-v3-onnx/tree/322c3b29492673eb7d0b434bfa9dfb8653e34d02",
+    "terms_url": "https://huggingface.co/terms-of-service",
+    "license": "MIT",
     "relative_path": "gigaam-v3-rnnt-onnx/322c3b29492673eb7d0b434bfa9dfb8653e34d02",
     "files": [
       {
@@ -56,6 +60,9 @@
     "name": "TeraTTS v2",
     "revision": "f05ea799094571a3553904a555df3834fb0b963b",
     "repository": "TeraSpace/TeraTTSv2",
+    "delivery": "upstream_download",
+    "source_url": "https://huggingface.co/TeraSpace/TeraTTSv2/tree/f05ea799094571a3553904a555df3834fb0b963b",
+    "terms_url": "https://huggingface.co/terms-of-service",
     "relative_path": "teratts-v2/f05ea799094571a3553904a555df3834fb0b963b",
     "files": [
       {

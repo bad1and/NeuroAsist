@@ -122,6 +122,19 @@ elseif (-not (Test-Path -LiteralPath $python)) {
     throw "-SkipDependencyInstall requires the isolated release environment at $releaseEnvironment"
 }
 
+# Generate legal resources once, before either AppOnly staging or NSIS. A fresh
+# directory prevents notices removed from the dependency graph leaking in.
+$legalBuildId = [guid]::NewGuid().ToString("N")
+$legalResource = Join-Path $root "build\legal-resources\$legalBuildId"
+New-Item -ItemType Directory -Force -Path $legalResource | Out-Null
+Copy-Item -LiteralPath (Join-Path $root "LICENSE"), (Join-Path $root "PRIVACY.md"), (Join-Path $root "THIRD_PARTY_ASSETS.md") -Destination $legalResource
+& $python (Join-Path $root "scripts\create_dependency_inventory.py") --output (Join-Path $legalResource "licenses")
+Assert-LastExitCode "Collecting dependency notices"
+$ffmpegCheckArguments = @("--output", (Join-Path $legalResource "licenses\ffmpeg\build-profile.json"))
+if (-not $AppOnly) { $ffmpegCheckArguments += "--strict" }
+& $python (Join-Path $root "scripts\check_ffmpeg_profile.py") @ffmpegCheckArguments
+Assert-LastExitCode "Checking the FFmpeg release profile"
+
 $coreResource = Join-Path $output "neuroasist-core"
 $coreExecutable = Join-Path $coreResource "neuroasist-core.exe"
 if ($ReuseCore) {
@@ -162,11 +175,18 @@ if ($ReuseCore) {
 
 Remove-CudaLibraries $coreResource
 
+# User-downloaded voice assets must never become installer resources, even
+# when reusing an existing core tree. Check before Tauri invokes NSIS.
+& $python (Join-Path $root "scripts\check_release_artifact.py") --models-only `
+    --staging $coreResource --staging $avatarResource --staging $legalResource
+Assert-LastExitCode "Checking download-only model delivery"
+
 # Add the complete onedir tree as a Tauri resource only for the release build.
 # The Rust shell launches core/neuroasist-core.exe directly, so Windows does
 # not unpack a 442 MB onefile executable on every cold start.
 $overridePath = Join-Path $root "build\tauri-release.config.json"
 $override = @{ bundle = @{ resources = @{ "../../../build/core/neuroasist-core" = "core" } } }
+$override.bundle.resources["../../../build/legal-resources/$legalBuildId"] = "legal"
 $override | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 -LiteralPath $overridePath
 $buildArguments = @("--config", $overridePath)
 if ($AppOnly) { $buildArguments += "--no-bundle" }
@@ -187,9 +207,7 @@ if ($AppOnly) {
     Copy-Item -LiteralPath $coreResource -Destination (Join-Path $applicationDirectory "core") -Recurse
     New-Item -ItemType Directory -Path (Join-Path $applicationDirectory "avatar") | Out-Null
     Get-ChildItem -LiteralPath $avatarResource -Force | Where-Object { $_.Name -ne ".gitkeep" -and $_.Name -notlike "*DoNotShip*" } | Copy-Item -Destination (Join-Path $applicationDirectory "avatar") -Recurse
-    Copy-Item -LiteralPath (Join-Path $root "LICENSE"), (Join-Path $root "PRIVACY.md"), (Join-Path $root "THIRD_PARTY_ASSETS.md") -Destination $applicationDirectory
-    & $python (Join-Path $root "scripts\create_dependency_inventory.py") --output (Join-Path $applicationDirectory "licenses")
-    Assert-LastExitCode "Collecting dependency notices"
+    Get-ChildItem -LiteralPath $legalResource -Force | Copy-Item -Destination $applicationDirectory -Recurse
     & $python (Join-Path $root "scripts\check_preinstaller_app.py") --app $applicationDirectory --source-record $sourceRecord --output (Join-Path $artifactRoot "iris-$version-app-manifest.json")
     Assert-LastExitCode "Validating the staged application"
     Write-Host "Application candidate without installer: $applicationDirectory"
@@ -224,6 +242,7 @@ $manifest = Join-Path $artifactRoot "iris-$version-release-manifest.json"
     --artifact $publishedInstaller `
     --staging $coreResource `
     --staging $avatarResource `
+    --staging $legalResource `
     --version $version `
     --signing-status $signingStatus `
     --output $manifest

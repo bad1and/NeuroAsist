@@ -124,6 +124,36 @@ def git_revision() -> str | None:
     return result.stdout.strip() or None
 
 
+def download_only_model_paths(roots: Iterable[Path]) -> list[str]:
+    """Keep TeraTTS snapshots/caches and known weights out of release resources.
+
+    Hash matching also detects renamed weights. Only files with a catalogued
+    weight size are hashed; unrelated ONNX libraries and legal notices are valid.
+    """
+    catalog = json.loads((ROOT / "apps/backend/app/model_manager/catalog.json").read_text(encoding="utf-8"))
+    model = next(item for item in catalog if item["id"] == "teratts-v2")
+    namespaces = {"teratts-v2", "terattsv2", "models--teraspace--terattsv2"}
+    weights: dict[int, set[str]] = {}
+    for file in model["files"]:
+        if Path(file["path"]).suffix.lower() in {".onnx", ".npy"}:
+            weights.setdefault(file["size_bytes"], set()).add(file["sha256"])
+    findings: set[str] = set()
+    for root in roots:
+        if not root.is_dir():
+            raise ValueError(f"Release resource directory does not exist: {root}")
+        if root.name.lower() in namespaces:
+            findings.add(root.name)
+            continue
+        for path in root.rglob("*"):
+            relative = path.relative_to(root)
+            namespace_index = next((index for index, part in enumerate(relative.parts) if part.lower() in namespaces), None)
+            if namespace_index is not None:
+                findings.add(f"{root.name}/{Path(*relative.parts[:namespace_index + 1]).as_posix()}")
+            elif path.is_file() and (digests := weights.get(path.stat().st_size)) and sha256(path) in digests:
+                findings.add(f"{root.name}/{relative.as_posix()}")
+    return sorted(findings)
+
+
 def build_manifest(
     *, artifact: Path, version: str, staging_roots: Iterable[Path], signing_status: str
 ) -> dict[str, object]:
@@ -147,6 +177,9 @@ def build_manifest(
     if retired_dependencies:
         formatted = "\n- ".join(retired_dependencies)
         raise ValueError(f"Retired dependencies are present in the package staging tree:\n- {formatted}")
+    model_files = download_only_model_paths(scanned_roots)
+    if model_files:
+        raise ValueError("Download-only model resources are present in the package staging tree:\n- " + "\n- ".join(model_files))
 
     return {
         "schema_version": 1,
@@ -170,12 +203,14 @@ def build_manifest(
             "retired_packages": sorted(RETIRED_RUNTIME_PACKAGES),
             "forbidden_paths": [],
         },
+        "model_delivery_scan": {"method": "pre-nsis-resource-tree", "download_only_models": ["teratts-v2"], "forbidden_paths": []},
     }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--artifact", type=Path, required=True, help="NSIS installer executable")
+    parser.add_argument("--artifact", type=Path, help="NSIS installer executable")
+    parser.add_argument("--models-only", action="store_true", help="Reject download-only model resources before packaging")
     parser.add_argument(
         "--staging",
         type=Path,
@@ -183,8 +218,8 @@ def main() -> int:
         required=True,
         help="Resource directory included in the package; may be provided more than once",
     )
-    parser.add_argument("--version", required=True, help="Product SemVer from VERSION")
-    parser.add_argument("--output", type=Path, required=True, help="Manifest JSON path")
+    parser.add_argument("--version", help="Product SemVer from VERSION")
+    parser.add_argument("--output", type=Path, help="Manifest JSON path")
     parser.add_argument(
         "--signing-status",
         choices=("unsigned", "authenticode"),
@@ -192,6 +227,18 @@ def main() -> int:
         help="Recorded status only; Authenticode verification is performed by the build script",
     )
     args = parser.parse_args()
+
+    if args.models_only:
+        try:
+            findings = download_only_model_paths([path.resolve() for path in args.staging])
+            if findings:
+                parser.error("Download-only model resources are present: " + ", ".join(findings))
+        except ValueError as error:
+            parser.error(str(error))
+        print("Download-only model scan passed: no TeraTTS weights or cache in release resources.")
+        return 0
+    if not all((args.artifact, args.version, args.output)):
+        parser.error("--artifact, --version and --output are required unless --models-only is used")
 
     try:
         manifest = build_manifest(

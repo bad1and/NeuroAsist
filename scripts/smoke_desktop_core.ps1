@@ -53,6 +53,8 @@ try {
 
     Invoke-RestMethod @loopbackRequest "http://127.0.0.1:$Port/internal/shutdown" -Method Post -Headers $headers -TimeoutSec 2 | Out-Null
     if (-not $core.WaitForExit(8000)) { throw "Desktop core did not exit gracefully." }
+    $core.WaitForExit()
+    if ($null -eq $core.ExitCode -or $core.ExitCode -ne 0) { throw "Desktop core exited with code $($core.ExitCode) after shutdown; expected 0." }
     Write-Host "Desktop core smoke passed: authenticated startup and graceful shutdown."
 } finally {
     [System.Net.WebRequest]::DefaultWebProxy = $originalProxy

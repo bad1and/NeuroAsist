@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import threading
 from dataclasses import dataclass
@@ -22,6 +23,9 @@ class ModelSpec:
     restart_required: bool = True
     license: str | None = None
     files: tuple[dict[str, object], ...] = ()
+    delivery: str | None = None
+    source_url: str | None = None
+    terms_url: str | None = None
 
 
 SILERO_VAD = ModelSpec(
@@ -51,9 +55,20 @@ SMART_TURN_V3_2 = ModelSpec(
 
 def catalog_specs() -> tuple[ModelSpec, ...]:
     catalog = json.loads(Path(__file__).with_name("catalog.json").read_text(encoding="utf-8"))
+    for item in catalog:
+        if item.get("delivery") == "upstream_download":
+            repository, revision = item["repository"], item["revision"]
+            if not re.fullmatch(r"[\w.-]+/[\w.-]+", repository) or not re.fullmatch(r"[0-9a-f]{40}", revision):
+                raise ValueError(f"Invalid pinned upstream model: {item['id']}")
+            for file in item["files"]:
+                path = file["path"]
+                if (not path or "\\" in path or path.startswith("/") or any(part in {"", ".", ".."} for part in path.split("/"))
+                        or file["url"] != f"https://huggingface.co/{repository}/resolve/{revision}/{path}"):
+                    raise ValueError(f"Model file must use the pinned upstream source: {item['id']}/{path}")
     return tuple(ModelSpec(id=item["id"], name=item["name"], version=item["revision"], url="", relative_path=item["relative_path"],
                            sha256=hashlib.sha256(json.dumps(item["files"], sort_keys=True).encode()).hexdigest(),
-                           size_bytes=item["size_bytes"], files=tuple(item["files"])) for item in catalog)
+                           size_bytes=item["size_bytes"], files=tuple(item["files"]), license=item.get("license"),
+                           delivery=item.get("delivery"), source_url=item.get("source_url"), terms_url=item.get("terms_url")) for item in catalog)
 
 
 DEFAULT_SPECS = (SILERO_VAD, SMART_TURN_V3_2, *catalog_specs())
@@ -110,6 +125,9 @@ class ModelManager:
             "sha256": spec.sha256,
             "restart_required": spec.restart_required,
             "license": spec.license,
+            "delivery": spec.delivery,
+            "source_url": spec.source_url,
+            "terms_url": spec.terms_url,
             "status": progress.get("status", "installed" if installed else "not_installed"),
             "downloaded_bytes": progress.get("downloaded_bytes", spec.size_bytes if installed else 0),
             "total_bytes": progress.get("total_bytes", spec.size_bytes),

@@ -45,6 +45,11 @@ Support (Mono). Исполняемый файл аватара в Git не вх�
 `constraints.txt` ограничивает выбор версий и сам не устанавливает пакеты.
 Не заменяйте профили результатом `pip freeze` из долгоживущей среды.
 
+Разбор текстовых PDF использует закреплённый `pypdf==6.21.1` из runtime-профиля.
+OCR и отдельный PDF-сервис не требуются. Уведомления Windows подключены через
+`@tauri-apps/plugin-notification` / `tauri-plugin-notification` версии `2.3.3`.
+Проверка Cargo не подтверждает доставку уведомления в установленном приложении.
+
 ## Первая установка
 
 В новом клоне, из корня репозитория:
@@ -155,3 +160,27 @@ Node.js или Rust. Перед публикацией ещё нужно под�
   полному lock-файлу с хешами всех wheels.
 
 См. [условия публикации](release-checklist.md) и [порядок выпуска](release-runbook.md).
+
+## Проверка перед финальной сборкой — 20 октября 2026
+
+Отдельная среда `build/release-venv-stage2` создана из CPU/runtime/build-профилей;
+прежняя `build/release-venv` сохранена. Проверены строгий состав, `pip check`,
+PDF и совместимость HTTP-путей. Новые pins и условные исключения описаны в
+[разборе безопасности](security-dependencies-2026-10-20.md).
+
+CPU-профиль явно выбирает `torch`/`torchaudio` с суффиксом `+cpu`.
+Официальный PyPI используется дополнительно для транзитивных исправлений,
+отсутствующих в CPU-индексе. Build-профиль закрепляет также версию pip.
+Перед применением `-SkipDependencyInstall` проверять именно используемую среду;
+старые успешные логи не подтверждают соответствие новым требованиям.
+
+```powershell
+.\build\release-venv-stage2\Scripts\python.exe scripts/check_python_dependencies.py --profile runtime --profile build --strict
+.\build\release-venv-stage2\Scripts\python.exe -m pip check
+.\build\release-venv-stage2\Scripts\python.exe scripts/create_dependency_inventory.py --output output/release-stage2-20261020/licenses
+```
+
+Inventory включает все три npm-графа, Python build-среду, весь Cargo.lock,
+четыре управляемые модели, тексты model notices, условия ассетов и метаданные
+связанных FFmpeg-библиотек. Он шире фактической бинарной поставки: состав
+и notices нового каталога приложения проверяются на третьем этапе.

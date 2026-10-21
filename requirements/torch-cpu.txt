@@ -1,6 +1,9 @@
 # Install this profile before runtime.txt to select the CPU PyTorch wheels.
 --index-url https://download.pytorch.org/whl/cpu
+# Transitive security fixes may not be mirrored by the CPU wheel index.
+# Explicit local versions below prevent selecting the PyPI GPU-capable wheels.
+--extra-index-url https://pypi.org/simple
 -c constraints.txt
 
-torch==2.11.0
-torchaudio==2.11.0
+torch==2.11.0+cpu
+torchaudio==2.11.0+cpu

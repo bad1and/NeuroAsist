@@ -1,0 +1,22 @@
+[
+  {
+    "file": "GigaAM-MIT.txt",
+    "source": "https://huggingface.co/istupakov/gigaam-v3-onnx/resolve/322c3b29492673eb7d0b434bfa9dfb8653e34d02/LICENSE.txt",
+    "sha256": "f00de6715714c7a63d08639cdbfaa40224eefc407302614bd19f1a8b98c875aa"
+  },
+  {
+    "file": "RUAccent-MIT.txt",
+    "source": "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/f05ea799094571a3553904a555df3834fb0b963b/RUACCENT_NOTICE.txt",
+    "sha256": "079aded52d6e28786b692c28ce8373412e8688490333d87588527b5b1ffe0da7"
+  },
+  {
+    "file": "Silero-VAD-MIT.txt",
+    "source": "https://raw.githubusercontent.com/snakers4/silero-vad/7e30209a3e901f9842f81b225f3e93d8199902b1/LICENSE",
+    "sha256": "2e63e9a38b6e8fc0c7bc37ce174caca1862870856c6daf5697cfb785e925520b"
+  },
+  {
+    "file": "Smart-Turn-BSD.txt",
+    "source": "https://raw.githubusercontent.com/pipecat-ai/smart-turn/4786657e242dfe77dd138699ac564ee074a2a543/LICENSE",
+    "sha256": "0d66364067f678c08586ebb60a16a2aed4fa081ec11057df35585759ce0e774f"
+  }
+]

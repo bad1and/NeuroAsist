@@ -1,0 +1,231 @@
+{
+  "review_date": "2026-10-20",
+  "distribution_approved": false,
+  "components": [
+    {
+      "id": "geologica",
+      "component": "Geologica variable UI font, Version 1.010;gftools[0.9.28]",
+      "status": "notice_required",
+      "delivery": "Local variable TTF bundled by Vite into desktop web assets; Cyrillic verified",
+      "license": "OFL-1.1; The Geologica Project Authors / Monokrom",
+      "source": "https://github.com/google/fonts/tree/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/geologica",
+      "required": "Retain full OFL license and copyright notice with font delivery; included by inventory generator in licenses/fonts/.",
+      "source_files": {
+        "apps/web/src/fonts/Geologica-Variable.ttf": "9124d9e88ac6c11d761f35241713a51d68e2c4ebedce0edaca834717a00959ec",
+        "third-party/font-notices/Geologica-OFL.txt": "778186245840aea0e60bec6a46e7fb1442e0cd78e41afeadffcd3e8824b379e0",
+        "third-party/font-notices/Geologica-METADATA.pb": "08b4d879d8dc0aa9cb3c458c9bae4d3de457d53af239e563c27b3458776b5819"
+      }
+    },
+    {
+      "id": "didact-gothic",
+      "component": "Didact Gothic Regular retained alternative font, version 2.101",
+      "status": "license_recorded",
+      "delivery": "Unused local alternative retained in source; not imported into the current Vite bundle",
+      "license": "OFL-1.1; The Didact Gothic Project Authors / Daniel Johnson, Cyreal",
+      "source": "https://github.com/google/fonts/tree/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/didactgothic",
+      "required": "Retain full OFL license and copyright notice with font delivery; included by inventory generator in licenses/fonts/.",
+      "source_files": {
+        "apps/web/src/fonts/DidactGothic-Regular.ttf": "b98f9e091b6337a86f4e0f69c94c31905e1e287782853f472e176b4e28d3f81f",
+        "third-party/font-notices/Didact-Gothic-OFL.txt": "36e2f1debc9778bac79fac1a0cb5a5ef51c102f00b58ef7d8a05324144b68166",
+        "third-party/font-notices/Didact-Gothic-METADATA.pb": "e2bb5ef0b9b495f375a697ade60d7ed85165316b16982c2ce8f0a699b8fe62b3"
+      }
+    },
+    {
+      "id": "balsamiq-sans",
+      "component": "Balsamiq Sans retained alternative font, four faces",
+      "status": "license_recorded",
+      "delivery": "Unused local alternative retained in source; not imported into the current Vite bundle",
+      "license": "OFL-1.1; The Balsamiq Sans Project Authors / Michael Angeles",
+      "source": "https://github.com/google/fonts/tree/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/balsamiqsans",
+      "required": "Retain full OFL license and copyright notice with font delivery; included by inventory generator in licenses/fonts/.",
+      "source_files": {
+        "apps/web/src/fonts/BalsamiqSans-Regular.ttf": "fcc9c00a9ad6e78673fa84653745569097241d99b5d1387a23f395858ed46b7e",
+        "apps/web/src/fonts/BalsamiqSans-Bold.ttf": "a3302bd8424e6a37704eb5e20d5c5a3a2fd80feaf57e48a19d261f8e0c583621",
+        "apps/web/src/fonts/BalsamiqSans-Italic.ttf": "0a287472035409f556acd66c1c926047ee9829a62f88b0fa273591332a8606df",
+        "apps/web/src/fonts/BalsamiqSans-BoldItalic.ttf": "4999588a66defbf39e718b3edb0b965b932157bd8d1321130de06bec0cdccc75",
+        "third-party/font-notices/Balsamiq-Sans-OFL.txt": "0e82859672e549fd39554e2bfa97b5511e81f4f89394f2e696666d36b5d52144",
+        "third-party/font-notices/Balsamiq-Sans-METADATA.pb": "1dfa7cdb8b196abdde81d4cd400769e24926cce52cecb41c0298564b23f62680"
+      }
+    },
+    {
+      "id": "huninn",
+      "component": "Huninn Regular retained alternative font, version 1.003",
+      "status": "license_recorded",
+      "delivery": "Unused local alternative retained in source; not imported into the current Vite bundle",
+      "license": "OFL-1.1; The Huninn Project Authors / justfont",
+      "source": "https://github.com/google/fonts/tree/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/huninn",
+      "required": "Retain the full OFL license and copyright notice with font delivery; included by the inventory generator in licenses/fonts/.",
+      "source_files": {
+        "apps/web/src/fonts/Huninn-Regular.ttf": "1bd770a5ffc0c06723b567686f8b5db5abf9ab54227f3bbc4e6fd648f4698805",
+        "third-party/font-notices/Huninn-OFL.txt": "d71824aeb09afc4c2cac01acab5c3db79796e927ba37be40d69fb62a412639b6"
+      }
+    },
+    {
+      "id": "days-one",
+      "component": "Days One Regular UI heading font, version 1.002",
+      "status": "notice_required",
+      "delivery": "Local TTF bundled by Vite into desktop web assets; Cyrillic verified",
+      "license": "OFL-1.1; Jovanny Lemonad",
+      "source": "https://github.com/google/fonts/tree/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/daysone",
+      "required": "Retain the full OFL license and copyright notice with font delivery; included by the inventory generator in licenses/fonts/.",
+      "source_files": {
+        "apps/web/src/fonts/DaysOne-Regular.ttf": "7b5a0e6d88696e43e95f6320613908e53d36ad854b4a18e4a1b8d1c19fdbf1fe",
+        "third-party/font-notices/Days-One-OFL.txt": "cacad5bf45bf5c81f4b6cbd114261bc8a08f6110b66a4c6fad8bbc16618a3096"
+      }
+    },
+    {
+      "id": "iris-vrm",
+      "component": "Flow 2.1 / IRIS.vrm",
+      "status": "owner_confirmed_scope_pending",
+      "delivery": "Unity player; source VRM reviewed separately",
+      "license": "Custom Kado terms and separate owner-confirmed permission",
+      "source": "https://note.com/masakikado/n/nac5949dd52a6",
+      "evidence": "Owner confirmed permission on 2026-10-12 and again on 2026-10-20. Permission text and binary/source scope are not stored in this repository.",
+      "required": "Record scope/reference of existing permission in private release evidence; retain Kado credit.",
+      "source_files": {
+        "apps/avatar-unity/Assets/IRIS.vrm": "c80c488e4836d41f1b54b601fcebd943b9a5a6107428b9027e10f006cb1f5f78"
+      }
+    },
+    {
+      "id": "proxima-nova",
+      "component": "Proxima Nova WOFF fonts",
+      "status": "runtime_replaced_source_cleanup_pending",
+      "delivery": "Unused legacy source files retained; no longer imported by web entrypoints or included in the current Vite bundle",
+      "license": "Commercial; desktop redistribution evidence not supplied",
+      "source": "https://www.marksimonson.com/licensing/",
+      "evidence": "Owner stated on 2026-10-20 that no confirmation is available and requested keeping current materials for now, replacing later.",
+      "required": "Runtime font replaced by Huninn on 2026-10-21. Review/remove legacy font files from public source delivery and history, or record appropriate redistribution permission.",
+      "source_files": {
+        "apps/web/src/fonts/ProximaNova-Bold.woff": "18d46403e20e98a00c045f42dbfa9e66de58a433a4cf78e097cf517bb688639e",
+        "apps/web/src/fonts/ProximaNova-Extrabld.woff": "b84b7524176bef10524f6fce14299ab5f925e3524f9daece1b9768b50f5e1955",
+        "apps/web/src/fonts/ProximaNova-Light.woff": "2a070c103043ac8405ef9a2625d7cd910c39ebe0526a70c40509fe0028d711a1",
+        "apps/web/src/fonts/ProximaNova-Regular.woff": "ca945009fa876d9c7a6ec8c7efe5c303a77d1862eb6091d292dd7645dede9299",
+        "apps/web/src/fonts/ProximaNova-Semibold.woff": "4cc28f2957f30ef2d077fc934e2ec93c33ccf938301eabf0b57673674557a4fa"
+      }
+    },
+    {
+      "id": "mixamo",
+      "component": "Mixamo FBX and derived performance curves",
+      "status": "binary_only_policy_selected_ai_review_pending",
+      "delivery": "Public code excludes Mixamo FBX and derived motion data; release embeds Unity animations for playback, with no asset export function",
+      "license": "Adobe Mixamo additional terms",
+      "source": "https://wwwimages2.adobe.com/content/dam/cc/en/legal/servicetou/Mixamo-Addl-Terms-en_US-20210623.pdf",
+      "evidence": "Owner selected split source/binary distribution on 2026-10-20. Policy is documented in Docs/mixamo-distribution.md; public source/history filtering and AI/ML terms applicability remain unverified.",
+      "required": "Exclude original and derived motion assets from public files/history; verify no standalone animation package/export; record decision on Adobe AI/ML clause before distribution.",
+      "source_files": {
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Animations/X Bot@Agreeing.fbx": "05417f0c3445fe937def98e56197e59fafef93541c412b27b8645c12b9d27711",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Animations/X Bot@Angry.fbx": "fceb0a3e2915d5937ec2f22fa6448bad0d880957e3dba2866e0aabc857157f6c",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Animations/X Bot@Bashful.fbx": "808e1713adc0a966165c34a99d1fbdf0e7b7771f5c41f8fe49adf964ad0d6ed6",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Animations/X Bot@Bow.fbx": "acf420ad724328078b04b9a6c04ec3be560f00da9799ace7a364f7605accab2a",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Animations/X Bot@Clapping.fbx": "47d9b90dad617367ee7f61b762983ae7cbae4624c249f0300807699eebd7b60a",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Animations/X Bot@Facepalm.fbx": "012c4845bfa442e28654df503addb34ea896dd46c70a099f8ed2d616ba786b57",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Animations/X Bot@Idle.fbx": "af80190f2072f035d2223b91c8d53a12480d7203d63107631916a067bb54a6cc",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Animations/X Bot@Laughing.fbx": "51548796f74933376e4a2d6c48e48f051adf8c62af203c9782b5c9cd954e1b45",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Animations/X Bot@Look Around.fbx": "e703f02c796ba01ada7329b2f55b68d2da19f276c61f295f50fcbd737ac2409c",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Animations/X Bot@Pointing.fbx": "1b63760e405e5babc1534fd42067388e60574e0beb735dad39b5acd035975cb7",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Animations/X Bot@Shaking Head No.fbx": "fe476a60744252fb18aea0ddd2c5fb20bdc896b0a690723f1dd3a739a0857a29",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Animations/X Bot@Shrugging.fbx": "71ba878114bb30107a5affaccc0648e9f48613c36b34f0386ce8e073f60e3988",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Animations/X Bot@Standing Thumbs Up.fbx": "82d5c4fe45eb3b40868e7b04d49286731e8c01bba7faafdd80c58d67415ae7b8",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Animations/X Bot@Surprised.fbx": "4e16a523791750fa9943ed77729803e64ceda27de054a56b8a5a8f7f0327c8b1",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Animations/X Bot@Talking.fbx": "e26b3786b26978fbbc797a0ff39fb49cb54423e89aaafa617162f823b23e1247",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Animations/X Bot@TalkingQuestion.fbx": "28c10b2783b424fdd0ce2191da44729fe4951d88313bd8343ab97ad02d739a61",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Animations/X Bot@Thinking.fbx": "9f47b8ee5dd272a70e98b356b9993c222a1984bcb02119747cd7576fc70347db",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Animations/X Bot@Waving.fbx": "9a47a0ea5795560e2c457d0ef0f6cadd7252b2a7c226f406a48b098a11414785",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Animations/X Bot@WavingGoodbye.fbx": "3d11985815f5f08682113f76f9cc4c79db428ff55f8ce116888ef05eb506f2d9",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Motion/Generated/Performances.asset": "e18f04ad08491938d064abdab353ad61c760aeb4762a43e917731821b551341f",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Motion/Generated/Performances.asset.meta": "6fb0a1fe88f6b4ee3a00281c0d92800935cb109949e6af9c2a69f072793207a2"
+      },
+      "publication_exclusions": [
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Animations/",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Animations.meta",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Motion/Generated/",
+        "apps/avatar-unity/Assets/NeuroAsistAvatar/Motion/Generated.meta",
+        "Other exported clips or derived motion datasets"
+      ]
+    },
+    {
+      "id": "gigaam-onnx",
+      "component": "GigaAM v3 RNNT ONNX",
+      "status": "notice_required",
+      "delivery": "Model Manager download, pinned revision and SHA-256",
+      "license": "MIT",
+      "source": "https://huggingface.co/istupakov/gigaam-v3-onnx/blob/322c3b29492673eb7d0b434bfa9dfb8653e34d02/LICENSE.txt",
+      "required": "Keep exporter/source license and GigaChat Team copyright with delivered weights."
+    },
+    {
+      "id": "teratts-v2",
+      "component": "TeraTTSv2 code and weights",
+      "status": "upstream_download_terms_review_pending",
+      "delivery": "Direct author Hugging Face download through Model Manager, pinned revision and SHA-256; never bundled or mirrored by Iris; optional source/terms links and pre-packaging resource guard implemented 2026-10-21",
+      "license": "No standalone v2 LICENSE found; HF public-content terms and author local-inference instructions also apply; RUAccent MIT notice is separate",
+      "source": "https://huggingface.co/TeraSpace/TeraTTSv2/blob/f05ea799094571a3553904a555df3834fb0b963b/README.md",
+      "required": "Use direct download from the author repository instead of bundling/mirroring weights; review HF terms and model instructions for intended local desktop/voice/output use. Seek clarification where scope remains unclear; a separate permission letter is not automatically required solely because the card lacks an SPDX license.",
+      "evidence": "Older Tera2Space/TeraTTS GitHub code has an MIT license. No explicit grant for the selected v2 snapshot/ONNX weights/voice references was found, including in HF discussion 1. See Docs/requests/teratts-permission-request.md for an unsent request. On 2026-10-21, HF public-repository content grant and author local-inference README were reviewed; direct download was distinguished from redistribution in the installer."
+    },
+    {
+      "id": "ruaccent",
+      "component": "Bundled RUAccent adaptation and model assets",
+      "status": "notice_required",
+      "delivery": "Part of TeraTTS snapshot",
+      "license": "MIT, Denis Petrov 2026",
+      "source": "https://huggingface.co/TeraSpace/TeraTTSv2/blob/f05ea799094571a3553904a555df3834fb0b963b/RUACCENT_NOTICE.txt",
+      "required": "Retain RUACCENT_NOTICE.txt and MIT copyright notice."
+    },
+    {
+      "id": "silero-vad",
+      "component": "Silero VAD 6.2.1",
+      "status": "notice_required",
+      "delivery": "Pinned JIT Model Manager download",
+      "license": "MIT",
+      "source": "https://github.com/snakers4/silero-vad/blob/7e30209a3e901f9842f81b225f3e93d8199902b1/LICENSE",
+      "required": "Include Silero Team MIT notice with model delivery."
+    },
+    {
+      "id": "smart-turn",
+      "component": "Smart Turn v3.2 CPU",
+      "status": "notice_required",
+      "delivery": "Pinned ONNX Model Manager download",
+      "license": "BSD-2-Clause (pinned model card)",
+      "source": "https://huggingface.co/pipecat-ai/smart-turn-v3/blob/f766f81d3cfdf7737ac64aad813d91bbfd56bf93/README.md",
+      "required": "Retain complete BSD copyright/disclaimer from upstream with delivered model."
+    },
+    {
+      "id": "unity-packages",
+      "component": "Unity player, UniVRM/glTF, uLipSync and Unity packages",
+      "status": "artifact_review_pending",
+      "delivery": "Compiled Unity player",
+      "license": "Per-package MIT/Unity terms; full list in Unity package lock",
+      "source": "apps/avatar-unity/Packages/packages-lock.json",
+      "required": "Collect actual player/package notices; verify Unity redistribution terms for selected build."
+    },
+    {
+      "id": "pyav-ffmpeg",
+      "component": "PyAV 18 and bundled FFmpeg libraries",
+      "status": "clean_profile_selected_build_pending",
+      "delivery": "Python wheel libraries in PyInstaller core",
+      "license": "Current wheel declares LGPLv3+ but includes x264/x265; selected replacement profile uses unmodified upstream without GPL/nonfree/external video codecs",
+      "source": "https://pyav.org/docs/stable/overview/installation.html",
+      "required": "Build and qualify selected shared-library profile, provide matching source/build archive and full notices, preserve LGPL rights, and verify legal resources in installed NSIS. No end-user setup or mandatory startup dialogs.",
+      "evidence": "FFmpeg 8.1.2 and linked configuration inspected; pyav-ffmpeg 8.1.2-1 changes x264/x265 classification in configure. Unmodified source archive hash verified; complete license texts saved. Replacement wheel has not been built or qualified.",
+      "implementation": "Docs/tts-ffmpeg-delivery.md; third-party/ffmpeg/profile.json; scripts/check_ffmpeg_profile.py"
+    },
+    {
+      "id": "python-npm-rust",
+      "component": "Python runtime and Python/npm/Rust dependencies",
+      "status": "artifact_review_pending",
+      "delivery": "Compiled core and shell; dev dependencies may be build-only",
+      "license": "Per-package inventory and notices",
+      "source": "scripts/create_dependency_inventory.py",
+      "required": "Review notices and final artifact composition; do not infer approval from SPDX metadata alone."
+    },
+    {
+      "id": "windows-runtime",
+      "component": "WebView2 / Microsoft runtime components",
+      "status": "installer_review_pending",
+      "delivery": "Installer prerequisites in later stage",
+      "license": "Microsoft redistribution terms",
+      "source": "https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution",
+      "required": "Document bootstrapper/runtime method, terms and installed files during installer acceptance."
+    }
+  ]
+}
