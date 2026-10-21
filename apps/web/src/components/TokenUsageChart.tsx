@@ -1,7 +1,9 @@
 import { useState, useMemo, useCallback, useRef } from "react";
 import { ParentSize } from "@visx/responsive";
 import { scaleBand, scaleLinear } from "@visx/scale";
-import { Activity } from "lucide-react";
+import {
+  IconInterfaceActivity as Activity,
+} from "../CustomIcons";
 import type { TokenUsageTimeseriesPoint } from "../types";
 
 export interface TokenUsageChartProps {

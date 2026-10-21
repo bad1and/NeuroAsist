@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Plus, RefreshCw } from "lucide-react";
+import {
+  IconInterfacePlus as Plus,
+  IconInterfaceRefresh as RefreshCw,
+} from "./CustomIcons";
 import { AppDialog } from "./components/AppDialog";
 import { MaterialButton } from "./components/MaterialButton";
 import { LoadingRing } from "./components/LoadingRing";

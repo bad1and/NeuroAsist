@@ -1,5 +1,8 @@
 import { useRef, useState, type ReactNode } from "react";
-import { MessageSquarePlus, X } from "lucide-react";
+import {
+  IconMailChatBubblePlus as MessageSquarePlus,
+  IconInterfaceCross as X,
+} from "../CustomIcons";
 import { MaterialButton } from "../components/MaterialButton";
 import { ConfirmationRim } from "../components/ConfirmationRim";
 import { buttonSeed } from "../components/buttonMaterial";

@@ -1,0 +1,15 @@
+@font-face {
+  font-family: "Geologica";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("./Geologica-Variable.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Geologica";
+  font-style: oblique 0deg 12deg;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("./Geologica-Variable.ttf") format("truetype");
+}

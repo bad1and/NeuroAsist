@@ -1,0 +1,7 @@
+@font-face {
+  font-family: "Didact Gothic";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./DidactGothic-Regular.ttf") format("truetype");
+}

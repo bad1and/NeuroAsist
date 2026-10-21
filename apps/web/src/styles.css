@@ -38,7 +38,17 @@
   --panel-height: 650px;
 }
 
-* { box-sizing: border-box; }
+/* Hide native scrollbar chrome everywhere, including lazy-loaded panels. */
+* {
+  box-sizing: border-box;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+*::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
 svg { shape-rendering: geometricPrecision; }
 [hidden] { display: none !important; }
 .workspace-view-slot { display: contents; }
@@ -5891,12 +5901,17 @@ body {
 .sidebar-footer-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
 }
 
 .sidebar-footer-row > .navigation-button {
   min-width: 0;
   flex: 1 1 auto;
+}
+
+.app-shell:not(.is-sidebar-collapsed) .sidebar-footer-row > .navigation-button {
+  padding: 8px 10px !important;
+  gap: 8px !important;
 }
 
 .sidebar-footer-row > .navigation-button,
@@ -10140,19 +10155,12 @@ pre,
 .settings-panel .avatar-technical:not([hidden]),
 .settings-panel .avatar-test-disclosure:not([hidden]) {
   position: relative !important;
-  background:
-    radial-gradient(145% 115% at 28% 12%, rgba(255, 255, 255, 0.034) 0%, rgba(255, 255, 255, 0.007) 50%, transparent 100%),
-    linear-gradient(172deg, rgba(255, 255, 255, 0.009) 0%, rgba(0, 0, 0, 0.042) 100%),
-    var(--color-surface) !important;
+  background: var(--surface-card) !important;
   border: 0 !important;
   border-radius: var(--radius-card, 40px) !important;
   corner-shape: squircle !important;
   padding: 28px 32px !important;
-  box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.045),
-    0 2px 4px 0 rgba(0, 0, 0, 0.25),
-    0 10px 24px -2px rgba(0, 0, 0, 0.35),
-    0 24px 48px -6px rgba(0, 0, 0, 0.45) !important;
+  box-shadow: var(--shadow-card) !important;
   display: flex !important;
   flex-direction: column !important;
   gap: 18px !important;
@@ -10170,10 +10178,7 @@ pre,
 .avatar-section-card:not([hidden]):nth-child(4n + 2),
 .settings-panel .avatar-technical:not([hidden]):nth-child(4n + 2),
 .settings-panel .avatar-test-disclosure:not([hidden]):nth-child(4n + 2) {
-  background:
-    radial-gradient(160% 120% at 64% 10%, rgba(255, 255, 255, 0.032) 0%, rgba(255, 255, 255, 0.006) 52%, transparent 100%),
-    linear-gradient(185deg, rgba(255, 255, 255, 0.008) 0%, rgba(0, 0, 0, 0.046) 100%),
-    var(--color-surface) !important;
+  background: var(--surface-card-2) !important;
 }
 
 .settings-card:not([hidden]):nth-child(4n + 3),
@@ -10183,10 +10188,7 @@ pre,
 .avatar-section-card:not([hidden]):nth-child(4n + 3),
 .settings-panel .avatar-technical:not([hidden]):nth-child(4n + 3),
 .settings-panel .avatar-test-disclosure:not([hidden]):nth-child(4n + 3) {
-  background:
-    radial-gradient(140% 110% at 38% 24%, rgba(255, 255, 255, 0.030) 0%, rgba(255, 255, 255, 0.006) 55%, transparent 100%),
-    linear-gradient(178deg, rgba(255, 255, 255, 0.009) 0%, rgba(0, 0, 0, 0.040) 100%),
-    var(--color-surface) !important;
+  background: var(--surface-card-3) !important;
 }
 
 .settings-card:not([hidden]):nth-child(4n),
@@ -10196,10 +10198,7 @@ pre,
 .avatar-section-card:not([hidden]):nth-child(4n),
 .settings-panel .avatar-technical:not([hidden]):nth-child(4n),
 .settings-panel .avatar-test-disclosure:not([hidden]):nth-child(4n) {
-  background:
-    radial-gradient(155% 120% at 72% 16%, rgba(255, 255, 255, 0.034) 0%, rgba(255, 255, 255, 0.007) 48%, transparent 100%),
-    linear-gradient(188deg, rgba(255, 255, 255, 0.008) 0%, rgba(0, 0, 0, 0.048) 100%),
-    var(--color-surface) !important;
+  background: var(--surface-card-4) !important;
 }
 
 .settings-card:not([hidden]):hover,
@@ -10208,11 +10207,7 @@ pre,
 .avatar-section-card:not([hidden]):hover,
 .settings-panel .avatar-technical:not([hidden]):hover,
 .settings-panel .avatar-test-disclosure:not([hidden]):hover {
-  box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.06),
-    0 4px 8px 0 rgba(0, 0, 0, 0.28),
-    0 12px 24px -3px rgba(0, 0, 0, 0.38),
-    0 28px 52px -8px rgba(0, 0, 0, 0.48) !important;
+  box-shadow: var(--shadow-card-hover) !important;
 }
 
 .settings-card.compact:not([hidden]) {
@@ -11790,17 +11785,10 @@ button.danger-button:not(.secondary):active:not(:disabled) {
 .memory-card,
 .memory-create-form {
   position: relative !important;
-  background:
-    radial-gradient(145% 115% at 28% 12%, rgba(255, 255, 255, 0.034) 0%, rgba(255, 255, 255, 0.007) 50%, transparent 100%),
-    linear-gradient(172deg, rgba(255, 255, 255, 0.009) 0%, rgba(0, 0, 0, 0.042) 100%),
-    var(--color-surface) !important;
+  background: var(--surface-card) !important;
   border: 0 !important;
   corner-shape: squircle !important;
-  box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.045),
-    0 2px 4px 0 rgba(0, 0, 0, 0.25),
-    0 10px 24px -2px rgba(0, 0, 0, 0.35),
-    0 24px 48px -6px rgba(0, 0, 0, 0.45) !important;
+  box-shadow: var(--shadow-card) !important;
   transition: none;
 }
 
@@ -11811,10 +11799,7 @@ button.danger-button:not(.secondary):active:not(:disabled) {
 .timeline-content:nth-child(4n + 2),
 .memory-card:nth-child(4n + 2),
 .memory-create-form:nth-child(4n + 2) {
-  background:
-    radial-gradient(160% 120% at 64% 10%, rgba(255, 255, 255, 0.032) 0%, rgba(255, 255, 255, 0.006) 52%, transparent 100%),
-    linear-gradient(185deg, rgba(255, 255, 255, 0.008) 0%, rgba(0, 0, 0, 0.046) 100%),
-    var(--color-surface) !important;
+  background: var(--surface-card-2) !important;
 }
 
 .coding-card:nth-child(4n + 3),
@@ -11824,10 +11809,7 @@ button.danger-button:not(.secondary):active:not(:disabled) {
 .timeline-content:nth-child(4n + 3),
 .memory-card:nth-child(4n + 3),
 .memory-create-form:nth-child(4n + 3) {
-  background:
-    radial-gradient(140% 110% at 38% 24%, rgba(255, 255, 255, 0.030) 0%, rgba(255, 255, 255, 0.006) 55%, transparent 100%),
-    linear-gradient(178deg, rgba(255, 255, 255, 0.009) 0%, rgba(0, 0, 0, 0.040) 100%),
-    var(--color-surface) !important;
+  background: var(--surface-card-3) !important;
 }
 
 .coding-card:nth-child(4n),
@@ -11837,10 +11819,7 @@ button.danger-button:not(.secondary):active:not(:disabled) {
 .timeline-content:nth-child(4n),
 .memory-card:nth-child(4n),
 .memory-create-form:nth-child(4n) {
-  background:
-    radial-gradient(155% 120% at 72% 16%, rgba(255, 255, 255, 0.034) 0%, rgba(255, 255, 255, 0.007) 48%, transparent 100%),
-    linear-gradient(188deg, rgba(255, 255, 255, 0.008) 0%, rgba(0, 0, 0, 0.048) 100%),
-    var(--color-surface) !important;
+  background: var(--surface-card-4) !important;
 }
 
 .coding-card:hover,
@@ -11850,11 +11829,7 @@ button.danger-button:not(.secondary):active:not(:disabled) {
 .timeline-content:hover,
 .memory-card:hover,
 .memory-create-form:hover {
-  box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.06),
-    0 4px 8px 0 rgba(0, 0, 0, 0.28),
-    0 12px 24px -3px rgba(0, 0, 0, 0.38),
-    0 28px 52px -8px rgba(0, 0, 0, 0.48) !important;
+  box-shadow: var(--shadow-card-hover) !important;
 }
 
 /* Card squircle corner radii and generous tactile padding (Screenshot 2 Archetype) */

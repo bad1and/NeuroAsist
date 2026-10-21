@@ -1,5 +1,7 @@
 import { useRef, useState } from "react";
-import { RotateCcw } from "lucide-react";
+import {
+  IconInterfaceReset as RotateCcw,
+} from "../CustomIcons";
 import { notify } from "../notifications";
 import { animateButtonPress } from "../animations";
 import { resetReferenceWindow, setReferenceWindowLocked, type DesktopWindowPreferences } from "../desktop";
@@ -48,10 +50,13 @@ export function WindowSettings() {
           </div>
         </div>
         {preferences && (
+          <div className="window-reference-preview">
+          <svg viewBox="0 0 240 150" role="img" aria-label="Схема эталонного и минимального размера окна"><rect x="5" y="5" width="230" height="140" rx="16" fill="var(--color-base-deep)" /><rect x="15" y="15" width="210" height="120" rx="12" fill="var(--color-surface-raised)" /><rect x="24" y="24" width={Math.max(30, Math.min(190, preferences.minimum.width / preferences.reference.width * 190))} height={Math.max(25, Math.min(98, preferences.minimum.height / preferences.reference.height * 98))} rx="8" fill="var(--color-accent)" opacity=".6" /></svg>
           <dl className="window-size-summary">
             <div><dt>Эталон</dt><dd>{formatSize(preferences.reference)}</dd></div>
             <div><dt>Минимальный размер</dt><dd>{formatSize(preferences.minimum)}</dd></div>
           </dl>
+          </div>
         )}
         {adapted && <p className="muted">На этом экране размер ограничен доступной рабочей областью.</p>}
         {!available && <p className="muted">Управление размером окна доступно в настольном приложении Iris.</p>}

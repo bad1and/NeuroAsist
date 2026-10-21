@@ -4,7 +4,6 @@ import { StartupScreen } from "../components/StartupScreen";
 import { MaterialButtonContours } from "../components/MaterialButtonContours";
 import type { StartupStage } from "../startup";
 import type { CoreStatus } from "../desktop";
-import "../fonts/proxima-nova.css";
 import "../tokens.css";
 import "../styles.css";
 import "./preview.css";

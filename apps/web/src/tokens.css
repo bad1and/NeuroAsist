@@ -1,5 +1,8 @@
 /* Hallmark · genre: atmospheric · macrostructure: Workbench · design-system: design.md · nav: N3 · footer: none (app) · contrast: pass (40–41) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · mobile: pass (34, 49, 50–57) · icons: pass (30) · designed-as-app */
 /* Hallmark · pre-emit critique: P5 H5 E4 S5 R5 V5 */
+@import "./fonts/days-one.css";
+@import "./fonts/geologica.css";
+
 :root {
   color-scheme: dark;
   --color-base: oklch(22% 0.008 265);
@@ -47,6 +50,34 @@
     0 1px 0 oklch(100% 0 0 / 0.045) inset,
     0 18px 38px oklch(7% 0.004 265 / 0.28),
     0 3px 10px oklch(7% 0.004 265 / 0.2);
+  /* Shared settings-card material for neutral interface plates. */
+  --surface-card:
+    radial-gradient(145% 115% at 28% 12%, rgba(255, 255, 255, 0.034) 0%, rgba(255, 255, 255, 0.007) 50%, transparent 100%),
+    linear-gradient(172deg, rgba(255, 255, 255, 0.009) 0%, rgba(0, 0, 0, 0.042) 100%),
+    var(--color-surface);
+  --surface-card-2:
+    radial-gradient(160% 120% at 64% 10%, rgba(255, 255, 255, 0.032) 0%, rgba(255, 255, 255, 0.006) 52%, transparent 100%),
+    linear-gradient(185deg, rgba(255, 255, 255, 0.008) 0%, rgba(0, 0, 0, 0.046) 100%),
+    var(--color-surface);
+  --surface-card-3:
+    radial-gradient(140% 110% at 38% 24%, rgba(255, 255, 255, 0.030) 0%, rgba(255, 255, 255, 0.006) 55%, transparent 100%),
+    linear-gradient(178deg, rgba(255, 255, 255, 0.009) 0%, rgba(0, 0, 0, 0.040) 100%),
+    var(--color-surface);
+  --surface-card-4:
+    radial-gradient(155% 120% at 72% 16%, rgba(255, 255, 255, 0.034) 0%, rgba(255, 255, 255, 0.007) 48%, transparent 100%),
+    linear-gradient(188deg, rgba(255, 255, 255, 0.008) 0%, rgba(0, 0, 0, 0.048) 100%),
+    var(--color-surface);
+  --shadow-card:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.045),
+    0 2px 4px 0 rgba(0, 0, 0, 0.25),
+    0 10px 24px -2px rgba(0, 0, 0, 0.35),
+    0 24px 48px -6px rgba(0, 0, 0, 0.45);
+  --shadow-card-hover:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.06),
+    0 4px 8px 0 rgba(0, 0, 0, 0.28),
+    0 12px 24px -3px rgba(0, 0, 0, 0.38),
+    0 28px 52px -8px rgba(0, 0, 0, 0.48);
+
   --shadow-row:
     0 1px 0 oklch(100% 0 0 / 0.025) inset,
     0 3px 10px oklch(7% 0.004 265 / 0.16);
@@ -103,7 +134,8 @@
   --color-selection-thumb: #d4d0df;
   --surface-selection-thumb: linear-gradient(var(--color-selection-thumb), var(--color-selection-thumb));
 
-  --font-ui: "Proxima Nova", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-ui: "Geologica", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-heading: "Days One", var(--font-ui);
   --font-subtitles: "Shantell Sans", cursive, sans-serif;
   --font-mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
   --corner-shape: squircle;

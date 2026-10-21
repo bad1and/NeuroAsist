@@ -1,0 +1,23 @@
+@font-face {
+  font-family: "Days One";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./DaysOne-Regular.ttf") format("truetype");
+}
+
+/* Days One has one genuine Regular face. Keep UI typography roles separate
+   from body copy, controls, subtitles and technical values. */
+:is(h1, h2, h3, h4, h5, h6,
+    .settings-card-title, .details-section-title, .avatar-dev-section-title,
+    .notification-title, .model-item-card > strong) {
+  font-family: var(--font-heading);
+  font-weight: 400;
+  font-synthesis: none;
+}
+
+.sidebar .navigation-button > span {
+  font-family: var(--font-heading);
+  font-weight: 400;
+  font-synthesis: none;
+}

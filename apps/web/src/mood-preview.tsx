@@ -6,7 +6,6 @@ import { MaterialButton } from "./components/MaterialButton";
 import { MaterialButtonContours } from "./components/MaterialButtonContours";
 import { AppCheckbox } from "./components/AppCheckbox";
 import { getMoodVisuals } from "./mood-visuals";
-import "./fonts/proxima-nova.css";
 import "./tokens.css";
 import "./styles.css";
 import "./state.css";

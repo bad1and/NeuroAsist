@@ -1,5 +1,18 @@
 import { useContext, useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
-import { ArrowUp, Check, ChevronLeft, ChevronRight, Copy, Headphones, Mic, Minus, Search, Sparkles, Square, X } from "lucide-react";
+import {
+  IconInterfaceArrowUp as ArrowUp,
+  IconInterfaceCheck as Check,
+  IconInterfaceChevronLeft as ChevronLeft,
+  IconInterfaceChevronRight as ChevronRight,
+  IconInterfaceCopy as Copy,
+  IconInterfaceHelpCustomerSupport5 as Headphones,
+  IconInterfaceMicrophone as Mic,
+  IconInterfaceMinus as Minus,
+  IconInterfaceSearch as Search,
+  IconInterfaceSparkles as Sparkles,
+  IconInterfaceStop as Square,
+  IconInterfaceCross as X,
+} from "../CustomIcons";
 import { CustomSelect } from "../components/CustomSelect";
 import { useMaterialFeedback } from "./useMaterialFeedback";
 import { AppSwitch } from "../components/AppSwitch";

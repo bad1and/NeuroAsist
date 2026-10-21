@@ -1,0 +1,173 @@
+{
+  "fonts": [
+    {
+      "family": "Days One",
+      "author": "Jovanny Lemonad",
+      "license": "OFL-1.1",
+      "google_fonts_commit": "47d54ca1ebb14fd864695f1d39dc734f39017c33",
+      "font_version": "Version 1.002",
+      "usage": "UI headings and section titles; Regular 400 only",
+      "russian_alphabet_verified": true,
+      "files": {
+        "apps/web/src/fonts/DaysOne-Regular.ttf": {
+          "url": "https://raw.githubusercontent.com/google/fonts/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/daysone/DaysOne-Regular.ttf",
+          "sha256": "7b5a0e6d88696e43e95f6320613908e53d36ad854b4a18e4a1b8d1c19fdbf1fe",
+          "bytes": 65580
+        },
+        "third-party/font-notices/Days-One-OFL.txt": {
+          "url": "https://raw.githubusercontent.com/google/fonts/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/daysone/OFL.txt",
+          "sha256": "cacad5bf45bf5c81f4b6cbd114261bc8a08f6110b66a4c6fad8bbc16618a3096",
+          "bytes": 4398
+        },
+        "third-party/font-notices/Days-One-METADATA.pb": {
+          "url": "https://raw.githubusercontent.com/google/fonts/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/daysone/METADATA.pb",
+          "sha256": "693985115d5abe76bb0b824ca23ce2288258a131e7af0ae11999dd5a6a6a137e",
+          "bytes": 843
+        }
+      }
+    },
+    {
+      "family": "Huninn",
+      "author": "The Huninn Project Authors / justfont",
+      "license": "OFL-1.1",
+      "google_fonts_commit": "47d54ca1ebb14fd864695f1d39dc734f39017c33",
+      "font_version": "Version 1.003",
+      "usage": "Retained local alternative; not imported into the current runtime bundle",
+      "russian_alphabet_verified": true,
+      "files": {
+        "apps/web/src/fonts/Huninn-Regular.ttf": {
+          "url": "https://raw.githubusercontent.com/google/fonts/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/huninn/Huninn-Regular.ttf",
+          "sha256": "1bd770a5ffc0c06723b567686f8b5db5abf9ab54227f3bbc4e6fd648f4698805",
+          "bytes": 4683972
+        },
+        "third-party/font-notices/Huninn-OFL.txt": {
+          "url": "https://raw.githubusercontent.com/google/fonts/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/huninn/OFL.txt",
+          "sha256": "d71824aeb09afc4c2cac01acab5c3db79796e927ba37be40d69fb62a412639b6",
+          "bytes": 4382
+        },
+        "third-party/font-notices/Huninn-METADATA.pb": {
+          "url": "https://raw.githubusercontent.com/google/fonts/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/huninn/METADATA.pb",
+          "sha256": "8c79bd14cb554fb1b39d9e39fad6b01f952ae00f7b9534db04a6bde6810dd033",
+          "bytes": 659
+        }
+      }
+    },
+    {
+      "family": "Balsamiq Sans",
+      "author": "The Balsamiq Sans Project Authors / Michael Angeles",
+      "license": "OFL-1.1",
+      "google_fonts_commit": "47d54ca1ebb14fd864695f1d39dc734f39017c33",
+      "font_version": [
+        "Version 1.020; ttfautohint (v1.8.4.7-5d5b);gftools[0.9.26]"
+      ],
+      "usage": "Retained local alternative; not imported into the current runtime bundle",
+      "russian_alphabet_verified": true,
+      "files": {
+        "apps/web/src/fonts/BalsamiqSans-Regular.ttf": {
+          "url": "https://raw.githubusercontent.com/google/fonts/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/balsamiqsans/BalsamiqSans-Regular.ttf",
+          "sha256": "fcc9c00a9ad6e78673fa84653745569097241d99b5d1387a23f395858ed46b7e",
+          "bytes": 407528
+        },
+        "apps/web/src/fonts/BalsamiqSans-Bold.ttf": {
+          "url": "https://raw.githubusercontent.com/google/fonts/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/balsamiqsans/BalsamiqSans-Bold.ttf",
+          "sha256": "a3302bd8424e6a37704eb5e20d5c5a3a2fd80feaf57e48a19d261f8e0c583621",
+          "bytes": 369860
+        },
+        "apps/web/src/fonts/BalsamiqSans-Italic.ttf": {
+          "url": "https://raw.githubusercontent.com/google/fonts/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/balsamiqsans/BalsamiqSans-Italic.ttf",
+          "sha256": "0a287472035409f556acd66c1c926047ee9829a62f88b0fa273591332a8606df",
+          "bytes": 379924
+        },
+        "apps/web/src/fonts/BalsamiqSans-BoldItalic.ttf": {
+          "url": "https://raw.githubusercontent.com/google/fonts/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/balsamiqsans/BalsamiqSans-BoldItalic.ttf",
+          "sha256": "4999588a66defbf39e718b3edb0b965b932157bd8d1321130de06bec0cdccc75",
+          "bytes": 351304
+        },
+        "third-party/font-notices/Balsamiq-Sans-OFL.txt": {
+          "url": "https://raw.githubusercontent.com/google/fonts/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/balsamiqsans/OFL.txt",
+          "sha256": "0e82859672e549fd39554e2bfa97b5511e81f4f89394f2e696666d36b5d52144",
+          "bytes": 4395
+        },
+        "third-party/font-notices/Balsamiq-Sans-METADATA.pb": {
+          "url": "https://raw.githubusercontent.com/google/fonts/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/balsamiqsans/METADATA.pb",
+          "sha256": "1dfa7cdb8b196abdde81d4cd400769e24926cce52cecb41c0298564b23f62680",
+          "bytes": 2222
+        }
+      }
+    },
+    {
+      "family": "Didact Gothic",
+      "author": "The Didact Gothic Project Authors / Daniel Johnson, Cyreal",
+      "license": "OFL-1.1",
+      "google_fonts_commit": "47d54ca1ebb14fd864695f1d39dc734f39017c33",
+      "font_version": "Version 2.101",
+      "usage": "Retained local alternative; not imported into the current runtime bundle",
+      "russian_alphabet_verified": true,
+      "files": {
+        "apps/web/src/fonts/DidactGothic-Regular.ttf": {
+          "url": "https://raw.githubusercontent.com/google/fonts/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/didactgothic/DidactGothic-Regular.ttf",
+          "sha256": "b98f9e091b6337a86f4e0f69c94c31905e1e287782853f472e176b4e28d3f81f",
+          "bytes": 194200
+        },
+        "third-party/font-notices/Didact-Gothic-OFL.txt": {
+          "url": "https://raw.githubusercontent.com/google/fonts/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/didactgothic/OFL.txt",
+          "sha256": "36e2f1debc9778bac79fac1a0cb5a5ef51c102f00b58ef7d8a05324144b68166",
+          "bytes": 4379
+        },
+        "third-party/font-notices/Didact-Gothic-METADATA.pb": {
+          "url": "https://raw.githubusercontent.com/google/fonts/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/didactgothic/METADATA.pb",
+          "sha256": "e2bb5ef0b9b495f375a697ade60d7ed85165316b16982c2ce8f0a699b8fe62b3",
+          "bytes": 659
+        }
+      }
+    },
+    {
+      "family": "Geologica",
+      "author": "The Geologica Project Authors / Monokrom",
+      "license": "OFL-1.1",
+      "google_fonts_commit": "47d54ca1ebb14fd864695f1d39dc734f39017c33",
+      "font_version": "Version 1.010;gftools[0.9.28]",
+      "usage": "Primary UI and body text; variable weight 100-900, oblique 0-12 degrees",
+      "axes": {
+        "wght": [
+          100.0,
+          100.0,
+          900.0
+        ],
+        "CRSV": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "SHRP": [
+          0.0,
+          0.0,
+          100.0
+        ],
+        "slnt": [
+          -12.0,
+          0.0,
+          0.0
+        ]
+      },
+      "russian_alphabet_verified": true,
+      "files": {
+        "apps/web/src/fonts/Geologica-Variable.ttf": {
+          "url": "https://raw.githubusercontent.com/google/fonts/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/geologica/Geologica%5BCRSV%2CSHRP%2Cslnt%2Cwght%5D.ttf",
+          "sha256": "9124d9e88ac6c11d761f35241713a51d68e2c4ebedce0edaca834717a00959ec",
+          "bytes": 348640
+        },
+        "third-party/font-notices/Geologica-OFL.txt": {
+          "url": "https://raw.githubusercontent.com/google/fonts/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/geologica/OFL.txt",
+          "sha256": "778186245840aea0e60bec6a46e7fb1442e0cd78e41afeadffcd3e8824b379e0",
+          "bytes": 4400
+        },
+        "third-party/font-notices/Geologica-METADATA.pb": {
+          "url": "https://raw.githubusercontent.com/google/fonts/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/geologica/METADATA.pb",
+          "sha256": "08b4d879d8dc0aa9cb3c458c9bae4d3de457d53af239e563c27b3458776b5819",
+          "bytes": 1398
+        }
+      }
+    }
+  ]
+}

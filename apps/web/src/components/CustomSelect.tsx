@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect, useId, ReactNode, Children, isValidElement, ReactElement } from "react";
-import { ChevronDown } from "lucide-react";
+import {
+  IconInterfaceChevronDown as ChevronDown,
+} from "../CustomIcons";
 import { isTestEnvironment, prefersReducedMotion, runSafeAnimation } from "../animations/core";
 import { ButtonMaterialLayers } from "./MaterialButton";
 import { materialStyle } from "./buttonMaterial";

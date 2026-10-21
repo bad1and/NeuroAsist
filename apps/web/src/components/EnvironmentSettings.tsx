@@ -1,6 +1,8 @@
 import { MaterialButton } from "./MaterialButton";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUpRight } from "lucide-react";
+import {
+  IconInterfaceArrowUpRight as ArrowUpRight,
+} from "../CustomIcons";
 import { getEnvironmentStatus } from "../api";
 import { AppSwitch } from "./AppSwitch";
 import { CustomSelect } from "./CustomSelect";
