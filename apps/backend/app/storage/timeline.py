@@ -2823,16 +2823,37 @@ class TimelineStore:
         }
 
     def ensure_active_session(self) -> dict[str, object]:
-        """Return the active session or create the first one without clearing history."""
+        """Resume a recent session; archive an idle conversation before reopening."""
         with self._immediate_connect() as connection:
+            now = self._now()
             session_id = self._active_session_id(connection)
             if session_id is not None:
-                return {"session_id": session_id, "created": False}
+                # Startup recovery may already have closed the episode. Use
+                # durable session messages rather than the current episode pointer.
+                last_activity = connection.execute(
+                    """SELECT MAX(COALESCE(completed_at, created_at))
+                       FROM conversation_messages WHERE timeline_id = ? AND session_id = ?""",
+                    (PRIMARY_TIMELINE_ID, session_id),
+                ).fetchone()[0]
+                if last_activity is None or self._seconds_between(last_activity, now) < self._episode_policy.hard_inactivity_seconds:
+                    return {"session_id": session_id, "created": False}
+                episode = self._current_episode_row(connection)
+                if episode is not None:
+                    self._close_episode(connection, episode, "inactivity", now)
+                connection.execute(
+                    """UPDATE background_jobs SET available_at = ?, updated_at = ?
+                       WHERE type = 'memory_consolidation' AND status = 'pending'
+                         AND json_extract(payload_json, '$.end_message_id') IN (
+                           SELECT id FROM conversation_messages WHERE session_id = ?
+                         )""",
+                    (now, now, session_id),
+                )
+                connection.execute("DELETE FROM conversation_turn_state WHERE timeline_id = ?", (PRIMARY_TIMELINE_ID,))
             session_id = uuid4().hex
             connection.execute(
                 """UPDATE conversation_timelines
                    SET active_session_id = ?, updated_at = ? WHERE id = ?""",
-                (session_id, self._now(), PRIMARY_TIMELINE_ID),
+                (session_id, now, PRIMARY_TIMELINE_ID),
             )
         return {"session_id": session_id, "created": True}
 

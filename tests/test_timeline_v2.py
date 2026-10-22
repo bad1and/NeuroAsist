@@ -8,7 +8,7 @@ from apps.backend import main as backend_main
 from apps.backend.app.api.routes import chat as chat_route
 from apps.backend.app.core.config import Settings
 from apps.backend.app.llm.base import LLMResponse
-from apps.backend.app.storage.timeline import LATEST_SCHEMA_VERSION, TimelineStore
+from apps.backend.app.storage.timeline import EpisodePolicy, LATEST_SCHEMA_VERSION, TimelineStore
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -208,6 +208,62 @@ def test_open_session_resumes_without_erasing_messages(monkeypatch, tmp_path: Pa
     assert resumed.status_code == 200
     assert resumed.json() == {"session_id": session_id, "created": False}
     assert [item["id"] for item in messages.json()["items"]] == [accepted.message.id]
+
+
+@pytest.mark.parametrize("recovered,episodes_enabled", [(False, True), (True, True), (False, False)])
+def test_open_session_after_overnight_break_preserves_history_and_memory(
+    monkeypatch, tmp_path: Path, recovered: bool, episodes_enabled: bool,
+) -> None:
+    client, _ = make_client(monkeypatch, tmp_path)
+    with client:
+        store = client.app.state.timeline_store
+        monkeypatch.setattr(store, "_episode_policy", EpisodePolicy(enabled=episodes_enabled))
+        monkeypatch.setattr(store, "_now", lambda: "2026-10-21T19:00:00.000+00:00")
+        session_id = client.post("/conversation/session").json()["session_id"]
+        message = store.accept_user_turn(session_key=session_id, content="Вечерний разговор", input_mode="text").message
+        memory = store.create_memory({
+            "scope": "user_profile", "kind": "identity", "subject": "user",
+            "predicate": "name", "value_text": "Роман", "source_message_ids": [message.id],
+        }, actor="test")
+        store.enqueue_consolidation_job(message.id)
+        monkeypatch.setattr(store, "_now", lambda: "2026-10-22T06:00:00.000+00:00")
+        if recovered:
+            store.recover_active_episode()
+
+        opened = client.post("/conversation/session")
+        new_id = opened.json()["session_id"]
+        empty = client.get("/timeline/messages", params={"session_id": new_id})
+        history = client.get("/timeline/messages", params={"session_id": session_id})
+        stale = client.post("/chat", json={"session_id": session_id, "message": "устарело"})
+
+        assert opened.status_code == 200 and opened.json()["created"] is True
+        assert new_id != session_id
+        assert empty.json()["items"] == []
+        assert [item["id"] for item in history.json()["items"]] == [message.id]
+        assert store.get_memory(str(memory["id"])) is not None
+        assert store.current_episode() is None
+        assert stale.status_code == 409
+        assert client.post("/conversation/session").json() == {"session_id": new_id, "created": False}
+
+
+@pytest.mark.parametrize("now,expired", [
+    ("2026-10-22T00:10:00.000+00:00", False),
+    ("2026-10-22T00:59:59.000+00:00", False),
+    ("2026-10-22T01:00:00.000+00:00", True),
+])
+def test_session_inactivity_uses_latest_reply_and_configured_timeout(monkeypatch, tmp_path: Path, now: str, expired: bool) -> None:
+    store = TimelineStore(tmp_path / "idle.sqlite3", EpisodePolicy(hard_inactivity_seconds=3600))
+    store.init_db()
+    monkeypatch.setattr(store, "_now", lambda: "2026-10-21T23:55:00.000+00:00")
+    session_id = str(store.ensure_active_session()["session_id"])
+    store.accept_user_turn(session_key=session_id, content="Продолжаем", input_mode="text")
+    store.append_message(role="assistant", content="Ответ", session_id=session_id, input_mode="text", created_at="2026-10-22T00:00:00.000+00:00")
+    monkeypatch.setattr(store, "_now", lambda: now)
+
+    result = store.ensure_active_session()
+
+    assert result["created"] is expired
+    assert (result["session_id"] != session_id) is expired
 
 
 def test_timeline_pagination_journal_and_range_deletion(monkeypatch, tmp_path: Path) -> None:

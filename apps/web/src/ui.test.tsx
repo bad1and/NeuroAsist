@@ -164,6 +164,9 @@ describe("русский интерфейс", () => {
       fireEvent.change(composer, { target: { value: "вопрос" } });
       fireEvent.submit(composer.closest("form")!);
       await waitFor(() => expect(screen.getByRole("button", { name: "Отправка сообщения" })).toBeDisabled());
+      const sessionChecks = api.getConversationSession.mock.calls.length;
+      fireEvent(window, new Event("focus"));
+      expect(api.getConversationSession).toHaveBeenCalledTimes(sessionChecks);
       api.getTimelineMessages.mockResolvedValue({ items: [{ id: "saved-reply", role: "assistant", content: "Сохранённая часть", status: "interrupted", utterance_id: "original" }] });
       const connectionState = (client! as unknown as { onConnectionState: (state: "connected" | "disconnected") => void }).onConnectionState;
       act(() => { client!.clearActive(); connectionState("disconnected"); });
@@ -340,8 +343,8 @@ describe("русский интерфейс", () => {
     try {
       render(<App />);
       fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
-      fireEvent.click(await screen.findByRole("button", { name: "Начать" }));
-
+      // The notification itself opens the dialog, even if it beats timeline loading.
+      await screen.findByRole("button", { name: "Завершить" });
       await waitFor(() => expect(api.getVoiceTtsStatus).toHaveBeenCalledWith("coding-review-voice"));
       await waitFor(() => expect(play).toHaveBeenCalledOnce());
       const subtitles = screen.getByRole("region", { name: "Субтитры Iris" });
@@ -383,8 +386,7 @@ describe("русский интерфейс", () => {
 
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Начать" }));
-
+    await screen.findByRole("button", { name: "Завершить" });
     await waitFor(() => expect(api.getEvents).toHaveBeenCalled());
     expect(api.getVoiceTtsStatus).not.toHaveBeenCalled();
   });
@@ -477,6 +479,43 @@ describe("русский интерфейс", () => {
     await screen.findByRole("button", { name: "Диалог" });
     await waitFor(() => expect(api.getConversationSession).toHaveBeenCalledTimes(1));
     expect(api.resetConversationSession).not.toHaveBeenCalled();
+  });
+
+  it("ожидает активную сессию и не подмешивает общую историю в новый диалог", async () => {
+    let resolveSession!: (value: { session_id: string; created: boolean }) => void;
+    api.getConversationSession.mockImplementationOnce(() => new Promise(resolve => { resolveSession = resolve; }));
+    api.getTimelineMessages.mockImplementation(async (_limit, session) => ({
+      items: session === "morning-session" ? [] : [{ id: "yesterday", role: "assistant", content: "Вчерашний разговор", metadata: {} }],
+      next_offset: null,
+    }));
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
+    await waitFor(() => expect(api.getConversationSession).toHaveBeenCalled());
+    expect(api.getTimelineMessages).not.toHaveBeenCalled();
+
+    await act(async () => resolveSession({ session_id: "morning-session", created: true }));
+
+    await waitFor(() => expect(api.getTimelineMessages).toHaveBeenCalledWith(50, "morning-session"));
+    expect(screen.queryByText("Вчерашний разговор")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Начать" })).toBeVisible();
+  });
+
+  it("показывает начало диалога при возвращении к окну после завершения старой сессии", async () => {
+    api.getTimelineMessages.mockImplementation(async (_limit, session) => ({
+      items: session === "test-session" ? [{ id: "evening", role: "assistant", content: "Вечерний разговор", metadata: {} }] : [],
+      next_offset: null,
+    }));
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
+    expect(await screen.findByText("Вечерний разговор")).toBeVisible();
+    api.getConversationSession.mockResolvedValue({ session_id: "morning-session", created: true });
+
+    fireEvent(window, new Event("focus"));
+
+    expect(await screen.findByRole("button", { name: "Начать" })).toBeVisible();
+    expect(screen.queryByText("Вечерний разговор")).not.toBeInTheDocument();
+    expect(api.resetConversationSession).not.toHaveBeenCalled();
+    expect(api.getTimelineMessages).toHaveBeenLastCalledWith(50, "morning-session");
   });
 
   it("сохраняет открытый чат при переходе между разделами", async () => {

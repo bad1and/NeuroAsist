@@ -215,7 +215,7 @@ async def require_active_session_async(request: Request, session_id: str) -> Non
 
 @router.post("/session")
 async def open_session(request: Request) -> dict[str, object]:
-    """Resume the active browser session without treating a reload as reset."""
+    """Resume a recent browser session or open a new one after a long break."""
     store = getattr(request.app.state, "timeline_store", None)
     if store is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Timeline V2 is disabled")

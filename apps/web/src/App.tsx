@@ -876,6 +876,12 @@ function MainApp() {
     }
   }, []);
 
+  const checkSession = useCallback(async () => {
+    const session = await getConversationSession();
+    // A late idle check must not replace a session started manually meanwhile.
+    setSessionId(current => current === sessionId ? session.session_id : current);
+  }, [sessionId]);
+
   useEffect(() => {
     if (!servicesReady || !settings || setupRequired || sessionId || startingSession) return;
     const frame = window.requestAnimationFrame(() => {
@@ -1018,6 +1024,7 @@ function MainApp() {
                 onOpenChat={() => switchView("chat")}
                 onOpenSettings={() => switchView("settings")}
                 onStartNewDialog={startFreshSession}
+                onCheckSession={checkSession}
                 onRetryAvatar={retryAvatar}
               />
             </Suspense>
@@ -1264,6 +1271,7 @@ export function ChatPage({
   onOpenChat,
   onOpenSettings,
   onStartNewDialog,
+  onCheckSession,
   onRetryAvatar,
 }: {
   sessionId: string | null;
@@ -1281,6 +1289,7 @@ export function ChatPage({
   onOpenChat?: () => void;
   onOpenSettings?: () => void;
   onStartNewDialog: (boundaryReason?: ConversationBoundaryReason) => Promise<void>;
+  onCheckSession?: () => Promise<void>;
   onRetryAvatar: () => Promise<void>;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -1605,6 +1614,7 @@ export function ChatPage({
   const refreshTimelineMessages = useCallback((targetSessionId?: string) => {
     const revision = chatRevisionRef.current;
     const activeUtterance = liveSocketRef.current?.activeUtteranceId;
+    const knownMessageIds = new Set(messagesRef.current.map(message => message.id));
     return (targetSessionId ? getTimelineMessages(50, targetSessionId) : getTimelineMessages(50)).then((payload) => {
       if (revision !== chatRevisionRef.current || activeUtterance !== liveSocketRef.current?.activeUtteranceId || (targetSessionId && targetSessionId !== currentSessionRef.current)) return;
       const restored = payload.items
@@ -1612,8 +1622,10 @@ export function ChatPage({
         .map((message) => ({ id: message.id, role: message.role as "user" | "assistant", content: message.content,
           clientMessageId: message.client_message_id ?? undefined, utteranceId: message.utterance_id ?? undefined }));
       setMessages(current => [...restored, ...current.filter(message =>
-        submissionRef.current !== null && message.role === "user" && message.clientMessageId === submissionRef.current.id
-        && !restored.some(item => item.id === message.id || item.clientMessageId === message.clientMessageId))]);
+        (!knownMessageIds.has(message.id)
+          || (submissionRef.current !== null && message.role === "user" && message.clientMessageId === submissionRef.current.id))
+        && !restored.some(item => item.id === message.id
+          || (message.clientMessageId && item.clientMessageId === message.clientMessageId)))]);
       if (payload.items.length > 0) {
         setIsStarted(true);
       }
@@ -1622,7 +1634,55 @@ export function ChatPage({
     });
   }, []);
 
-  useEffect(() => { void refreshTimelineMessages(); }, [refreshTimelineMessages]);
+  const restoredSessionRef = useRef(sessionId);
+  useEffect(() => {
+    const previousSession = restoredSessionRef.current;
+    restoredSessionRef.current = sessionId;
+    if (previousSession && previousSession !== sessionId) {
+      chatRevisionRef.current++;
+      submissionRef.current = null;
+      pendingTextDeltasRef.current.clear();
+      liveSocketRef.current?.close();
+      liveSocketRef.current = null;
+      liveSocketSessionIdRef.current = null;
+      livePlayerRef.current?.stop();
+      setMessages([]);
+      setIsStarted(false);
+      setLoading(false);
+      setVoiceState("idle");
+      setRetryText(null);
+      setError(null);
+    }
+    if (sessionId) void refreshTimelineMessages(sessionId);
+  }, [refreshTimelineMessages, sessionId]);
+
+  const canCheckSessionRef = useRef(false);
+  canCheckSessionRef.current = !loading && !liveConversation && !microphoneStarting
+    && !sessionStarting && !newDialogPending && voiceState === "idle";
+  const dialogHasMessagesRef = useRef(false);
+  dialogHasMessagesRef.current = messages.length > 0 || isStarted;
+
+  useEffect(() => {
+    if (!isActive || !sessionId || !onCheckSession) return;
+    let pending = false;
+    const check = () => {
+      if (pending || !canCheckSessionRef.current || document.visibilityState === "hidden") return;
+      pending = true;
+      void onCheckSession().catch(() => {
+        // Keep the saved conversation visible until the core is reachable.
+      }).finally(() => { pending = false; });
+    };
+    // Covers returning from another section, restoring a window, and sleep.
+    if (dialogHasMessagesRef.current) check();
+    const timer = window.setInterval(check, 60_000);
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, [isActive, sessionId, onCheckSession]);
 
   useEffect(() => {
     if (!sessionId) return;
