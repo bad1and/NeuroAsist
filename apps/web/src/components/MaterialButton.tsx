@@ -7,6 +7,7 @@ type Props = ComponentPropsWithoutRef<"button"> & {
   seed?: number;
   tone?: "accent" | "graphite" | "danger" | "warning" | "success";
   appearance?: "lens" | "plain" | "quiet" | "joined";
+  surfaceMotion?: boolean;
 };
 
 function MaterialFace() {
@@ -49,7 +50,7 @@ const navigationClasses = /\b(navigation-button|settings-nav-button|settings-nav
 
 /** Keeps the native button, its children, form semantics and forwarded DOM ref. */
 export const MaterialButton = forwardRef<HTMLButtonElement, Props>(function MaterialButton({
-  materialKey, seed, tone, appearance, className = "", style, children, disabled, ...props
+  materialKey, seed, tone, appearance, surfaceMotion, className = "", style, children, disabled, ...props
 }, forwardedRef) {
   const localRef = useRef<HTMLButtonElement>(null);
   const attach = useCallback((node: HTMLButtonElement | null) => {
@@ -64,7 +65,7 @@ export const MaterialButton = forwardRef<HTMLButtonElement, Props>(function Mate
   const resolvedSeed = seed ?? buttonSeed(materialKey);
   const contour = className.includes("chat-start-button") ? "start" : className.includes("dock-finish-btn") ? "finish"
     : className.includes("dock-new-dialog-btn") ? "new" : className.includes("dock-icon-btn") ? "square" : undefined;
-  useMaterialFeedback(localRef, { disabled: disabled || mode === "plain" || mode === "joined", seed: resolvedSeed, quiet: mode === "quiet", pressSurface: true });
+  useMaterialFeedback(localRef, { disabled: disabled || mode === "plain" || mode === "joined", seed: resolvedSeed, quiet: mode === "quiet", pressSurface: true, surfaceMotion });
 
   useLayoutEffect(() => {
     const element = localRef.current;

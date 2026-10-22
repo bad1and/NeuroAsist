@@ -5,8 +5,8 @@ import { animate, prefersReducedMotion, type Animation } from "../animations/cor
 /** Shared cursor feedback for the accepted lens material. */
 export function useMaterialFeedback(
   ref: RefObject<HTMLElement | null>,
-  { field = false, disabled = false, pinned = "", seed = null, quiet = false, pressSurface = false, pressScale = true }:
-  { field?: boolean; disabled?: boolean; pinned?: string; seed?: number | null; quiet?: boolean; pressSurface?: boolean; pressScale?: boolean } = {},
+  { field = false, disabled = false, pinned = "", seed = null, quiet = false, pressSurface = false, pressScale = true, surfaceMotion = true }:
+  { field?: boolean; disabled?: boolean; pinned?: string; seed?: number | null; quiet?: boolean; pressSurface?: boolean; pressScale?: boolean; surfaceMotion?: boolean } = {},
 ) {
   useEffect(() => {
     const element = ref.current;
@@ -20,6 +20,7 @@ export function useMaterialFeedback(
     let hovered = false;
     let focused = element.matches(":focus-visible") || (field && element.contains(document.activeElement));
     let pressed = false;
+    const scaleOnPress = pressScale && surfaceMotion;
     let reduced = prefersReducedMotion();
     const media = window.matchMedia?.("(prefers-reduced-motion: reduce)");
     // Independent of the material RNG: existing seeds retain their static appearance.
@@ -57,8 +58,10 @@ export function useMaterialFeedback(
       const y = Math.max(-1, Math.min(1, (cursorY - bounds.top) / bounds.height * 2 - 1));
       const compact = bounds.width / bounds.height <= 3;
       const tilt = (compact ? 2.1 : 1.15) + character * .65;
-      if (!faceMotion) {
+      if (surfaceMotion && !faceMotion) {
         faceMotion = createAnimatable(surface, { rotateX: 230, rotateY: 230, y: 230, ease });
+      }
+      if (!lightMotion) {
         lightMotion = createAnimatable(spot, { x: 160 + fluidity * 100, y: 160 + fluidity * 100, ease });
         light?.style.setProperty("--dp-hover-strength", `${.08 + character * .035}`);
       }
@@ -67,9 +70,9 @@ export function useMaterialFeedback(
         light?.style.setProperty("--dp-hover-width", `${(compact ? 40 : 23) + spread * 12}%`);
       }
       // Only the decorative surface moves; text and hit bounds stay stable.
-      faceMotion.rotateX(-y * tilt);
-      faceMotion.rotateY(x * tilt);
-      faceMotion.y(-.65 * (1 - Math.abs(y) * .35));
+      faceMotion?.rotateX(-y * tilt);
+      faceMotion?.rotateY(x * tilt);
+      faceMotion?.y(-.65 * (1 - Math.abs(y) * .35));
       lightMotion?.x(x * bounds.width * .42);
       lightMotion?.y(y * bounds.height * .38);
     };
@@ -92,15 +95,15 @@ export function useMaterialFeedback(
       element.dataset.rimVisible = String(visible);
       change(rim, { opacity: visible ? 1 : 0 });
       change(light, { opacity: !disabled && (hovered || pressed) ? 1 : 0 });
-      if (quiet || (pressScale && pressSurface && !reduced)) change(surface, {
+      if (quiet || (scaleOnPress && pressSurface && !reduced)) change(surface, {
         ...(quiet ? { opacity: !disabled && (hovered || focused || pressed) ? 1 : 0 } : {}),
-        ...(pressScale && pressSurface && !reduced ? { scale: pressed ? .96 : 1 } : {}),
+        ...(scaleOnPress && pressSurface && !reduced ? { scale: pressed ? .96 : 1 } : {}),
       });
     };
     const restore = () => {
       if (!pressed) return;
       pressed = false;
-      if (pressScale && !field && !reduced && !pressSurface) change(element, { scale: 1 });
+      if (scaleOnPress && !field && !reduced && !pressSurface) change(element, { scale: 1 });
       update();
     };
     const enter = (event: PointerEvent) => {
@@ -125,7 +128,7 @@ export function useMaterialFeedback(
     const down = (event?: Event) => {
       if (disabled || (event?.target instanceof Element && event.target.closest("button:disabled"))) return;
       pressed = true;
-      if (pressScale && !field && !reduced && !pressSurface) change(element, { scale: 0.96 });
+      if (scaleOnPress && !field && !reduced && !pressSurface) change(element, { scale: 0.96 });
       update();
     };
     const keydown = (event: KeyboardEvent) => {
@@ -198,5 +201,5 @@ export function useMaterialFeedback(
       if (quiet) surface?.style.removeProperty("opacity");
       if (pressSurface) surface?.style.removeProperty("transform");
     };
-  }, [ref, field, disabled, pinned, seed, quiet, pressSurface, pressScale]);
+  }, [ref, field, disabled, pinned, seed, quiet, pressSurface, pressScale, surfaceMotion]);
 }

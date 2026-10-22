@@ -123,6 +123,31 @@ it("reveals a quiet control while pressed without requiring pointer hover", () =
   expect(feedback.transitions.filter(change => change.target === face).slice(-1)[0]?.values).toMatchObject({ opacity: 0, scale: 1 });
 });
 
+it("keeps a fixed surface aligned on hover and press while its light follows the pointer", () => {
+  render(<MaterialButton materialKey="shortcuts.bind.search" appearance="quiet" surfaceMotion={false}>Ctrl + K</MaterialButton>);
+  const element = button();
+  const face = element.querySelector<HTMLElement>(".dp-hover-surface")!;
+  pointer(element, "pointerenter");
+  vi.advanceTimersByTime(20);
+  expect(feedback.motions).toHaveLength(1);
+  const light = feedback.motions[0];
+  expect(light.target).toBe(element.querySelector(".dp-hover-spot"));
+  expect(light.x.mock.lastCall?.[0]).toBeGreaterThan(0);
+  pointer(element, "pointermove", 120, 140);
+  vi.advanceTimersByTime(20);
+  expect(light.x.mock.lastCall?.[0]).toBeLessThan(0);
+  fireEvent.pointerDown(element);
+  expect(feedback.transitions.filter(change => change.target === face).slice(-1)[0]?.values).toMatchObject({ opacity: 1 });
+  fireEvent.pointerUp(element);
+  for (const key of ["Enter", " "]) {
+    fireEvent.keyDown(element, { key });
+    fireEvent.keyUp(element, { key });
+  }
+  fireEvent.pointerLeave(element);
+  expect(feedback.transitions.filter(change => change.target === face).slice(-1)[0]?.values).toMatchObject({ opacity: 0 });
+  expect(feedback.transitions.some(change => "scale" in change.values)).toBe(false);
+});
+
 it("keeps dropdown options at full size on pointer and keyboard presses while retaining light feedback", () => {
   render(<CustomSelect value="one"><option value="one">Один на один</option><option value="group">Несколько собеседников</option></CustomSelect>);
   fireEvent.click(screen.getByRole("button"));
