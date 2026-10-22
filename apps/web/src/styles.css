@@ -1195,9 +1195,11 @@ select { appearance: auto; }
 
 .chat-idle-stage .in-app-avatar-stage {
   position: absolute;
-  left: 50%;
+  /* Offset the folded legs past the label; the seat stays above the CTA. */
+  left: calc(50% + 20px * var(--dock-scale, 1));
   transform: translateX(-50%);
-  bottom: calc(var(--dock-base-toolbar-height, 121px) * var(--dock-scale, 1));
+  /* Leave a small overlap above the CTA without covering its label. */
+  bottom: calc((var(--dock-base-toolbar-height, 121px) - 81px + 24px) * var(--dock-scale, 1));
   width: min(100%, calc(var(--avatar-base-width, 500px) * var(--dock-scale, 1)));
   height: calc(100% - calc(var(--dock-base-toolbar-height, 121px) * var(--dock-scale, 1) + 20px));
   max-height: calc(var(--avatar-base-height, 520px) * var(--dock-scale, 1));
@@ -1309,6 +1311,7 @@ select { appearance: auto; }
 
 .chat-start-banner {
   position: relative;
+  z-index: 2;
   width: calc(var(--dock-base-width, 829px) * var(--dock-scale, 1));
   height: calc(var(--dock-base-toolbar-height, 121px) * var(--dock-scale, 1));
   max-width: 100%;
@@ -1330,18 +1333,22 @@ select { appearance: auto; }
   transform: translateX(-50%) scale(var(--dock-scale, 1));
   transform-origin: bottom center;
   display: flex;
+  flex-direction: column;
+  gap: 12px;
   align-items: center;
-  justify-content: center;
-  pointer-events: auto;
+  /* Keep the button top fixed at the welcome support level. */
+  justify-content: flex-start;
+  pointer-events: none;
 }
 
-.banner-bg-svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.35));
+.chat-start-caption {
+  margin: 0;
+  color: var(--color-text-soft);
+  /* The dock scales as a unit; keep this secondary copy readable at any size. */
+  font-size: calc(12px / var(--dock-scale, 1));
+  font-weight: 350;
+  line-height: 1.4;
+  text-align: center;
 }
 
 .chat-start-button {
@@ -1360,6 +1367,7 @@ select { appearance: auto; }
   justify-content: center;
   filter: drop-shadow(0 4px 16px rgba(0, 0, 0, 0.25));
   cursor: pointer;
+  pointer-events: auto;
   user-select: none;
   transition: none;
 }
@@ -1393,10 +1401,10 @@ select { appearance: auto; }
   align-items: center;
   justify-content: center;
   gap: 14px;
-  color: #D7D7D7;
+  color: var(--color-accent-ink);
   font-size: 20px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
+  font-weight: 600;
+  letter-spacing: 0;
   transition: none;
 }
 

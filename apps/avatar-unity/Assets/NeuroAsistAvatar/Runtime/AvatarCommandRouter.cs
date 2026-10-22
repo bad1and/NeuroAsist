@@ -73,6 +73,11 @@ namespace NeuroAsist.Avatar
                     client.SendAck(command.message_id, true);
                     if (sleepController != null) sleepController.SetSleeping(payload.sleep);
                     break;
+                case "avatar.presentation":
+                    var welcome = GetComponent<AvatarWelcomeController>();
+                    var presented = welcome != null && welcome.SetPresentation(payload.presentation);
+                    client.SendAck(command.message_id, presented, presented ? null : "presentation unavailable");
+                    break;
                 case "avatar.visibility":
                     client.SendAck(command.message_id, true);
                     if (sleepController != null) sleepController.SetSleeping(!payload.visible);

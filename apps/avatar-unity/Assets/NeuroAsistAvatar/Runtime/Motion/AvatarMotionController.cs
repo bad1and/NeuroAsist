@@ -48,7 +48,7 @@ namespace NeuroAsist.Avatar
         public Animator Animator => animator;
         public float QuietActivity => state != null && state.Current != AvatarState.Idle ? 1f : policy.QuietActivity(Time.time);
         public int PendingCount => pending == null ? 0 : 1;
-        public bool CanPerformGesture(GestureTag tag) => settings != null && settings.MotionEnabled && tag != GestureTag.Auto && tag != GestureTag.None
+        public bool CanPerformGesture(GestureTag tag) => isActiveAndEnabled && settings != null && settings.MotionEnabled && tag != GestureTag.Auto && tag != GestureTag.None
             && settings.GestureDefinitions.Exists(d => d != null && (d.Tag == tag || d.Tag == AvatarMotionNames.BaseGesture(tag)));
 
         public void Configure(AvatarMotionSettings value, Animator valueAnimator, Transform root, AvatarStateController valueState)

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UniVRM10;
 using UnityEngine;
 
@@ -19,6 +20,33 @@ namespace NeuroAsist.Avatar
         private Vector3 viewDirection = Vector3.back;
         private int lastWidth;
         private int lastHeight;
+        private Bounds? fullBodyBounds;
+        private IReadOnlyList<Vector3> fullBodyPoints;
+        private bool groundedWelcome;
+
+        public void SetFullBodyFraming(Bounds? bounds, IReadOnlyList<Vector3> points = null, bool groundAtBottom = false)
+        {
+            fullBodyBounds = bounds;
+            fullBodyPoints = points;
+            groundedWelcome = groundAtBottom;
+            FrameNow();
+        }
+
+        public static float FullBodyDistance(Bounds bounds, float aspect, float fieldOfView, float padding = 1.1f, Vector3? direction = null)
+        {
+            var verticalTangent = Mathf.Tan(fieldOfView * Mathf.Deg2Rad * .5f);
+            var inverseView = Quaternion.Inverse(Quaternion.LookRotation(direction ?? Vector3.back, Vector3.up));
+            var distance = .1f;
+            foreach (var x in new[] { -1f, 1f })
+            foreach (var y in new[] { -1f, 1f })
+            foreach (var z in new[] { -1f, 1f })
+            {
+                var point = inverseView * Vector3.Scale(bounds.extents, new Vector3(x, y, z));
+                distance = Mathf.Max(distance, Mathf.Abs(point.y) * padding / verticalTangent - point.z,
+                    Mathf.Abs(point.x) * padding / (verticalTangent * Mathf.Max(.1f, aspect)) - point.z);
+            }
+            return distance;
+        }
 
         public void Configure(Camera camera, Vrm10Instance vrm)
         {
@@ -47,6 +75,47 @@ namespace NeuroAsist.Avatar
 
         public void FrameNow()
         {
+            if (avatarCamera != null && fullBodyBounds.HasValue)
+            {
+                var full = fullBodyBounds.Value;
+                var fullDirection = (viewDirection + Vector3.down * .10f).normalized;
+                var fullDistance = FullBodyDistance(full, avatarCamera.aspect, verticalFieldOfView, 1.08f, fullDirection);
+                if (fullBodyPoints != null && fullBodyPoints.Count > 0)
+                {
+                    // Fit the deformed silhouette, avoiding the empty front/top
+                    // corners of a world-space box making a seated figure tiny.
+                    var inverse = Quaternion.Inverse(Quaternion.LookRotation(fullDirection, Vector3.up));
+                    var tangent = Mathf.Tan(verticalFieldOfView * Mathf.Deg2Rad * .5f);
+                    fullDistance = .1f;
+                    foreach (var vertex in fullBodyPoints)
+                    {
+                        var point = inverse * (vertex - full.center);
+                        fullDistance = Mathf.Max(fullDistance, Mathf.Abs(point.y) * 1.08f / tangent - point.z,
+                            Mathf.Abs(point.x) * 1.08f / (tangent * Mathf.Max(.1f, avatarCamera.aspect)) - point.z);
+                    }
+                }
+                avatarCamera.fieldOfView = verticalFieldOfView;
+                avatarCamera.transform.SetPositionAndRotation(
+                    full.center - fullDirection * fullDistance,
+                    Quaternion.LookRotation(fullDirection, Vector3.up));
+                if (groundedWelcome && fullBodyPoints != null)
+                {
+                    // Move the complete silhouette down to the button plane.
+                    // Solve in view space so perspective depth and resize do not
+                    // introduce a floating gap below the imported floor pose.
+                    var inverse = Quaternion.Inverse(avatarCamera.transform.rotation);
+                    var tangent = Mathf.Tan(verticalFieldOfView * Mathf.Deg2Rad * .5f);
+                    var shift = float.PositiveInfinity;
+                    foreach (var vertex in fullBodyPoints)
+                    {
+                        var point = inverse * (vertex - avatarCamera.transform.position);
+                        shift = Mathf.Min(shift, point.y + .99f * point.z * tangent);
+                    }
+                    if (!float.IsInfinity(shift)) avatarCamera.transform.position += avatarCamera.transform.up * shift;
+                }
+                lastWidth = Screen.width; lastHeight = Screen.height;
+                return;
+            }
             if (avatarCamera == null || avatar == null || !TryGetBounds(out var bounds)) return;
             var aspect = Mathf.Max(.1f, avatarCamera.aspect);
             var verticalFovRadians = verticalFieldOfView * Mathf.Deg2Rad;

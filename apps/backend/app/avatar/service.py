@@ -69,6 +69,9 @@ class AvatarService:
         self._body_expected: dict[tuple[str, str], str] = {}
         self._body_results: dict[str, dict] = {}
         self._body_lock = asyncio.Lock()
+        self._presentation = "portrait"
+        self._presentation_revision = 0
+        self._presentation_lock = asyncio.Lock()
 
     async def body_status(self) -> dict:
         clients = [c for c in await self.manager.snapshot() if c.renderer_ready]
@@ -296,6 +299,19 @@ class AvatarService:
             "avatar.overlay.configure", session_id, overlay.model_dump(mode="json"), protocol_version=2, min_protocol_version=2,
         )
 
+    async def set_presentation(self, mode: str, revision: int) -> BroadcastResult:
+        # Layout changes can race when a new dialog replaces its welcome screen.
+        # A late request from the previous host must never restore the seated pose.
+        async with self._presentation_lock:
+            if revision <= self._presentation_revision:
+                return BroadcastResult(attempted=0, sent=0, failed=0, skipped=True)
+            self._presentation = mode
+            self._presentation_revision = revision
+            return await self._broadcast(
+                "avatar.presentation", "default", {"presentation": mode},
+                protocol_version=2, min_protocol_version=2,
+            )
+
     async def set_sleep(self, sleep: bool, *, session_id: str = "default") -> BroadcastResult:
         return await self._broadcast(
             "avatar.sleep",
@@ -346,6 +362,12 @@ class AvatarService:
             await self.manager.send_to(client_id, frame.model_dump(mode="json"))
         elif envelope.type == "avatar.ready":
             await self.manager.update(client_id, renderer_ready=True)
+            if self._presentation_revision:
+                frame = OutgoingMessage(
+                    protocol_version=2, type="avatar.presentation",
+                    payload={"presentation": self._presentation},
+                )
+                await self.manager.send_to(client_id, frame.model_dump(mode="json"))
             self.event_bus.publish(
                 "avatar.ready",
                 "info",

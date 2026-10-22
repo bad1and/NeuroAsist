@@ -336,6 +336,7 @@ GameObject:
   - component: {fileID: 975465933}
   - component: {fileID: 975465934}
   - component: {fileID: 975465935}
+  - component: {fileID: 975465936}
   m_Layer: 0
   m_Name: NeuroAsistAvatarRuntime
   m_TagString: Untagged
@@ -641,6 +642,22 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 21ce555ce8f9fc746b98184538d15fc2, type: 3}
   m_Name:
   m_EditorClassIdentifier:
+--- !u!114 &975465936
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 975465916}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9669d13aaf04d4d4192ce7689aff949c, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  animator: {fileID: 1949565772}
+  presentation: {fileID: 975465929}
+  sittingIdle: {fileID: -203655887218126122, guid: 8d4118400e944464b947f9818608a59d, type: 3}
+  useStool: 0
 --- !u!1 &1594657433
 GameObject:
   m_ObjectHideFlags: 0

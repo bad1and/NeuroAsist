@@ -308,6 +308,11 @@ class AvatarOverlayPatch(ProtocolModel):
     height: float | None = Field(default=None, ge=240.0, le=2160.0)
 
 
+class AvatarPresentationRequest(ProtocolModel):
+    mode: Literal["portrait", "welcome_seated"]
+    revision: int = Field(ge=1)
+
+
 class AvatarSleepRequest(ProtocolModel):
     sleep: bool = True
     session_id: str = "default"

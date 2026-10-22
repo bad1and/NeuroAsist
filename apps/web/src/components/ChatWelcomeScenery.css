@@ -1,0 +1,49 @@
+.chat-welcome-scenery {
+  position: absolute;
+  /* Extend through the existing bottom inset; keep the portrait's dock anchor. */
+  inset: 0 0 -24px;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  z-index: 0;
+  container-type: inline-size;
+}
+
+.chat-welcome-depth {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 60% 40% at 50% 100%, color-mix(in srgb, var(--color-accent) 19%, transparent), transparent 100%),
+    radial-gradient(ellipse 48% 70% at 50% 46%, transparent 38%, color-mix(in srgb, var(--color-base) 40%, transparent) 100%);
+}
+
+.chat-welcome-flora {
+  position: absolute;
+  bottom: -30px;
+  width: clamp(330px, 58cqw, 650px);
+  opacity: .46;
+  mask-image: linear-gradient(to top, transparent, #000 18%, #000 76%, transparent);
+}
+
+.chat-welcome-flora img {
+  display: block;
+  width: 100%;
+  height: auto;
+  transform-origin: 50% 100%;
+  filter: saturate(.68);
+}
+
+.chat-welcome-flora-left { left: -36px; }
+.chat-welcome-flora-right { right: -38px; width: clamp(360px, 65cqw, 730px); opacity: .58; }
+
+.chat-welcome-ground {
+  position: absolute;
+  inset: auto 0 0;
+  height: 190px;
+  background: linear-gradient(to top, var(--color-base), color-mix(in srgb, var(--color-base) 72%, transparent) 32%, transparent);
+}
+
+@container (max-width: 560px) {
+  .chat-welcome-flora-left { left: -72px; opacity: .32; }
+  .chat-welcome-flora-right { right: -80px; opacity: .42; }
+}

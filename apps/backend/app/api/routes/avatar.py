@@ -8,6 +8,7 @@ from apps.backend.app.avatar.schemas import (
     AvatarOverlayPatch,
     OverlayPayload,
     AvatarSleepRequest,
+    AvatarPresentationRequest,
     AvatarStopRequest,
     AvatarTestEmotionRequest,
     AvatarTestGestureRequest,
@@ -68,6 +69,12 @@ async def update_avatar_overlay(payload: AvatarOverlayPatch, request: Request) -
 async def avatar_sleep(payload: AvatarSleepRequest, request: Request) -> dict[str, object]:
     result = await request.app.state.avatar_service.set_sleep(payload.sleep, session_id=payload.session_id)
     return {"sent": result.sent, "skipped": result.skipped, "sleep": payload.sleep}
+
+
+@router.post("/presentation")
+async def avatar_presentation(payload: AvatarPresentationRequest, request: Request) -> dict[str, object]:
+    result = await request.app.state.avatar_service.set_presentation(payload.mode, payload.revision)
+    return {"sent": result.sent, "skipped": result.skipped}
 
 
 @router.post("/test/speak", status_code=status.HTTP_202_ACCEPTED)

@@ -65,6 +65,7 @@ namespace NeuroAsist.AvatarEditor
             Link(state, "client", client); Link(emotion, "settings", settings); Link(emotion, "vrm", vrm); Link(speech, "client", client); Link(speech, "player", player); Link(speech, "emotion", emotion); Link(speech, "state", state); Link(speech, "fallback", fallback); Link(router, "client", client); Link(router, "speech", speech); Link(router, "emotion", emotion); Link(router, "state", state); Link(client, "settings", settings); Link(client, "router", router); Link(client, "state", state);
             Link(performance, "settings", settings);
             presentation.Configure(Camera.main, vrm);
+            AvatarWelcomeSetup.Configure(root, animator, presentation);
             sleep.Configure(Camera.main, speech, client);
             Link(router, "sleepController", sleep); Link(sleep, "avatarCamera", Camera.main); Link(sleep, "speech", speech); Link(sleep, "client", client);
             Link(speech, "motion", motion); Link(router, "motion", motion); Link(router, "overlay", overlay);

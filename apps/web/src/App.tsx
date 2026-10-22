@@ -4,6 +4,8 @@ import { CustomSelect } from "./components/CustomSelect";
 import { DictionaryEditor } from "./components/DictionaryEditor";
 import { CorpusSurface } from "./components/CorpusSurface";
 import { useDockScale } from "./components/useDockScale";
+import { ChatWelcomeScenery } from "./components/ChatWelcomeScenery";
+import { useAvatarPresentation } from "./components/useAvatarPresentation";
 import {
   IconInterfaceHome2,
   IconMailChatBubbleTextSquare,
@@ -2793,6 +2795,7 @@ export function ChatPage({
   }, [liveConversation, toggleMicrophoneMute]);
 
   const isDialogActive = isStarted || messages.length > 0 || liveConversation;
+  useAvatarPresentation(!isDialogActive, showInAppAvatar && isActive, avatarHostStatus?.phase);
 
   const handleStart = async (event?: React.MouseEvent<HTMLElement>) => {
     if (event) animateButtonPress(event.currentTarget);
@@ -2914,19 +2917,12 @@ export function ChatPage({
           isActive={isActive}
         />
         <div className="chat-idle-stage">
+          <ChatWelcomeScenery active={isActive} />
           {showInAppAvatar && isActive && (
             <InAppAvatarHost status={avatarHostStatus} onRetry={onRetryAvatar} />
           )}
           <div className="chat-start-banner">
             <div className="chat-start-banner-inner">
-              <svg className="banner-bg-svg" width="829" height="121" viewBox="0 0 829 121" fill="none" preserveAspectRatio="none">
-                <defs>
-                  <clipPath id="banner-squircle-clip">
-                    <path d="M0 60.5C0 31.8824 0 17.5736 8.7868 8.7868C17.5736 0 31.7157 0 60 0H769C797.284 0 811.426 0 820.213 8.7868C829 17.5736 829 31.8824 829 60.5C829 89.1176 829 103.426 820.213 112.213C811.426 121 797.284 121 769 121H60C31.7157 121 17.5736 121 8.7868 112.213C0 103.426 0 89.1176 0 60.5Z" />
-                  </clipPath>
-                </defs>
-                <image href="/brand/chat-start-banner.png" width="829" height="121" preserveAspectRatio="xMidYMid slice" clipPath="url(#banner-squircle-clip)" />
-              </svg>
               <MaterialButton materialKey={"App.button-4"}
                 className="chat-start-button"
                 type="button"
@@ -2936,9 +2932,10 @@ export function ChatPage({
               >
                 <span className="btn-content">
                   <IrisPetalsIcon size={28} />
-                  <span>НАЧАТЬ</span>
+                  <span>Начать</span>
                 </span>
               </MaterialButton>
+              <p className="chat-start-caption">Голосом или текстом</p>
             </div>
           </div>
         </div>
