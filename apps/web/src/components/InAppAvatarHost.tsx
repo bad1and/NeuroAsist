@@ -24,9 +24,11 @@ function nextAvatarHostRevision(): number {
 export function InAppAvatarHost({
   status,
   onRetry,
+  suspended = false,
 }: {
   status?: AvatarHostStatus | null;
   onRetry?: () => Promise<void>;
+  suspended?: boolean;
 } = {}) {
   const hostRef = useRef<HTMLElement | null>(null);
   const [retrying, setRetrying] = useState(false);
@@ -51,6 +53,10 @@ export function InAppAvatarHost({
   };
 
   useLayoutEffect(() => {
+    if (suspended) {
+      void setAvatarInAppVisible(false, nextAvatarHostRevision()).catch(() => {});
+      return;
+    }
     const element = hostRef.current;
     if (!element) return undefined;
 
@@ -112,10 +118,10 @@ export function InAppAvatarHost({
       retryTimers.forEach((timer) => window.clearTimeout(timer));
       void setAvatarInAppVisible(false, nextAvatarHostRevision());
     };
-  }, []);
+  }, [suspended]);
 
   return (
-    <aside ref={hostRef} className="in-app-avatar-stage" aria-label="Аватар Iris">
+    <aside ref={hostRef} className="in-app-avatar-stage" aria-label="Аватар Iris" aria-hidden={suspended || undefined} style={suspended ? { visibility: "hidden" } : undefined}>
       {loading && (
         <div className="in-app-avatar-loader-fallback" role="status" aria-live="polite">
           <IrisLoader size="standard" active />

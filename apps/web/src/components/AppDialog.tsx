@@ -2,7 +2,7 @@ import { MaterialButton } from "./MaterialButton";
 import { useEffect, useId, useLayoutEffect, useState, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { IconInterfaceCross, IconInterfaceAlertTriangle } from "../CustomIcons";
-import { animateButtonPress, animateNotification } from "../animations";
+import { animate, animateButtonPress, animateNotification, isTestEnvironment, prefersReducedMotion } from "../animations";
 import { ConfirmationRim } from "./ConfirmationRim";
 import { buttonSeed } from "./buttonMaterial";
 
@@ -10,27 +10,34 @@ export interface AppDialogProps {
   open: boolean;
   title: string;
   description?: string;
+  headerContent?: ReactNode;
   children?: ReactNode;
   onClose: () => void;
   icon?: ReactNode;
   variant?: "warning" | "danger" | "info";
   size?: "compact" | "wide";
+  presentation?: "notification" | "spotlight";
 }
 
 export function AppDialog({
   open,
   title,
   description,
+  headerContent,
   children,
   onClose,
   icon,
   variant = "warning",
   size = "compact",
+  presentation = "notification",
 }: AppDialogProps) {
   const [isExiting, setIsExiting] = useState(false);
   const [rendered, setRendered] = useState(open);
   const exitTimerRef = useRef<number | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const hostRef = useRef<HTMLElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
   const descriptionId = useId();
@@ -41,30 +48,55 @@ export function AppDialog({
       if (rendered && cardRef.current && !cardRef.current.contains(active)) {
         (cardRef.current.querySelector<HTMLElement>("[autofocus], input:not([disabled]), button:not([disabled]), [tabindex='0']") || cardRef.current).focus();
       }
-    } else if (openerRef.current) {
+    } else if (openerRef.current && (presentation !== "spotlight" || !rendered)) {
       const active = document.activeElement;
       if (active === document.body || cardRef.current?.contains(active)) {
         if (openerRef.current.isConnected) openerRef.current.focus();
       }
       openerRef.current = null;
     }
-  }, [open, rendered]);
+  }, [open, rendered, presentation]);
+  useLayoutEffect(() => {
+    if (!rendered || presentation !== "spotlight") return;
+    const background = [...document.body.children].filter(element => element !== hostRef.current && element instanceof HTMLElement) as HTMLElement[];
+    const previous = background.map(element => element.hasAttribute("inert"));
+    background.forEach(element => element.setAttribute("inert", ""));
+    return () => background.forEach((element, index) => { if (!previous[index]) element.removeAttribute("inert"); });
+  }, [rendered, presentation]);
   useLayoutEffect(() => {
     if (!rendered || !cardRef.current) return;
+    if (presentation === "spotlight") {
+      if (isTestEnvironment()) return;
+      const reduced = prefersReducedMotion();
+      const motion = animate(cardRef.current, {
+        opacity: isExiting ? [1, 0] : [0, 1],
+        translateY: reduced ? 0 : isExiting ? [0, 8] : [12, 0],
+        scale: reduced ? 1 : isExiting ? [1, .99] : [.98, 1],
+        duration: isExiting ? 180 : 240,
+        ease: "outCubic",
+      });
+      const backdropMotion = hostRef.current ? animate(hostRef.current, {
+        opacity: isExiting ? [1, 0] : [0, 1],
+        duration: reduced ? 100 : isExiting ? 180 : 240,
+        ease: "outQuad",
+      }) : null;
+      return () => { motion.cancel(); backdropMotion?.cancel(); };
+    }
     const motion = animateNotification(cardRef.current, isExiting ? "exit" : "enter");
     return () => { motion?.cancel(); };
-  }, [rendered, isExiting]);
+  }, [rendered, isExiting, presentation]);
 
   const cachedContentRef = useRef({
     title,
     description,
+    headerContent,
     children,
     icon,
     variant,
   });
 
   if (open) {
-    cachedContentRef.current = { title, description, children, icon, variant };
+    cachedContentRef.current = { title, description, headerContent, children, icon, variant };
   }
 
   useEffect(() => {
@@ -105,7 +137,8 @@ export function AppDialog({
       if (dialogs[dialogs.length - 1] !== cardRef.current) return;
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        if (presentation === "spotlight") handleDismiss();
+        else onClose();
       }
       if (e.key === "Tab" && cardRef.current) {
         const controls = [...cardRef.current.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled]):not([type='hidden']), select:not([disabled]), textarea:not([disabled]), a[href], summary, [tabindex='0']")].filter(element => !element.closest("[hidden], [inert]") && !element.closest("details:not([open]) > :not(summary)"));
@@ -120,13 +153,13 @@ export function AppDialog({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [open, onClose]);
+  }, [open, onClose, presentation, isExiting]);
 
   if (!rendered || typeof document === "undefined") {
     return null;
   }
 
-  const handleDismiss = () => {
+  function handleDismiss() {
     if (isExiting) return;
     setIsExiting(true);
     if (exitTimerRef.current !== null) {
@@ -137,7 +170,7 @@ export function AppDialog({
       setIsExiting(false);
       onClose();
     }, 190);
-  };
+  }
 
   const handleBodyClick = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
@@ -149,31 +182,34 @@ export function AppDialog({
 
   const currentTitle = open ? title : cachedContentRef.current.title;
   const currentDescription = open ? description : cachedContentRef.current.description;
+  const currentHeaderContent = open ? headerContent : cachedContentRef.current.headerContent;
   const currentChildren = open ? children : cachedContentRef.current.children;
   const currentIcon = open ? icon : cachedContentRef.current.icon;
   const currentVariant = open ? variant : cachedContentRef.current.variant;
+  const detached = presentation === "spotlight" && Boolean(currentHeaderContent);
 
   const content = (
-    <aside className={`app-dialog-host${size === "wide" ? " is-wide" : ""}`} aria-label={currentVariant === "info" ? "Диалог" : "Диалог подтверждения"} aria-live={currentVariant === "info" ? "off" : "assertive"}>
+    <aside ref={hostRef} className={`app-dialog-host${size === "wide" ? " is-wide" : ""}${presentation === "spotlight" ? " is-spotlight" : ""}`} onMouseDown={presentation === "spotlight" ? event => { if (event.target === event.currentTarget && event.button === 0) handleDismiss(); } : undefined} aria-label={currentVariant === "info" ? "Диалог" : "Диалог подтверждения"} aria-live={currentVariant === "info" ? "off" : "assertive"}>
       <div
         ref={cardRef}
-        className={`notification-card app-dialog-card confirmation-surface is-${currentVariant}${size === "wide" ? " is-wide" : ""}${isExiting ? " is-exiting" : ""}`}
+        className={`notification-card app-dialog-card confirmation-surface is-${currentVariant}${size === "wide" ? " is-wide" : ""}${detached ? " is-detached" : ""}${isExiting ? " is-exiting" : ""}`}
         role={currentVariant === "info" ? "dialog" : "alertdialog"}
         tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={currentDescription ? descriptionId : undefined}
       >
-        <div className="notification-card-header">
-          <div className="notification-icon-box">
+        <div ref={headerRef} className={`notification-card-header${detached ? " spotlight-search-surface" : ""}`}>
+          {!(presentation === "spotlight" && currentHeaderContent) && <div className="notification-icon-box">
             {currentIcon ?? <IconInterfaceAlertTriangle size={24} aria-hidden="true" />}
-          </div>
+          </div>}
 
           <div className="notification-header-content">
             <div className="notification-title-row">
-              <h2 id={titleId} className="notification-title">
+              <h2 id={titleId} className={currentHeaderContent ? "sr-only" : "notification-title"}>
                 {currentTitle}
               </h2>
+              {currentHeaderContent}
             </div>
 
             {currentDescription && (
@@ -185,9 +221,9 @@ export function AppDialog({
 
           <div className="notification-side-actions">
             <MaterialButton materialKey={"dialog.close." + title}
-              appearance="quiet"
+              appearance={presentation === "spotlight" ? "lens" : "quiet"}
               type="button"
-              className="notification-control-btn notification-close-btn confirmation-close"
+              className={`notification-control-btn notification-close-btn confirmation-close${presentation === "spotlight" ? " icon-button" : ""}`}
               aria-label="Закрыть диалог"
               title="Закрыть"
               onClick={(e) => {
@@ -199,14 +235,16 @@ export function AppDialog({
               <IconInterfaceCross size={16} aria-hidden="true" />
             </MaterialButton>
           </div>
+          {detached && <ConfirmationRim cardRef={headerRef} seed={buttonSeed(`search-field.${currentTitle}`)} active={open && !isExiting} />}
         </div>
 
         {currentChildren && (
-          <div className="notification-dialog-body" onClick={handleBodyClick}>
+          <div ref={bodyRef} className={`notification-dialog-body${detached ? " spotlight-results-surface" : ""}`} onClick={handleBodyClick}>
             {currentChildren}
+            {detached && <ConfirmationRim cardRef={bodyRef} seed={buttonSeed(`search-results.${currentTitle}`)} active={open && !isExiting} />}
           </div>
         )}
-        <ConfirmationRim cardRef={cardRef} seed={buttonSeed(`confirmation.${currentTitle}`)} active={open && !isExiting} />
+        {!detached && <ConfirmationRim cardRef={cardRef} seed={buttonSeed(`confirmation.${currentTitle}`)} active={open && !isExiting} />}
       </div>
     </aside>
   );

@@ -17,6 +17,33 @@ describe("AppDialog (Top Notification Format)", () => {
     cleanup();
   });
 
+  it("blocks the background for spotlight, traps focus and restores the opener after closing", () => {
+    const background = document.createElement("main");
+    const opener = document.createElement("button");
+    background.append(opener);
+    document.body.append(background);
+    opener.focus();
+    const close = vi.fn();
+    const view = render(<AppDialog open title="Поиск" variant="info" presentation="spotlight" onClose={close}><input aria-label="Запрос" /></AppDialog>);
+    expect(background).toHaveAttribute("inert");
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.parentElement).toHaveClass("is-spotlight");
+    const input = screen.getByRole("textbox");
+    input.focus();
+    fireEvent.keyDown(input, { key: "Tab" });
+    expect(screen.getByRole("button", { name: "Закрыть диалог" })).toHaveFocus();
+    fireEvent.mouseDown(dialog);
+    expect(close).not.toHaveBeenCalled();
+    fireEvent.mouseDown(dialog.parentElement!, { button: 0 });
+    act(() => vi.advanceTimersByTime(200));
+    expect(close).toHaveBeenCalledOnce();
+    expect(background).not.toHaveAttribute("inert");
+    view.rerender(<AppDialog open={false} title="Поиск" presentation="spotlight" onClose={close} />);
+    expect(opener).toHaveFocus();
+    view.unmount();
+    background.remove();
+  });
+
   it("не рендерит ничего, когда open=false", () => {
     const onClose = vi.fn();
     render(

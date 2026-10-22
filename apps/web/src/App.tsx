@@ -1025,6 +1025,7 @@ function MainApp() {
                 avatarStatus={avatarStatus}
                 avatarHostStatus={avatarHostStatus}
                 showInAppAvatar={settings?.avatar_placement === "in_app" && (settings.avatar_in_app_visible ?? true)}
+                avatarSuspended={globalSearchOpen}
                 onRefreshEvents={refreshEvents}
                 onOpenMemory={() => switchView("memory")}
                 onOpenChat={() => switchView("chat")}
@@ -1272,6 +1273,7 @@ export function ChatPage({
   avatarStatus,
   avatarHostStatus,
   showInAppAvatar,
+  avatarSuspended = false,
   onRefreshEvents,
   onOpenMemory,
   onOpenChat,
@@ -1290,6 +1292,7 @@ export function ChatPage({
   avatarStatus: AvatarStatusResponse | null;
   avatarHostStatus: AvatarHostStatus | null;
   showInAppAvatar: boolean;
+  avatarSuspended?: boolean;
   onRefreshEvents: () => Promise<void>;
   onOpenMemory: () => void;
   onOpenChat?: () => void;
@@ -2919,7 +2922,7 @@ export function ChatPage({
         <div className="chat-idle-stage">
           <ChatWelcomeScenery active={isActive} />
           {showInAppAvatar && isActive && (
-            <InAppAvatarHost status={avatarHostStatus} onRetry={onRetryAvatar} />
+            <InAppAvatarHost status={avatarHostStatus} onRetry={onRetryAvatar} suspended={avatarSuspended} />
           )}
           <div className="chat-start-banner">
             <div className="chat-start-banner-inner">
@@ -2983,7 +2986,7 @@ export function ChatPage({
         isActive={isActive}
       />
       {showInAppAvatar && isActive && (
-        <InAppAvatarHost status={avatarHostStatus} onRetry={onRetryAvatar} />
+        <InAppAvatarHost status={avatarHostStatus} onRetry={onRetryAvatar} suspended={avatarSuspended} />
       )}
       <div className="chat-content">
         {memoryNotice && (

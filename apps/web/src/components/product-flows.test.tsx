@@ -9,7 +9,7 @@ const reminders = vi.hoisted(() => ({ getReminders: vi.fn(), updateReminder: vi.
 vi.mock("../api", () => api);
 vi.mock("../product-api", () => reminders);
 vi.mock("./ReminderDelivery", () => ({ allowReminderNotifications: vi.fn().mockResolvedValue(false) }));
-vi.mock("./AppDialog", () => ({ AppDialog: ({ open, children }: { open: boolean; children: ReactNode }) => open ? <div role="dialog">{children}</div> : null }));
+vi.mock("./AppDialog", () => ({ AppDialog: ({ open, children, headerContent }: { open: boolean; children: ReactNode; headerContent?: ReactNode }) => open ? <div role="dialog">{headerContent}{children}</div> : null }));
 vi.mock("./MaterialButton", () => ({ MaterialButton: ({ materialKey: _key, appearance: _appearance, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { materialKey?: string; appearance?: string }) => <button {...props} /> }));
 vi.mock("animejs", () => ({ createTimer: vi.fn(() => ({ cancel: vi.fn() })) }));
 vi.mock("../audio-devices", () => ({ setAudioElementOutput: vi.fn().mockResolvedValue(undefined) }));
@@ -34,6 +34,37 @@ beforeEach(() => { vi.clearAllMocks(); notify.dismissAll(); localStorage.clear()
 afterEach(() => { cleanup(); notify.dismissAll(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("global search navigation", () => {
+  it("filters result types and opens the selected plan from the keyboard", async () => {
+    vi.useFakeTimers();
+    api.requestJson.mockImplementation((path: string) => Promise.resolve({ items: path.startsWith("/memory/commitments")
+      ? [{ id: "plan-filtered", title: "Проверить сборку", details: "Сегодня" }]
+      : path.startsWith("/timeline") ? [{ id: "history-filtered", role: "user", content: "Проверить историю", created_at: "2026-10-22T10:00:00Z" }] : [] }));
+    const select = vi.fn();
+    render(<GlobalSearch open developerMode={false} onClose={vi.fn()} onSelect={select} />);
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "Проверить" } });
+    await act(() => vi.advanceTimersByTimeAsync(190));
+    fireEvent.click(screen.getByRole("button", { name: "Планы" }));
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    expect(screen.getByRole("option")).toHaveTextContent("Проверить сборку");
+    expect(input).toHaveFocus();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(select).toHaveBeenCalledWith(expect.objectContaining({ kind: "memory", focus: expect.objectContaining({ id: "plan-filtered", section: "commitments" }) }));
+  });
+
+  it("clears a query and its scope without closing search, returning focus to the input", async () => {
+    const close = vi.fn();
+    render(<GlobalSearch open developerMode={false} onClose={close} onSelect={vi.fn()} />);
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "нет совпадений" } });
+    fireEvent.click(screen.getByRole("button", { name: "Память" }));
+    fireEvent.click(screen.getByRole("button", { name: "Очистить поиск" }));
+    expect(input).toHaveValue("");
+    expect(input).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Все" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getAllByRole("option").length).toBeGreaterThan(0);
+    expect(close).not.toHaveBeenCalled();
+  });
   it("translates settings results while preserving user plan titles and excerpts", async () => {
     function LocalizedSearch() {
       useInterfaceLocale("en");
@@ -62,9 +93,9 @@ describe("global search navigation", () => {
     await act(() => vi.advanceTimersByTimeAsync(190));
     fireEvent.change(input, { target: { value: "new" } });
     await act(() => vi.advanceTimersByTimeAsync(190));
-    expect(screen.getByText("new result")).toBeInTheDocument();
+    expect(screen.getByRole("option")).toHaveTextContent("new result");
     await act(async () => old.resolve({ items: [] }));
-    expect(screen.getByText("new result")).toBeInTheDocument();
+    expect(screen.getByRole("option")).toHaveTextContent("new result");
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(select).toHaveBeenCalledWith(expect.objectContaining({ kind: "history", focus: expect.objectContaining({ id: "exact-message", query: "new" }) }));

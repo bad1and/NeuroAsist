@@ -473,6 +473,20 @@ describe("русский интерфейс", () => {
     expect(container.querySelector(".chat-panel.has-in-app-avatar .in-app-avatar-stage")).toBeInTheDocument();
   });
 
+  it("скрывает аватар на время центрального поиска и возвращает после Escape", async () => {
+    api.getSettings.mockResolvedValue({ ...settings, avatar_placement: "in_app", avatar_in_app_visible: true });
+    const { container } = render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
+    const avatar = container.querySelector(".in-app-avatar-stage");
+    expect(avatar).not.toHaveStyle({ visibility: "hidden" });
+    fireEvent.keyDown(window, { key: "л", code: "KeyK", ctrlKey: true });
+    expect(await screen.findByRole("dialog", { name: "Найти в Iris" })).toBeInTheDocument();
+    expect(avatar).toHaveStyle({ visibility: "hidden" });
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Найти в Iris" })).not.toBeInTheDocument());
+    expect(avatar).not.toHaveStyle({ visibility: "hidden" });
+  });
+
   it("восстанавливает активную сессию без сброса диалога при новом входе", async () => {
     render(<App />);
 

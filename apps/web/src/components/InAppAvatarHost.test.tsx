@@ -83,6 +83,24 @@ describe("InAppAvatarHost", () => {
     expect(desktop.setAvatarInAppVisible).not.toHaveBeenCalledWith(true, expect.any(Number));
   });
 
+  it("temporarily hides the native popup without letting a pending layout reveal it, then restores its bounds", async () => {
+    Object.defineProperty(window, "devicePixelRatio", { configurable: true, value: 1 });
+    const bounds = deferred<void>();
+    desktop.setAvatarInAppBounds.mockReturnValueOnce(bounds.promise);
+    const view = render(<InAppAvatarHost />);
+    view.rerender(<InAppAvatarHost suspended />);
+    expect(view.getByLabelText("Аватар Iris")).toHaveStyle({ visibility: "hidden" });
+    expect(desktop.setAvatarInAppVisible).toHaveBeenLastCalledWith(false, expect.any(Number));
+    bounds.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(desktop.setAvatarInAppVisible).not.toHaveBeenCalledWith(true, expect.any(Number));
+    view.rerender(<InAppAvatarHost suspended={false} />);
+    await vi.waitFor(() => expect(desktop.setAvatarInAppVisible).toHaveBeenLastCalledWith(true, expect.any(Number)));
+    expect(view.getByLabelText("Аватар Iris")).not.toHaveStyle({ visibility: "hidden" });
+    expect(desktop.setAvatarInAppBounds).toHaveBeenLastCalledWith(expect.objectContaining({ x: 18, y: 24, width: 220, height: 360 }));
+  });
+
   it("coalesces native layout invalidations into one animation-frame sync", async () => {
     let invalidate: (() => void) | undefined;
     desktop.listenForAvatarLayoutInvalidation.mockImplementation(async (listener: () => void) => {
