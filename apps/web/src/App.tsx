@@ -641,7 +641,7 @@ function MainApp() {
   const startupSubdetail = useMemo(() => {
     if (coreStatus === "failed" || coreStatus === "crashed") return undefined;
     if (coreStatus !== "ready") {
-      return "Подготавливаю ядро";
+      return "Подключаю сервисы Iris";
     }
     if (startupStage === 1) return "Подготавливаю модель диалога";
     if (startupStage === 2 && isWaitingForAvatar) {
@@ -3611,7 +3611,7 @@ export function SettingsPage({
         <SettingsNavigation current={activeSection} onChange={openSettingsSection} />
         <div className="settings-content" ref={settingsContentRef}>
           {activeSection === "system-window" ? <>
-            <header className="settings-heading"><h2>Окно приложения</h2><p>Эталонный размер, фиксация и восстановление окна.</p></header>
+            <header className="settings-heading"><h2>Окно приложения</h2><p>Размер окна и запрет на его изменение.</p></header>
             <WindowSettings />
           </> : <div className="empty-state"><IconInterfaceAlertAlarmBell2 size={28} aria-hidden="true" /><strong>Настройки недоступны</strong><span>Подключитесь к сервису и попробуйте ещё раз.</span></div>}
         </div>
@@ -3625,21 +3625,21 @@ export function SettingsPage({
     .join(" · ");
   const settingsSectionMeta: Record<SettingsSection, { title: string; description: string }> = {
     conversation: { title: "Живой разговор", description: "Когда Iris слушает, вступает в разговор и выражает эмоции." },
-    environment: { title: "Окружение и гео", description: "Город, время на устройстве, погода, новости и веб-поиск." },
-    avatar: { title: "Аватар", description: "Размещение, внешний вид и тестовые команды Iris." },
+    environment: { title: "Город и интернет", description: "Город, время на устройстве, погода, новости и веб-поиск." },
+    avatar: { title: "Аватар", description: "Аватар в диалоге или на рабочем столе." },
     voice: { title: "Голос", description: "Звучание, темп и подача речи." },
     "voice-devices": { title: "Устройства", description: "Микрофон, наушники и профиль записи." },
     "voice-recognition": { title: "Распознавание", description: "Словари и параметры распознавания речи." },
-    "voice-advanced": { title: "Дополнительно", description: "Буфер воспроизведения и приватный сбор тестовых записей." },
+    "voice-advanced": { title: "Дополнительно", description: "Параметры воспроизведения и тестовые записи речи." },
     memory: { title: "Память", description: "Какие сведения Iris может сохранять между разговорами." },
-    "system-interface": { title: "Интерфейс", description: "Общие настройки интерфейса." },
-    "system-window": { title: "Окно приложения", description: "Эталонный размер, фиксация и восстановление окна." },
-    "api-keys": { title: "API-ключи", description: "Защищённое локальное хранение ключей моделей и веб-поиска." },
-    "token-usage": { title: "Токены и расходы", description: "Учет входящих и исходящих токенов API, кэширование и аналитика затрат." },
+    "system-interface": { title: "Интерфейс", description: "Язык, анимация запуска и панель разговора." },
+    "system-window": { title: "Окно приложения", description: "Размер окна и запрет на его изменение." },
+    "api-keys": { title: "API-ключи", description: "Подключите модель для ответов Iris и, при необходимости, сервис поиска." },
+    "token-usage": { title: "Токены и расходы", description: "Посмотрите, сколько запросов отправляет Iris и во сколько они обходятся." },
     "system-overview": { title: "Система", description: "Состояние подключения и компонентов Iris." },
     models: { title: "Модели", description: "Загрузка и обслуживание локальных моделей." },
-    backups: { title: "Резервные копии", description: "Копии памяти и настроек профиля." },
-    maintenance: { title: "Обслуживание данных", description: "Индексы, очистка и необратимые действия." },
+    backups: { title: "Резервные копии", description: "Сохраните данные Iris или восстановите их из копии." },
+    maintenance: { title: "Обслуживание данных", description: "Восстановление поиска по памяти и очистка данных." },
     events: { title: "Журнал событий", description: "Технические события и диагностика." },
   };
 
@@ -3703,11 +3703,11 @@ export function SettingsPage({
           <div className="settings-card-header">
             <div className="settings-card-title-group">
               <h3 className="settings-card-title">Первый разговор</h3>
-              <p className="settings-card-subtitle">Ключ модели, голос и устройства — в одном мастере настройки.</p>
+              <p className="settings-card-subtitle">Подключите модель и проверьте микрофон перед разговором.</p>
             </div>
           </div>
           <div className="settings-card-actions">
-            <MaterialButton materialKey="system.first-conversation" className="primary-button" onClick={onOpenSetup}>Подготовить первый разговор</MaterialButton>
+            <MaterialButton materialKey="system.first-conversation" className="primary-button" onClick={onOpenSetup}>Настроить Iris</MaterialButton>
           </div>
         </section>}
         <div className="settings-scenario-grid" hidden={activeSection !== "system-overview"}>
@@ -3739,7 +3739,7 @@ export function SettingsPage({
               <div className="settings-card-header-main">
                 <div className="settings-card-title-group">
                   <h3 className="settings-card-title">Язык интерфейса</h3>
-                  <p className="settings-card-subtitle">Локализация элементов управления, кнопок и системных подсказок</p>
+                  <p className="settings-card-subtitle">Язык меню, кнопок и подсказок.</p>
                 </div>
               </div>
             </div>
@@ -3765,7 +3765,6 @@ export function SettingsPage({
                 <option value="ru">Русский</option>
                 <option value="en">Английский</option>
               </CustomSelect>
-              <small>Выберите язык кнопок, меню и системных подсказок.</small>
             </label>
           </div>
 
@@ -3791,8 +3790,8 @@ export function SettingsPage({
             <div className="settings-card-header">
               <div className="settings-card-header-main">
                 <div className="settings-card-title-group">
-                  <h3 className="settings-card-title">Инструменты разработки и QA</h3>
-                  <p className="settings-card-subtitle">Специальные режимы для отладки голоса, таймингов и аватара</p>
+                  <h3 className="settings-card-title">Для разработчиков</h3>
+                  <p className="settings-card-subtitle">Диагностика и расширенные настройки Iris.</p>
                 </div>
               </div>
             </div>
@@ -3800,7 +3799,7 @@ export function SettingsPage({
             <SettingsSwitch
               checked={developerModeEnabled}
               label="Режим разработчика"
-              description="Разблокирует расширенные настройки голоса, таймингов живого разговора, отладки аватара и прямого управления данными."
+              description="Открывает настройки пауз, голоса и аватара, диагностику и очистку данных."
               onChange={(checked) => {
                 const previousValue = developerModeEnabled;
                 setDeveloperModeEnabled(checked);
@@ -3876,7 +3875,7 @@ export function SettingsPage({
               <div className="settings-card-header-main">
                 <div className="settings-card-title-group">
                   <h3 className="settings-card-title">Распознавание речи</h3>
-                  <p className="settings-card-subtitle">Основной язык распознавания речи в режиме Live</p>
+                  <p className="settings-card-subtitle">Выберите язык, на котором будете говорить с Iris.</p>
                 </div>
               </div>
             </div>
@@ -3906,8 +3905,8 @@ export function SettingsPage({
             <div className="settings-card-header">
               <div className="settings-card-header-main">
                 <div className="settings-card-title-group">
-                  <h3 className="settings-card-title">Синтез и характер речи</h3>
-                  <p className="settings-card-subtitle">Выбор голоса Iris, темп речи и эмоциональная подача</p>
+                  <h3 className="settings-card-title">Как звучит Iris</h3>
+                  <p className="settings-card-subtitle">Выберите голос и настройте скорость речи.</p>
                 </div>
               </div>
 
@@ -3955,7 +3954,7 @@ export function SettingsPage({
               <label>
                 Подача голоса
                 <CustomSelect value={voiceTtsStyle} onChange={(event) => void changeVoiceStyle(event.target.value)} disabled={saving}>
-                  <option value="auto">Авто — по эмоции нейросети</option>
+                  <option value="auto">Автоматически — по настроению Iris</option>
                   <option value="calm">Спокойно</option>
                   <option value="normal">Обычно</option>
                   <option value="energetic">Энергично</option>
@@ -3990,8 +3989,7 @@ export function SettingsPage({
             <div className="settings-card-header">
               <div className="settings-card-header-main">
                 <div className="settings-card-title-group">
-                  <h3 className="settings-card-title">Аудиоустройства и запись</h3>
-                  <p className="settings-card-subtitle">Микрофон, динамики/наушники и шумоподавление</p>
+                  <h3 className="settings-card-title">Микрофон и воспроизведение</h3>
                 </div>
               </div>
             </div>
@@ -4014,13 +4012,13 @@ export function SettingsPage({
                   <option value="speakers">Колонки</option>
                 </CustomSelect>
                 <small>
-                  Управляет эхоподавлением и шумоподавлением браузера для записи и живого режима.
+                  Подавляет шум и эхо с учётом того, используете вы гарнитуру или колонки.
                   {!developerModeEnabled && " Доступно в режиме разработчика."}
                 </small>
               </label>
 
               <label>
-                Источник входа (микрофон)
+                Микрофон для разговора
                 <CustomSelect
                   value={voiceInputDeviceId}
                   onChange={(event) => {
@@ -4038,11 +4036,10 @@ export function SettingsPage({
                     </option>
                   ))}
                 </CustomSelect>
-                <small>Используется для единственного голосового режима Live.</small>
               </label>
 
               <label className="settings-field-full">
-                Источник вывода (наушники или колонки)
+                Где воспроизводить голос Iris
                 <CustomSelect
                   value={voiceOutputDeviceId}
                   onChange={(event) => {
@@ -4062,8 +4059,8 @@ export function SettingsPage({
                 </CustomSelect>
                 <small>
                   {audioDevices.canSelectOutput
-                    ? "Выбранное устройство используется для синтезированных аудиофайлов и воспроизведения сообщений; запасной системный голос браузера следует настройке Windows."
-                    : "Этот WebView не поддерживает выбор устройства вывода."}
+                    ? "Голос Iris и сообщения будут звучать здесь. Резервный голос использует устройство по умолчанию в Windows."
+                    : "Выбор устройства недоступен. Звук выводится на устройство по умолчанию в Windows."}
                 </small>
               </label>
             </div>
@@ -4105,8 +4102,8 @@ export function SettingsPage({
             <div className="settings-card-header">
               <div className="settings-card-header-main">
                 <div className="settings-card-title-group">
-                  <h3 className="settings-card-title">Детектор активности речи (VAD)</h3>
-                  <p className="settings-card-subtitle">Модель определения речи для старта и окончания реплик</p>
+                  <h3 className="settings-card-title">Определение речи (VAD)</h3>
+                  <p className="settings-card-subtitle">Помогает отличать речь от тишины и шума.</p>
                 </div>
               </div>
               <div className="settings-card-header-actions">
@@ -4130,14 +4127,14 @@ export function SettingsPage({
             <div className="settings-card-header">
               <div className="settings-card-header-main">
                 <div className="settings-card-title-group">
-                  <h3 className="settings-card-title">Словарь распознавания (STT)</h3>
-                  <p className="settings-card-subtitle">Канонические термины и правила замены распознанных слов</p>
+                  <h3 className="settings-card-title">Исправления распознавания</h3>
+                  <p className="settings-card-subtitle">Добавьте слова, которые Iris часто слышит неправильно.</p>
                 </div>
               </div>
 
             </div>
 
-            <DictionaryEditor value={sttTermsText} onChange={setSttTermsText} leftLabel="Правильный термин" rightLabel="Как может распознаться (варианты через |)" disabled={saving} /><p className="settings-apply-note">Например: NeuroAsist → Нейро Асист | нейроасист. Применяются только перечисленные точные замены.</p>
+            <DictionaryEditor value={sttTermsText} onChange={setSttTermsText} leftLabel="Правильное написание" rightLabel="Как Iris слышит (варианты через |)" disabled={saving} /><p className="settings-apply-note">Например: NeuroAsist → Нейро Асист | нейроасист. Iris будет исправлять только указанные варианты.</p>
             <div className="settings-card-actions">
               <MaterialButton materialKey={"App.button-24"} className="secondary" type="button" onClick={() => void saveSttTerms()} disabled={saving}>
                 Сохранить словарь распознавания
@@ -4150,8 +4147,8 @@ export function SettingsPage({
             <div className="settings-card-header">
               <div className="settings-card-header-main">
                 <div className="settings-card-title-group">
-                  <h3 className="settings-card-title">Словарь произношений (TTS)</h3>
-                  <p className="settings-card-subtitle">Транскрипция и ударения для естественного синтеза речи</p>
+                  <h3 className="settings-card-title">Произношение слов</h3>
+                  <p className="settings-card-subtitle">Укажите, как произносить имена и незнакомые слова.</p>
                 </div>
               </div>
 
@@ -4170,8 +4167,8 @@ export function SettingsPage({
             <div className="settings-card-header">
               <div className="settings-card-header-main">
                 <div className="settings-card-title-group">
-                  <h3 className="settings-card-title">Буферизация и сбор данных</h3>
-                  <p className="settings-card-subtitle">Настройка задержек сетевого буфера и сбор контрольных аудиозаписей</p>
+                  <h3 className="settings-card-title">Воспроизведение и тестовые записи</h3>
+                  <p className="settings-card-subtitle">Настройки для проверки прерываний и задержек звука.</p>
                 </div>
               </div>
               <div className="settings-card-header-actions">
@@ -4226,7 +4223,7 @@ export function SettingsPage({
                 disabled={!developerModeEnabled}
                 onClick={() => setShowSttCapture((value) => !value)}
               >
-                {showSttCapture ? "Скрыть сбор тестовых записей" : "Собрать приватный STT-корпус"}
+                {showSttCapture ? "Скрыть сбор тестовых записей" : "Записать примеры для проверки распознавания"}
               </MaterialButton>
             </div>
           </div>
@@ -4246,7 +4243,7 @@ export function SettingsPage({
             <div className="settings-card-header">
               <div className="settings-card-header-main">
                 <div className="settings-card-title-group">
-                  <h3 className="settings-card-title">Формат и инициатива диалога</h3>
+                  <h3 className="settings-card-title">Участники и инициатива</h3>
                   <p className="settings-card-subtitle">
                     Кто участвует в беседе и как часто Iris проявляет инициативу.
                   </p>
@@ -4270,7 +4267,7 @@ export function SettingsPage({
               </label>
 
               <label>
-                Охотность вступать
+                Активность в беседе
                 <CustomSelect
                   value={liveSettings.live_conversation_engagement}
                   onChange={(event) => updateLiveSetting(
@@ -4306,8 +4303,8 @@ export function SettingsPage({
             <div className="settings-card-header">
               <div className="settings-card-header-main">
                 <div className="settings-card-title-group">
-                  <h3 className="settings-card-title">Тонкие параметры и тайминги</h3>
-                  <p className="settings-card-subtitle">Тонкая настройка пауз, перебивания и строгости обращения</p>
+                  <h3 className="settings-card-title">Паузы и перебивания</h3>
+                  <p className="settings-card-subtitle">Когда Iris ждёт продолжения, отвечает или уступает слово.</p>
                 </div>
               </div>
               <div className="settings-card-header-actions">
@@ -4372,7 +4369,6 @@ export function SettingsPage({
               <div className="settings-card-header-main">
                 <div className="settings-card-title-group">
                   <h3 className="settings-card-title">Эмоции и настроение</h3>
-                  <p className="settings-card-subtitle">Выраженность эмоций, восстановление настроения и влияние недавних событий</p>
                 </div>
               </div>
               <div className="settings-card-header-actions">
@@ -4495,7 +4491,7 @@ const SETTINGS_NAVIGATION: Array<{
     icon: IconInterfacePageControllerSettings,
     items: [
       { section: "conversation", label: "Живой разговор" },
-      { section: "environment", label: "Окружение и гео" },
+      { section: "environment", label: "Город и интернет" },
     ],
   },
   {
@@ -4720,7 +4716,7 @@ function SystemMaintenance({
               <h2 className="settings-card-title">Обслуживание данных</h2>
               <DevBadge active={developerMode} onClick={onUnlockRequest} />
             </div>
-            <p className="settings-card-subtitle">Необратимые действия вынесены отдельно</p>
+            <p className="settings-card-subtitle">Восстановление поиска и удаление истории или памяти.</p>
           </div>
         </div>
       </div>
@@ -5032,7 +5028,7 @@ function AvatarControls({
           <div className="settings-card-header-main">
             <div className="settings-card-title-group">
               <h2 className="settings-card-title">Управление аватаром</h2>
-              <p className="settings-card-subtitle">Интеграция с 3D-моделью компаньона и визуализация эмоций</p>
+              <p className="settings-card-subtitle">Выберите, где показывать аватар Iris.</p>
             </div>
           </div>
           <div className="settings-card-header-actions">
@@ -5051,11 +5047,11 @@ function AvatarControls({
           <div className="avatar-placement-grid">
             <label className="avatar-placement-option">
               <input type="radio" name="avatar-placement" aria-label="Внутри Iris" checked={placement === "in_app"} onChange={() => void changePlacement("in_app")} />
-              <span><strong>Внутри Iris</strong><small style={{ display: "block", color: "var(--color-text-muted)", marginTop: 2 }}>Внизу слева на экране диалога, без второго окна.</small></span>
+              <span><strong>Внутри Iris</strong><small style={{ display: "block", color: "var(--color-text-muted)", marginTop: 2 }}>В левом нижнем углу диалога.</small></span>
             </label>
             <label className="avatar-placement-option">
-              <input type="radio" name="avatar-placement" aria-label="Отдельным оверлеем" checked={placement === "desktop_overlay"} onChange={() => void changePlacement("desktop_overlay")} />
-              <span><strong>Отдельным оверлеем</strong><small style={{ display: "block", color: "var(--color-text-muted)", marginTop: 2 }}>Поверх рабочего стола, как сейчас.</small></span>
+              <input type="radio" name="avatar-placement" aria-label="На рабочем столе" checked={placement === "desktop_overlay"} onChange={() => void changePlacement("desktop_overlay")} />
+              <span><strong>На рабочем столе</strong><small style={{ display: "block", color: "var(--color-text-muted)", marginTop: 2 }}>В отдельном окне поверх рабочего стола.</small></span>
             </label>
           </div>
         </fieldset>
@@ -5070,14 +5066,14 @@ function AvatarControls({
         <div className="avatar-options">
           <SettingsSwitch
             checked={placement === "in_app" ? inAppVisible : (overlay?.visible ?? true)}
-            label={placement === "in_app" ? "Показывать в диалоге" : "Показывать оверлей"}
+            label={placement === "in_app" ? "Показывать в диалоге" : "Показывать на рабочем столе"}
             disabled={!enabled || busy}
             onChange={(checked) => void (placement === "in_app" ? updateInAppVisibility(checked) : updateOverlay({ visible: checked }))}
           />
           {placement === "desktop_overlay" && (
             <div className="avatar-overlay-options" style={{ display: "grid", gap: 6, width: "100%" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <small style={{ color: "var(--color-text-muted)" }}>Опции оверлея</small>
+                <small style={{ color: "var(--color-text-muted)" }}>Окно аватара</small>
 
               </div>
               <SettingsSwitch
@@ -5093,7 +5089,7 @@ function AvatarControls({
                 onChange={(checked) => void updateOverlay({ locked: checked })}
               />
               <label>
-                Масштаб оверлея {overlay?.scale?.toFixed(1) ?? "1.0"}
+                Размер аватара {overlay?.scale?.toFixed(1) ?? "1.0"}
                 <input min="0.5" max="2" step="0.1" type="range" value={overlay?.scale ?? 1} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ scale: Number(event.target.value) })} />
               </label>
             </div>
@@ -5108,7 +5104,7 @@ function AvatarControls({
             Окно тестирования (QA Studio)
           </strong>
           <span style={{ display: "block", color: "rgba(255, 255, 255, 0.65)", fontSize: "12px", marginTop: 2 }}>
-            Автономный стенд тестировщика: проверка всех 24 эмоций, 20 жестов, сценариев речи и системных уведомлений.
+            Проверка эмоций, жестов, речи и уведомлений в отдельном окне.
           </span>
         </div>
         <MaterialButton materialKey={"App.button-42"}

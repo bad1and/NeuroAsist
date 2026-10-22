@@ -81,7 +81,7 @@ describe("desktop chrome и запуск", () => {
     const restore = vi.fn();
     render(<StartupScreen status="failed" retrying={false} subdetail="Bundled Neuro Core is missing" onRetry={retry} onRestoreBackup={restore} />);
     expect(screen.getByText("Bundled Neuro Core is missing")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Не удалось запустить ядро" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Не удалось запустить Iris" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Попробовать снова/ }));
     expect(retry).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "Восстановить из копии" }));
@@ -150,10 +150,10 @@ describe("эталонное окно", () => {
 
   it("сбрасывает размер отдельной командой и не снимает фиксацию", async () => {
     render(<><WindowSettings /><NotificationHost /></>);
-    const reset = screen.getByRole("button", { name: "Вернуть эталонный размер" });
+    const reset = screen.getByRole("button", { name: "Вернуть исходный размер" });
     await waitFor(() => expect(reset).toBeEnabled());
     fireEvent.click(reset);
-    expect(await screen.findByRole("status")).toHaveTextContent("Окно возвращено к эталонному размеру.");
+    expect(await screen.findByRole("status")).toHaveTextContent("Исходный размер окна восстановлен.");
     expect(tauriInvoke).toHaveBeenCalledWith("reset_reference_window", {}, undefined);
     expect(tauriInvoke).not.toHaveBeenCalledWith("set_reference_window_locked", expect.anything(), undefined);
   });

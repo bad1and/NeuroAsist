@@ -21,13 +21,13 @@ const floraAssetsPromise = Promise.all([
   import("../../../../assets/startup-flora-top-right.webp"),
 ]);
 
-const STAGES = ["Запуск ядра", "Готовность модели", "Запуск сервисов"];
+const STAGES = ["Запуск Iris", "Подключение модели", "Запуск сервисов"];
 const STATUS_COPY: Record<CoreStatus, { title: string; detail: string }> = {
-  starting: { title: "Запускаю Iris", detail: "Подготавливаю ядро" },
+  starting: { title: "Запускаю Iris", detail: "Подключаю сервисы Iris" },
   ready: { title: "Рада тебя видеть", detail: "Всё готово к разговору" },
-  failed: { title: "Не удалось запустить ядро", detail: "Проверь журнал диагностики или попробуй ещё раз" },
-  crashed: { title: "Ядро завершило работу", detail: "Iris сохранила данные и готова к повторному запуску" },
-  closing: { title: "Завершаю работу", detail: "Сохраняю состояние и закрываю сервисы" },
+  failed: { title: "Не удалось запустить Iris", detail: "Попробуйте снова. Подробности ошибки — в журнале диагностики." },
+  crashed: { title: "Работа Iris прервана", detail: "Перезапустите Iris, чтобы продолжить." },
+  closing: { title: "Завершаю работу", detail: "Сохраняю данные и закрываю Iris" },
 };
 
 export function StartupScreen({ status, stage = status === "ready" || status === "closing" ? 3 : 1,

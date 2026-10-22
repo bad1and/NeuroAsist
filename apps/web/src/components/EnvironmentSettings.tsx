@@ -129,14 +129,12 @@ export function EnvironmentSettings({ settings, developerMode, onSaveSetting, on
             {cityBusy ? "Сохраняем…" : citySaved ? "Сохранено ✓" : "Сохранить"}
           </MaterialButton>
         </div>
-        <small>Нажмите Enter или «Сохранить», чтобы применить город.</small>
       </div>}
     </section>
 
     <section className="settings-card" aria-labelledby="environment-weather">
       <div className="settings-card-header"><div className="settings-card-title-group">
         <h3 className="settings-card-title" id="environment-weather">Погода</h3>
-        <p className="settings-card-subtitle">Текущая погода и прогноз для выбранного города.</p>
       </div></div>
       <AppSwitch checked={weatherEnabled} label="Погода за окном"
         description="Iris получает текущую погоду, а при вопросе запрашивает подробный прогноз."
@@ -147,7 +145,6 @@ export function EnvironmentSettings({ settings, developerMode, onSaveSetting, on
     <section className="settings-card" aria-labelledby="environment-news">
       <div className="settings-card-header"><div className="settings-card-title-group">
         <h3 className="settings-card-title" id="environment-news">Новости</h3>
-        <p className="settings-card-subtitle">Свежие события из открытых RSS-лент.</p>
       </div></div>
       <AppSwitch checked={newsEnabled} label="Сводка новостей"
         description="Россия и мир, технологии, наука и игры. В беседу попадают новости по теме вопроса."

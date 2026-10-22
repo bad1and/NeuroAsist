@@ -38,7 +38,7 @@ describe("global search navigation", () => {
       return <GlobalSearch open developerMode={false} onClose={vi.fn()} onSelect={vi.fn()} />;
     }
     const view = render(<LocalizedSearch />);
-    await waitFor(() => expect(screen.getByText("Environment & location")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Location and internet")).toBeInTheDocument());
     api.requestJson.mockImplementation((path: string) => Promise.resolve({ items: path.startsWith("/memory/commitments")
       ? [{ id: "user-plan", title: "Настройки", details: "Сохранено" }] : [] }));
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "user-plan" } });

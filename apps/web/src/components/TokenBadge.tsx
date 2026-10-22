@@ -152,7 +152,7 @@ export function TokenDialogContent({ tokens, role, onClose }: TokenDialogContent
                 type="button"
                 className="token-copy-btn secondary"
                 onClick={handleCopyJson}
-                title="Скопировать сырой JSON"
+                title="Скопировать JSON"
               >
                 {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
                 <span>{copied ? "Скопировано!" : "Копировать"}</span>
@@ -250,7 +250,7 @@ export function TokenBadge({ tokens, role, onOpen }: TokenBadgeProps) {
         type="button"
         className={`token-badge ${isUser ? "user-badge" : "assistant-badge"} ${internalOpen ? "active" : ""}`}
         onClick={handleToggle}
-        title="Нажмите для полной детализации токенов"
+        title="Подробности расхода токенов"
         aria-label={`Токены: ${badgeText}. Нажмите для детализации`}
         aria-expanded={internalOpen}
       >

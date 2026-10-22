@@ -572,7 +572,7 @@ export function CodingAgentPage({
                 <header className="settings-heading" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px" }}>
                   <div>
                     <h2 id="coding-agent-title">Задачи кодинг-агента</h2>
-                    <p>Очередь выполнения, ревью кода, diff изменений и логи событий в реальном времени.</p>
+                    <p>Следите за задачами и проверяйте готовые изменения.</p>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                     <MaterialButton materialKey={"coding.button-7"}
@@ -743,7 +743,7 @@ export function CodingAgentPage({
           <>
             <header className="settings-heading">
               <h2>Новая задача кодинг-агента</h2>
-              <p>Сформулируйте цель. Агент создаст или модифицирует файлы в изолированной Docker-песочнице.</p>
+              <p>Опишите, что нужно сделать. Агент подготовит изменения в отдельной рабочей папке.</p>
             </header>
 
             {error && (
@@ -798,7 +798,7 @@ export function CodingAgentPage({
                     rows={5}
                     value={objective}
                     onChange={(event) => setObjective(event.target.value)}
-                    placeholder="Например: напиши вспомогательный модуль parse_csv.py и юнит-тесты к нему с проверкой в sandbox"
+                    placeholder="Например: напиши модуль чтения CSV и проверь его тестами"
                     disabled={busy || !status?.enabled}
                     required
                   />
@@ -883,7 +883,7 @@ export function CodingAgentPage({
             <header className="settings-heading" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px" }}>
               <div>
                 <h2>Песочница и окружение Docker</h2>
-                <p>Диагностика контейнеризации, образа песочницы и изоляции рабочих папок.</p>
+                <p>Проверьте, готов ли Docker к запуску задач.</p>
               </div>
               <MaterialButton materialKey={"coding.button-18"}
                 className="secondary"
@@ -995,7 +995,7 @@ export function CodingAgentPage({
           <>
             <header className="settings-heading">
               <h2>Параметры кодинг-агента</h2>
-              <p>Управление моделью, автоматическим делегированием из диалога и репозиториями.</p>
+              <p>Выберите модель и проект для работы с кодом.</p>
             </header>
 
             {error && (
@@ -1029,15 +1029,15 @@ export function CodingAgentPage({
                   <CodingSwitch
                     checked={settings.coding_agent_enabled}
                     label="Включить Coding Agent"
-                    description="Позволяет ставить задачи и делегировать выполнение кода агенту."
+                    description="Включает создание и выполнение задач с кодом."
                     disabled={busy || !settings.coding_api_key_configured}
                     onChange={(checked) => void changeSettings({ coding_agent_enabled: checked })}
                   />
 
                   <CodingSwitch
                     checked={settings.coding_auto_delegate}
-                    label="Автоделегирование из диалога"
-                    description="Основной диалог Iris распознаёт запросы на код и автоматически передаёт их в очередь."
+                    label="Задачи с кодом из разговора"
+                    description="Iris будет создавать задачи с кодом по просьбе в разговоре."
                     disabled={busy || !settings.coding_agent_enabled}
                     onChange={(checked) => void changeSettings({ coding_auto_delegate: checked })}
                   />
@@ -1068,7 +1068,7 @@ export function CodingAgentPage({
                         </option>
                       ))}
                     </CustomSelect>
-                    <small>Модель, ответственная за анализ контекста, написание кода и формирование diff.</small>
+                    <small>Эта модель будет выполнять задачи с кодом.</small>
                   </div>
 
                   <div className="coding-field">

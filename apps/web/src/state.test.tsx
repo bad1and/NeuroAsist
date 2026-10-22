@@ -65,7 +65,7 @@ describe("StatePage", () => {
     const viewport = screen.getByLabelText("Лента событий");
     expect(viewport).toContainElement(item);
     expect(viewport).toContainElement(item.querySelector(".timeline-marker"));
-    expect(viewport).not.toContainElement(screen.getByRole("heading", { name: "Живая история" }));
+    expect(viewport).not.toContainElement(screen.getByRole("heading", { name: "События и заметки" }));
     expect(screen.getAllByRole("button", { name: /Спокойный диалог/ })).toHaveLength(1);
   });
 
@@ -86,7 +86,7 @@ describe("StatePage", () => {
 
   it("shows human-readable state, scoped reset, and reflection toggle", async () => {
     render(<StatePage />);
-    expect(await screen.findByRole("heading", { name: "Живая история" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "События и заметки" })).toBeInTheDocument();
     expect(screen.getByText("Что влияет на настроение")).toBeInTheDocument();
     expect(screen.getByText("Резкость / Защита границ")).toBeInTheDocument();
     expect(screen.queryByText("insult")).not.toBeInTheDocument();

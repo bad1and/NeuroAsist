@@ -274,7 +274,7 @@ function JournalMessageDetails({
         <div className="details-section details-tokens-section">
           <div className="details-section-title">
             <Zap size={13} className="text-accent" />
-            <span>Параметры вызова LLM</span>
+            <span>Запрос к модели</span>
             {tokens.model && <span className="details-model-tag">{tokens.model}</span>}
           </div>
 
@@ -336,7 +336,7 @@ function JournalMessageDetails({
         <div className="details-section details-companion-section">
           <div className="details-section-title">
             <Sparkles size={13} className="text-purple" />
-            <span>Состояние и экспрессия Iris</span>
+            <span>Эмоции и жесты Iris</span>
           </div>
 
           <div className="companion-cues-row">
@@ -432,7 +432,7 @@ function JournalMessageDetails({
       {memoryUpdates && memoryUpdates.length > 0 && <div className="details-section details-memory-section">
         <div className="details-section-title">
           <Brain size={13} className="text-cyan" />
-          <span>Долгосрочная память хода</span>
+          <span>Что Iris запомнила</span>
         </div>
 
           <div className="memory-updates-list">
@@ -472,7 +472,7 @@ function JournalMessageDetails({
               `Метаданные сообщения #${message.id.slice(0, 8)}`,
             )
           }
-          title="Просмотреть сырой JSON объект хода"
+          title="Открыть JSON сообщения"
         >
           <Terminal size={12} />
           <span>JSON сообщения</span>

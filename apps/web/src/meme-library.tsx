@@ -57,7 +57,7 @@ export function MemeLibraryPanel() {
 
   return <div className="meme-library-panel">
     <header className="meme-library-heading">
-      <div><h2>Мемотека</h2><p>Отсылки, значения и источники. Ирис пополняет справочник после поиска о мемах.</p></div>
+      <div><h2>Мемотека</h2><p>Мемы и отсылки, которые Iris нашла и может использовать в разговоре.</p></div>
       <span className="memory-status">{items.length} / {limit}</span>
     </header>
     <div className="meme-library-toolbar">
@@ -65,7 +65,7 @@ export function MemeLibraryPanel() {
       <MaterialButton materialKey="memes.refresh" appearance="quiet" aria-label="Обновить мемотеку" disabled={busy} onClick={() => void refresh()}><RefreshCw size={16} /></MaterialButton>
       <MaterialButton materialKey="memes.add" disabled={busy || items.length >= limit} onClick={() => edit("new")}><Plus size={16} />Добавить</MaterialButton>
     </div>
-    <p className="meme-library-note">Выдержки поиска требуют проверки. Ручная правка закрепляет значение; отключённые карточки не подсказываются в ответах.</p>
+    <p className="meme-library-note">Проверьте найденные значения и исправьте ошибки. Отключите карточку, чтобы Iris её не использовала.</p>
     {error && !editing && !deleting && <p role="alert" className="meme-library-error">{error}</p>}
     {loading ? <LoadingRing /> : <div className="memory-list" ref={list}>
       {filtered.map(card => <article className={`memory-card meme-card${card.enabled ? "" : " is-disabled"}`} key={card.id}>
@@ -83,7 +83,7 @@ export function MemeLibraryPanel() {
       </article>)}
       {!filtered.length && <p className="empty-state">{query ? "Ничего не найдено" : "В мемотеке пока нет карточек"}</p>}
     </div>}
-    <AppDialog open={editing !== null} title={editing === "new" ? "Добавить мем" : "Исправить мем"} description="Укажите значение, ситуации применения и источник. Карточка будет сохранена как ручная правка." variant="info" onClose={() => { if (!busy) setEditing(null); }}>
+    <AppDialog open={editing !== null} title={editing === "new" ? "Добавить мем" : "Исправить мем"} description="Укажите значение, примеры использования и источник." variant="info" onClose={() => { if (!busy) setEditing(null); }}>
       <form onSubmit={e => { e.preventDefault(); if (editing) void run(() => saveMemeCard(editing === "new" ? null : editing.id, form)); }}>
         <div className="meme-edit-fields">
           <label className="form-field"><span>Название или фраза</span><input required maxLength={100} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} data-i18n-skip /></label>

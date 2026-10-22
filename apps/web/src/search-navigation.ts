@@ -6,7 +6,7 @@ export type SearchDestination =
 
 export const SETTINGS_SEARCH = [
   { section: "conversation", title: "Живой разговор", words: "поведение участие инициативность паузы перебивание conversation", dev: false },
-  { section: "environment", title: "Окружение и гео", words: "поиск интернет погода новости город время местоположение search weather", dev: false },
+  { section: "environment", title: "Город и интернет", words: "поиск интернет погода новости город время местоположение search weather", dev: false },
   { section: "avatar", title: "Аватар", words: "аватар оверлей масштаб клики положение avatar overlay", dev: false },
   { section: "voice", title: "Голос", words: "голос скорость речь темп звучание выразительность voice speed", dev: false },
   { section: "voice-devices", title: "Устройства", words: "микрофон наушники звук запись устройство microphone audio headphones", dev: false },

@@ -215,7 +215,7 @@ describe("русский интерфейс", () => {
     fireEvent.click(within(navigation).getByRole("button", { name: "Система" }));
     fireEvent.click(within(navigation).getByRole("button", { name: "Окно приложения" }));
     expect(screen.getByRole("heading", { name: "Окно приложения" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Вернуть эталонный размер" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Вернуть исходный размер" })).toBeVisible();
   });
   it("открывает отдельный раздел эталонного окна в системных настройках", async () => {
     render(<App />);
@@ -224,7 +224,7 @@ describe("русский интерфейс", () => {
     fireEvent.click(within(navigation).getByRole("button", { name: "Система" }));
     fireEvent.click(within(navigation).getByRole("button", { name: "Окно приложения" }));
     expect(screen.getByRole("heading", { name: "Окно приложения" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Вернуть эталонный размер" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Вернуть исходный размер" })).toBeDisabled();
     expect(screen.getByRole("switch", { name: /Запретить изменение размера окна/ })).toBeDisabled();
   });
   it("собирает диалог в отдельную рабочую область с закреплённым композером", async () => {
@@ -459,7 +459,7 @@ describe("русский интерфейс", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Аватар" }));
     expect(screen.getByText("Где показывать аватар")).toBeInTheDocument();
     expect(screen.getByLabelText("Внутри Iris")).toBeChecked();
-    expect(screen.getByLabelText("Отдельным оверлеем")).not.toBeChecked();
+    expect(screen.getByLabelText("На рабочем столе")).not.toBeChecked();
   });
 
   it("не связывает встроенный аватар со скрытым внешним оверлеем", async () => {
@@ -619,7 +619,7 @@ describe("русский интерфейс", () => {
 
     expect(await screen.findByRole("heading", { name: "О чём поговорим?" })).toBeInTheDocument();
     expect(await screen.findByText("Идеи интерфейса")).toBeInTheDocument();
-    expect(screen.getByText("Iris самостоятельно поддерживает актуальность фактов.")).toBeInTheDocument();
+    expect(screen.getByText("Проверьте, что Iris запомнила, и исправьте неточности.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Начать диалог/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Начать" }));
     expect(await screen.findByPlaceholderText("Ввод сообщения...")).toBeInTheDocument();
@@ -772,7 +772,7 @@ describe("русский интерфейс", () => {
     const tokenUsageBtn = within(navigation).getByRole("button", { name: "Токены и расходы" });
     fireEvent.click(tokenUsageBtn);
 
-    expect(await screen.findByText("Токены и расходы LLM")).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Статистика запросов" })).toBeVisible();
   });
 
   it("автосохраняет отдельное поле и откатывает его при ошибке", async () => {
@@ -855,12 +855,12 @@ describe("русский интерфейс", () => {
 
     fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Живой разговор" }));
     expect(screen.getByLabelText("Участники")).not.toBeDisabled();
-    expect(screen.getByLabelText("Охотность вступать")).not.toBeDisabled();
+    expect(screen.getByLabelText("Активность в беседе")).not.toBeDisabled();
     expect(screen.getByLabelText("Инициативность")).not.toBeDisabled();
     expect(screen.getByLabelText("Прямое обращение")).toBeDisabled();
     expect(screen.getByLabelText("Чувствительность к перебиванию")).toBeDisabled();
     expect(screen.getByLabelText("Терпимость к паузам")).toBeDisabled();
-    expect(screen.getByText("Тонкие параметры и тайминги")).toBeInTheDocument();
+    expect(screen.getByText("Паузы и перебивания")).toBeInTheDocument();
   });
 
   it("включает режим разработчика через Интерфейс и разблокирует расширенные настройки", async () => {
@@ -932,8 +932,8 @@ describe("русский интерфейс", () => {
       fireEvent.click(voiceGroup);
       fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Устройства" }));
 
-      const input = await screen.findByLabelText(/Источник входа/);
-      const output = screen.getByLabelText(/Источник вывода/);
+      const input = await screen.findByLabelText(/Микрофон для разговора/);
+      const output = screen.getByLabelText(/Где воспроизводить голос Iris/);
       await waitFor(() => expect(input).not.toBeDisabled());
       await waitFor(() => expect(output).not.toBeDisabled());
       fireEvent.change(input, { target: { value: "usb-microphone" } });
@@ -1261,14 +1261,14 @@ describe("русский интерфейс", () => {
 
     // Detailed metrics and cues are now displayed
     expect(screen.getByTestId("journal-turn-details")).toBeInTheDocument();
-    expect(screen.getByText("Параметры вызова LLM")).toBeInTheDocument();
-    expect(screen.getByText("Состояние и экспрессия Iris")).toBeInTheDocument();
-    expect(screen.getByText("Долгосрочная память хода")).toBeInTheDocument();
+    expect(screen.getByText("Запрос к модели")).toBeInTheDocument();
+    expect(screen.getByText("Эмоции и жесты Iris")).toBeInTheDocument();
+    expect(screen.getByText("Что Iris запомнила")).toBeInTheDocument();
     expect(screen.getByText("Пользователь настроен дружелюбно")).toBeInTheDocument();
     expect(screen.getByText("Приятно снова общаться")).toBeInTheDocument();
 
     // Open raw JSON dialog
-    const inspectBtn = screen.getByTitle("Просмотреть сырой JSON объект хода");
+    const inspectBtn = screen.getByTitle("Открыть JSON сообщения");
     fireEvent.click(inspectBtn);
     expect(screen.getByText("Сырой JSON токенов, эмоций и памяти:")).toBeInTheDocument();
 
@@ -1430,7 +1430,7 @@ describe("переходы и размещение настроек", () => {
       const heading = await screen.findByRole("heading", { name: "Tavily API" });
       await waitFor(() => expect(heading).toHaveFocus());
       expect(screen.getByLabelText("API-ключ Tavily")).toBeVisible();
-      fireEvent.click(screen.getByRole("button", { name: "Окружение и гео" }));
+      fireEvent.click(screen.getByRole("button", { name: "Город и интернет" }));
       await waitFor(() => expect(screen.getByRole("heading", { name: "Веб-поиск" })).toBeVisible());
       expect(screen.queryByLabelText("API-ключ Tavily")).not.toBeVisible();
     }

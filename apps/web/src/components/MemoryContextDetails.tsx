@@ -25,8 +25,8 @@ function ContextRecordRow({ item, sessionId }: { item: ContextRecord; sessionId?
     <small>Входной контекст этого ответа</small>
     {!item.current ? <p className="settings-apply-note">Запись уже удалена. Показан сохранённый фрагмент контекста.</p> : <>
       {item.current.value_text !== item.value && <p className="settings-apply-note">После ответа запись была изменена.</p>}
-      <details><summary>Исправить текущую запись</summary><textarea aria-label="Новое значение записи памяти" value={text} maxLength={2000} rows={3} onChange={event => setText(event.target.value)} /><MaterialButton materialKey={`context.save.${item.id}`} className="secondary" type="button" disabled={busy || !text.trim()} onClick={() => void run(() => updateMemory(item.id, { value_text: text }), "Текущая запись исправлена. Снимок старого ответа сохранён.")}>Сохранить исправление</MaterialButton></details>
-      <MaterialButton materialKey={`context.exclude.${item.id}`} className="text-button" type="button" disabled={busy || !sessionId} onClick={() => void run(() => requestJson("/memory-context/exclude-next", { method: "POST", body: JSON.stringify({ session_id: sessionId, memory_id: item.id }) }), "Запись исключена из следующего контекста текущего разговора.")}>Исключить из следующего ответа</MaterialButton>
+      <details><summary>Исправить текущую запись</summary><textarea aria-label="Новое значение записи памяти" value={text} maxLength={2000} rows={3} onChange={event => setText(event.target.value)} /><MaterialButton materialKey={`context.save.${item.id}`} className="secondary" type="button" disabled={busy || !text.trim()} onClick={() => void run(() => updateMemory(item.id, { value_text: text }), "Запись исправлена. В деталях прежнего ответа остаётся старый текст.")}>Сохранить исправление</MaterialButton></details>
+      <MaterialButton materialKey={`context.exclude.${item.id}`} className="text-button" type="button" disabled={busy || !sessionId} onClick={() => void run(() => requestJson("/memory-context/exclude-next", { method: "POST", body: JSON.stringify({ session_id: sessionId, memory_id: item.id }) }), "В следующем ответе Iris не будет использовать эту запись памяти.")}>Исключить из следующего ответа</MaterialButton>
     </>}
     {error && <p className="error-text" role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
   </article>;
@@ -44,7 +44,7 @@ export function MemoryContextDetails({ messageId, count, sessionId }: { messageI
   return <>
     <MaterialButton materialKey={`context.open.${messageId}`} className="text-button" type="button" onClick={event => { event.stopPropagation(); void show(); }}>В контексте {count} записей памяти · DEV</MaterialButton>
     <AppDialog open={open} onClose={() => setOpen(false)} title="Память во входном контексте" icon={<Brain size={24} aria-hidden="true" />} variant="info" size="wide">
-      <div className="memory-context-details"><p className="settings-apply-note">Это фактические записи, переданные модели. Список не доказывает, что каждый факт повлиял на формулировку ответа. Новые сохранения показаны отдельно в деталях сообщения. Исключение отключает одну запись памяти на следующий ход; тот же факт может оставаться в истории разговора.</p>
+      <div className="memory-context-details"><p className="settings-apply-note">Эти записи были отправлены модели для ответа, но не обязательно использованы в нём. Новые факты показаны в деталях сообщения. Исключить запись можно только из следующего запроса; тот же факт может остаться в истории беседы.</p>
         {error && <p className="error-text" role="alert">{error}</p>}{!items && !error && <p role="status">Загружаю контекст…</p>}
         {items?.map(item => <ContextRecordRow key={item.id} item={item} sessionId={sessionId} />)}
       </div>

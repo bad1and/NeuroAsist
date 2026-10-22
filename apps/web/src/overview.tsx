@@ -124,7 +124,7 @@ export function OverviewPage({
       setHasMoreMemories(memory.next_offset != null);
       setError(null);
     } catch (cause) {
-      const msg = cause instanceof TypeError ? "Не удалось обновить обзор. Проверь подключение к Iris." : cause instanceof Error ? cause.message : "Данные обзора недоступны";
+      const msg = cause instanceof TypeError ? "Не удалось обновить обзор. Проверьте подключение к Iris." : cause instanceof Error ? cause.message : "Данные обзора недоступны";
       setError(msg);
       notify.error("Обзор", msg);
     } finally {
@@ -152,7 +152,7 @@ export function OverviewPage({
         <div className="overview-intro">
           <p>{greeting()}</p>
           <h2>О чём поговорим?</h2>
-          <span>Iris рядом, когда хочется обсудить идею, разобрать задачу или просто выговориться.</span>
+          <span>Обсудите идею, задайте вопрос или расскажите, как прошёл день.</span>
           <MaterialButton materialKey={"overview.button-1"} className="primary-button overview-cta" onClick={handleCtaClick}>
             Начать диалог <IconInterfaceCursorArrow2 size={18} aria-hidden="true" />
           </MaterialButton>
@@ -171,7 +171,7 @@ export function OverviewPage({
           <div>
             <span>Последний разговор</span>
             <h3 data-i18n-skip={latest?.title && latest.title !== "Разговор с Iris" ? "" : undefined}>{latest?.title || (latest ? "Разговор с Iris" : "История пока пуста")}</h3>
-            <p>{latest ? `${latest.message_count} сообщ. · ${formatRelative(latest.last_activity_at)}` : "Начни диалог — он появится здесь."}</p>
+            <p>{latest ? `${latest.message_count} сообщ. · ${formatRelative(latest.last_activity_at)}` : "Здесь появится ваш последний разговор с Iris."}</p>
           </div>
           <MaterialButton materialKey={"overview.button-3"} className="card-link" onClick={(e) => { animateButtonPress(e.currentTarget); if (latest) onOpenHistory(); else onOpenChat(); }}>
             {latest ? "Открыть историю" : "Начать разговор"}<IconInterfaceCursorArrow2 size={15} />
@@ -191,7 +191,7 @@ export function OverviewPage({
                 "Нет сохранённых записей"
               )}
             </h3>
-            <p>Iris самостоятельно поддерживает актуальность фактов.</p>
+            <p>Проверьте, что Iris запомнила, и исправьте неточности.</p>
           </div>
           <MaterialButton materialKey={"overview.button-4"} className="card-link" onClick={(e) => { animateButtonPress(e.currentTarget); onOpenMemory(); }}>
             Открыть память<IconInterfaceCursorArrow2 size={15} />

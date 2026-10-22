@@ -40,20 +40,19 @@ export function WindowSettings() {
 
   return (
     <div className="form-grid settings-form" aria-busy={busy}>
-      <section className="settings-card" aria-label="Эталонное окно">
+      <section className="settings-card" aria-label="Размер окна">
         <div className="settings-card-header">
           <div className="settings-card-header-main">
             <div className="settings-card-title-group">
-              <h3 className="settings-card-title">Эталонный размер</h3>
-              <p className="settings-card-subtitle">Начальный размер окна, для которого настроены пропорции и отступы интерфейса.</p>
+              <h3 className="settings-card-title">Размер по умолчанию</h3>
             </div>
           </div>
         </div>
         {preferences && (
           <div className="window-reference-preview">
-          <svg viewBox="0 0 240 150" role="img" aria-label="Схема эталонного и минимального размера окна"><rect x="5" y="5" width="230" height="140" rx="16" fill="var(--color-base-deep)" /><rect x="15" y="15" width="210" height="120" rx="12" fill="var(--color-surface-raised)" /><rect x="24" y="24" width={Math.max(30, Math.min(190, preferences.minimum.width / preferences.reference.width * 190))} height={Math.max(25, Math.min(98, preferences.minimum.height / preferences.reference.height * 98))} rx="8" fill="var(--color-accent)" opacity=".6" /></svg>
+          <svg viewBox="0 0 240 150" role="img" aria-label="Размер окна по умолчанию и минимальный размер"><rect x="5" y="5" width="230" height="140" rx="16" fill="var(--color-base-deep)" /><rect x="15" y="15" width="210" height="120" rx="12" fill="var(--color-surface-raised)" /><rect x="24" y="24" width={Math.max(30, Math.min(190, preferences.minimum.width / preferences.reference.width * 190))} height={Math.max(25, Math.min(98, preferences.minimum.height / preferences.reference.height * 98))} rx="8" fill="var(--color-accent)" opacity=".6" /></svg>
           <dl className="window-size-summary">
-            <div><dt>Эталон</dt><dd>{formatSize(preferences.reference)}</dd></div>
+            <div><dt>По умолчанию</dt><dd>{formatSize(preferences.reference)}</dd></div>
             <div><dt>Минимальный размер</dt><dd>{formatSize(preferences.minimum)}</dd></div>
           </dl>
           </div>
@@ -71,10 +70,10 @@ export function WindowSettings() {
           checked={preferences?.locked ?? false}
           disabled={!available || !preferences || busy}
           label="Запретить изменение размера окна"
-          description="Возвращает эталонный размер и отключает растягивание и разворачивание. Сохраняется после перезапуска Iris."
+          description="Вернёт исходный размер. Окно нельзя будет растянуть или развернуть."
           onChange={(locked) => void run(
             () => setReferenceWindowLocked(locked),
-            locked ? "Эталонный размер зафиксирован." : "Изменение размера окна разрешено.",
+            locked ? "Размер окна зафиксирован." : "Изменение размера окна разрешено.",
           )}
         />
         <div className="settings-card-actions">
@@ -85,14 +84,13 @@ export function WindowSettings() {
             disabled={!available || !preferences || busy}
             onClick={(event) => {
               animateButtonPress(event.currentTarget);
-              void run(resetReferenceWindow, "Окно возвращено к эталонному размеру.");
+              void run(resetReferenceWindow, "Исходный размер окна восстановлен.");
             }}
           >
             <RotateCcw size={16} aria-hidden="true" />
-            Вернуть эталонный размер
+            Вернуть исходный размер
           </MaterialButton>
         </div>
-        <p className="muted">Сброс размера выводит окно из развёрнутого режима. Фиксация остаётся в выбранном состоянии.</p>
       </section>
     </div>
   );

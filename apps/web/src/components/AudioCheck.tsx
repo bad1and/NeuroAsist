@@ -75,7 +75,7 @@ export function AudioCheck({ inputDeviceId = "", outputDeviceId = "", playbackRa
       {(recording || previewing) && <MaterialButton materialKey="audio.stop-check" className="text-button" type="button" onClick={() => stop()}>Остановить проверку</MaterialButton>}
     </div>
     {recording && <><meter min={0} max={1} value={level} aria-label="Уровень микрофона" /><p role="status">Скажите несколько слов. Проверка длится до 15 секунд; запись не сохраняется.</p></>}
-    {previewing && <p role="status">Подготавливаю или воспроизвожу пробную фразу…</p>}
+    {previewing && <p role="status">Проверяем голос Iris…</p>}
     {error && <p className="error-text" role="alert">{error}</p>}
   </section>;
 }

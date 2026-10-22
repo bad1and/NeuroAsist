@@ -153,7 +153,7 @@ describe("JournalPage token dialog interaction", () => {
     const detailButtons = screen.getAllByRole("button", { name: "Подробнее" });
     fireEvent.click(detailButtons[1]);
 
-    expect(screen.getByText("Параметры вызова LLM")).toBeInTheDocument();
+    expect(screen.getByText("Запрос к модели")).toBeInTheDocument();
     expect(screen.getByText("В ответе")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Свернуть" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("Поиск в интернете")).toBeInTheDocument();

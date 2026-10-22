@@ -8,9 +8,9 @@ import { animate, prefersReducedMotion } from "../animations";
 import type { PublicSettings } from "../types";
 
 const profiles = [
-  { label: "Спокойнее", engagement: "low", initiative: "off", description: "Сдержанное участие, без инициативных реплик." },
-  { label: "Обычно", engagement: "balanced", initiative: "rare", description: "Сбалансированное участие и редкая инициатива." },
-  { label: "Больше общения", engagement: "high", initiative: "balanced", description: "Больше участия и предложений продолжить беседу." },
+  { label: "Спокойнее", engagement: "low", initiative: "off", description: "Реже вступает в беседу и не начинает её сама." },
+  { label: "Обычно", engagement: "balanced", initiative: "rare", description: "Поддерживает разговор, изредка начинает сама." },
+  { label: "Больше общения", engagement: "high", initiative: "balanced", description: "Чаще вступает в разговор и предлагает новые темы." },
 ] as const;
 
 export function ConversationProfiles({ engagement, initiative, onChange }: { engagement: string; initiative: string; onChange: (value: Pick<PublicSettings, "live_conversation_engagement" | "live_conversation_initiative">) => void }) {

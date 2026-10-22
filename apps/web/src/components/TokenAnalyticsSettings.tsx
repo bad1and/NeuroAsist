@@ -45,7 +45,7 @@ export const CATEGORY_TABS: { id: PurposeCategory; label: string; purposes?: str
   { id: "all", label: "Все назначения" },
   { id: "chat", label: "Диалог и голос", purposes: ["chat_json", "chat_live", "adjudication", "chat", "live"] },
   { id: "memory", label: "Память и рефлексия", purposes: ["memory", "reflection", "memory_extraction", "memory_synthesis", "memory_conflict"] },
-  { id: "guards", label: "Защита и Repair", purposes: ["chat_json_repair", "chat_json_guard_retry", "chat_live_guard_retry", "memory_repair", "reflection_repair"] },
+  { id: "guards", label: "Проверки и исправления", purposes: ["chat_json_repair", "chat_json_guard_retry", "chat_live_guard_retry", "memory_repair", "reflection_repair"] },
   { id: "coding", label: "Coding Agent", purposes: ["coding"] },
 ];
 
@@ -179,9 +179,9 @@ export function TokenAnalyticsSettings() {
             <Zap size={20} />
           </div>
           <div>
-            <h2>Токены и расходы LLM</h2>
+            <h2>Статистика запросов</h2>
             <p className="token-analytics-subtitle">
-              Полный учет входящих и исходящих токенов API DeepSeek, коэффициента кэширования и затрат
+              Запросы к модели и примерная стоимость работы Iris.
             </p>
           </div>
         </div>
@@ -256,7 +256,7 @@ export function TokenAnalyticsSettings() {
         {/* 2. Cache Hit Rate */}
         <div className="token-kpi-card">
           <div className="token-kpi-header">
-            <span className="token-kpi-label">Кэширование промптов</span>
+            <span className="token-kpi-label">Токены из кэша</span>
           </div>
           <div className="token-kpi-value text-cache" data-testid="kpi-cache-rate">
             {stats ? `${stats.cache_hit_rate.toFixed(1)}%` : "0.0%"}
@@ -403,7 +403,7 @@ export function TokenAnalyticsSettings() {
         <div className="records-card-header">
           <div className="records-card-title-group">
             <Terminal size={17} className="text-accent" />
-            <h3>Журнал запросов к LLM</h3>
+            <h3>Журнал запросов к модели</h3>
             <span className="records-count-badge">
               Всего: {recordsResponse?.total ?? 0}
             </span>
@@ -506,8 +506,8 @@ export function TokenAnalyticsSettings() {
                         type="button"
                         className="inspect-btn"
                         onClick={() => setInspectRecord(r)}
-                        title="Просмотреть сырой JSON"
-                        aria-label="Просмотреть сырой JSON"
+                        title="Открыть JSON"
+                        aria-label="Открыть JSON"
                       >
                         <Terminal size={13} />
                       </MaterialButton>
@@ -558,7 +558,7 @@ export function TokenAnalyticsSettings() {
       {/* Inspect Raw JSON Dialog */}
       <AppDialog
         open={Boolean(inspectRecord)}
-        title="Сырые метрики вызова LLM"
+        title="Подробности запроса"
         description={inspectRecord ? `Запрос: ${inspectRecord.request_id}` : ""}
         onClose={() => setInspectRecord(null)}
         variant="info"
@@ -587,7 +587,7 @@ export function TokenAnalyticsSettings() {
 
               <div className="inspect-json-box">
                 <div className="inspect-json-header">
-                  <span>Сырой объект записи</span>
+                  <span>JSON записи</span>
                   <MaterialButton materialKey={"TokenAnalyticsSettings.button-8"}
                     type="button"
                     className="token-copy-btn"

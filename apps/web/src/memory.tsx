@@ -478,10 +478,10 @@ export function MemoryPage({ developerMode = false, focusRequest, onOpenSource }
 
       <div className="memory-content" ref={contentRef}>
         {section !== "commitments" && <p className="memory-section-description">{({
-          all: "Все актуальные сведения, которые Iris извлекла из разговоров.",
-          active: "Сохранённые факты профиля. Закреплённые записи отмечены закладкой.",
-          topics: "Общие темы: краткое содержание и связанные сведения.",
-          archive: "Заменённые, истёкшие и удалённые записи. Здесь можно проверить причину и замену.",
+          all: "Что Iris помнит из ваших разговоров.",
+          active: "Факты о вас и ваши предпочтения. Важные записи можно закрепить.",
+          topics: "Записи памяти, собранные по темам.",
+          archive: "Прежние и убранные записи. Здесь видно, почему они больше не используются.",
           diagnostics: "Состояние индексов и извлечения памяти.", memes: "Библиотека выражений и контекст их использования.",
         } as Record<string,string>)[section]}</p>}
         {section === "memes" && developerMode ? <MemeLibraryPanel /> : <>
@@ -588,7 +588,7 @@ export function MemoryPage({ developerMode = false, focusRequest, onOpenSource }
                 <div className="empty-state">
                   <IconMoneyCashierTag size={28} aria-hidden="true" />
                   <strong>Тем пока нет</strong>
-                  <span>Iris сформирует тематические кластеры в процессе общения.</span>
+                  <span>Здесь появятся темы из ваших разговоров.</span>
                 </div>
               )}
             </>
@@ -778,7 +778,7 @@ export function MemoryPage({ developerMode = false, focusRequest, onOpenSource }
                   <div className="empty-state">
                     <IconInterfaceAlertAlarmBell2 size={28} />
                     <strong>Диагностических записей пока нет</strong>
-                    <span>Здесь появятся результаты фоновой консолидации и понятные причины нулевой записи.</span>
+                    <span>Здесь будут результаты обработки памяти и причины ошибок.</span>
                   </div>
                 )}
             </>
@@ -910,7 +910,7 @@ export function MemoryPage({ developerMode = false, focusRequest, onOpenSource }
                 <div className="empty-state">
                   <IconComputerRobotCyborg1 size={28} aria-hidden="true" />
                   <strong>Записей пока нет</strong>
-                  <span>Помощник предложит факты для сохранения после разговора.</span>
+                  <span>Здесь появятся факты, которые Iris запомнит в разговоре.</span>
                 </div>
               )}
               {nextOffset !== null && <MaterialButton materialKey="memory.load-more" type="button" disabled={loadingMore} onClick={() => void loadMore()}>
@@ -951,7 +951,7 @@ export function MemoryPage({ developerMode = false, focusRequest, onOpenSource }
       <AppDialog
         open={Boolean(pendingEditMemory)}
         title="Исправить запись памяти"
-        description="Исправление будет закреплено как явный выбор пользователя и сразу попадёт в поиск."
+        description="Iris будет использовать исправленный текст. Запись будет закреплена."
         onClose={() => setPendingEditMemory(null)}
         variant="info"
       >

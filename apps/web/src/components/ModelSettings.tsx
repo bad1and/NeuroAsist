@@ -67,7 +67,6 @@ export function ModelManager(_props: { developerMode?: boolean; onUnlockRequest?
         <strong data-i18n-skip>{model.name}</strong>
         <p className="settings-apply-note">{modelPurpose(model)}</p>
         {model.delivery === "upstream_download" && <>
-          <p className="settings-apply-note">Скачивается напрямую с Hugging Face</p>
           <div className="model-actions">
             {model.source_url && <MaterialButton materialKey="models.source" className="text-button settings-inline-link" disabled={busy} onClick={() => void run(() => openModelInformation(model.id, "source", model.source_url!))}>Источник модели</MaterialButton>}
             {model.terms_url && <MaterialButton materialKey="models.terms" className="text-button settings-inline-link" disabled={busy} onClick={() => void run(() => openModelInformation(model.id, "terms", model.terms_url!))}>Условия использования</MaterialButton>}

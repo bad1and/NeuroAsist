@@ -263,7 +263,7 @@ export function GuidedSttCapture({
     >
       <header className="stt-capture-header">
         <div>
-          <h3 id="stt-capture-title">Приватный корпус речи</h3>
+          <h3 id="stt-capture-title">Тестовые записи речи</h3>
           <p><IconInterfaceSecurityShield4 size={16} aria-hidden="true" /> Записи остаются только на этом устройстве.</p>
         </div>
         <strong className="stt-capture-count" aria-label={`Сохранено сценариев: ${completedCount} из ${SCENARIOS.length}`}>

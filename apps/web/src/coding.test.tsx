@@ -206,7 +206,7 @@ describe("CodingAgentPage", () => {
     fireEvent.click(within(nav).getByRole("button", { name: /Новая задача/i }));
     await waitFor(() => {
       expect(screen.getByText("Постановка задачи")).toBeInTheDocument();
-      expect(screen.getByPlaceholderText(/напиши вспомогательный модуль/i)).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Цель задачи" })).toBeInTheDocument();
     });
 
     // Переходим в раздел «Песочница Docker»
@@ -222,7 +222,7 @@ describe("CodingAgentPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Параметры кодинг-агента")).toBeInTheDocument();
       expect(screen.getByText("Включить Coding Agent")).toBeInTheDocument();
-      expect(screen.getByText("Автоделегирование из диалога")).toBeInTheDocument();
+      expect(screen.getByText("Задачи с кодом из разговора")).toBeInTheDocument();
     });
   });
 

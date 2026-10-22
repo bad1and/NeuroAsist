@@ -27,7 +27,7 @@ describe("interface translations", () => {
     function PortalFixture({ locale, open }: { locale: InterfaceLocale; open: boolean }) {
       useInterfaceLocale(locale);
       return createElement("section", null, "Настройки", open && createPortal(createElement("aside", null,
-        createElement("strong", null, "Подготовить первый разговор"),
+        createElement("strong", null, "Настроить Iris"),
         createElement("input", { placeholder: "Поиск по памяти" }),
         createElement("p", { "data-i18n-skip": true }, "Настройки — пользовательский текст"),
         createElement("pre", null, "Настройки")), document.body));
@@ -35,11 +35,11 @@ describe("interface translations", () => {
     const view = render(createElement(PortalFixture, { locale: "en", open: false }), { container: root });
     expect(screen.getByText("Settings")).toBeInTheDocument();
     view.rerender(createElement(PortalFixture, { locale: "en", open: true }));
-    await waitFor(() => expect(screen.getByText("Prepare your first conversation")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Set up Iris")).toBeInTheDocument());
     expect(screen.getByPlaceholderText("Search memory")).toBeInTheDocument();
     expect(screen.getByText("Настройки — пользовательский текст")).toBeInTheDocument();
     await act(async () => view.rerender(createElement(PortalFixture, { locale: "ru", open: true })));
-    expect(screen.getByText("Подготовить первый разговор")).toBeInTheDocument();
+    expect(screen.getByText("Настроить Iris")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Поиск по памяти")).toBeInTheDocument();
     view.unmount(); root.remove();
   });
@@ -47,7 +47,7 @@ describe("interface translations", () => {
     expect(translateInterfaceText("Скачать", "en")).toBe("Download");
     expect(translateInterfaceText("Восстановить", "en")).toBe("Restore");
     expect(translateInterfaceText("Резервных копий пока нет", "en")).toBe("No backups yet");
-    expect(translateInterfaceText("Окружение и гео", "en")).toBe("Environment & location");
+    expect(translateInterfaceText("Город и интернет", "en")).toBe("Location and internet");
   });
   it("translates interface copy in both directions", () => {
     expect(translateInterfaceText("Настройки", "en")).toBe("Settings");
@@ -70,12 +70,12 @@ describe("interface translations", () => {
     expect(translateInterfaceText("Параметры кодинг-агента", "en")).toBe("Coding Agent settings");
     expect(translateInterfaceText("Режим разработчика", "en")).toBe("Developer mode");
     expect(translateInterfaceText(
-      "Разблокирует расширенные настройки голоса, таймингов живого разговора, отладки аватара и прямого управления данными.",
+      "Открывает настройки пауз, голоса и аватара, диагностику и очистку данных.",
       "en",
-    )).toBe("Unlocks advanced settings for voice, live-conversation timing, avatar debugging, and direct data control.");
+    )).toBe("Enables pause, voice and avatar settings, diagnostics and data cleanup.");
     expect(translateInterfaceText("Сначала новые", "en")).toBe("Newest first");
     expect(translateInterfaceText("Целостность", "en")).toBe("Integrity");
-    expect(translateInterfaceText("Живая история", "en")).toBe("Live history");
+    expect(translateInterfaceText("События и заметки", "en")).toBe("Events and notes");
     expect(translateInterfaceText("Что влияет на настроение", "en")).toBe("What affects the mood");
     expect(translateInterfaceText("Шутка / Подкол", "en")).toBe("Joke / Teasing");
     expect(translateInterfaceText("Влияет сейчас", "en")).toBe("Active now");

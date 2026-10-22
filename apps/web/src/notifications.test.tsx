@@ -421,7 +421,7 @@ describe("Unified Notification System", () => {
       });
 
       act(() => {
-        notify.error("Сбой сервиса", "Не удалось запустить ядро", {
+        notify.error("Сбой сервиса", "Не удалось запустить Iris", {
           details: "RuntimeError: Connection timed out",
         });
       });

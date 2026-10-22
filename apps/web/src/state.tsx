@@ -315,7 +315,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
 
         <main className="state-timeline-container">
           <div className="state-timeline-header">
-            <h2>Живая история</h2>
+            <h2>События и заметки</h2>
             <div className="timeline-header-controls">
               <SlidingSegments className="timeline-filter-pills" value={filterOnlyImportant} aria-label="Фильтр истории">
                 <MaterialButton appearance="plain" materialKey={"state.button-3"}

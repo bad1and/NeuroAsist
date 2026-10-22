@@ -88,7 +88,7 @@ describe("TokenAnalyticsSettings component", () => {
   it("renders header, KPI cards, and breakdowns", async () => {
     render(<TokenAnalyticsSettings />);
 
-    expect(screen.getByText("Токены и расходы LLM")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Статистика запросов" })).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByTestId("kpi-total-tokens")).toHaveTextContent("12 450");
       expect(screen.getByTestId("kpi-cache-rate")).toHaveTextContent("80.0%");
@@ -116,14 +116,14 @@ describe("TokenAnalyticsSettings component", () => {
 
   it("allows inspecting request details in dialog", async () => {
     render(<TokenAnalyticsSettings />);
-    await waitFor(() => expect(screen.getByTitle("Просмотреть сырой JSON")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTitle("Открыть JSON")).toBeInTheDocument());
 
-    const inspectBtn = screen.getByTitle("Просмотреть сырой JSON");
+    const inspectBtn = screen.getByTitle("Открыть JSON");
     fireEvent.click(inspectBtn);
 
-    expect(screen.getByText("Сырые метрики вызова LLM")).toBeInTheDocument();
+    expect(screen.getByText("Подробности запроса")).toBeInTheDocument();
     expect(screen.getByText("Запрос: req-12345")).toBeInTheDocument();
-    expect(screen.getByText("Сырой объект записи")).toBeInTheDocument();
+    expect(screen.getByText("JSON записи")).toBeInTheDocument();
   });
 
   it("shows confirmation modal and resets statistics", async () => {

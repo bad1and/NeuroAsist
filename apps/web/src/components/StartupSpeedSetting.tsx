@@ -7,5 +7,5 @@ export function compactStartup(): boolean {
 }
 export function StartupSpeedSetting() {
   const [enabled, setEnabled] = useState(compactStartup);
-  return <div className="settings-card"><AppSwitch checked={enabled} label="Короткий финал запуска" description="После готовности сервисов логотип и переход выполняются быстрее. Применяется при следующем запуске на этом компьютере." onChange={checked => { try { localStorage.setItem(COMPACT_STARTUP_KEY, checked ? "1" : "0"); setEnabled(checked); } catch { /* Leave the previous value if storage is unavailable. */ } }} /></div>;
+  return <div className="settings-card"><AppSwitch checked={enabled} label="Сократить анимацию запуска" description="Вступит в силу при следующем запуске Iris." onChange={checked => { try { localStorage.setItem(COMPACT_STARTUP_KEY, checked ? "1" : "0"); setEnabled(checked); } catch { /* Leave the previous value if storage is unavailable. */ } }} /></div>;
 }

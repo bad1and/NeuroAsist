@@ -29,7 +29,7 @@ describe("release settings", () => {
   it("does not report successful import after cancelling the file dialog", async () => {
     vi.mocked(desktop.importDesktopBackup).mockResolvedValue(null);
     render(<BackupControls />);
-    fireEvent.click(screen.getByText("Импорт ZIP"));
+    fireEvent.click(screen.getByText("Загрузить копию из ZIP"));
     await screen.findByText("Резервных копий пока нет");
     expect(screen.queryByText("Импорт завершён.")).not.toBeInTheDocument();
   });
@@ -87,7 +87,7 @@ describe("release settings", () => {
     const terms = "https://huggingface.co/terms-of-service";
     vi.mocked(api.getModels).mockResolvedValue({ models: [{ id: "teratts-v2", name: "TeraTTS", version: "revision", installed: false, size_bytes: 1000, sha256: "hash", restart_required: true, status: "not_installed", downloaded_bytes: 0, total_bytes: 1000, delivery: "upstream_download", source_url: source, terms_url: terms }] });
     render(<ModelManager />);
-    expect(await screen.findByText("Скачивается напрямую с Hugging Face")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Источник модели" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(api.installModel).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText("Источник модели"));
