@@ -2,8 +2,7 @@
 .overview-page .overview-grid,
 .overview-page .overview-plan,
 .settings-scenario,
-.settings-panel .avatar-qa-studio-callout,
-.document-attachment-popover {
+.settings-panel .avatar-qa-studio-callout {
   background: var(--surface-card) !important;
   border: 0 !important;
   border-radius: var(--radius-card, 40px) !important;
@@ -12,8 +11,7 @@
 }
 .overview-page .overview-grid:hover,
 .overview-page .overview-plan:hover,
-.settings-scenario:hover,
-.document-attachment-popover:hover { box-shadow: var(--shadow-card-hover) !important; }
+.settings-scenario:hover { box-shadow: var(--shadow-card-hover) !important; }
 .overview-page .overview-grid { gap: 0; }
 .overview-page .overview-card { min-width: 0; min-height: 190px; padding: 18px 24px; }
 .overview-page .overview-card-icon { margin-block-end: 12px; }
@@ -167,12 +165,21 @@
 .setup-steps { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
 .setup-steps [aria-current="step"] { color: var(--color-text); background: var(--color-accent); }
 .setup-actions { justify-content: flex-end; margin-top: 20px; }
-.document-attachment { position: absolute; left: 14px; bottom: 9px; width: 40px; z-index: 3; }
+.chat-composer-inner:has(> .document-attachment) { padding-left: 40px; }
+.document-attachment { position: static; flex: 0 0 44px; width: 44px; height: 44px; margin-bottom: -6px; z-index: 3; }
 .chat-memory-mode { position: absolute; right: 20px; bottom: calc(100% + 10px); padding: 7px 12px; border-radius: var(--radius-control-sm); background: var(--color-surface); color: var(--color-text-soft); font-size: 12px; }
-.document-attachment > .icon-button { min-width: 40px; min-height: 40px; }
-.document-attachment-popover { position: absolute; left: 0; bottom: calc(100% + 12px); width: min(480px,70vw); padding: 14px 18px; font-size: 13px; }
-.document-attachment-popover strong { overflow-wrap: anywhere; }
-.document-attachment-popover small { display: block; margin-top: 8px; line-height: 1.6; color: var(--color-text-soft); }
+.document-attachment > button.document-attachment-button { position: relative; display: flex; align-items: center; justify-content: center; width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 0; margin: 0; border: 0; border-radius: 50%; corner-shape: round; background: transparent; box-shadow: none; color: var(--color-accent-ink); opacity: .8; cursor: pointer; }
+.document-attachment > button.document-attachment-button:hover:not(:disabled) { background: rgb(255 255 255 / .1); opacity: 1; }
+.document-attachment > button.document-attachment-button:focus-visible { opacity: 1; }
+.document-attachment > button.document-attachment-button:disabled { opacity: .35; cursor: not-allowed; }
+.document-attachment-button > svg { flex-shrink: 0; }
+.document-attachment-button[data-attached="true"]::before { content: ""; position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.document-attachment-details { display: flex; flex-direction: column; gap: 16px; max-height: calc(100dvh - 200px); padding: 4px; margin: -4px; overflow: auto; }
+.document-attachment-details p { margin: 0; color: var(--color-text-soft); font-size: 13px; line-height: 1.6; }
+.document-attachment-details summary { cursor: pointer; color: var(--color-text-soft); font-size: 13px; font-weight: 550; }
+.document-attachment-details details > p { margin-top: 10px; }
+.document-attachment-details .document-source-actions { margin-top: 0; }
+.document-attachment-details button.secondary { min-height: 44px !important; }
 .document-source-actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; margin-top: 12px; }
 .document-source-actions label { display: grid; gap: 6px; font-size: 12px; }
 .document-source-actions input { width: 86px; }

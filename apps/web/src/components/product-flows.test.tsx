@@ -22,14 +22,16 @@ import { PatchReview, splitPatch } from "./PatchReview";
 import { searchSettings } from "../search-navigation";
 import { DocumentSources } from "./MemoryContextDetails";
 import { useInterfaceLocale } from "../i18n";
+import { NotificationHost } from "./NotificationHost";
+import { notify } from "../notifications";
 
 const deferred = <T,>() => {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>(done => { resolve = done; });
   return { promise, resolve };
 };
-beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); api.requestJson.mockResolvedValue({ items: [], document: null }); reminders.getReminders.mockResolvedValue({ items: [] }); });
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+beforeEach(() => { vi.clearAllMocks(); notify.dismissAll(); localStorage.clear(); api.requestJson.mockResolvedValue({ items: [], document: null }); reminders.getReminders.mockResolvedValue({ items: [] }); });
+afterEach(() => { cleanup(); notify.dismissAll(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("global search navigation", () => {
   it("translates settings results while preserving user plan titles and excerpts", async () => {
@@ -112,7 +114,7 @@ describe("attachment lifecycle", () => {
     const upload = deferred<unknown>();
     api.requestJson.mockImplementation((path: string, options?: RequestInit) => options?.method === "POST" ? upload.promise : Promise.resolve({ document: null }));
     const busy = vi.fn();
-    render(<DocumentAttachment sessionId="session" onBusyChange={busy} />);
+    render(<><DocumentAttachment sessionId="session" onBusyChange={busy} /><NotificationHost /></>);
     await act(async () => {});
     fireEvent.change(screen.getByLabelText("Выбрать документ"), { target: { files: [new File(["test"], "note.md")] } });
     const [, options] = api.requestJson.mock.calls.find(([, init]) => init?.method === "POST")!;
@@ -123,6 +125,62 @@ describe("attachment lifecycle", () => {
     await act(async () => upload.resolve({ id: uploadId, name: "note.md", fragment_count: 1, ephemeral: true }));
     expect(screen.queryByText("note.md")).not.toBeInTheDocument();
     expect(busy).toHaveBeenLastCalledWith(false);
+  });
+
+  it("shows attachment status outside the composer and reopens details from the attachment button", async () => {
+    api.requestJson.mockImplementation((_path: string, options?: RequestInit) => Promise.resolve(options?.method === "POST"
+      ? { id: "file-1", name: "notes.txt", fragment_count: 1, ephemeral: true }
+      : { document: null }));
+    render(<><div className="chat-composer"><DocumentAttachment sessionId="session" onBusyChange={vi.fn()} /></div><NotificationHost /></>);
+    await act(async () => {});
+    fireEvent.change(screen.getByLabelText("Выбрать документ"), { target: { files: [new File(["notes"], "notes.txt")] } });
+    await screen.findByText("Документ прикреплён");
+    expect(screen.getByText("notes.txt").closest(".notification-host")).not.toBeNull();
+    expect(document.querySelector(".chat-composer .notification-card")).toBeNull();
+    expect(document.querySelector(".document-attachment-popover")).toBeNull();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Открыть прикреплённый документ" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("Файл доступен Iris в текущей беседе.");
+    fireEvent.click(screen.getByRole("button", { name: "Убрать из беседы" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Приложить документ" })).not.toHaveAttribute("data-attached", "true"));
+    expect(api.requestJson).toHaveBeenCalledWith("/documents/file-1?session_id=session", { method: "DELETE" });
+  });
+
+  it("cleans up a pending upload notification on session change and ignores its late result", async () => {
+    const pending = deferred<unknown>();
+    api.requestJson.mockImplementation((_path: string, options?: RequestInit) => options?.method === "POST" ? pending.promise : Promise.resolve({ document: null }));
+    const view = render(<><DocumentAttachment sessionId="first" onBusyChange={vi.fn()} /><NotificationHost /></>);
+    await act(async () => {});
+    fireEvent.change(screen.getByLabelText("Выбрать документ"), { target: { files: [new File(["notes"], "old.txt")] } });
+    expect(screen.getByText("Читаю документ…")).toBeInTheDocument();
+    view.rerender(<><DocumentAttachment sessionId="second" onBusyChange={vi.fn()} /><NotificationHost /></>);
+    await act(async () => pending.resolve({ id: "old", name: "old.txt", fragment_count: 1, ephemeral: true }));
+    expect(screen.queryByText("Читаю документ…")).not.toBeInTheDocument();
+    expect(screen.queryByText("Документ прикреплён")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Приложить документ" })).toBeInTheDocument();
+  });
+
+  it("reports invalid files in the notification area without starting an upload", async () => {
+    render(<><DocumentAttachment sessionId="session" onBusyChange={vi.fn()} /><NotificationHost /></>);
+    await act(async () => {});
+    fireEvent.change(screen.getByLabelText("Выбрать документ"), { target: { files: [new File(["image"], "image.png")] } });
+    expect(screen.getByText("Не удалось прикрепить документ").closest(".notification-host")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Выбрать файл" })).toBeInTheDocument();
+    expect(api.requestJson.mock.calls.some(([, options]) => options?.method === "POST")).toBe(false);
+  });
+
+  it("finishes a replacement when the previous document expires during upload", async () => {
+    vi.useFakeTimers();
+    const pending = deferred<unknown>();
+    api.requestJson.mockImplementation((_path: string, options?: RequestInit) => options?.method === "POST" ? pending.promise : Promise.resolve({ document: { id: "previous", name: "previous.txt", fragment_count: 1, ephemeral: true, expires_in_seconds: 1 } }));
+    render(<><DocumentAttachment sessionId="session" onBusyChange={vi.fn()} /><NotificationHost /></>);
+    await act(async () => {});
+    fireEvent.change(screen.getByLabelText("Выбрать документ"), { target: { files: [new File(["new"], "replacement.txt")] } });
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(screen.getByText("Читаю документ…")).toBeInTheDocument();
+    await act(async () => pending.resolve({ id: "replacement", name: "replacement.txt", fragment_count: 1, ephemeral: true }));
+    expect(screen.getByText("Документ прикреплён")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Открыть прикреплённый документ" })).toBeEnabled();
   });
 });
 
