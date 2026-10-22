@@ -14,9 +14,6 @@ export type CaptureMetadata = {
   supportedConstraints: MediaTrackSupportedConstraints;
 };
 
-// Temporary default until the key becomes a runtime setting.
-export const LIVE_MUTE_HOTKEY = "m";
-
 export function microphoneConstraints(profile: CaptureProfile, inputDeviceId = ""): MediaTrackConstraints {
   const processing = {
     live: { echoCancellation: true, noiseSuppression: true, autoGainControl: false },

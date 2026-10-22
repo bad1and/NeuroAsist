@@ -13,6 +13,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isDesktopApp, quitDesktopApp } from "../desktop";
 import { animateButtonPress } from "../animations";
 import { useDesktopWindowPreferences } from "../useDesktopWindowPreferences";
+import { useShortcutBindings, formatBinding } from "../shortcuts";
 
 export function WindowChrome({
   title,
@@ -32,6 +33,8 @@ export function WindowChrome({
   onOpenSearch?: () => void;
 }) {
   const desktop = isDesktopApp();
+  const shortcuts = useShortcutBindings();
+  const searchTitle = "Найти в Iris" + (shortcuts.search ? ` · ${formatBinding(shortcuts.search)}` : "");
   const { available: mainWindow, preferences } = useDesktopWindowPreferences();
   const resizeLocked = mainWindow && (!preferences || preferences.locked);
   const [maximized, setMaximized] = useState(false);
@@ -86,7 +89,7 @@ export function WindowChrome({
         {title && <h1 data-tauri-drag-region>{title}</h1>}
       </div>
       <div className="window-chrome-actions">
-        {onOpenSearch && <MaterialButton materialKey="window.search" appearance="quiet" className="icon-button" type="button" aria-label="Найти в Iris (Ctrl+K)" title="Найти в Iris · Ctrl+K" onClick={onOpenSearch}><Search size={16} /></MaterialButton>}
+        {onOpenSearch && <MaterialButton materialKey="window.search" appearance="quiet" className="window-search" type="button" aria-label="Найти в Iris" title={searchTitle} onClick={onOpenSearch}><Search size={16} aria-hidden="true" /></MaterialButton>}
         {desktop && (
           <div className="window-controls" aria-label="Управление окном">
             <MaterialButton materialKey={"WindowChrome.button-2"} appearance="quiet" tone="success" onClick={(e) => { animateButtonPress(e.currentTarget); void getCurrentWindow().minimize(); }} aria-label="Свернуть окно"><Minus size={14} /></MaterialButton>

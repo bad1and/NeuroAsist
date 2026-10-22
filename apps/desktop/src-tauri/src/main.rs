@@ -22,7 +22,8 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
-use tauri_plugin_global_shortcut::ShortcutState;
+mod shortcut_preferences;
+use shortcut_preferences::{get_shortcut_preferences, set_shortcut_preferences, set_shortcut_recording, ShortcutPreferences};
 
 mod window_preferences;
 use window_preferences::{
@@ -1514,6 +1515,11 @@ fn main() {
                 }
             }
             match event {
+                WindowEvent::Focused(false) => {
+                    if let Some(preferences) = window.app_handle().try_state::<ShortcutPreferences>() {
+                        preferences.restore_after_focus_loss(window.app_handle());
+                    }
+                }
                 WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
                     let _ = window.emit("desktop-request-close", ());
@@ -1572,23 +1578,15 @@ fn main() {
                 let _ = state.start_core(&core_handle);
             });
             #[cfg(desktop)]
-            app.handle().plugin(
-                tauri_plugin_global_shortcut::Builder::new()
-                    .with_shortcuts(["CommandOrControl+Shift+N", "CommandOrControl+Alt+A"])?
-                    .with_handler(|app, shortcut, event| {
-                        if event.state == ShortcutState::Pressed {
-                            if shortcut.to_string() == "CTRL+ALT+A" {
-                                let _ = app.state::<DesktopState>().toggle_avatar(app);
-                            } else {
-                                show_main_window(app);
-                            }
-                        }
-                    })
-                    .build(),
-            )?;
+            app.handle().plugin(tauri_plugin_global_shortcut::Builder::new().build())?;
+            app.manage(ShortcutPreferences::load(app.path().app_config_dir()?.join("shortcuts.json")));
+            app.state::<ShortcutPreferences>().start(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            get_shortcut_preferences,
+            set_shortcut_preferences,
+            set_shortcut_recording,
             get_window_preferences,
             set_reference_window_locked,
             reset_reference_window,

@@ -15,6 +15,7 @@ export const SETTINGS_SEARCH = [
   { section: "memory", title: "Настройки памяти", words: "память инкогнито приватность memory incognito", dev: false },
   { section: "system-interface", title: "Интерфейс", words: "язык интерфейс разработчик developer language", dev: false },
   { section: "system-window", title: "Окно приложения", words: "размер окно фиксация восстановить window resize", dev: false },
+  { section: "shortcuts", title: "Сочетания клавиш", words: "горячие клавиши бинды привязка раскладка клавиатура shortcuts hotkeys keyboard", dev: false },
   { section: "api-keys", title: "API-ключи", words: "ключ api deepseek tavily brave serper подключение", dev: false },
   { section: "token-usage", title: "Токены и расходы", words: "расходы стоимость токены статистика деньги usage cost", dev: false },
   { section: "system-overview", title: "Готовность системы", words: "готовность система подключение диагностика connection", dev: false },

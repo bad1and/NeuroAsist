@@ -1,5 +1,7 @@
+import { SHORTCUT_TRANSLATIONS } from "./shortcut-translations";
 /** UI copy for the three approved product stages. User data is never translated. */
 export const PRODUCT_TRANSLATIONS: readonly (readonly [string, string])[] = [
+  ...SHORTCUT_TRANSLATIONS,
   ["Источник модели", "Model source"],
   ["Условия использования", "Terms of use"],
   ["Не удалось создать каталог данных Iris", "Could not create Iris data directory"],

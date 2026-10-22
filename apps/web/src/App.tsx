@@ -153,7 +153,6 @@ import {
 } from "./audio-devices";
 import {
   BrowserVadRecorder,
-  LIVE_MUTE_HOTKEY,
   PcmInputClient,
   type MicrophoneProfile,
 } from "./vad";
@@ -161,6 +160,8 @@ import { LoadingRing } from "./components/LoadingRing";
 import { WorkspaceView } from "./components/WorkspaceView";
 import { OverviewPage } from "./overview";
 import { GlobalSearch } from "./components/GlobalSearch";
+import { ShortcutSettings } from "./components/ShortcutSettings";
+import { useShortcutCommands, useShortcutBindings, formatBinding } from "./shortcuts";
 import type { SearchFocus } from "./search-navigation";
 import { FirstConversationSetup } from "./components/FirstConversationSetup";
 import { ReminderDelivery } from "./components/ReminderDelivery";
@@ -257,6 +258,7 @@ type SettingsSection =
   | "memory"
   | "system-interface"
   | "system-window"
+  | "shortcuts"
   | "api-keys"
   | "token-usage"
   | "system-overview"
@@ -474,13 +476,6 @@ function MainApp() {
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [historyFocus, setHistoryFocus] = useState<SearchFocus>();
   const [memoryFocus, setMemoryFocus] = useState<SearchFocus>();
-  useEffect(() => {
-    const shortcut = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setGlobalSearchOpen(true); }
-    };
-    window.addEventListener("keydown", shortcut);
-    return () => window.removeEventListener("keydown", shortcut);
-  }, []);
   const [visitedViews, setVisitedViews] = useState<Set<AppView>>(() => new Set<AppView>(["overview", "chat"]));
   const [settingsNavigationRequest, setSettingsNavigationRequest] = useState<SettingsNavigationRequest>();
   const [navigationOpen, setNavigationOpen] = useState(false);
@@ -971,6 +966,15 @@ function MainApp() {
     setActiveView(view);
     closeNavigation();
   };
+  useShortcutCommands({
+    search: () => setGlobalSearchOpen(true),
+    settings: () => switchView("settings"),
+    chat: () => switchView("chat"),
+    history: () => switchView("journal"),
+    memory: () => switchView("memory"),
+    plans: () => { setMemoryFocus({ id: "", section: "commitments", query: "", requestId: crypto.randomUUID() }); switchView("memory"); },
+    sidebar: () => setSidebarCollapsed(current => !current),
+  }, !showStartup && !setupOpen);
   return (
     <>
     {(!showStartup || (startupReady && startupRevealRequested)) && (
@@ -2782,17 +2786,13 @@ export function ChatPage({
     updateConversationStatus(nextMuted ? "Микрофон выключен" : "Микрофон включён");
   }, [cancelPendingBargeIn, liveConversation, microphoneMuted, playMuteTone, updateConversationStatus]);
 
-  useEffect(() => {
-    const handleMuteHotkey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== LIVE_MUTE_HOTKEY || event.repeat || !liveConversation) return;
-      const target = event.target as HTMLElement | null;
-      if (target?.isContentEditable || (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
-      event.preventDefault();
-      toggleMicrophoneMute();
-    };
-    window.addEventListener("keydown", handleMuteHotkey);
-    return () => window.removeEventListener("keydown", handleMuteHotkey);
-  }, [liveConversation, toggleMicrophoneMute]);
+  const shortcutBindings = useShortcutBindings();
+  useShortcutCommands({
+    microphone: () => { if (!liveConversation || !vadRecorderRef.current) return false; toggleMicrophoneMute(); },
+    sound: () => { if (!sessionId) return false; toggleSoundMute(); },
+    stopSpeech: () => { if (voiceState !== "speaking") return false; interruptAssistantSpeech(); setVoiceState("idle"); },
+    composer: () => { if (!isActive || !composerTextareaRef.current) return false; composerTextareaRef.current.focus(); },
+  });
 
   const isDialogActive = isStarted || messages.length > 0 || liveConversation;
   useAvatarPresentation(!isDialogActive, showInAppAvatar && isActive, avatarHostStatus?.phase);
@@ -3100,7 +3100,7 @@ export function ChatPage({
                         toggleMicrophoneMute();
                       }
                     }}
-                    title={
+                    title={(
                       microphoneStarting
                         ? "Микрофон подключается"
                         : microphoneMuted
@@ -3110,7 +3110,7 @@ export function ChatPage({
                           : liveReady
                             ? "Включить микрофон"
                             : "Включить после загрузки голосовых сервисов"
-                    }
+                    ) + (shortcutBindings.microphone ? ` · ${formatBinding(shortcutBindings.microphone)}` : "")}
                     aria-label={microphoneStarting ? "Микрофон подключается" : "Live"}
                     aria-busy={microphoneStarting}
                     aria-pressed={liveConversation && !microphoneMuted}
@@ -3125,7 +3125,7 @@ export function ChatPage({
                       animateButtonPress(e.currentTarget);
                       toggleSoundMute();
                     }}
-                    title={soundMuted ? "Звук выключен (нажмите, чтобы включить)" : "Звук включён (нажмите, чтобы выключить)"}
+                    title={(soundMuted ? "Звук выключен (нажмите, чтобы включить)" : "Звук включён (нажмите, чтобы выключить)") + (shortcutBindings.sound ? ` · ${formatBinding(shortcutBindings.sound)}` : "")}
                     aria-label={soundMuted ? "Звук выключен" : "Звук включён"}
                     aria-pressed={!soundMuted}
                     type="button"
@@ -3670,6 +3670,9 @@ export function SettingsPage({
           {activeSection === "system-window" ? <>
             <header className="settings-heading"><h2>Окно приложения</h2><p>Размер окна и запрет на его изменение.</p></header>
             <WindowSettings />
+          </> : activeSection === "shortcuts" ? <>
+            <header className="settings-heading"><h2>Сочетания клавиш</h2><p>Настройте клавиши для частых действий.</p></header>
+            <ShortcutSettings />
           </> : <div className="empty-state"><IconInterfaceAlertAlarmBell2 size={28} aria-hidden="true" /><strong>Настройки недоступны</strong><span>Подключитесь к сервису и попробуйте ещё раз.</span></div>}
         </div>
       </section>
@@ -3691,6 +3694,7 @@ export function SettingsPage({
     memory: { title: "Память", description: "Какие сведения Iris может сохранять между разговорами." },
     "system-interface": { title: "Интерфейс", description: "Язык, анимация запуска и панель разговора." },
     "system-window": { title: "Окно приложения", description: "Размер окна и запрет на его изменение." },
+    shortcuts: { title: "Сочетания клавиш", description: "Настройте клавиши для частых действий." },
     "api-keys": { title: "API-ключи", description: "Подключите модель для ответов Iris и, при необходимости, сервис поиска." },
     "token-usage": { title: "Токены и расходы", description: "Посмотрите, сколько запросов отправляет Iris и во сколько они обходятся." },
     "system-overview": { title: "Система", description: "Состояние подключения и компонентов Iris." },
@@ -3747,7 +3751,7 @@ export function SettingsPage({
               <h2 id={`settings-${activeSection}`} tabIndex={-1}>{activeSettingsMeta.title}</h2>
               <p>{activeSettingsMeta.description}</p>
             </div>
-            {!["system-window", "api-keys", "token-usage", "system-overview", "models", "backups", "maintenance", "events", "avatar"].includes(activeSection) && <AutoSaveStatus status={autosave.status} onRetry={autosave.retry} />}
+            {!["shortcuts", "system-window", "api-keys", "token-usage", "system-overview", "models", "backups", "maintenance", "events", "avatar"].includes(activeSection) && <AutoSaveStatus status={autosave.status} onRetry={autosave.retry} />}
           </div>
         </header>
 
@@ -3788,6 +3792,7 @@ export function SettingsPage({
         </div></details>
 
         {activeSection === "system-window" && <WindowSettings />}
+        {activeSection === "shortcuts" && <ShortcutSettings />}
 
         <div className="form-grid settings-form" hidden={activeSection !== "system-interface"}>
           {/* Interface Language Card */}
@@ -4583,6 +4588,7 @@ const SETTINGS_NAVIGATION: Array<{
     items: [
       { section: "system-interface", label: "Интерфейс" },
       { section: "system-window", label: "Окно приложения" },
+      { section: "shortcuts", label: "Сочетания клавиш" },
       { section: "api-keys", label: "API-ключи" },
       { section: "token-usage", label: "Токены и расходы" },
       { section: "system-overview", label: "Обзор" },
