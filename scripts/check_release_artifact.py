@@ -20,6 +20,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterable
 
+try:
+    from .avatar_assets import raw_model_paths
+except ImportError:
+    from avatar_assets import raw_model_paths
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PRIVATE_FILE_NAMES = frozenset(
@@ -169,6 +174,9 @@ def build_manifest(
         raise ValueError(f"Release installer is empty: {artifact}")
 
     scanned_roots = list(staging_roots)
+    raw_models = raw_model_paths(scanned_roots)
+    if raw_models:
+        raise ValueError("Source avatar assets are present in the package staging tree:\n- " + "\n- ".join(raw_models))
     forbidden = private_paths(scanned_roots)
     if forbidden:
         formatted = "\n- ".join(forbidden)
@@ -204,6 +212,7 @@ def build_manifest(
             "forbidden_paths": [],
         },
         "model_delivery_scan": {"method": "pre-nsis-resource-tree", "download_only_models": ["teratts-v2"], "forbidden_paths": []},
+        "avatar_source_scan": {"method": "pre-nsis-resource-tree", "forbidden_paths": []},
     }
 
 
@@ -230,6 +239,9 @@ def main() -> int:
 
     if args.models_only:
         try:
+            raw_models = raw_model_paths([path.resolve() for path in args.staging])
+            if raw_models:
+                parser.error("Source avatar assets are present: " + ", ".join(raw_models))
             findings = download_only_model_paths([path.resolve() for path in args.staging])
             if findings:
                 parser.error("Download-only model resources are present: " + ", ".join(findings))

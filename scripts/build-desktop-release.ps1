@@ -3,6 +3,8 @@ param(
     [switch]$SkipDependencyInstall,
     [switch]$ReuseCore,
     [switch]$AppOnly,
+    [string]$AvatarPackage,
+    [string]$AvatarPackageSha256,
     [string]$ArtifactDirectory = "artifacts",
     [switch]$RequireCleanWorktree,
     [string]$SigningCertificateThumbprint,
@@ -19,6 +21,7 @@ $tauri = Join-Path $desktop "src-tauri"
 $output = Join-Path $root "build\core"
 $avatarResource = Join-Path $root "apps\avatar-unity\Builds\NeuroAsistAvatar"
 $avatarExecutable = Join-Path $avatarResource "NeuroAsistAvatar.exe"
+$avatarReceipt = $null
 $version = (Get-Content -Raw -LiteralPath (Join-Path $root "VERSION")).Trim()
 $artifactRoot = if ([IO.Path]::IsPathFullyQualified($ArtifactDirectory)) {
     $ArtifactDirectory
@@ -80,9 +83,21 @@ if ($RequireCleanWorktree) {
 if (-not (Test-Path -LiteralPath $bootstrapPython)) {
     throw "Bootstrap Python virtual environment not found at $bootstrapPython"
 }
-if (-not (Test-Path -LiteralPath $avatarExecutable)) {
-    throw "Release build requires the Unity avatar at $avatarExecutable. Build it with npm --prefix apps/desktop run build:avatar first."
+if ($AvatarPackage) {
+    if (-not $AvatarPackageSha256) { throw "-AvatarPackage requires the independently pinned -AvatarPackageSha256." }
+    $avatarResource = Join-Path $root ("build\avatar-input\" + [guid]::NewGuid().ToString("N"))
+    $avatarReceipt = "$avatarResource.json"
+    & $bootstrapPython (Join-Path $root "scripts\avatar_assets.py") install-player `
+        --archive $AvatarPackage --sha256 $AvatarPackageSha256 --output $avatarResource --receipt $avatarReceipt
+    Assert-LastExitCode "Verifying the private Unity Player package"
+    $avatarExecutable = Join-Path $avatarResource "NeuroAsistAvatar.exe"
 }
+elseif ($AvatarPackageSha256) { throw "-AvatarPackageSha256 requires -AvatarPackage." }
+if (-not (Test-Path -LiteralPath $avatarExecutable)) {
+    throw "Release build requires a verified Unity Player package (-AvatarPackage/-AvatarPackageSha256), or an existing local Player at $avatarExecutable. See Docs/avatar-distribution.md."
+}
+& $bootstrapPython (Join-Path $root "scripts\avatar_assets.py") check-player --player $avatarResource
+Assert-LastExitCode "Checking the Unity Player for source assets"
 
 & $bootstrapPython (Join-Path $root "scripts\check_docs.py")
 Assert-LastExitCode "Validating release metadata and documentation"
@@ -128,6 +143,7 @@ $legalBuildId = [guid]::NewGuid().ToString("N")
 $legalResource = Join-Path $root "build\legal-resources\$legalBuildId"
 New-Item -ItemType Directory -Force -Path $legalResource | Out-Null
 Copy-Item -LiteralPath (Join-Path $root "LICENSE"), (Join-Path $root "PRIVACY.md"), (Join-Path $root "THIRD_PARTY_ASSETS.md") -Destination $legalResource
+if ($avatarReceipt) { Copy-Item -LiteralPath $avatarReceipt -Destination (Join-Path $legalResource "avatar-component.json") }
 & $python (Join-Path $root "scripts\create_dependency_inventory.py") --output (Join-Path $legalResource "licenses")
 Assert-LastExitCode "Collecting dependency notices"
 $ffmpegCheckArguments = @("--output", (Join-Path $legalResource "licenses\ffmpeg\build-profile.json"))
@@ -186,6 +202,8 @@ Assert-LastExitCode "Checking download-only model delivery"
 # not unpack a 442 MB onefile executable on every cold start.
 $overridePath = Join-Path $root "build\tauri-release.config.json"
 $override = @{ bundle = @{ resources = @{ "../../../build/core/neuroasist-core" = "core" } } }
+$avatarConfigPath = [IO.Path]::GetFullPath($avatarResource).Replace('\', '/')
+$override.bundle.resources[$avatarConfigPath] = "avatar"
 $override.bundle.resources["../../../build/legal-resources/$legalBuildId"] = "legal"
 $override | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 -LiteralPath $overridePath
 $buildArguments = @("--config", $overridePath)

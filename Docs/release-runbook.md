@@ -23,11 +23,15 @@ FFmpeg; NSIS требует соответствия выбранному про
 ## Каталог приложения без установщика
 
 ```powershell
-$env:NEUROASIST_UNITY_EDITOR = "C:\Program Files\Unity\Hub\Editor\2022.3.62f3\Editor\Unity.exe"
-.\scripts\build-preinstaller-app.ps1 -ArtifactDirectory artifacts\preinstaller
+.\scripts\build-preinstaller-app.ps1 -RequireCleanWorktree `
+  -AvatarPackage D:\delivery\iris-avatar-windows.zip `
+  -AvatarPackageSha256 '<SHA-256 из доверенной закрытой сборки>' `
+  -ArtifactDirectory artifacts\preinstaller
 ```
 
-Команда готовит CPU Python onedir, Unity и Tauri `--no-bundle`. Дополнительные
+Unity собирается отдельно в закрытом репозитории по
+[схеме поставки аватара](avatar-distribution.md). Команда проверяет готовый Player
+и готовит CPU Python onedir и Tauri `--no-bundle`. Дополнительные
 ресурсы передаются отдельным override; исходный Tauri-конфиг не переписывается.
 Каталог `iris-1.0.0-app` содержит приложение, ядро, аватар, notices и SHA-256.
 Снимок исходников до и после сборки должен совпадать. Незакоммиченные изменения
@@ -57,17 +61,19 @@ $env:NEUROASIST_UNITY_EDITOR = "C:\Program Files\Unity\Hub\Editor\2022.3.62f3\Ed
 | `Documentation` | PR и `main` | Версии, параметры окружения, локальные ссылки и изображения |
 | `CI` | PR и `main` | Backend pytest, Vitest/build и Windows Rust check |
 | `Synthetic lifecycle soak` | Еженедельно и вручную | Одночасовой отчёт состояний, отмены и роста памяти |
-| `Build Windows release candidate` | Тег `v*` или вручную | NSIS, проверка упакованного ядра, SHA-256-манифест и статус подписи |
+| `Public avatar source boundary` | PR, `main`, `v0.9.1` | Запрет исходных моделей и частных анимаций в публичном дереве |
+| `Build Windows application candidate` | Вручную с private run ID и SHA-256 | Каталог приложения AppOnly с проверенным Unity Player; без NSIS и публикации |
 
 Конфигурации находятся в [`.github/workflows`](../.github/workflows/).
 Синтетический прогон не использует микрофон, загрузку моделей или Unity.
 
 ## Подготовить Windows-runner
 
-Workflow кандидата работает на защищённом self-hosted runner с метками
-`Windows` и `iris-release`. Нужны Python, Node.js, Rust и закреплённый Unity
-Editor. `NEUROASIST_UNITY_EDITOR` указывает на его исполняемый файл.
-Собранный аватар не хранится в Git.
+Публичный workflow приложения работает на `windows-latest`. Только закрытая
+Unity-сборка использует self-hosted runner `Windows`, `iris-avatar-private`
+с лицензированным Unity Editor. `NEUROASIST_UNITY_EDITOR` указывает на его EXE.
+Публичной сборке нужен `IRIS_AVATAR_ARTIFACT_READ_TOKEN` с разрешением
+Actions read только для `Gogowski/NeuroAsist-avatar-private`.
 
 В GitHub используется environment `release-candidate` с принятой в проекте
 политикой проверки. Для подписи сертификат устанавливается в хранилище Windows
@@ -75,8 +81,8 @@ runner; его отпечаток задаётся секретом `WINDOWS_CER
 Необязательная переменная `WINDOWS_TIMESTAMP_URL` выбирает сервер отметки
 времени. По умолчанию сценарий использует сервис DigiCert.
 
-Workflow не создаёт GitHub Release и не объявляет сборку стабильной.
-Для запуска по тегу имя должно точно равняться `v` + корневой `VERSION`.
+Workflow не создаёт установщик или GitHub Release и не объявляет сборку стабильной.
+Автоматический запуск сборки установщика по тегу на этом этапе отключён.
 
 ## Собрать кандидата
 

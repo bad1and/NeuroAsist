@@ -7,6 +7,8 @@ namespace NeuroAsist.AvatarEditor
     {
         public static void BuildWindows()
         {
+            if (!File.Exists("Assets/IRIS.vrm"))
+                throw new System.InvalidOperationException("Private avatar inputs are missing. Import them with scripts/avatar_assets.py import-private before building Unity.");
             // The avatar is a ScriptedImporter asset.  When this project is first
             // cloned, Unity may parse the scene before compiling that importer and
             // leave IRIS as a "Missing Prefab" in Library.  Reimport it before

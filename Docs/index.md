@@ -51,6 +51,7 @@ Iris — голосовой AI-персонаж для Windows. Здесь оп�
 - [Запуск, сборка и диагностика](operations.md)
 - [Python-зависимости](dependencies.md) и [правила версий](versioning.md)
 - [Условия публикации](release-checklist.md) и [порядок выпуска](release-runbook.md)
+- [Раздельная сборка аватара](avatar-distribution.md) — закрытый Unity, публичное приложение и очистка истории
 - [История изменений](../CHANGELOG.md)
 - [Безопасность](../SECURITY.md), [конфиденциальность](../PRIVACY.md) и [сторонние материалы](../THIRD_PARTY_ASSETS.md)
 

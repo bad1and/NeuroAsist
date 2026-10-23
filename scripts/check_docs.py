@@ -30,7 +30,6 @@ ROOT_MARKDOWN = (
     "design.md",
     "AGENTS.md",
     "GEMINI.md",
-    "rules.md",
     "assets/README.md",
     "requirements/README.md",
     "apps/desktop/README.md",
@@ -177,6 +176,10 @@ def check_environment_reference(errors: list[str]) -> None:
 
 def maintained_markdown() -> list[Path]:
     files = {ROOT / item for item in ROOT_MARKDOWN}
+    # rules.md is a local, gitignored agent guide. Clean public checkouts and
+    # the private Unity builder must not require an unpublished local file.
+    if (ROOT / "rules.md").is_file():
+        files.add(ROOT / "rules.md")
     files.update((ROOT / "Docs").rglob("*.md"))
     return sorted(files)
 

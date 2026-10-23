@@ -12,7 +12,13 @@ Its release metadata mirrors Iris `1.0.0`: product `Iris Avatar`, company
 `NeuroAsist`, and application identifier `com.neuroasist.avatar`. The root
 documentation check prevents version drift.
 
-Build it from the repository root with Unity 2022.3.62f3 and the
+The public checkout excludes the VRM and restricted animation inputs. Official
+Unity builds run in `Gogowski/NeuroAsist-avatar-private` from a reviewed public
+commit. See the [split build guide](../../Docs/avatar-distribution.md) for private
+input import, Player packaging and public application assembly.
+
+With authorized private inputs imported into an isolated checkout, build it
+from the repository root with Unity 2022.3.62f3 and the
 Windows Build Support (Mono) module. The built executable is absent from a
 clean clone; the editor is required for the first build and later rebuilds,
 not for running the finished renderer. Close the editor and running avatar

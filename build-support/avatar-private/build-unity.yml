@@ -1,0 +1,67 @@
+# Copy this template into the PRIVATE repository's .github/workflows/.
+name: Build private Iris Unity Player
+on:
+  workflow_dispatch:
+    inputs:
+      public_commit:
+        description: Reviewed 40-character commit from bad1and/NeuroAsist
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: iris-private-unity
+  cancel-in-progress: false
+jobs:
+  unity:
+    if: github.event.repository.private == true && github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, Windows, iris-avatar-private]
+    timeout-minutes: 60
+    steps:
+      - name: Validate the reviewed source revision
+        shell: pwsh
+        env:
+          SOURCE_COMMIT: ${{ inputs.public_commit }}
+        run: |
+          if ($env:SOURCE_COMMIT -notmatch '^[0-9a-f]{40}$') { throw 'Supply an exact reviewed public commit.' }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: private-inputs
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: bad1and/NeuroAsist
+          ref: ${{ inputs.public_commit }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Check public sources and record their identity
+        shell: pwsh
+        run: |
+          python source/scripts/avatar_assets.py check-public --root source
+          if ($LASTEXITCODE -ne 0) { throw 'Private inputs are tracked in public sources.' }
+          python source/scripts/avatar_assets.py record-source --root source --output "$env:RUNNER_TEMP/iris-avatar-source.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot record source identity.' }
+      - name: Import private assets and build Unity
+        shell: pwsh
+        run: |
+          python source/scripts/avatar_assets.py import-private --root source --private private-inputs
+          if ($LASTEXITCODE -ne 0) { throw 'Private input verification failed.' }
+          & ./source/apps/avatar-unity/scripts/build-windows.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Unity build failed.' }
+      - name: Package only the compiled Player
+        shell: pwsh
+        run: |
+          python source/scripts/avatar_assets.py package-player --root source `
+            --player source/apps/avatar-unity/Builds/NeuroAsistAvatar `
+            --source-record "$env:RUNNER_TEMP/iris-avatar-source.json" `
+            --archive "$env:RUNNER_TEMP/iris-avatar-delivery/iris-avatar-windows.zip"
+          if ($LASTEXITCODE -ne 0) { throw 'Player verification failed.' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: iris-avatar-windows
+          path: ${{ runner.temp }}/iris-avatar-delivery/iris-avatar-windows.zip
+          if-no-files-found: error
+          retention-days: 30

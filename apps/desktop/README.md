@@ -39,7 +39,12 @@ Closing the main window starts graceful shutdown and exits the application;
 minimizing it keeps the app running. The tray Quit action also stops the
 managed core and avatar.
 
-Build the Unity renderer first with `npm run build:avatar --prefix apps/desktop`. In development the shell automatically discovers `apps/avatar-unity/Builds/NeuroAsistAvatar/NeuroAsistAvatar.exe`; production bundles include that directory as an `avatar` resource. `NEUROASIST_AVATAR_EXECUTABLE` remains an override for a custom renderer.
+Official Unity builds use authorized inputs in the private avatar repository.
+The [split build guide](../../Docs/avatar-distribution.md) describes the verified
+Player archive and application assembly. In development the shell automatically
+discovers `apps/avatar-unity/Builds/NeuroAsistAvatar/NeuroAsistAvatar.exe`;
+the release build script maps the verified Player to the `avatar` resource.
+`NEUROASIST_AVATAR_EXECUTABLE` remains an override for a custom renderer.
 
 The shell gives Unity `NEUROASIST_BACKEND_URL` and `NEUROASIST_BACKEND_TOKEN`, enabling it to connect to the randomly selected, authenticated backend port. The tray **Show / hide avatar** action controls the active avatar presentation without restarting the renderer. In **Separate overlay** mode, hold `Ctrl+Alt` to temporarily make the click-through overlay interactive for drag/repositioning; `Ctrl+Alt+A` shows or hides it.
 

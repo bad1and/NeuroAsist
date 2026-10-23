@@ -26,8 +26,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": {
-      "../../avatar-unity/Builds/NeuroAsistAvatar": "avatar"
-    }
+    "resources": {}
   }
 }

@@ -79,3 +79,12 @@ def test_release_scan_keeps_supported_silero_vad(tmp_path: Path) -> None:
     (staging / "_internal" / "silero_vad-6.2.1.dist-info").mkdir()
 
     assert retired_dependency_paths([staging]) == []
+
+
+@pytest.mark.parametrize("name,data", [("IRIS.vrm", b"model"), ("renamed.bin", b"glTF private avatar")])
+def test_release_rejects_raw_avatar_even_outside_player(tmp_path: Path, name: str, data: bytes) -> None:
+    staging = tmp_path / "core"
+    staging.mkdir()
+    (staging / name).write_bytes(data)
+    with pytest.raises(ValueError, match="Source avatar assets"):
+        build_manifest(artifact=_installer(tmp_path), version="1.0.0", staging_roots=[staging], signing_status="unsigned")

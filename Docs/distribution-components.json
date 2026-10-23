@@ -76,12 +76,17 @@
     {
       "id": "iris-vrm",
       "component": "Flow 2.1 / IRIS.vrm",
-      "status": "owner_confirmed_scope_pending",
-      "delivery": "Unity player; source VRM reviewed separately",
+      "status": "split_build_foundation_history_transition_pending",
+      "delivery": "Private Unity build from pinned public code; public application build receives a hash-pinned compiled Player. History cleanup is prepared in an isolated mirror; remote transition is tracked separately.",
       "license": "Custom Kado terms and separate owner-confirmed permission",
       "source": "https://note.com/masakikado/n/nac5949dd52a6",
-      "evidence": "Owner confirmed permission on 2026-10-12 and again on 2026-10-20. Permission text and binary/source scope are not stored in this repository.",
-      "required": "Record scope/reference of existing permission in private release evidence; retain Kado credit.",
+      "evidence": "Owner confirmed permission on 2026-10-12 and 2026-10-20; on 2026-10-23 clarified that the author objects only to source VRM redistribution. Correspondence was not inspected. Live GitHub v0.9 exposes IRIS.vrm; v0.8 also contains a web copy. Local Player scan found no loose source models or exact copy of the current VRM among 151 files; Unity extraction and installed NSIS were not tested. See Docs/avatar-distribution.md.",
+      "required": "Implement source exclusion, local import and a build without the avatar; prepare isolated history cleanup and verify the installed package; retain Kado credit and the scope/reference of existing permission in private release evidence.",
+      "publication_exclusions": [
+        "apps/avatar-unity/Assets/IRIS.vrm",
+        "apps/web/public/avatar/IRIS.vrm",
+        "Other standalone source or derived avatar assets and renamed/archive copies"
+      ],
       "source_files": {
         "apps/avatar-unity/Assets/IRIS.vrm": "c80c488e4836d41f1b54b601fcebd943b9a5a6107428b9027e10f006cb1f5f78"
       }

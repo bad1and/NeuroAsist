@@ -6,6 +6,10 @@ $ErrorActionPreference = "Stop"
 $project = Split-Path -Parent $PSScriptRoot
 $logFile = Join-Path $project "Builds\avatar-build.log"
 $root = (Resolve-Path (Join-Path $project "..\..")).Path
+if (-not (Test-Path -LiteralPath (Join-Path $project "Assets\IRIS.vrm"))) {
+    throw "Private avatar inputs are missing. Run python scripts/avatar_assets.py import-private --private <private-repository> in an isolated checkout. See Docs/avatar-distribution.md."
+}
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $logFile) | Out-Null
 $expectedVersion = (Get-Content -Raw -LiteralPath (Join-Path $root "VERSION")).Trim()
 $playerSettings = Get-Content -Raw -LiteralPath (Join-Path $project "ProjectSettings\ProjectSettings.asset")
 if ($playerSettings -notmatch "(?m)^\s*bundleVersion:\s*$([regex]::Escape($expectedVersion))\s*$") {

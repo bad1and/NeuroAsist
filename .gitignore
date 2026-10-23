@@ -246,3 +246,16 @@ output/
 
 # Local source materials; production brand assets live in apps/web/public/brand.
 /Для мусора (не удалять)/
+
+# Private avatar inputs are imported only on the trusted Unity build machine.
+# Keep the UniVRM package directories and IRIS.vrm.meta (stable scene GUID).
+/apps/avatar-unity/Assets/*.vrm
+/apps/avatar-unity/Assets/**/*.vrm
+/apps/avatar-unity/Assets/*.glb
+/apps/avatar-unity/Assets/*.gltf
+/apps/avatar-unity/Assets/NeuroAsistAvatar/Animations/
+/apps/avatar-unity/Assets/NeuroAsistAvatar/Animations.meta
+/apps/avatar-unity/Assets/NeuroAsistAvatar/Motion/Generated/
+/apps/avatar-unity/Assets/NeuroAsistAvatar/Motion/Generated.meta
+/apps/web/public/avatar/*.vrm
+/apps/web/public/avatar/animations/

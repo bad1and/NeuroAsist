@@ -7,6 +7,7 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from check_release_artifact import ROOT, private_paths, retired_dependency_paths, download_only_model_paths, sha256
+from avatar_assets import raw_model_paths, player_findings
 
 
 def source_snapshot() -> dict:
@@ -20,6 +21,9 @@ def manifest(directory: Path, source_record: Path | None = None) -> dict:
     for path in expected:
         if not (directory / path).is_file():
             raise ValueError(f"Missing application resource: {path}")
+    avatar_findings = raw_model_paths([directory]) + player_findings(directory / "avatar")
+    if avatar_findings:
+        raise ValueError("Source avatar assets or unexpected Player files: " + ", ".join(avatar_findings))
     findings = private_paths([directory / "core", directory / "avatar"]) + retired_dependency_paths([directory / "core"])
     if findings:
         raise ValueError("Unexpected runtime data: " + ", ".join(findings))

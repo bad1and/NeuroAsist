@@ -1,9 +1,16 @@
-name: Build Windows release candidate
+name: Build Windows application candidate
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      avatar_run_id:
+        description: Successful run ID in Gogowski/NeuroAsist-avatar-private
+        required: true
+        type: string
+      avatar_sha256:
+        description: Independently reviewed SHA-256 of iris-avatar-windows.zip
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -14,57 +21,62 @@ concurrency:
 
 jobs:
   build:
-    # This runner intentionally owns the licensed Unity editor and (optionally)
-    # the release signing certificate.  The avatar build is not stored in git.
-    runs-on: [self-hosted, Windows, iris-release]
+    # Public runner receives only the compiled, hash-pinned Unity Player.
+    # Foundation stage produces an application directory, not an installer.
+    runs-on: windows-latest
     environment:
       name: release-candidate
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version-file: .python-version
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .nvmrc
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Verify tag and release metadata
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - name: Verify source boundary, metadata and artifact access
         shell: pwsh
+        env:
+          AVATAR_RUN_ID: ${{ inputs.avatar_run_id }}
+          AVATAR_SHA256: ${{ inputs.avatar_sha256 }}
+          AVATAR_ACCESS: ${{ secrets.IRIS_AVATAR_ARTIFACT_READ_TOKEN }}
         run: |
-          $version = (Get-Content -Raw VERSION).Trim()
-          if ("${{ github.ref_type }}" -eq "tag" -and "${{ github.ref_name }}" -ne "v$version") {
-            throw "Tag ${{ github.ref_name }} does not match VERSION $version."
-          }
+          if ($env:AVATAR_RUN_ID -notmatch '^[0-9]+$' -or $env:AVATAR_SHA256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'Invalid artifact run ID or SHA-256.' }
+          if (-not $env:AVATAR_ACCESS) { throw 'Configure IRIS_AVATAR_ARTIFACT_READ_TOKEN: private repository Actions read only.' }
+          python scripts/avatar_assets.py check-public
+          if ($LASTEXITCODE -ne 0) { throw 'Private inputs are tracked in public sources.' }
           python scripts/check_docs.py
+          if ($LASTEXITCODE -ne 0) { throw 'Documentation checks failed.' }
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          repository: Gogowski/NeuroAsist-avatar-private
+          run-id: ${{ inputs.avatar_run_id }}
+          name: iris-avatar-windows
+          github-token: ${{ secrets.IRIS_AVATAR_ARTIFACT_READ_TOKEN }}
+          path: build/private-avatar-delivery
       - name: Create isolated build environment
         shell: pwsh
         run: |
           python -m venv .venv
           .\.venv\Scripts\python.exe -m pip install --upgrade pip
-      - name: Build Unity avatar resource
-        shell: pwsh
-        run: |
-          npm ci --prefix apps/desktop
-          npm --prefix apps/desktop run build:avatar
-      - name: Build, smoke, sign and attest candidate
+      - name: Build application without installer
         shell: pwsh
         env:
-          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
-          WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
+          AVATAR_SHA256: ${{ inputs.avatar_sha256 }}
         run: |
-          $arguments = @("-RequireCleanWorktree", "-ArtifactDirectory", "artifacts")
-          if ($env:WINDOWS_CERTIFICATE_THUMBPRINT) {
-            $arguments += @("-SigningCertificateThumbprint", $env:WINDOWS_CERTIFICATE_THUMBPRINT)
-            if ($env:WINDOWS_TIMESTAMP_URL) { $arguments += @("-TimestampUrl", $env:WINDOWS_TIMESTAMP_URL) }
-          }
-          & .\scripts\build-desktop-release.ps1 @arguments
+          & ./scripts/build-preinstaller-app.ps1 -RequireCleanWorktree `
+            -AvatarPackage "$env:GITHUB_WORKSPACE/build/private-avatar-delivery/iris-avatar-windows.zip" `
+            -AvatarPackageSha256 $env:AVATAR_SHA256 -ArtifactDirectory artifacts
+          if ($LASTEXITCODE -ne 0) { throw 'Application build failed.' }
       - name: Upload release candidate
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: iris-${{ github.ref_name }}-windows-release-candidate
+          name: iris-${{ github.ref_name }}-windows-application
           path: artifacts/
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 30
