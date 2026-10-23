@@ -3,6 +3,10 @@ name: Build Windows application candidate
 on:
   workflow_dispatch:
     inputs:
+      public_commit:
+        description: Reviewed 40-character application source commit
+        required: true
+        type: string
       avatar_run_id:
         description: Successful run ID in Gogowski/NeuroAsist-avatar-private
         required: true
@@ -28,8 +32,15 @@ jobs:
       name: release-candidate
     timeout-minutes: 180
     steps:
+      - name: Validate the application source revision
+        shell: pwsh
+        env:
+          SOURCE_COMMIT: ${{ inputs.public_commit }}
+        run: |
+          if ($env:SOURCE_COMMIT -notmatch '^[0-9a-f]{40}$') { throw 'Supply an exact reviewed public commit.' }
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ inputs.public_commit }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5

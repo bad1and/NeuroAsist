@@ -88,3 +88,13 @@ def test_release_rejects_raw_avatar_even_outside_player(tmp_path: Path, name: st
     (staging / name).write_bytes(data)
     with pytest.raises(ValueError, match="Source avatar assets"):
         build_manifest(artifact=_installer(tmp_path), version="1.0.0", staging_roots=[staging], signing_status="unsigned")
+
+
+def test_release_manifest_identifies_checked_out_code_instead_of_dispatch_branch(tmp_path: Path, monkeypatch) -> None:
+    from scripts import check_release_artifact
+    monkeypatch.setenv("GITHUB_SHA", "dispatch-branch")
+    monkeypatch.setattr(check_release_artifact, "git_revision", lambda: "reviewed-source")
+    staging = tmp_path / "core"
+    staging.mkdir()
+    result = build_manifest(artifact=_installer(tmp_path), version="1.0.0", staging_roots=[staging], signing_status="unsigned")
+    assert result["commit"] == "reviewed-source"

@@ -193,7 +193,7 @@ def build_manifest(
         "schema_version": 1,
         "product": "Iris",
         "version": version,
-        "commit": os.getenv("GITHUB_SHA") or git_revision(),
+        "commit": git_revision() or os.getenv("GITHUB_SHA"),
         "created_at_utc": datetime.now(UTC).isoformat(),
         "installer": {
             "filename": artifact.name,
