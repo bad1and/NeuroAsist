@@ -106,6 +106,20 @@ def test_player_roundtrip_and_archive_hash_binding(tmp_path):
         assets.install_player(archive, assets.sha256(archive), destination, root)
 
 
+def test_burst_build_diagnostics_are_excluded_from_delivery(tmp_path):
+    root = repo(tmp_path / "source")
+    built = player(tmp_path / "player")
+    debug = built / "Iris Avatar_BurstDebugInformation_DoNotShip"
+    debug.mkdir()
+    (debug / "private-build-paths.txt").write_text("diagnostics")
+    archive = tmp_path / "avatar.zip"
+    assets.package_player(built, archive, assets.source_record(root), "1.0.0")
+    with zipfile.ZipFile(archive) as bundle:
+        assert not any("donotship" in name.lower() for name in bundle.namelist())
+    assets.install_player(archive, assets.sha256(archive), tmp_path / "installed", root)
+    assert assets.player_findings(tmp_path / "installed") == []
+
+
 def test_player_rejects_stale_renderer_sources(tmp_path):
     root, archive = package(tmp_path)
     (root / "apps/avatar-unity/Assets/Code.cs").write_text("different source")

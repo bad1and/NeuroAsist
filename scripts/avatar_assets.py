@@ -147,12 +147,14 @@ def import_private(root: Path, private: Path) -> None:
         shutil.copyfile(private / "assets" / name, target)
 
 
-def player_findings(root: Path) -> list[str]:
+def player_findings(root: Path, *, allow_build_debug: bool = False) -> list[str]:
     if not root.is_dir() or is_link(root):
         raise ValueError(f"Player directory does not exist or is a link: {root}")
     findings = []
     for path in root.rglob("*"):
         name = path.relative_to(root).as_posix()
+        if allow_build_debug and "donotship" in name.split("/")[0].lower():
+            continue
         if is_link(path) or any(part.lower() in {"library", "temp", "obj", ".git"} or "donotship" in part.lower() for part in path.relative_to(root).parts):
             findings.append(name)
         elif path.is_file() and path.name != ".gitkeep":
@@ -182,7 +184,10 @@ def raw_model_paths(roots: list[Path]) -> list[str]:
 
 
 def package_player(player: Path, archive: Path, record: dict, version: str) -> dict:
-    findings = player_findings(player)
+    # Unity emits a separate Burst diagnostics tree next to the Player. It is
+    # a build output, not a deliverable; omit it rather than shipping or deleting
+    # it. Checks on the extracted/staged Player stay strict.
+    findings = player_findings(player, allow_build_debug=True)
     if findings:
         raise ValueError("Source assets or unexpected files in Player: " + ", ".join(findings))
     for name in ("NeuroAsistAvatar.exe", "UnityPlayer.dll"):
@@ -191,7 +196,8 @@ def package_player(player: Path, archive: Path, record: dict, version: str) -> d
     if not (player / "NeuroAsistAvatar_Data").is_dir():
         raise ValueError("Missing NeuroAsistAvatar_Data")
     files = {p.relative_to(player).as_posix(): {"bytes": p.stat().st_size, "sha256": sha256(p)}
-             for p in sorted(player.rglob("*")) if p.is_file() and p.name != ".gitkeep"}
+             for p in sorted(player.rglob("*")) if p.is_file() and p.name != ".gitkeep"
+             and "donotship" not in p.relative_to(player).parts[0].lower()}
     manifest = {"schema_version": 1, "component": "iris-avatar-windows", "version": version,
                 "public_commit": record["public_commit"], "renderer_source_sha256": record["renderer_source_sha256"],
                 "files": files}
