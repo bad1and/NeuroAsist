@@ -88,7 +88,14 @@ def public_findings(root: Path) -> list[str]:
 def source_record(root: Path) -> dict:
     names = [p for p in tracked(root) if not private_source(p) and
              (p.startswith("apps/avatar-unity/") or p.startswith("apps/protocol/") or p in {"VERSION", "scripts/avatar_assets.py"})]
-    files = {name: sha256(root / name) for name in sorted(names) if (root / name).is_file()}
+    def source_hash(path: Path) -> str:
+        data = path.read_bytes()
+        # Git normalizes ordinary text. Different Windows/Linux autocrlf
+        # settings must not invalidate an otherwise identical reviewed source.
+        if b"\0" not in data:
+            data = data.replace(b"\r\n", b"\n")
+        return hashlib.sha256(data).hexdigest()
+    files = {name: source_hash(root / name) for name in sorted(names) if (root / name).is_file()}
     return {"public_commit": git(root, "rev-parse", "HEAD").decode().strip(),
             "renderer_source_sha256": hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest(),
             "source_files": files}

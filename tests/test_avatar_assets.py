@@ -113,6 +113,15 @@ def test_player_rejects_stale_renderer_sources(tmp_path):
         assets.install_player(archive, assets.sha256(archive), tmp_path / "installed", root)
 
 
+def test_source_digest_ignores_checkout_line_endings(tmp_path):
+    root = repo(tmp_path / "source")
+    code = root / "apps/avatar-unity/Assets/Code.cs"
+    code.write_bytes(b"public class Avatar {}\n")
+    before = assets.source_record(root)["renderer_source_sha256"]
+    code.write_bytes(b"public class Avatar {}\r\n")
+    assert assets.source_record(root)["renderer_source_sha256"] == before
+
+
 @pytest.mark.parametrize("kind", ["unexpected", "tampered", "traversal", "case-collision"])
 def test_player_rejects_invalid_inventory_without_leaving_destination(tmp_path, kind):
     root, archive = package(tmp_path)
