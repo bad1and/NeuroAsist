@@ -142,6 +142,7 @@ def test_generate_disables_thinking_caps_output_and_collects_usage(monkeypatch) 
         ("memory", "llm_memory_max_tokens", 701, "disabled"),
         ("reflection", "llm_reflection_max_tokens", 211, "disabled"),
         ("adjudication", "llm_adjudication_max_tokens", 233, "disabled"),
+        ("chat_task", "llm_chat_task_max_tokens", 1_024, "enabled"),
         ("coding", "llm_coding_max_tokens", 4_321, "enabled"),
     ],
 )

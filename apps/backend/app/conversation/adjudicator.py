@@ -13,6 +13,7 @@ from apps.backend.app.conversation.schemas import (
 )
 from apps.backend.app.llm.base import ChatMessage, LLMProvider
 from apps.backend.app.schemas.character import DialogueStyleCue
+from apps.backend.app.conversation.feedback import user_feedback
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ relevant_opening, emotional_event, cooldown, speech_budget, echo, low_confidence
 Оценивай намерение, адресат, синтаксис, предыдущий ход и отношения — не наличие слова.
 - Дружеский мат, грубоватое приветствие («Здорово, заебал»), самоирония, цитата и ругань на ситуацию/код → neutral, teasing или shared_success. Мат сам по себе не меняет настроение.
 - Критика без намеренного унижения → disagreement или user_frustration, но не insult.
+- «Мой любимый трек», «мне нравится» — сообщение о вкусе, не запрос прожарки; «мне неприятно», «я обиделся» — реакция пользователя, не радость Iris. Не усиливай teasing из этих слов. Iris вправе резко не согласиться; взаимная игра определяется контекстом, не матом.
 - Только намеренное унижение Iris, угроза или повторное давление после обозначенной границы → insult/rejection с hurt/anger и снижением отношений.
 - Похвала, восхищение («ты лучшая», «обожаю тебя», «спасибо большое, выручила») → event_kind="praise", intensity 0.5-0.75, valence 0.5..0.7, emotion_impulses: {"joy": 0.6, "interest": 0.3}, relationship_impulses: {"warmth": 0.05, "trust": 0.03}.
 - Извинения и попытки помириться («прости», «извини, погорячился», «мир?») → event_kind="apology", intensity 0.55-0.75, valence 0.4..0.6, emotion_impulses: {"joy": 0.3}, relationship_impulses: {"tension": -0.06, "warmth": 0.04}.
@@ -113,9 +115,18 @@ class StructuredConversationAdjudicator:
         ]
         try:
             result = await self._call(messages, self._first_timeout)
+            appraisal = result.appraisal
+            feedback = user_feedback(transcript)
+            if feedback and appraisal.event_kind in {"teasing", "shared_success"}:
+                # Keep Iris's existing mood and permission to disagree. This
+                # input simply is not evidence of another playful success.
+                appraisal = appraisal.model_copy(update={
+                    "event_kind": "neutral" if feedback == "preference" else "user_frustration",
+                    "emotion_impulses": {}, "relationship_impulses": {}, "valence": 0.0, "arousal": 0.0,
+                })
             return AdjudicationResult(
                 result.decision,
-                self._with_cause(result.appraisal, cause_message_id),
+                self._with_cause(appraisal, cause_message_id),
                 "llm",
                 result.dialogue_style,
             )

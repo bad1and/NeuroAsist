@@ -8,7 +8,7 @@ from difflib import SequenceMatcher
 from functools import lru_cache
 from dataclasses import dataclass, replace
 from collections.abc import AsyncIterator
-from contextlib import aclosing
+from contextlib import aclosing, nullcontext
 from uuid import uuid4
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -30,6 +30,7 @@ from apps.backend.app.agents.character.dialogue_style import (
 )
 from apps.backend.app.agents.character.turn_intent import analyze_dialogue_turn, search_process_question
 from apps.backend.app.agents.character.persona import get_persona
+from apps.backend.app.context.task_frame import frame_from_context
 from apps.backend.app.agents.character.protocol import classify_intent, deterministic_turn, legacy_result, parse_turn
 from apps.backend.app.agents.character.voice_input import (
     VoiceInputInterpretation,
@@ -132,6 +133,9 @@ class CharacterAgent:
         self._prompt_dialogue_style = "street"
         self._meme_context_chars = 0
         self._response_guard_failure: str | None = None
+        self._single_word_required = False
+        self._task_reasoning = False
+        self._guard_retry_used = False
         self._response_guard_reason: str | None = None
         self._grounding_users: tuple[str, ...] = ()
         self.last_turn: CharacterTurn | None = None
@@ -248,6 +252,9 @@ class CharacterAgent:
         self._reminder_user_text = user_text
         self._current_user_action_text = user_text
         self._response_guard_failure = None
+        self._single_word_required = False
+        self._task_reasoning = False
+        self._guard_retry_used = False
         self._response_guard_reason = None
         self.last_web_search_metadata = None
         self._body_session_id = session_id
@@ -340,6 +347,15 @@ class CharacterAgent:
                     self._turn_web_forbidden = True
         self.last_context_memories = list(built_context.diagnostics.get("selected_memory_records", [])) if built_context else []
         return interpreted, effective_text, built_context
+
+    @staticmethod
+    def _needs_body_context(user_text: str) -> bool:
+        # Tools stay available on every turn. Only the detailed pose report and
+        # duplicated action rules are conditional, not the capability itself.
+        return bool(re.search(
+            r"(?iu)\b(?:рук\w*|голов\w*|глаз\w*|аватар\w*|жест\w*|поз[аыуе]|телом|"
+            r"подмиг\w*|помаш\w*|кивни|выпрямись|похлопай|фейспалм)\b", user_text,
+        ))
 
     async def _resolve_situational_context(self, user_text: str, *, allow_search: bool = True) -> str | None:
         """Resolve Tier 1 micro-header and optional Tier 2 deep enrichment without double roundtrips."""
@@ -467,10 +483,11 @@ class CharacterAgent:
         self._search_budget = None
         self._search_entity = ""
         turn_intent = analyze_dialogue_turn(user_text, context)
+        task_frame = frame_from_context(context, user_text)
         if search_process_question(user_text):
             reader = getattr(self._history, "get_recent_search_operations", None)
             self._search_operations = await asyncio.to_thread(reader, session_id) if callable(reader) else []
-        self._turn_lookup_suppressed = turn_intent.suppress_lookup and not material_continuation(user_text)
+        self._turn_lookup_suppressed = task_frame.active or (turn_intent.suppress_lookup and not material_continuation(user_text))
         self._supplied_material_turn = supplied_material(user_text) or (material_continuation(user_text) and bool(users) and supplied_material(users[-1]))
         if self._supplied_material_turn:
             self._turn_lookup_suppressed = True
@@ -732,15 +749,17 @@ class CharacterAgent:
     async def _skill_model_generate(self, messages):
         tools = self._skills.tools() if not self._skill_called else []
         generate = getattr(self._llm_provider, "generate_with_tools", None)
-        return await generate(messages, tools=tools) if tools and callable(generate) else await self._llm_provider.generate(messages)
+        with llm_call_purpose("chat_task") if self._task_reasoning else nullcontext():
+            return await generate(messages, tools=tools) if tools and callable(generate) else await self._llm_provider.generate(messages)
 
     async def _skill_model_stream(self, messages):
         tools = self._skills.tools() if not self._skill_called else []
         stream = getattr(self._llm_provider, "stream_with_tools", None)
         iterator = stream(messages, tools=tools) if tools and callable(stream) else self._llm_provider.stream(messages)
-        async with aclosing(iterator):
-            async for delta in iterator:
-                yield delta
+        with llm_call_purpose("chat_task") if self._task_reasoning else nullcontext():
+            async with aclosing(iterator):
+                async for delta in iterator:
+                    yield delta
 
     @staticmethod
     def _live_skill_request(content):
@@ -1196,10 +1215,13 @@ class CharacterAgent:
             else await asyncio.to_thread(self._history.get_recent_messages, session_id, limit=self._history_limit)
         )
         self._grounding_users = tuple(m.content for m in context if m.role == "user")
+        turn_frame = frame_from_context(context, prompt_user_text)
+        self._single_word_required = turn_frame.single_word
+        self._task_reasoning = bool(turn_frame.relation and len(re.findall(r"\w+", prompt_user_text)) <= 2)
         planned_search = await self._plan_turn_search(session_id, prompt_user_text, context)
         situational_context = await self._resolve_turn_context(prompt_user_text, planned_search, live=False)
         model_routing_candidate = await self._should_request_model_delegation(effective_text)
-        required_anchors = self._required_response_anchors(prompt_user_text)
+        required_anchors = [] if frame_from_context(context, prompt_user_text).active else self._required_response_anchors(prompt_user_text)
         if built_context is not None:
             built_context.diagnostics["relevance_guard"] = {
                 "outcome": "not_required",
@@ -1233,7 +1255,7 @@ class CharacterAgent:
         ]
         _, dialogue_style = self._dialogue_style_context()
         self._prompt_dialogue_style = dialogue_style
-        if self._avatar_service is not None:
+        if self._avatar_service is not None and self._needs_body_context(prompt_user_text):
             messages.append(ChatMessage(role="system", content=AVATAR_CONTROL_RULES + "\nСостояние твоего аватара сейчас (телеметрия): " + json.dumps(await self._avatar_service.body_status(), ensure_ascii=False)))
         if self._document_prompt:
             messages.append(ChatMessage(role="system", content=self._document_prompt))
@@ -1260,7 +1282,7 @@ class CharacterAgent:
                 )
             )
         pacing = infer_dialogue_pacing(prompt_user_text, context)
-        meme_context = self._meme_context(prompt_user_text, context, pacing, dialogue_style, state_behavior)
+        meme_context = self._meme_context(prompt_user_text, context, pacing, dialogue_style, state_behavior) if pacing.mode != "constrained" else ""
         if meme_context:
             messages.append(ChatMessage(role="system", content=meme_context))
         messages.append(
@@ -1277,7 +1299,7 @@ class CharacterAgent:
             ChatMessage(role="system", content=dialogue_style_prompt(dialogue_style, turn_mode=pacing.mode,
                         user_text=prompt_user_text, humor_policy=getattr(state_behavior, "humor_policy", "normal")))
         )
-        variety = speech_variety_prompt(context, getattr(self._runtime_settings, "speech_discouraged_words", ()))
+        variety = speech_variety_prompt(context, getattr(self._runtime_settings, "speech_discouraged_words", ())) if pacing.mode != "constrained" else ""
         if variety or self._speech_feedback_prompt:
             messages.append(ChatMessage(role="system", content=variety + "\n" + self._speech_feedback_prompt))
         if skill_rule:
@@ -1515,6 +1537,20 @@ class CharacterAgent:
                 if built_context is not None:
                     built_context.diagnostics["relevance_guard"]["outcome"] = "fallback"
                 self._publish_relevance_guard("fallback", previous_assistant_id, duplicate, pending_followup, "retry_rejected")
+
+        if self._violates_word_contract(parsed.payload["reply"]):
+            repaired = None
+            if not retry_used and not needs_guard_retry:
+                try:
+                    with llm_call_purpose("chat_json_guard_retry"):
+                        response = await self._llm_provider.generate([
+                            *messages, ChatMessage(role="system", content="Исправь только формат: reply содержит ровно одно слово по текущей задаче. Сохрани Character Protocol и metadata."),
+                        ])
+                    repaired = self._parse_response_result(response.content, session_id=session_id, user_text=prompt_user_text,
+                                                           empty_fallback_reply=empty_reply, report_invalid=False)
+                except Exception:
+                    pass
+            parsed = repaired if repaired is not None and repaired.valid and not self._violates_word_contract(repaired.payload["reply"]) else self._word_contract_fallback()
 
         parsed.payload["reply"] = self._truthful_search_reply(parsed.payload["reply"])
         model_coding_reply = await self._accept_model_coding_delegation(
@@ -1999,6 +2035,9 @@ class CharacterAgent:
             else await asyncio.to_thread(self._history.get_recent_messages, session_id, limit=self._history_limit)
         )
         self._grounding_users = tuple(m.content for m in context if m.role == "user")
+        turn_frame = frame_from_context(context, prompt_user_text)
+        self._single_word_required = turn_frame.single_word
+        self._task_reasoning = bool(turn_frame.relation and len(re.findall(r"\w+", prompt_user_text)) <= 2)
         self._streaming_turn = True
         self._bridge_state = state_context or ""
         planned_search = await self._plan_turn_search(session_id, prompt_user_text, context)
@@ -2014,7 +2053,7 @@ class CharacterAgent:
                 else:
                     situational_context = result
         model_routing_candidate = await self._should_request_model_delegation(effective_text)
-        required_anchors = self._required_response_anchors(prompt_user_text)
+        required_anchors = [] if frame_from_context(context, prompt_user_text).active else self._required_response_anchors(prompt_user_text)
         if built_context is not None:
             built_context.diagnostics["relevance_guard"] = {
                 "outcome": "not_required",
@@ -2039,7 +2078,7 @@ class CharacterAgent:
         ]
         _, dialogue_style = self._dialogue_style_context()
         self._prompt_dialogue_style = dialogue_style
-        if self._avatar_service is not None:
+        if self._avatar_service is not None and self._needs_body_context(prompt_user_text):
             messages.append(ChatMessage(role="system", content=AVATAR_CONTROL_RULES + "\nСостояние твоего аватара сейчас (телеметрия): " + json.dumps(await self._avatar_service.body_status(), ensure_ascii=False)))
         if self._document_prompt:
             messages.append(ChatMessage(role="system", content=self._document_prompt))
@@ -2066,7 +2105,7 @@ class CharacterAgent:
                 )
             )
         pacing = infer_dialogue_pacing(prompt_user_text, context)
-        meme_context = self._meme_context(prompt_user_text, context, pacing, dialogue_style, state_behavior)
+        meme_context = self._meme_context(prompt_user_text, context, pacing, dialogue_style, state_behavior) if pacing.mode != "constrained" else ""
         if meme_context:
             messages.append(ChatMessage(role="system", content=meme_context))
         messages.append(
@@ -2081,7 +2120,7 @@ class CharacterAgent:
             ChatMessage(role="system", content=dialogue_style_prompt(dialogue_style, turn_mode=pacing.mode,
                         user_text=prompt_user_text, humor_policy=getattr(state_behavior, "humor_policy", "normal")))
         )
-        variety = speech_variety_prompt(context, getattr(self._runtime_settings, "speech_discouraged_words", ()))
+        variety = speech_variety_prompt(context, getattr(self._runtime_settings, "speech_discouraged_words", ())) if pacing.mode != "constrained" else ""
         if variety or self._speech_feedback_prompt:
             messages.append(ChatMessage(role="system", content=variety + "\n" + self._speech_feedback_prompt))
         if skill_rule:
@@ -2659,7 +2698,36 @@ class CharacterAgent:
     def _looks_like_structured_content(value: str) -> bool:
         return value.startswith(("{", "[", "```"))
 
-    async def _guarded_live_stream(
+    def _violates_word_contract(self, reply: str) -> bool:
+        if not getattr(self, "_single_word_required", False):
+            return False
+        visible = re.sub(r"\[\[.*?\]\]", "", reply, flags=re.S).strip()
+        return len(re.findall(r"\w+(?:[-’']\w+)*", visible)) != 1
+
+    def _word_contract_fallback(self) -> _ParseResult:
+        self._response_guard_failure = "response_format_retry_failed"
+        return _ParseResult({"reply": "Затрудняюсь.", "emotion": "neutral", "intent": "unknown"}, valid=False, reason="response_format_retry_failed")
+
+    async def _guarded_live_stream(self, messages, **options):
+        if not getattr(self, "_single_word_required", False):
+            async for delta in self._relevance_guarded_live_stream(messages, **options):
+                yield delta
+            return
+        # Hold only explicitly constrained answers; normal speech keeps its
+        # first-sentence latency. Never trim a sentence into a false synonym.
+        raw = "".join([part async for part in self._relevance_guarded_live_stream(messages, **options)])
+        control, _ = self._live_search_opening(raw)
+        if pending_skill(control) or not self._violates_word_contract(raw):
+            yield raw
+            return
+        if not self._guard_retry_used:
+            raw = await self._live_guard_retry(
+                messages, options.get("previous_assistant_reply", ""), options.get("user_text", ""),
+                False, [], format_only=True,
+            )
+        yield self._word_contract_fallback().payload["reply"] if self._violates_word_contract(raw) else raw
+
+    async def _relevance_guarded_live_stream(
         self, messages: list[ChatMessage], *, require_pending_response: bool = False,
         previous_assistant_reply: str = "", previous_assistant_id: str | None = None,
         user_text: str = "", required_anchors: list[str] | None = None,
@@ -2802,8 +2870,10 @@ class CharacterAgent:
         user_text: str, require_pending_response: bool, required_anchors: list[str],
         response_target_text: str | None = None,
         response_target_anchors: list[str] | None = None,
+        *, format_only: bool = False,
     ) -> str:
         """A retry is fully buffered so a second stale answer cannot reach TTS."""
+        self._guard_retry_used = True
         try:
             with llm_call_purpose("chat_live_guard_retry"):
                 chunks = [
@@ -2813,12 +2883,13 @@ class CharacterAgent:
                             role="system",
                             content=self._guard_retry_instruction(
                                 require_pending_response,
-                                True,
+                                not format_only,
                                 self._is_casual_status_check(user_text),
                                 required_anchors,
                                 response_target_text,
                                 response_target_anchors or [],
                                 live=True,
+                                single_word=self._single_word_required,
                             ),
                         ),
                     ])
@@ -2828,6 +2899,7 @@ class CharacterAgent:
         reply = "".join(chunks).strip()
         if (
             not reply
+            or self._violates_word_contract(reply)
             or self._has_unconfirmed_continuity_accusation(reply)
             or self._has_unconfirmed_assistant_content_attribution(reply, previous_assistant_reply, user_text)
             or (
@@ -2841,6 +2913,8 @@ class CharacterAgent:
             or self._stale_duplicate_assessment(reply, previous_assistant_reply, user_text)["stale"]
             or self._has_ungrounded_status_question(reply, user_text)
         ):
+            if self._single_word_required:
+                return self._word_contract_fallback().payload["reply"]
             if required_anchors:
                 return self._anchor_reply_fallback(required_anchors).payload["reply"]
             if require_pending_response:
@@ -3011,6 +3085,7 @@ class CharacterAgent:
         response_target_anchors: list[str] | None = None,
         *,
         live: bool = False,
+        single_word: bool = False,
     ) -> str:
         instruction = CharacterAgent._continuity_retry_instruction()
         if stale_duplicate:
@@ -3045,6 +3120,8 @@ class CharacterAgent:
                 " Обязательно явно отреагируй на последнюю содержательную часть всего блока "
                 f"и упомяни смысловые якоря: {', '.join(required_anchors)}."
             )
+        if single_word:
+            instruction += " Видимая реплика содержит ровно одно слово по текущей задаче; служебные теги и metadata сохраняются."
         return instruction
 
     @staticmethod

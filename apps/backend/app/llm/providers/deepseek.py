@@ -61,6 +61,7 @@ _PROFILE_SETTINGS: dict[str, tuple[str, int]] = {
     "chat_search_assess": ("llm_search_assess_max_tokens", 400),
     "chat_json": ("llm_chat_json_max_tokens", 900),
     "chat_live": ("llm_chat_live_max_tokens", 500),
+    "chat_task": ("llm_chat_task_max_tokens", 1_200),
     "memory": ("llm_memory_max_tokens", 1_600),
     "reflection": ("llm_reflection_max_tokens", 300),
     "adjudication": ("llm_adjudication_max_tokens", 350),
@@ -83,6 +84,11 @@ def _root_exception_detail(exc: BaseException) -> str:
             break
         current = nested
     message = str(current).strip()
+    # Protocol errors can include the complete Authorization header, including
+    # escaped credential bytes. Header contents must never enter diagnostics.
+    lowered = message.casefold()
+    if "authorization" in lowered or "bearer" in lowered or ("header" in lowered and "value" in lowered):
+        return type(current).__name__
     return f"{type(current).__name__}: {message}" if message else type(current).__name__
 
 
@@ -658,7 +664,7 @@ class DeepSeekProvider(LLMProvider):
         return _RequestProfile(
             purpose=purpose,
             max_tokens=max_tokens,
-            thinking="enabled" if purpose == "coding" else "disabled",
+            thinking="enabled" if purpose in {"coding", "chat_task"} else "disabled",
         )
 
     def _record_success(self, response: LLMResponse) -> None:

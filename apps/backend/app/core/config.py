@@ -70,10 +70,11 @@ class Settings(BaseSettings):
     deepseek_model: str = DEEPSEEK_FLASH_MODEL
     # Explicit output budgets for each LLM purpose. DeepSeek V4.1 supports very
     # large completions, so relying on the provider default makes a malformed
-    # or runaway response unnecessarily expensive. Non-coding thinking is
-    # disabled in the provider independently of these caps.
+    # or runaway response unnecessarily expensive. Ordinary chat has no extra
+    # reasoning; explicit lexical tasks use a small separate profile.
     llm_chat_json_max_tokens: int = Field(default=900, ge=64, le=16_384)
     llm_chat_live_max_tokens: int = Field(default=500, ge=64, le=16_384)
+    llm_chat_task_max_tokens: int = Field(default=1_200, ge=128, le=4_096)
     llm_search_plan_max_tokens: int = Field(default=256, ge=64, le=512)
     llm_search_assess_max_tokens: int = Field(default=400, ge=64, le=512)
     llm_memory_max_tokens: int = Field(default=1_600, ge=64, le=16_384)

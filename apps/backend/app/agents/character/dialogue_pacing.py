@@ -13,9 +13,11 @@ from dataclasses import dataclass
 from typing import Literal
 
 from apps.backend.app.agents.character.turn_intent import analyze_dialogue_turn, recent_reply_cue
+from apps.backend.app.context.task_frame import frame_from_context
+from apps.backend.app.conversation.feedback import feedback_prompt
 
 
-DialogueMode = Literal["micro", "conversational", "banter", "focused", "deep"]
+DialogueMode = Literal["micro", "conversational", "banter", "focused", "deep", "constrained"]
 
 
 _WORD_RE = re.compile(r"[^\W_]+(?:-[^\W_]+)?", re.UNICODE)
@@ -61,6 +63,16 @@ class DialoguePacing:
 
     def prompt_block(self, *, input_mode: str, recent_messages=(), user_text: str = "") -> str:
         recent_messages = list(recent_messages)
+        frame = frame_from_context(recent_messages, user_text)
+        if self.mode == "constrained" and frame.active:
+            return (
+                "Соблюдай формат текущей задачи."
+                if any(m.role == "system" and m.content.startswith("Текущая задача пользователя (до её завершения): ") for m in recent_messages)
+                else frame.prompt()
+            ) + (
+                " Это текстовая расшифровка голоса, не исходное аудио."
+                if input_mode == "voice" else ""
+            )
         rules = {
             "micro": (
                 "Дай одну естественную короткую реплику, обычно одно предложение и до 12 слов. "
@@ -91,8 +103,9 @@ class DialoguePacing:
             ),
         }[self.mode]
         voice_rule = (
-            " Это расшифровка речи: слова-паразиты и самопоправки задают естественный ритм, а не список тем, "
-            "на каждую из которых надо отдельно ответить."
+            " Это расшифровка речи: у тебя текст, не исходная мелодия или ритм аудио. "
+            "Самопоправки — не список тем: последняя поправка заменяет догадку. "
+            "Непонятную аббревиатуру не подменяй названием программы."
             if input_mode == "voice"
             else ""
         )
@@ -123,6 +136,7 @@ class DialoguePacing:
             f"{voice_rule}"
             f"{repair_rule}"
             f"{intent_rule}"
+            f"{feedback_prompt(user_text)}"
             f"{recent_reply_cue(recent_messages)}"
         )
 
@@ -132,6 +146,8 @@ def infer_dialogue_pacing(user_text: str, recent_messages=()) -> DialoguePacing:
 
     text = " ".join(user_text.strip().split())
     words = _WORD_RE.findall(text)
+    if frame_from_context(recent_messages, user_text).active:
+        return DialoguePacing("constrained")
     if text.casefold().strip(" ,.!?") in {"ирис", "айрис", "ириска", "люрис"}:
         return DialoguePacing("micro", turn_kind="address")
     if _DEEP_REQUEST_RE.search(text):
