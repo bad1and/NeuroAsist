@@ -171,6 +171,21 @@ describe("CustomSelect", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
   });
 
+  it("не отправляет короткое меню вверх, когда его реальная высота помещается снизу", () => {
+    const height = vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("custom-select-dropdown") ? 90 : 0;
+    });
+    try {
+      const { container } = render(<CustomSelect value="one"><option value="one">Первый</option><option value="two">Второй</option></CustomSelect>);
+      const trigger = screen.getByRole("button", { name: "Первый" });
+      vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue({
+        top: window.innerHeight - 160, bottom: window.innerHeight - 122, height: 38,
+      } as DOMRect);
+      fireEvent.click(trigger);
+      expect(container.querySelector(".custom-select-container")).toHaveAttribute("data-placement", "bottom");
+    } finally { height.mockRestore(); }
+  });
+
   it("закрывает меню, если открытое поле становится недоступным", () => {
     const { rerender } = render(<CustomSelect value="one"><option value="one">Первый</option></CustomSelect>);
     fireEvent.click(screen.getByRole("button", { name: "Первый" }));

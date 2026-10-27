@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useId, ReactNode, Childre
 import {
   IconInterfaceChevronDown as ChevronDown,
 } from "../CustomIcons";
-import { isTestEnvironment, prefersReducedMotion, runSafeAnimation } from "../animations/core";
+import { animate, isTestEnvironment, prefersReducedMotion, runSafeAnimation } from "../animations/core";
 import { ButtonMaterialLayers } from "./MaterialButton";
 import { materialStyle } from "./buttonMaterial";
 import { useMaterialFeedback } from "./useMaterialFeedback";
@@ -92,6 +92,8 @@ export function CustomSelect({
 }: CustomSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [placement, setPlacement] = useState<"bottom" | "top">("bottom");
+  const [popupPresent, setPopupPresent] = useState(false);
+  const [menuHeight, setMenuHeight] = useState(0);
   const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
   const instanceId = useId();
   const listboxId = `${instanceId}-listbox`;
@@ -100,34 +102,68 @@ export function CustomSelect({
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
+  const entered = useRef(false);
   const optionRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const options = extractOptions(children);
   const selectedOption = options.find((o) => o.value === String(value)) || options[0];
 
+  useLayoutEffect(() => { if (isOpen) setPopupPresent(true); }, [isOpen]);
+
   // The joined shell follows the real field size, including compact settings.
   useLayoutEffect(() => {
     const container = containerRef.current;
     const trigger = triggerRef.current;
-    if (!isOpen || !container || !trigger) return;
+    const dropdown = dropdownRef.current;
+    if (!isOpen || !popupPresent || !container || !trigger || !dropdown) return;
     const measure = () => {
       const computed = getComputedStyle(trigger);
       const rect = trigger.getBoundingClientRect();
       container.style.setProperty("--select-header-height", `${rect.height}px`);
       container.style.setProperty("--select-shell-radius", computed.borderTopLeftRadius || "var(--radius-control)");
-      const dropdownHeight = Math.min(dropdownRef.current?.scrollHeight || 240, 240);
+      const dropdownHeight = Math.min(dropdown.scrollHeight || options.length * 40 + 12, 240);
       const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - 8);
       const spaceAbove = Math.max(0, rect.top - 8);
       const opensAbove = spaceBelow < dropdownHeight && spaceAbove > spaceBelow;
       setPlacement(opensAbove ? "top" : "bottom");
-      container.style.setProperty("--select-menu-max-height", `${Math.max(38, Math.min(240, opensAbove ? spaceAbove : spaceBelow))}px`);
+      const maximum = Math.max(38, Math.min(240, opensAbove ? spaceAbove : spaceBelow));
+      container.style.setProperty("--select-menu-max-height", `${maximum}px`);
+      setMenuHeight(dropdown.getBoundingClientRect().height || Math.min(dropdownHeight, maximum));
     };
     measure();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     observer?.observe(trigger);
+    observer?.observe(dropdown);
     window.addEventListener("resize", measure);
     return () => { observer?.disconnect(); window.removeEventListener("resize", measure); };
-  }, [isOpen]);
+  }, [isOpen, popupPresent, options.length]);
+
+  // The opaque shell stays attached to the field. Only its list area expands;
+  // clipping contains rows throughout the motion, including an upward reveal.
+  useLayoutEffect(() => {
+    const popup = popupRef.current;
+    if (!popupPresent || !popup || !menuHeight) return;
+    let active = true;
+    if (!entered.current) {
+      popup.style.height = "0px";
+      entered.current = true;
+    }
+    const finish = () => {
+      if (!active) return;
+      popup.style.height = `${isOpen ? menuHeight : 0}px`;
+      if (!isOpen) { entered.current = false; setPopupPresent(false); }
+    };
+    if (isTestEnvironment() || prefersReducedMotion()) { finish(); return; }
+    const motion = animate(popup, {
+      height: isOpen ? menuHeight : 0,
+      duration: isOpen ? 220 : 150, ease: "outCubic", onComplete: finish,
+    });
+    const media = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    const preference = () => { motion.cancel(); finish(); };
+    media?.addEventListener("change", preference);
+    return () => { active = false; motion.cancel(); media?.removeEventListener("change", preference); };
+  }, [isOpen, popupPresent, menuHeight, placement]);
 
   useEffect(() => { if (disabled) setIsOpen(false); }, [disabled]);
 
@@ -143,14 +179,6 @@ export function CustomSelect({
     return () => { animation?.cancel(); };
   }, [isOpen]);
 
-  useEffect(() => {
-    if (!isOpen || !dropdownRef.current || isTestEnvironment()) return;
-    const animation = runSafeAnimation(dropdownRef.current, {
-      opacity: [0, 1], y: [placement === "bottom" ? -4 : 4, 0], duration: 180, ease: "outCubic",
-    });
-    return () => { animation?.cancel(); };
-  }, [isOpen, placement]);
-
   // Keep highlighted index synced on open
   useEffect(() => {
     if (isOpen) {
@@ -163,16 +191,21 @@ export function CustomSelect({
   useEffect(() => {
     if (isOpen && highlightedIndex >= 0 && optionRefs.current[highlightedIndex]) {
       const el = optionRefs.current[highlightedIndex];
-      if (typeof el?.scrollIntoView === "function") {
-        el.scrollIntoView({
-          block: "nearest",
-        });
+      if (el) {
+        // Keep keyboard navigation inside the list; never scroll the settings page.
+        const list = dropdownRef.current;
+        if (list && el) {
+          const top = el.offsetTop;
+          if (top < list.scrollTop) list.scrollTop = top;
+          else if (top + el.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = top + el.offsetHeight - list.clientHeight;
+        }
       }
     }
   }, [highlightedIndex, isOpen]);
 
   // Click outside to close
   useEffect(() => {
+    if (!isOpen) return;
     function handleClickOutside(event: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
         setIsOpen(false);
@@ -180,7 +213,7 @@ export function CustomSelect({
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  }, [isOpen]);
 
   const handleSelect = (optionValue: string) => {
     if (disabled) return;
@@ -243,7 +276,7 @@ export function CustomSelect({
 
   return (
     <div
-      className={`custom-select-container ${disabled ? "disabled" : ""} ${isOpen ? "open" : ""} ${className}`}
+      className={`custom-select-container ${disabled ? "disabled" : ""} ${popupPresent ? "open" : ""} ${className}`}
       data-placement={placement}
       ref={containerRef}
       onKeyDown={handleKeyDown}
@@ -277,8 +310,9 @@ export function CustomSelect({
         <ChevronDown size={16} className="custom-select-icon" />
       </button>
 
-      {isOpen && (
-        <div className={`custom-select-popup placement-${placement}`}>
+      {popupPresent && (
+        <div ref={popupRef} className={`custom-select-popup placement-${placement}`} inert={!isOpen || undefined} aria-hidden={!isOpen || undefined}>
+        <div className="custom-select-reveal">
         <div
           ref={dropdownRef}
           id={listboxId}
@@ -305,6 +339,7 @@ export function CustomSelect({
               />
             );
           })}
+        </div>
         </div>
         </div>
       )}

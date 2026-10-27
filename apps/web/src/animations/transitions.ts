@@ -2,22 +2,39 @@ import { waapi } from "animejs";
 import { animate, createTimeline, stagger, prefersReducedMotion, isTestEnvironment, ANIMATION_TOKENS } from "./core";
 import type { Animation } from "./core";
 
-/**
- * Animate page entrance: subtle fade, scale and vertical slide with cubic easing
- */
+const pageMotions = new WeakMap<HTMLElement, ReturnType<typeof waapi.animate>>();
+
+function enteringAncestor(element: HTMLElement): boolean {
+  for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+    const entry = pageMotions.get(ancestor);
+    if (entry && !entry.completed && entry.animations.length) return true;
+  }
+  return false;
+}
+
+/** One quiet entrance per surface. Never stack parent and child page motion. */
 export function animatePageEnter(target: HTMLElement | string): ReturnType<typeof waapi.animate> | null {
   if (typeof window === "undefined" || !target || isTestEnvironment()) return null;
+  const element = typeof target === "string" ? document.querySelector<HTMLElement>(target) : target;
+  if (!element || element.closest("[hidden]") || enteringAncestor(element)) return null;
+  pageMotions.get(element)?.revert();
   const reduced = prefersReducedMotion();
-
-  return waapi.animate(target, {
-    opacity: [0, 1],
-    transform: reduced ? "none" : ["translateY(6px)", "translateY(0)"],
-    duration: reduced ? ANIMATION_TOKENS.duration.micro : 220,
+  const duration = reduced ? 100 : 200;
+  // Keep the native Unity host's coordinates stable on the dialogue screen.
+  const spatial = !reduced && !element.classList.contains("workspace-chat");
+  const motion = waapi.animate(element, {
+    opacity: [.35, 1],
+    transform: spatial ? ["translateY(4px)", "translateY(0px)"] : "none",
+    duration,
     ease: "cubic-bezier(0.2, 0.8, 0.2, 1)",
+    onComplete: () => { motion.revert(); pageMotions.delete(element); },
   });
+  pageMotions.set(element, motion);
+  return motion;
 }
 
 const cardMotions = new WeakMap<HTMLElement, Animation>();
+const revealedCards = new WeakSet<HTMLElement>();
 
 /** Animate a bounded set of visible rows, never an entire long history. */
 export function animateStaggerCards(
@@ -33,16 +50,18 @@ export function animateStaggerCards(
   if (root.closest("[hidden]") || !root.getClientRects().length) return null;
   const targets: HTMLElement[] = [];
   for (const element of root.querySelectorAll<HTMLElement>(itemSelector)) {
-    if (element.closest("[hidden]")) continue;
+    if (element.closest("[hidden]") || revealedCards.has(element)) continue;
     const rect = element.getBoundingClientRect();
     if (rect.width && rect.height && rect.bottom > 0 && rect.top < window.innerHeight) targets.push(element);
     if (targets.length === 12) break;
   }
   if (!targets.length) return null;
+  targets.forEach(element => revealedCards.add(element));
+  if (enteringAncestor(root)) return null;
   const reduced = prefersReducedMotion();
   const motion = animate(targets, {
-    opacity: [0, 1],
-    translateY: reduced ? 0 : [6, 0],
+    opacity: [.5, 1],
+    translateY: reduced ? 0 : [3, 0],
     duration: reduced ? 120 : 220,
     delay: reduced ? 0 : stagger(Math.min(customDelay, 16)),
     ease: ANIMATION_TOKENS.ease.smooth,
@@ -56,7 +75,7 @@ export function animateStaggerCards(
 }
 
 /**
- * Expressive chat message entrance with soft spring bounce
+ * Short message entrance, without scaling the text.
  */
 export function animateMessagePop(element: HTMLElement): Animation | null {
   if (typeof window === "undefined" || !element || isTestEnvironment()) return null;
@@ -65,9 +84,9 @@ export function animateMessagePop(element: HTMLElement): Animation | null {
   return animate(element, {
     opacity: [0, 1],
     translateY: reduced ? 0 : [12, 0],
-    scale: reduced ? 1 : [0.93, 1],
+    scale: 1,
     duration: reduced ? ANIMATION_TOKENS.duration.micro : ANIMATION_TOKENS.duration.standard,
-    ease: ANIMATION_TOKENS.ease.bounce,
+    ease: ANIMATION_TOKENS.ease.smooth,
     onComplete: () => {
       if (element instanceof HTMLElement) element.style.transform = "";
     },
@@ -122,7 +141,7 @@ export function animateNumberCounter(
 }
 
 /**
- * Dialog/modal entrance animation with soft spring
+ * Quiet dialog entrance.
  */
 export function animateModalEnter(dialog: HTMLElement): Animation | null {
   if (typeof window === "undefined" || !dialog || isTestEnvironment()) return null;
@@ -130,10 +149,10 @@ export function animateModalEnter(dialog: HTMLElement): Animation | null {
 
   return animate(dialog, {
     opacity: [0, 1],
-    scale: reduced ? 1 : [0.92, 1],
-    translateY: reduced ? 0 : [10, 0],
-    duration: reduced ? ANIMATION_TOKENS.duration.micro : ANIMATION_TOKENS.duration.medium,
-    ease: ANIMATION_TOKENS.ease.bounce,
+    scale: 1,
+    translateY: reduced ? 0 : [6, 0],
+    duration: reduced ? ANIMATION_TOKENS.duration.micro : 200,
+    ease: ANIMATION_TOKENS.ease.smooth,
     onComplete: () => {
       if (dialog instanceof HTMLElement) dialog.style.transform = "";
     },
@@ -158,16 +177,16 @@ export function animateButtonPress(element: HTMLElement): Animation | null {
 }
 
 /**
- * Active tab / filter pill switch bounce
+ * Active tab / filter pill confirmation.
  */
 export function animateTabSwitch(element: HTMLElement): Animation | null {
   if (element?.classList.contains("dp-lens")) return null;
   if (typeof window === "undefined" || !element || prefersReducedMotion() || isTestEnvironment()) return null;
 
   return animate(element, {
-    scale: [0.94, 1.04, 1],
+    opacity: [.72, 1],
     duration: ANIMATION_TOKENS.duration.fast,
-    ease: ANIMATION_TOKENS.ease.spring,
+    ease: ANIMATION_TOKENS.ease.smooth,
     onComplete: () => {
       if (element instanceof HTMLElement) element.style.transform = "";
     },

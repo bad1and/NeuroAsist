@@ -25,13 +25,14 @@
   right: 0;
   z-index: 1;
   isolation: isolate;
+  height: 0;
   --select-shell-top: calc(1px - var(--select-header-height, 38px));
-  --select-shell-bottom: 0px;
+  --select-shell-bottom: -1px;
 }
 .custom-select-popup.placement-bottom { top: calc(100% - 1px); }
 .custom-select-popup.placement-top {
   bottom: calc(100% - 1px);
-  --select-shell-top: 0px;
+  --select-shell-top: -1px;
   --select-shell-bottom: calc(1px - var(--select-header-height, 38px));
 }
 .custom-select-popup::before {
@@ -47,6 +48,18 @@
   background: var(--surface-select-menu);
   box-shadow: var(--depth-select-menu);
 }
+
+/* Clip the growing list without clipping the stationary shell under the field. */
+.custom-select-reveal {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  border-radius: var(--select-shell-radius, var(--radius-control));
+  corner-shape: var(--corner-shape);
+}
+.placement-bottom .custom-select-reveal { border-top-left-radius: 0; border-top-right-radius: 0; }
+.placement-top .custom-select-reveal { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.custom-select-reveal > .custom-select-dropdown { border-radius: 0 !important; }
 
 /* Hidden native select for accessibility & automated tests */
 .custom-select-native-hidden {
@@ -131,7 +144,10 @@
 
 /* Only the inner list scrolls; the shell stays continuous around the header. */
 .custom-select-dropdown {
-  position: relative;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
   width: 100%;
   max-height: var(--select-menu-max-height, 240px);
   overflow-y: auto;
@@ -150,7 +166,7 @@
 }
 
 .placement-bottom .custom-select-dropdown { border-top-left-radius: 0; border-top-right-radius: 0; }
-.placement-top .custom-select-dropdown { padding: 5px 5px 7px; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.placement-top .custom-select-dropdown { top: auto; bottom: 0; padding: 5px 5px 7px; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 
 
 

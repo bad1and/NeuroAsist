@@ -1,0 +1,30 @@
+/* Motion ownership lives in Anime.js; surfaces and geometry remain in Iris tokens. */
+.dp-lens .dp-hover-sheen {
+  display: block;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  /* A soft shoulder and flat peak diffuse the reflection without a blur layer. */
+  background: linear-gradient(var(--dp-sheen-angle, 110deg),
+    transparent calc(49% - var(--dp-sheen-spread, 18%)),
+    rgb(255 255 255 / .012) calc(49% - var(--dp-sheen-spread, 18%) * .7),
+    rgb(255 255 255 / .065) calc(49% - var(--dp-sheen-spread, 18%) * .35),
+    rgb(255 255 255 / .105) calc(49% - var(--dp-sheen-spread, 18%) * .15),
+    rgb(255 255 255 / .11) 49%,
+    rgb(255 255 255 / .105) calc(49% + var(--dp-sheen-spread, 18%) * .15),
+    rgb(255 255 255 / .065) calc(49% + var(--dp-sheen-spread, 18%) * .35),
+    rgb(255 255 255 / .012) calc(49% + var(--dp-sheen-spread, 18%) * .7),
+    transparent calc(49% + var(--dp-sheen-spread, 18%)));
+}
+.app-shell > .sidebar { transition: none; }
+.settings-navigation { position: relative; }
+.settings-nav-disclosure { display: flow-root; min-height: 0; }
+.settings-nav-disclosure[hidden] { display: none !important; }
+.settings-nav-children[hidden] { display: none !important; }
+.settings-nav-group-button[aria-expanded] .settings-nav-chevron { transition: none; }
+.custom-select-popup[aria-hidden="true"] { pointer-events: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dp-lens .dp-hover-sheen { display: none; }
+}
