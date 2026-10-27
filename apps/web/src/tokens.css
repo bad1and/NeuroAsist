@@ -21,6 +21,12 @@
   --color-accent-soft: oklch(50.2% 0.069 298.9 / 0.17);
   --color-accent-ink: oklch(98% 0.008 265);
   --color-focus: oklch(76% 0.069 298.9);
+  /* Bklit charts: restrained Iris violet with neutral comparison steps. */
+  --color-chart-primary: color-mix(in oklch, var(--color-focus) 76%, var(--color-accent));
+  --color-chart-secondary: var(--color-text-soft);
+  --color-chart-tertiary: color-mix(in oklch, var(--color-focus) 45%, var(--color-text-muted));
+  --color-chart-quaternary: var(--color-accent-visual);
+  --color-chart-quinary: var(--color-text-muted);
   --color-success: oklch(73% 0.13 155);
   --color-warning: oklch(80% 0.13 85);
   --color-danger: #865B5C;
@@ -115,7 +121,13 @@
   --surface-toast: linear-gradient(180deg, rgba(255, 255, 255, .035), transparent 28%, rgba(0, 0, 0, .04)), var(--surface-notification);
   --depth-toast: 0 1px 2px rgba(0, 0, 0, .24), 0 8px 18px -4px rgba(0, 0, 0, .28), 0 18px 32px -10px rgba(0, 0, 0, .24);
 
-  /* Original near-black field; the menu uses the same dark base with soft depth. */
+  /* Recessed inputs have one dark face, without an outer light edge. */
+  --surface-field: linear-gradient(var(--color-base-deep), var(--color-base-deep));
+  --depth-field: inset 0 4px 10px rgb(0 0 0 / .72), inset 0 1px 3px rgb(0 0 0 / .22), inset 2px 0 8px rgb(0 0 0 / .16), inset -2px 0 8px rgb(0 0 0 / .16);
+  /* Passive status labels echo the button material at a quieter scale. */
+  --surface-status: radial-gradient(ellipse at 50% 0%, rgb(255 255 255 / .07), transparent 75%), linear-gradient(180deg, var(--lens-graphite), var(--color-surface));
+  --depth-status: inset 0 1px 2px rgb(255 255 255 / .08), inset 0 -2px 3px rgb(0 0 0 / .24), 0 2px 2px -1px rgb(0 0 0 / .28), 0 4px 8px -3px rgb(0 0 0 / .24);
+  /* The menu uses the same dark base with soft depth. */
   --surface-select-field: linear-gradient(var(--color-base-deep), var(--color-base-deep));
   --depth-select-field: inset 0 5px 8px rgb(0 0 0 / .8), inset 0 1px 2px rgb(0 0 0 / .7), inset 3px 0 7px rgb(0 0 0 / .3), inset -3px 0 7px rgb(0 0 0 / .3);
   --surface-select-menu: radial-gradient(ellipse at 50% 100%, rgb(255 255 255 / .02), transparent 75%), linear-gradient(180deg, color-mix(in srgb, var(--color-base-deep) 82%, var(--color-graphite-upper)), var(--color-base-deep));
@@ -203,10 +215,9 @@
   --notification-rim-gradient: linear-gradient(90deg, var(--rim-light-start) 0%, var(--rim-light-mid) 21%, var(--rim-tone) 45%, var(--rim-light-lower) 72%, var(--rim-light-end) 100%);
 }
 
-/* Soften compact selection controls without changing the approved button contours. */
+/* Small moving thumbs retain their own geometry; selection surfaces use Iris's standard contour. */
 @supports (corner-shape: superellipse(1.45)) {
   :root {
-    --corner-selection: superellipse(1.65);
     --corner-selection-square: superellipse(1.3);
   }
 }

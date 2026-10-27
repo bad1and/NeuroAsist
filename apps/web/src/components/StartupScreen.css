@@ -73,7 +73,7 @@
 .startup-stages li[aria-current="step"] { color: var(--color-text); }
 .startup-stages li[data-state="formed"] .startup-stage-index { color: var(--color-text-soft); }
 .startup-game { position: absolute; z-index: 2; left: 50%; bottom: 28px; transform: translateX(-50%); }
-.startup-game-open { padding: 10px 20px; min-height: 36px; border: 0; border-radius: var(--radius-control); background: transparent; box-shadow: none; color: var(--color-text-muted); font: inherit; font-size: 12px; cursor: pointer; }
+.startup-game-open { padding: 10px 20px; min-height: 36px; border: 0; border-radius: var(--radius-control); corner-shape: var(--corner-shape); background: transparent; box-shadow: none; color: var(--color-text-muted); font: inherit; font-size: 12px; cursor: pointer; }
 .startup-game-open:hover { color: var(--color-text-soft); }
 @media (max-height: 680px) {
   .startup-mark { width: 230px; margin-bottom: 10px; }

@@ -73,21 +73,28 @@
 
 /* Layout stays with each existing control; the shared layers own its finish. */
 :where(button.iris-button[data-material]:not([data-material="plain"])) { position: relative; }
+/* Important declarations in a layer precede legacy unlayered !important
+   rules, including their more specific hover/active selectors. Only the
+   shared decorative face paints the finish; screen rules still own geometry. */
+@layer iris-material-reset {
+  button.iris-button[data-material]:not([data-material="plain"]) {
+    background: transparent !important;
+    box-shadow: none !important;
+    border-color: transparent !important;
+    filter: none !important;
+    overflow: visible !important;
+    clip-path: none !important;
+    animation: none !important;
+    transform: none !important;
+  }
+  button.iris-button[data-material]:not([data-material="plain"])::before,
+  button.iris-button[data-material]:not([data-material="plain"], [data-material="joined"])::after { content: none !important; }
+}
 button.iris-button[data-material]:not([data-material="plain"]) {
-  background: transparent !important;
-  box-shadow: none !important;
-  border-color: transparent !important;
-  filter: none !important;
-  overflow: visible !important;
-  clip-path: none !important;
   transition: none;
-  animation: none !important;
-  transform: none !important;
   color: var(--color-text) !important;
   isolation: isolate;
 }
-button.iris-button[data-material]:not([data-material="plain"])::before,
-button.iris-button[data-material]:not([data-material="plain"])::after { content: none !important; }
 button.iris-button.dp-accent { color: var(--color-accent-ink) !important; }
 button.iris-button[data-material]:not([data-material="plain"]):focus-visible { outline: none !important; }
 /* The material rim is also the keyboard focus indicator. */
@@ -126,7 +133,7 @@ button.iris-button[data-material]:not([data-material="plain"]):disabled { opacit
 .dock-finish-btn.iris-button { border-radius: 40.5px; corner-shape: var(--corner-shape); }
 .dock-new-dialog-btn.iris-button { border-radius: 33px; corner-shape: var(--corner-shape); }
 button.iris-button.is-muted { color: var(--color-danger) !important; }
-button.iris-button.is-loading { color: var(--color-accent-visual) !important; }
+button.iris-button.is-loading { color: var(--color-text) !important; }
 button.iris-button.is-loading:disabled { opacity: 1 !important; }
 /* Navigation labels retain the existing collapse/expand layout. */
 .iris-button > .dp-hover-surface { width: auto !important; height: auto !important; flex: none !important; }

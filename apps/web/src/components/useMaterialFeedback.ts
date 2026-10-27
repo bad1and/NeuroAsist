@@ -1,6 +1,7 @@
 import { useEffect, type RefObject } from "react";
 import { createAnimatable, cubicBezier, type AnimatableObject } from "animejs";
 import { animate, prefersReducedMotion, type Animation } from "../animations/core";
+import { materialGeometryRevision, subscribeMaterialGeometry } from "./materialLayout";
 
 /** Shared cursor feedback for the accepted lens material. */
 export function useMaterialFeedback(
@@ -15,9 +16,22 @@ export function useMaterialFeedback(
     const light = element.querySelector<HTMLElement>(".dp-hover-light");
     const surface = element.querySelector<HTMLElement>(".dp-hover-surface");
     const spot = element.querySelector<HTMLElement>(".dp-hover-spot");
+    const sheen = element.querySelector<HTMLElement>(".dp-hover-sheen");
     if (!rim && !light && !surface) return;
+    if (disabled) {
+      element.dataset.rimVisible = "false";
+      if (rim) rim.style.opacity = "0";
+      if (light) light.style.opacity = "0";
+      if (quiet && surface) surface.style.opacity = "0";
+      return () => {
+        rim?.style.removeProperty("opacity");
+        light?.style.removeProperty("opacity");
+        if (quiet) surface?.style.removeProperty("opacity");
+      };
+    }
     const running = new Map<HTMLElement, Animation>();
-    let hovered = false;
+    const requested = new Map<HTMLElement, Record<string, number>>();
+    let hovered = element.matches(":hover");
     let focused = element.matches(":focus-visible") || (field && element.contains(document.activeElement));
     let pressed = false;
     const scaleOnPress = pressScale && surfaceMotion;
@@ -35,10 +49,13 @@ export function useMaterialFeedback(
     let faceMotion: AnimatableObject | undefined;
     let lightMotion: AnimatableObject | undefined;
     let bounds: DOMRect | undefined;
+    let boundsRevision = materialGeometryRevision();
+    const stopGeometry = subscribeMaterialGeometry();
     let frame = 0;
     let cursorX = 0;
     let cursorY = 0;
     let compactShape: boolean | undefined;
+    let lastSheen = -Infinity;
 
     const resetMotion = () => {
       cancelAnimationFrame(frame);
@@ -52,6 +69,10 @@ export function useMaterialFeedback(
     const track = () => {
       frame = 0;
       if (!hovered || disabled || reduced || field || !surface || !spot) return;
+      if (boundsRevision !== materialGeometryRevision()) {
+        bounds = undefined;
+        boundsRevision = materialGeometryRevision();
+      }
       bounds ??= element.getBoundingClientRect();
       if (!bounds.width || !bounds.height) return;
       const x = Math.max(-1, Math.min(1, (cursorX - bounds.left) / bounds.width * 2 - 1));
@@ -83,10 +104,12 @@ export function useMaterialFeedback(
       cursorY = event.clientY;
       if (!frame) frame = requestAnimationFrame(track);
     };
-    const invalidateBounds = () => { bounds = undefined; };
 
     const change = (target: HTMLElement | null, values: Record<string, number>) => {
       if (!target) return;
+      const previous = requested.get(target);
+      if (previous && Object.keys(previous).length === Object.keys(values).length && Object.keys(values).every(key => previous[key] === values[key])) return;
+      requested.set(target, values);
       running.get(target)?.cancel();
       running.set(target, animate(target, { ...values, duration: reduced ? 120 : 180, ease: "outQuad" }));
     };
@@ -112,6 +135,20 @@ export function useMaterialFeedback(
       bounds = undefined;
       move(event);
       update();
+      // A brief grazing reflection gives the material life without moving labels.
+      if (sheen && !field && !reduced && performance.now() - lastSheen > 900) {
+        lastSheen = performance.now();
+        running.get(sheen)?.cancel();
+        const direction = character > .5 ? 1 : -1;
+        // Reuse the button's seed, keeping each reflection stable across hovers.
+        sheen.style.setProperty("--dp-sheen-angle", `${106 + fluidity * 10}deg`);
+        sheen.style.setProperty("--dp-sheen-spread", `${17 + spread * 3}%`);
+        running.set(sheen, animate(sheen, {
+          translateX: [`${-110 * direction}%`, `${110 * direction}%`],
+          opacity: [0, .39 + character * .07, 0],
+          duration: Math.round(340 + fluidity * 100), ease: "outQuad",
+        }));
+      }
     };
     const leave = () => { hovered = false; resetMotion(); restore(); update(); };
     const focus = (event: FocusEvent) => {
@@ -141,6 +178,7 @@ export function useMaterialFeedback(
       reduced = prefersReducedMotion();
       resetMotion();
       if (reduced) {
+        if (sheen) { running.get(sheen)?.cancel(); sheen.style.opacity = "0"; }
         faceMotion?.revert();
         lightMotion?.revert();
         faceMotion = undefined;
@@ -167,16 +205,21 @@ export function useMaterialFeedback(
     element.addEventListener("focusout", blur);
     element.addEventListener("keydown", keydown);
     element.addEventListener("keyup", keyup);
-    window.addEventListener("resize", invalidateBounds);
-    window.addEventListener("scroll", invalidateBounds, true);
     media?.addEventListener("change", motionPreference);
     // Initial mount is static: hundreds of resting controls must not create
     // zero-to-zero animations when opening a screen.
     const visible = !disabled && Boolean(pinned || focused);
     element.dataset.rimVisible = String(visible);
-    if (rim) rim.style.opacity = visible ? "1" : "0";
-    if (light) light.style.opacity = "0";
-    if (quiet && surface) surface.style.opacity = !disabled && focused ? "1" : "0";
+    if (rim) { rim.style.opacity = visible ? "1" : "0"; requested.set(rim, { opacity: visible ? 1 : 0 }); }
+    if (light) { light.style.opacity = hovered ? "1" : "0"; requested.set(light, { opacity: hovered ? 1 : 0 }); }
+    if (surface && (quiet || (scaleOnPress && pressSurface && !reduced))) {
+      const values = {
+        ...(quiet ? { opacity: hovered || focused ? 1 : 0 } : {}),
+        ...(scaleOnPress && pressSurface && !reduced ? { scale: 1 } : {}),
+      };
+      if (quiet) surface.style.opacity = hovered || focused ? "1" : "0";
+      requested.set(surface, values);
+    }
     return () => {
       element.removeEventListener("pointerenter", enter);
       element.removeEventListener("pointermove", move);
@@ -188,8 +231,7 @@ export function useMaterialFeedback(
       element.removeEventListener("focusout", blur);
       element.removeEventListener("keydown", keydown);
       element.removeEventListener("keyup", keyup);
-      window.removeEventListener("resize", invalidateBounds);
-      window.removeEventListener("scroll", invalidateBounds, true);
+      stopGeometry();
       media?.removeEventListener("change", motionPreference);
       cancelAnimationFrame(frame);
       faceMotion?.revert();

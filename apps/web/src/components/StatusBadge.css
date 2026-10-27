@@ -1,0 +1,90 @@
+/* A single passive material for status labels throughout Iris. Screen styles
+   may position a label; these rules own its face, contour and typography. */
+:is(#root, .app-dialog-host) :is(.settings-status-pill, .status-pill, .coding-status-pill, .memory-status, .journal-active-pill, .journal-badge, .status-tag) {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center;
+  flex-shrink: 0;
+  width: fit-content;
+  gap: 6px !important;
+  min-height: 26px;
+  padding: 5px 11px !important;
+  border: 0 !important;
+  border-radius: var(--radius-control-sm) !important;
+  corner-shape: var(--corner-shape) !important;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--status-tint, transparent) 12%, transparent), color-mix(in srgb, var(--status-tint, transparent) 6%, transparent)), var(--surface-status) !important;
+  box-shadow: var(--depth-status) !important;
+  color: var(--status-ink, var(--color-text-soft)) !important;
+  font-size: 11.5px !important;
+  font-weight: 550 !important;
+  line-height: 16px;
+  letter-spacing: 0 !important;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+:is(#root, .app-dialog-host) :is(.settings-status-pill, .status-pill, .coding-status-pill, .memory-status, .journal-active-pill, .journal-badge, .status-tag)::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  corner-shape: inherit;
+  background: url("./lens-noise.svg") repeat;
+  background-size: 128px 128px;
+  mix-blend-mode: overlay;
+  opacity: var(--lens-noise-alpha);
+  pointer-events: none;
+}
+
+.settings-status-pill.is-active,
+.status-pill.ok,
+.coding-status-pill:is(.status-completed, .status-review_ready, .status-applied),
+.memory-status:is(.active, .healthy),
+.journal-active-pill,
+.journal-badge.active,
+.status-tag.success {
+  --status-tint: var(--color-success);
+  --status-ink: var(--color-success-text);
+}
+
+.settings-status-pill.is-warning,
+.status-pill.warn,
+.coding-status-pill:is(.status-running, .status-pending),
+.memory-status:is(.candidate, .superseded) {
+  --status-tint: var(--color-warning);
+  --status-ink: var(--color-warning-text);
+}
+
+.status-pill.bad,
+.coding-status-pill:is(.status-failed, .status-cancelled),
+.memory-status:is(.deleted, .rejected, .degraded),
+.status-tag.error {
+  --status-tint: var(--color-danger);
+  --status-ink: var(--color-danger-text);
+}
+
+.coding-status-pill:is(.status-waiting_for_input, .status-conflicted) {
+  --status-tint: var(--color-accent);
+  --status-ink: var(--color-text);
+}
+
+/* Dense history and analytics rows retain their smaller footprint. */
+.status-pill { margin-left: auto; }
+:is(#root, .app-dialog-host) :is(.journal-badge, .status-tag) {
+  min-height: 20px;
+  padding: 2px 7px !important;
+  border-radius: 12px !important;
+  corner-shape: var(--corner-shape);
+  font-size: 10.5px !important;
+}
+
+@media (forced-colors: active) {
+  :is(#root, .app-dialog-host) :is(.settings-status-pill, .status-pill, .coding-status-pill, .memory-status, .journal-active-pill, .journal-badge, .status-tag) {
+    border: 1px solid CanvasText !important;
+    background: Canvas !important;
+    color: CanvasText !important;
+  }
+}

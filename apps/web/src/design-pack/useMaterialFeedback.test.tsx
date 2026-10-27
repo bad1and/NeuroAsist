@@ -123,6 +123,43 @@ it("reveals a quiet control while pressed without requiring pointer hover", () =
   expect(feedback.transitions.filter(change => change.target === face).slice(-1)[0]?.values).toMatchObject({ opacity: 0, scale: 1 });
 });
 
+it("restores the selected material when a disabled quiet control becomes active", () => {
+  const view = render(<MaterialButton materialKey="navigation.test" className="navigation-button" disabled>Раздел</MaterialButton>);
+  const face = screen.getByRole("button").querySelector<HTMLElement>(".dp-hover-surface")!;
+  expect(face.style.opacity).toBe("0");
+  view.rerender(<MaterialButton materialKey="navigation.test" className="navigation-button is-active">Раздел</MaterialButton>);
+  expect(face.style.opacity).not.toBe("0");
+});
+
+it("keeps hover feedback when an open disclosure returns to its quiet state under the pointer", () => {
+  const view = render(<MaterialButton materialKey="disclosure.hover" appearance="lens">Параметры</MaterialButton>);
+  const element = button();
+  vi.spyOn(element, "matches").mockImplementation(selector => selector === ":hover");
+  view.rerender(<MaterialButton materialKey="disclosure.hover" appearance="quiet">Параметры</MaterialButton>);
+  const face = element.querySelector<HTMLElement>(".dp-hover-surface")!;
+  expect(face.style.opacity).toBe("1");
+  fireEvent.pointerLeave(element);
+  expect(feedback.transitions.filter(change => change.target === face).slice(-1)[0]?.values).toMatchObject({ opacity: 0 });
+});
+
+it("keeps a restrained reflection stable for the same button seed across remounts", () => {
+  const reflection = (seed: number) => {
+    const view = render(<MaterialButton materialKey="reflection.test" seed={seed}>Кнопка</MaterialButton>);
+    const element = button();
+    pointer(element, "pointerenter");
+    const sheen = element.querySelector<HTMLElement>(".dp-hover-sheen")!;
+    const changes = feedback.transitions.filter(change => change.target === sheen);
+    const values = changes[changes.length - 1].values;
+    const result = { values, angle: sheen.style.getPropertyValue("--dp-sheen-angle"), spread: sheen.style.getPropertyValue("--dp-sheen-spread") };
+    expect((values.opacity as number[])[1]).toBeLessThan(.5);
+    view.unmount();
+    return result;
+  };
+  const first = reflection(42);
+  expect(reflection(42)).toEqual(first);
+  expect(reflection(73)).not.toEqual(first);
+});
+
 it("keeps a fixed surface aligned on hover and press while its light follows the pointer", () => {
   render(<MaterialButton materialKey="shortcuts.bind.search" appearance="quiet" surfaceMotion={false}>Ctrl + K</MaterialButton>);
   const element = button();

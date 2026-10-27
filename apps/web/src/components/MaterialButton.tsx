@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useLayoutEffect, useRef, type ComponentPropsWithoutRef, type CSSProperties, type ReactNode } from "react";
 import { buttonSeed, materialStyle } from "./buttonMaterial";
 import { useMaterialFeedback } from "./useMaterialFeedback";
+import { observeMaterialSize } from "./materialLayout";
 
 type Props = ComponentPropsWithoutRef<"button"> & {
   materialKey: string;
@@ -23,7 +24,7 @@ export function ButtonMaterialLayers({ children }: { children?: ReactNode } = {}
     <span className="dp-hover-surface" aria-hidden="true">
       <span className="dp-depth" />
       <MaterialFace />{children}
-      <span className="dp-hover-light"><span className="dp-hover-spot" /></span>
+      <span className="dp-hover-light"><span className="dp-hover-spot" /><span className="dp-hover-sheen" /></span>
     </span>
     <span className="dp-rim" aria-hidden="true" />
   </>;
@@ -46,7 +47,7 @@ export function MaterialButtonGroup({ materialKey, muted = [false, false], class
 }
 
 const plainClasses = /\b(text-button|card-link|navigation-scrim|send-button|custom-select-trigger|search-clear-btn|token-badge|journal-header-tokens|notification-expand-link|coding-task-card|avatar-dev-card|journal-message-details-toggle)\b/;
-const navigationClasses = /\b(navigation-button|settings-nav-button|settings-nav-direct|settings-nav-group-button|avatar-dev-subnav-btn)\b/;
+const navigationClasses = /\b(navigation-button|settings-nav-button|settings-nav-direct|settings-nav-group-button|avatar-dev-subnav-btn|history-item-minimal)\b/;
 
 /** Keeps the native button, its children, form semantics and forwarded DOM ref. */
 export const MaterialButton = forwardRef<HTMLButtonElement, Props>(function MaterialButton({
@@ -74,27 +75,14 @@ export const MaterialButton = forwardRef<HTMLButtonElement, Props>(function Mate
     const measure = (width: number, height: number) => {
       if (!width || !height) return;
       squircle ??= getComputedStyle(element).getPropertyValue("corner-shape").includes("squircle") || /\b(icon-button|dock-icon-btn)\b/.test(className);
-      element.dataset.materialSquare = String(mode !== "joined" && Math.abs(width - height) < 1 && squircle);
-      element.dataset.materialCompact = String(height <= 80 && width / height <= 3);
+      const square = String(mode !== "joined" && Math.abs(width - height) < 1 && squircle);
+      const compact = String(height <= 80 && width / height <= 3);
+      if (element.dataset.materialSquare !== square) element.dataset.materialSquare = square;
+      if (element.dataset.materialCompact !== compact) element.dataset.materialCompact = compact;
     };
     // ResizeObserver supplies layout results, avoiding a forced synchronous
     // layout for every individual button during the route commit.
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(entries => {
-      for (const entry of entries) {
-        const box = entry.borderBoxSize?.[0];
-        if (box) measure(box.inlineSize, box.blockSize);
-        else {
-          const rect = element.getBoundingClientRect();
-          measure(rect.width, rect.height);
-        }
-      }
-    });
-    observer?.observe(element);
-    if (!observer) {
-      const rect = element.getBoundingClientRect();
-      measure(rect.width, rect.height);
-    }
-    return () => observer?.disconnect();
+    return observeMaterialSize(element, measure);
   }, [mode, className]);
 
   return <button {...props} ref={attach} disabled={disabled}

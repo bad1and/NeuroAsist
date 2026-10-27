@@ -1,5 +1,6 @@
 /* One restrained material for selection controls; motion is driven by Anime.js. */
 .iris-segments.iris-segments {
+  --segment-radius: var(--radius-control, 24px);
   position: relative;
   isolation: isolate;
   display: inline-flex;
@@ -10,7 +11,8 @@
   max-width: 100%;
   padding: 4px;
   border: 0;
-  border-radius: var(--radius-control, 24px) !important;
+  /* The outer track follows the face radius plus its 4px inset. */
+  border-radius: calc(var(--segment-radius) + 4px) !important;
   corner-shape: var(--corner-selection, squircle) !important;
   background: var(--surface-selection-track);
   box-shadow: var(--depth-selection-track);
@@ -24,7 +26,7 @@
   left: 0;
   z-index: -1;
   pointer-events: none;
-  border-radius: var(--radius-control-sm, 18px) !important;
+  border-radius: var(--segment-radius) !important;
   corner-shape: var(--corner-selection, squircle);
   background: var(--surface-selection-active);
   box-shadow: none;
@@ -41,7 +43,7 @@
   margin: 0;
   padding: 5px 12px;
   border: 0;
-  border-radius: var(--radius-control-sm, 18px) !important;
+  border-radius: var(--segment-radius) !important;
   corner-shape: var(--corner-selection, squircle) !important;
   background: transparent !important;
   box-shadow: none !important;

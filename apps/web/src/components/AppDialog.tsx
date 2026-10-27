@@ -7,6 +7,8 @@ import { ConfirmationRim } from "./ConfirmationRim";
 import { buttonSeed } from "./buttonMaterial";
 
 export interface AppDialogProps {
+  className?: string;
+  showRim?: boolean;
   open: boolean;
   title: string;
   description?: string;
@@ -20,6 +22,8 @@ export interface AppDialogProps {
 }
 
 export function AppDialog({
+  className = "",
+  showRim = true,
   open,
   title,
   description,
@@ -133,6 +137,7 @@ export function AppDialog({
     if (!open) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       const dialogs = document.querySelectorAll(".app-dialog-card:not(.is-exiting)");
       if (dialogs[dialogs.length - 1] !== cardRef.current) return;
       if (e.key === "Escape") {
@@ -189,7 +194,7 @@ export function AppDialog({
   const detached = presentation === "spotlight" && Boolean(currentHeaderContent);
 
   const content = (
-    <aside ref={hostRef} className={`app-dialog-host${size === "wide" ? " is-wide" : ""}${presentation === "spotlight" ? " is-spotlight" : ""}`} onMouseDown={presentation === "spotlight" ? event => { if (event.target === event.currentTarget && event.button === 0) handleDismiss(); } : undefined} aria-label={currentVariant === "info" ? "Диалог" : "Диалог подтверждения"} aria-live={currentVariant === "info" ? "off" : "assertive"}>
+    <aside ref={hostRef} className={`app-dialog-host${size === "wide" ? " is-wide" : ""}${presentation === "spotlight" ? " is-spotlight" : ""} ${className}`} onMouseDown={presentation === "spotlight" ? event => { if (event.target === event.currentTarget && event.button === 0) handleDismiss(); } : undefined} aria-label={currentVariant === "info" ? "Диалог" : "Диалог подтверждения"} aria-live={currentVariant === "info" ? "off" : "assertive"}>
       <div
         ref={cardRef}
         className={`notification-card app-dialog-card confirmation-surface is-${currentVariant}${size === "wide" ? " is-wide" : ""}${detached ? " is-detached" : ""}${isExiting ? " is-exiting" : ""}`}
@@ -235,16 +240,16 @@ export function AppDialog({
               <IconInterfaceCross size={16} aria-hidden="true" />
             </MaterialButton>
           </div>
-          {detached && <ConfirmationRim cardRef={headerRef} seed={buttonSeed(`search-field.${currentTitle}`)} active={open && !isExiting} />}
+          {showRim && detached && <ConfirmationRim cardRef={headerRef} seed={buttonSeed(`search-field.${currentTitle}`)} active={open && !isExiting} />}
         </div>
 
         {currentChildren && (
           <div ref={bodyRef} className={`notification-dialog-body${detached ? " spotlight-results-surface" : ""}`} onClick={handleBodyClick}>
             {currentChildren}
-            {detached && <ConfirmationRim cardRef={bodyRef} seed={buttonSeed(`search-results.${currentTitle}`)} active={open && !isExiting} />}
+            {showRim && detached && <ConfirmationRim cardRef={bodyRef} seed={buttonSeed(`search-results.${currentTitle}`)} active={open && !isExiting} />}
           </div>
         )}
-        {!detached && <ConfirmationRim cardRef={cardRef} seed={buttonSeed(`confirmation.${currentTitle}`)} active={open && !isExiting} />}
+        {showRim && !detached && <ConfirmationRim cardRef={cardRef} seed={buttonSeed(`confirmation.${currentTitle}`)} active={open && !isExiting} />}
       </div>
     </aside>
   );
