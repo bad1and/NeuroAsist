@@ -1,3 +1,4 @@
+import { Disclosure } from "./Disclosure";
 import { useId, useMemo } from "react";
 
 export type PatchFile = { name: string; patch: string; added: number; removed: number };
@@ -20,11 +21,11 @@ export function PatchReview({ patch }: { patch: string }) {
   const id = useId();
   return <section className="patch-review" aria-label="Изменения по файлам">
     <nav className="patch-file-list" aria-label="Изменённые файлы">
-      {files.map((file, index) => <a key={index} href={`#${id}-${index}`}><span>{file.name}</span><small>+{file.added} −{file.removed}</small></a>)}
+      {files.map((file, index) => <a key={index} href={`#${id}-${index}`}><span data-i18n-skip>{file.name}</span><small>+{file.added} −{file.removed}</small></a>)}
     </nav>
-    {files.map((file, index) => <details className="patch-file" key={index} id={`${id}-${index}`} open={files.length === 1 && file.patch.length < 200_000}>
-      <summary><span>{file.name}</span><small>+{file.added} −{file.removed}</small></summary>
+    {files.map((file, index) => <Disclosure materialKey={`patch.file.${file.name}`} label={<><span data-i18n-skip>{file.name}</span><small>+{file.added} −{file.removed}</small></>} className="patch-file" key={index} id={`${id}-${index}`} defaultOpen={files.length === 1 && file.patch.length < 200_000}>
+
       <pre tabIndex={0} aria-label={`Diff: ${file.name}`}>{file.patch.length > 200_000 ? file.patch : file.patch.split("\n").map((line, n) => <span key={n} className={line.startsWith("@@") ? "patch-hunk" : line.startsWith("+") && !line.startsWith("+++") ? "patch-added" : line.startsWith("-") && !line.startsWith("---") ? "patch-removed" : undefined}>{line}{"\n"}</span>)}</pre>
-    </details>)}
+    </Disclosure>)}
   </section>;
 }

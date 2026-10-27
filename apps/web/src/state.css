@@ -157,21 +157,11 @@
   color: var(--color-text-soft);
 }
 .state-dashboard .cause-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 28px;
-  padding: 4px 0;
   margin-top: 4px;
-  color: var(--color-text-muted);
-  font-size: 12px;
-  font-weight: 500;
 }
-.state-dashboard .cause-toggle:hover { color: var(--color-text); }
-.state-dashboard .cause-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+.state-dashboard .cause-toggle .iris-disclosure-label { display: inline-flex; align-items: center; gap: 6px; }
 .state-dashboard .cause-extra-count { font-variant-numeric: tabular-nums; }
 .state-dashboard .mood-causes ul:focus-visible,
-.state-dashboard .cause-toggle:focus-visible,
 .state-dashboard .neutral-summary:focus-visible {
   outline: 2px solid var(--color-focus);
   outline-offset: 4px;
@@ -285,6 +275,7 @@
   background: transparent;
   border: 0;
   border-radius: 6px;
+  corner-shape: var(--corner-shape);
   box-shadow: none;
   color: var(--color-text-muted);
   font-size: 13px;

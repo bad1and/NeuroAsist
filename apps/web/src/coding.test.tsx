@@ -128,7 +128,7 @@ describe("CodingAgentPage", () => {
     api.applyCodingTask.mockResolvedValue(tasks[1]);
     render(<CodingAgentPage settings={mockSettings} events={[]} sessionId="s" onOpenApiSettings={vi.fn()} onSettingsChanged={vi.fn()} />);
     fireEvent.click(await screen.findByText(tasks[0].objective));
-    expect(screen.getByRole("button", { name: "Применить изменения" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Применить изменения" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: /Назад к списку задач/ }));
     fireEvent.click(await screen.findByText(tasks[1].objective));
     await waitFor(() => expect(screen.getByRole("button", { name: "Применить изменения" })).toBeEnabled());

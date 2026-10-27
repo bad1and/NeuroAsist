@@ -1,4 +1,5 @@
 import { AppCheckbox } from "./components/AppCheckbox";
+import { DisclosureTrigger } from "./components/Disclosure";
 import { SlidingSegments } from "./components/SlidingSegments";
 import { LoadingRing } from "./components/LoadingRing";
 import { ButtonMaterialLayers, MaterialButton } from "./components/MaterialButton";
@@ -14,7 +15,6 @@ import { IconInterfaceCalendarMark, IconInterfaceEditMagicWand } from "./CustomI
 import {
   IconInterfaceArrowRight as ArrowRight,
   IconInterfaceCheck as Check,
-  IconInterfaceChevronDown as ChevronDown,
   IconInterfaceHeart as Heart,
   IconHealthMedicalHeartCare1 as HandHeart,
   IconUsersFeedback as Handshake,
@@ -239,11 +239,10 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
                       ); })}
                     </ul>
                     {causeGroups.length > 3 && (
-                      <MaterialButton appearance="plain" materialKey="state.causes-toggle" className="text-button cause-toggle" type="button" aria-expanded={causesExpanded} aria-controls={causesId}
+                      <DisclosureTrigger materialKey="state.causes-toggle" className="cause-toggle" open={causesExpanded} aria-controls={causesId}
                         onClick={() => { if (causeListRef.current) causeListRef.current.scrollTop = 0; setCausesExpanded(value => !value); }}>
                         {causesExpanded ? "Свернуть" : <><span>Ещё причины</span><span className="cause-extra-count">{causeGroups.length - 3}</span></>}
-                        <ChevronDown size={14} aria-hidden="true" />
-                      </MaterialButton>
+                      </DisclosureTrigger>
                     )}
                   </div>
                 )}

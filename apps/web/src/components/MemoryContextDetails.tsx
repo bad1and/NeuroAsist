@@ -1,3 +1,4 @@
+import { Disclosure } from "./Disclosure";
 import { useState } from "react";
 import {
   IconInterfaceBrain as Brain,
@@ -25,7 +26,7 @@ function ContextRecordRow({ item, sessionId }: { item: ContextRecord; sessionId?
     <small>Входной контекст этого ответа</small>
     {!item.current ? <p className="settings-apply-note">Запись уже удалена. Показан сохранённый фрагмент контекста.</p> : <>
       {item.current.value_text !== item.value && <p className="settings-apply-note">После ответа запись была изменена.</p>}
-      <details><summary>Исправить текущую запись</summary><textarea aria-label="Новое значение записи памяти" value={text} maxLength={2000} rows={3} onChange={event => setText(event.target.value)} /><MaterialButton materialKey={`context.save.${item.id}`} className="secondary" type="button" disabled={busy || !text.trim()} onClick={() => void run(() => updateMemory(item.id, { value_text: text }), "Запись исправлена. В деталях прежнего ответа остаётся старый текст.")}>Сохранить исправление</MaterialButton></details>
+      <Disclosure materialKey={`context.edit.${item.id}`} label="Исправить текущую запись"><textarea aria-label="Новое значение записи памяти" value={text} maxLength={2000} rows={3} onChange={event => setText(event.target.value)} /><MaterialButton materialKey={`context.save.${item.id}`} className="secondary" type="button" disabled={busy || !text.trim()} onClick={() => void run(() => updateMemory(item.id, { value_text: text }), "Запись исправлена. В деталях прежнего ответа остаётся старый текст.")}>Сохранить исправление</MaterialButton></Disclosure>
       <MaterialButton materialKey={`context.exclude.${item.id}`} className="text-button" type="button" disabled={busy || !sessionId} onClick={() => void run(() => requestJson("/memory-context/exclude-next", { method: "POST", body: JSON.stringify({ session_id: sessionId, memory_id: item.id }) }), "В следующем ответе Iris не будет использовать эту запись памяти.")}>Исключить из следующего ответа</MaterialButton>
     </>}
     {error && <p className="error-text" role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
@@ -57,10 +58,10 @@ export function DocumentSources({ value }: { value: unknown }) {
   const data = value as { name?: string; partial?: boolean; sources?: Array<{ id: string; label: string; text?: string }> };
   if (!Array.isArray(data.sources)) return null;
   const sources = data.sources.filter(source => source && typeof source.id === "string" && typeof source.label === "string");
-  return <details className="document-sources" onClick={event => event.stopPropagation()}><summary>Документ: <span data-i18n-skip>{typeof data.name === "string" ? data.name : "Файл"}</span> · {sources.length} фрагментов</summary>
+  return <Disclosure materialKey="document.sources" label={<>Документ: <span data-i18n-skip>{typeof data.name === "string" ? data.name : "Файл"}</span> · {sources.length} фрагментов</>} className="document-sources" onClick={event => event.stopPropagation()}>
     {data.partial && <p className="settings-apply-note">В ответ были переданы выбранные части документа.</p>}
-    {sources.map(source => <details key={source.id}><summary>{source.id} · {source.label}</summary>{typeof source.text === "string"
+    {sources.map(source => <Disclosure materialKey={`document.fragment.${source.id}`} label={<span data-i18n-skip>{source.id} · {source.label}</span>} key={source.id}>{typeof source.text === "string"
       ? <p className="document-source-text" data-i18n-skip>{source.text}</p>
-      : <p className="settings-apply-note">Исходный текст не сохраняется в истории. Пока вложение доступно, откройте фрагмент через скрепку в беседе; после удаления или истечения срока прикрепите файл заново.</p>}</details>)}
-  </details>;
+      : <p className="settings-apply-note">Исходный текст не сохраняется в истории. Пока вложение доступно, откройте фрагмент через скрепку в беседе; после удаления или истечения срока прикрепите файл заново.</p>}</Disclosure>)}
+  </Disclosure>;
 }

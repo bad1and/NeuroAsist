@@ -1,3 +1,4 @@
+import { Disclosure } from "./Disclosure";
 import { useEffect, useRef, useState } from "react";
 import {
   IconInterfaceContentFile as FileText,
@@ -178,10 +179,10 @@ export function DocumentAttachment({ sessionId, disabled = false, onBusyChange }
     <AppDialog open={detailsOpen && Boolean(document) && !source} title="Документ в беседе" description={document?.name} icon={<FileText size={24} aria-hidden="true" />} variant="info" onClose={() => setDetailsOpen(false)}>
       <div className="document-attachment-details">
         <p>Файл доступен Iris в текущей беседе.</p>
-        <details>
-          <summary>Как используется файл</summary>
+        <Disclosure materialKey="document.usage" label={<>Как используется файл</>}>
+
           <p>Для ответа Iris отправляет нужные фрагменты внешней модели. В личную память они автоматически не добавляются. В истории остаются ответ и ссылки, без исходного текста файла. Прикрепите файл заново после его удаления из беседы, перезапуска Iris или через 2 часа.</p>
-        </details>
+        </Disclosure>
         <div className="document-source-actions">
           <label>Ссылка из ответа<input aria-label="ID фрагмента документа" value={sourceId} disabled={busy} onChange={event => setSourceId(event.target.value.toUpperCase().replace(/[^D0-9]/g, ""))} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); void inspectSource(); } }} placeholder="D1" /></label>
           <MaterialButton materialKey="document.inspect" className="secondary" type="button" disabled={busy} onClick={() => void inspectSource()}>Открыть фрагмент</MaterialButton>

@@ -1,3 +1,4 @@
+import { Disclosure } from "./Disclosure";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MaterialButton } from "./MaterialButton";
 import {
@@ -82,7 +83,7 @@ export function RemindersPanel({ plans, onChanged, query = "", sortOrder = "date
         {item.status === "open" && <div className="reminder-card-actions">
           <MaterialButton materialKey={`reminders.done.${item.id}`} className="secondary" disabled={busy} onClick={() => void patch(item, "completed")}>Готово</MaterialButton>
           <MaterialButton materialKey={`reminders.cancel.${item.id}`} className="text-button" disabled={busy} onClick={() => void patch(item, "cancelled")}>Отменить</MaterialButton>
-          {item.delivery_token && <details className="reminder-reschedule"><summary>Перенести</summary><ReminderReschedule item={item as Reminder} busy={busy} onSave={value => void run(() => updateReminder(item.id, { due_at: value }))} /></details>}
+          {item.delivery_token && <Disclosure materialKey={`reminder.reschedule.${item.id}`} label="Перенести" className="reminder-reschedule"><ReminderReschedule item={item as Reminder} busy={busy} onSave={value => void run(() => updateReminder(item.id, { due_at: value }))} /></Disclosure>}
         </div>}
       </div>
     </article>)}

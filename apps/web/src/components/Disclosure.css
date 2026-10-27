@@ -1,0 +1,14 @@
+.iris-disclosure { min-width: 0; }
+.iris-disclosure[hidden], .iris-disclosure-panel[hidden] { display: none !important; }
+.iris-disclosure-header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; min-width: 0; }
+.iris-disclosure-actions { display: flex; align-items: center; gap: 10px; margin-inline-start: auto; }
+button.iris-disclosure-trigger {
+  display: inline-flex; align-items: center; gap: 10px; width: fit-content; max-width: 100%; min-height: 44px;
+  padding: 11px 16px; border: 0; border-radius: var(--radius-control); corner-shape: var(--corner-shape);
+  text-align: left; white-space: normal; font-family: var(--font-ui); font-size: 13px; font-weight: 500; line-height: 1.5;
+}
+.iris-disclosure-trigger > .iris-disclosure-label { min-width: 0; overflow-wrap: anywhere; }
+.iris-disclosure-trigger > .iris-disclosure-chevron { flex: 0 0 20px; width: 20px; height: 20px; color: var(--color-text); }
+.iris-disclosure-panel { display: flow-root; min-width: 0; min-height: 0; }
+.iris-disclosure-content { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; padding-top: 12px; }
+.iris-disclosure-content > * { min-width: 0; }

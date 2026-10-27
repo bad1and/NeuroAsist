@@ -1,3 +1,4 @@
+import { Disclosure } from "./components/Disclosure";
 import { SlidingSegments } from "./components/SlidingSegments";
 import { LoadingRing } from "./components/LoadingRing";
 import { MaterialButton } from "./components/MaterialButton";
@@ -436,7 +437,6 @@ export function CodingAgentPage({
                   <div className="coding-detail-title-group">
                     <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                       <span className={`coding-status-pill status-${selected.status}`}>
-                        {ACTIVE_TASKS.has(selected.status) && <span className="journal-pulse-dot" />}
                         {statusLabel(selected.status)}
                       </span>
                       <span style={{ fontSize: "12px", color: "var(--color-text-muted)" }}>
@@ -491,12 +491,12 @@ export function CodingAgentPage({
                 )}
 
                 {selected.patch_text && (
-                  <details className="coding-diff" open>
-                    <summary>
+                  <Disclosure materialKey={`coding.diff.${selected.id}`} label={<>
                       <IconInterfaceFilesFolderCopy2 size={16} /> Diff и изменённые файлы
-                    </summary>
+                    </>} className="coding-diff" defaultOpen>
+
                     <PatchReview patch={selected.patch_text} />
-                  </details>
+                  </Disclosure>
                 )}
 
                 <div className="coding-subgrid">
@@ -712,7 +712,6 @@ export function CodingAgentPage({
                       >
                         <div className="coding-task-card-header">
                           <span className={`coding-status-pill status-${task.status}`}>
-                            {ACTIVE_TASKS.has(task.status) && <span className="journal-pulse-dot" />}
                             {statusLabel(task.status)}
                           </span>
                           <time style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>
