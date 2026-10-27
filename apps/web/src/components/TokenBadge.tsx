@@ -1,4 +1,5 @@
 import { MaterialButton } from "./MaterialButton";
+import { DisclosureTrigger } from "./Disclosure";
 import { useState, useRef, useEffect, useId } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -6,7 +7,6 @@ import {
   IconInterfaceCopy as Copy,
   IconInterfaceCheck as Check,
   IconInterfaceCross as X,
-  IconInterfaceChevronDown as ChevronDown,
   IconInterfaceChevronRight as ChevronRight,
   IconInterfaceTerminal as Terminal,
   IconInterfaceClock as Clock3,
@@ -131,10 +131,9 @@ export function TokenDialogContent({ tokens, role, onClose }: TokenDialogContent
 
       {/* Raw JSON toggle */}
       <div className="token-raw-section">
-        <MaterialButton materialKey={"TokenBadge.button-1"}
-          type="button"
-          className="secondary token-raw-toggle-btn"
-          aria-expanded={showRawJson}
+        <DisclosureTrigger materialKey={"TokenBadge.button-1"}
+          className="token-raw-toggle-btn"
+          open={showRawJson}
           aria-controls={rawJsonId}
           onClick={() => setShowRawJson((prev) => !prev)}
         >
@@ -142,8 +141,7 @@ export function TokenDialogContent({ tokens, role, onClose }: TokenDialogContent
             <Terminal size={15} aria-hidden="true" />
             <span>JSON ответа</span>
           </span>
-          <ChevronDown size={15} aria-hidden="true" />
-        </MaterialButton>
+        </DisclosureTrigger>
 
         <div id={rawJsonId} className="token-raw-content" hidden={!showRawJson}>
           {showRawJson && <>

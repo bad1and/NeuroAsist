@@ -1,0 +1,69 @@
+/* Bklit utilities only: Iris owns the global reset, palette and typography. */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+
+@custom-variant dark (&:is(.dark *));
+@source "./";
+
+@theme inline {
+    --color-chart-line-primary: var(--chart-line-primary);
+    --color-chart-line-secondary: var(--chart-line-secondary);
+    --color-chart-brush-border: var(--chart-brush-border);
+    --color-chart-tooltip-background: var(--chart-tooltip-background);
+    --color-chart-tooltip-foreground: var(--chart-tooltip-foreground);
+    --color-chart-tooltip-muted: var(--chart-tooltip-muted);
+    --color-chart-scale-02: var(--chart-scale-02);
+    --color-chart-scale-03: var(--chart-scale-03);
+    --color-chart-scale-04: var(--chart-scale-04);
+    --color-chart-scale-05: var(--chart-scale-05);
+    --color-chart-segment-line: var(--chart-segment-line);
+    --color-chart-segment-background: var(--chart-segment-background);
+    --color-chart-marker-badge-foreground: var(--chart-marker-badge-foreground);
+    --color-chart-marker-badge-background: var(--chart-marker-badge-background);
+    --color-chart-indicator-secondary-color: var(--chart-indicator-secondary-color);
+    --color-chart-indicator-color: var(--chart-indicator-color);
+    --color-chart-scale-pattern-color: var(--chart-scale-pattern-color);
+    --color-chart-scale-01: var(--chart-scale-01);
+    --color-chart-scale-mix: var(--chart-scale-mix);
+    --color-chart-label: var(--chart-label);
+    --color-chart-marker-foreground: var(--chart-marker-foreground);
+    --color-chart-marker-border: var(--chart-marker-border);
+    --color-chart-marker-background: var(--chart-marker-background);
+    --color-chart-grid: var(--chart-grid);
+    --color-chart-crosshair: var(--chart-crosshair);
+    --color-chart-foreground-muted: var(--chart-foreground-muted);
+    --color-chart-foreground: var(--chart-foreground);
+    --color-chart-background: var(--chart-background);
+    --color-chart-negative: var(--chart-negative);
+    --color-chart-positive: var(--chart-positive);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+}
+
+/* Iris is dark-only. Every chart token follows the host design tokens. */
+.iris-charts {
+  --chart-1: var(--color-chart-primary);
+  --chart-2: var(--color-chart-secondary);
+  --chart-3: var(--color-chart-tertiary);
+  --chart-4: var(--color-chart-quaternary);
+  --chart-5: var(--color-chart-quinary);
+  --chart-background: var(--color-surface);
+  --chart-foreground: var(--color-text);
+  --chart-foreground-muted: var(--color-text-muted);
+  --chart-line-primary: var(--chart-1);
+  --chart-line-secondary: var(--chart-2);
+  --chart-grid: color-mix(in oklch, var(--color-text-muted) 14%, transparent);
+  --chart-label: var(--color-text-muted);
+  --chart-crosshair: color-mix(in oklch, var(--color-text-soft) 40%, transparent);
+  --chart-tooltip-background: var(--color-surface-raised);
+  --chart-tooltip-foreground: var(--color-text);
+  --chart-tooltip-muted: var(--color-text-muted);
+  --chart-brush-border: var(--color-rule);
+  --foreground: var(--color-text);
+  --muted-foreground: var(--color-text-muted);
+  --popover: var(--color-surface-raised);
+  --popover-foreground: var(--color-text);
+}

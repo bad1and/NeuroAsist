@@ -1,22 +1,11 @@
-import { SlidingSegments } from "./SlidingSegments";
+import { Disclosure } from "./Disclosure";
 import { MaterialButton } from "./MaterialButton";
-import { useState, useEffect, useCallback, useMemo } from "react";
-import {
-  IconInterfaceLightning as Zap,
-  IconInterfaceRefresh as RefreshCw,
-  IconInterfaceDeleteBin3 as Trash2,
-  IconInterfaceTrendingUp as TrendingUp,
-  IconInterfaceServer as Server,
-  IconInterfaceChevronLeft as ChevronLeft,
-  IconInterfaceChevronRight as ChevronRight,
-  IconInterfaceCheck as Check,
-  IconInterfaceCopy as Copy,
-  IconInterfaceTerminal as Terminal,
-  IconInterfaceLayers as Layers,
-} from "../CustomIcons";
+import { IconInterfaceActivity } from "../CustomIcons";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { getLlmTokenStats, getLlmTokenRecords, resetLlmTokenStats } from "../api";
 import { AppDialog } from "./AppDialog";
-import { TokenUsageChart } from "./TokenUsageChart";
+import { ExpenseDashboard } from "./ExpenseDashboard";
+import { RequestJournal, RequestRecordDetails } from "./RequestJournal";
 import type { TokenUsageStats, TokenRecordItem, TokenRecordsResponse } from "../types";
 
 const PURPOSE_LABELS: Record<string, string> = {
@@ -49,27 +38,6 @@ export const CATEGORY_TABS: { id: PurposeCategory; label: string; purposes?: str
   { id: "coding", label: "Coding Agent", purposes: ["coding"] },
 ];
 
-function formatNum(num?: number): string {
-  if (num === undefined || num === null || isNaN(num)) return "0";
-  return num.toLocaleString().replace(/\u00a0/g, " ");
-}
-
-function formatCost(usd?: number): string {
-  if (usd === undefined || usd === null || isNaN(usd)) return "Нет данных";
-  if (usd > 0 && usd < 0.0001) return "<$0.0001";
-  return `$${usd.toFixed(4)}`;
-}
-
-function formatTimeOnly(ts: number): string {
-  const d = new Date(ts * 1000);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function formatDateTime(ts: number): string {
-  const d = new Date(ts * 1000);
-  return `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
-}
-
 export function TokenAnalyticsSettings() {
   const [timeframe, setTimeframe] = useState<"24h" | "7d" | "30d" | "all">("24h");
   const [stats, setStats] = useState<TokenUsageStats | null>(null);
@@ -78,9 +46,14 @@ export function TokenAnalyticsSettings() {
   const [purposeFilter, setPurposeFilter] = useState<string>("");
   const [page, setPage] = useState(0);
   const pageSize = 20;
+  const journalRef = useRef<HTMLDivElement>(null);
+  const [journalOpen, setJournalOpen] = useState(false);
+  const statsRequest = useRef(0);
+  const recordsRequest = useRef(0);
 
   const [loading, setLoading] = useState(true);
   const [recordsLoading, setRecordsLoading] = useState(false);
+  const [recordsError, setRecordsError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Modals & Details
@@ -108,27 +81,31 @@ export function TokenAnalyticsSettings() {
   }, [currentCategory]);
 
   const fetchStats = useCallback(async (tf = timeframe) => {
+    const request = ++statsRequest.current;
+    setStats(previous => previous?.timeframe === tf ? previous : null);
     setLoading(true);
     setError(null);
     try {
       const data = await getLlmTokenStats(tf);
-      setStats(data);
+      if (request === statsRequest.current) setStats(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось загрузить статистику токенов");
+      if (request === statsRequest.current) setError(err instanceof Error ? err.message : "Не удалось загрузить статистику токенов");
     } finally {
-      setLoading(false);
+      if (request === statsRequest.current) setLoading(false);
     }
   }, [timeframe]);
 
   const fetchRecords = useCallback(async (currPage = page, purpose = effectivePurpose) => {
+    const request = ++recordsRequest.current;
     setRecordsLoading(true);
+    setRecordsError(null);
     try {
       const data = await getLlmTokenRecords(pageSize, currPage * pageSize, purpose || undefined);
-      setRecordsResponse(data);
-    } catch {
-      // Keep previous records
+      if (request === recordsRequest.current) setRecordsResponse(data);
+    } catch (err) {
+      if (request === recordsRequest.current) setRecordsError(err instanceof Error ? err.message : "Не удалось загрузить журнал запросов");
     } finally {
-      setRecordsLoading(false);
+      if (request === recordsRequest.current) setRecordsLoading(false);
     }
   }, [page, effectivePurpose]);
 
@@ -146,7 +123,7 @@ export function TokenAnalyticsSettings() {
       await resetLlmTokenStats();
       setShowResetDialog(false);
       await fetchStats();
-      await fetchRecords(0, purposeFilter);
+      await fetchRecords(0, effectivePurpose);
       setPage(0);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось сбросить статистику");
@@ -166,443 +143,47 @@ export function TokenAnalyticsSettings() {
     }
   };
 
-  const timeseries = stats?.timeseries ?? [];
-  const totalPages = recordsResponse ? Math.ceil(recordsResponse.total / pageSize) : 1;
-
   return (
     <div className="token-analytics-page">
-      <p className="settings-apply-note">Стоимость рассчитана по учтённым токенам. Итог у провайдера может отличаться; это оценка расходов.</p>
-      {/* Top Header */}
-      <div className="token-analytics-header">
-        <div className="token-analytics-title-group">
-          <div className="token-analytics-title-icon">
-            <Zap size={20} />
-          </div>
-          <div>
-            <h2>Статистика запросов</h2>
-            <p className="token-analytics-subtitle">
-              Запросы к модели и примерная стоимость работы Iris.
-            </p>
-          </div>
-        </div>
+      <ExpenseDashboard stats={stats?.timeframe === timeframe ? stats : null} loading={loading} error={error} timeframe={timeframe}
+        onTimeframe={setTimeframe} onRefresh={() => { void fetchStats(); void fetchRecords(); }}
+        onReset={() => setShowResetDialog(true)} purposeLabels={PURPOSE_LABELS}
+        onPurpose={purpose => {
+          setSelectedCategory("all");
+          setPurposeFilter(purpose);
+          setPage(0);
+          const journal = journalRef.current;
+          setJournalOpen(true);
+          journal?.scrollIntoView?.({ behavior: "instant", block: "start" });
+        }} />
 
-        <div className="token-analytics-controls">
-          {/* Timeframe pill selector */}
-          <SlidingSegments className="token-timeframe-selector" value={timeframe} aria-label="Временной диапазон">
-            {(
-              [
-                { key: "24h", label: "24 ч" },
-                { key: "7d", label: "7 дн" },
-                { key: "30d", label: "30 дн" },
-                { key: "all", label: "Всё время" },
-              ] as const
-            ).map((tf) => (
-              <MaterialButton appearance="plain" materialKey={["TokenAnalyticsSettings.button-1", tf.key].join(":")}
-                key={tf.key}
-                type="button"
-                className={`token-timeframe-btn ${timeframe === tf.key ? "active" : ""}`} aria-pressed={timeframe === tf.key}
-                onClick={() => setTimeframe(tf.key)}
-              >
-                {tf.label}
-              </MaterialButton>
-            ))}
-          </SlidingSegments>
-
-          <MaterialButton materialKey={"TokenAnalyticsSettings.button-2"}
-            type="button"
-            className="secondary icon-btn-text"
-            onClick={() => {
-              void fetchStats();
-              void fetchRecords();
-            }}
-            disabled={loading}
-            title="Обновить данные"
-          >
-            <RefreshCw size={15} className={loading ? "spin" : ""} />
-            <span>Обновить</span>
-          </MaterialButton>
-
-          <MaterialButton materialKey={"TokenAnalyticsSettings.button-3"}
-            type="button"
-            className="secondary icon-btn-text token-reset-btn"
-            onClick={() => setShowResetDialog(true)}
-            title="Очистить журнал токенов"
-          >
-            <Trash2 size={15} />
-            <span>Сброс</span>
-          </MaterialButton>
-        </div>
-      </div>
-
-      {error && <div className="notice error-banner">{error}</div>}
-
-      {/* KPI Cards Grid */}
-      <div className="token-kpi-grid">
-        {/* 1. Total Tokens */}
-        <div className="token-kpi-card">
-          <div className="token-kpi-header">
-            <span className="token-kpi-label">Всего токенов</span>
-          </div>
-          <div className="token-kpi-value text-total" data-testid="kpi-total-tokens">
-            {formatNum(stats?.total_tokens)}
-          </div>
-          <div className="token-kpi-footer">
-            <span className="text-prompt">In: {formatNum(stats?.prompt_tokens)}</span>
-            <span className="dot-divider">·</span>
-            <span className="text-completion">Out: {formatNum(stats?.completion_tokens)}</span>
-          </div>
-        </div>
-
-        {/* 2. Cache Hit Rate */}
-        <div className="token-kpi-card">
-          <div className="token-kpi-header">
-            <span className="token-kpi-label">Токены из кэша</span>
-          </div>
-          <div className="token-kpi-value text-cache" data-testid="kpi-cache-rate">
-            {stats ? `${stats.cache_hit_rate.toFixed(1)}%` : "0.0%"}
-          </div>
-          <div className="token-kpi-footer">
-            <span className="text-hit">Hit: {formatNum(stats?.cache_hit_tokens)}</span>
-            <span className="dot-divider">·</span>
-            <span className="text-miss">Miss: {formatNum(stats?.cache_miss_tokens)}</span>
-          </div>
-        </div>
-
-        {/* 3. Requests & Latency */}
-        <div className="token-kpi-card">
-          <div className="token-kpi-header">
-            <span className="token-kpi-label">Запросы и скорость</span>
-          </div>
-          <div className="token-kpi-value">
-            {formatNum(stats?.request_count)} <span className="kpi-unit">вызовов</span>
-          </div>
-          <div className="token-kpi-footer">
-            <span>Средняя: {stats?.latency_avg_ms ?? 0} мс</span>
-            <span className="dot-divider">·</span>
-            <span>p95: {stats?.latency_p95_ms ?? 0} мс</span>
-          </div>
-        </div>
-
-        {/* 4. Estimated Cost */}
-        <div className="token-kpi-card">
-          <div className="token-kpi-header">
-            <span className="token-kpi-label">Расходы (DeepSeek)</span>
-          </div>
-          <div className="token-kpi-value text-cost" data-testid="kpi-cost">
-            {formatCost(stats?.estimated_cost_usd)}
-          </div>
-          <div className="token-kpi-footer">
-            <span>$0.07/M cached in · $1.10/M out</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Timeseries Chart Card (Bklit UI) */}
-      <div className="token-chart-card">
-        <div className="token-chart-header">
-          <div className="token-chart-title-wrap">
-            <TrendingUp size={16} className="text-accent" />
-            <h3>Динамика расхода токенов</h3>
-          </div>
-          <div className="token-chart-legend">
-            <div className="legend-item">
-              <span className="legend-dot prompt-dot" />
-              <span>Prompt</span>
-            </div>
-            <div className="legend-item">
-              <span className="legend-dot completion-dot" />
-              <span>Output</span>
-            </div>
-            <div className="legend-item">
-              <span className="legend-dot cache-dot" />
-              <span>Cache Hit</span>
-            </div>
-          </div>
-        </div>
-
-        <TokenUsageChart timeseries={timeseries} timeframe={timeframe} />
-      </div>
-
-      {/* Breakdowns 2-Column Section */}
-      <div className="token-breakdown-grid">
-        {/* By Purpose */}
-        <div className="token-breakdown-card">
-          <div className="breakdown-card-header">
-            <Layers size={16} className="text-accent" />
-            <h4>Распределение по назначению</h4>
-          </div>
-          <div className="breakdown-list">
-            {stats && Object.keys(stats.by_purpose).length > 0 ? (
-              Object.entries(stats.by_purpose).map(([purposeKey, data]) => {
-                const percent = stats.total_tokens > 0
-                  ? Math.round((data.total / stats.total_tokens) * 100)
-                  : 0;
-                return (
-                  <div key={purposeKey} className="breakdown-item">
-                    <div className="breakdown-item-top">
-                      <span className="breakdown-name">
-                        {PURPOSE_LABELS[purposeKey] || purposeKey}
-                      </span>
-                      <span className="breakdown-nums">
-                        <strong>{formatNum(data.total)}</strong> ({percent}%) · {data.request_count} вызовов
-                      </span>
-                    </div>
-                    <div className="breakdown-bar-bg">
-                      <div
-                        className="breakdown-bar-val"
-                        style={{ width: `${Math.max(3, percent)}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="empty-subtext">Нет записей за период</div>
-            )}
-          </div>
-        </div>
-
-        {/* By Model */}
-        <div className="token-breakdown-card">
-          <div className="breakdown-card-header">
-            <Server size={16} className="text-accent" />
-            <h4>Распределение по моделям</h4>
-          </div>
-          <div className="breakdown-list">
-            {stats && Object.keys(stats.by_model).length > 0 ? (
-              Object.entries(stats.by_model).map(([modelKey, data]) => {
-                const percent = stats.total_tokens > 0
-                  ? Math.round((data.total / stats.total_tokens) * 100)
-                  : 0;
-                return (
-                  <div key={modelKey} className="breakdown-item">
-                    <div className="breakdown-item-top">
-                      <span className="breakdown-name model-code">{modelKey}</span>
-                      <span className="breakdown-nums">
-                        <strong>{formatNum(data.total)}</strong> ({percent}%) · {data.request_count} вызовов
-                      </span>
-                    </div>
-                    <div className="breakdown-bar-bg">
-                      <div
-                        className="breakdown-bar-val model-bar"
-                        style={{ width: `${Math.max(3, percent)}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="empty-subtext">Нет записей за период</div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Raw Requests Table Card */}
-      <div className="token-records-card">
-        <div className="records-card-header">
-          <div className="records-card-title-group">
-            <Terminal size={17} className="text-accent" />
-            <h3>Журнал запросов к модели</h3>
-            <span className="records-count-badge">
-              Всего: {recordsResponse?.total ?? 0}
-            </span>
-          </div>
-
-          <div className="records-filter-group">
-            <select
-              value={purposeFilter}
-              onChange={(e) => {
-                setPurposeFilter(e.target.value);
-                setPage(0);
-              }}
-              className="records-purpose-select"
-              aria-label="Фильтр по назначению"
-            >
-              <option value="">
-                {selectedCategory === "all" ? "Все операции" : "Все в этой категории"}
-              </option>
-              {availablePurposes.map(([k, v]) => (
-                <option key={k} value={k}>{v}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* High-level Category Tabs */}
-        <SlidingSegments className="records-category-tabs" role="tablist" value={selectedCategory} aria-label="Категории вызовов LLM">
-          {CATEGORY_TABS.map((cat) => (
-            <MaterialButton appearance="plain" materialKey={["TokenAnalyticsSettings.button-4", cat.id].join(":")}
-              key={cat.id}
-              type="button"
-              role="tab"
-              aria-selected={selectedCategory === cat.id}
-              tabIndex={selectedCategory === cat.id ? 0 : -1}
-              className={`records-category-tab ${selectedCategory === cat.id ? "active" : ""}`}
-              onClick={() => {
-                setSelectedCategory(cat.id);
-                setPurposeFilter("");
-                setPage(0);
-              }}
-            >
-              {cat.label}
-            </MaterialButton>
-          ))}
-        </SlidingSegments>
-
-        <div className="records-table-wrapper">
-          <table className="token-records-table">
-            <thead>
-              <tr>
-                <th>Время</th>
-                <th>Назначение</th>
-                <th>Модель</th>
-                <th>Prompt (Hit/Miss)</th>
-                <th>Output</th>
-                <th>Всего</th>
-                <th>Задержка</th>
-                <th>Статус</th>
-                <th>JSON</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recordsResponse?.items && recordsResponse.items.length > 0 ? (
-                recordsResponse.items.map((r, i) => (
-                  <tr key={`${r.request_id}-${i}`} className="records-table-row">
-                    <td className="cell-time" title={formatDateTime(r.timestamp)}>
-                      {formatTimeOnly(r.timestamp)}
-                    </td>
-                    <td>
-                      <span className="purpose-badge">
-                        {PURPOSE_LABELS[r.purpose] || r.purpose}
-                      </span>
-                    </td>
-                    <td className="cell-model">
-                      <code className="model-tag">{r.model}</code>
-                    </td>
-                    <td>
-                      <span className="text-prompt">{formatNum(r.prompt)}</span>
-                      {r.cache_hit > 0 && (
-                        <span className="cache-mini-tag hit">+{formatNum(r.cache_hit)}</span>
-                      )}
-                    </td>
-                    <td>
-                      <span className="text-completion">{formatNum(r.completion)}</span>
-                      {r.reasoning > 0 && (
-                        <span className="reasoning-mini-tag">R: {formatNum(r.reasoning)}</span>
-                      )}
-                    </td>
-                    <td className="cell-total">
-                      <strong>{formatNum(r.total)}</strong>
-                    </td>
-                    <td className="cell-latency">{r.latency_ms} мс</td>
-                    <td>
-                      <span className={`status-tag ${r.status === "success" ? "success" : "error"}`}>
-                        {r.status === "success" ? "200 OK" : "Ошибка"}
-                      </span>
-                    </td>
-                    <td>
-                      <MaterialButton materialKey={["TokenAnalyticsSettings.button-5", `${r.request_id}-${i}`].join(":")}
-                        type="button"
-                        className="inspect-btn"
-                        onClick={() => setInspectRecord(r)}
-                        title="Открыть JSON"
-                        aria-label="Открыть JSON"
-                      >
-                        <Terminal size={13} />
-                      </MaterialButton>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={9} className="records-empty">
-                    {recordsLoading ? "Загрузка журнала запросов…" : "Журнал вызовов пуст"}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Pagination footer */}
-        {totalPages > 1 && (
-          <div className="records-pagination">
-            <span>
-              Страница {page + 1} из {totalPages}
-            </span>
-            <div className="pagination-buttons">
-              <MaterialButton materialKey={"TokenAnalyticsSettings.button-6"}
-                type="button"
-                className="secondary pagination-btn"
-                disabled={page === 0 || recordsLoading}
-                onClick={() => setPage((p) => Math.max(0, p - 1))}
-              >
-                <ChevronLeft size={15} />
-                <span>Назад</span>
-              </MaterialButton>
-              <MaterialButton materialKey={"TokenAnalyticsSettings.button-7"}
-                type="button"
-                className="secondary pagination-btn"
-                disabled={page >= totalPages - 1 || recordsLoading}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                <span>Вперед</span>
-                <ChevronRight size={15} />
-              </MaterialButton>
-            </div>
-          </div>
-        )}
-      </div>
+      <Disclosure materialKey="requests.journal" label="Подробный журнал запросов" ref={journalRef}
+        open={journalOpen} onOpenChange={setJournalOpen} className="settings-technical-details expense-journal" regionLabel="Журнал запросов">
+        <RequestJournal records={recordsResponse} loading={recordsLoading} error={recordsError} visible={journalOpen}
+          categories={CATEGORY_TABS} category={selectedCategory} purpose={purposeFilter} purposeOptions={availablePurposes}
+          purposeLabels={PURPOSE_LABELS} page={page} pageSize={pageSize} onPage={setPage}
+          onCategory={category => { setSelectedCategory(category); setPurposeFilter(""); setPage(0); }}
+          onPurpose={purpose => { setPurposeFilter(purpose); setPage(0); }}
+          onClearFilters={() => { setSelectedCategory("all"); setPurposeFilter(""); setPage(0); }}
+          onRefresh={() => { void fetchRecords(); }}
+          onInspect={record => { setCopiedInspect(false); setInspectRecord(record); }} />
+      </Disclosure>
 
       {/* Inspect Raw JSON Dialog */}
       <AppDialog
         open={Boolean(inspectRecord)}
         title="Подробности запроса"
+        icon={<IconInterfaceActivity size={20} />}
+        size="wide"
+        className="request-inspect-dialog"
         description={inspectRecord ? `Запрос: ${inspectRecord.request_id}` : ""}
         onClose={() => setInspectRecord(null)}
         variant="info"
       >
         <div className="inspect-dialog-body">
-          {inspectRecord && (
-            <>
-              <div className="inspect-meta-grid">
-                <div>
-                  <span className="meta-label">Модель:</span>
-                  <strong>{inspectRecord.model}</strong>
-                </div>
-                <div>
-                  <span className="meta-label">Назначение:</span>
-                  <strong>{PURPOSE_LABELS[inspectRecord.purpose] || inspectRecord.purpose}</strong>
-                </div>
-                <div>
-                  <span className="meta-label">Задержка:</span>
-                  <strong>{inspectRecord.latency_ms} мс</strong>
-                </div>
-                <div>
-                  <span className="meta-label">Всего токенов:</span>
-                  <strong>{formatNum(inspectRecord.total)}</strong>
-                </div>
-              </div>
-
-              <div className="inspect-json-box">
-                <div className="inspect-json-header">
-                  <span>JSON записи</span>
-                  <MaterialButton materialKey={"TokenAnalyticsSettings.button-8"}
-                    type="button"
-                    className="token-copy-btn"
-                    onClick={handleCopyInspectJson}
-                  >
-                    {copiedInspect ? <Check size={13} /> : <Copy size={13} />}
-                    <span>{copiedInspect ? "Скопировано!" : "Копировать JSON"}</span>
-                  </MaterialButton>
-                </div>
-                <pre className="inspect-pre">
-                  <code>{JSON.stringify(inspectRecord, null, 2)}</code>
-                </pre>
-              </div>
-            </>
-          )}
+          {inspectRecord && <RequestRecordDetails record={inspectRecord}
+            label={PURPOSE_LABELS[inspectRecord.purpose] || inspectRecord.purpose}
+            copied={copiedInspect} onCopy={() => { void handleCopyInspectJson(); }} />}
           <div className="dialog-actions" style={{ marginTop: 16 }}>
             <MaterialButton materialKey={"TokenAnalyticsSettings.button-9"}
               type="button"

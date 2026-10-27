@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const api = vi.hoisted(() => ({
@@ -88,17 +88,17 @@ describe("TokenAnalyticsSettings component", () => {
   it("renders header, KPI cards, and breakdowns", async () => {
     render(<TokenAnalyticsSettings />);
 
-    expect(screen.getByRole("heading", { name: "Статистика запросов" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Расходы и запросы" })).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByTestId("kpi-total-tokens")).toHaveTextContent("12 450");
       expect(screen.getByTestId("kpi-cache-rate")).toHaveTextContent("80.0%");
       expect(screen.getByTestId("kpi-cost")).toHaveTextContent("$0.0035");
     });
 
-    expect(screen.getByText("Динамика расхода токенов")).toBeInTheDocument();
-    expect(screen.getByText("Распределение по назначению")).toBeInTheDocument();
+    expect(screen.getByText("Активность Iris")).toBeInTheDocument();
+    expect(screen.getByText("На что уходят токены")).toBeInTheDocument();
     expect(screen.getAllByText("Чат / Диалог").length).toBeGreaterThan(0);
-    expect(screen.getByText("Распределение по моделям")).toBeInTheDocument();
+    expect(screen.getByText("Использование моделей")).toBeInTheDocument();
     expect(screen.getAllByText("deepseek-flash").length).toBeGreaterThan(0);
   });
 
@@ -114,16 +114,124 @@ describe("TokenAnalyticsSettings component", () => {
     });
   });
 
+  it("explains unavailable data instead of presenting zero expenses", async () => {
+    api.getLlmTokenStats.mockRejectedValueOnce(new Error("Статистика недоступна"));
+    render(<TokenAnalyticsSettings />);
+    await screen.findByRole("alert");
+    expect(screen.getByTestId("kpi-cost")).toHaveTextContent("—");
+    expect(screen.getByText("График недоступен")).toBeInTheDocument();
+    expect(screen.queryByText("Здесь появится активность")).not.toBeInTheDocument();
+  });
+
+  it("shows zero expenses and an empty chart when the period truly has no requests", async () => {
+    api.getLlmTokenStats.mockResolvedValueOnce({ ...mockStats, total_tokens: 0, request_count: 0, estimated_cost_usd: 0,
+      timeseries: [], by_purpose: {}, by_model: {} });
+    render(<TokenAnalyticsSettings />);
+    await screen.findByText("Здесь появится активность");
+    expect(screen.getByTestId("kpi-cost")).toHaveTextContent("$0.0000");
+  });
+
+  it("ignores a late response from the previous period", async () => {
+    let resolveOld!: (value: TokenUsageStats) => void;
+    api.getLlmTokenStats.mockImplementation((timeframe: string) => timeframe === "24h"
+      ? new Promise<TokenUsageStats>(resolve => { resolveOld = resolve; })
+      : Promise.resolve({ ...mockStats, timeframe: "7d", total_tokens: 70000 }));
+    render(<TokenAnalyticsSettings />);
+    fireEvent.click(screen.getByRole("button", { name: "7 дн" }));
+    await waitFor(() => expect(screen.getByTestId("kpi-total-tokens")).toHaveTextContent("70 000"));
+    await act(async () => resolveOld(mockStats));
+    expect(screen.getByTestId("kpi-total-tokens")).toHaveTextContent("70 000");
+    expect(screen.getByRole("button", { name: "7 дн" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("opens the journal filtered by the selected chart purpose", async () => {
+    render(<TokenAnalyticsSettings />);
+    const purpose = await screen.findByRole("button", { name: /Чат \/ Диалог:.*Открыть запросы/ });
+    fireEvent.click(purpose);
+    await waitFor(() => expect(api.getLlmTokenRecords).toHaveBeenLastCalledWith(20, 0, "chat"));
+    expect(screen.getByRole("button", { name: "Подробный журнал запросов" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("preserves the selected journal category after a statistics reset", async () => {
+    render(<TokenAnalyticsSettings />);
+    fireEvent.click(screen.getByText("Подробный журнал запросов"));
+    fireEvent.click(screen.getByRole("tab", { name: "Память и рефлексия" }));
+    await waitFor(() => expect(api.getLlmTokenRecords).toHaveBeenLastCalledWith(20, 0,
+      "memory,reflection,memory_extraction,memory_synthesis,memory_conflict"));
+    fireEvent.click(screen.getByTitle("Очистить журнал токенов"));
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить все данные токенов" }));
+    await waitFor(() => expect(api.resetLlmTokenStats).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(api.getLlmTokenRecords).toHaveBeenLastCalledWith(20, 0,
+      "memory,reflection,memory_extraction,memory_synthesis,memory_conflict"));
+  });
+
+  it("exposes chart metric and aggregation selection", async () => {
+    render(<TokenAnalyticsSettings />);
+    await waitFor(() => expect(screen.getByTestId("kpi-total-tokens")).toHaveTextContent("12 450"));
+    fireEvent.click(screen.getByRole("button", { name: "Кэш" }));
+    expect(screen.getByRole("button", { name: "Кэш" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Накопительно" }));
+    expect(screen.getByRole("button", { name: "Накопительно" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(/Сумма с начала выбранного периода/)).toBeInTheDocument();
+  });
+
   it("allows inspecting request details in dialog", async () => {
     render(<TokenAnalyticsSettings />);
-    await waitFor(() => expect(screen.getByTitle("Открыть JSON")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Подробный журнал запросов"));
+    await waitFor(() => expect(screen.getByTitle("Подробности запроса")).toBeInTheDocument());
 
-    const inspectBtn = screen.getByTitle("Открыть JSON");
+    const inspectBtn = screen.getByTitle("Подробности запроса");
     fireEvent.click(inspectBtn);
 
     expect(screen.getByText("Подробности запроса")).toBeInTheDocument();
     expect(screen.getByText("Запрос: req-12345")).toBeInTheDocument();
     expect(screen.getByText("JSON записи")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "JSON запроса" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "JSON записи" }));
+    expect(screen.getByRole("region", { name: "JSON запроса" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Копировать JSON" })).toBeInTheDocument();
+  });
+
+  it("keeps unknown token usage distinct from a measured zero", async () => {
+    api.getLlmTokenRecords.mockResolvedValueOnce({ ...mockRecords, items: [{ ...mockRecords.items[0], usage_available: false, total: 0, prompt: 0, completion: 0, cache_hit: 0 }] });
+    render(<TokenAnalyticsSettings />);
+    fireEvent.click(screen.getByRole("button", { name: "Подробный журнал запросов" }));
+    const record = await screen.findByRole("button", { name: /^Открыть запрос:/ });
+    expect(record).toHaveTextContent("не учтены");
+    expect(record).not.toHaveTextContent("200 OK");
+    fireEvent.click(record);
+    expect(screen.getByText("Модель не передала расход токенов для этого запроса.")).toBeInTheDocument();
+  });
+
+  it("loads the next page and returns to the first page on category change", async () => {
+    api.getLlmTokenRecords.mockResolvedValue({ ...mockRecords, total: 44 });
+    render(<TokenAnalyticsSettings />);
+    fireEvent.click(screen.getByRole("button", { name: "Подробный журнал запросов" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Следующая страница запросов" }));
+    await waitFor(() => expect(api.getLlmTokenRecords).toHaveBeenLastCalledWith(20, 20, undefined));
+    fireEvent.click(screen.getByRole("tab", { name: "Память и рефлексия" }));
+    await waitFor(() => expect(api.getLlmTokenRecords).toHaveBeenLastCalledWith(20, 0,
+      "memory,reflection,memory_extraction,memory_synthesis,memory_conflict"));
+  });
+
+  it("retries a journal error without clearing the selected filters", async () => {
+    api.getLlmTokenRecords.mockRejectedValueOnce(new Error("Сервис недоступен"));
+    render(<TokenAnalyticsSettings />);
+    fireEvent.click(screen.getByRole("button", { name: "Подробный журнал запросов" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось загрузить запросы");
+    fireEvent.click(screen.getByRole("button", { name: "Попробовать снова" }));
+    expect(await screen.findByRole("button", { name: /^Открыть запрос:/ })).toBeInTheDocument();
+    expect(screen.queryByText("Сервис недоступен")).not.toBeInTheDocument();
+  });
+
+  it("retains the journal tab keyboard and accessibility contract", async () => {
+    render(<TokenAnalyticsSettings />);
+    fireEvent.click(screen.getByRole("button", { name: "Подробный журнал запросов" }));
+    const all = screen.getByRole("tab", { name: "Все назначения" });
+    all.focus();
+    fireEvent.keyDown(all, { key: "ArrowRight" });
+    expect(screen.getByRole("tab", { name: "Диалог и голос" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Диалог и голос" })).toHaveFocus();
   });
 
   it("shows confirmation modal and resets statistics", async () => {
@@ -144,6 +252,7 @@ describe("TokenAnalyticsSettings component", () => {
 
   it("filters records by clicking category tabs", async () => {
     render(<TokenAnalyticsSettings />);
+    fireEvent.click(screen.getByText("Подробный журнал запросов"));
     await waitFor(() => expect(api.getLlmTokenRecords).toHaveBeenCalled());
 
     const memoryTab = screen.getByRole("tab", { name: "Память и рефлексия" });
