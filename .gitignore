@@ -194,13 +194,6 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-# Cursor  
-#  Cursor is an AI-powered code editor.`.cursorignore` specifies files/directories to 
-#  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data
-#  refer to https://docs.cursor.com/context/ignore-files
-.cursorignore
-.cursorindexingignore
-
 # Unity generated files (Unity source/assets remain tracked when colocated)
 [Ll]ibrary/
 [Tt]emp/
@@ -219,9 +212,6 @@ data/stt-private-corpus/
 data/stt-*.json
 
 # Repository-local tools, exports, and experiment scratch space
-/.agents/
-/.hallmark/
-/.playwright-mcp/
 /Audio/
 /from iris/
 /lottie-player/
@@ -236,7 +226,6 @@ apps/avatar-unity/Assets/InitTestScene*.unity.meta
 apps/avatar-unity/*.csproj
 apps/avatar-unity/*.sln
 apps/avatar-unity/.vsconfig
-rules.md
 
 # Promotional materials and renders
 promo/

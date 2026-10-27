@@ -8,7 +8,7 @@ are described in the [desktop guide](../desktop/README.md#avatar-placement).
 [Hardware requirements](../../Docs/system-requirements.md) include the reference
 GPU; a minimum GPU for this avatar has not been measured.
 
-Its release metadata mirrors Iris `1.0.0`: product `Iris Avatar`, company
+Its release metadata mirrors Iris `0.9.1`: product `Iris Avatar`, company
 `NeuroAsist`, and application identifier `com.neuroasist.avatar`. The root
 documentation check prevents version drift.
 

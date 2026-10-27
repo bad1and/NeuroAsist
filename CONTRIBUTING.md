@@ -39,7 +39,6 @@ npm --prefix apps/desktop run check
 
 Для UI источник истины — [`design.md`](design.md) и
 [`tokens.css`](apps/web/src/tokens.css). Анимации используют Anime.js v4.
-Подробные указания для агентов — [`AGENTS.md`](AGENTS.md).
 
 ## Изменение для ревью
 

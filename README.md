@@ -11,7 +11,7 @@
 
 **Русский** · [English](README.en.md) · [Документация](Docs/index.md)
 
-[![Версия исходников](https://img.shields.io/badge/version-1.0.0-695B86?style=flat-square)](VERSION) · [Apache 2.0](LICENSE)
+[![Версия исходников](https://img.shields.io/badge/version-0.9.1-695B86?style=flat-square)](VERSION) · [Apache 2.0](LICENSE)
 
 [Возможности](#возможности) · [Интерфейс](#интерфейс) · [Требования](#системные-требования) · [Запуск](#запуск) · [Данные](#данные) · [Разработка](#разработка)
 

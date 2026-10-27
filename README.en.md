@@ -11,7 +11,7 @@ Iris remembers useful details from your conversations; an optional avatar can si
 
 [Русский](README.md) · **English** · [Documentation](Docs/index.md)
 
-[![Source version](https://img.shields.io/badge/version-1.0.0-695B86?style=flat-square)](VERSION) · [Apache 2.0](LICENSE)
+[![Source version](https://img.shields.io/badge/version-0.9.1-695B86?style=flat-square)](VERSION) · [Apache 2.0](LICENSE)
 
 [Features](#features) · [Interface](#interface) · [Requirements](#system-requirements) · [Getting started](#getting-started) · [Data](#data) · [Development](#development)
 

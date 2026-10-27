@@ -60,7 +60,7 @@ def test_external_urls_are_not_local_paths(tmp_path, monkeypatch):
 
 def test_maintained_inventory_includes_brand_and_developer_guides():
     files = {path.relative_to(check_docs.ROOT).as_posix() for path in check_docs.maintained_markdown()}
-    assert {"README.en.md", "README.ru.md", "Docs/index.md", "GEMINI.md", "assets/README.md", "apps/web/public/brand/README.md"} <= files
+    assert {"README.en.md", "README.ru.md", "Docs/index.md", "CONTRIBUTING.md", "assets/README.md", "apps/web/public/brand/README.md"} <= files
 
 
 def test_readme_language_links_allow_different_heading_structures(tmp_path, monkeypatch):

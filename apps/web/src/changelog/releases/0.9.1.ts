@@ -1,7 +1,7 @@
 import type { ReleaseNote } from "../types";
 
 export default {
-  version: "1.0.0",
+  version: "0.9.1",
   status: "preview",
   title: "Обновления — под рукой",
   summary: "Что изменилось в Iris — теперь в одном окне, к которому легко вернуться.",
@@ -28,5 +28,5 @@ export default {
       ],
     },
   ],
-  note: "Сборка в разработке: версия 1.0.0 пока не опубликована.",
+  note: "Сборка в разработке: версия 0.9.1 пока не опубликована.",
 } satisfies ReleaseNote;
