@@ -40,9 +40,9 @@ beforeEach(() => {
     if (command === "get_window_preferences" || command === "set_reference_window_locked" || command === "reset_reference_window") {
       const payload = {
         locked: args?.locked ?? false,
-        reference: { width: 1135, height: 760 },
+        reference: { width: 1260, height: 810 },
         minimum: { width: 900, height: 620 },
-        effectiveReference: { width: 1135, height: 760 },
+        effectiveReference: { width: 1260, height: 810 },
       };
       if (command === "set_reference_window_locked") windowEvents.forEach((listener) => listener({ payload }));
       return payload;
@@ -134,7 +134,7 @@ describe("эталонное окно", () => {
     render(<><WindowChrome title="" /><WindowSettings /></>);
     const toggle = screen.getByRole("switch");
     await waitFor(() => expect(toggle).toBeEnabled());
-    expect(screen.getAllByText("1135 × 760").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("1260 × 810").length).toBeGreaterThan(0);
     fireEvent.click(toggle);
     await waitFor(() => expect(toggle).toBeChecked());
     const maximize = screen.getByRole("button", { name: "Развернуть окно" });
@@ -191,8 +191,8 @@ describe("эталонное окно", () => {
     await waitFor(() => expect(tauriInvoke).toHaveBeenCalledWith("get_window_preferences", {}, undefined));
     const payload = {
       locked: true,
-      reference: { width: 1135, height: 760 }, minimum: { width: 900, height: 620 },
-      effectiveReference: { width: 1135, height: 760 },
+      reference: { width: 1260, height: 810 }, minimum: { width: 900, height: 620 },
+      effectiveReference: { width: 1260, height: 810 },
     };
     await act(async () => { windowEvents.forEach((listener) => listener({ payload })); });
     expect(screen.getByRole("switch")).toBeChecked();

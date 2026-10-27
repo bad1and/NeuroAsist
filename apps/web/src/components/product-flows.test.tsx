@@ -71,7 +71,7 @@ describe("global search navigation", () => {
       return <GlobalSearch open developerMode={false} onClose={vi.fn()} onSelect={vi.fn()} />;
     }
     const view = render(<LocalizedSearch />);
-    await waitFor(() => expect(screen.getByText("Location and internet")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Location, weather and news")).toBeInTheDocument());
     api.requestJson.mockImplementation((path: string) => Promise.resolve({ items: path.startsWith("/memory/commitments")
       ? [{ id: "user-plan", title: "Настройки", details: "Сохранено" }] : [] }));
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "user-plan" } });
@@ -101,8 +101,8 @@ describe("global search navigation", () => {
     expect(select).toHaveBeenCalledWith(expect.objectContaining({ kind: "history", focus: expect.objectContaining({ id: "exact-message", query: "new" }) }));
   });
   it("keeps developer sections out of ordinary settings results", () => {
-    expect(searchSettings("", false).some(item => item.section === "maintenance")).toBe(false);
-    expect(searchSettings("", true).some(item => item.section === "maintenance")).toBe(true);
+    expect(searchSettings("", false).some(item => item.section === "events")).toBe(false);
+    expect(searchSettings("", true).some(item => item.section === "events")).toBe(true);
   });
   it("keeps available search groups when one source fails", async () => {
     vi.useFakeTimers();
@@ -220,7 +220,7 @@ it("reschedules only after explicit Save, keeping the edited time local", async 
   reminders.getReminders.mockResolvedValue({ items: [{ id: "r", title: "Сборка", status: "open", due_at: future, delivery_token: "revision", delivered_at: null }] });
   reminders.updateReminder.mockResolvedValue({});
   render(<RemindersPanel plans={[]} onChanged={vi.fn()} />);
-  fireEvent.click(await screen.findByText("Перенести", { selector: "summary" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Перенести" }));
   const input = await screen.findByLabelText("Перенести: Сборка");
   fireEvent.change(input, { target: { value: "2030-10-20T19:00" } });
   expect(reminders.updateReminder).not.toHaveBeenCalled();

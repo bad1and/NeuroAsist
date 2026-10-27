@@ -34,6 +34,27 @@ beforeEach(() => {
   api.removeDesktopSearchApiKey.mockResolvedValue({});
 });
 describe("единый раздел ключей", () => {
+  it("раскрывает дополнительные подключения и сохраняет черновик при сворачивании", () => {
+    render(<ApiKeysSettings settings={initial} active onSettingsChanged={changed} collapseOptional />);
+    const toggle = screen.getByRole("button", { name: "Дополнительные подключения" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("region", { name: "Coding Agent API" })).toBeNull();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const input = card("Coding Agent API").getByLabelText("API-ключ Coding Agent");
+    fireEvent.change(input, { target: { value: "unsaved-fixture" } });
+    fireEvent.click(toggle);
+    expect(screen.queryByRole("region", { name: "Coding Agent API" })).toBeNull();
+    fireEvent.click(toggle);
+    expect(card("Coding Agent API").getByLabelText("API-ключ Coding Agent")).toHaveValue("unsaved-fixture");
+    expect(api.saveDesktopCodingApiKey).not.toHaveBeenCalled();
+  });
+  it("раскрывает подключение по переходу из поиска настроек", () => {
+    const { rerender } = render(<ApiKeysSettings settings={initial} active onSettingsChanged={changed} collapseOptional />);
+    rerender(<ApiKeysSettings settings={initial} active onSettingsChanged={changed} collapseOptional revealTarget="credential-tavily" />);
+    expect(screen.getByRole("button", { name: "Дополнительные подключения" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("region", { name: "Tavily API" })).toBeVisible();
+  });
   it.each([["DeepSeek API", "deepseek"], ["Coding Agent API", "deepseek"], ["Tavily API", "tavily"]])("открывает кабинет для %s", async (title, provider) => {
     render(<Harness />);
     fireEvent.click(card(title).getByRole("button", { name: "Получить API-ключ" }));

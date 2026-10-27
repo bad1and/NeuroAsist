@@ -89,6 +89,8 @@ class RuntimeSettingsPatch(BaseModel):
     voice_input_device_id: str | None = Field(default=None, max_length=2048)
     voice_output_device_id: str | None = Field(default=None, max_length=2048)
     voice_tts_voice: str | None = None
+    voice_tts_style: str | None = None
+    voice_tts_expression_level: str | None = None
     voice_playback_rate: float | None = None
     voice_live_playback_prebuffer_segments: int | None = None
     voice_live_playback_prebuffer_ms: int | None = None

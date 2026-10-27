@@ -1,3 +1,4 @@
+import { Disclosure } from "./Disclosure";
 import { useEffect, useRef, useState } from "react";
 import { cancelCodingImage, getCodingImage, getSettings, prepareCodingImage, registerCodingProject, updateRuntimeSettings, type CodingImageState } from "../api";
 import { chooseCodingProject, isDesktopApp } from "../desktop";
@@ -40,7 +41,7 @@ export function CodingSetup({ onSettingsChanged, onProjectRegistered, includeIma
         {state.status === "preparing" ? "Отменить подготовку" : state.status === "failed" || state.status === "cancelled" ? "Повторить подготовку" : "Подготовить песочницу"}
       </MaterialButton>
       {state.status === "ready" && <p role="status">Песочница подготовлена. Обновите состояние Docker.</p>}
-      {state.output && <details><summary>Журнал подготовки</summary><pre data-i18n-skip style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: 220, overflow: "auto" }}>{state.output}</pre></details>}
+      {state.output && <Disclosure materialKey="coding.setup.log" label={<>Журнал подготовки</>}><pre data-i18n-skip style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: 220, overflow: "auto" }}>{state.output}</pre></Disclosure>}
     </>}
     {state.error && <p className="notice" role="alert">{state.error}</p>}
   </div>;

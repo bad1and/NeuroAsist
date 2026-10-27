@@ -41,10 +41,12 @@ Iris — голосовой AI-персонаж для Windows. Здесь оп�
 [Unity-аватар](../apps/avatar-unity/README.md) ·
 [Движения и поведение аватара](avatar-behavior.md) ·
 [Дизайн-система](../design.md) ·
+[Раскрывающиеся блоки](disclosures.md) ·
 [Правила для агентов](../AGENTS.md)
 
 ## Выпуск и сопровождение
 
+- [Инструкция агенту по сборке и будущему установщику](installer-agent-handoff.md)
 - [Приёмка приложения перед установщиком](preinstaller-readiness.md)
 - [Второй этап подготовки](release-stage-2-plan.md), [результат](release-stage-2-result.md), [разбор зависимостей](security-dependencies-2026-10-20.md)
   и [карточка следующего кандидата](release-candidate-next.md)
@@ -54,6 +56,7 @@ Iris — голосовой AI-персонаж для Windows. Здесь оп�
 - [Раздельная сборка аватара](avatar-distribution.md) — закрытый Unity, публичное приложение и очистка истории
 - [Результат перехода и инструкция разработчику](avatar-distribution-result-2026-10-24.md)
 - [История изменений](../CHANGELOG.md)
+- [Подготовка заметок об обновлениях в приложении](changelog-authoring.md)
 - [Безопасность](../SECURITY.md), [конфиденциальность](../PRIVACY.md) и [сторонние материалы](../THIRD_PARTY_ASSETS.md)
 
 ## Измерения и история

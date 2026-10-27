@@ -105,8 +105,8 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         avatar_placement=runtime_settings.avatar_placement,
         avatar_in_app_visible=runtime_settings.avatar_in_app_visible,
         voice_tts_voice=runtime_settings.voice_tts_voice or settings.voice_tts_default_voice,
-        voice_tts_style=str(getattr(request.app.state, "voice_tts_style", "auto")),
-        voice_tts_expression_level=str(getattr(request.app.state, "voice_tts_expression_level", "natural")),
+        voice_tts_style=runtime_settings.voice_tts_style,
+        voice_tts_expression_level=runtime_settings.voice_tts_expression_level,
         voice_playback_rate=runtime_settings.voice_playback_rate,
         voice_live_playback_prebuffer_segments=runtime_settings.voice_live_playback_prebuffer_segments,
         voice_live_playback_prebuffer_ms=runtime_settings.voice_live_playback_prebuffer_ms,
@@ -224,6 +224,15 @@ async def patch_runtime_settings(
                 detail="Unsupported TTS voice",
             )
         runtime_settings.voice_tts_voice = payload.voice_tts_voice
+
+    from apps.backend.app.voice.style import VoiceStyle, VoiceExpressionLevel
+    for name, enum_type in (("voice_tts_style", VoiceStyle), ("voice_tts_expression_level", VoiceExpressionLevel)):
+        value = getattr(payload, name)
+        if value is not None:
+            try:
+                setattr(runtime_settings, name, enum_type(value).value)
+            except ValueError as error:
+                raise HTTPException(status_code=400, detail=f"Unsupported {name}") from error
 
     if payload.voice_playback_rate is not None:
         if not MIN_PLAYBACK_RATE <= payload.voice_playback_rate <= MAX_PLAYBACK_RATE:
@@ -365,6 +374,12 @@ async def patch_runtime_settings(
             detail="Could not persist settings",
         ) from error
     runtime_settings = committed_settings
+    if payload.voice_tts_style is not None:
+        request.app.state.voice_tts_style = live_runtime_settings.voice_tts_style
+    if payload.voice_tts_expression_level is not None:
+        request.app.state.voice_tts_expression_level = live_runtime_settings.voice_tts_expression_level
+        request.app.state.voice_service.set_tts_expression_level(live_runtime_settings.voice_tts_expression_level)
+
 
     # A selected output is rendered by the WebView because it can target a
     # concrete Windows device. Unity keeps decoding the same stream for lip
@@ -414,34 +429,13 @@ async def patch_runtime_settings(
 
 
 @router.patch("/settings/voice-style", response_model=PublicSettingsResponse)
-def patch_voice_style(payload: VoiceStylePatch, request: Request) -> PublicSettingsResponse:
-    from apps.backend.app.voice.style import VoiceStyle
-
-    try:
-        style = VoiceStyle(payload.voice_tts_style)
-    except ValueError as error:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported voice style") from error
-    request.app.state.voice_tts_style = style.value
-    request.app.state.event_bus.publish(
-        "voice.style_changed", "info", "Temporary voice style changed", {"style": style.value}
-    )
-    return get_public_settings(request)
+async def patch_voice_style(payload: VoiceStylePatch, request: Request) -> PublicSettingsResponse:
+    return await patch_runtime_settings(RuntimeSettingsPatch(voice_tts_style=payload.voice_tts_style), request)
 
 
 @router.patch("/settings/voice-expression", response_model=PublicSettingsResponse)
-def patch_voice_expression(payload: VoiceExpressionPatch, request: Request) -> PublicSettingsResponse:
-    from apps.backend.app.voice.style import VoiceExpressionLevel
-
-    try:
-        level = VoiceExpressionLevel(payload.voice_tts_expression_level)
-    except ValueError as error:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported voice expression level") from error
-    request.app.state.voice_tts_expression_level = level.value
-    request.app.state.voice_service.set_tts_expression_level(level.value)
-    request.app.state.event_bus.publish(
-        "voice.expression_changed", "info", "Temporary voice expression level changed", {"level": level.value}
-    )
-    return get_public_settings(request)
+async def patch_voice_expression(payload: VoiceExpressionPatch, request: Request) -> PublicSettingsResponse:
+    return await patch_runtime_settings(RuntimeSettingsPatch(voice_tts_expression_level=payload.voice_tts_expression_level), request)
 
 
 @router.get("/settings/pronunciations")

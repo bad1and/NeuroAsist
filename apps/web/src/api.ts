@@ -189,6 +189,8 @@ export function updateRuntimeSettings(payload: {
   voice_input_device_id?: string;
   voice_output_device_id?: string;
   voice_tts_voice?: string;
+  voice_tts_style?: string;
+  voice_tts_expression_level?: string;
   voice_playback_rate?: number;
   voice_live_playback_prebuffer_segments?: number;
   voice_live_playback_prebuffer_ms?: number;

@@ -17,6 +17,42 @@ from apps.backend.app.runtime.settings import RuntimeSettings, RuntimeSettingsSt
 from apps.backend.app.schemas.settings import RuntimeSettingsPatch
 
 
+def test_voice_preferences_survive_reload_and_apply_after_commit(monkeypatch, tmp_path):
+    runtime = RuntimeSettings()
+    store = RuntimeSettingsStore(tmp_path / "settings.json")
+    request = _request(runtime, store, tmp_path)
+    applied = []
+    request.app.state.voice_service = SimpleNamespace(set_tts_expression_level=applied.append)
+    monkeypatch.setattr(settings_route, "get_public_settings", lambda _request: {})
+    asyncio.run(settings_route.patch_runtime_settings(
+        RuntimeSettingsPatch(voice_tts_style="thoughtful", voice_tts_expression_level="minimal"), request))
+    loaded = store.load(RuntimeSettings())
+    assert (loaded.voice_tts_style, loaded.voice_tts_expression_level) == ("thoughtful", "minimal")
+    assert request.app.state.voice_tts_style == "thoughtful"
+    assert applied == ["minimal"]
+
+
+def test_invalid_voice_preference_does_not_apply_other_fields(monkeypatch, tmp_path):
+    runtime = RuntimeSettings()
+    store = RuntimeSettingsStore(tmp_path / "settings.json")
+    store.save(runtime)
+    before = store.path.read_bytes()
+    request = _request(runtime, store, tmp_path)
+    with pytest.raises(HTTPException):
+        asyncio.run(settings_route.patch_runtime_settings(
+            RuntimeSettingsPatch(voice_tts_style="calm", voice_tts_expression_level="invalid"), request))
+    assert runtime.voice_tts_style == "auto"
+    assert store.path.read_bytes() == before
+
+
+def test_old_settings_keep_data_and_default_voice_preferences(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"schema_version": 1, "settings": {"location_city": "Москва", "memory_incognito": True}}), encoding="utf-8")
+    loaded = RuntimeSettingsStore(path).load(RuntimeSettings())
+    assert (loaded.voice_tts_style, loaded.voice_tts_expression_level) == ("auto", "natural")
+    assert loaded.location_city == "Москва" and loaded.memory_incognito
+
+
 @pytest.mark.parametrize("category", ["science", "games"])
 def test_new_news_categories_are_validated_and_persisted(monkeypatch, tmp_path, category):
     runtime = RuntimeSettings()

@@ -9,6 +9,7 @@ import {
 import { isDesktopApp, openApiKeyPortal } from "../desktop";
 import type { PublicSettings } from "../types";
 import { MaterialButton } from "./MaterialButton";
+import { Disclosure } from "./Disclosure";
 
 export type CredentialTarget = "deepseek" | "coding" | "tavily";
 type Credential = CredentialTarget | "brave" | "serper";
@@ -30,13 +31,23 @@ const DETAILS: Record<Credential, { title: string; label: string; description: s
   serper: { title: "Serper API", label: "API-ключ Serper", description: "Сервис сейчас не используется. Ранее сохранённый ключ можно удалить." },
 };
 
-export function ApiKeysSettings({ settings, active, onSettingsChanged, only, idPrefix = "" }:
-  { settings: PublicSettings; active: boolean; onSettingsChanged: (settings: PublicSettings) => void; only?: CredentialTarget[]; idPrefix?: string }) {
+export function ApiKeysSettings({ settings, active, onSettingsChanged, only, idPrefix = "", collapseOptional = false, revealTarget, onDirtyChange }:
+  { settings: PublicSettings; active: boolean; onSettingsChanged: (settings: PublicSettings) => void; only?: CredentialTarget[]; idPrefix?: string; collapseOptional?: boolean; revealTarget?: string | null; onDirtyChange?: (dirty: boolean) => void }) {
   const [inputs, setInputs] = useState<Partial<Record<Credential, string>>>({});
   const [messages, setMessages] = useState<Partial<Record<Credential, { text: string; error?: boolean }>>>({});
   const [busy, setBusy] = useState<Credential | null>(null);
   const busyRef = useRef(false);
   const desktop = isDesktopApp();
+  const [optionalOpen, setOptionalOpen] = useState(false);
+  const dirty = Object.values(inputs).some(value => Boolean(value?.trim()));
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+  useEffect(() => { if (revealTarget && revealTarget !== "credential-deepseek") setOptionalOpen(true); }, [revealTarget]);
+  useEffect(() => {
+    if (!dirty) return;
+    const preventLoss = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", preventLoss);
+    return () => window.removeEventListener("beforeunload", preventLoss);
+  }, [dirty]);
   const openPortal = async (kind: CredentialTarget) => {
     try { await openApiKeyPortal(kind === "tavily" ? "tavily" : "deepseek"); }
     catch { setMessages(current => ({ ...current, [kind]: { text: "Не удалось открыть кабинет сервиса. Попробуйте ещё раз.", error: true } })); }
@@ -94,10 +105,7 @@ export function ApiKeysSettings({ settings, active, onSettingsChanged, only, idP
     }
   };
 
-  return <>
-    {!desktop && <div className="notice" role="status">Управление ключами доступно в установленном приложении Iris.</div>}
-    {(["deepseek", "coding", "tavily", "brave", "serper"] as Credential[]).filter(kind =>
-      (kind !== "brave" && kind !== "serper" || configured(kind)) && (!only || only.includes(kind as CredentialTarget))).map(kind => {
+  const renderCredential = (kind: Credential) => {
       const detail = DETAILS[kind];
       const legacy = kind === "brave" || kind === "serper";
       const hasKey = configured(kind);
@@ -110,36 +118,52 @@ export function ApiKeysSettings({ settings, active, onSettingsChanged, only, idP
           </div></div>
           <div className="settings-card-header-actions">
             <span className={`settings-status-pill ${hasKey ? "is-active" : kind === "deepseek" ? "is-warning" : ""}`}>
-              <span className="settings-status-dot" aria-hidden="true" />{hasKey ? "Ключ настроен" : "Ключ не настроен"}
+              {hasKey ? "Ключ настроен" : "Ключ не настроен"}
             </span>
           </div>
         </div>
-        {!legacy && <label htmlFor={`${idPrefix}${kind}-api-key-input`}>
+        {!legacy && <label className="settings-credential-field" htmlFor={`${idPrefix}${kind}-api-key-input`}>
           <input id={`${idPrefix}${kind}-api-key-input`} type="password" autoComplete="new-password"
             aria-label={detail.label}
             value={inputs[kind] ?? ""} disabled={Boolean(busy) || !desktop}
             onChange={event => setInputs(current => ({ ...current, [kind]: event.target.value }))}
             placeholder={hasKey ? "Введите новый ключ для замены" : "Введите API-ключ"} />
         </label>}
-        <div className="settings-card-actions">
-          {!legacy && <MaterialButton materialKey={`credentials.${kind}.save`} type="button" className="primary-button"
-            disabled={Boolean(busy) || !desktop || !inputs[kind]?.trim()} onClick={() => void act(kind, "save")}>
-            {hasKey ? "Заменить ключ" : "Сохранить ключ"}
-          </MaterialButton>}
-          {!legacy && <MaterialButton materialKey={`credentials.${kind}.portal`} type="button" className="secondary"
-            onClick={() => void openPortal(kind as CredentialTarget)}>
-            Получить API-ключ<ExternalLink size={15} aria-hidden="true" />
-          </MaterialButton>}
-          {hasKey && <MaterialButton materialKey={`credentials.${kind}.remove`} type="button" className="danger-button"
-            disabled={Boolean(busy) || !desktop} onClick={() => void act(kind, "remove")}>Удалить</MaterialButton>}
-          {kind === "tavily" && hasKey && <MaterialButton materialKey="credentials.tavily.check" type="button" className="secondary"
-            title="Проверка расходует поисковый кредит." disabled={Boolean(busy) || !hasKey}
-            onClick={() => void act(kind, "check")}>Проверить подключение</MaterialButton>}
+        <div className="settings-card-actions settings-credential-actions">
+          {!legacy && <div className="settings-credential-primary-actions">
+            <MaterialButton materialKey={`credentials.${kind}.save`} type="button" className="primary-button"
+              disabled={Boolean(busy) || !desktop || !inputs[kind]?.trim()} onClick={() => void act(kind, "save")}>
+              {hasKey ? "Заменить ключ" : "Сохранить ключ"}
+            </MaterialButton>
+            <MaterialButton materialKey={`credentials.${kind}.portal`} type="button" className="secondary"
+              onClick={() => void openPortal(kind as CredentialTarget)}>
+              Получить API-ключ<ExternalLink size={15} aria-hidden="true" />
+            </MaterialButton>
+          </div>}
+          {hasKey && <div className="settings-credential-manage-actions">
+            {kind === "tavily" && <MaterialButton materialKey="credentials.tavily.check" type="button" className="secondary"
+              title="Проверка расходует поисковый кредит." disabled={Boolean(busy)}
+              onClick={() => void act(kind, "check")}>Проверить подключение</MaterialButton>}
+            <MaterialButton materialKey={`credentials.${kind}.remove`} type="button" className="danger-button"
+              disabled={Boolean(busy) || !desktop} onClick={() => void act(kind, "remove")}>Удалить</MaterialButton>
+          </div>}
         </div>
         {busy === kind && <p role="status">Выполняем…</p>}
         {result && <p className={result.error ? "settings-action-error" : "settings-credential-hint"}
           role={result.error ? "alert" : "status"}>{result.text}</p>}
       </section>;
-    })}
+  };
+  const credentials = (["deepseek", "coding", "tavily", "brave", "serper"] as Credential[]).filter(kind =>
+    (kind !== "brave" && kind !== "serper" || configured(kind)) && (!only || only.includes(kind as CredentialTarget)));
+  return <>
+    {!desktop && <div className="notice" role="status">Управление ключами доступно в установленном приложении Iris.</div>}
+    <p className="settings-apply-note">Сохранение или удаление ключа перезапускает ядро Iris и прерывает текущий разговор. Ключи хранятся в защищённом хранилище Windows.</p>
+    {collapseOptional && !only ? <>
+      {renderCredential("deepseek")}
+      <Disclosure materialKey="credentials.optional.toggle" label="Дополнительные подключения" className="settings-optional-connections"
+        open={optionalOpen} onOpenChange={setOptionalOpen} contentClassName="settings-optional-content">
+        {credentials.filter(kind => kind !== "deepseek").map(renderCredential)}
+      </Disclosure>
+    </> : credentials.map(renderCredential)}
   </>;
 }

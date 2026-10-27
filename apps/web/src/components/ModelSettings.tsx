@@ -56,7 +56,7 @@ export function ModelManager(_props: { developerMode?: boolean; onUnlockRequest?
       <h2 className="settings-card-title">Модели</h2>
       <span className="models-total-size" aria-label="Общий объём моделей" data-i18n-skip>{(models.reduce((sum, model) => sum + model.size_bytes, 0) / 1024**3).toFixed(2)} GiB</span>
     </div>
-    <div className="model-item-card">
+    <div className="model-item-card model-directory-card">
       <strong>Папка моделей</strong>
       <p data-i18n-skip className="model-storage-path">{directory}</p>
       <MaterialButton materialKey="models.directory" className="secondary" title="При смене папки разговор остановится. Прежние файлы останутся на месте." disabled={busy || models.some(active) || !isDesktopApp()} onClick={() => void run(chooseDirectory)}>Выбрать папку</MaterialButton>

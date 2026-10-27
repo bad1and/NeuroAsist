@@ -221,8 +221,8 @@ def create_app() -> FastAPI:
         credentials={p: getattr(settings, f"{p}_api_key", None) for p in ("brave", "tavily", "serper")},
         budget_path=settings.app_data_path / "search-budget.sqlite3",
     ))
-    app.state.voice_tts_style = "auto"
-    app.state.voice_tts_expression_level = "natural"
+    app.state.voice_tts_style = runtime_settings.voice_tts_style
+    app.state.voice_tts_expression_level = runtime_settings.voice_tts_expression_level
     model_manager = ModelManager(model_root(settings.app_data_path), event_bus.publish)
     if os.getenv("NEUROASIST_MANAGED_MODELS") == "1":
         settings.voice_stt_onnx_model_path = str(model_manager.path_for("gigaam-v3-rnnt"))
@@ -350,6 +350,7 @@ def create_app() -> FastAPI:
     if conversation_service is not None:
         conversation_service.bind_turn_coordinator(turn_coordinator)
     voice_service = VoiceService(settings)
+    voice_service.set_tts_expression_level(runtime_settings.voice_tts_expression_level)
     available_tts_voices = voice_service.available_tts_voices()
     if runtime_settings.voice_tts_voice not in available_tts_voices:
         runtime_settings.voice_tts_voice = (

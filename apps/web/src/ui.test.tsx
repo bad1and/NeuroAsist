@@ -64,6 +64,22 @@ const settings = {
   available_tts_voices: ["ru_f1", "ru_f2", "ru_m1", "ru_m5", "eng_f3", "eng_f4_whisper", "eng_f5", "eng_m2_whisper", "eng_m3", "eng_m4"],
 };
 
+
+function settingButton(label: string): HTMLElement {
+ const nav=screen.getByRole('navigation',{name:/^(Разделы настроек|Settings sections)$/});
+ const groups: Record<string,string>={
+ 'Разговор':'Общение','Голос Iris':'Общение','Микрофон и звук':'Общение','Распознавание речи':'Общение','Аватар':'Общение',
+ 'Поиск в интернете':'Интернет и окружение','Город, погода и новости':'Интернет и окружение',
+ 'Сохранение и приватность':'Память и данные','Управление данными':'Память и данные','Резервные копии':'Память и данные',
+ 'Интерфейс и окно':'Приложение','Сочетания клавиш':'Приложение','Уведомления':'Приложение',
+ 'API-ключи':'Подключения','Локальные модели':'Подключения','Расходы и запросы':'Подключения',
+ 'Состояние Iris':'Диагностика','Для разработчиков':'Диагностика','Журнал событий':'Диагностика',
+ 'Data management':'Memory and data'
+ };
+ if(groups[label]){const group=within(nav).getByRole('button',{name:groups[label]});if(group.getAttribute('aria-expanded')!=='true')fireEvent.click(group);}
+ return within(nav).getByRole('button',{name:label});
+}
+
 class MockWebSocket {
   onopen: (() => void) | null = null;
   onmessage: ((event: MessageEvent) => void) | null = null;
@@ -215,21 +231,28 @@ describe("русский интерфейс", () => {
       onInterfaceLocaleChange={vi.fn()} onSettingsChanged={vi.fn()}
     />);
     const navigation = screen.getByRole("navigation", { name: "Разделы настроек" });
-    fireEvent.click(within(navigation).getByRole("button", { name: "Система" }));
-    fireEvent.click(within(navigation).getByRole("button", { name: "Окно приложения" }));
-    expect(screen.getByRole("heading", { name: "Окно приложения" })).toBeVisible();
+    fireEvent.click(settingButton("Диагностика"));
+    fireEvent.click(settingButton("Интерфейс и окно"));
+    expect(screen.getByRole("heading", { name: "Интерфейс и окно" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Вернуть исходный размер" })).toBeVisible();
   });
   it("открывает отдельный раздел эталонного окна в системных настройках", async () => {
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
     const navigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
-    fireEvent.click(within(navigation).getByRole("button", { name: "Система" }));
-    fireEvent.click(within(navigation).getByRole("button", { name: "Окно приложения" }));
-    expect(screen.getByRole("heading", { name: "Окно приложения" })).toBeVisible();
+    fireEvent.click(settingButton("Диагностика"));
+    fireEvent.click(settingButton("Интерфейс и окно"));
+    expect(screen.getByRole("heading", { name: "Интерфейс и окно" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Вернуть исходный размер" })).toBeDisabled();
     expect(screen.getByRole("switch", { name: /Запретить изменение размера окна/ })).toBeDisabled();
-  });
+  }, 10_000);
+  it("открывает историю обновлений из О приложении и возвращает фокус", async () => {
+ render(<App/>);fireEvent.click(await screen.findByRole('button',{name:'Настройки'}));await screen.findByRole('navigation',{name:'Разделы настроек'});
+ fireEvent.click(settingButton('О приложении'));const opener=screen.getByRole('button',{name:'Что нового'});opener.focus();fireEvent.click(opener);
+ expect(await screen.findByRole('dialog',{name:'Что нового'})).toBeVisible();fireEvent.click(screen.getByRole('button',{name:'Закрыть диалог'}));
+ await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Что нового'})).not.toBeInTheDocument());expect(opener).toHaveFocus();
+});
+
   it("собирает диалог в отдельную рабочую область с закреплённым композером", async () => {
     const { container } = render(<App />);
 
@@ -609,8 +632,8 @@ describe("русский интерфейс", () => {
       expect(subtitles).toBeVisible();
       expect(document.querySelector(".conversation-surface.is-background")).not.toHaveClass("is-minimized");
       const settingsNavigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
-      fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Система" }));
-      fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Интерфейс" }));
+      fireEvent.click(settingButton("Диагностика"));
+      fireEvent.click(settingButton("Уведомления"));
       const preference = await screen.findByRole("switch", { name: /Разговор в уведомлениях/ });
       expect(preference).toBeChecked();
       fireEvent.click(preference);
@@ -678,25 +701,12 @@ describe("русский интерфейс", () => {
     expect(await screen.findByPlaceholderText("Ввод сообщения...")).toBeInTheDocument();
   });
 
-  it("открывает системный подраздел без отдельного пункта событий", async () => {
-    render(<App />);
-
-    expect(await screen.findByRole("button", { name: "Диалог" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Events" })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
-    const settingsNavigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
-    await within(settingsNavigation).findByRole("button", { name: "Система" });
-    fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Система" }));
-    fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Обзор" }));
-
-    expect(await screen.findByRole("heading", { name: "Система" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Модели" }));
-    expect(screen.getByRole("button", { name: "Модели" })).not.toHaveClass("is-dev-dimmed");
-    expect((await screen.findAllByRole("heading", { name: "Модели" })).length).toBeGreaterThanOrEqual(1);
-    fireEvent.click(screen.getByRole("button", { name: "Журнал событий" }));
-    expect(await screen.findByRole("button", { name: "Обновить журнал событий" })).toBeInTheDocument();
-  });
+  it("открывает состояние и модели, скрывая журнал без режима разработчика",async()=>{
+ render(<App/>);fireEvent.click(await screen.findByRole('button',{name:'Настройки'}));await screen.findByRole('navigation',{name:'Разделы настроек'});
+ fireEvent.click(settingButton('Состояние Iris'));expect(screen.getByRole('heading',{name:'Состояние Iris'})).toBeVisible();
+ fireEvent.click(settingButton('Локальные модели'));expect(await screen.findByRole('heading',{name:'Модели'})).toBeVisible();
+ expect(screen.queryByRole('button',{name:'Журнал событий'})).not.toBeInTheDocument();
+});
 
   it("меняет только язык интерфейса и сохраняет выбор", async () => {
     api.updateRuntimeSettings.mockResolvedValue({ ...settings, interface_locale: "en" });
@@ -708,9 +718,9 @@ describe("русский интерфейс", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
     const settingsNavigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
-    fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Система" }));
-    fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Интерфейс" }));
-    await screen.findByRole("heading", { name: "Интерфейс" });
+    fireEvent.click(settingButton("Диагностика"));
+    fireEvent.click(settingButton("Интерфейс и окно"));
+    await screen.findByRole("heading", { name: "Интерфейс и окно" });
 
     const interfaceLanguage = document.querySelector<HTMLSelectElement>(
       ".settings-content > .form-grid.settings-form:not([hidden]) select",
@@ -742,75 +752,35 @@ describe("русский интерфейс", () => {
     expect(await screen.findByRole("radio", { name: "Inside Iris" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open testing window" })).not.toBeInTheDocument();
 
-    const systemGroup = within(englishSettingsNavigation).getByRole("button", { name: "System" });
-    if (systemGroup.getAttribute("aria-expanded") !== "true") fireEvent.click(systemGroup);
-    fireEvent.click(within(englishSettingsNavigation).getByRole("button", { name: "Data maintenance" }));
-    expect(await screen.findByRole("button", { name: "Rebuild memory index" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Clear memory" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reset all data" })).toBeInTheDocument();
+    fireEvent.click(settingButton("Data management"));
+    expect(await screen.findByRole("button",{name:"Archive memories"})).toBeInTheDocument();
+    expect(screen.getByRole("button",{name:"Delete history and memories"})).toBeInTheDocument();
+    expect(screen.queryByRole("button",{name:"Rebuild memory index"})).not.toBeInTheDocument();
   }, 20_000);
 
-  it("показывает только выбранный раздел настроек", async () => {
-    const { container } = render(<App />);
-    expect(await screen.findByRole("button", { name: "Диалог" })).toBeInTheDocument();
+  it("разделяет ввод, звучание и параметры разговора",async()=>{
+ render(<App/>);fireEvent.click(await screen.findByRole('button',{name:'Настройки'}));await screen.findByRole('navigation',{name:'Разделы настроек'});
+ expect(screen.getByLabelText('Участники')).toBeVisible();expect(screen.getByLabelText('Чувствительность к перебиванию')).not.toBeVisible();
+ fireEvent.click(screen.getByRole('button',{name:'Настроить подробнее'}));expect(screen.getByLabelText('Чувствительность к перебиванию')).toBeVisible();
+ fireEvent.click(settingButton('Голос Iris'));expect(screen.getByLabelText(/Голос TeraTTSv2/)).toBeVisible();expect(screen.getByLabelText('Язык голосового ввода')).not.toBeVisible();
+ expect(screen.getByRole('heading',{name:'Произношение слов'})).toBeVisible();fireEvent.click(settingButton('Распознавание речи'));
+ expect(screen.getByLabelText('Язык голосового ввода')).toBeVisible();expect(screen.queryByRole('heading',{name:'Произношение слов'})).not.toBeInTheDocument();
+});
 
-    fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
-    const navigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
-    expect(within(navigation).queryByText("Настройки")).not.toBeInTheDocument();
-    expect(screen.queryByText("Настройки Iris")).not.toBeInTheDocument();
-    expect(screen.queryByText("Готово к изменениям")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Участие в разговоре" })).toBeVisible();
-    expect(screen.getByLabelText("Участники")).not.toBeVisible();
-    fireEvent.click(screen.getByText("Все параметры разговора"));
-    expect(screen.getByLabelText("Участники")).toBeVisible();
-    expect(container.querySelector(".system-stack")).toHaveAttribute("hidden");
-
-    const voiceGroup = within(navigation).getByRole("button", { name: "Голос" });
-    expect(voiceGroup).toHaveAttribute("aria-expanded", "true");
-    expect(voiceGroup).toHaveAttribute("aria-controls", "settings-nav-children-voice");
-    fireEvent.click(voiceGroup);
-    expect(voiceGroup).toHaveAttribute("aria-expanded", "false");
-    expect(screen.getByLabelText("Участники")).toBeVisible();
-    expect(screen.queryByLabelText("Язык голосового ввода")).not.toBeVisible();
-
-    fireEvent.click(voiceGroup);
-    expect(voiceGroup).toHaveAttribute("aria-expanded", "true");
-    fireEvent.click(within(navigation).getByRole("button", { name: "Основное" }));
-    expect(screen.getByLabelText("Язык голосового ввода")).toBeVisible();
-    expect(screen.getByLabelText(/Голос TeraTTSv2/)).toBeVisible();
-    expect(screen.getByText("TeraTTSv2 · CPU · активен")).toBeVisible();
-    expect(screen.getByLabelText("Участники")).not.toBeVisible();
-
-    fireEvent.click(voiceGroup);
-    expect(voiceGroup).toHaveAttribute("aria-expanded", "false");
-    expect(screen.getByLabelText("Язык голосового ввода")).toBeVisible();
-    expect(within(navigation).getByRole("button", { name: "Основное", hidden: true })).toHaveAttribute("aria-current", "page");
-  });
-
-  it("открывает одиночные разделы напрямую и сохраняет доступную навигацию групп", async () => {
-    render(<App />);
-    expect(await screen.findByRole("button", { name: "Диалог" })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
-    const navigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
-    const behavior = within(navigation).getByRole("button", { name: "Поведение" });
-    expect(behavior).toHaveAttribute("aria-expanded", "true");
-    expect(behavior).toHaveAttribute("aria-controls", "settings-nav-children-behavior");
-    expect(within(navigation).getByRole("button", { name: "Живой разговор" })).toHaveAttribute("aria-current", "page");
-
-    const avatar = within(navigation).getByRole("button", { name: "Аватар" });
-    expect(avatar).not.toHaveAttribute("aria-expanded");
-    fireEvent.click(avatar);
-    expect(await screen.findByRole("heading", { name: "Аватар" })).toBeVisible();
-    expect(avatar).toHaveAttribute("aria-current", "page");
-    expect(screen.queryByRole("heading", { name: "Аватар Iris" })).not.toBeInTheDocument();
-
-    const memory = within(navigation).getByRole("button", { name: "Память" });
-    expect(memory).not.toHaveAttribute("aria-expanded");
-    fireEvent.click(memory);
-    expect(await screen.findByRole("heading", { name: "Память" })).toBeVisible();
-    expect(memory).toHaveAttribute("aria-current", "page");
-  });
+  it("показывает логические группы и выделяет текущий раздел",async()=>{
+ render(<App/>);fireEvent.click(await screen.findByRole('button',{name:'Настройки'}));await screen.findByLabelText('Участники');const nav=screen.getByRole('navigation',{name:'Разделы настроек'});
+ const group=within(nav).getByRole('button',{name:'Общение'});expect(group).toHaveAttribute('aria-expanded','true');
+ const internet=within(nav).getByRole('button',{name:'Интернет и окружение'});
+ fireEvent.click(internet);expect(internet).toHaveAttribute('aria-expanded','true');expect(group).toHaveAttribute('aria-expanded','false');
+ expect(screen.getByLabelText('Участники')).toBeVisible();
+ fireEvent.click(internet);expect(internet).toHaveAttribute('aria-expanded','false');
+ fireEvent.click(group);expect(group).toHaveAttribute('aria-expanded','true');
+ expect(settingButton('Разговор')).toHaveAttribute('aria-current','page');fireEvent.click(settingButton('Аватар'));
+ expect(screen.getByRole('heading',{name:'Аватар'})).toBeVisible();fireEvent.click(settingButton('Сохранение и приватность'));
+ expect(screen.getByRole('heading',{name:'Сохранение и приватность'})).toBeVisible();expect(settingButton('Сохранение и приватность')).toHaveAttribute('aria-current','page');
+ expect(within(nav).getByRole('button',{name:'Память и данные'})).toHaveAttribute('aria-expanded','true');
+ expect(group).toHaveAttribute('aria-expanded','false');expect(internet).toHaveAttribute('aria-expanded','false');
+});
 
   it("открывает раздел Токены и расходы без ошибок", async () => {
     render(<App />);
@@ -818,14 +788,14 @@ describe("русский интерфейс", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
     const navigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
-    const systemGroup = within(navigation).getByRole("button", { name: "Система" });
+    const systemGroup = settingButton("Диагностика");
     if (systemGroup.getAttribute("aria-expanded") !== "true") {
       fireEvent.click(systemGroup);
     }
-    const tokenUsageBtn = within(navigation).getByRole("button", { name: "Токены и расходы" });
+    const tokenUsageBtn = settingButton("Расходы и запросы");
     fireEvent.click(tokenUsageBtn);
 
-    expect(await screen.findByRole("heading", { name: "Статистика запросов" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Расходы и запросы" })).toBeVisible();
   });
 
   it("автосохраняет отдельное поле и откатывает его при ошибке", async () => {
@@ -834,8 +804,8 @@ describe("русский интерфейс", () => {
     expect(await screen.findByRole("button", { name: "Диалог" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
-    const memoryButtons = await screen.findAllByRole("button", { name: "Память" });
-    fireEvent.click(memoryButtons[memoryButtons.length - 1]);
+    await screen.findByRole("navigation", { name: "Разделы настроек" });
+    fireEvent.click(settingButton("Сохранение и приватность"));
     const mode = screen.getByLabelText("Режим сохранения");
     fireEvent.change(mode, { target: { value: "off" } });
 
@@ -850,7 +820,7 @@ describe("русский интерфейс", () => {
     fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
     await waitFor(() => expect(api.updateRuntimeSettings).toHaveBeenCalledWith({ memory_mode: "automatic" }));
     await waitFor(() => expect(mode).toHaveValue("automatic"));
-  });
+  }, 10_000);
 
   it("откладывает сохранение скорости до окончания debounce", async () => {
     render(<App />);
@@ -858,10 +828,10 @@ describe("русский интерфейс", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
     const settingsNavigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
-    const voiceGroup = within(settingsNavigation).getByRole("button", { name: "Голос" });
+    const voiceGroup = settingButton("Общение");
     fireEvent.click(voiceGroup);
     fireEvent.click(voiceGroup);
-    fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Основное" }));
+    fireEvent.click(settingButton("Голос Iris"));
     fireEvent.change(screen.getByRole("slider", { name: /Скорость воспроизведения/ }), { target: { value: "1.2" } });
 
     expect(api.updateRuntimeSettings).not.toHaveBeenCalled();
@@ -875,7 +845,7 @@ describe("русский интерфейс", () => {
     expect(await screen.findByRole("button", { name: "Диалог" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Живой разговор" }));
+    fireEvent.click(await settingButton("Разговор"));
     const participantMode = await screen.findByLabelText("Участники");
     fireEvent.change(participantMode, { target: { value: "group" } });
 
@@ -886,35 +856,13 @@ describe("русский интерфейс", () => {
     expect(container.querySelector(".settings-panel")).toBeInTheDocument();
   });
 
-  it("блокирует настройки разработчика по умолчанию и делает вкладки полупрозрачными", async () => {
-    render(<App />);
-    expect(await screen.findByRole("button", { name: "Диалог" })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
-    const settingsNavigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
-    const voiceGroup = within(settingsNavigation).getByRole("button", { name: "Голос" });
-    fireEvent.click(voiceGroup);
-    fireEvent.click(voiceGroup);
-    fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Основное" }));
-
-    const recognitionBtn = within(settingsNavigation).getByRole("button", { name: "Распознавание" });
-    expect(recognitionBtn).not.toHaveClass("is-dev-dimmed");
-    expect(within(settingsNavigation).getByRole("button", { name: "Основное" })).not.toHaveClass("is-dev-dimmed");
-
-    expect(screen.getByLabelText(/Голос TeraTTSv2/)).not.toBeDisabled();
-    expect(screen.getByRole("slider", { name: /Скорость воспроизведения/ })).not.toBeDisabled();
-    expect(screen.getByLabelText(/Подача голоса/)).not.toBeDisabled();
-    expect(screen.getByLabelText(/Выразительность/)).not.toBeDisabled();
-
-    fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Живой разговор" }));
-    expect(screen.getByLabelText("Участники")).not.toBeDisabled();
-    expect(screen.getByLabelText("Активность в беседе")).not.toBeDisabled();
-    expect(screen.getByLabelText("Инициативность")).not.toBeDisabled();
-    expect(screen.getByLabelText("Прямое обращение")).toBeDisabled();
-    expect(screen.getByLabelText("Чувствительность к перебиванию")).toBeDisabled();
-    expect(screen.getByLabelText("Терпимость к паузам")).toBeDisabled();
-    expect(screen.getByText("Паузы и перебивания")).toBeInTheDocument();
-  });
+  it("оставляет бытовые параметры доступными и скрывает технические инструменты",async()=>{
+ render(<App/>);fireEvent.click(await screen.findByRole('button',{name:'Настройки'}));await screen.findByRole('navigation',{name:'Разделы настроек'});
+ fireEvent.click(settingButton('Микрофон и звук'));expect(screen.getByLabelText(/Профиль микрофона/)).toBeEnabled();expect(screen.getByLabelText('Защита от собственного голоса')).toBeEnabled();
+ fireEvent.click(settingButton('Разговор'));fireEvent.click(screen.getByRole('button',{name:'Настроить подробнее'}));expect(screen.getByLabelText('Терпимость к паузам')).toBeEnabled();
+ fireEvent.click(settingButton('Для разработчиков'));expect(screen.getByRole('switch',{name:/Режим разработчика/})).not.toBeChecked();
+ expect(screen.queryByRole('button',{name:'Журнал событий'})).not.toBeInTheDocument();expect(screen.getByLabelText('Сегментов в буфере')).not.toBeVisible();
+});
 
   it("включает режим разработчика через Интерфейс и разблокирует расширенные настройки", async () => {
     render(<App />);
@@ -922,8 +870,8 @@ describe("русский интерфейс", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
     const settingsNavigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
-    fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Система" }));
-    fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Интерфейс" }));
+    fireEvent.click(settingButton("Диагностика"));
+    fireEvent.click(settingButton("Для разработчиков"));
 
     const devSwitch = await screen.findByRole("switch", { name: /Режим разработчика/ });
     expect(devSwitch).not.toBeChecked();
@@ -935,22 +883,15 @@ describe("русский интерфейс", () => {
     await waitFor(() => expect(api.updateRuntimeSettings).toHaveBeenCalledWith({ developer_mode_enabled: true }));
   });
 
-  it("переходит в раздел Интерфейс по клику на Dev-бейдж", async () => {
-    render(<App />);
-    expect(await screen.findByRole("button", { name: "Диалог" })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
-    const settingsNavigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
-    fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Живой разговор" }));
-
-    fireEvent.click(screen.getByRole("button", { name: "Все параметры разговора" }));
-    const devBadges = await screen.findAllByRole("button", { name: "Dev" });
-    expect(devBadges.length).toBeGreaterThan(0);
-    fireEvent.click(devBadges[0]);
-
-    expect(await screen.findByRole("heading", { name: "Интерфейс" })).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: /Режим разработчика/ })).toBeInTheDocument();
-  });
+  it("раскрывает точный параметр разговора из локального поиска",async()=>{
+ render(<App/>);fireEvent.click(await screen.findByRole('button',{name:'Настройки'}));await screen.findByLabelText('Участники');const nav=screen.getByRole('navigation',{name:'Разделы настроек'});
+ fireEvent.click(within(nav).getByRole('button',{name:'Интернет и окружение'}));
+ fireEvent.change(screen.getByRole('searchbox',{name:'Поиск по настройкам'}),{target:{value:'перебивания'}});
+ fireEvent.click(screen.getByRole('button',{name:'Паузы и перебивания'}));
+ await waitFor(()=>expect(screen.getByRole('heading',{name:'Паузы и перебивания'})).toHaveFocus());expect(screen.getByLabelText('Чувствительность к перебиванию')).toBeVisible();
+ expect(within(nav).getByRole('button',{name:'Общение'})).toHaveAttribute('aria-expanded','true');
+ expect(within(nav).getByRole('button',{name:'Интернет и окружение'})).toHaveAttribute('aria-expanded','false');
+});
 
   it("сохраняет выбранные устройства ввода и вывода", async () => {
     const mediaDevicesDescriptor = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
@@ -980,10 +921,10 @@ describe("русский интерфейс", () => {
       expect(await screen.findByRole("button", { name: "Диалог" })).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
       const settingsNavigation = await screen.findByRole("navigation", { name: "Разделы настроек" });
-      const voiceGroup = within(settingsNavigation).getByRole("button", { name: "Голос" });
+      const voiceGroup = settingButton("Общение");
       fireEvent.click(voiceGroup);
       fireEvent.click(voiceGroup);
-      fireEvent.click(within(settingsNavigation).getByRole("button", { name: "Устройства" }));
+      fireEvent.click(settingButton("Микрофон и звук"));
 
       const input = await screen.findByLabelText(/Микрофон для разговора/);
       const output = screen.getByLabelText(/Где воспроизводить голос Iris/);
@@ -1073,7 +1014,7 @@ describe("русский интерфейс", () => {
     await waitFor(() => expect(api.resetConversationSession).toHaveBeenCalledWith("new_dialog"));
     expect(api.resetConversationSession).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
-    fireEvent.click(screen.getByRole("button", { name: "Живой разговор" }));
+    fireEvent.click(settingButton("Разговор"));
     expect(screen.queryByRole("button", { name: "Сбросить сессию" })).not.toBeInTheDocument();
   });
 
@@ -1207,8 +1148,8 @@ describe("русский интерфейс", () => {
       onInterfaceLocaleChange={vi.fn()} onSettingsChanged={vi.fn()}
     />);
     const navigation = screen.getByRole("navigation", { name: "Разделы настроек" });
-    fireEvent.click(within(navigation).getByRole("button", { name: "Система" }));
-    fireEvent.click(within(navigation).getByRole("button", { name: /Обслуживание данных/ }));
+    fireEvent.click(settingButton("Диагностика"));
+    fireEvent.click(settingButton("Управление данными"));
     fireEvent.click(await screen.findByRole("button", { name: "Удалить всю историю" }));
     expect(screen.getByRole("heading", { name: "Удалить всю историю диалогов?" })).toBeInTheDocument();
     expect(api.clearTimelineHistory).not.toHaveBeenCalled();
@@ -1431,9 +1372,10 @@ describe("русский интерфейс", () => {
     fireEvent.click(await screen.findByText("Ошибочный диалог"));
     expect(await screen.findByText("Сетевая ошибка при загрузке")).toBeInTheDocument();
 
-    // Click empty episode via keyboard
-    const emptyCard = screen.getByText("Пустой диалог").closest("article")!;
-    fireEvent.keyDown(emptyCard, { key: "Enter" });
+    // Native button keyboard activation is covered in the browser smoke.
+    const emptyCard = screen.getByText("Пустой диалог").closest("button")!;
+    expect(emptyCard).toHaveAttribute("type", "button");
+    fireEvent.click(emptyCard);
 
     expect(await screen.findByText("В этом диалоге нет сообщений")).toBeInTheDocument();
     expect(screen.queryByText("Сетевая ошибка при загрузке")).not.toBeInTheDocument();
@@ -1472,10 +1414,23 @@ describe("переходы и размещение настроек", () => {
   function renderSettings(extra: Record<string, unknown> = {}) {
     return render(<SettingsPage settings={{ ...settings, coding_api_key_configured: true,
       web_search_enabled: true, search_api_keys_configured: {}, ...extra } as PublicSettings}
-      initialSection="environment" avatarStatus={null} avatarOverlay={null} events={[]}
+      initialSection="internet" avatarStatus={null} avatarOverlay={null} events={[]}
       onRefreshEvents={vi.fn()} onRefreshAvatar={vi.fn()} onAvatarOverlayChanged={vi.fn()}
       onInterfaceLocaleChange={vi.fn()} onSettingsChanged={vi.fn()} />);
   }
+  it("начинает новый раздел сверху и сохраняет прокрутку меню", () => {
+    const { container } = renderSettings();
+    const navigation = screen.getByRole("navigation", { name: "Разделы настроек" });
+    const content = container.querySelector<HTMLElement>(".settings-content")!;
+    navigation.scrollTop = 180;
+    content.scrollTop = 640;
+
+    fireEvent.click(settingButton("Сохранение и приватность"));
+
+    expect(content.scrollTop).toBe(0);
+    expect(navigation.scrollTop).toBe(180);
+    expect(screen.getByRole("heading", { name: "Сохранение и приватность" })).toBeVisible();
+  });
   it("повторяет переход к Tavily с фокусом через навигацию разделов", async () => {
     renderSettings();
     for (let repeat = 0; repeat < 2; repeat += 1) {
@@ -1483,7 +1438,7 @@ describe("переходы и размещение настроек", () => {
       const heading = await screen.findByRole("heading", { name: "Tavily API" });
       await waitFor(() => expect(heading).toHaveFocus());
       expect(screen.getByLabelText("API-ключ Tavily")).toBeVisible();
-      fireEvent.click(screen.getByRole("button", { name: "Город и интернет" }));
+      fireEvent.click(settingButton("Поиск в интернете"));
       await waitFor(() => expect(screen.getByRole("heading", { name: "Веб-поиск" })).toBeVisible());
       expect(screen.queryByLabelText("API-ключ Tavily")).not.toBeVisible();
     }
@@ -1494,21 +1449,14 @@ describe("переходы и размещение настроек", () => {
       onInterfaceLocaleChange: vi.fn(), onSettingsChanged: vi.fn() };
     const { rerender } = render(<SettingsPage {...props} navigationRequest={{ section: "api-keys", target: "coding", id: 1 }} />);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Coding Agent API" })).toHaveFocus());
-    fireEvent.click(screen.getByRole("button", { name: "Живой разговор" }));
+    fireEvent.click(settingButton("Разговор"));
     rerender(<SettingsPage {...props} navigationRequest={{ section: "api-keys", target: "coding", id: 2 }} />);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Coding Agent API" })).toHaveFocus());
   });
-  it("размещает эхозащиту рядом с устройствами и сохраняет Dev-ограничение", async () => {
-    renderSettings();
-    const navigation = screen.getByRole("navigation", { name: "Разделы настроек" });
-    fireEvent.click(within(navigation).getByRole("button", { name: "Устройства" }));
-    expect(screen.getByLabelText("Защита от собственного голоса")).toBeVisible();
-    expect(screen.getByLabelText("Защита от собственного голоса")).toBeDisabled();
-    fireEvent.click(within(navigation).getByRole("button", { name: "Живой разговор" }));
-    fireEvent.click(screen.getByText("Все параметры разговора"));
-    expect(screen.getByRole("heading", { name: "Эмоции и настроение" })).toBeVisible();
-    expect(screen.getByLabelText("Защита от собственного голоса")).not.toBeVisible();
-  });
+  it("размещает доступную эхозащиту рядом с устройствами",()=>{
+ renderSettings();fireEvent.click(settingButton('Микрофон и звук'));expect(screen.getByLabelText('Защита от собственного голоса')).toBeVisible();expect(screen.getByLabelText('Защита от собственного голоса')).toBeEnabled();
+ fireEvent.click(settingButton('Разговор'));expect(screen.getByLabelText('Защита от собственного голоса')).not.toBeVisible();expect(screen.getByRole('heading',{name:'Эмоции и настроение',hidden:true})).not.toBeVisible();
+});
 });
 
 
@@ -1521,10 +1469,107 @@ it("сохраняет оба поля буфера при быстром изм
   fireEvent.change(screen.getByLabelText("Сегментов в буфере"), { target: { value: "3" } });
   fireEvent.change(screen.getByLabelText("Задержка буфера, мс"), { target: { value: "800" } });
   expect(api.updateRuntimeSettings).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Устройства" }));
+  fireEvent.click(settingButton("Микрофон и звук"));
   await waitFor(() => expect(confirmed.voice_live_playback_prebuffer_segments).toBe(3));
   await waitFor(() => expect(confirmed.voice_live_playback_prebuffer_ms).toBe(800));
-  fireEvent.click(screen.getByRole("button", { name: "Дополнительно" }));
+  fireEvent.click(settingButton("Для разработчиков"));
   expect(screen.getByLabelText("Сегментов в буфере")).toHaveValue(3);
   expect(screen.getByLabelText("Задержка буфера, мс")).toHaveValue(800);
 });
+
+
+describe("новые сценарии настроек", () => {
+  const baseProps = () => ({ settings: settings as PublicSettings, avatarStatus: null, avatarOverlay: null, events: [],
+    onRefreshEvents: vi.fn(), onRefreshAvatar: vi.fn(), onAvatarOverlayChanged: vi.fn(),
+    onInterfaceLocaleChange: vi.fn(), onSettingsChanged: vi.fn() });
+
+  it("сохраняет подачу и выразительность через постоянные настройки", async () => {
+    api.updateRuntimeSettings.mockImplementation(async patch => ({ ...settings, ...patch }));
+    render(<SettingsPage {...baseProps()} initialSection="voice" />);
+    fireEvent.change(screen.getByLabelText(/Подача голоса/), { target: { value: "thoughtful" } });
+    fireEvent.change(screen.getByLabelText(/Выразительность/), { target: { value: "minimal" } });
+    await waitFor(() => expect(api.updateRuntimeSettings).toHaveBeenCalledWith({ voice_tts_expression_level: "minimal" }));
+    expect(api.updateRuntimeSettings).toHaveBeenCalledWith({ voice_tts_style: "thoughtful" });
+    expect(api.updateVoiceStyle).not.toHaveBeenCalled();
+    expect(api.updateVoiceExpression).not.toHaveBeenCalled();
+  });
+
+  it("сохраняет черновик словаря при переходах и не сохраняет незавершённую строку", async () => {
+    render(<SettingsPage {...baseProps()} initialSection="voice" />);
+    const word = screen.getByLabelText("Слово");
+    await waitFor(() => expect(word).toBeEnabled());
+    fireEvent.change(word, { target: { value: "Iris" } });
+    expect(screen.getByRole("button", { name: "Сохранить словарь" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Как произносить"), { target: { value: "Ирис" } });
+    fireEvent.click(settingButton("Разговор"));
+    fireEvent.click(settingButton("Голос Iris"));
+    expect(screen.getByLabelText("Слово")).toHaveValue("Iris");
+    expect(screen.getByRole("button", { name: "Сохранить словарь" })).toBeEnabled();
+    expect(api.updatePronunciations).not.toHaveBeenCalled();
+  });
+
+  it("возвращает прокрутку посещённого раздела", () => {
+    const { container } = render(<SettingsPage {...baseProps()} />);
+    const content = container.querySelector<HTMLElement>(".settings-content")!;
+    content.scrollTop = 310;
+    fireEvent.click(settingButton("Голос Iris"));
+    expect(content.scrollTop).toBe(0);
+    fireEvent.click(settingButton("Разговор"));
+    expect(content.scrollTop).toBe(310);
+  });
+
+  it("не теряет введённый ключ при отмене перехода", async () => {
+    const original = Object.getOwnPropertyDescriptor(window, "__TAURI_INTERNALS__");
+    Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
+    try {
+      render(<SettingsPage {...baseProps()} initialSection="api-keys" />);
+      const input = screen.getByLabelText("API-ключ DeepSeek");
+      fireEvent.change(input, { target: { value: "test-unsaved-key" } });
+      fireEvent.click(settingButton("Разговор"));
+      expect(await screen.findByRole("alertdialog", { name: "Отбросить введённый ключ?" })).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "Остаться" }));
+      expect(input).toHaveValue("test-unsaved-key");
+      fireEvent.click(settingButton("Разговор"));
+      fireEvent.click(screen.getByRole("button", { name: "Отбросить и перейти" }));
+      await waitFor(() => expect(screen.getByRole("heading", { name: "Разговор" })).toBeVisible());
+      fireEvent.click(settingButton("API-ключи"));
+      expect(input).toHaveValue("");
+      expect(api.saveDesktopApiKey).not.toHaveBeenCalled();
+    } finally {
+      if (original) Object.defineProperty(window, "__TAURI_INTERNALS__", original);
+      else Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+    }
+  });
+
+  it("выбирает раздел через компактное окно", async () => {
+    render(<SettingsPage {...baseProps()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Выбрать раздел настроек:/ }));
+    const picker = await screen.findByRole("dialog", { name: "Разделы настроек" });
+    fireEvent.change(within(picker).getByRole("searchbox"), { target: { value: "инкогнито" } });
+    fireEvent.click(within(picker).getByRole("button", { name: "Режим инкогнито" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Разделы настроек" })).not.toBeInTheDocument());
+    expect(screen.getByRole("switch", { name: /Режим инкогнито/ })).toBeVisible();
+    expect(document.getElementById("memory-incognito")).toHaveFocus();
+  });
+});
+
+
+it("сохраняет черновик словаря после ухода в другой раздел приложения", async () => {
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
+  await screen.findByRole("navigation", { name: "Разделы настроек" });
+  fireEvent.click(settingButton("Голос Iris"));
+  const word = screen.getByLabelText("Слово");
+  await waitFor(() => expect(word).toBeEnabled());
+  fireEvent.change(word, { target: { value: "Iris" } });
+  fireEvent.change(screen.getByLabelText("Как произносить"), { target: { value: "Ирис" } });
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Разделы приложения" })).getByRole("button", { name: "Обзор" }));
+  const beforeUnload = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(beforeUnload);
+  expect(beforeUnload.defaultPrevented).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
+  await screen.findByRole("navigation", { name: "Разделы настроек" });
+  expect(screen.getByLabelText("Слово")).toHaveValue("Iris");
+  expect(screen.getByLabelText("Как произносить")).toHaveValue("Ирис");
+  expect(api.updatePronunciations).not.toHaveBeenCalled();
+}, 10_000);

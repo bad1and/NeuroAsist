@@ -42,7 +42,7 @@ const RU_TO_EN: readonly TranslationPair[] = [
   ["Восстановить", "Restore"],
   ["Резервных копий пока нет", "No backups yet"],
   ["Город и интернет", "Location and internet"],
-  ["Модель отсутствует или повреждена. Откройте Настройки → Система → Модели и повторите загрузку.", "The model is missing or damaged. Open Settings → System → Models and retry the download."],
+  ["Модель отсутствует или повреждена. Откройте Настройки → Подключения → Локальные модели и повторите загрузку.", "The model is missing or damaged. Open Settings → Connections → Local models and retry the download."],
   ["Восстановить из копии", "Restore from backup"],
   ["Iris сохранит текущие данные перед заменой. После восстановления приложение перезапустится.", "Iris will preserve current data before replacement. The application will restart after restoration."],
   ["История, память, настройки и словари. Ключи API не входят в копии.", "History, memory, preferences and dictionaries. API keys are excluded."],

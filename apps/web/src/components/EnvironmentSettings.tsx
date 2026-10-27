@@ -10,6 +10,9 @@ import type { EnvironmentStatus, PublicSettings } from "../types";
 import type { RuntimeSettingsPatch } from "../settingsAutosave";
 
 export interface EnvironmentSettingsProps {
+  section?: "all" | "context" | "search";
+  onOpenNotifications?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
   settings: PublicSettings;
   developerMode: boolean;
   onSaveSetting: (patch: RuntimeSettingsPatch, rollback?: () => void,
@@ -17,7 +20,7 @@ export interface EnvironmentSettingsProps {
   onOpenApiKeys: () => void;
 }
 
-export function EnvironmentSettings({ settings, developerMode, onSaveSetting, onOpenApiKeys }: EnvironmentSettingsProps) {
+export function EnvironmentSettings({ settings, developerMode, onSaveSetting, onOpenApiKeys, section = "all", onOpenNotifications, onDirtyChange }: EnvironmentSettingsProps) {
   const [envStatus, setEnvStatus] = useState<EnvironmentStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [cityInput, setCityInput] = useState(settings.location_city ?? "");
@@ -33,6 +36,7 @@ export function EnvironmentSettings({ settings, developerMode, onSaveSetting, on
   const webSearchEnabled = settings.web_search_enabled ?? true;
   const searchProvider = settings.web_search_provider === "tavily" ? "tavily" : "free";
   const newsCategory = settings.news_category ?? "all";
+  useEffect(() => { onDirtyChange?.(cityBusy || cityInput.trim() !== (settings.location_city ?? "").trim()); }, [cityInput, cityBusy, settings.location_city, onDirtyChange]);
 
   const refreshStatus = useCallback(async () => {
     const id = ++requestId.current;
@@ -95,7 +99,7 @@ export function EnvironmentSettings({ settings, developerMode, onSaveSetting, on
     : unavailable;
 
   return <>
-    <section className="settings-card" aria-labelledby="environment-location">
+    <section className="settings-card" aria-labelledby="environment-location" hidden={section === "search"}>
       <div className="settings-card-header"><div className="settings-card-header-main"><div className="settings-card-title-group">
         <h3 className="settings-card-title" id="environment-location">Местоположение и время</h3>
         <p className="settings-card-subtitle">Город для погоды и контекста бесед. Время берётся из системных часов.</p>
@@ -125,14 +129,15 @@ export function EnvironmentSettings({ settings, developerMode, onSaveSetting, on
               if (event.key === "Enter") { event.preventDefault(); void handleSaveCity(); }
             }} />
           <MaterialButton materialKey="environment.city.save" type="button" className="secondary"
-            disabled={cityBusy || !cityInput.trim()} onClick={() => void handleSaveCity()}>
+            disabled={cityBusy || !cityInput.trim() || cityInput.trim() === (settings.location_city ?? "").trim()} onClick={() => void handleSaveCity()}>
             {cityBusy ? "Сохраняем…" : citySaved ? "Сохранено ✓" : "Сохранить"}
           </MaterialButton>
         </div>
+      {cityInput.trim() !== (settings.location_city ?? "").trim() && <small role="status">Город ещё не сохранён.</small>}
       </div>}
     </section>
 
-    <section className="settings-card" aria-labelledby="environment-weather">
+    <section className="settings-card" aria-labelledby="environment-weather" hidden={section === "search"}>
       <div className="settings-card-header"><div className="settings-card-title-group">
         <h3 className="settings-card-title" id="environment-weather">Погода</h3>
       </div></div>
@@ -142,7 +147,7 @@ export function EnvironmentSettings({ settings, developerMode, onSaveSetting, on
       {weatherEnabled && <div className="readonly-setting"><span>Погода сейчас</span><strong>{weatherLabel}</strong></div>}
     </section>
 
-    <section className="settings-card" aria-labelledby="environment-news">
+    <section className="settings-card" aria-labelledby="environment-news" hidden={section === "search"}>
       <div className="settings-card-header"><div className="settings-card-title-group">
         <h3 className="settings-card-title" id="environment-news">Новости</h3>
       </div></div>
@@ -158,7 +163,7 @@ export function EnvironmentSettings({ settings, developerMode, onSaveSetting, on
       </label>}
     </section>
 
-    <section className="settings-card" aria-labelledby="environment-search">
+    <section className="settings-card" aria-labelledby="environment-search" hidden={section === "context"}>
       <div className="settings-card-header"><div className="settings-card-title-group">
         <h3 className="settings-card-title settings-target-heading" id="environment-search" tabIndex={-1}>Веб-поиск</h3>
         <p className="settings-card-subtitle">Проверка актуальной информации во время разговора.</p>
@@ -166,31 +171,37 @@ export function EnvironmentSettings({ settings, developerMode, onSaveSetting, on
       <AppSwitch checked={webSearchEnabled} label="Самостоятельный поиск в интернете"
         description="Запросы и источники сохраняются только в истории диалога."
         onChange={checked => saveSetting({ web_search_enabled: checked })} />
-      <AppSwitch checked={settings.web_search_notifications_enabled ?? false}
+      {section === "all" && <AppSwitch checked={settings.web_search_notifications_enabled ?? false}
         label="Показывать поиск в уведомлениях"
         description="Этапы проверки и источники можно раскрыть в уведомлении. История сохраняется и без уведомлений."
-        onChange={checked => saveSetting({ web_search_notifications_enabled: checked })} />
+        onChange={checked => saveSetting({ web_search_notifications_enabled: checked })} />}
       <label>Источник веб-поиска
         <CustomSelect value={searchProvider} disabled={!webSearchEnabled} onChange={event => saveSetting({ web_search_provider: event.target.value as "free" | "tavily" })}>
-          <option value="free">Бесплатные источники</option><option value="tavily">Tavily Free</option>
+          <option value="free">Бесплатные источники</option><option value="tavily">Tavily (API)</option>
         </CustomSelect>
         <small>При отсутствии ключа Tavily или исчерпании бесплатной квоты Iris использует открытые источники.</small>
       </label>
       <div className="settings-source-key-row">
         <span>{settings.search_api_keys_configured?.tavily ? "Ключ Tavily настроен" : "Ключ Tavily не настроен"}</span>
-        <MaterialButton materialKey="environment.open-api-keys" type="button" className="text-button settings-inline-link" onClick={onOpenApiKeys}>
+        <MaterialButton materialKey="environment.open-api-keys" type="button" className="secondary settings-inline-link" onClick={onOpenApiKeys}>
           Настроить API-ключ<ArrowUpRight size={15} aria-hidden="true" />
         </MaterialButton>
       </div>
+      {onOpenNotifications && <div className="settings-card-actions"><MaterialButton materialKey="environment.notifications" className="secondary" onClick={onOpenNotifications}>Настроить уведомления о поиске</MaterialButton></div>}
     </section>
 
-    <div className="readonly-setting audio-device-refresh">
-      <span>Данные окружения</span>
-      <MaterialButton materialKey="environment.refresh" type="button" className="secondary" disabled={loading} onClick={() => void refreshStatus()}>
-        {loading ? "Обновляем…" : "Обновить данные"}
-      </MaterialButton>
-      {!loading && (!envStatus || envStatus.status === "unavailable") && <small role="status">Окружение пока недоступно. Попробуйте обновить данные.</small>}
-    </div>
+    <section className="settings-card settings-environment-refresh" aria-labelledby="environment-refresh-title" aria-busy={loading}>
+      <div className="settings-environment-refresh-row">
+        <div className="settings-card-title-group">
+          <h3 className="settings-card-title" id="environment-refresh-title">Данные окружения</h3>
+          <p className="settings-card-subtitle">Город, время, погода и новости для разговора с Iris.</p>
+        </div>
+        <MaterialButton materialKey="environment.refresh" type="button" className="secondary" disabled={loading} onClick={() => void refreshStatus()}>
+          {loading ? "Обновляем…" : "Обновить данные"}
+        </MaterialButton>
+      </div>
+      {!loading && (!envStatus || envStatus.status === "unavailable") && <p className="settings-saved-note" role="status">Окружение пока недоступно. Попробуйте обновить данные.</p>}
+    </section>
     {developerMode && envStatus?.ambient_header && <div className="readonly-setting dev-locked-field">
       <span>Промпт контекста (режим разработчика)</span><small className="settings-environment-prompt">{envStatus.ambient_header}</small>
     </div>}

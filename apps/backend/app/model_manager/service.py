@@ -82,7 +82,7 @@ def require_managed_model(model_id: str, path: Path) -> None:
     root = model_root(Path(os.environ["NEUROASIST_APP_DATA_DIR"]))
     manager = ModelManager(root)
     if path.resolve() != manager.path_for(model_id).resolve() or not manager.model_state(model_id)["installed"]:
-        raise RuntimeError("Модель отсутствует или повреждена. Откройте Настройки → Система → Модели и повторите загрузку.")
+        raise RuntimeError("Модель отсутствует или повреждена. Откройте Настройки → Подключения → Локальные модели и повторите загрузку.")
 
 
 class ModelManager:

@@ -45,7 +45,7 @@ export function GlobalSearch({ open, developerMode, onClose, onSelect }: {
     const controller = new AbortController();
     const text = query.trim();
     setActiveIndex(0); setUnavailable([]);
-    const settings: Result[] = searchSettings(text, developerMode).slice(0, 8).map(item => ({ id: `setting.${item.section}`, group: "Настройки", title: item.title, excerpt: "Открыть раздел", destination: { kind: "setting", section: item.section } }));
+    const settings: Result[] = searchSettings(text, developerMode).slice(0, 8).map(item => ({ id: `setting.${item.section}.${item.focusId ?? "page"}`, group: "Настройки", title: item.title, excerpt: "Открыть раздел", destination: { kind: "setting", section: item.section, focusId: item.focusId } }));
     setResults(settings);
     if (!text) { setLoading(false); return; }
     setLoading(true);

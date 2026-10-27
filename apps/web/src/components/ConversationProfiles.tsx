@@ -1,10 +1,6 @@
 import { MaterialButton } from "./MaterialButton";
-import {
-  IconInterfaceChevronDown as ChevronDown,
-  IconInterfaceSliders as SlidersHorizontal,
-} from "../CustomIcons";
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { animate, prefersReducedMotion } from "../animations";
+import { Disclosure } from "./Disclosure";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import type { PublicSettings } from "../types";
 
 const profiles = [
@@ -13,7 +9,7 @@ const profiles = [
   { label: "Больше общения", engagement: "high", initiative: "balanced", description: "Чаще вступает в разговор и предлагает новые темы." },
 ] as const;
 
-export function ConversationProfiles({ engagement, initiative, onChange }: { engagement: string; initiative: string; onChange: (value: Pick<PublicSettings, "live_conversation_engagement" | "live_conversation_initiative">) => void }) {
+export function ConversationProfiles({ engagement, initiative, onChange, children }: { engagement: string; initiative: string; children?: ReactNode; onChange: (value: Pick<PublicSettings, "live_conversation_engagement" | "live_conversation_initiative">) => void }) {
   const id = useId();
   const matched = profiles.some(profile => engagement === profile.engagement && initiative === profile.initiative);
   return <section className="settings-card conversation-profile-card">
@@ -37,22 +33,16 @@ export function ConversationProfiles({ engagement, initiative, onChange }: { eng
         </MaterialButton>;
       })}
     </div>
+    {children}
   </section>;
 }
 
-export function ConversationSettingsDetails({ hidden, children }: { hidden: boolean; children: ReactNode }) {
+export function ConversationSettingsDetails({ hidden, children, reveal = false }: { hidden: boolean; children: ReactNode; reveal?: boolean }) {
   const [expanded, setExpanded] = useState(false);
-  const id = useId();
-  const content = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!expanded || !content.current || prefersReducedMotion()) return;
-    const motion = animate(content.current, { opacity: [0, 1], translateY: [-4, 0], duration: 180, ease: "outQuad" });
-    return () => { motion.revert(); };
-  }, [expanded]);
-  return <section className="conversation-settings-details" hidden={hidden}>
-    <MaterialButton materialKey="conversation.all-settings" className="secondary conversation-settings-toggle" type="button" aria-expanded={expanded} aria-controls={id} onClick={() => setExpanded(value => !value)}>
-      <SlidersHorizontal size={16} aria-hidden="true" />Все параметры разговора<ChevronDown size={16} aria-hidden="true" />
-    </MaterialButton>
-    <div id={id} className="conversation-settings-stack" ref={content} hidden={!expanded} role="region" aria-label="Все параметры разговора">{children}</div>
-  </section>;
+  useEffect(() => { if (reveal) setExpanded(true); }, [reveal]);
+  const isExpanded = expanded || reveal;
+  return <Disclosure materialKey="conversation.all-settings" label="Настроить подробнее" className="conversation-settings-details"
+    hidden={hidden} open={isExpanded} onOpenChange={setExpanded} contentClassName="conversation-settings-stack" regionLabel="Все параметры разговора">
+    {children}
+  </Disclosure>;
 }

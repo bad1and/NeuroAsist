@@ -58,7 +58,7 @@ class GigaAMOnnxSTTProvider(STTProvider):
         if all((self._model_dir / name).is_file() for name in MODEL_FILES):
             return
         if os.getenv("NEUROASIST_MANAGED_MODELS") == "1":
-            raise RuntimeError("Скачайте GigaAM в Настройки → Система → Модели.")
+            raise RuntimeError("Скачайте GigaAM в Настройки → Подключения → Локальные модели.")
         from huggingface_hub import snapshot_download
 
         snapshot_download("istupakov/gigaam-v3-onnx", revision=MODEL_REVISION,

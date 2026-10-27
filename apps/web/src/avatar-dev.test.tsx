@@ -112,11 +112,11 @@ describe("AvatarDevStudioStandalonePage", () => {
       />,
     );
 
-    // Expand Sistema group first, then switch to Interface section
-    const systemBtn = screen.getByRole("button", { name: /Система/ });
+    // Open the developer tools in Diagnostics.
+    const systemBtn = screen.getByRole("button", { name: /Диагностика/ });
     fireEvent.click(systemBtn);
 
-    const interfaceBtn = screen.getByRole("button", { name: /Интерфейс/ });
+    const interfaceBtn = screen.getByRole("button", { name: /Для разработчиков/ });
     fireEvent.click(interfaceBtn);
 
     const switchInput = screen.getByRole("switch", { name: /Окно тестирования/ });
@@ -183,6 +183,7 @@ describe("AvatarDevStudioStandalonePage", () => {
     expect(screen.getByLabelText(/API-ключ DeepSeek/)).toHaveAttribute("type", "password");
     expect(screen.getByLabelText(/API-ключ Coding Agent/)).toHaveAttribute("type", "password");
     expect(within(screen.getByRole("region", { name: "DeepSeek API" })).getByText("Ключ настроен")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Дополнительные подключения" }));
     expect(within(screen.getByRole("region", { name: "Coding Agent API" })).getByText("Ключ не настроен")).toBeInTheDocument();
   });
 });

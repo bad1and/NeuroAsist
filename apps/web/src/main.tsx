@@ -9,6 +9,10 @@ import "./components/StartupScreen.css";
 import "./components/MaterialButton.css";
 import "./components/FieldMaterial.css";
 import "./product-improvements.css";
+import "./components/StatusBadge.css";
+import "./animations/motion.css";
+import "./overview.css";
+import "./settings/settings.css";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

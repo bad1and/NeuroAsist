@@ -61,6 +61,8 @@ class RuntimeSettings:
     voice_input_device_id: str = ""
     voice_output_device_id: str = ""
     voice_tts_voice: str | None = None
+    voice_tts_style: str = "auto"
+    voice_tts_expression_level: str = "natural"
     voice_playback_rate: float = 1.0
     voice_live_playback_prebuffer_segments: int = 1
     voice_live_playback_prebuffer_ms: int = 0
@@ -161,6 +163,9 @@ class RuntimeSettingsStore:
             # old settings files, but never allow a persisted flag to disable it.
             values["live_conversation_enabled"] = True
             values["web_search_free_only"] = True
+            from apps.backend.app.voice.style import coerce_voice_style, coerce_voice_expression_level
+            values["voice_tts_style"] = coerce_voice_style(values.get("voice_tts_style", defaults.voice_tts_style)).value
+            values["voice_tts_expression_level"] = coerce_voice_expression_level(values.get("voice_tts_expression_level", defaults.voice_tts_expression_level)).value
             if values.get("interface_locale") not in {None, "ru", "en"}:
                 values["interface_locale"] = defaults.interface_locale
             if values.get("web_search_provider") not in {None, "free", "brave", "tavily", "serper"}:

@@ -187,7 +187,7 @@ def test_runtime_voice_settings_can_be_updated(client: TestClient) -> None:
         )
 
 
-def test_voice_style_can_be_changed_until_restart(client: TestClient) -> None:
+def test_voice_style_is_saved_in_runtime_preferences(client: TestClient) -> None:
     response = client.patch("/settings/voice-style", json={"voice_tts_style": "energetic"})
 
     assert response.status_code == 200
@@ -198,7 +198,7 @@ def test_voice_style_can_be_changed_until_restart(client: TestClient) -> None:
     assert unsupported.status_code == 400
 
 
-def test_voice_expression_level_can_be_changed_until_restart(client: TestClient) -> None:
+def test_voice_expression_level_is_saved_in_runtime_preferences(client: TestClient) -> None:
     response = client.patch(
         "/settings/voice-expression",
         json={"voice_tts_expression_level": "minimal"},
