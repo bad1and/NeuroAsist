@@ -76,12 +76,12 @@
     {
       "id": "iris-vrm",
       "component": "Flow 2.1 / IRIS.vrm",
-      "status": "public_heads_cleaned_pr_refs_and_actions_pending",
+      "status": "public_heads_cleaned_actions_pending",
       "delivery": "Private Unity build from pinned public code; public application build receives a hash-pinned compiled Player. Public branch histories are cleaned; readonly GitHub PR refs still expose old source assets.",
       "license": "Custom Kado terms and separate owner-confirmed permission",
       "source": "https://note.com/masakikado/n/nac5949dd52a6",
-      "evidence": "Owner clarified that the author objects only to source VRM redistribution; correspondence was not inspected. On 2026-10-24 a fresh public clone had no excluded assets across reachable branch histories; readonly PR refs still contain the VRM. Local Unity build from fresh public/private clones succeeded; 151 packaged Player files passed verification. Cloud split build and installed runtime were not tested. See Docs/avatar-distribution-result-2026-10-24.md.",
-      "required": "Resolve remaining PR refs and cached source access with the repository owner and GitHub Support; configure private runner and narrow Actions-read token, run both workflows, and accept actual application delivery. Preserve author permission and credit; Unity packaging is not an extraction guarantee.",
+      "evidence": "Owner clarified that the author objects only to source VRM redistribution; correspondence was not inspected. On 2026-10-24 a fresh public clone had no excluded assets across reachable branch histories; readonly PR refs still contain the VRM. Local Unity build from fresh public/private clones succeeded; 151 packaged Player files passed verification. Cloud split build and installed runtime were not tested. See Docs/avatar-distribution-result-2026-10-24.md. On 2026-10-24 the owner accepted residual access through legacy PR refs and excluded further removal from installer prerequisites. See Docs/installer-agent-handoff.md.",
+      "required": "Configure private runner and narrow Actions-read token, run both workflows, and accept actual application delivery. Keep source assets out of new public files and shipped artifacts. Legacy PR-ref cleanup is optional by owner decision, not an installer prerequisite. Preserve author permission and credit; Unity packaging is not an extraction guarantee.",
       "publication_exclusions": [
         "apps/avatar-unity/Assets/IRIS.vrm",
         "apps/web/public/avatar/IRIS.vrm",

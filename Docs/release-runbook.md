@@ -8,6 +8,10 @@
 принимается после [условий выпуска](release-checklist.md).
 Номер `1.0.0` в исходниках сам по себе не подтверждает готовность установщика.
 
+Агенту, продолжающему подготовку установщика, сначала прочитать
+[инструкцию передачи](installer-agent-handoff.md): в ней зафиксированы
+раздельная сборка и принятый владельцем остаточный доступ через старые PR refs.
+
 Подготовка до установщика объединена в [три крупных этапа](release-stage-2-plan.md).
 Перед сборкой сверить [разбор зависимостей](security-dependencies-2026-10-20.md)
 и [условия материалов](../THIRD_PARTY_ASSETS.md). Для следующего каталога
@@ -86,16 +90,21 @@ Workflow не создаёт установщик или GitHub Release и не 
 
 ## Собрать кандидата
 
-После пересборки Unity, из корня репозитория:
+После получения проверенного пакета из закрытой Unity-сборки, из корня репозитория:
 
 ```powershell
-.\scripts\build-desktop-release.ps1 -RequireCleanWorktree -ArtifactDirectory artifacts
+.\scripts\build-desktop-release.ps1 -RequireCleanWorktree `
+  -AvatarPackage D:\delivery\iris-avatar-windows.zip `
+  -AvatarPackageSha256 '<проверенный SHA-256 компонента>' `
+  -ArtifactDirectory artifacts
 ```
 
 С подписью:
 
 ```powershell
 .\scripts\build-desktop-release.ps1 -RequireCleanWorktree `
+  -AvatarPackage D:\delivery\iris-avatar-windows.zip `
+  -AvatarPackageSha256 '<проверенный SHA-256 компонента>' `
   -SigningCertificateThumbprint 'ОТПЕЧАТОК_СЕРТИФИКАТА' -ArtifactDirectory artifacts
 ```
 
