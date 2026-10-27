@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import re
+import sqlite3
 import time
 from datetime import UTC, datetime, timedelta
 from difflib import SequenceMatcher
@@ -22,6 +23,7 @@ from apps.backend.app.agents.character.prompts import (
 )
 from apps.backend.app.agents.character.dialogue_pacing import infer_dialogue_pacing
 from apps.backend.app.agents.character.memes import MemeLibrary
+from apps.backend.app.agents.character.opinions import OpinionStore, OpinionProposal, OpinionConflict, opinion_stream
 from apps.backend.app.agents.character.dialogue_style import (
     DialogueStyleService,
     dialogue_style_prompt,
@@ -118,6 +120,7 @@ class CharacterAgent:
         avatar_service=None,
         reminder_service=None,
         document_service=None,
+        opinion_store: OpinionStore | None = None,
     ) -> None:
         self._llm_provider = llm_provider
         self._history = history
@@ -132,6 +135,10 @@ class CharacterAgent:
         self._runtime_settings = runtime_settings
         self._dialogue_style_service = dialogue_style_service
         self._meme_library = meme_library
+        self._opinion_store = opinion_store
+        self._pending_opinion = None
+        self._opinion_proposed = False
+        self._opinion_context_chars = 0
         self._prompt_dialogue_style = "street"
         self._meme_context_chars = 0
         self._response_guard_failure: str | None = None
@@ -219,6 +226,67 @@ class CharacterAgent:
         )
         return episode_id, mode
 
+    def _stage_opinion(self, value):
+        self._pending_opinion = None
+        self._opinion_proposed = value is not None
+        if value is not None and self._opinion_store is not None:
+            try:
+                self._pending_opinion = OpinionProposal.model_validate(value)
+            except ValueError:
+                pass
+
+    def _opinion_context(self, text, context, *, live):
+        self._opinion_context_chars = 0
+        if self._opinion_store is None:
+            return ""
+        try:
+            cue = self._opinion_store.prompt(text, context, live=live,
+                incognito=self._opinion_writes_paused())
+            self._opinion_context_chars = len(cue)
+            return cue
+        except (OSError, ValueError, sqlite3.Error):
+            logger.warning("Could not read Iris viewpoints")
+            return "Твои сохранённые взгляды сейчас недоступны. Не выдумывай, что всегда придерживалась новой позиции."
+
+    def _opinion_writes_paused(self):
+        return (getattr(self._runtime_settings, "memory_incognito", False)
+                or getattr(self._runtime_settings, "memory_mode", "balanced") == "off")
+
+    def _commit_opinion(self, reply):
+        proposal, proposed = self._pending_opinion, self._opinion_proposed
+        self._pending_opinion = None
+        self._opinion_proposed = False
+        if (not proposed or self._response_guard_failure or self._opinion_writes_paused()
+                or self.last_document_context or (self.last_skill_metadata or {}).get("name") in {"avatar_body", "create_reminder"}):
+            return reply
+        if proposal is None or self._opinion_store is None:
+            return "Эта оценка пока предварительная: сохранить её не получилось. " + reply
+        try:
+            result = self._opinion_store.apply(proposal,
+                source_id=getattr(self._last_user_message, "id", None) or self._active_turn_id)
+        except OpinionConflict as exc:
+            if exc.current and exc.current["enabled"]:
+                stance = exc.current["stance"]
+                stance = stance[:1].upper() + stance[1:]
+                return stance + (" " if stance.endswith((".", "!", "?")) else ". ") + "Свою позицию я пока не меняла."
+            return "Не буду выдавать новую позицию за прежнюю: сохранить пересмотр сейчас не получилось."
+        except (OSError, ValueError, sqlite3.Error):
+            logger.warning("Could not save Iris viewpoint")
+            return "Эта оценка пока предварительная: сохранить её не получилось. " + reply
+        if result["changed"]:
+            previous = result["previous"]
+            # Keep a natural acknowledgement the model already supplied. A
+            # deterministic notice is required only when it silently flips.
+            matches = list(re.finditer(r"(?iu)\b(?:передумала|пересмотрела|изменила\s+(?:сво[её]\s+)?(?:мнение|позицию))\b", reply))
+            negated = any(re.search(r"(?iu)\bне\s+$", reply[max(0, match.start() - 15):match.start()]) for match in matches)
+            acknowledged = bool(matches) and not negated
+            acknowledged = acknowledged or re.match(r"(?iu)^\s*меняет\s*[,!.]", reply)
+            if acknowledged:
+                return reply
+            notice = f'Я изменила мнение о «{proposal.topic}». Раньше: {previous["stance"]} Теперь: {proposal.stance} Причина: {proposal.reason}'
+            return notice if negated else notice + " " + reply
+        return reply
+
     def _meme_context(self, text, context, pacing, style, state_behavior=None):
         self._meme_context_chars = 0
         if self._meme_library is None:
@@ -258,6 +326,7 @@ class CharacterAgent:
         self._task_reasoning = False
         self._guard_retry_used = False
         self._response_guard_reason = None
+        self._stage_opinion(None)
         self.last_web_search_metadata = None
         self._body_session_id = session_id
         self.last_news_metadata = None
@@ -1229,6 +1298,7 @@ class CharacterAgent:
         diagnostics = {"persona_version": self._persona.persona_version,
                        "prompt_dialogue_style": self._prompt_dialogue_style,
                        "meme_context_chars": self._meme_context_chars}
+        diagnostics["opinion_context_chars"] = self._opinion_context_chars
         if self._response_guard_failure:
             diagnostics.update(response_failed=True, response_failure_reason=self._response_guard_failure)
             if self._response_guard_reason:
@@ -1394,6 +1464,9 @@ class CharacterAgent:
         meme_context = self._meme_context(prompt_user_text, context, pacing, dialogue_style, state_behavior) if pacing.mode != "constrained" else ""
         if meme_context:
             messages.append(ChatMessage(role="system", content=meme_context))
+        opinion_context = await asyncio.to_thread(self._opinion_context, prompt_user_text, context, live=False) if pacing.mode != "constrained" else ""
+        if opinion_context:
+            messages.append(ChatMessage(role="system", content=opinion_context))
         messages.append(
             ChatMessage(
                 role="system",
@@ -2219,6 +2292,9 @@ class CharacterAgent:
         meme_context = self._meme_context(prompt_user_text, context, pacing, dialogue_style, state_behavior) if pacing.mode != "constrained" else ""
         if meme_context:
             messages.append(ChatMessage(role="system", content=meme_context))
+        opinion_context = await asyncio.to_thread(self._opinion_context, prompt_user_text, context, live=True) if pacing.mode != "constrained" else ""
+        if opinion_context:
+            messages.append(ChatMessage(role="system", content=opinion_context))
         messages.append(
             ChatMessage(
                 role="system",
@@ -2242,6 +2318,7 @@ class CharacterAgent:
         chunks: list[str] = [search_acknowledgement] if search_acknowledgement else []
         from apps.backend.app.reminders import explicit_reminder, failed_reminder_reply
         hold_reminder = explicit_reminder(self._reminder_user_text)
+        hold_opinion = False
         route_buffer = ""
         route_checked = not model_routing_candidate
         guard_options: dict[str, Any] = {
@@ -2257,6 +2334,7 @@ class CharacterAgent:
         # Control commands remain hidden even when this turn forbids lookup.
         visible_stream = self._live_stream_with_optional_search(messages, guard_options)
         async for delta in self._truthful_search_stream(visible_stream):
+            hold_opinion = hold_opinion or self._opinion_proposed
             if not delta:
                 continue
             if not route_checked:
@@ -2292,25 +2370,36 @@ class CharacterAgent:
                         yield str(result["reply"])
                         return
             chunks.append(delta)
-            if not hold_reminder:
+            if not hold_reminder and not hold_opinion:
                 yield delta
         if not route_checked and route_buffer:
             _, _, remainder = self._extract_live_coding_delegation(route_buffer, final=True)
             if remainder:
                 chunks.append(remainder)
-                if not hold_reminder:
+                if not hold_reminder and not hold_opinion:
                     yield remainder
         reply = "".join(chunks).strip()
         if hold_reminder:
             reply = failed_reminder_reply(self.last_skill_metadata, self._reminder_user_text, reply) or reply
-        if stored_reply_transform is not None:
+        if stored_reply_transform is not None and not hold_opinion:
             reply = stored_reply_transform(reply)
+        if hold_opinion:
+            # Only viewpoint-writing replies are held. Save before the first
+            # spoken word, so a stale revision can never be spoken as accepted.
+            from apps.backend.app.voice.directives import LiveDirectiveParser, clean_live_reply
+            directive, _ = LiveDirectiveParser().feed(reply)
+            reply = await asyncio.to_thread(self._commit_opinion, clean_live_reply(reply))
+            if directive is not None:
+                reply = f"[[avatar emotion={directive.emotion.value} gesture={directive.gesture} intensity={directive.intensity}]] " + reply
+            spoken_opinion_reply = reply
+            if stored_reply_transform is not None:
+                reply = stored_reply_transform(reply)
         if not reply:
             reply = self._empty_model_fallback(effective_text)
-            if not hold_reminder:
+            if not hold_reminder and not hold_opinion:
                 yield reply
-        if hold_reminder:
-            yield reply
+        if hold_reminder or hold_opinion:
+            yield spoken_opinion_reply if hold_opinion else reply
         if persist_reply is None:
             persist_reply = source_message is None
         await asyncio.to_thread(
@@ -2355,6 +2444,11 @@ class CharacterAgent:
                 payload.pop("diary_note", None)
                 payload.pop("cognitive_appraisal", None)
             parsed = _ParseResult(payload, parsed.valid, parsed.reason, turn)
+        if parsed.valid:
+            reply = self._commit_opinion(parsed.payload["reply"])
+            if reply != parsed.payload["reply"]:
+                parsed = replace(parsed, payload={**parsed.payload, "reply": reply},
+                    turn=parsed.turn.model_copy(update={"reply": reply}) if parsed.turn else None)
         if (
             parsed.valid
             and parsed.turn is not None
@@ -2639,6 +2733,7 @@ class CharacterAgent:
         event_type: str = "llm.invalid_json",
         report_invalid: bool = True,
     ) -> _ParseResult:
+        self._stage_opinion(None)
         json_content = self._extract_json(raw_content)
 
         try:
@@ -2663,6 +2758,7 @@ class CharacterAgent:
                 report_invalid,
             )
 
+        opinion = payload.pop("opinion", None)
         try:
             turn, valid_metadata, adapter_reason = parse_turn(payload, user_text=user_text)
         except ValueError:
@@ -2675,6 +2771,7 @@ class CharacterAgent:
                 report_invalid,
             )
 
+        self._stage_opinion(opinion)
         legacy_without_gesture = "gesture" not in payload and "affect" not in payload
         result_payload = legacy_result(
             turn,
@@ -2857,7 +2954,8 @@ class CharacterAgent:
         allows_repetition = self._user_allows_repetition(user_text, previous_assistant_reply)
         duplicate_guard = bool(previous_assistant_reply and not allows_repetition)
         previous_normalized = self._normalized_for_similarity(previous_assistant_reply)
-        async for delta in self._skill_model_stream(messages):
+        self._stage_opinion(None)
+        async for delta in opinion_stream(self._skill_model_stream(messages), self._stage_opinion):
             if released:
                 yield delta
                 continue
@@ -2982,11 +3080,12 @@ class CharacterAgent:
         *, format_only: bool = False,
     ) -> str:
         """A retry is fully buffered so a second stale answer cannot reach TTS."""
+        self._stage_opinion(None)
         self._guard_retry_used = True
         try:
             with llm_call_purpose("chat_live_guard_retry"):
                 chunks = [
-                    delta async for delta in self._llm_provider.stream([
+                    delta async for delta in opinion_stream(self._llm_provider.stream([
                         *messages,
                         ChatMessage(
                             role="system",
@@ -3001,7 +3100,7 @@ class CharacterAgent:
                                 single_word=self._single_word_required,
                             ),
                         ),
-                    ])
+                    ]), self._stage_opinion)
                 ]
         except Exception:
             return self._stale_reply_fallback().payload["reply"]

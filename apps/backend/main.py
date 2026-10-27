@@ -32,6 +32,7 @@ from apps.backend.app.api.routes.context_debug import router as context_debug_ro
 from apps.backend.app.api.routes.llm_diagnostics import router as llm_diagnostics_router
 from apps.backend.app.api.routes.memory import router as memory_router
 from apps.backend.app.api.routes.meme_library import router as meme_library_router
+from apps.backend.app.api.routes.opinions import router as opinions_router
 from apps.backend.app.api.routes.models import router as models_router
 from apps.backend.app.api.routes.maintenance import router as maintenance_router
 from apps.backend.app.api.routes.conversation import router as conversation_router
@@ -75,6 +76,7 @@ from apps.backend.app.voice.orchestrator import SpeechOrchestrator
 from apps.backend.app.agents.character.agent import CharacterAgent
 from apps.backend.app.agents.character.dialogue_style import DialogueStyleService
 from apps.backend.app.agents.character.memes import MemeLibrary
+from apps.backend.app.agents.character.opinions import OpinionStore
 from apps.backend.app.conversation.schemas import ConversationAction, ConversationPhase, SpeakerRole
 from apps.backend.app.conversation.service import LiveConversationService
 from apps.backend.app.conversation.state_service import CharacterStateService
@@ -323,6 +325,11 @@ def create_app() -> FastAPI:
     ) if timeline_store is not None else None
     dialogue_style_service = DialogueStyleService(timeline_store, runtime_settings, runtime_settings_store) if timeline_store is not None else None
     meme_library = MemeLibrary(settings.app_data_path / "meme-library.json")
+    try:
+        opinion_store = OpinionStore(settings.app_data_path / "iris-opinions.sqlite3")
+    except (OSError, sqlite3.Error):
+        logger.warning("Iris viewpoint store is unavailable")
+        opinion_store = None
     if memory_service is not None and semantic_init_error:
         memory_service._semantic_degraded_reason = semantic_init_error
     conversation_service = LiveConversationService(
@@ -530,6 +537,7 @@ def create_app() -> FastAPI:
                 runtime_settings=runtime_settings,
                 dialogue_style_service=dialogue_style_service,
                 meme_library=meme_library,
+                opinion_store=opinion_store,
                 avatar_service=avatar_service,
                 reminder_service=reminder_service,
                 document_service=document_service,
@@ -655,6 +663,7 @@ def create_app() -> FastAPI:
             runtime_settings=runtime_settings,
             dialogue_style_service=dialogue_style_service,
             meme_library=meme_library,
+            opinion_store=opinion_store,
             avatar_service=avatar_service,
             reminder_service=reminder_service,
             document_service=document_service,
@@ -1491,6 +1500,7 @@ def create_app() -> FastAPI:
     app.state.character_state_service = character_state_service
     app.state.dialogue_style_service = dialogue_style_service
     app.state.meme_library = meme_library
+    app.state.opinion_store = opinion_store
     app.state.event_bus = event_bus
     app.state.runtime_settings = runtime_settings
     app.state.runtime_settings_store = runtime_settings_store
@@ -1526,6 +1536,7 @@ def create_app() -> FastAPI:
     from apps.backend.app.api.routes.memory_context import router as memory_context_router
     app.include_router(memory_context_router)
     app.include_router(meme_library_router)
+    app.include_router(opinions_router)
     app.include_router(models_router)
     app.include_router(maintenance_router)
     app.include_router(conversation_router)

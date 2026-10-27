@@ -23,6 +23,8 @@ import type {
   TokenUsageStats,
   TokenRecordsResponse,
   MemeCard,
+  IrisOpinion,
+  OpinionRevision,
 } from "./types";
 
 const DESKTOP_RUNTIME =
@@ -422,6 +424,19 @@ export async function getVoicePreview(signal: AbortSignal): Promise<Blob> {
 
 export function getMemeLibrary(): Promise<{ items: MemeCard[]; limit: number }> {
   return requestJson("/meme-library");
+}
+
+export function getOpinions(): Promise<{ items: IrisOpinion[]; limit: number }> {
+  return requestJson("/opinions");
+}
+export function getOpinionHistory(id: string): Promise<{ items: OpinionRevision[] }> {
+  return requestJson(`/opinions/${encodeURIComponent(id)}/history`);
+}
+export function saveOpinion(fields: { topic: string; stance: string; reason: string; aliases: string[]; id: string | null; expected_revision: number }): Promise<{ item: IrisOpinion }> {
+  return requestJson("/opinions", { method: "POST", body: JSON.stringify(fields) });
+}
+export function toggleOpinion(id: string, enabled: boolean, revision: number): Promise<{ updated: boolean }> {
+  return requestJson(`/opinions/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ enabled, revision }) });
 }
 
 export function saveMemeCard(id: string | null, fields: Partial<Pick<MemeCard, "name" | "summary" | "tags" | "source" | "enabled">>): Promise<{ item: MemeCard }> {

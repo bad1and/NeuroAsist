@@ -775,3 +775,11 @@ export type MemeCard = {
   published_at: string;
   enabled: boolean;
 };
+export interface IrisOpinion {
+  id: string; topic: string; stance: string; reason: string; aliases: string[];
+  revision: number; enabled: boolean; created_at: string; origin: "default" | "iris" | "developer";
+}
+export interface OpinionRevision {
+  revision: number; stance: string; reason: string; created_at: string;
+  origin: "default" | "iris" | "developer"; source_id: string | null;
+}
