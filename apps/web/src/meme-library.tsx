@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  IconInterfacePlus as Plus,
-  IconInterfaceRefresh as RefreshCw,
+  IconInterfaceBookOpen,
+  IconInterfaceArrowUpRight,
+  IconInterfaceTextFormattingTextStyle,
+  IconInterfaceDeleteBin3,
 } from "./CustomIcons";
 import { AppDialog } from "./components/AppDialog";
 import { MaterialButton } from "./components/MaterialButton";
+import { MemoryCollectionToolbar } from "./components/MemoryCollectionToolbar";
 import { LoadingRing } from "./components/LoadingRing";
 import { animateStaggerCards } from "./animations";
 import { deleteMemeCard, getMemeLibrary, saveMemeCard } from "./api";
@@ -56,32 +59,29 @@ export function MemeLibraryPanel() {
   const filtered = items.filter(c => `${c.name} ${c.summary} ${c.tags}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
 
   return <div className="meme-library-panel">
-    <header className="meme-library-heading">
-      <div><h2>Мемотека</h2><p>Мемы и отсылки, которые Iris нашла и может использовать в разговоре.</p></div>
-      <span className="memory-status">{items.length} / {limit}</span>
-    </header>
-    <div className="meme-library-toolbar">
-      <input aria-label="Поиск по мемотеке" placeholder="Найти мем" value={query} onChange={e => setQuery(e.target.value)} />
-      <MaterialButton materialKey="memes.refresh" appearance="quiet" aria-label="Обновить мемотеку" disabled={busy} onClick={() => void refresh()}><RefreshCw size={16} /></MaterialButton>
-      <MaterialButton materialKey="memes.add" disabled={busy || items.length >= limit} onClick={() => edit("new")}><Plus size={16} />Добавить</MaterialButton>
-    </div>
+    <MemoryCollectionToolbar materialKey="memes" query={query} onQueryChange={setQuery} searchLabel="Поиск по мемотеке" placeholder="Найти мем" refreshLabel="Обновить мемотеку" onRefresh={() => void refresh()} onAdd={() => edit("new")} busy={busy} addDisabled={items.length >= limit} count={`${items.length} / ${limit}`} />
     <p className="meme-library-note">Проверьте найденные значения и исправьте ошибки. Отключите карточку, чтобы Iris её не использовала.</p>
     {error && !editing && !deleting && <p role="alert" className="meme-library-error">{error}</p>}
     {loading ? <LoadingRing /> : <div className="memory-list" ref={list}>
-      {filtered.map(card => <article className={`memory-card meme-card${card.enabled ? "" : " is-disabled"}`} key={card.id}>
+      {filtered.map(card => <article className={`memory-card memory-collection-card meme-card${card.enabled ? "" : " is-disabled"}`} key={card.id}>
         <div className="memory-card-main">
-          <div className="memory-card-heading"><strong data-i18n-skip>{card.name}</strong><span className="memory-status">{KINDS[card.kind]}</span></div>
-          <p data-i18n-skip>{card.summary}</p>
-          {card.tags && <small data-i18n-skip>{card.tags}</small>}
-          <div className="meme-card-source"><a href={card.source} target="_blank" rel="noopener noreferrer">Источник</a><small>{card.kind === "reviewed" ? "Правка" : card.kind === "search_excerpt" ? "Найдено" : "Проверка"}: {card.checked_at.slice(0, 10)}{card.published_at && ` · Публикация: ${card.published_at}`}</small></div>
-        </div>
-        <div className="memory-actions">
-          <MaterialButton materialKey={`memes.edit:${card.id}`} appearance="quiet" disabled={busy} onClick={() => edit(card)}>Исправить</MaterialButton>
-          <MaterialButton materialKey={`memes.toggle:${card.id}`} appearance="quiet" disabled={busy} onClick={() => void run(() => saveMemeCard(card.id, { enabled: !card.enabled }))}>{card.enabled ? "Отключить" : "Включить"}</MaterialButton>
-          <MaterialButton materialKey={`memes.delete:${card.id}`} appearance="quiet" disabled={busy} onClick={() => setDeleting(card)}>Удалить</MaterialButton>
+          <div className="memory-card-heading">
+            <div className="memory-card-label"><IconInterfaceBookOpen size={14} aria-hidden="true" /><strong data-i18n-skip>{card.name}</strong></div>
+            {!card.enabled && <span className="memory-status inactive">Отключено</span>}
+          </div>
+          <p className="memory-fact-value" data-i18n-skip>{card.summary}</p>
+          <div className="memory-record-footer">
+            <div className="memory-record-meta"><span>{KINDS[card.kind]}</span>{card.tags && <span data-i18n-skip>{card.tags}</span>}<span>{card.kind === "reviewed" ? "Исправлено:" : card.kind === "search_excerpt" ? "Найдено:" : "Проверено:"} <time dateTime={card.checked_at}>{card.checked_at.slice(0, 10)}</time></span>{card.published_at && <span>Опубликовано: <span data-i18n-skip>{card.published_at}</span></span>}</div>
+            <div className="memory-record-controls">
+              <MaterialButton materialKey={`memes.edit:${card.id}`} className="secondary" disabled={busy} onClick={() => edit(card)}><IconInterfaceTextFormattingTextStyle size={15} aria-hidden="true" />Исправить</MaterialButton>
+              <MaterialButton materialKey={`memes.toggle:${card.id}`} className="secondary" disabled={busy} onClick={() => void run(() => saveMemeCard(card.id, { enabled: !card.enabled }))}>{card.enabled ? "Отключить" : "Включить"}</MaterialButton>
+              <MaterialButton materialKey={`memes.delete:${card.id}`} className="secondary" appearance="quiet" disabled={busy} onClick={() => setDeleting(card)}><IconInterfaceDeleteBin3 size={15} aria-hidden="true" />Удалить</MaterialButton>
+              <a className="memory-collection-source" href={card.source} target="_blank" rel="noopener noreferrer">Источник<IconInterfaceArrowUpRight size={14} aria-hidden="true" /></a>
+            </div>
+          </div>
         </div>
       </article>)}
-      {!filtered.length && <p className="empty-state">{query ? "Ничего не найдено" : "В мемотеке пока нет карточек"}</p>}
+      {!filtered.length && <div className="empty-state"><IconInterfaceBookOpen size={28} aria-hidden="true" /><strong>{query ? "Ничего не найдено" : "В мемотеке пока нет карточек"}</strong><span>{query ? "Попробуйте другое слово." : "Добавьте мем или отсылку для разговоров с Iris."}</span></div>}
     </div>}
     <AppDialog open={editing !== null} title={editing === "new" ? "Добавить мем" : "Исправить мем"} description="Укажите значение, примеры использования и источник." variant="info" onClose={() => { if (!busy) setEditing(null); }}>
       <form onSubmit={e => { e.preventDefault(); if (editing) void run(() => saveMemeCard(editing === "new" ? null : editing.id, form)); }}>
@@ -92,11 +92,11 @@ export function MemeLibraryPanel() {
           <label className="form-field"><span>Источник</span><input required type="url" maxLength={1000} value={form.source} onChange={e => setForm({ ...form, source: e.target.value })} data-i18n-skip /></label>
           {error && <p role="alert">{error}</p>}
         </div>
-        <div className="dialog-actions"><MaterialButton materialKey="memes.cancel" type="button" disabled={busy} onClick={() => setEditing(null)}>Отмена</MaterialButton><MaterialButton materialKey="memes.save" type="submit" disabled={busy || !form.name.trim() || !form.summary.trim() || !form.source.trim()}>Сохранить</MaterialButton></div>
+        <div className="dialog-actions"><MaterialButton materialKey="memes.cancel" type="button" disabled={busy} onClick={() => setEditing(null)}>Отмена</MaterialButton><MaterialButton materialKey="memes.save" className="primary-button" type="submit" disabled={busy || !form.name.trim() || !form.summary.trim() || !form.source.trim()}>Сохранить</MaterialButton></div>
       </form>
     </AppDialog>
     <AppDialog open={deleting !== null} title="Удалить карточку мема?" description="Карточка исчезнет из справочника и больше не будет подсказываться в ответах." variant="danger" onClose={() => { if (!busy) setDeleting(null); }}>
-      <div className="dialog-actions"><MaterialButton materialKey="memes.delete-cancel" disabled={busy} onClick={() => setDeleting(null)}>Отмена</MaterialButton><MaterialButton materialKey="memes.delete-confirm" disabled={busy} onClick={() => { if (deleting) void run(() => deleteMemeCard(deleting.id)); }}>Удалить</MaterialButton></div>
+      <div className="dialog-actions"><MaterialButton materialKey="memes.delete-cancel" disabled={busy} onClick={() => setDeleting(null)}>Отмена</MaterialButton><MaterialButton materialKey="memes.delete-confirm" className="danger-button" disabled={busy} onClick={() => { if (deleting) void run(() => deleteMemeCard(deleting.id)); }}>Удалить</MaterialButton></div>
       {error && <p role="alert">{error}</p>}
     </AppDialog>
   </div>;

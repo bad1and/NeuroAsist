@@ -1,6 +1,8 @@
+import { Disclosure, DisclosureTrigger } from "./components/Disclosure";
 import type { SearchFocus } from "./search-navigation";
 import { LoadingRing } from "./components/LoadingRing";
 import { MemeLibraryPanel } from "./meme-library";
+import { OpinionsPanel } from "./opinions";
 import { MaterialButton } from "./components/MaterialButton";
 import { RemindersPanel } from "./components/RemindersPanel";
 import {
@@ -30,7 +32,6 @@ import { CustomSelect } from "./components/CustomSelect";
 import { AppDialog } from "./components/AppDialog";
 import {
   IconInterfaceArrowUpRight as ArrowUpRight,
-  IconInterfaceChevronDown as ChevronDown,
   IconInterfaceClock as Clock3,
   IconMailChatBubbleTextSquare as MessagesSquare,
   IconInterfaceMore as MoreHorizontal,
@@ -70,15 +71,15 @@ import {
 } from "./animations";
 import { currentInterfaceLocale, interfaceIntlLocale } from "./i18n";
 
-type MemorySection = "all" | "active" | "topics" | "commitments" | "archive" | "diagnostics" | "memes";
+type MemorySection = "all" | "active" | "topics" | "commitments" | "archive" | "diagnostics" | "memes" | "opinions";
 
 const STATUS_LABELS: Record<MemoryStatus | "all", string> = {
   all: "Все",
-  active: "Сохранённые",
-  superseded: "Заменённые",
-  deleted: "Удалённые",
-  rejected: "Отклонённые",
-  expired: "Истёкшие",
+  active: "Сохранено",
+  superseded: "Есть новая версия",
+  deleted: "В архиве",
+  rejected: "Не принято",
+  expired: "Срок истёк",
 };
 
 const MEMORY_SECTIONS: Array<{ id: MemorySection; label: string; icon: ComponentType<CustomIconProps> }> = [
@@ -245,9 +246,9 @@ function MemoryRecordFooter({ memory, archived, onOpenSource }: {
       {sourceIds.length > 0 && onOpenSource && <MaterialButton materialKey={`memory.source.${memory.id}`} className="secondary memory-source-button" type="button" onClick={() => onOpenSource(sourceIds[0])}>
         <MessagesSquare size={16} aria-hidden="true" />Открыть источник<ArrowUpRight size={14} aria-hidden="true" />
       </MaterialButton>}
-      <MaterialButton materialKey={`memory.details.${memory.id}`} className="secondary memory-details-toggle" type="button" aria-expanded={expanded} aria-controls={detailsId} onClick={() => setExpanded(value => !value)}>
-        Подробности записи<ChevronDown size={16} aria-hidden="true" />
-      </MaterialButton>
+      <DisclosureTrigger materialKey={`memory.details.${memory.id}`} className="memory-details-toggle" open={expanded} aria-controls={detailsId} onClick={() => setExpanded(value => !value)}>
+        Подробности записи
+      </DisclosureTrigger>
     </div>
     <div className="memory-record-details" id={detailsId} ref={detailsRef} hidden={!expanded} role="region" aria-label="Подробности записи">
       <dl className="memory-record-facts">
@@ -310,7 +311,7 @@ export function MemoryPage({ developerMode = false, focusRequest, onOpenSource }
     const target = document.getElementById(`memory-record-${focusRequest.id}`);
     if (target) { target.classList.add("search-focus-target"); target.tabIndex = -1; target.scrollIntoView?.({ block: "center", behavior: "instant" }); target.focus({ preventScroll: true }); focused.current = focusRequest.requestId; }
   }, [items, commitments, loading, focusApplied, focusRequest]);
-  useEffect(() => { if (!developerMode && (section === "memes" || section === "diagnostics")) setSection("all"); }, [developerMode, section]);
+  useEffect(() => { if (!developerMode && (section === "memes" || section === "opinions" || section === "diagnostics")) setSection("all"); }, [developerMode, section]);
 
   const containerRef = useAnimeScope<HTMLElement>((scope, root) => {
     animatePageEnter(root);
@@ -337,7 +338,7 @@ export function MemoryPage({ developerMode = false, focusRequest, onOpenSource }
     setNextOffset(null);
     if (loadedSection.current !== section) setLoading(true);
     try {
-      if (section === "memes") return;
+      if (section === "memes" || section === "opinions") return;
       if (section === "topics") {
         const response = await getMemoryTopics(searchQuery || undefined);
         if (revision !== requestRevision.current) return;
@@ -459,7 +460,7 @@ export function MemoryPage({ developerMode = false, focusRequest, onOpenSource }
   return (
     <section className="memory-panel" ref={containerRef}>
       <nav className="settings-navigation memory-navigation" aria-label="Разделы памяти">
-        {[...MEMORY_SECTIONS.filter(item => developerMode || item.id !== "diagnostics"), ...(developerMode ? [{ id: "memes" as const, label: "Мемотека", icon: IconEntertainmentGamingEsports }] : [])].map(({ id, label, icon: Icon }) => (
+        {[...MEMORY_SECTIONS.filter(item => developerMode || item.id !== "diagnostics"), ...(developerMode ? [{ id: "memes" as const, label: "Мемотека", icon: IconEntertainmentGamingEsports }, { id: "opinions" as const, label: "Взгляды Iris", icon: IconCitiesPoliticsVote }] : [])].map(({ id, label, icon: Icon }) => (
           <MaterialButton materialKey={["memory.button-1", id].join(":")}
             key={id}
             type="button"
@@ -482,9 +483,9 @@ export function MemoryPage({ developerMode = false, focusRequest, onOpenSource }
           active: "Факты о вас и ваши предпочтения. Важные записи можно закрепить.",
           topics: "Записи памяти, собранные по темам.",
           archive: "Прежние и убранные записи. Здесь видно, почему они больше не используются.",
-          diagnostics: "Состояние индексов и извлечения памяти.", memes: "Библиотека выражений и контекст их использования.",
+          diagnostics: "Состояние индексов и извлечения памяти.", memes: "Мемы и отсылки, которые Iris может использовать в разговоре.", opinions: "Собственные позиции Iris и история их изменений.",
         } as Record<string,string>)[section]}</p>}
-        {section === "memes" && developerMode ? <MemeLibraryPanel /> : <>
+        {section === "memes" && developerMode ? <MemeLibraryPanel /> : section === "opinions" && developerMode ? <OpinionsPanel /> : <>
         <header className="memory-heading">
           <div className="memory-toolbar">
             <form
@@ -580,7 +581,7 @@ export function MemoryPage({ developerMode = false, focusRequest, onOpenSource }
                       <p data-i18n-skip>
                         {topic.summary_text || "Краткое описание ещё не сформировано."}
                       </p>
-                      <div className="memory-provenance"><small>{formatMemoryDate((topic as any).created_at, topic.id)}</small><details><summary>Связи и основания</summary><p>Связи: {topic.links.length} · доказательства: {topic.evidence.length}</p></details></div>
+                      <div className="memory-provenance"><small>{formatMemoryDate((topic as any).created_at, topic.id)}</small><Disclosure materialKey={`memory.topic.${topic.id}.evidence`} label="Связи и основания"><p>Связи: {topic.links.length} · доказательства: {topic.evidence.length}</p></Disclosure></div>
                     </div>
                   </article>
                 ))
@@ -898,10 +899,10 @@ export function MemoryPage({ developerMode = false, focusRequest, onOpenSource }
                       </div>
 
                       {audit[memory.id] && (
-                        <details className="memory-audit" open>
-                          <summary>История записи</summary>
+                        <Disclosure materialKey={`memory.audit.${memory.id}`} label="История записи" className="memory-audit" defaultOpen>
+
                           <p>{audit[memory.id].map((item) => `${item.action} (${item.actor})`).join(" → ")}</p>
-                        </details>
+                        </Disclosure>
                       )}
                     </article>
                   );
