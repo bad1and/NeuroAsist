@@ -9,6 +9,10 @@ from threading import Lock
 from apps.backend.app.conversation.decision import ConversationDecisionEngine
 from apps.backend.app.llm.base import ChatMessage
 from apps.backend.app.storage.timeline import TimelineStore
+from apps.backend.app.context.task_frame import resolve_task_frame
+from apps.backend.app.memory.lifecycle import freshness, session_style_prompt
+from apps.backend.app.semantic.embedding import query_embedding_scope
+from apps.backend.app.agents.character.turn_intent import analyze_dialogue_turn
 
 
 @dataclass(frozen=True)
@@ -53,7 +57,7 @@ class ContextManager:
         # reflections). Each used to open its own connection, and against a WAL
         # database that file setup costs about a millisecond apiece regardless
         # of the query, so the scope collapses eight of them into one.
-        with self._store.read_scope():
+        with self._store.read_scope(), query_embedding_scope():
             return self._build(
                 user_text, session_id=session_id, current_message_id=current_message_id,
             )
@@ -62,7 +66,12 @@ class ContextManager:
         material = self._store.context_material(
             user_text, self._recent_turns, session_id=session_id, current_message_id=current_message_id,
         )
-        name_only_followup = self._is_name_only_followup(user_text)
+        instruction_turns = self._store.task_user_turns(current_message_id) if current_message_id else material["recent"]
+        task_frame = resolve_task_frame(instruction_turns, user_text)
+        current_source = self._store.get_message(current_message_id) if current_message_id else None
+        direct_source = current_source is None or current_source.metadata.get("dialogue_scope") not in {"ambient", "incomplete"}
+        style_prompt = session_style_prompt(instruction_turns, user_text) if not task_frame.active and direct_source else None
+        name_only_followup = self._is_name_only_followup(user_text) and not task_frame.active
         explicit_readdressment = self._is_explicit_readdressment(user_text)
         last_assistant = next((row for row in reversed(material["recent"]) if row.get("role") == "assistant"), None)
         failed_followup = bool(last_assistant and self._failed_reply(last_assistant))
@@ -108,6 +117,11 @@ class ContextManager:
             # The name is a wake signal. The unanswered thought is the actual
             # request that retrieval and the response model must process.
             effective_user_text = response_target_text
+        minimal_retrieval = task_frame.active or analyze_dialogue_turn(effective_user_text).kind == "greeting"
+        if minimal_retrieval:
+            # The task and exact session dialogue carry these turns. An
+            # associative memory search for "взрыв" or "привет" adds noise.
+            material["summaries"] = []
         pending_user_id_set = set(pending_user_message_ids)
         identity = ChatMessage(
             role="system",
@@ -119,6 +133,14 @@ class ContextManager:
                     " Personal facts persist until corrected. Current/period facts "
                     "describe their last confirmation, not proof they still hold "
                     "today; use source times for relative dates."
+                    + (" Saved style is a default, "
+                    "never a command for every answer: the current request and task win. "
+                    "Conditional preferences apply only in their stated situation. "
+                    "Aging/unverified facts need cautious wording or a brief natural check "
+                    "when the answer depends on them, not a question on every greeting. "
+                    "Reading, quoting or summarizing a record does not confirm it. "
+                    "Past dialogue style instructions do not carry into a new session."
+                    if self._max_tokens >= 600 else "")
                     if self._memory_service is not None else ""
                 )
             ),
@@ -154,8 +176,10 @@ class ContextManager:
                 ),
             )
 
+        project_summary = getattr(self._memory_service, "project_episode_summary", None)
+        safe_summaries = [project_summary(summary) if callable(project_summary) else summary for summary in material["summaries"]]
         selected_summaries: list[tuple[str, ChatMessage]] = [
-            summary_context_item(summary) for summary in material["summaries"]
+            summary_context_item(summary) for summary in safe_summaries if summary is not None
         ]
         selected_memories: list[tuple[str, ChatMessage]] = []
         selected_topics: list[tuple[str, ChatMessage]] = []
@@ -192,7 +216,7 @@ class ContextManager:
             retrieve_summaries = getattr(
                 self._memory_service, "retrieve_episode_summaries", None,
             )
-            if callable(retrieve_summaries):
+            if callable(retrieve_summaries) and not minimal_retrieval:
                 selected_summaries = [
                     summary_context_item(summary)
                     for summary in retrieve_summaries(
@@ -201,7 +225,7 @@ class ContextManager:
                         limit=2,
                     )
                 ]
-            retrieved_memories = list(self._memory_service.retrieve(retrieval_query))
+            retrieved_memories = list(self._memory_service.retrieve(retrieval_query)) if not minimal_retrieval else []
             core_profile = getattr(self._memory_service, "core_profile", None)
             if callable(core_profile):
                 core = core_profile()
@@ -225,19 +249,31 @@ class ContextManager:
                     "predicate": str(memory["predicate"]),
                     "value": str(memory["value_text"]),
                 }
+                listing = bool(getattr(self._memory_service, "enumeration_query", lambda _: False)(effective_user_text))
+                if memory.get("status") == "superseded":
+                    record["status"] = "superseded"
+                    record["historical"] = True
                 if memory.get("temporal_semantics") in {"current", "period"}:
                     record["temporal_semantics"] = str(memory["temporal_semantics"])
+                lifecycle = dict(dict(memory.get("metadata") or {}).get("lifecycle") or {})
+                if lifecycle.get("scope") == "conditional":
+                    record["applies_when"] = lifecycle.get("condition", "")
+                state = memory.get("freshness") or freshness(memory)
+                if state["state"] in {"aging", "unverified"}:
+                    record["freshness"] = state["state"]
                 observed = sorted(
                     source_timestamps[str(source_id)]
                     for source_id in memory.get("source_message_ids", [])
                     if str(source_id) in source_timestamps
                 )
-                if observed:
+                if observed and not listing:
                     record["first_observed_at"] = observed[0]
-                    record["last_confirmed_at"] = observed[-1]
-                if memory.get("created_at"):
+                    record["last_confirmed_at"] = lifecycle.get("last_confirmed_at") or observed[-1]
+                elif lifecycle.get("last_confirmed_at") and (not listing or state["state"] in {"aging", "unverified"}):
+                    record["last_confirmed_at"] = lifecycle["last_confirmed_at"]
+                if memory.get("created_at") and not listing:
                     record["recorded_at"] = str(memory["created_at"])
-                if memory.get("updated_at") and memory.get("updated_at") != memory.get("created_at"):
+                if memory.get("updated_at") and memory.get("updated_at") != memory.get("created_at") and not listing:
                     record["last_updated_at"] = str(memory["updated_at"])
                 for field in ("valid_from", "valid_to", "expires_at"):
                     if memory.get(field):
@@ -270,7 +306,7 @@ class ContextManager:
             flags=re.IGNORECASE,
         ))
         incognito = bool(self._memory_service and getattr(self._memory_service, "incognito", False))
-        if not incognito and not factual_query:
+        if not incognito and not factual_query and not task_frame.active:
             current_episode = material.get("active_episode_id")
             all_reflections = self._store.list_reflections("primary", limit=10)
             reflection = next(
@@ -370,6 +406,10 @@ class ContextManager:
 
         def assemble() -> list[ChatMessage]:
             messages = [identity]
+            if task_frame.active:
+                messages.append(ChatMessage(role="system", content=task_frame.prompt()))
+            if style_prompt:
+                messages.append(ChatMessage(role="system", content=style_prompt))
             if pending_followup_message is not None:
                 messages.append(pending_followup_message)
             if clarification_message is not None:
@@ -456,6 +496,8 @@ class ContextManager:
         )
         built = BuiltContext(messages, remaining, {
             "active_episode_id": material["active_episode_id"],
+            "task_frame": {"relation": task_frame.relation, "single_word": task_frame.single_word},
+            "retrieval_scope": "core_and_session" if minimal_retrieval else "relevant_memory",
             "current_message_id": current_message_id,
             "current_sequence": material.get("causal_upper_bound"),
             "causal_upper_bound": material.get("causal_upper_bound"),
@@ -503,7 +545,7 @@ class ContextManager:
             "dropped_open_loop_ids": dropped_loop_ids,
             "dropped_turn_count": dropped_turn_count,
             "budget": self._max_tokens,
-            "block_budgets": {"profile": 250, "facts": 450, "topics": 500, "episodes": 300, "recent": 1000, "open_loops": 250, "ambient": 200},
+            "block_budgets": {"profile": 250, "facts": getattr(self._memory_service, "context_max_tokens", 450), "topics": 500, "episodes": 300, "recent": 1000, "open_loops": 250, "ambient": 200},
         },
             effective_user_text,
             pending_user_message_ids,

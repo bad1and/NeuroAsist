@@ -5,8 +5,36 @@ from __future__ import annotations
 import hashlib
 import math
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Protocol
+
+
+_query_vectors: ContextVar[dict | None] = ContextVar("memory_query_vectors", default=None)
+
+
+@contextmanager
+def query_embedding_scope():
+    """One request-local vector per provider/query, shared across namespaces."""
+    if _query_vectors.get() is not None:
+        yield
+        return
+    token = _query_vectors.set({})
+    try:
+        yield
+    finally:
+        _query_vectors.reset(token)
+
+
+def embed_query(provider, text: str) -> list[float]:
+    cache = _query_vectors.get()
+    key = (id(provider), text)
+    if cache is None:
+        return getattr(provider, "embed_query", provider.embed)(text)
+    if key not in cache:
+        cache[key] = getattr(provider, "embed_query", provider.embed)(text)
+    return cache[key]
 
 
 class EmbeddingProvider(Protocol):

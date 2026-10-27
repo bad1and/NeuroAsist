@@ -9,7 +9,7 @@ import pytest
 
 from apps.backend.app.storage.backups import BackupService, check_database
 from apps.backend.app.storage.recovery import recover_interrupted_restore, restore_archive
-from apps.backend.app.storage.timeline import TimelineStore
+from apps.backend.app.storage.timeline import LATEST_SCHEMA_VERSION, TimelineStore
 from apps.backend.app.runtime.settings import RuntimeSettings, RuntimeSettingsStore
 
 
@@ -149,15 +149,15 @@ def test_committed_restore_finalizes_without_rolling_back(tmp_path):
 def test_migration_replaces_invalid_snapshot_without_losing_it(tmp_path):
     store, service = profile(tmp_path)
     with closing(sqlite3.connect(service.database_path)) as connection, connection:
-        connection.execute("DELETE FROM schema_migrations WHERE version=20")
-    snapshot = service.database_path.parent / "migration-backups/neuroasist-schema-19.sqlite3"
+        connection.execute("DELETE FROM schema_migrations WHERE version=?", (LATEST_SCHEMA_VERSION,))
+    snapshot = service.database_path.parent / f"migration-backups/neuroasist-schema-{LATEST_SCHEMA_VERSION - 1}.sqlite3"
     snapshot.parent.mkdir(exist_ok=True)
     snapshot.write_bytes(b"interrupted snapshot")
     store.init_db()
-    assert check_database(snapshot) == 19
+    assert check_database(snapshot) == LATEST_SCHEMA_VERSION - 1
     preserved = list(snapshot.parent.glob(snapshot.name + ".invalid-*"))
     assert len(preserved) == 1 and preserved[0].read_bytes() == b"interrupted snapshot"
-    assert check_database(service.database_path) == 20
+    assert check_database(service.database_path) == LATEST_SCHEMA_VERSION
 
 
 def test_snapshot_publication_failure_keeps_existing_copy(tmp_path, monkeypatch):

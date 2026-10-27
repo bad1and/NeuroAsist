@@ -18,7 +18,10 @@ ARCHIVE_FILES = frozenset({"data/neuroasist.sqlite3", "settings.json", "stt-term
 MAX_ARCHIVE_BYTES = 2 * 1024**3
 
 
-def check_database(path: Path, *, maximum_schema: int = 20, require_iris: bool = True) -> int:
+def check_database(path: Path, *, maximum_schema: int | None = None, require_iris: bool = True) -> int:
+    if maximum_schema is None:
+        from apps.backend.app.storage.timeline import LATEST_SCHEMA_VERSION
+        maximum_schema = LATEST_SCHEMA_VERSION
     with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
         if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
             raise ValueError("База повреждена. Исходные данные сохранены.")

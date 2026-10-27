@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable, Iterator, Protocol
 
-from .embedding import EmbeddingProvider
+from .embedding import EmbeddingProvider, embed_query
 
 
 @dataclass(frozen=True)
@@ -108,8 +108,7 @@ class SqliteVecIndex:
             connection.execute("DELETE FROM semantic_vectors WHERE namespace = ? AND item_id = ?", (namespace, item_id))
 
     def search_sync(self, query: str, namespace: str, limit: int) -> list[VectorSearchResult]:
-        embed_query = getattr(self._provider, "embed_query", self._provider.embed)
-        query_vector = embed_query(query)
+        query_vector = embed_query(self._provider, query)
         with self._connect() as connection:
             state = connection.execute("SELECT model_id, dimension FROM semantic_index_state WHERE namespace = ?", (namespace,)).fetchone()
             if state is None:
@@ -132,8 +131,7 @@ class SqliteVecIndex:
         item_ids: set[str] | None = None,
     ) -> list[VectorSearchResult]:
         """Score SQLite source rows without mutating a lagging rebuildable index."""
-        embed_query = getattr(self._provider, "embed_query", self._provider.embed)
-        query_vector = embed_query(query)
+        query_vector = embed_query(self._provider, query)
         scored = [
             VectorSearchResult(item_id, self._cosine(query_vector, self._provider.embed(text)))
             for item_id, text in self._source(namespace)

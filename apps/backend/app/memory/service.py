@@ -14,7 +14,9 @@ from typing import Any, Literal
 
 from apps.backend.app.runtime.settings import RuntimeSettings
 from apps.backend.app.memory.consolidation import CommitmentProposal, ConsolidationResult, FactProposal, TopicProposal
-from apps.backend.app.memory.signals import MEMORY_CORRECTION_CUE
+from apps.backend.app.memory.signals import MEMORY_CORRECTION_CUE, personal_event
+from apps.backend.app.memory.evidence import matching_units, normalize as evidence_normalize, terms as evidence_terms
+from apps.backend.app.memory.lifecycle import condition_matches, freshness, is_style_memory, local_style_only, parse_time, scope_correction, style_request, style_requests
 from apps.backend.app.memory.slots import (
     KNOWN_MEMORY_SLOTS,
     MEMORY_SLOT_POLICIES,
@@ -22,7 +24,9 @@ from apps.backend.app.memory.slots import (
     TRANSIENT_MEMORY_SLOTS,
 )
 from apps.backend.app.semantic.vector_index import NullVectorIndex, VectorDimensionMismatch
+from apps.backend.app.semantic.embedding import query_embedding_scope
 from apps.backend.app.storage.timeline import StoredTimelineMessage, TimelineStore
+from apps.backend.app.context.task_frame import resolve_task_frame, scoped_response_format
 
 
 logger = logging.getLogger(__name__)
@@ -212,7 +216,184 @@ class MemoryService:
             for slot in ("user.name", "user.prefers_response_length")
             for item in self._store.memory_slot_items(slot)
             if self._memory_has_eligible_source(item)
+            and not scoped_response_format(str(item["value_text"]))
+            and self._applicable_memory(item, "", core=True)
         ][:2]
+
+    def _lifecycle_values(self, values: dict[str, object], *, actor: str) -> dict[str, object] | None:
+        """The source bounds model scope; a dropped qualifier cannot widen a request."""
+        result = dict(values)
+        metadata = dict(result.get("metadata") or {})
+        previous = dict(metadata.get("lifecycle") or {})
+        sources = [source for source_id in result.get("source_message_ids", [])
+                   if (source := self._store.get_message(str(source_id))) is not None
+                   and source.role == "user" and self.is_eligible_automatic_source(source)]
+        sources.sort(key=lambda source: source.sequence_no)
+        if actor == "extractor" and sources and all(local_style_only(source.effective_content) for source in sources):
+            return None
+        scope = str(result.get("memory_scope") or previous.get("scope") or "durable")
+        condition = str(previous.get("condition") or result.get("context_hint") or "")[:160]
+        if actor == "extractor" and scope in {"session", "turn"}:
+            return None
+        if actor not in {"user", "manual_migration"} and not result.get("user_locked") and is_style_memory(result):
+            requests = [request for source in sources for request in self._source_style_requests(source)]
+            proposed_style = style_request(str(result.get("value_text", "")))
+            if proposed_style:
+                matching = [request for request in requests if request.style == proposed_style.style]
+                if matching:
+                    requests = matching
+                if proposed_style.scope == "conditional" or result.get("memory_scope") == "conditional":
+                    conditioned = [request for request in requests if request.scope == "conditional"]
+                    requests = conditioned or requests
+            if not requests:
+                # Legacy records with missing provenance are historical data, not a default style.
+                scope = "unverified"
+            else:
+                request = requests[-1]
+                scope, condition = request.scope, request.condition
+                if scope in {"session", "turn"}:
+                    if actor == "extractor":
+                        return None
+                elif scope == "conditional":
+                    result.update(predicate="preference", slot_key=None, object_key=None, supersedes_id=None)
+                    value = str(result["value_text"])
+                    if condition.casefold() not in value.casefold():
+                        result["value_text"] = f"Когда {condition}: {value}"
+                    result = self._canonicalize_single(result)
+        if actor in {"user", "manual_migration"}:
+            scope = "durable"
+        observed = [source.created_at for source in sources]
+        if previous.get("last_confirmed_at"):
+            observed.append(str(previous["last_confirmed_at"]))
+        sessions = {source.session_id or source.episode_id for source in sources}
+        lifecycle = {"version": 22, "scope": scope,
+                     "last_confirmed_at": max(observed) if observed else None,
+                     "confirmation_sessions": max(len(sessions), int(previous.get("confirmation_sessions", 0)))}
+        if actor == "user":
+            lifecycle["last_confirmed_at"] = datetime.now(UTC).isoformat(timespec="milliseconds")
+        if condition and scope == "conditional":
+            lifecycle["condition"] = condition
+        metadata["lifecycle"] = lifecycle
+        result["metadata"] = metadata
+        return result
+
+    def _source_style_requests(self, source: StoredTimelineMessage) -> list:
+        requests = style_requests(source.effective_content)
+        if requests or len(source.effective_content) > 100 or "?" in source.effective_content or self._REJECTION.search(source.effective_content):
+            return requests
+        prior = [row for row in self._store.memory_extraction_context(source.id, 4)
+                 if row.sequence_no < source.sequence_no and row.session_id == source.session_id]
+        question = prior[-1] if prior else None
+        if question is None or question.role != "assistant" or not self.is_eligible_automatic_source(question):
+            return []
+        text = question.effective_content
+        if "?" not in text or not re.search(r"(?iu)\bответ\w*\b", text) or not re.search(r"(?iu)\b(?:предпочитаешь|любишь|нрав\w*|обычно|по\s+умолчанию)\b", text):
+            return []
+        reply = source.effective_content
+        if self._CONFIRMATION.search(reply):
+            if re.search(r"(?iu)\b(?:или|or)\b", text):
+                return []
+            reply = text
+        request = style_request("Я предпочитаю " + reply + " ответы. " if "?" not in reply else "Я предпочитаю " + reply.replace("?", ""))
+        if request is None:
+            return []
+        # The question can explicitly limit the preference to this answer.
+        question_scope = style_request("Я предпочитаю " + text.replace("?", ""))
+        if question_scope and question_scope.scope in {"session", "turn", "conditional"}:
+            request = question_scope
+        return [request]
+
+    def _applicable_memory(self, memory: dict[str, object], query: str, *, core: bool = False) -> bool:
+        if memory.get("slot_key") in TRANSIENT_MEMORY_SLOTS and not memory.get("user_locked"):
+            expiry = parse_time(memory.get("expires_at"))
+            if expiry is not None and expiry <= datetime.now(UTC):
+                return False
+        lifecycle = dict(dict(memory.get("metadata") or {}).get("lifecycle") or {})
+        # Check old rows on read too, even before the one-time migration runs.
+        if not lifecycle and is_style_memory(memory) and not memory.get("user_locked"):
+            prepared = self._lifecycle_values(memory, actor="migration")
+            lifecycle = dict(prepared["metadata"]["lifecycle"]) if prepared else {"scope": "unverified"}
+        scope = lifecycle.get("scope", "durable")
+        if scope in {"session", "turn", "unverified"}:
+            return False
+        explicit_recall = bool(re.search(
+            r"(?iu)\b(?:(?:помнишь|знаешь|сохранила|запомнила|перечисли)\b.*\b(?:обо?\s+мне|предпочтен\w*|стил\w*|ответ\w*)|какие\b.*\b(?:мои|у\s+меня)\b.*\bпредпочтен\w*)", query,
+        ))
+        if scope == "conditional" and (core or not explicit_recall and not condition_matches(str(lifecycle.get("condition", "")), query)):
+            return False
+        if core and is_style_memory(memory) and freshness({**memory, "metadata": {"lifecycle": lifecycle}})["state"] in {"aging", "unverified"}:
+            return False
+        return True
+
+    def _revise_preference_scope(self, values: dict[str, object]) -> dict[str, object] | None:
+        """A user can correct the scope of a remembered request in ordinary speech."""
+        if values.get("memory_scope") not in {"session", "turn"} or not values.get("supersedes_id"):
+            return None
+        target = self._store.get_memory(str(values["supersedes_id"]))
+        if target is None or target["status"] != "active" or target.get("user_locked") or not is_style_memory(target):
+            return None
+        if self._normalize(str(target["value_text"])) != self._normalize(str(values["value_text"])):
+            return None
+        if float(values.get("confidence", 0)) < self._auto_min_confidence or float(values.get("source_quality", 1)) < .8:
+            return None
+        sources = [source for source_id in values.get("source_message_ids", [])
+                   if (source := self._store.get_message(str(source_id))) is not None
+                   and source.role == "user" and self.is_eligible_automatic_source(source)]
+        grounded = [source for source in sources if scope_correction(source.effective_content)]
+        if not grounded or max(source.sequence_no for source in grounded) <= self._latest_user_source_sequence(target):
+            return None
+        metadata = dict(target.get("metadata") or {})
+        metadata["lifecycle"] = {**dict(metadata.get("lifecycle") or {}), "version": 22,
+                                 "scope": str(values["memory_scope"]),
+                                 "scope_revision_source_ids": [source.id for source in grounded]}
+        self._store.update_memory(str(target["id"]), {"metadata": metadata}, actor="policy", action="preference_scope_corrected")
+        changed = self._store.set_memory_status(str(target["id"]), "rejected", actor="policy",
+                                               action="local_preference_scope_corrected",
+                                               reason="user clarified that the earlier request was local")
+        self._schedule_vector_sync(changed)
+        self._restore_displaced_style(target)
+        return changed
+
+    def _restore_displaced_style(self, memory: dict[str, object]) -> bool:
+        if memory.get("slot_key") != "user.prefers_response_length" or self._store.memory_slot_items("user.prefers_response_length"):
+            return False
+        predecessor = memory.get("supersedes_id")
+        visited = {str(memory["id"])}
+        while predecessor and str(predecessor) not in visited:
+            visited.add(str(predecessor))
+            previous = self._store.get_memory(str(predecessor))
+            if previous is None or previous["status"] != "superseded" or previous.get("slot_key") != "user.prefers_response_length":
+                return False
+            history = self._store.memory_audit(str(previous["id"]))
+            if any(entry.get("actor") == "user" and entry.get("action") in {"deleted", "rejected"} for entry in history):
+                return False
+            values = self._lifecycle_values(previous, actor="migration")
+            if values and values["metadata"]["lifecycle"]["scope"] == "durable":
+                self._store.update_memory(str(previous["id"]), {"metadata": values["metadata"], "superseded_by_id": None}, actor="policy", action="scope_annotated_v22")
+                restored = self._store.set_memory_status(str(previous["id"]), "active", actor="policy", action="global_style_restored_v22")
+                self._schedule_vector_sync(restored)
+                return True
+            predecessor = previous.get("supersedes_id")
+        return False
+
+    def _task_response_format(self, values: dict[str, object]) -> bool:
+        """Reject a format for one task, including an extractor dropping its condition."""
+        if values.get("slot_key") != "user.prefers_response_length":
+            return False
+        value = str(values.get("value_text", ""))
+        if scoped_response_format(value):
+            return True
+        for source_id in values.get("source_message_ids", []):
+            source = self._store.get_message(str(source_id))
+            if source is None or source.role != "user":
+                continue
+            text = source.effective_content
+            if re.search(r"(?iu)\b(?:всегда|обычно|предпочитаю)\b", text):
+                continue
+            frame = resolve_task_frame(self._store.task_user_turns(source.id))
+            if frame.relation or re.search(r"(?iu)\b(?:сейчас|на этот раз|в этом ответе)\b", text):
+                return True
+        return False
 
     @property
     def incognito(self) -> bool:
@@ -243,6 +424,8 @@ class MemoryService:
         text = source.effective_content.strip()
         if not text:
             return False
+        if local_style_only(text):
+            return False
         explicit_memory = self._EXPLICIT_MEMORY_CUE.search(text) is not None
         explicit_correction = self._EXPLICIT_CORRECTION_CUE.search(text) is not None
 
@@ -267,6 +450,7 @@ class MemoryService:
             or self._SENSITIVE_SELF_FACT.search(text)
             or self._DEVELOPER_FACT.match(text.strip())
             or self._substantive_statement(text)
+            or personal_event(text)
             or self._answers_personal_question(source, text)
         )
         if has_durable_novelty:
@@ -311,7 +495,7 @@ class MemoryService:
         context = self._store.memory_extraction_context(source.id, 4)
         question = next((
             row for row in reversed(context)
-            if row.sequence_no < source.sequence_no and row.role == "assistant"
+            if row.sequence_no < source.sequence_no and row.role == "assistant" and row.session_id == source.session_id
         ), None)
         if question is None or not self.is_eligible_automatic_source(question):
             return False
@@ -449,16 +633,22 @@ class MemoryService:
         }
 
     def retrieve(self, query: str, limit: int = 6) -> list[dict[str, object]]:
+        with query_embedding_scope():
+            return self._retrieve(query, limit)
+
+    def _retrieve(self, query: str, limit: int) -> list[dict[str, object]]:
         if not self._enabled or self.incognito or self._runtime.memory_mode == "off":
             return []
         self.expire_due_memories()
         normalized_query = self._normalize(query)
+        if limit == 6 and self.enumeration_query(query):
+            limit = 24
         developer_query = bool(re.search(
             r"\b(?:разработчик|разработчики|создатель|developer|developers)\b"
             r"|\bкак\s+зовут\s+(?:твоего\s+)?второго\b",
             normalized_query,
         ))
-        if developer_query:
+        if developer_query and not self._historical_query(query):
             active_profile = self._store.memory_slot_items("assistant.developer") + self._store.memory_slot_items("assistant.developer_count")
             memories = [
                 item for item in active_profile
@@ -467,7 +657,7 @@ class MemoryService:
             memories = self._attach_retrieval(
                 memories, {str(item["id"]): 1.0 for item in memories}, {}, temporal=False,
             )
-        elif self._is_identity_query(normalized_query):
+        elif self._is_identity_query(normalized_query) and not self._historical_query(query):
             active_profile = self._store.memory_slot_items("user.name") + self._store.memory_slot_items("assistant.developer")
             memories = [
                 item for item in active_profile
@@ -518,6 +708,9 @@ class MemoryService:
         query_terms = set(re.findall(r"[^\W_]+", self._normalize(query), flags=re.UNICODE))
         for topic in topic_candidates.values():
             text = f"{topic['title']} {topic['summary_text']}"
+            sources = self._store.continuity_source_ids("topic", str(topic["id"]))
+            if sources and not self._derived_allowed(text, sources, reading=True):
+                continue
             overlap = len(query_terms & set(re.findall(r"[^\W_]+", self._normalize(text), flags=re.UNICODE)))
             topic_id = str(topic["id"])
             lexical_score = topic_fts_scores.get(topic_id, 0.0)
@@ -528,6 +721,9 @@ class MemoryService:
                 memories.append({"id": f"topic:{topic_id}", "namespace": "topic_memory", "predicate": str(topic["title"]), "value_text": str(topic["summary_text"]), "importance": .7, "confidence": 1.0, "status": "active", "source_message_ids": [], "created_at": topic.get("created_at"), "updated_at": topic.get("updated_at"), "retrieval": {"score": round(score, 4), "components": {"exact": 0, "fts": round(lexical_score, 4), "semantic": round(semantic_score, 4), "importance": .7}, "reasons": reasons}})
         for commitment in commitment_candidates.values():
             text = f"{commitment['title']} {commitment['details']}"
+            sources = self._store.continuity_source_ids("commitment", str(commitment["id"]))
+            if sources and not self._derived_allowed(text, sources, require_user=False, reading=True):
+                continue
             overlap = len(query_terms & set(re.findall(r"[^\W_]+", self._normalize(text), flags=re.UNICODE)))
             commitment_id = str(commitment["id"])
             lexical_score = commitment_fts_scores.get(commitment_id, 0.0)
@@ -556,6 +752,7 @@ class MemoryService:
                 or eligibility is not None
                 and eligibility.get(str(memory["id"]), True)
             )
+            and self._applicable_memory(memory, query)
         ]
         selected: list[dict[str, object]] = []
         used_tokens = 0
@@ -605,10 +802,11 @@ class MemoryService:
             ):
                 candidates[summary_id] = summary
         if not candidates:
-            return self._store.list_episode_summaries(
+            fallback = self._store.list_episode_summaries(
                 exclude_episode_id=active_episode_id,
                 limit=limit,
             )
+            return [safe for item in fallback if (safe := self.project_episode_summary(item)) is not None]
         ranked = [
             {
                 **summary,
@@ -624,11 +822,22 @@ class MemoryService:
             }
             for summary_id, summary in candidates.items()
         ]
-        return sorted(
+        return [safe for item in sorted(
             ranked,
             key=lambda item: float(dict(item["retrieval"])["score"]),
             reverse=True,
-        )[:limit]
+        ) if (safe := self.project_episode_summary(item)) is not None][:limit]
+
+    def project_episode_summary(self, summary: dict) -> dict | None:
+        """Filter derived recall, leaving source history and affect untouched."""
+        raw_ids = summary.get("source_message_ids", summary.get("source_message_ids_json", []))
+        source_ids = json.loads(raw_ids) if isinstance(raw_ids, str) else list(raw_ids or [])
+        if not source_ids:
+            return summary
+        parts = re.split(r"\s+\|\s+|\s+\.\.\.\s+|\s+—\s+|(?<=[.!?])\s+", str(summary["summary_text"]))
+        kept = [part for part in parts if part.startswith("Эмоциональный фон:")
+                or self._derived_allowed(part, source_ids, reading=True)]
+        return {**summary, "summary_text": " | ".join(kept)} if kept else None
 
     def explain_retrieval(self, query: str, limit: int = 8) -> dict[str, object]:
         started = time.perf_counter()
@@ -807,6 +1016,8 @@ class MemoryService:
                 "source_episode_id": source_message.episode_id,
                 "extractor_version": "deepseek-character-v1",
                 "supersedes_id": candidate.get("supersedes_id"),
+                "memory_scope": candidate.get("memory_scope", "durable"),
+                "context_hint": str(candidate.get("context_hint", ""))[:160],
             }
             try:
                 created = self._apply_source_candidate(values, source_message, sync_vector=False)
@@ -862,8 +1073,18 @@ class MemoryService:
             source_ids = [item for item in proposal.source_message_ids if item in by_id]
             if not source_ids:
                 continue
-            source = by_id[source_ids[-1]]
+            users = [by_id[item] for item in source_ids if by_id[item].role == "user" and self.is_eligible_automatic_source(by_id[item])]
+            if not users:
+                continue
+            source = max(users, key=lambda item: item.sequence_no)
             values = proposal.model_dump()
+            quote = evidence_normalize(proposal.evidence_text)
+            if proposal.evidence_text and (not quote or not any(
+                quote in evidence_normalize(item.effective_content) for item in users
+            )):
+                continue
+            if proposal.evidence_text:
+                values["metadata"] = {"evidence_text": proposal.evidence_text}
             values.update({
                 "scope": "user_profile", "source_message_ids": source_ids, "source_episode_id": source.episode_id,
                 "extractor_version": "consolidation-v11", "extraction_model": model,
@@ -895,8 +1116,14 @@ class MemoryService:
             source_ids = [item for item in proposal.source_message_ids if item in by_id]
             if not source_ids:
                 continue
+            if self._only_local_style_sources(source_ids) or not self._derived_allowed(
+                f"{proposal.title} {proposal.details}", source_ids, sensitivity=proposal.sensitivity, require_user=False,
+            ):
+                continue
             try:
-                commitment = self._store.create_commitment({**proposal.model_dump(), "source_message_ids": source_ids, "source_episode_id": by_id[source_ids[-1]].episode_id, "extractor_version": "consolidation-v11"})
+                commitment = self._apply_commitment_proposal(proposal, source_ids)
+                if commitment is None:
+                    continue
                 self._store.enqueue_memory_index_job(str(commitment["id"]), "commitment_memory")
                 saved_commitments += 1
             except (KeyError, TypeError, ValueError):
@@ -1089,6 +1316,51 @@ class MemoryService:
                 self._schedule_vector_sync(current)
                 repaired.append(current)
         return repaired
+
+    def repair_task_scoped_preferences(self) -> dict[str, int]:
+        """Preserve the dialogue rule and restore a global preference it displaced.
+
+        Never resurrect deleted/rejected user data or replace a user's manual
+        edit. Original task records and their audit remain available.
+        """
+        counts = {"task_rules_removed_from_profile": 0, "global_preferences_restored": 0}
+        with self._write_lock, self._store.consolidation_transaction():
+            for item in self._store.memory_slot_items("user.prefers_response_length"):
+                audit = self._store.memory_audit(str(item["id"]))
+                if item.get("user_locked") or any(e.get("actor") == "user" for e in audit) or not self._task_response_format(item):
+                    continue
+                changed = self._store.set_memory_status(
+                    str(item["id"]), "rejected", actor="migration", action="task_format_removed_from_profile",
+                    reason="temporary task instruction remains in source dialogue",
+                )
+                self._schedule_vector_sync(changed)
+                counts["task_rules_removed_from_profile"] += 1
+                predecessor_id = item.get("supersedes_id")
+                seen = {str(item["id"])}
+                while predecessor_id and str(predecessor_id) not in seen:
+                    seen.add(str(predecessor_id))
+                    previous = self._store.get_memory(str(predecessor_id))
+                    if previous is None or previous["status"] != "superseded" or previous.get("user_locked"):
+                        break
+                    previous_audit = self._store.memory_audit(str(previous["id"]))
+                    if any(e.get("actor") == "user" for e in previous_audit):
+                        break
+                    if not self._task_response_format(previous):
+                        if previous.get("superseded_by_id") not in seen:
+                            break
+                        if self._store.memory_slot_items("user.prefers_response_length") or not any(
+                            (source := self._store.get_message(str(source_id))) is not None
+                            and source.role == "user" and self.is_eligible_automatic_source(source)
+                            for source_id in previous.get("source_message_ids", [])
+                        ):
+                            break
+                        self._store.update_memory(str(previous["id"]), {"superseded_by_id": None}, actor="migration", action="global_preference_scope_repaired")
+                        restored = self._store.set_memory_status(str(previous["id"]), "active", actor="migration", action="global_preference_restored_after_task")
+                        self._schedule_vector_sync(restored)
+                        counts["global_preferences_restored"] += 1
+                        break
+                    predecessor_id = previous.get("supersedes_id")
+        return counts
 
     def repair_ambiguous_relationship_memories(self) -> list[dict[str, object]]:
         """Move old, inferred social ties out of active prompt context.
@@ -1620,6 +1892,46 @@ class MemoryService:
             self._store.finish_memory_repair(repair_key, counts)
         return counts
 
+    def repair_v22_memory_lifecycle(self) -> dict[str, object]:
+        """Annotate provenance and retire accidental global style without losing history."""
+        key = "memory-lifecycle-v22"
+        prior = self._store.memory_repair_run(key)
+        if prior is not None and prior.get("status") == "completed":
+            return dict(prior.get("result", {})) | {"idempotent_noop": True}
+        counts = {"annotated": 0, "local_style_retired": 0, "global_style_restored": 0}
+        with self._write_lock, self._store.consolidation_transaction():
+            for memory in self._store.list_memories(status="active", limit=100000, include_enrichment=False):
+                audit = self._store.memory_audit(str(memory["id"]))
+                manual = memory.get("user_locked") or any(entry.get("actor") == "user" for entry in audit)
+                if manual:
+                    user_times = [str(entry["created_at"]) for entry in audit if entry.get("actor") == "user"]
+                    metadata = dict(memory.get("metadata") or {})
+                    previous_lifecycle = dict(metadata.get("lifecycle") or {})
+                    metadata["lifecycle"] = {**previous_lifecycle,
+                                             "last_confirmed_at": previous_lifecycle.get("last_confirmed_at") or (max(user_times) if user_times else memory.get("created_at"))}
+                    memory = {**memory, "metadata": metadata}
+                values = self._lifecycle_values(memory, actor="manual_migration" if manual else "migration")
+                if values is None:
+                    continue
+                lifecycle = values["metadata"]["lifecycle"]
+                if not manual and is_style_memory(memory) and lifecycle["scope"] in {"session", "turn", "unverified"}:
+                    changed = self._store.set_memory_status(
+                        str(memory["id"]), "rejected", actor="migration", action="local_style_retired_v22",
+                        reason="dialogue instruction cannot become the permanent response profile",
+                    )
+                    self._store.update_memory(str(memory["id"]), {"metadata": values["metadata"]}, actor="migration", action="scope_annotated_v22")
+                    self._schedule_vector_sync(changed)
+                    counts["local_style_retired"] += 1
+                    counts["global_style_restored"] += int(self._restore_displaced_style(memory))
+                    continue
+                # No status changes to personal facts, user edits or protected data.
+                self._store.update_memory(str(memory["id"]), self._canonical_fields(values), actor="migration", action="scope_annotated_v22")
+                if lifecycle["scope"] == "conditional":
+                    counts["global_style_restored"] += int(self._restore_displaced_style(memory))
+                counts["annotated"] += 1
+            self._store.finish_memory_repair(key, counts)
+        return counts
+
     def clarification_prompt(self, current_message_id: str | None) -> str | None:
         clarification = self._store.next_memory_clarification(current_message_id)
         if clarification is None:
@@ -1763,6 +2075,7 @@ class MemoryService:
             if memory["status"] != "candidate":
                 return memory
             canonical = self._canonicalize_single(memory)
+            canonical = self._lifecycle_values(canonical, actor="user") or canonical
             self._store.update_memory(
                 memory_id, self._canonical_fields(canonical),
                 actor="user", action="confirmed_canonicalized",
@@ -1807,6 +2120,7 @@ class MemoryService:
                 **existing,
                 "user_locked": True,
             })
+            canonical = self._lifecycle_values(canonical, actor="user") or canonical
             self._store.update_memory(
                 memory_id,
                 {**self._canonical_fields(canonical), "user_locked": True},
@@ -1823,6 +2137,7 @@ class MemoryService:
             memory = self._store.set_memory_status(
                 memory_id, "active", actor="user", action="restored",
             )
+            self._store.allow_restored_memory(memory)
         self._sync_vector(memory)
         return memory
 
@@ -1843,6 +2158,7 @@ class MemoryService:
                 ),
                 "user_locked": changes.get("user_locked", True),
             })
+            canonical = self._lifecycle_values(canonical, actor="user") or canonical
             exact, conflict = self._match_existing(canonical, exclude_id=memory_id)
             if (
                 existing["status"] == "active"
@@ -1950,6 +2266,45 @@ class MemoryService:
                 "subject": self._normalize(str(values["subject"])),
                 "predicate": self._normalize(str(values["predicate"])),
             })
+            if actor == "extractor" and self._store.memory_is_suppressed(values):
+                return None
+            if actor == "extractor" and values.get("slot_key") == "user.pet":
+                # A real message ID is insufficient to invent a pet. Preserve
+                # short answers to a personal question and normal paraphrases.
+                sources = [self._store.get_message(str(item)) for item in values.get("source_message_ids", [])]
+                if not any(source and source.role == "user" and (
+                    matching_units(source.effective_content, str(values["value_text"]))
+                    or re.search(r"(?iu)\b(?:кот\w*|кошк\w*|собак\w*|собач\w*|щен\w*|питом\w*|попуга\w*|хомяк\w*)\b", source.effective_content)
+                    or self._answers_personal_question(source, source.effective_content)
+                ) for source in sources):
+                    return None
+            if actor == "extractor":
+                revised = self._revise_preference_scope(values)
+                if revised is not None:
+                    return revised
+            if actor == "extractor" and self._task_response_format(values):
+                # Current dialogue already retains the instruction. Do not turn
+                # a game or a single answer into the permanent response profile.
+                return None
+            prepared = self._lifecycle_values(values, actor=actor)
+            if prepared is None:
+                return None
+            values = prepared
+            if actor == "extractor" and is_style_memory(values):
+                # The model may paraphrase the same old preference on replay.
+                # A corrected/deleted source cannot become new evidence merely
+                # because the extracted wording changed.
+                asserting_ids = {
+                    str(source_id) for source_id in values.get("source_message_ids", [])
+                    if (source := self._store.get_message(str(source_id))) is not None
+                    and source.role == "user" and self._source_style_requests(source)
+                }
+                if asserting_ids and any(
+                    item["status"] in {"rejected", "deleted", "superseded", "expired"}
+                    and asserting_ids <= set(item.get("source_message_ids", []))
+                    for item in self._store.memory_slot_items("user.prefers_response_length", active_only=False)
+                ):
+                    return None
             exact, conflict = self._match_existing(values)
             if actor == "extractor" and exact is None:
                 source_ids = set(values.get("source_message_ids", []))
@@ -1961,12 +2316,25 @@ class MemoryService:
                 ):
                     return None
             if exact is not None:
+                # Duplicate windows, weak STT or model uncertainty cannot serve
+                # as a fresh confirmation of an otherwise trusted fact.
+                if actor == "extractor" and self._autonomous_decision(values, None).action != "accept":
+                    return None
                 exact = self._store.reinforce_memory_evidence(
                     str(exact["id"]),
                     [str(item) for item in values.get("source_message_ids", [])],
                     values.get("source_episode_id"),
                     float(values.get("source_quality", 1.0)),
                 )
+                refreshed = self._lifecycle_values({
+                    **values, "source_message_ids": exact["source_message_ids"],
+                    "metadata": exact.get("metadata", {}), "user_locked": exact.get("user_locked", False),
+                }, actor=actor)
+                if refreshed is not None and refreshed["metadata"] != exact.get("metadata"):
+                    exact = self._store.update_memory(
+                        str(exact["id"]), {"metadata": refreshed["metadata"]},
+                        actor="policy", action="source_confirmation_updated",
+                    )
                 if values.get("expires_at") is not None:
                     exact = self._store.update_memory(
                         str(exact["id"]),
@@ -2121,7 +2489,7 @@ class MemoryService:
                 continue
             text = self._normalize(source.effective_content)
             if re.search(
-                r"\b(?:нет|исправ\w*|теперь|на самом деле|вообще-то|зови меня)\b",
+                r"\b(?:нет|исправ\w*|теперь|на самом деле|вообще-то|зови меня|больше\s+не)\b",
                 text,
             ):
                 return True
@@ -2266,8 +2634,9 @@ class MemoryService:
             "user.project": r"\bпроект",
             "user.learning": r"\b(?:изуча|учусь|уч[иу]ть|осваива)",
             "user.occupation": r"\b(?:професси|кем\s+.*работа|где\s+.*работа)",
-            "user.location": r"\b(?:город|где\s+.*живу|место\s+жительств|прожива)",
+            "user.location": r"\b(?:город|где\s+.*(?:живу|жил|жила)|место\s+жительств|прожива)",
             "user.preference": r"\b(?:предпочтени|предпочита|что\s+я\s+люблю|что\s+мне\s+нрав|любим)",
+            "user.prefers_response_length": r"\b(?:предпочтени|стиль\s+ответ|длина\s+ответ)",
             "user.likes_game": r"\b(?:игр|играю|во\s+что)",
             "user.likes_category": r"\b(?:жанр|игр)",
             "user.interest": r"\b(?:увлека|интерес|хобби)",
@@ -2282,6 +2651,7 @@ class MemoryService:
             "user.constraint": r"\bограничени",
         }
         normalized = self._normalize(query)
+        historical = self._historical_query(query)
         profile_query = re.search(r"\bчто\s+(?:ты\s+)?(?:знаешь|помнишь)\s+обо?\s+мне\b", normalized)
         if profile_query:
             for item in self._store.list_memories(status="active", limit=limit, include_enrichment=False):
@@ -2290,16 +2660,38 @@ class MemoryService:
         else:
             for slot, pattern in slot_queries.items():
                 if re.search(pattern, normalized):
-                    for item in self._store.memory_slot_items(slot):
+                    for item in self._store.memory_slot_items(slot, active_only=not historical):
+                        if item["status"] not in ({"active", "superseded"} if historical else {"active"}):
+                            continue
                         candidates[str(item["id"])] = item
                         fts_scores.setdefault(str(item["id"]), .65)
+        if historical:
+            for item in self._store.list_memories(status="superseded", query=query, limit=max(16, limit), include_enrichment=False):
+                candidates[str(item["id"])] = item
+                fts_scores.setdefault(str(item["id"]), .65)
+        if re.search(r"\b(?:рецепт|ужин|перекус|завтрак|обед|десерт|приготов|блюд|меню|питани|поесть)", normalized):
+            for slot in ("user.health_constraint", "user.constraint"):
+                for item in self._store.memory_slot_items(slot):
+                    if re.search(r"(?iu)арахис|орех|молок|лактоз|глютен|пищ|диабет|яиц|яйц|мяс|рыб|морепродукт|сахар", str(item["value_text"])):
+                        candidates[str(item["id"])] = {**item, "task_constraint": True}
+                        fts_scores.setdefault(str(item["id"]), .95)
         semantic_scores = self._semantic_namespace_scores(query, "memory", self._semantic_limit)
+        # A subject-specific preference must also work with FTS-only search
+        # (код/кодом), without another model request or an unrelated style hit.
+        for item in self._store.memory_slot_items("user.preference"):
+            lifecycle = dict(dict(item.get("metadata") or {}).get("lifecycle") or {})
+            if lifecycle.get("scope") == "conditional" and condition_matches(str(lifecycle.get("condition", "")), query):
+                candidates[str(item["id"])] = item
+                fts_scores.setdefault(str(item["id"]), .65)
         for memory_id in semantic_scores:
             memory = self._store.get_memory(memory_id)
             if memory is not None and memory["status"] == "active":
                 candidates[memory_id] = memory
         temporal = self._is_temporal_query(query)
-        return self._attach_retrieval(list(candidates.values()), fts_scores, semantic_scores, temporal)[:limit]
+        applicable = [item for item in candidates.values() if self._applicable_memory(item, query)]
+        ranked = self._attach_retrieval(applicable, fts_scores, semantic_scores, temporal)
+        eligibility = self._store.memory_source_eligibility([str(item["id"]) for item in ranked])
+        return [item for item in ranked if eligibility.get(str(item["id"]), True)][:limit]
 
     def _semantic_namespace_scores(
         self, query: str, namespace: str, limit: int,
@@ -2315,12 +2707,11 @@ class MemoryService:
         try:
             results = list(self._vector_index.search_sync(query, namespace, limit))
             snapshot_method = getattr(self._vector_index, "snapshot_sync", None)
+            inventory_method = getattr(self._vector_index, "inventory_ids_sync", None)
             source_search = getattr(self._vector_index, "search_source_sync", None)
             if callable(snapshot_method) and callable(source_search):
-                indexed_ids = set(snapshot_method(namespace).get("ids", []))
-                source_ids = {
-                    item_id for item_id, _ in self._store.semantic_index_items(namespace)
-                }
+                indexed_ids = inventory_method(namespace) if callable(inventory_method) else set(snapshot_method(namespace).get("ids", []))
+                source_ids = self._store.semantic_index_ids(namespace)
                 missing_ids = source_ids - indexed_ids
                 if missing_ids:
                     existing = {result.item_id for result in results}
@@ -2405,11 +2796,29 @@ class MemoryService:
             memory_id = str(memory["id"])
             fts_score = fts_scores.get(memory_id, 0.0)
             semantic_score = max(0.0, semantic_scores.get(memory_id, 0.0))
+            if not fts_score and semantic_score < 0.25:
+                # Importance/confidence describe the fact, not its relevance to
+                # this turn. They cannot rescue a weak semantic-only match.
+                continue
             temporal_score = self._temporal_score(str(memory["created_at"])) if temporal else 0.0
-            recency = self._temporal_score(str(memory["updated_at"])) * (.5 if temporal else .1)
+            confirmed = dict(dict(memory.get("metadata") or {}).get("lifecycle") or {}).get("last_confirmed_at")
+            recency = self._temporal_score(str(confirmed)) * (.5 if temporal else .1) if confirmed else 0
             source_quality = float(memory.get("source_quality", 1.0))
             score = 0.48 * semantic_score + 0.26 * fts_score + 0.10 * float(memory["importance"]) + 0.08 * float(memory["confidence"]) + .08 * source_quality + recency + temporal_score
+            current_freshness = freshness(memory)
+            score *= 1.0 if memory.get("status") == "superseded" else float(current_freshness["weight"])
+            if memory.get("task_constraint"):
+                score += .35
+            if memory.get("status") == "superseded":
+                score += .15
+            memory = {**memory, "freshness": current_freshness}
             reasons = (["semantic"] if semantic_score else []) + (["fts"] if fts_score else []) + (["temporal"] if temporal else [])
+            if memory.get("task_constraint"):
+                reasons.append("task_constraint")
+            if memory.get("status") == "superseded":
+                reasons.append("historical")
+            if current_freshness["state"] in {"aging", "unverified"}:
+                reasons.append("needs_reconfirmation")
             ranked.append({**memory, "namespace": "factual_memory", "retrieval": {"score": round(score, 4), "semantic_score": round(semantic_score, 4), "fts_score": round(fts_score, 4), "components": {"exact": 0.0, "fts": round(fts_score, 4), "semantic": round(semantic_score, 4), "importance": float(memory["importance"]), "confidence": float(memory["confidence"]), "recency": round(recency, 4), "source_quality": source_quality}, "reasons": reasons}})
         return sorted(ranked, key=lambda item: item["retrieval"]["score"], reverse=True)
 
@@ -2460,6 +2869,10 @@ class MemoryService:
         for item in active:
             if item["id"] == exclude_id:
                 continue
+            candidate_scope = dict(dict(values.get("metadata") or {}).get("lifecycle") or {}).get("scope", "durable")
+            item_scope = dict(dict(item.get("metadata") or {}).get("lifecycle") or {}).get("scope", "durable")
+            if candidate_scope != item_scope:
+                continue
             item_slot = str(item.get("slot_key") or "")
             item_object = str(item.get("object_key") or "")
             if slot_key:
@@ -2481,9 +2894,20 @@ class MemoryService:
                 conflict = item
         replacement_id = values.get("supersedes_id")
         if replacement_id and exact is None and self._has_explicit_correction(values):
-            target = next((item for item in active if item["id"] == replacement_id), None)
-            if target is not None:
+            target = self._store.get_memory(str(replacement_id))
+            # An explicit ID is not permission to replace an unrelated slot.
+            opposing = {slot_key, str(target.get("slot_key"))} == {"user.preference", "user.dislike"} if target else False
+            same_value = target is not None and evidence_terms(str(target["value_text"])) == evidence_terms(str(values["value_text"]))
+            if target is not None and target["status"] == "active" and target["id"] != exclude_id and (
+                target.get("slot_key") == slot_key or opposing and same_value
+            ):
                 conflict = target
+        if exact is None and conflict is None and slot_key in {"user.preference", "user.dislike"} and self._has_explicit_correction(values):
+            other_slot = "user.preference" if slot_key == "user.dislike" else "user.dislike"
+            opposite = [item for item in self._store.memory_slot_items(other_slot)
+                        if evidence_terms(str(item["value_text"])) == evidence_terms(str(values["value_text"]))]
+            if len(opposite) == 1:
+                conflict = opposite[0]
         return exact, conflict
 
     def _validate_sources(self, source_ids: list[str], *, manual: bool) -> None:
@@ -2498,6 +2922,10 @@ class MemoryService:
 
     def _apply_topic_proposal(self, proposal: TopicProposal, source_ids: list[str]) -> dict[str, object] | None:
         if not source_ids:
+            return None
+        if self._only_local_style_sources(source_ids):
+            return None
+        if not self._derived_allowed(f"{proposal.title} {proposal.summary_text}", source_ids, sensitivity=proposal.sensitivity):
             return None
         normalized_topic = self._normalize(f"{proposal.title} {proposal.summary_text}")
         if any(marker in normalized_topic for marker in (
@@ -2539,6 +2967,93 @@ class MemoryService:
         for source_id in source_ids:
             self._store.link_topic(str(topic["id"]), "message", source_id)
         return topic
+
+    def _derived_allowed(self, text: str, source_ids: list[str], *, sensitivity: str = "normal", require_user: bool = True, reading: bool = False) -> bool:
+        """Apply user consent and suppression to derived continuity, never emotions."""
+        sources = [self._store.get_message(str(item)) for item in source_ids]
+        if reading:
+            sources = [source for source in sources if source is not None]
+        if not reading and (not sources or any(source is None or not self.is_eligible_automatic_source(source) for source in sources)):
+            return False
+        users = [source for source in sources if source.role == "user"]
+        if require_user and not users and not reading:
+            return False
+        values = {"value_text": text, "source_message_ids": source_ids}
+        if self._store.memory_is_suppressed(values, derived=True):
+            return False
+        sensitive = sensitivity == "sensitive" or self._contains_sensitive(text.casefold()) and any(
+            self._SENSITIVE_SELF_FACT.search(source.effective_content) for source in users
+        )
+        if sensitive and not self._has_explicit_memory_consent(values):
+            # A later in-chat confirmation may have already activated this fact.
+            accepted = self._store.memory_slot_items("user.health_constraint")
+            if not any(item["sensitivity"] == "sensitive"
+                       and set(item.get("source_message_ids", [])) & set(source_ids)
+                       and evidence_terms(str(item["value_text"])) <= evidence_terms(text)
+                       for item in accepted):
+                return False
+        return True
+
+    @staticmethod
+    def enumeration_query(query: str) -> bool:
+        return bool(re.search(r"(?iu)\b(?:все|всё|полный|перечисли|список)\b", query)
+                    and re.search(r"(?iu)\b(?:мои|моих|у\s+меня|обо?\s+мне|проект\w*|устройств\w*|предпочтени\w*)\b", query))
+
+    @staticmethod
+    def _historical_query(query: str) -> bool:
+        return bool(re.search(r"(?iu)\b(?:раньше|прежде|до\s+(?:переезда|смены|изменени\w*)|previously|used\s+to)\b", query))
+
+    def _apply_commitment_proposal(self, proposal: CommitmentProposal, source_ids: list[str]) -> dict[str, object] | None:
+        sources = [self._store.get_message(str(item)) for item in source_ids]
+        if not sources or proposal.confidence < self._llm_min_confidence or any(
+            source is None or self._source_quality(source) < .8 for source in sources
+        ):
+            return None
+        existing = self._store.get_commitment(proposal.commitment_id) if proposal.commitment_id else None
+        if proposal.commitment_id and existing is None:
+            return None
+        if existing is None:
+            siblings = [item for item in self._store.list_commitments(limit=1000)
+                        if item["kind"] == proposal.kind and self._normalize(item["title"]) == self._normalize(proposal.title)]
+            if len(siblings) == 1:
+                existing = siblings[0]
+            elif len(siblings) > 1:
+                open_items = [item for item in siblings if item["status"] == "open"]
+                if len(open_items) == 1:
+                    existing = open_items[0]
+                else:
+                    return None
+        if existing is not None:
+            if existing.get("user_locked") or existing["kind"] != proposal.kind:
+                return None
+            if proposal.expected_updated_at and proposal.expected_updated_at != existing["updated_at"]:
+                return None
+            previous_ids = [str(item["message_id"]) for item in existing.get("evidence", [])]
+            previous_sequence = max((source.sequence_no for item in previous_ids
+                                     if (source := self._store.get_message(item)) is not None), default=0)
+            if max(source.sequence_no for source in sources) < previous_sequence:
+                return None
+            if existing["status"] != "open" and proposal.status == "open":
+                # A fresh later task with the same title is allowed; an old
+                # window must never reopen the completed one.
+                if max(source.sequence_no for source in sources) <= previous_sequence:
+                    return None
+                existing = None
+            elif existing["status"] != "open" and proposal.status != existing["status"]:
+                return None
+        values = proposal.model_dump(exclude={"commitment_id", "expected_updated_at", "sensitivity"})
+        if existing is not None:
+            # Link completion evidence as well, for stale-job protection.
+            changes = {key: value for key, value in values.items() if key != "source_message_ids" and existing.get(key) != value}
+            return self._store.update_commitment_with_evidence(str(existing["id"]), changes, source_ids)
+        return self._store.create_commitment({**values, "source_message_ids": source_ids,
+                                              "source_episode_id": sources[-1].episode_id,
+                                              "extractor_version": "consolidation-v23"})
+
+    def _only_local_style_sources(self, source_ids: list[str]) -> bool:
+        users = [source for source_id in source_ids
+                 if (source := self._store.get_message(source_id)) is not None and source.role == "user"]
+        return bool(users) and all(local_style_only(source.effective_content) for source in users)
 
     @classmethod
     def _fingerprint(cls, subject: str, predicate: str, value: str) -> str:
@@ -2767,6 +3282,17 @@ class MemoryService:
             "relationship.friend": "friend",
         }.get(predicate, predicate)
         value = str(result.get("value_text", "")).strip()
+        if predicate == "habit" and re.search(
+            r"(?iu)\bпо\s+(?:понедельник\w*|вторник\w*|средам|четверг\w*|пятниц\w*|суббот\w*|воскресень\w*)\b", value,
+        ):
+            predicate = "schedule"
+        if predicate == "prefers_response_length" and not scoped_response_format(value) and re.search(
+            r"(?iu)\b(?:когда\b|при\s+(?:работе|обсуждении|разборе|объяснении|игре)|для\s+(?:кода|работы|задач\w*))", value,
+        ):
+            # A lasting conditional preference can coexist with the general
+            # response profile, but cannot supersede its single-value slot.
+            predicate = "preference"
+            result.update(slot_key="", object_key="", cardinality="multi", supersedes_id=None)
         slot = str(result.get("slot_key") or "")
         object_key = str(result.get("object_key") or "")
         if predicate == "name" and subject == "user":
@@ -2890,8 +3416,17 @@ class MemoryService:
             result["cardinality"] = policy.cardinality
             result["temporal_semantics"] = policy.temporal_semantics
             if policy.ttl_days is not None and not result.get("expires_at"):
+                timestamps = self._store.message_timestamps([
+                    str(item) for item in result.get("source_message_ids", [])
+                    if (source := self._store.get_message(str(item))) is not None and source.role == "user"
+                ])
+                observed_at = max(timestamps.values(), default="")
+                try:
+                    anchor = datetime.fromisoformat(observed_at).astimezone(UTC)
+                except ValueError:
+                    anchor = datetime.now(UTC)
                 result["expires_at"] = (
-                    datetime.now(UTC) + timedelta(days=policy.ttl_days)
+                    anchor + timedelta(days=policy.ttl_days)
                 ).isoformat(timespec="milliseconds")
             elif policy.ttl_days is None:
                 result["expires_at"] = None
@@ -2925,6 +3460,7 @@ class MemoryService:
                 "canonical_text", "expires_at", "cardinality",
                 "temporal_semantics",
                 "sensitivity",
+                "metadata",
             )
             if key in values
         }
@@ -2968,19 +3504,14 @@ class MemoryService:
     def expire_due_memories(self) -> int:
         now = datetime.now(UTC)
         expired = 0
-        for item in self._store.list_memories(
-            status="active", limit=500, include_enrichment=False,
-        ):
+        for item in self._store.due_transient_memories(list(TRANSIENT_MEMORY_SLOTS), now.isoformat()):
             if item.get("slot_key") not in TRANSIENT_MEMORY_SLOTS or item.get("user_locked"):
                 continue
             raw = item.get("expires_at")
             if not raw:
                 continue
-            try:
-                due = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-            except ValueError:
-                continue
-            if due <= now:
+            due = parse_time(raw)
+            if due is not None and due <= now:
                 self._store.set_memory_status(
                     str(item["id"]), "expired", actor="policy", action="expired",
                     reason="v17 temporal TTL elapsed",

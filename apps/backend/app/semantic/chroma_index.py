@@ -13,7 +13,7 @@ import math
 from shutil import rmtree
 from typing import Callable
 
-from .embedding import EmbeddingProvider
+from .embedding import EmbeddingProvider, embed_query
 from .vector_index import VectorDimensionMismatch, VectorSearchResult
 
 
@@ -56,7 +56,7 @@ class ChromaVectorIndex:
         self._collection(namespace).delete(ids=[item_id])
 
     def search_sync(self, query: str, namespace: str, limit: int) -> list[VectorSearchResult]:
-        query_embedding = getattr(self._provider, "embed_query", self._provider.embed)(query)
+        query_embedding = embed_query(self._provider, query)
         result = self._collection(namespace).query(
             query_embeddings=[query_embedding], n_results=max(1, limit), include=["distances"],
         )
@@ -74,8 +74,7 @@ class ChromaVectorIndex:
         *,
         item_ids: set[str] | None = None,
     ) -> list[VectorSearchResult]:
-        embed_query = getattr(self._provider, "embed_query", self._provider.embed)
-        query_vector = embed_query(query)
+        query_vector = embed_query(self._provider, query)
         scored: list[VectorSearchResult] = []
         for item_id, text in self._source(namespace):
             if item_ids is not None and item_id not in item_ids:
@@ -101,6 +100,10 @@ class ChromaVectorIndex:
             if indexed.get(item_id) != text:
                 self.upsert_sync(item_id, text, namespace)
         self._last_successful_sync = self._now()
+
+    def inventory_ids_sync(self, namespace: str) -> set[str]:
+        # The interactive bridge needs IDs, not every document and its hash.
+        return {str(item) for item in self._collection(namespace).get(include=[]).get("ids", [])}
 
     def snapshot_sync(self, namespace: str) -> dict[str, object]:
         collection = self._collection(namespace)

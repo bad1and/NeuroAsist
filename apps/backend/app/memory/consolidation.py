@@ -24,7 +24,10 @@ class FactProposal(BaseModel):
     source_message_ids: list[str] = Field(default_factory=list, max_length=20)
     cardinality: Literal["single", "multi"] = "multi"
     temporal_semantics: Literal["atemporal", "current", "period"] = "atemporal"
+    memory_scope: Literal["durable", "conditional", "session", "turn"] = "durable"
+    context_hint: str = Field(default="", max_length=160)
     supersedes_id: str | None = Field(default=None, max_length=64)
+    evidence_text: str = Field(default="", max_length=1000)
 
 
 class TopicProposal(BaseModel):
@@ -34,6 +37,7 @@ class TopicProposal(BaseModel):
     summary_text: str = Field(default="", max_length=2000)
     topic_id: str | None = None
     source_message_ids: list[str] = Field(default_factory=list, max_length=20)
+    sensitivity: Literal["normal", "sensitive"] = "normal"
 
 
 class CommitmentProposal(BaseModel):
@@ -46,6 +50,9 @@ class CommitmentProposal(BaseModel):
     importance: float = Field(default=0.6, ge=0, le=1)
     confidence: float = Field(default=0.7, ge=0, le=1)
     source_message_ids: list[str] = Field(default_factory=list, max_length=20)
+    commitment_id: str | None = Field(default=None, max_length=64)
+    expected_updated_at: str | None = Field(default=None, max_length=64)
+    sensitivity: Literal["normal", "sensitive"] = "normal"
 
 
 class ConflictProposal(BaseModel):

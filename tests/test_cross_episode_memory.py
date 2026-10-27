@@ -52,9 +52,10 @@ def test_cross_episode_continuity_after_break(tmp_path: Path):
     # Fetch context material for the morning session
     material = store.context_material("Привет, с чего начнём?", recent_turns=8, session_id=session_morning)
 
-    # Verify recent messages from night are visible across session_id
+    # Previous dialogue stays available as reference, with an explicit period;
+    # its raw instructions must not become the new session's active turns.
     recent_contents = [r["content"] for r in material["recent"]]
-    assert any("JWT" in c for c in recent_contents), f"Night messages should be present in recent turns: {recent_contents}"
+    assert not any("JWT" in c for c in recent_contents)
 
     # Verify previous episode summary is present and tagged
     assert len(material["summaries"]) > 0
@@ -70,6 +71,7 @@ def test_cross_episode_continuity_after_break(tmp_path: Path):
     system_contents = [m.content for m in built.messages if m.role == "system"]
     assert any("Контекст недавнего прошлого разговора (что обсуждали до перерыва):" in c for c in system_contents)
     assert any("[Время:" in c or "[Период:" in c for c in system_contents)
+    assert any("JWT" in c or "авторизаци" in c for c in system_contents)
 
     # Verify token budget is strictly respected
     assert built.token_estimate <= 3000

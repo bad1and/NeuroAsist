@@ -1011,7 +1011,15 @@ def create_app() -> FastAPI:
             "Memory retention v21 repair checked",
             memory_service.repair_v21_memory_retention(),
         ))
+        events.append((
+            "memory.task_preference_scope_repaired", "info", "Task response formats separated from global profile",
+            memory_service.repair_task_scoped_preferences(),
+        ))
         expired = memory_service.expire_due_memories()
+        events.append((
+            "memory.v22_repair", "info", "Memory scope and source freshness v22 checked",
+            memory_service.repair_v22_memory_lifecycle(),
+        ))
         if expired:
             events.append((
                 "memory.temporal_expired",
