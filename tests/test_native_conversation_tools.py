@@ -106,13 +106,30 @@ async def test_native_dialogue_never_prefetches_raw_recognition_text(question):
 
 
 @pytest.mark.anyio
-async def test_parallel_native_calls_are_rejected_without_partial_execution(monkeypatch):
-    fake = FakeClient([completion([call(id="a"), call(id="b")]), _completion('{"reply":"Проверка не выполнена.","emotion":"neutral","intent":"question"}')])
+async def test_mixed_native_calls_are_rejected_without_partial_execution(monkeypatch):
+    other = call(id="b")
+    other.function.name = "create_reminder"
+    fake = FakeClient([completion([call(id="a"), other]), _completion('{"reply":"Проверка не выполнена.","emotion":"neutral","intent":"question"}')])
     monkeypatch.setattr(module, "_shared_client", lambda *_: fake)
     lookup = Lookup()
     agent = CharacterAgent(DeepSeekProvider(_settings()), History(), 12, situational_coordinator=Environment(lookup))
     await agent.handle_user_message("s", QUESTION, persist_reply=False)
     assert not lookup.calls
+    assert {m["tool_call_id"] for m in fake.completions.calls[-1]["messages"] if m["role"] == "tool"} == {"a", "b"}
+
+
+@pytest.mark.anyio
+async def test_related_native_searches_share_one_lookup_and_return_every_call_id(monkeypatch):
+    fake = FakeClient([completion([call({"query": "Deadlock Violet release date"}, id="a"),
+        call({"query": "Deadlock Nurse Harrow latest hero"}, id="b")]),
+        _completion('{"reply":"Проверка завершена.","emotion":"neutral","intent":"question"}')])
+    monkeypatch.setattr(module, "_shared_client", lambda *_: fake)
+    lookup = Lookup()
+    agent = CharacterAgent(DeepSeekProvider(_settings()), History(), 12, situational_coordinator=Environment(lookup))
+    await agent.handle_user_message("s", "Поищи, Violet и Nurse Harrow — разные герои Deadlock?", persist_reply=False)
+    assert len(lookup.calls) == 1
+    assert "Violet" in lookup.calls[0][0] and "Nurse Harrow" in lookup.calls[0][0]
+    assert agent.last_skill_metadata["coalesced_calls"] == 2
     assert {m["tool_call_id"] for m in fake.completions.calls[-1]["messages"] if m["role"] == "tool"} == {"a", "b"}
 
 

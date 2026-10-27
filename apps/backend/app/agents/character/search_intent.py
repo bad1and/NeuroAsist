@@ -43,12 +43,37 @@ def query_anchors(value: str) -> set[str]:
     return terms(value) - generic
 
 
+def refinement_preserves_subject(original: str, refined: str, entity: str = "") -> bool:
+    """Keep names/versions fixed while allowing a better phrasing or language."""
+    original = re.sub(r"\b(?:site|after|before):\S+", "", original, flags=re.I)
+    for version in re.findall(r"\b\d+(?:\.\d+)+(?:[a-z][a-z0-9-]*)?\b", original, re.I):
+        if not re.search(r"(?<![\w.])" + re.escape(version) + r"(?![\w.])", refined, re.I):
+            return False
+    for quoted in re.findall(r'[«"]([^»"]+)[»"]', original):
+        if normalize_entity(quoted) not in normalize_entity(refined):
+            return False
+    if entity:
+        anchors = query_anchors(entity)
+    else:
+        # Search wording is replaceable; product names, quoted titles and exact
+        # error/version identifiers are not. With no named subject, stay strict.
+        generic = terms("Ошибка установка установить исправить причина решение почему где когда инструкция Error install installation fix solution failed failure troubleshooting package documentation details official release announcement latest version")
+        names = re.findall(r"\b(?:[A-ZА-ЯЁ][\w.+-]*|[a-z][a-z0-9.+-]*)\b", original)
+        anchors = set().union(*(terms(name) for name in names)) - generic if names else set()
+        for quoted in re.findall(r'[«"]([^»"]+)[»"]', original):
+            anchors.update(query_anchors(quoted))
+        anchors.update(word for word in terms(original) if word.isdigit() and not re.fullmatch(r"20\d{2}", word))
+        if not anchors:
+            anchors = query_anchors(original)
+    return bool(anchors) and anchors.issubset(terms(refined))
+
+
 _COMMAND = re.compile(r"\b(?:найди|поищи|поискать|погугли|загугли|погуглить|гугли|ищи|(?:посмотри|глянь|проверь)\s+в\s+(?:интернете|инете|сети)|search\s+(?:for|the\s+web)|look\s+up)\b", re.I)
 _FRESH = re.compile(r"\b(?:когда\s+(?:выйдет|выходит|выход|релиз)|дата\s+(?:выхода|релиза)|когда.{0,80}\bрелиз|(?:актуальн\w*|последн\w*|новейш\w*|текущ\w*)\s+верси\w*|какая.{0,40}\bверсия|сколько\s+сейчас\s+стоит|when.{0,80}\b(?:release|launch)|latest\s+version)\b", re.I)
 _LOCAL = re.compile(r"\b(?:в\s+(?:этом|моем|данном)\s+(?:коде|тексте|файле)|перепиши|отредактируй|переведи|исправь\s+(?:код|текст)|(?:как|почему|зачем)\s+(?:работает|работал|устроен)|(?:как|почему)\s+найти|(?:ошибк\w*|опечатк\w*)\s+в\s+(?:код\w*|текст\w*)|(?:ты|она)\s+(?:умеешь|умеет|может)\s+(?:искать|найти)|я\s+(?:сам\s+)?(?:найду|поищу|погуглю)|(?:не|не\s+надо|не\s+нужно)\s+(?:найди|поищи|погугли))\b", re.I)
 _FOLLOWUP = re.compile(r"\b(?:ты.{0,35}\bнайди|найди\s+не\s+я|(?:ну\s+)?(?:и\s+)?что\s+там|что\s+с\s+поиском|ты.{0,60}\b(?:ищешь|искать)|але|алло|ты\s+тут|(?:найди|поищи|проверь)\s+(?:это|еще\s+раз|заново|лучше)|ищи\s+(?:ты|сама)|поищи\s+(?:ты|сама))\b", re.I)
 _FILLER = re.compile(r"\b(?:пожалуйста|плиз|ирис|iris|ты|сама|сам|мне|нам|это|то|не|я|нет|ну|так|с|в|и|там|данные|информацию|информация|что|же|еще|раз|заново|лучше|нормально|давай|теперь|уже|бля|блять|смысле|ебаный|свет|поиск|поиском)\b", re.I)
-_RECENT = re.compile(r"\b(?:последн\w*|нов\w*|свеж\w*)\s+(?:перс\w*|геро\w*|обновлен\w*|патч\w*)|\b(?:latest|newest)\s+(?:hero|character|update)\b", re.I)
+_RECENT = re.compile(r"\b(?:последн\w*|нов\w*|свеж\w*)\s+(?:вышедш\w*\s+)?(?:перс\w*|геро\w*|агент\w*|обновлен\w*|патч\w*)|\b(?:latest|newest)\s+(?:hero|character|agent|update)\b", re.I)
 _CURRENT = re.compile(r"(?:свеж\w*|последн\w*|актуальн\w*).{0,15}\b(?:новост\w*|информац\w*|данн\w*)|(?:что|че|чё).{0,60}\bпроизошл\w*|latest\s+(?:news|information)", re.I)
 _REFERENCE = re.compile(r"\b(?:их|его|нее|него|нему|ним|ней|них)\b", re.I)
 
@@ -59,6 +84,26 @@ def _clean_query(text: str) -> str:
     text = re.sub(r"\b(?:у\s+нас|получается|по\s+нему|по\s+ним|что\s+там|че\s+там)\b", " ", text, flags=re.I)
     text = re.sub(r"\b(?:а|че|чё|какие|какая|какой|какое|их|его|него|нему|ним|них)\b", " ", text, flags=re.I)
     return " ".join(_FILLER.sub(" ", text).split()).strip(" ,.!?:")[:300]
+
+
+def explicit_query_revision(text: str, previous_query: str, recent_messages=()) -> SearchRequest | None:
+    """A literal replacement outranks the assistant's earlier search hypotheses."""
+    if not previous_query or internet_forbidden(text) or sensitive_query(text):
+        return None
+    text = " ".join(text.split())
+    match = re.search(
+        r"(?iu)(?:(?:просто|только)\s+(?:найди|поищи|ищи)|(?:найди|поищи|ищи)\s+(?:просто|только)|(?:запрос|поиск)\s*[:—])\s*(.+)$", text,
+    )
+    if match is None and re.search(r"(?iu)\b(?:убери|исключи|запрос|поискать|поищи)\b", " ".join(
+        m.content for m in list(recent_messages)[-4:] if getattr(m, "role", None) == "user"
+    )):
+        match = re.search(r"(?iu)\bпросто\s+(.+)$", text)
+    if match is None:
+        return None
+    query = re.sub(r"(?iu)\s+(?:вс[её]|вот и вс[её]|и вс[её])[.!? ]*$", "", match[1]).strip(' .!?«»"')
+    if len(terms(query)) < 2 or len(query) > 300 or sensitive_query(query):
+        return None
+    return SearchRequest(normalize_entity(query), force_refresh=True, reason="query_revision")
 
 
 _DETAIL = re.compile(r"^\s*(?:(?:вот|прям|еще|ну|это|не|нет|да|а|давай|точнее|вернее|я имел в виду)\s+)*(?:сейчас|в\s+этом\s+году|(?:за\s+)?(?:вчера|сегодня)|недавно|другой\s+(?:вариант|анекдот)|за\s+(?:неделю|месяц))\b", re.I)
@@ -221,7 +266,7 @@ def _meaningful(query: str) -> bool:
 
 def _fact(text: str) -> str:
     if _RECENT.search(text):
-        return "последний новый герой" if re.search(r"перс|геро|hero|character", text, re.I) else "последнее обновление"
+        return "последний новый герой" if re.search(r"перс|геро|агент|hero|character|agent", text, re.I) else "последнее обновление"
     return " ".join(_FILLER.sub(" ", text).split())
 
 

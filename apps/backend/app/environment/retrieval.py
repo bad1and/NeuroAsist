@@ -13,6 +13,7 @@ _STOP = set("что как когда где какой какая какие с
 _ALIASES = {"гта": "gta", "ии": "ai", "россия": "russia", "россии": "russia", "росси": "russia", "игр": "gaming", "игры": "gaming", "техно": "technology", "наука": "science", "науки": "science"}
 _STOP.discard("microphone")
 _STOP.update("кто последний самое самый победитель выиграл победил финал итоги результаты winner final won".split())
+_STOP.update("новый новая новые новейший последняя последние вышедший вышедшая вышедшие вышедшего вышедших".split())
 _MODIFIERS = set("hero heroes character characters new newest update updates patch notes full text alternative another joke doctor memory announcement announced launch launched available recent recently yesterday october september january february march april may june july august november december".split())
 
 
@@ -113,7 +114,13 @@ def relevance(query: str, text: str) -> float:
         anchors.update(q & {"football", "hockey", "basketball"})
     if anchors and not anchors.issubset(candidate):
         return 0.0
-    overlap = len(q & candidate) / len(q)
+    # English announcements often omit the Russian query's grammatical words
+    # and the search year. Keep the named product/version mandatory, but do not
+    # reject its release note solely for lacking the word "герой" or "2026".
+    content_q = q - _MODIFIERS
+    if not event_year:
+        content_q = {w for w in content_q if not re.fullmatch(r"20\d{2}", w)}
+    overlap = len(content_q & candidate) / len(content_q) if content_q else len(q & candidate) / len(q)
     return overlap if overlap >= 0.34 else 0.0
 
 

@@ -16,15 +16,15 @@ class CodingBridge:
     """
 
     _code_signal = re.compile(
-        r"(?:coding\s*agent|агент[ау]?\s+код|код(?:е|овый|инг)?|программ|"
-        r"репозитор|файл(?:ы|а)?|тест(?:ы|ировать)?|bug|баг|ошибк|"
-        r"python|(?:питон|пайтон)[а-яё]*|typescript|javascript|react|backend|frontend|api|refactor|рефактор)",
+        r"\b(?:coding\s*agent|агент[ау]?\s+код\w*|код(?:а|е|ом|овый|инг)?|программ\w*|"
+        r"репозитор\w*|файл\w*|тест(?:ы|а|ов|ировать)?|"
+        r"python|(?:питон|пайтон)[а-яё]*|typescript|javascript|react|backend|frontend|api|refactor|рефактор\w*)\b",
         re.IGNORECASE,
     )
     _action_signal = re.compile(
-        r"(?:сделай|дай|передай|поручи|попроси|реализуй|исправь|измени|добавь|создай|напиши|проверь|запусти|"
+        r"\b(?:сделай|дай|передай|поручи|попроси|реализуй|исправь|измени|добавь|создай|напиши|проверь|запусти|"
         r"накод[а-яё]*|накот[а-яё]*|сгенер[а-яё]*|"
-        r"give|delegate|fix|implement|change|add|create|write|test|run)", re.IGNORECASE,
+        r"give|delegate|fix|implement|change|add|create|write|test|run)\b", re.IGNORECASE,
     )
     _stop_signal = re.compile(r"(?:останови|стоп|отмени|прекрати|cancel|stop)", re.IGNORECASE)
     _status_signal = re.compile(
@@ -68,7 +68,7 @@ class CodingBridge:
     # word forms.  It only decides whether to append a compact routing hint to
     # the existing DeepSeek request; it never creates a task by itself.
     _model_routing_target_signal = re.compile(
-        r"(?:алгоритм|сортир|калькулятор|парсер|скрипт|функци|"
+        r"\b(?:алгоритм|сортир|калькулятор|парсер|скрипт|функци|"
         r"сайт|лендинг|приложен|интерфейс|экран|форм[ауе]|кнопк|"
         r"бот|плагин|виджет|таблиц[ауе]|баз[ауе]\s+данных|"
         r"c\+\+|c#|java|kotlin|swift|go|rust|php|sql|html|css|"
@@ -85,13 +85,19 @@ class CodingBridge:
         self._deferred_objectives: dict[str, tuple[str, float]] = {}
 
     def observe_user_message(self, session_id: str, user_text: str, source_message=None) -> str | None:
+        # A deferred software request belongs to the adjacent exchange. A new
+        # topic or a search request cannot confirm it merely by saying "давай".
+        confirmation = self._deferred_confirmation_signal.fullmatch(self._confirmation_text(user_text))
+        code_detail = self._code_signal.search(user_text) and not self._agent_task_signal.search(user_text)
+        if not (confirmation or code_detail or self._is_coding_delegation_request(user_text)):
+            self._deferred_objectives.pop(session_id, None)
         if not self.service.enabled:
             tasks = self.service.store.list_coding_tasks(limit=30) if self.service.store is not None else []
-            if self._is_coding_delegation_request(user_text) or self._agent_task_signal.search(user_text):
+            if self._is_coding_delegation_request(user_text):
                 self._deferred_objectives[session_id] = (user_text, time.monotonic())
                 return self._forced_reply(self._disabled_reply(user_text))
             if self._has_recent_deferred_objective(session_id) and (
-                self._code_signal.search(user_text) or self._deferred_confirmation_signal.search(user_text)
+                code_detail or confirmation
             ):
                 # A task is often described over two chat messages.  While
                 # unavailable, keep the latest code-specific detail rather
@@ -156,6 +162,9 @@ class CodingBridge:
         return bool(
             self._is_coding_request(user_text)
             or self._delegation_request_signal.search(user_text)
+            or (re.search(r"\b(?:переда\w*|поручи|delegate)\b", user_text, re.I)
+                and re.search(r"\b(?:задач\w*|task)\b", user_text, re.I)
+                and re.search(r"\b(?:агент\w*|agent)\b", user_text, re.I))
         )
 
     def should_request_model_delegation(self, user_text: str) -> bool:
@@ -238,10 +247,14 @@ class CodingBridge:
         if time.monotonic() - created_at > self._deferred_ttl_seconds:
             self._deferred_objectives.pop(session_id, None)
             return None
-        if not self._deferred_confirmation_signal.search(user_text):
+        if not self._deferred_confirmation_signal.fullmatch(self._confirmation_text(user_text)):
             return None
         self._deferred_objectives.pop(session_id, None)
         return objective
+
+    @staticmethod
+    def _confirmation_text(user_text: str) -> str:
+        return " ".join(re.sub(r"[^\w'’]+", " ", user_text).split()).strip()
 
     def _has_recent_deferred_objective(self, session_id: str) -> bool:
         deferred = self._deferred_objectives.get(session_id)
