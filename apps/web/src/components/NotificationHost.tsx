@@ -223,8 +223,13 @@ export function NotificationCard({
         </div>
       </div>
 
-      {Boolean(notification.actions?.length) && <div className="notification-footer-actions">
-        {notification.actions!.map((action, index) => <MaterialButton key={index}
+      {(Boolean(notification.actions?.length) || Boolean(notification.navigateLabel && onNavigate)) && <div className="notification-footer-actions">
+        {notification.navigateLabel && notification.navigateView && onNavigate && <MaterialButton
+          materialKey={`notification.${notification.id}.navigate`} type="button"
+          className="notification-action-btn notification-pill-btn is-primary"
+          onClick={event => { event.stopPropagation(); onNavigate(notification.navigateView!); handleDismiss(); }}
+        >{notification.navigateLabel}</MaterialButton>}
+        {notification.actions?.map((action, index) => <MaterialButton key={index}
           materialKey={`notification.${notification.id}.action.${index}`} type="button"
           className={`notification-action-btn notification-pill-btn ${action.variant === "primary" ? "is-primary" : "is-secondary"}`}
           onClick={(event) => {

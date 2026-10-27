@@ -234,6 +234,7 @@ describe("Unified Notification System", () => {
       vi.stubGlobal("ResizeObserver", class {
         constructor(private callback: () => void) {}
         observe(element: Element) { if (element.classList.contains("notification-card")) resize = this.callback; }
+        unobserve() {}
         disconnect() {}
       });
       try {
