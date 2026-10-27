@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { PublicSettings } from "../types";
 const api = vi.hoisted(() => ({ getReadiness: vi.fn(), getSettings: vi.fn(), updateRuntimeSettings: vi.fn() }));
@@ -18,7 +18,7 @@ beforeEach(() => {
   api.getReadiness.mockResolvedValue({ text_chat: "ready", live_ready: false });
   devices.getAudioDeviceCatalog.mockResolvedValue({ inputs: [], outputs: [], canEnumerate: true, canSelectOutput: false });
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 it("requires a saved model key even when the text service reports ready", async () => {
   const start = vi.fn(), changed = vi.fn();
   const view = render(<FirstConversationSetup open settings={settings} onSettingsChanged={changed} onClose={vi.fn()} onStart={start} />);
@@ -39,4 +39,84 @@ it("resumes the saved device step without asking for microphone access", async (
   expect(screen.getByRole("option", { name: "Выбранный микрофон недоступен" })).toBeInTheDocument();
   expect(devices.getAudioDeviceCatalog).toHaveBeenCalledWith(false);
   expect(api.updateRuntimeSettings).not.toHaveBeenCalled();
+});
+it("lets a text-ready user finish without downloading voice models", async () => {
+  const configured = { ...settings, api_key_configured: true };
+  api.getSettings.mockResolvedValue(configured);
+  const start = vi.fn(), close = vi.fn();
+  render(<FirstConversationSetup open settings={configured} onSettingsChanged={vi.fn()} onClose={close} onStart={start} />);
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "4. Первый разговор" }));
+  expect(screen.getByText("Голос пока не готов. Можно начать с текста и вернуться к настройке позже.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Начать разговор" }));
+  expect(localStorage.getItem("iris.setup.completed.v1")).toBe("1");
+  expect(close).toHaveBeenCalledOnce();
+  expect(start).toHaveBeenCalledOnce();
+});
+it("moves focus into each step and resumes after deferring without marking completion", async () => {
+  const close = vi.fn(), changed = vi.fn();
+  const props = { settings, onSettingsChanged: changed, onClose: close, onStart: vi.fn() };
+  const view = render(<FirstConversationSetup open {...props} />);
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+  expect(screen.getByRole("heading", { name: "Подготовим голос" })).toHaveFocus();
+  fireEvent.click(screen.getByRole("button", { name: "Продолжить позже" }));
+  expect(close).toHaveBeenCalledOnce();
+  expect(localStorage.getItem("iris.setup.completed.v1")).toBeNull();
+  view.unmount();
+  render(<FirstConversationSetup open {...props} />);
+  await act(async () => {});
+  expect(screen.getByRole("button", { name: "2. Речевые модели" })).toHaveAttribute("aria-current", "step");
+  fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+  expect(screen.getByRole("heading", { name: "Подключим модель ответа" })).toHaveFocus();
+});
+it("keeps start unavailable while the model is connecting and links back to the missing key", async () => {
+  localStorage.setItem("iris.setup.step.v1", "3");
+  api.getReadiness.mockResolvedValue({ text_chat: "loading", live_ready: true });
+  const start = vi.fn();
+  const props = { onSettingsChanged: vi.fn(), onClose: vi.fn(), onStart: start };
+  const view = render(<FirstConversationSetup open settings={settings} {...props} />);
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "Добавить ключ модели" }));
+  expect(screen.getByRole("button", { name: "1. Модель ответа" })).toHaveAttribute("aria-current", "step");
+  fireEvent.click(screen.getByRole("button", { name: "4. Первый разговор" }));
+  view.rerender(<FirstConversationSetup open settings={{ ...settings, api_key_configured: true }} {...props} />);
+  expect(screen.getByText("Ключ сохранён. Подключаем модель…")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Начать разговор" })).toBeDisabled();
+  expect(start).not.toHaveBeenCalled();
+});
+it("dismisses with Escape and restores focus to the opener", async () => {
+  vi.useFakeTimers();
+  const opener = document.createElement("button"); document.body.append(opener); opener.focus();
+  const close = vi.fn();
+  const props = { settings, onSettingsChanged: vi.fn(), onClose: close, onStart: vi.fn() };
+  const view = render(<FirstConversationSetup open {...props} />);
+  await act(async () => {});
+  expect(opener).toHaveAttribute("inert");
+  fireEvent.keyDown(window, { key: "Escape" });
+  await act(async () => { vi.advanceTimersByTime(200); });
+  expect(close).toHaveBeenCalledOnce();
+  view.rerender(<FirstConversationSetup open={false} {...props} />);
+  expect(opener).toHaveFocus();
+  expect(opener).not.toHaveAttribute("inert");
+  opener.remove();
+});
+it("selects header stages with the keyboard while keeping the navigation focused", async () => {
+  render(<FirstConversationSetup open settings={settings} onSettingsChanged={vi.fn()} onClose={vi.fn()} onStart={vi.fn()} />);
+  await act(async () => {});
+  const navigation = screen.getByRole("navigation", { name: "Шаги первого запуска" });
+  const first = within(navigation).getByRole("button", { name: "1. Модель ответа" });
+  first.focus();
+  fireEvent.keyDown(first, { key: "ArrowRight" });
+  const second = within(navigation).getByRole("button", { name: "2. Речевые модели" });
+  expect(second).toHaveFocus();
+  expect(second).toHaveAttribute("aria-current", "step");
+  expect(screen.getByRole("heading", { name: "Подготовим голос" })).toBeInTheDocument();
+  fireEvent.keyDown(second, { key: "End" });
+  const last = within(navigation).getByRole("button", { name: "4. Первый разговор" });
+  expect(last).toHaveFocus();
+  expect(last).toHaveAttribute("aria-current", "step");
+  fireEvent.keyDown(last, { key: "ArrowRight" });
+  expect(first).toHaveFocus();
+  expect(first).toHaveAttribute("aria-current", "step");
 });

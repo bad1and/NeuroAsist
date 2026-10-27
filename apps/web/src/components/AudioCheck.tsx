@@ -4,8 +4,8 @@ import { MaterialButton } from "./MaterialButton";
 import { getVoicePreview } from "../api";
 import { setAudioElementOutput } from "../audio-devices";
 
-export function AudioCheck({ inputDeviceId = "", outputDeviceId = "", playbackRate = 1 }: {
-  inputDeviceId?: string; outputDeviceId?: string; playbackRate?: number;
+export function AudioCheck({ inputDeviceId = "", outputDeviceId = "", playbackRate = 1, checks = ["microphone", "voice"] }: {
+  inputDeviceId?: string; outputDeviceId?: string; playbackRate?: number; checks?: ("microphone" | "voice")[];
 }) {
   const [recording, setRecording] = useState(false);
   const [previewing, setPreviewing] = useState(false);
@@ -70,8 +70,8 @@ export function AudioCheck({ inputDeviceId = "", outputDeviceId = "", playbackRa
   };
   return <section className="audio-check" aria-label="Проверка микрофона и звука">
     <div className="audio-check-actions">
-      <MaterialButton materialKey="audio.check-input" className="secondary" type="button" disabled={recording || previewing} onClick={() => void microphone()}>Проверить микрофон</MaterialButton>
-      <MaterialButton materialKey="audio.preview" className="secondary" type="button" disabled={recording || previewing} onClick={() => void preview()}>Послушать Iris</MaterialButton>
+      {checks.includes("microphone") && <MaterialButton materialKey="audio.check-input" className="secondary" type="button" disabled={recording || previewing} onClick={() => void microphone()}>Проверить микрофон</MaterialButton>}
+      {checks.includes("voice") && <MaterialButton materialKey="audio.preview" className="secondary" type="button" disabled={recording || previewing} onClick={() => void preview()}>Послушать Iris</MaterialButton>}
       {(recording || previewing) && <MaterialButton materialKey="audio.stop-check" className="text-button" type="button" onClick={() => stop()}>Остановить проверку</MaterialButton>}
     </div>
     {recording && <><meter min={0} max={1} value={level} aria-label="Уровень микрофона" /><p role="status">Скажите несколько слов. Проверка длится до 15 секунд; запись не сохраняется.</p></>}
