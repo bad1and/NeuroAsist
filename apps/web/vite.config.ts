@@ -1,9 +1,9 @@
 import { defineConfig } from "vite";
 import tailwindcss from "@tailwindcss/vite";
-import { versionDefine } from "./build-version";
+import { versionDefine, watchAppVersion } from "./build-version";
 
 export default defineConfig(({ mode }) => ({
-  plugins: [tailwindcss()],
+  plugins: [tailwindcss(), watchAppVersion()],
   resolve: { alias: { "@": new URL("./src", import.meta.url).pathname.replace(/^\/(.:\/)/, "$1") } },
   define: versionDefine,
   build: {
