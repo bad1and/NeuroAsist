@@ -3,6 +3,7 @@ import type { SearchFocus } from "./search-navigation";
 import { MemoryContextDetails, DocumentSources } from "./components/MemoryContextDetails";
 import { LoadingRing } from "./components/LoadingRing";
 import { MaterialButton } from "./components/MaterialButton";
+import { DisclosureTrigger } from "./components/Disclosure";
 import {
   IconInterfaceTimeStopWatchCircle,
   IconInterfaceSpirals,
@@ -28,7 +29,6 @@ import { calculateDeepSeekCostUsd } from "./deepseek";
 import { AppDialog } from "./components/AppDialog";
 import {
   IconInterfaceChevronLeft as ChevronLeft,
-  IconInterfaceChevronDown as ChevronDown,
   IconInterfaceChevronRight as ChevronRight,
   IconInterfaceCross as X,
   IconInterfaceLightning as Zap,
@@ -224,10 +224,10 @@ function JournalMessageFooter({ message, expanded, showToggle, detailsId, onTogg
         aria-label={tokenLabel} title={`${tokenLabel}: ${tokenCount.toLocaleString(interfaceIntlLocale())}`} onClick={() => onOpenTokens(tokens)}>
         <Zap size={14} aria-hidden="true" /><span data-i18n-skip>{new Intl.NumberFormat(interfaceIntlLocale(), { notation: "compact", maximumFractionDigits: 1 }).format(tokenCount)} {currentInterfaceLocale() === "en" ? "tokens" : "ток."}</span>
       </MaterialButton>}
-      {showToggle && hasDetails && <MaterialButton materialKey={`journal.details.${message.id}`} type="button" className="secondary journal-message-action journal-message-details-toggle" appearance="lens"
-        aria-expanded={expanded} aria-controls={detailsId} onClick={onToggle}>
-        <span>{expanded ? "Свернуть" : "Подробнее"}</span><ChevronDown size={14} aria-hidden="true" />
-      </MaterialButton>}
+      {showToggle && hasDetails && <DisclosureTrigger materialKey={`journal.details.${message.id}`} className="journal-message-details-toggle"
+        open={expanded} aria-controls={detailsId} onClick={onToggle}>
+        {expanded ? "Свернуть" : "Подробнее"}
+      </DisclosureTrigger>}
     </div>}
   </footer>;
 }
@@ -486,12 +486,14 @@ export function JournalPage({
   onOpenChat,
   isActive = true,
   focusRequest,
+  episodeRequest,
   developerMode = false,
   currentSessionId,
 }: {
   onOpenChat?: () => void;
   isActive?: boolean;
   focusRequest?: SearchFocus;
+  episodeRequest?: { episode: TimelineJournalItem; requestId: string };
   developerMode?: boolean;
   currentSessionId?: string | null;
 } = {}) {
@@ -527,12 +529,14 @@ export function JournalPage({
 
   const searchContextRef = useRef(false);
   const lastFocusedRequest = useRef("");
+  const lastEpisodeRequest = useRef("");
   const activeRequestIdRef = useRef(0);
   const searchRequestIdRef = useRef(0);
   useEffect(() => () => {
     activeRequestIdRef.current++;
     searchRequestIdRef.current++;
     lastFocusedRequest.current = "";
+    lastEpisodeRequest.current = "";
   }, []);
 
   const containerRef = useAnimeScope<HTMLElement>((scope, root) => {
@@ -619,6 +623,14 @@ export function JournalPage({
   }, [isActive, refresh]);
 
   useEffect(() => {
+    if (!isActive || !episodeRequest || lastEpisodeRequest.current === episodeRequest.requestId) return;
+    lastEpisodeRequest.current = episodeRequest.requestId;
+    setResults(null);
+    setQuery("");
+    void onSelectEpisode(episodeRequest.episode);
+  }, [episodeRequest, isActive, onSelectEpisode]);
+
+  useEffect(() => {
     if (!isActive || !focusRequest || lastFocusedRequest.current === focusRequest.requestId) return;
     lastFocusedRequest.current = focusRequest.requestId;
     searchContextRef.current = true;
@@ -700,42 +712,37 @@ export function JournalPage({
     const isCurrent = !item.ended_at;
 
     return (
-      <article
+      <MaterialButton
+        materialKey={`journal.episode.${item.id ?? item.day}`}
         className={`history-item-minimal ${isSelected ? "is-active" : ""}`}
         key={item.id ?? item.day}
+        type="button"
         onClick={() => onSelectEpisode(item)}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            void onSelectEpisode(item);
-          }
-        }}
+        aria-pressed={Boolean(isSelected)}
         aria-label={`Диалог от ${formatDate(item.day)}`}
       >
-        <div className="history-item-minimal-icon" aria-hidden="true">
+        <span className="history-item-minimal-icon" aria-hidden="true">
           <IconMailChatBubbleTextSquare size={19} />
-        </div>
-        <div className="history-item-minimal-content">
-          <div className="history-item-minimal-header">
+        </span>
+        <span className="history-item-minimal-content">
+          <span className="history-item-minimal-header">
             <strong>{item.title || formatDate(item.day)}</strong>
             {isCurrent && (
               <span title="Текущий диалог" aria-label="Текущий диалог">
                 <span className="journal-pulse-dot" />
               </span>
             )}
-          </div>
-          <div className="history-item-minimal-meta">
+          </span>
+          <span className="history-item-minimal-meta">
             {item.message_count} {item.message_count === 1 ? "сообщение" : "сообщений"}
             {item.last_activity_at && !isCurrent ? ` · ${formatTime(item.last_activity_at)}` : ""}
             {isCurrent ? " · сейчас" : ""}
             {Boolean(item.token_estimate && item.token_estimate > 0) && (
               <span> · {item.token_estimate! >= 1000 ? `${(item.token_estimate! / 1000).toFixed(1)}k` : item.token_estimate} токенов</span>
             )}
-          </div>
-        </div>
-      </article>
+          </span>
+        </span>
+      </MaterialButton>
     );
   };
 

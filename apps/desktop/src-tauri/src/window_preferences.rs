@@ -5,8 +5,8 @@ use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, WebviewW
 
 // Design dimensions are logical pixels: Windows display scaling must not
 // change the amount of space available to the web interface.
-pub const REFERENCE_WIDTH: f64 = 1135.0;
-pub const REFERENCE_HEIGHT: f64 = 760.0;
+pub const REFERENCE_WIDTH: f64 = 1260.0;
+pub const REFERENCE_HEIGHT: f64 = 810.0;
 pub const MIN_WIDTH: f64 = 900.0;
 pub const MIN_HEIGHT: f64 = 620.0;
 
@@ -248,7 +248,7 @@ mod tests {
     #[test]
     fn reference_and_minimum_fit_small_and_scaled_work_areas() {
         let (reference, minimum) = fitted_dimensions(1920.0, 1040.0);
-        assert_eq!((reference.width, reference.height), (1135.0, 760.0));
+        assert_eq!((reference.width, reference.height), (1260.0, 810.0));
         assert_eq!((minimum.width, minimum.height), (900.0, 620.0));
         let (reference, minimum) = fitted_dimensions(1366.0 / 1.5, 728.0 / 1.5);
         assert!(reference.width <= 1366.0 / 1.5);
