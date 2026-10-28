@@ -38,7 +38,7 @@ it("сохраняет историю при ошибке памяти и вос
   render(<OverviewPage {...props()} />);
   expect(await screen.findByRole("heading", { name: episode.title! })).toBeInTheDocument();
   expect(screen.getByText("Память недоступна")).toBeInTheDocument();
-  expect(screen.queryByText("Начинаем знакомство")).not.toBeInTheDocument();
+  expect(screen.queryByText("Давайте знакомиться")).not.toBeInTheDocument();
   api.getMemories.mockResolvedValue({ items: [memory] });
   fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
   expect(await screen.findByText(memory.value_text)).toBeInTheDocument();
@@ -127,4 +127,48 @@ it("открывает переданную из обзора беседу в ж
   render(<StrictMode><JournalPage episodeRequest={{ episode, requestId: "from-overview" }} /></StrictMode>);
   expect(await screen.findByText("Ответ из выбранной беседы")).toBeInTheDocument();
   expect(api.getTimelineMessages).toHaveBeenCalledWith(200, "session", "latest");
+});
+
+it("перелистывает советы по кругу и с клавиатуры, сохраняя фокус на управлении", async () => {
+  render(<StrictMode><OverviewPage {...props()} /></StrictMode>);
+  await screen.findByRole("heading", { name: episode.title! });
+  const next = screen.getByRole("button", { name: "Следующий совет" });
+  const previous = screen.getByRole("button", { name: "Предыдущий совет" });
+  next.focus();
+  fireEvent.keyDown(next, { key: "End" });
+  expect(screen.getByRole("heading", { name: "Большие планы. Полтора разработчика." })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Настроить голос" })).not.toBeInTheDocument();
+  expect(next).toHaveFocus();
+  fireEvent.click(next);
+  expect(screen.getByRole("heading", { name: "Пусть Iris звучит по-вашему" })).toBeInTheDocument();
+  fireEvent.keyDown(next, { key: "ArrowLeft" });
+  expect(screen.getByText("Совет 8 из 8")).toBeInTheDocument();
+  fireEvent.keyDown(previous, { key: "Home" });
+  fireEvent.keyDown(previous, { key: "ArrowRight" });
+  expect(screen.getByRole("heading", { name: "Память можно поправить" })).toBeInTheDocument();
+  fireEvent.click(previous);
+  expect(screen.getByText("Совет 1 из 8")).toBeInTheDocument();
+});
+
+it("открывает память и конкретные настройки из советов без изменения самих настроек", async () => {
+  const actions = props();
+  render(<OverviewPage {...actions} />);
+  await screen.findByRole("heading", { name: episode.title! });
+  const next = screen.getByRole("button", { name: "Следующий совет" });
+  fireEvent.click(screen.getByRole("button", { name: "Настроить голос" }));
+  expect(actions.onOpenSettings).toHaveBeenLastCalledWith("voice", undefined);
+  fireEvent.click(next);
+  fireEvent.click(screen.getByRole("button", { name: "Посмотреть память" }));
+  expect(actions.onOpenMemory).toHaveBeenCalledOnce();
+  for (const [label, section, focusId] of [
+    ["Выбрать сочетания", "shortcuts", undefined],
+    ["Открыть словарь", "voice", "voice-pronunciations"],
+    ["Перейти к инкогнито", "memory", "memory-incognito"],
+    ["Настроить поиск", "internet", undefined],
+    ["Открыть резервные копии", "backups", undefined],
+  ] as const) {
+    fireEvent.click(next);
+    fireEvent.click(screen.getByRole("button", { name: label }));
+    expect(actions.onOpenSettings).toHaveBeenLastCalledWith(section, focusId);
+  }
 });

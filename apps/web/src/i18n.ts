@@ -620,6 +620,41 @@ const RU_TO_EN: readonly TranslationPair[] = [
   ["Добрый день", "Good afternoon"],
   ["Добрый вечер", "Good evening"],
   ["О чём поговорим?", "What would you like to talk about?"],
+  ["Недавние разговоры", "Recent conversations"],
+  ["Первый разговор — впереди", "Your first conversation awaits"],
+  ["Обсудите идею, задайте вопрос или расскажите, как прошёл день. К беседе можно будет вернуться здесь.", "Discuss an idea, ask a question or talk about your day. You can return to the conversation here."],
+  ["Давайте знакомиться", "Let's get to know each other"],
+  ["Воспоминания под вашим контролем", "Your memories, your control"],
+  ["Здесь появится то, что Iris запомнит из ваших разговоров.", "What Iris remembers from your conversations will appear here."],
+  ["Больше об Iris", "More about Iris"],
+  ["Перелистывание советов", "Browse tips"],
+  ["Предыдущий совет", "Previous tip"],
+  ["Следующий совет", "Next tip"],
+  ["Совет", "Tip"],
+  ["карусель", "carousel"],
+  ["Пусть Iris звучит по-вашему", "Give Iris a voice you enjoy"],
+  ["Темп и выразительность голоса можно настроить под себя.", "Adjust the pace and expression of the voice to suit you."],
+  ["Настроить голос", "Adjust voice"],
+  ["Память можно поправить", "Memories can be corrected"],
+  ["Исправляйте неточности в воспоминаниях и удаляйте лишнее.", "Correct inaccurate memories and remove anything you no longer need."],
+  ["Посмотреть память", "Review memories"],
+  ["Частые действия — под рукой", "Everyday actions at your fingertips"],
+  ["Микрофон, поиск и звук — одним сочетанием клавиш.", "Control the microphone, search and sound with keyboard shortcuts."],
+  ["Выбрать сочетания", "Choose shortcuts"],
+  ["Сложное имя — знакомое звучание", "Help Iris say that name"],
+  ["Добавьте имена и термины в словарь, чтобы Iris произносила их правильно.", "Add names and terms to the dictionary to help Iris pronounce them correctly."],
+  ["Открыть словарь", "Open dictionary"],
+  ["Не каждый разговор нужно запоминать", "Some conversations can stay in the moment"],
+  ["В режиме инкогнито новые сообщения и факты не сохраняются.", "Incognito mode does not save new messages or facts."],
+  ["Перейти к инкогнито", "Find incognito settings"],
+  ["Свежие факты лучше проверять", "Check facts that change"],
+  ["Подключите поиск, чтобы Iris проверяла свежую информацию по источникам.", "Connect search so Iris can check current information against sources."],
+  ["Настроить поиск", "Set up search"],
+  ["У важных разговоров может быть копия", "Keep a copy of what matters"],
+  ["Сохраните историю, память и настройки перед переездом на другой компьютер.", "Back up your history, memories and settings before moving to another computer."],
+  ["Открыть резервные копии", "Open backups"],
+  ["Большие планы. Полтора разработчика.", "Big plans. One and a half developers."],
+  ["Один пишет код. Оставшаяся половина: «А давай ещё вот это».", "One writes the code. The remaining half: 'What if we also added this?'"],
   ["Обсудите идею, задайте вопрос или расскажите, как прошёл день.", "Discuss an idea, ask a question or talk about your day."],
   ["Начать диалог", "Start chat"],
   ["Не удалось обновить обзор. Проверьте подключение к Iris.", "Could not refresh the overview. Check the connection to Iris."],
@@ -1042,7 +1077,7 @@ function isSkipped(node: Node): boolean {
   return Boolean(element?.closest("[data-i18n-skip], script, style, pre, code"));
 }
 
-const LOCALIZED_ATTRIBUTES = ["aria-label", "title", "placeholder", "alt"];
+const LOCALIZED_ATTRIBUTES = ["aria-label", "aria-roledescription", "title", "placeholder", "alt"];
 
 function localizeTextNode(node: Text, locale: InterfaceLocale): void {
   if (isSkipped(node)) return;

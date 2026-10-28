@@ -752,6 +752,10 @@ function MainApp() {
                 switchView("journal");
               }}
               onOpenMemory={() => switchView("memory")}
+              onOpenSettings={(section, focusId) => {
+                setSettingsNavigationRequest({ section, focusId: focusId ?? `settings-${section}`, id: Date.now() });
+                switchView("settings");
+              }}
               onOpenPlans={() => { setMemoryFocus({ id: "", section: "commitments", query: "", requestId: crypto.randomUUID() }); switchView("memory"); }}
               />
           </WorkspaceView>
