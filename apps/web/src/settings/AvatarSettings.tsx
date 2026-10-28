@@ -5,10 +5,12 @@ import { MaterialButton } from "../components/MaterialButton";
 import { CustomSelect } from "../components/CustomSelect";
 
 import { useEffect, useState } from "react";
+import { isDesktopApp } from "../desktop";
+import { getDesktopAvatarMonitors, type DesktopMonitor } from "../desktop-avatar";
 import { IconInterfaceSparkles as Sparkles, IconInterfaceRefresh as RefreshCw } from "../CustomIcons";
 
 import { getAvatarOverlay, updateRuntimeSettings, sendAvatarTestEmotion, sendAvatarTestGesture, sendAvatarTestPhrase, stopAvatar, updateAvatarOverlay } from "../api";
-import type { AvatarStatusResponse, AvatarOverlaySettings, AvatarPlacement, PublicSettings, InterfaceLocale } from "../types";
+import type { AvatarStatusResponse, AvatarOverlaySettings, AvatarPlacement, AvatarQuality, PublicSettings, InterfaceLocale } from "../types";
 
 import { InfoRow } from "../components/InfoRow";
 
@@ -49,6 +51,8 @@ export function AvatarControls({
   overlay: initialOverlay,
   placement,
   inAppVisible,
+  inAppQuality,
+  desktopQuality,
   interfaceLocale,
   developerMode = false,
   onUnlockRequest,
@@ -62,6 +66,8 @@ export function AvatarControls({
   overlay: AvatarOverlaySettings | null;
   placement: AvatarPlacement;
   inAppVisible: boolean;
+  inAppQuality: AvatarQuality;
+  desktopQuality: AvatarQuality;
   interfaceLocale: InterfaceLocale;
   developerMode?: boolean;
   onUnlockRequest?: () => void;
@@ -77,6 +83,13 @@ export function AvatarControls({
   const [motionIntensity, setMotionIntensity] = useState(0.8);
   const [busy, setBusy] = useState(false);
   const [overlay, setOverlay] = useState<AvatarOverlaySettings | null>(initialOverlay);
+  const [monitors, setMonitors] = useState<DesktopMonitor[]>([]);
+  useEffect(() => {
+    if (!isDesktopApp()) return;
+    const refresh = () => void getDesktopAvatarMonitors().then(setMonitors).catch(() => {});
+    refresh(); window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, []);
   const enabled = Boolean(avatarStatus?.enabled);
   const client = avatarStatus?.clients[0];
   const engine = avatarStatus?.emotion_engine;
@@ -132,6 +145,18 @@ export function AvatarControls({
     } finally { setBusy(false); }
   };
 
+  const changeQuality = async (field: "avatar_in_app_quality" | "avatar_desktop_quality", quality: AvatarQuality) => {
+    setBusy(true);
+    try {
+      const nextSettings = await updateRuntimeSettings({ [field]: quality });
+      onSettingsChanged(nextSettings);
+    } catch (error) {
+      notify.error("Настройки", error instanceof Error ? error.message : "Не удалось сохранить качество аватара.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const changePlacement = async (nextPlacement: AvatarPlacement) => {
     if (nextPlacement === placement) return;
     setBusy(true);
@@ -185,6 +210,27 @@ export function AvatarControls({
           </div>
         </fieldset>
 
+        <div className="avatar-quality-settings">
+          <h3 className="settings-card-title">Качество изображения</h3>
+          <div className="avatar-quality-grid">
+            <div>
+              <label htmlFor="avatar-in-app-quality">Качество внутри Iris</label>
+              <CustomSelect id="avatar-in-app-quality" value={inAppQuality} disabled={busy}
+                onChange={event => void changeQuality("avatar_in_app_quality", event.target.value as AvatarQuality)}>
+                <option value="low">Низкое</option><option value="medium">Среднее</option><option value="high">Высокое</option>
+              </CustomSelect>
+            </div>
+            <div>
+              <label htmlFor="avatar-desktop-quality">Качество на рабочем столе</label>
+              <CustomSelect id="avatar-desktop-quality" value={desktopQuality} disabled={busy}
+                onChange={event => void changeQuality("avatar_desktop_quality", event.target.value as AvatarQuality)}>
+                <option value="low">Низкое</option><option value="medium">Среднее</option><option value="high">Высокое</option>
+              </CustomSelect>
+            </div>
+          </div>
+          <p className="settings-card-subtitle">Чем выше качество, тем ровнее контуры и больше нагрузка на видеокарту. Применяется сразу.</p>
+        </div>
+
         <div className="avatar-options">
           <SettingsSwitch
             checked={placement === "in_app" ? inAppVisible : (overlay?.visible ?? true)}
@@ -194,6 +240,27 @@ export function AvatarControls({
           />
           {placement === "desktop_overlay" && (
             <div className="avatar-overlay-options" style={{ display: "grid", gap: 6, width: "100%" }}>
+              <fieldset className="avatar-placement" disabled={!enabled || busy}>
+                <legend>Вид на рабочем столе</legend>
+                <div className="avatar-placement-grid">
+                  <label className="avatar-placement-option"><input type="radio" name="desktop-avatar-mode" checked={(overlay?.desktop_mode ?? "waist") === "waist"} onChange={() => void updateOverlay({desktop_mode:"waist"})}/>
+                    <span><strong>По пояс</strong><small>Над панелью задач. Перемещение только по горизонтали.</small></span></label>
+                  <label className="avatar-placement-option"><input type="radio" name="desktop-avatar-mode" checked={overlay?.desktop_mode === "full_body"} onChange={() => void updateOverlay({desktop_mode:"full_body"})}/>
+                    <span><strong>В полный рост</strong><small>Свободное перемещение по рабочему столу.</small></span></label>
+                </div>
+              </fieldset>
+              <label htmlFor="desktop-avatar-monitor">Монитор</label>
+              <CustomSelect id="desktop-avatar-monitor" value={overlay?.layouts?.[overlay.desktop_mode ?? "waist"]?.monitor ?? overlay?.monitor ?? "primary"}
+                disabled={!enabled || busy || monitors.length === 0} onChange={event => {
+                  const mode=overlay?.desktop_mode ?? "waist";
+                  const current=overlay?.layouts?.[mode];
+                  const display=monitors.find(m=>m.id===event.target.value) ?? monitors.find(m=>m.primary);
+                  void updateOverlay({layouts:{[mode]:{monitor:event.target.value,x_ratio:current?.x_ratio ?? 0.8,y_ratio:current?.y_ratio ?? 1,
+                    height_dip:current?.height_dip ?? (display ? display.area.height/display.scale*0.7 : 520)}}});
+                }}>
+                <option value="primary">Основной монитор</option>
+                {monitors.map((monitor,index)=><option key={monitor.id} value={monitor.id}>{`Монитор ${index+1} · ${monitor.name} · ${Math.round(monitor.area.width)} × ${Math.round(monitor.area.height)}${monitor.primary?" · основной":""}`}</option>)}
+              </CustomSelect>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <small style={{ color: "var(--color-text-muted)" }}>Окно аватара</small>
 
@@ -206,14 +273,19 @@ export function AvatarControls({
               />
               <SettingsSwitch
                 checked={overlay?.locked ?? true}
-                label="Заблокировать клики"
+                label="Закрепить положение и размер"
                 disabled={!enabled || busy}
                 onChange={(checked) => void updateOverlay({ locked: checked })}
               />
-              <label>
-                Размер аватара {overlay?.scale?.toFixed(1) ?? "1.0"}
-                <input min="0.5" max="2" step="0.1" type="range" value={overlay?.scale ?? 1} disabled={!enabled || busy} onChange={(event) => void updateOverlay({ scale: Number(event.target.value) })} />
-              </label>
+              <p className="settings-card-subtitle">Наведите на Iris и снимите замок, чтобы переместить её или изменить размер угловым маркером. Положение и размер каждого вида сохраняются отдельно.</p>
+              <SettingsSwitch checked={overlay?.subtitles_enabled ?? true} label="Показывать субтитры" disabled={!enabled || busy}
+                onChange={checked => void updateOverlay({subtitles_enabled:checked})}/>
+              <label htmlFor="desktop-avatar-subtitles">Положение субтитров</label>
+              <CustomSelect id="desktop-avatar-subtitles" value={overlay?.subtitle_position ?? "above"} disabled={!enabled || busy || overlay?.subtitles_enabled === false}
+                onChange={event => void updateOverlay({subtitle_position:event.target.value as "above"|"below"|"left"|"right"})}>
+                <option value="above">Над аватаром</option><option value="below">Под аватаром</option><option value="left">Слева</option><option value="right">Справа</option>
+              </CustomSelect>
+              <p className="settings-card-subtitle">Не больше двух строк, даже без наведения. У края экрана субтитры переходят на свободную сторону.</p>
             </div>
           )}
         </div>

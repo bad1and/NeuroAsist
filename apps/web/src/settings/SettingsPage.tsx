@@ -852,6 +852,8 @@ export function SettingsPage({
             overlay={avatarOverlay}
             placement={settings.avatar_placement}
             inAppVisible={settings.avatar_in_app_visible}
+            inAppQuality={settings.avatar_in_app_quality ?? "high"}
+            desktopQuality={settings.avatar_desktop_quality ?? "medium"}
             interfaceLocale={interfaceLocale}
             developerMode={developerModeEnabled}
             onUnlockRequest={() => openSettingsSection("developer")}

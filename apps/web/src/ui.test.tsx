@@ -47,7 +47,7 @@ const settings = {
   provider: "deepseek", model: "deepseek-flash", personality: "default", interface_locale: "ru" as const, voice_language: "ru",
   voice_microphone_profile: "balanced", voice_input_device_id: "", voice_output_device_id: "", voice_vad: { configured_provider: "silero", active_provider: "silero", ready: true, fallback: false },
   voice_input_diagnostic_audio_enabled: false,
-  voice_stt_model: "small", voice_tts_enabled: true, avatar_enabled: false, avatar_placement: "desktop_overlay", avatar_in_app_visible: true, voice_tts_voice: "ru_f1",
+  voice_stt_model: "small", voice_tts_enabled: true, avatar_enabled: false, avatar_placement: "desktop_overlay", avatar_in_app_visible: true, avatar_in_app_quality: "high", avatar_desktop_quality: "medium", voice_tts_voice: "ru_f1",
   voice_tts_provider: "teratts", voice_tts_model: "TeraSpace/TeraTTSv2", voice_tts_device: "cpu", voice_tts_style: "auto", voice_tts_expression_level: "natural",
   voice_playback_rate: 1, voice_live_playback_prebuffer_segments: 2, voice_live_playback_prebuffer_ms: 700,
   voice_live_playback_start_lead_ms: 30,
@@ -333,6 +333,8 @@ describe("русский интерфейс", () => {
       onerror: (() => void) | null = null;
 
       constructor(_url: string) {}
+      addEventListener() {}
+      removeEventListener() {}
 
       pause() { pause(); }
 
@@ -485,6 +487,30 @@ describe("русский интерфейс", () => {
     expect(screen.getByText("Где показывать аватар")).toBeInTheDocument();
     expect(screen.getByLabelText("Внутри Iris")).toBeChecked();
     expect(screen.getByLabelText("На рабочем столе")).not.toBeChecked();
+  });
+
+  it("сохраняет качество аватара отдельно для приложения и рабочего стола", async () => {
+    let confirmed = { ...settings };
+    api.getSettings.mockImplementation(async () => confirmed);
+    api.updateRuntimeSettings.mockImplementation(async patch => {
+      confirmed = { ...confirmed, ...patch };
+      return confirmed;
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Настройки" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Аватар" }));
+    const inside = await screen.findByLabelText("Качество внутри Iris");
+    const desktop = screen.getByLabelText("Качество на рабочем столе");
+    expect(inside).toHaveValue("high");
+    expect(desktop).toHaveValue("medium");
+    fireEvent.change(desktop, { target: { value: "high" } });
+    await waitFor(() => expect(desktop).toHaveValue("high"));
+    expect(api.updateRuntimeSettings).toHaveBeenLastCalledWith({ avatar_desktop_quality: "high" });
+    expect(inside).toHaveValue("high");
+    fireEvent.change(inside, { target: { value: "low" } });
+    await waitFor(() => expect(inside).toHaveValue("low"));
+    expect(api.updateRuntimeSettings).toHaveBeenLastCalledWith({ avatar_in_app_quality: "low" });
+    expect(desktop).toHaveValue("high");
   });
 
   it("не связывает встроенный аватар со скрытым внешним оверлеем", async () => {
@@ -748,6 +774,7 @@ describe("русский интерфейс", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const englishSettingsNavigation = await screen.findByRole("navigation", { name: "Settings sections" });
+    fireEvent.click(within(englishSettingsNavigation).getByRole("button", { name: /^Conversation$/ }));
     fireEvent.click(within(englishSettingsNavigation).getByRole("button", { name: "Avatar" }));
     expect(await screen.findByRole("radio", { name: "Inside Iris" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open testing window" })).not.toBeInTheDocument();

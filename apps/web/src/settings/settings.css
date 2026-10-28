@@ -60,3 +60,26 @@
   .settings-panel .audio-device-refresh { display: flex !important; flex-direction: column !important; align-items: stretch !important; gap: 12px; }
   .settings-panel .audio-device-refresh > button { max-width: 100%; white-space: normal !important; }
 }
+.avatar-quality-settings {
+  display: grid;
+  gap: 12px;
+  margin: 20px 0;
+}
+.avatar-quality-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.avatar-quality-grid > div {
+  display: grid;
+  gap: 8px;
+}
+@media (max-width: 640px) {
+  .avatar-quality-grid { grid-template-columns: 1fr; }
+}
+
+.avatar-placement-option small {
+  display: block;
+  margin-top: 2px;
+  color: var(--color-text-muted);
+}
