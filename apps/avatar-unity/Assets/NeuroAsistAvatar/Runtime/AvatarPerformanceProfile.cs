@@ -5,29 +5,66 @@ namespace NeuroAsist.Avatar
     public sealed class AvatarPerformanceProfile : MonoBehaviour
     {
         public const int EmbeddedFrameRate = 60;
-        // Two samples clean up hair and clothing silhouettes at the narrow
-        // in-app size without materially competing with the WebView GPU work.
-        public const int EmbeddedAntiAliasing = 4;
+        public const int EmbeddedAntiAliasing = 8;
+        public const int DesktopFrameRate = 30;
+        public const int DesktopAntiAliasing = 4;
         [SerializeField] private AvatarRuntimeSettings settings;
+        public string SelectedQuality { get; private set; }
+        public int FrameRate => FrameRateFor(SelectedQuality ?? DefaultQuality(IsManagedDesktopHost()), IsManagedDesktopHost());
+
+        public static string DefaultQuality(bool desktop) => desktop ? "medium" : "high";
+        public static int AntiAliasingFor(string quality) => quality == "low" ? 2 : quality == "medium" ? 4 : 8;
+        public static int FrameRateFor(string quality, bool desktop) => quality == "low" || desktop && quality != "high" ? 30 : 60;
+
+        public bool ConfigureQuality(string inAppQuality, string desktopQuality)
+        {
+            return ApplyQuality(IsManagedDesktopHost() ? desktopQuality : inAppQuality);
+        }
+
+        public bool ApplyQuality(string quality)
+        {
+            if (quality != "low" && quality != "medium" && quality != "high") return false;
+            if (SelectedQuality == quality) return true;
+            SelectedQuality = quality;
+            QualitySettings.vSyncCount = 0;
+            if (GetComponent<AvatarSleepController>()?.IsSleeping != true)
+                Application.targetFrameRate = FrameRate;
+            QualitySettings.antiAliasing = AntiAliasingFor(quality);
+            // MToon needs shadowing for the original skin and clothing tones,
+            // even in the economical preset. Only the shadow-map resolution varies.
+            QualitySettings.shadows = ShadowQuality.All;
+            QualitySettings.shadowResolution = quality == "low" ? ShadowResolution.Low
+                : quality == "medium" ? ShadowResolution.Medium : ShadowResolution.High;
+            QualitySettings.anisotropicFiltering = quality == "low"
+                ? AnisotropicFiltering.Disable : AnisotropicFiltering.Enable;
+            var camera = Camera.main;
+            if (camera != null)
+            {
+                // MSAA is supported by the built-in Forward rendering path.
+                camera.renderingPath = RenderingPath.Forward;
+                camera.allowMSAA = true;
+            }
+            Debug.Log($"[AvatarQuality] {(IsManagedDesktopHost() ? "desktop" : "in-app")}: {quality}, {FrameRate} FPS, {QualitySettings.antiAliasing}x MSAA, soft shadows.", this);
+            return true;
+        }
 
         private void Awake()
         {
             if (Application.isEditor || settings == null) return;
-            var embeddedInIris = IsEmbeddedHost();
+            var embeddedInIris = IsNativeHosted();
+            var desktop = IsManagedDesktopHost();
             if (!ShouldApplyPerformanceProfile(embeddedInIris, settings.ApplyAvatarLowProfile)) return;
-            QualitySettings.vSyncCount = 0;
-            Application.targetFrameRate = embeddedInIris ? EmbeddedFrameRate : Mathf.Max(15, settings.AvatarFrameRate);
+            var quality = System.Environment.GetEnvironmentVariable("NEUROASIST_AVATAR_QUALITY");
+            if (!ApplyQuality(quality)) ApplyQuality(DefaultQuality(desktop));
+            if (!embeddedInIris) Application.targetFrameRate = Mathf.Max(15, settings.AvatarFrameRate);
             // The Iris host owns the native bounds in the embedded mode.
             // Calling SetResolution here happens after the player is ready and
             // would overwrite its chat-slot rectangle with the standalone
             // 1280×720 default (the source of a fullscreen-looking avatar).
             if (ShouldSetStandaloneResolution(embeddedInIris))
                 Screen.SetResolution(Mathf.Max(640, settings.AvatarWidth), Mathf.Max(360, settings.AvatarHeight), false);
-            QualitySettings.antiAliasing = embeddedInIris ? EmbeddedAntiAliasing : 4;
-            QualitySettings.shadows = ShadowQuality.All; // Enable shadows for MToon
-            QualitySettings.pixelLightCount = 2;
+            QualitySettings.pixelLightCount = desktop ? 1 : 2;
             QualitySettings.realtimeReflectionProbes = false;
-            QualitySettings.anisotropicFiltering = AnisotropicFiltering.Enable;
             QualitySettings.lodBias = 1.0f;
 
             var camera = Camera.main;
@@ -52,14 +89,11 @@ namespace NeuroAsist.Avatar
             {
                 if (!keptLight && light.type == LightType.Directional) { 
                     keptLight = true; 
-                    light.shadows = LightShadows.Soft; // Enable soft shadows for the main directional light
+                    light.shadows = LightShadows.Soft;
                     continue; 
                 }
                 light.enabled = false;
             }
-            Debug.Log(embeddedInIris
-                ? "[AvatarPerformance] Iris embedded profile enabled: 60 FPS, 4x MSAA, Shadows Enabled, host-controlled bounds."
-                : "[AvatarPerformance] AvatarLow enabled: 1280x720 @ 30 FPS", this);
         }
 
         public static bool ShouldSetStandaloneResolution(bool embeddedInIris)
@@ -77,5 +111,10 @@ namespace NeuroAsist.Avatar
             return WindowsDesktopOverlay.IsEmbeddedHost(
                 System.Environment.GetEnvironmentVariable("NEUROASIST_AVATAR_HOST"));
         }
+
+        public static bool IsManagedDesktopHost() => WindowsDesktopOverlay.IsManagedDesktopHost(
+            System.Environment.GetEnvironmentVariable("NEUROASIST_AVATAR_HOST"));
+
+        public static bool IsNativeHosted() => IsEmbeddedHost() || IsManagedDesktopHost();
     }
 }

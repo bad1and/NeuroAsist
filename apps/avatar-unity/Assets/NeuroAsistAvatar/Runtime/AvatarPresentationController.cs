@@ -23,6 +23,17 @@ namespace NeuroAsist.Avatar
         private Bounds? fullBodyBounds;
         private IReadOnlyList<Vector3> fullBodyPoints;
         private bool groundedWelcome;
+        private bool desktopFullBody;
+        private Bounds? standingBounds;
+
+        public void SetDesktopMode(string mode)
+        {
+            desktopFullBody = mode == "full_body";
+            fullBodyBounds = null;
+            fullBodyPoints = null;
+            groundedWelcome = false;
+            FrameNow();
+        }
 
         public void SetFullBodyFraming(Bounds? bounds, IReadOnlyList<Vector3> points = null, bool groundAtBottom = false)
         {
@@ -75,6 +86,20 @@ namespace NeuroAsist.Avatar
 
         public void FrameNow()
         {
+            if (desktopFullBody && avatarCamera != null && avatar != null)
+            {
+                if (!standingBounds.HasValue && TryGetBounds(out var measured)) standingBounds = measured;
+                if (standingBounds.HasValue)
+                {
+                    var full = standingBounds.Value;
+                    var standingDistance = FullBodyDistance(full, avatarCamera.aspect, verticalFieldOfView, 1.08f, viewDirection);
+                    avatarCamera.fieldOfView = verticalFieldOfView;
+                    avatarCamera.transform.SetPositionAndRotation(full.center - viewDirection * standingDistance,
+                        Quaternion.LookRotation(viewDirection, Vector3.up));
+                    lastWidth = Screen.width; lastHeight = Screen.height;
+                    return;
+                }
+            }
             if (avatarCamera != null && fullBodyBounds.HasValue)
             {
                 var full = fullBodyBounds.Value;
@@ -146,15 +171,16 @@ namespace NeuroAsist.Avatar
 
         private void ApplyRenderQuality()
         {
-            if (AvatarPerformanceProfile.IsEmbeddedHost())
+            if (AvatarPerformanceProfile.IsNativeHosted())
             {
-                // The embedded D3D surface shares the GPU with WebView. The
-                // performance profile configured the 60 FPS, low-overhead path.
+                // Native surfaces share the GPU with the rest of the desktop.
+                // Preserve the separate desktop and in-app performance profiles.
                 if (avatarCamera != null)
                 {
                     // Preserve coverage alpha in the embedded swapchain.
                     avatarCamera.allowHDR = false;
-                    avatarCamera.allowMSAA = AvatarPerformanceProfile.EmbeddedAntiAliasing > 1;
+                    avatarCamera.renderingPath = RenderingPath.Forward;
+                    avatarCamera.allowMSAA = QualitySettings.antiAliasing > 1;
                     avatarCamera.allowDynamicResolution = false;
                     avatarCamera.clearFlags = CameraClearFlags.SolidColor;
                 }

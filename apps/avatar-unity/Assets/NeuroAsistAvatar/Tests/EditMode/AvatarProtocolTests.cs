@@ -4,6 +4,19 @@ namespace NeuroAsist.Avatar.Tests
 {
     public sealed class AvatarProtocolTests
     {
+        [Test] public void ManagedDesktopHostIsDistinctFromInAppAndLegacyOverlay()
+        {
+            Assert.That(WindowsDesktopOverlay.IsManagedDesktopHost("desktop_managed"), Is.True);
+            Assert.That(WindowsDesktopOverlay.IsEmbeddedHost("desktop_managed"), Is.False);
+            Assert.That(WindowsDesktopOverlay.IsManagedDesktopHost("overlay"), Is.False);
+            Assert.That(WindowsDesktopOverlay.IsManagedDesktopHost(null), Is.False);
+        }
+        [Test] public void ParsesIndependentDesktopFraming()
+        {
+            Assert.That(AvatarProtocol.TryParse("{\"protocol_version\":2,\"type\":\"avatar.overlay.configure\",\"message_id\":\"desktop\",\"payload\":{\"desktop_mode\":\"full_body\",\"locked\":true}}", out var command), Is.True);
+            Assert.That(command.payload.desktop_mode, Is.EqualTo("full_body"));
+            Assert.That(command.payload.locked, Is.True);
+        }
         [Test] public void ParsesValidPing() { Assert.That(AvatarProtocol.TryParse("{\"protocol_version\":1,\"type\":\"avatar.ping\",\"message_id\":\"id\",\"payload\":{}}", out var command), Is.True); Assert.That(command.type, Is.EqualTo("avatar.ping")); }
         [Test] public void ParsesV2Ping() { Assert.That(AvatarProtocol.TryParse("{\"protocol_version\":2,\"type\":\"avatar.ping\",\"message_id\":\"id\",\"payload\":{}}", out var command), Is.True); Assert.That(command.protocol_version, Is.EqualTo(2)); }
         [Test] public void ParsesV2StreamMetadata() { Assert.That(AvatarProtocol.TryParse("{\"protocol_version\":2,\"type\":\"avatar.stream.metadata\",\"message_id\":\"id\",\"payload\":{\"utterance_id\":\"u\",\"emotion\":\"smirk\",\"gesture\":\"shrug\",\"gesture_intensity\":0.55}}", out var command), Is.True); Assert.That(command.payload.emotion, Is.EqualTo("smirk")); Assert.That(command.payload.gesture, Is.EqualTo("shrug")); }
@@ -33,7 +46,7 @@ namespace NeuroAsist.Avatar.Tests
         [Test] public void DetectsEmbeddedDesktopHostOnly() { Assert.That(WindowsDesktopOverlay.IsEmbeddedHost("embedded"), Is.True); Assert.That(WindowsDesktopOverlay.IsEmbeddedHost("overlay"), Is.False); Assert.That(WindowsDesktopOverlay.IsEmbeddedHost(null), Is.False); }
         [Test] public void LetsIrisHostControlEmbeddedResolution() { Assert.That(AvatarPerformanceProfile.ShouldSetStandaloneResolution(true), Is.False); Assert.That(AvatarPerformanceProfile.ShouldSetStandaloneResolution(false), Is.True); }
         [Test] public void EmbeddedProfileTargetsSixtyFramesPerSecond() { Assert.That(AvatarPerformanceProfile.EmbeddedFrameRate, Is.EqualTo(60)); }
-        [Test] public void EmbeddedProfileUsesLightweightEdgeAntiAliasing() { Assert.That(AvatarPerformanceProfile.EmbeddedAntiAliasing, Is.EqualTo(4)); }
+        [Test] public void EmbeddedProfileUsesHighQualityEdgeAntiAliasing() { Assert.That(AvatarPerformanceProfile.EmbeddedAntiAliasing, Is.EqualTo(8)); }
         [Test] public void EmbeddedHostAlwaysSelectsPerformanceProfile() { Assert.That(AvatarPerformanceProfile.ShouldApplyPerformanceProfile(true, false), Is.True); Assert.That(AvatarPerformanceProfile.ShouldApplyPerformanceProfile(false, false), Is.False); }
     }
 }

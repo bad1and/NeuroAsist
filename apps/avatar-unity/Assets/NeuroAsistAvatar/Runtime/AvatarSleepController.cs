@@ -9,7 +9,7 @@ namespace NeuroAsist.Avatar
     /// - Keeps speech, lip-sync and stream processing running while hidden.
     /// - Sets targetFrameRate to 30 FPS (avoids starving the Win32 message pump, guarantees instant <33ms response).
     /// When waking up:
-    /// - Instantly restores 60 FPS, Time.timeScale to 1, and re-enables camera rendering with 0 reload latency.
+    /// - Restores the selected quality profile and re-enables camera rendering.
     /// </summary>
     public sealed class AvatarSleepController : MonoBehaviour
     {
@@ -93,7 +93,8 @@ namespace NeuroAsist.Avatar
         private void WakeUp()
         {
             QualitySettings.vSyncCount = 0;
-            Application.targetFrameRate = AwakeFrameRate;
+            var profile = GetComponent<AvatarPerformanceProfile>();
+            Application.targetFrameRate = profile != null ? profile.FrameRate : AwakeFrameRate;
             Time.timeScale = 1f;
 
             if (avatarCamera != null)
@@ -101,7 +102,7 @@ namespace NeuroAsist.Avatar
                 avatarCamera.enabled = true;
             }
 
-            Debug.Log("[AvatarSleep] Avatar woke up (Camera enabled, targetFrameRate = " + AwakeFrameRate + ")");
+            Debug.Log("[AvatarSleep] Avatar woke up (Camera enabled, targetFrameRate = " + Application.targetFrameRate + ")");
         }
     }
 }

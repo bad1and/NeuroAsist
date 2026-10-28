@@ -25,6 +25,37 @@ namespace NeuroAsist.Avatar.Tests
             yield return new WaitForSeconds(.6f);
         }
 
+        [UnityTest] public IEnumerator DesktopFullBodyFitsStandingModelAndWaistRestoresPortrait()
+        {
+            var presentation = Object.FindFirstObjectByType<AvatarPresentationController>();
+            var motion = Object.FindFirstObjectByType<AvatarMotionController>();
+            var welcome = Object.FindFirstObjectByType<AvatarWelcomeController>();
+            var animator = motion.Animator;
+            var original = animator.runtimeAnimatorController;
+            var originalAspect = Camera.main.aspect;
+            presentation.SetDesktopMode("full_body");
+            foreach (var aspect in new[] { .45f, .58f, .9f })
+            {
+                Camera.main.aspect = aspect;
+                presentation.FrameNow();
+                yield return null;
+                foreach (var bone in new[] { HumanBodyBones.Head, HumanBodyBones.LeftFoot, HumanBodyBones.RightFoot })
+                {
+                    var point = Camera.main.WorldToViewportPoint(animator.GetBoneTransform(bone).position);
+                    Assert.That(point.x, Is.InRange(.01f, .99f), bone.ToString());
+                    Assert.That(point.y, Is.InRange(.01f, .99f), bone.ToString());
+                }
+            }
+            presentation.SetDesktopMode("waist");
+            Camera.main.aspect = .88f;
+            presentation.FrameNow();
+            Assert.That(Camera.main.WorldToViewportPoint(animator.GetBoneTransform(HumanBodyBones.LeftFoot).position).y, Is.LessThan(0));
+            Assert.That(welcome.IsSeated, Is.False);
+            Assert.That(animator.runtimeAnimatorController, Is.SameAs(original));
+            Assert.That(motion.enabled, Is.True);
+            Camera.main.aspect = originalAspect;
+        }
+
         [UnityTest] public IEnumerator SeatedClipLoopsWithoutRootDriftAndRestoresConversationRig()
         {
             var welcome = Object.FindFirstObjectByType<AvatarWelcomeController>();

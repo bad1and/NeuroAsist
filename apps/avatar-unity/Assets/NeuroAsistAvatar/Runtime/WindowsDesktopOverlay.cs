@@ -37,7 +37,8 @@ namespace NeuroAsist.Avatar
         private void Awake()
         {
             if (Application.isEditor || Application.platform != RuntimePlatform.WindowsPlayer) return;
-            embeddedInIris = IsEmbeddedHost(Environment.GetEnvironmentVariable("NEUROASIST_AVATAR_HOST"));
+            var host = Environment.GetEnvironmentVariable("NEUROASIST_AVATAR_HOST");
+            embeddedInIris = IsEmbeddedHost(host) || IsManagedDesktopHost(host);
             // In the in-app mode Tauri owns the exact Unity HWND. GetActiveWindow
             // is unreliable while a player starts hidden or loses activation to
             // Iris, so this component must not alter native styles at all.
@@ -64,8 +65,8 @@ namespace NeuroAsist.Avatar
             alwaysOnTop = nextAlwaysOnTop;
             locked = nextLocked;
             scale = Mathf.Clamp(nextScale, .5f, 2f);
-            transform.localScale = Vector3.one * scale;
             if (embeddedInIris) return;
+            transform.localScale = Vector3.one * scale;
             if (!initialized) InitializeWindow();
             if (handle == IntPtr.Zero) return;
             ApplyWindowFlags();
@@ -127,6 +128,11 @@ namespace NeuroAsist.Avatar
         public static bool IsEmbeddedHost(string host)
         {
             return string.Equals(host, "embedded", StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static bool IsManagedDesktopHost(string host)
+        {
+            return string.Equals(host, "desktop_managed", StringComparison.OrdinalIgnoreCase);
         }
 
         private void SetClickThrough(bool enabled)

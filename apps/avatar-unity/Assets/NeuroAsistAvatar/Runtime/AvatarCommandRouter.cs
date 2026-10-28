@@ -65,8 +65,14 @@ namespace NeuroAsist.Avatar
                     client.SendAck(command.message_id, true);
                     if (System.Enum.TryParse(payload.state, true, out AvatarState next)) state.SetState(next, false);
                     break;
+                case "avatar.render.quality":
+                    var qualityAccepted = GetComponent<AvatarPerformanceProfile>()?.ConfigureQuality(payload.in_app_quality, payload.desktop_quality) == true;
+                    client.SendAck(command.message_id, qualityAccepted, qualityAccepted ? null : "render quality unavailable");
+                    break;
                 case "avatar.overlay.configure":
                     client.SendAck(command.message_id, true);
+                    if (AvatarPerformanceProfile.IsManagedDesktopHost())
+                        GetComponent<AvatarPresentationController>()?.SetDesktopMode(payload.desktop_mode);
                     if (overlay != null) overlay.Configure(payload.visible, payload.always_on_top, payload.locked, payload.scale, payload.monitor, payload.x, payload.y, payload.width, payload.height);
                     break;
                 case "avatar.sleep":
@@ -74,6 +80,8 @@ namespace NeuroAsist.Avatar
                     if (sleepController != null) sleepController.SetSleeping(payload.sleep);
                     break;
                 case "avatar.presentation":
+                    // Presentation replay from an old in-app host cannot crop a desktop figure.
+                    if (AvatarPerformanceProfile.IsManagedDesktopHost()) { client.SendAck(command.message_id, true); break; }
                     var welcome = GetComponent<AvatarWelcomeController>();
                     var presented = welcome != null && welcome.SetPresentation(payload.presentation);
                     client.SendAck(command.message_id, presented, presented ? null : "presentation unavailable");
