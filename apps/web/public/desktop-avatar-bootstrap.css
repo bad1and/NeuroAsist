@@ -1,0 +1,6 @@
+html.desktop-avatar-root,
+html.desktop-avatar-root body,
+html.desktop-avatar-root #root {
+  background: transparent !important;
+}
+html.desktop-avatar-root .iris-static-splash { display: none; }

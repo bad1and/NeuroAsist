@@ -24,7 +24,9 @@ async def upload_document(request: Request, session_id: str = Form(...), upload_
         if await request.is_disconnected():
             request.app.state.document_service.cancel(session_id, upload_id)
             raise HTTPException(499, "Загрузка отменена")
-        return request.app.state.document_service.put(session_id, upload_id, name, units).metadata()
+        metadata = request.app.state.document_service.put(session_id, upload_id, name, units).metadata()
+        request.app.state.event_bus.publish("documents.changed", "info", "Conversation document updated", {"session_id": session_id})
+        return metadata
     except DocumentError as exc:
         raise HTTPException(422, str(exc)) from exc
     finally:
@@ -40,6 +42,7 @@ async def current_document(request: Request, session_id: str):
 @router.delete("/{identifier}")
 def delete_document(request: Request, identifier: str, session_id: str):
     request.app.state.document_service.cancel(session_id, identifier)
+    request.app.state.event_bus.publish("documents.changed", "info", "Conversation document removed", {"session_id": session_id})
     return {"removed": True}
 
 

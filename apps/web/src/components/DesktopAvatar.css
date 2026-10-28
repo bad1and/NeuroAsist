@@ -1,0 +1,59 @@
+html.desktop-avatar-root, .desktop-avatar-root body, .desktop-avatar-root #root { background: transparent !important; min-width: 0; overflow: hidden; }
+.desktop-avatar-surface { position: fixed; inset: 0; background: transparent; pointer-events: none; color: var(--color-text); }
+.desktop-avatar-hit { position: absolute; pointer-events: auto; cursor: grab; touch-action: none; }
+.desktop-avatar-hit.is-locked { cursor: default; }
+.desktop-avatar-resize { position: absolute; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 7px; color: var(--color-text); background: var(--surface-notification); box-shadow: var(--depth-notification); pointer-events: auto; cursor: nesw-resize; font-size: 20px; opacity: .52; }
+.desktop-avatar-resize:is(:hover, :focus-visible) { opacity: 1; }
+.desktop-avatar-controls { position: absolute; inset: 0; pointer-events: none; }
+.desktop-avatar-controls[hidden], .desktop-avatar-popover[hidden], .desktop-avatar-composer[hidden] { display: none; }
+.desktop-avatar-left, .desktop-avatar-right { position: absolute; }
+.desktop-avatar-left { display: grid; gap: 10px; }
+.desktop-avatar-control { position: relative; width: 44px; pointer-events: auto; opacity: .52; }
+.desktop-avatar-icon { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 22px; corner-shape: superellipse(1.5); cursor: pointer; }
+.desktop-avatar-icon > svg { flex: none; }
+.desktop-avatar-media { display: flex; flex-direction: column; width: 44px; height: 88px; border-radius: 22px; corner-shape: var(--corner-shape); isolation: isolate; }
+.desktop-avatar-media > button { display: flex; align-items: center; justify-content: center; flex: 0 0 44px; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 22px; corner-shape: var(--corner-shape); cursor: pointer; }
+.desktop-avatar-media .dp-joined-half { left: 0; right: 0; width: 100%; height: 50%; bottom: auto; border-radius: 22px; }
+.desktop-avatar-media .dp-joined-half[data-side="0"] { top: 0; }
+.desktop-avatar-media .dp-joined-half[data-side="1"] { top: 50%; }
+.desktop-avatar-media > button:focus-visible::after { z-index: 1; }
+
+/* A restrained translucent surface inside the existing avatar WebView. */
+.desktop-avatar-glass { position: absolute; isolation: isolate; box-sizing: border-box; border-radius: 32px; corner-shape: var(--corner-shape);
+  background: linear-gradient(145deg, rgb(63 63 72 / .38), rgb(28 29 35 / .56));
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+  box-shadow: 0 8px 24px rgb(0 0 0 / .14);
+}
+.desktop-avatar-glass::before { content: ""; position: absolute; z-index: -1; inset: 0; border-radius: inherit; corner-shape: inherit; pointer-events: none;
+  background: url("./lens-noise.svg") repeat; background-size: 128px 128px; opacity: .04; mix-blend-mode: soft-light;
+}
+.desktop-avatar-glass > .confirmation-rim { border-radius: inherit; corner-shape: inherit; }
+.desktop-avatar-popover { padding: 0; pointer-events: auto; overflow: visible; }
+.desktop-avatar-popover.is-tools { padding: 10px; }
+.desktop-avatar-popover-body { position: relative; max-height: calc(100vh - 24px); overflow-y: auto; scrollbar-width: thin; border-radius: inherit; corner-shape: inherit; }
+.desktop-avatar-popover.is-tools .desktop-avatar-popover-body { max-height: calc(100vh - 44px); border-radius: 22px; }
+.desktop-avatar-composer { position: relative; border-radius: inherit; corner-shape: inherit; }
+.desktop-avatar-composer textarea { --field-surface: linear-gradient(transparent, transparent); --field-edge: var(--field-surface) !important; --field-border-current: 0px !important; --field-depth: 0 0 0 transparent; --rim-halo: 0 0 0 transparent; --field-padding: 20px 60px 20px 20px;
+  display: block; box-sizing: border-box; width: 100%; height: 160px; min-height: 160px; resize: none; border: 0; border-radius: 32px; corner-shape: var(--corner-shape); color: var(--color-text);
+  font-family: var(--font-subtitles, "Shantell Sans", cursive, sans-serif); font-size: 18px; font-weight: 500; line-height: 1.55;
+}
+.desktop-avatar-composer > button { position: absolute; right: 12px; bottom: 12px; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 18px; corner-shape: var(--corner-shape); }
+.desktop-avatar-error { display: flex; align-items: start; gap: 8px; padding: 12px 14px; pointer-events: auto; font: 400 12px/1.5 var(--font-ui); color: var(--color-text-soft); overflow-wrap: anywhere; }
+.desktop-avatar-error > button { flex: none; background: none; border: 0; color: inherit; padding: 2px; }
+.desktop-document { display: grid; gap: 4px; font: 400 13px/1.5 var(--font-ui); }
+.desktop-document > button { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 10px 12px; border: 0; border-radius: 22px; corner-shape: var(--corner-shape); background: transparent; box-shadow: none; color: var(--color-text); text-align: left; font: 550 13px/1.5 var(--font-ui); cursor: pointer; }
+.desktop-document > button:is(:hover, :focus-visible):not(:disabled) { background: rgb(225 221 239 / .08); }
+.desktop-document > button:disabled { opacity: .42; cursor: not-allowed; }
+.desktop-document-action-icon { display: flex; align-items: center; justify-content: center; flex: 0 0 32px; width: 32px; height: 32px; border-radius: 12px; corner-shape: var(--corner-shape); background: rgb(225 221 239 / .07); }
+.desktop-document p { margin: 0; color: var(--color-danger-text); }
+.desktop-document-current { display: flex; align-items: center; gap: 8px; padding: 4px 12px 8px; }
+.desktop-document-current span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.desktop-document-current button { padding: 4px; font-size: 12px; }
+.desktop-avatar-captions { position: absolute; box-sizing: border-box; padding: 14px 20px; pointer-events: none; }
+.desktop-avatar-captions p { margin: 0; font-family: var(--font-subtitles, "Shantell Sans", cursive, sans-serif); font-size: 18px; font-weight: 700; line-height: 24px; text-shadow: 0 1px 3px rgb(0 0 0 / .35); overflow-wrap: anywhere; white-space: normal; max-height: 48px; overflow: hidden; }
+.desktop-avatar-resize:focus-visible, .desktop-avatar-error > button:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+@media (forced-colors: active) {
+  .desktop-avatar-glass { background: Canvas; border: 1px solid CanvasText; }
+  .desktop-avatar-glass::before { display: none; }
+  .desktop-avatar-control { opacity: 1 !important; }
+}

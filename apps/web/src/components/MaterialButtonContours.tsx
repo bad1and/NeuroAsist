@@ -45,5 +45,6 @@ export function MaterialButtonContours() {
   return <svg width="0" height="0" aria-hidden="true" style={{ position: "absolute", pointerEvents: "none" }}><defs>
     <clipPath id="apple-squircle-square" clipPathUnits="objectBoundingBox"><path d={appleSquarePath} /></clipPath>
     {contours.map(({ id, width, height, path }) => <clipPath key={id} id={`iris-material-${id}`} clipPathUnits="objectBoundingBox"><path d={path} transform={`scale(${1 / width} ${1 / height})`} /></clipPath>)}
+    <clipPath id="iris-material-media-vertical" clipPathUnits="objectBoundingBox"><path d={squareButtonContour(132, 66)} transform={`matrix(0 ${1 / 132} ${-1 / 66} 0 1 0)`} /></clipPath>
   </defs></svg>;
 }

@@ -71,6 +71,19 @@ const buffer = (duration: number) => ({ duration }) as AudioBuffer;
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("TTSStreamPlayer", () => {
+  it("mutes current and future sources without stopping the speech clock", async () => {
+    const player=new TTSStreamPlayer(vi.fn(),vi.fn(),vi.fn());
+    player.begin("muted");player.setMuted(true);
+    const first=player.enqueue("muted",0,audio());await tick();
+    const context=FakeAudioContext.instance;
+    context.deferred[0].resolve(buffer(.5));await first;
+    const source=context.sources[0];
+    expect(source.start).toHaveBeenCalled();
+    expect(source.connect).not.toHaveBeenCalledWith(context.destination);
+    player.setMuted(false);expect(source.connect).toHaveBeenCalledWith(context.destination);
+    player.setMuted(true);expect(source.disconnect).toHaveBeenCalledWith(context.destination);
+    expect(source.stop).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.useRealTimers();
     FakeAudioContext.initialState = "running";

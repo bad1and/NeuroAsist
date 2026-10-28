@@ -11,10 +11,13 @@ import { CorpusSurface } from "./components/CorpusSurface";
 import { useDockScale } from "./components/useDockScale";
 import { ChatWelcomeScenery } from "./components/ChatWelcomeScenery";
 import { useAvatarPresentation } from "./components/useAvatarPresentation";
+import { useDesktopConversationBridge, DOCUMENT_CHANGED } from "./desktop-avatar-bridge";
+import { requestJson } from "./api";
 import { IconInterfaceHome2, IconMailChatBubbleTextSquare, IconInterfaceTimeStopWatchCircle, IconComputerRobotCyborg1, IconInterfacePageControllerSettings, IconProgrammingScript2, IconInterfaceCursorArrow2 } from "./CustomIcons";
 import { FormEvent, KeyboardEvent as ReactKeyboardEvent, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { IconInterfaceCursorArrow2 as SendHorizontal, IconMailChatBubblePlus as MessageSquarePlus } from "./CustomIcons";
 const AvatarDevStudioStandalonePage = lazy(() => import("./components/AvatarDevPanel").then(module => ({ default: module.AvatarDevStudioStandalonePage })));
+const DesktopAvatarPage = lazy(() => import("./components/DesktopAvatar").then(module => ({ default: module.DesktopAvatar })));
 
 
 
@@ -162,6 +165,9 @@ function isQaStudioWindow(): boolean {
 
 export default function App() {
   useIndicatorAnimations();
+  if ((window as unknown as { __IRIS_VIEW__?: string }).__IRIS_VIEW__ === "desktop-avatar") {
+    return <Suspense fallback={null}><DesktopAvatarPage /></Suspense>;
+  }
   if (isQaStudioWindow()) {
     return <Suspense fallback={<p role="status">Загрузка студии…</p>}><AvatarDevStudioStandalonePage /></Suspense>;
   }
@@ -169,6 +175,12 @@ export default function App() {
 }
 
 function MainApp() {
+  useEffect(() => {
+    if (!isDesktopApp()) return;
+    const listener = import("@tauri-apps/api/event").then(({ listen }) =>
+      listen("desktop-avatar-open-chat", () => switchView("chat")));
+    return () => { void listener.then(stop => stop()); };
+  }, []);
   const [recoveryBackup, setRecoveryBackup] = useState<string | null>(null);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
@@ -639,6 +651,7 @@ function MainApp() {
       socket.onmessage = (message) => {
         try {
           const event = JSON.parse(message.data) as BackendEvent;
+          if (event.type === "documents.changed") window.dispatchEvent(new Event(DOCUMENT_CHANGED));
           setEvents((current) => dedupeEvents([...current, event]));
           notifyBackendEvent(event, () => { setSettingsNavigationRequest(current => ({ section: "models", id: (current?.id ?? 0) + 1 })); switchView("settings"); });
           retrievalNotifications.current.consume(event);
@@ -1025,6 +1038,8 @@ export function ChatPage({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [documentBusy, setDocumentBusy] = useState(false);
+  const [desktopDocumentBusy, setDesktopDocumentBusy] = useState(false);
+  const [desktopSubtitleCue, setDesktopSubtitleCue] = useState("");
   const [liveSttTranscript, setLiveSttTranscript] = useState("");
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [composerExtraHeight, setComposerExtraHeight] = useState(0);
@@ -1035,6 +1050,9 @@ export function ChatPage({
   const [loading, setLoading] = useState(false);
   const [isStarted, setIsStarted] = useState(false);
   const [soundMuted, setSoundMuted] = useState(false);
+  const soundMutedRef = useRef(soundMuted);
+  soundMutedRef.current = soundMuted;
+  const muteQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [retryText, setRetryText] = useState<string | null>(null);
@@ -1496,6 +1514,13 @@ export function ChatPage({
   );
 
   useEffect(() => {
+    if (!avatarStatus?.enabled) return;
+    muteQueueRef.current = muteQueueRef.current.catch(() => {}).then(() => requestJson("/avatar/audio/mute", {
+      method: "POST", body: JSON.stringify({muted: soundMuted}),
+    })).catch(() => setError("Не удалось применить выключение звука к аватару."));
+  }, [soundMuted, selectedOutputDeviceId, avatarStatus?.enabled, avatarStatus?.client_count]);
+
+  useEffect(() => {
     avatarOwnsAudioRef.current = avatarOwnsAudio;
   }, [avatarOwnsAudio]);
 
@@ -1638,13 +1663,12 @@ export function ChatPage({
   const toggleSoundMute = useCallback(() => {
     setSoundMuted((current) => {
       const next = !current;
-      if (next) {
-        stopVoicePlayback();
-        interruptAssistantSpeech();
-      }
+      if (activeAudioRef.current) activeAudioRef.current.muted = next;
+      livePlayerRef.current?.setMuted(next);
+      if (next && typeof speechSynthesis !== "undefined") speechSynthesis.cancel();
       return next;
     });
-  }, [interruptAssistantSpeech, stopVoicePlayback]);
+  }, []);
 
   const ensureLivePlayer = useCallback(() => {
     if (!livePlayerRef.current) {
@@ -1716,6 +1740,7 @@ export function ChatPage({
       startLeadMs: settings?.voice_live_playback_start_lead_ms ?? 30,
       outputDeviceId: selectedOutputDeviceId,
     });
+    livePlayerRef.current.setMuted(soundMutedRef.current);
     return livePlayerRef.current;
   }, [
     clearLiveSttTranscript,
@@ -2126,12 +2151,11 @@ export function ChatPage({
     }
   }, [avatarOwnsAudio, browserSpeechSupported, events, playAudioUrl, speakTextInBrowser]);
 
-  const onSubmit = async (event: FormEvent) => {
-    event.preventDefault();
+  const submitText = async (inputText: string) => {
     clearLiveSttTranscript();
-    const text = draft.trim();
-    if (!text || !sessionId || loading || documentBusy) {
-      return;
+    const text = inputText.trim();
+    if (!text || !sessionId || loading || documentBusy || desktopDocumentBusy) {
+      throw new Error("Дождитесь готовности диалога или завершения обработки файла.");
     }
     flushPendingTextDeltas();
     if (replyRecoveryTimerRef.current !== null) clearTimeout(replyRecoveryTimerRef.current);
@@ -2263,6 +2287,7 @@ export function ChatPage({
       if (revision !== chatRevisionRef.current || currentSessionRef.current !== sessionId) return;
       setError(requestError instanceof Error ? requestError.message : "Не удалось отправить сообщение");
       setRetryText(text);
+      throw requestError;
       // A transport failure is ambiguous: the server may already have
       // accepted the client id.  Keep the optimistic user bubble so retry
       // cannot silently erase a durable turn.
@@ -2272,6 +2297,11 @@ export function ChatPage({
         setVoiceState("idle");
       }
     }
+  };
+
+  const onSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    try { await submitText(draft); } catch { /* submitText already reports transport errors. */ }
   };
 
   const submitOnEnter = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
@@ -2530,6 +2560,25 @@ export function ChatPage({
     }
   };
 
+  useDesktopConversationBridge({
+    session_id: sessionId, ready: Boolean(sessionId && !sessionStarting),
+    loading, document_busy: documentBusy || desktopDocumentBusy,
+    microphone_active: liveConversation && !microphoneMuted, microphone_starting: microphoneStarting,
+    sound_muted: soundMuted, voice_state: voiceState, cue: desktopSubtitleCue, error,
+  }, async command => {
+    if (command.type === "attachment_busy") { setDesktopDocumentBusy(Boolean(command.busy)); if(command.busy) setIsStarted(true); return; }
+    if (command.type === "attachment_changed") { window.dispatchEvent(new Event(DOCUMENT_CHANGED)); return; }
+    if (!sessionId || sessionStarting) throw new Error("Диалог ещё подготавливается.");
+    if (command.type === "sound") toggleSoundMute();
+    if (command.type === "microphone") {
+      setIsStarted(true);
+      if (liveConversation) toggleMicrophoneMute(); else await toggleLive();
+    }
+    if (command.type === "send") { setIsStarted(true); await submitText(command.text ?? ""); }
+  });
+
+  useEffect(() => { setDesktopDocumentBusy(false); setDesktopSubtitleCue(""); }, [sessionId]);
+
   const handleFinish = async () => {
     chatRevisionRef.current++;
     submissionRef.current = null;
@@ -2736,6 +2785,9 @@ export function ChatPage({
             />
           )}
           <IrisSubtitles
+            cueMaxChars={settings?.avatar_placement === "desktop_overlay" && isDesktopApp() ? 28 : 45}
+            silentPlayback={settings?.avatar_placement === "desktop_overlay" && soundMuted}
+            onCueChange={setDesktopSubtitleCue}
             messages={messages}
             loading={loading}
             voiceState={voiceState}
@@ -2798,7 +2850,7 @@ export function ChatPage({
                 <MaterialButton materialKey={"App.button-8"}
                   className="send-button"
                   type="submit"
-                  disabled={!sessionId || sessionStarting || loading || documentBusy || !draft.trim().length}
+                  disabled={!sessionId || sessionStarting || loading || documentBusy || desktopDocumentBusy || !draft.trim().length}
                   onClick={(e) => animateButtonPress(e.currentTarget)}
                   aria-label={sessionStarting ? "Подготавливаем сессию" : loading ? "Отправка сообщения" : "Отправить сообщение"}
                   title={sessionStarting ? "Подготавливаем сессию" : loading ? "Отправка сообщения" : "Отправить сообщение"}

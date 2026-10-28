@@ -57,6 +57,19 @@ export class PlaybackCoordinator {
 
 export class TTSStreamPlayer {
   private context: AudioContext | null = null;
+  private muted = false;
+
+  setMuted(muted: boolean): void {
+    if (this.muted === muted) return;
+    this.muted = muted;
+    if (!this.context) return;
+    for (const source of this.sources) {
+      try {
+        if (muted) source.disconnect(this.context.destination);
+        else source.connect(this.context.destination);
+      } catch { /* A source may have finished between the snapshot and disconnect. */ }
+    }
+  }
   private scheduledUntil = 0;
   private sources = new Set<AudioBufferSourceNode>();
   private readyBuffers: Array<{ buffer: AudioBuffer; text: string; segmentId: number }> = [];
@@ -286,7 +299,7 @@ export class TTSStreamPlayer {
     const source = context.createBufferSource();
     source.buffer = buffer;
     source.playbackRate.value = 1;
-    source.connect(context.destination);
+    if (!this.muted) source.connect(context.destination);
     try {
       const analyser = audioAnalyzer.getOrCreateAnalyser(context);
       if (analyser) source.connect(analyser);

@@ -13,8 +13,9 @@ import { notify } from "../notifications";
 type AttachedDocument = { id: string; name: string; fragment_count: number; ephemeral: boolean; expires_in_seconds?: number };
 type Source = { id: string; label: string; text: string };
 
-export function DocumentAttachment({ sessionId, disabled = false, onBusyChange }: {
+export function DocumentAttachment({ sessionId, disabled = false, onBusyChange, variant = "default", onInteractionChange }: {
   sessionId: string | null; disabled?: boolean; onBusyChange: (busy: boolean) => void;
+  variant?: "default" | "desktop"; onInteractionChange?: (active: boolean) => void;
 }) {
   const [document, setDocument] = useState<AttachedDocument | null>(null);
   const [busy, setBusy] = useState(false);
@@ -38,6 +39,7 @@ export function DocumentAttachment({ sessionId, disabled = false, onBusyChange }
   const chooseFile = () => {
     if (!input.current || button.current?.disabled) return;
     setDetailsOpen(false);
+    onInteractionChange?.(true);
     input.current.click();
   };
   const reportFailure = (message: string, title = "Не удалось прикрепить документ") => {
@@ -82,8 +84,10 @@ export function DocumentAttachment({ sessionId, disabled = false, onBusyChange }
     };
     void refresh(); const timer = window.setInterval(() => void refresh(), 30_000);
     window.addEventListener("focus", refresh);
+    window.addEventListener("iris-document-changed", refresh);
     return () => {
       generation.current++; controller.abort(); clearInterval(timer); window.removeEventListener("focus", refresh);
+      window.removeEventListener("iris-document-changed", refresh);
       const current = active.current; active.current = null;
       current?.controller.abort();
       if (current) void remove(current.id, current.session).catch(() => {});
@@ -155,6 +159,25 @@ export function DocumentAttachment({ sessionId, disabled = false, onBusyChange }
       if (token === generation.current) changeBusy(false);
     }
   };
+  useEffect(() => {
+    const finish = () => onInteractionChange?.(false);
+    const picker = input.current;
+    picker?.addEventListener("cancel", finish);
+    window.addEventListener("focus", finish);
+    return () => { picker?.removeEventListener("cancel", finish); window.removeEventListener("focus", finish); };
+  }, [onInteractionChange]);
+  if (variant === "desktop") return <div className="desktop-document">
+    <input ref={input} type="file" accept=".txt,.md,.pdf" hidden aria-label="Выбрать документ" onChange={event => {
+      onInteractionChange?.(false); const file=event.target.files?.[0]; event.target.value=""; if (file) void upload(file);
+    }} />
+    <MaterialButton materialKey="desktop.document.choose" appearance="plain" className="desktop-document-action" ref={button} type="button" disabled={disabled || !sessionId || busy} onClick={chooseFile}>
+      <span className="desktop-document-action-icon" aria-hidden="true"><Paperclip size={20} /></span><span>{busy ? "Читаю документ…" : document ? "Заменить файл" : "Прикрепить файл"}</span>
+    </MaterialButton>
+    {document && <div className="desktop-document-current"><span data-i18n-skip>{document.name}</span>
+      <MaterialButton materialKey="desktop.document.remove" appearance="plain" type="button" disabled={disabled || busy} onClick={() => void removeDocument()}>Убрать</MaterialButton></div>}
+    {busy && <MaterialButton materialKey="desktop.document.cancel" appearance="plain" type="button" onClick={cancelUpload}>Отменить чтение</MaterialButton>}
+    {error && <p role="alert">{error}</p>}
+  </div>;
   return <div className="document-attachment">
     <input ref={input} type="file" accept=".txt,.md,.pdf" hidden aria-label="Выбрать документ" onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void upload(file); }} />
     <MaterialButton
