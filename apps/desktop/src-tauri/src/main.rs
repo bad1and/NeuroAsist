@@ -26,6 +26,10 @@ mod shortcut_preferences;
 use shortcut_preferences::{get_shortcut_preferences, set_shortcut_preferences, set_shortcut_recording, ShortcutPreferences};
 
 mod window_preferences;
+mod desktop_avatar;
+use desktop_avatar::{DesktopAvatarState, get_desktop_avatar_monitors, configure_desktop_avatar,
+    set_desktop_avatar_regions, begin_desktop_avatar_transform, desktop_avatar_command,
+    desktop_avatar_snapshot, open_main_from_avatar};
 use window_preferences::{
     get_window_preferences, reset_reference_window, set_reference_window_locked, WindowPreferences,
 };
@@ -168,8 +172,8 @@ enum CoreProcess {
 struct AvatarProcess {
     child: Child,
     placement: AvatarPlacement,
-    // HWND is stored as an integer to keep the state platform-neutral. It is
-    // present only for the Windows-owned surface used by the in-app mode.
+    // Exact renderer HWND for either managed Windows host, stored as an
+    // integer to keep the lifecycle state platform-neutral.
     embedded_window: Option<usize>,
 }
 
@@ -515,15 +519,19 @@ impl DesktopState {
             .env("NEUROASIST_BACKEND_URL", &runtime.api_base_url)
             .env("NEUROASIST_BACKEND_TOKEN", &runtime.api_token)
             .env("NEUROASIST_DESKTOP_PID", std::process::id().to_string())
+            .env("NEUROASIST_AVATAR_QUALITY", avatar_quality_from_settings(&desktop_data_root(&self.root), placement))
             .env(
                 "NEUROASIST_AVATAR_HOST",
                 if placement == AvatarPlacement::InApp {
                     "embedded"
                 } else {
-                    "overlay"
+                    "desktop_managed"
                 },
             );
-        if placement == AvatarPlacement::InApp {
+        if placement == AvatarPlacement::DesktopOverlay {
+            desktop_avatar::create_host(app)?;
+        }
+        {
             // DWM coverage alpha requires Unity's BitBlt D3D11 swapchain.
             // Flip-model surfaces do not preserve this window transparency.
             //
@@ -582,24 +590,14 @@ impl DesktopState {
             .avatar_visible
             .lock()
             .map_err(|_| "avatar visibility mutex poisoned")? = initial_visible;
-        if placement == AvatarPlacement::InApp {
-            // Unity takes several seconds to construct its native render
-            // window. Attaching it synchronously here blocks Tauri's command
-            // path and makes Iris appear frozen. The worker below waits in the
-            // background; bounds and visibility IPC are already queued in the
-            // shared DesktopState and are applied as soon as it attaches.
-            #[cfg(windows)]
-            self.attach_in_app_avatar_in_background(app.clone(), process_id, clients_before_launch);
-        } else {
-            self.set_avatar_lifecycle(app, AvatarLifecyclePhase::Ready, None);
-            self.watch_avatar_process(app.clone(), process_id);
-        }
+        #[cfg(windows)]
+        self.attach_avatar_in_background(app.clone(), process_id, clients_before_launch);
         self.emit_avatar_status(app);
         Ok(true)
     }
 
     #[cfg(windows)]
-    fn attach_in_app_avatar_in_background(
+    fn attach_avatar_in_background(
         &self,
         app: AppHandle,
         process_id: u32,
@@ -620,8 +618,7 @@ impl DesktopState {
                             return;
                         };
                         let is_current = avatar.as_ref().is_some_and(|process| {
-                            process.placement == AvatarPlacement::InApp
-                                && process.child.id() == process_id
+                            process.child.id() == process_id
                         });
                         if !is_current {
                             return;
@@ -690,12 +687,21 @@ impl DesktopState {
                     let Some(current_window) = current_window else {
                         return;
                     };
-                    if let Err(error) = attach_embedded_avatar_window(&app, current_window) {
+                    let placement = state.avatar.lock().ok().and_then(|p| p.as_ref().map(|p| p.placement));
+                    let attached = if placement == Some(AvatarPlacement::DesktopOverlay) {
+                        desktop_avatar::attach(&app, current_window)
+                    } else { attach_embedded_avatar_window(&app, current_window) };
+                    if let Err(error) = attached {
                         drop(_lifecycle);
                         state.fail_avatar_process(&app, process_id, error);
                         return;
                     }
                     state.set_avatar_lifecycle(&app, AvatarLifecyclePhase::Ready, None);
+                    if placement == Some(AvatarPlacement::DesktopOverlay) {
+                        drop(_lifecycle);
+                        state.watch_avatar_process(app.clone(), process_id);
+                        return;
+                    }
                     let _ = state.apply_in_app_avatar_host(&app);
                     let should_sleep = state
                         .in_app_avatar_visible
@@ -734,6 +740,7 @@ impl DesktopState {
             }
         });
         if let Some(mut process) = failed {
+            if process.placement == AvatarPlacement::DesktopOverlay { desktop_avatar::detach(app); }
             let _ = process.child.kill();
             let _ = process.child.wait();
             self.set_avatar_lifecycle(app, AvatarLifecyclePhase::Failed, Some(error));
@@ -802,7 +809,7 @@ impl DesktopState {
             running: avatar.is_some(),
             embedded: avatar
                 .as_ref()
-                .is_some_and(|process| process.embedded_window.is_some()),
+                .is_some_and(|process| process.placement == AvatarPlacement::InApp && process.embedded_window.is_some()),
             visible,
             ready: phase == AvatarLifecyclePhase::Ready,
             phase,
@@ -826,6 +833,7 @@ impl DesktopState {
             .as_ref()
             .map(|process| process.placement);
         if current != Some(placement) {
+            desktop_avatar::detach(app);
             self.stop_avatar_locked();
             let _ = self.start_avatar_locked(app, placement)?;
         }
@@ -838,6 +846,7 @@ impl DesktopState {
             .lock()
             .map_err(|_| "avatar lifecycle mutex poisoned")?;
         let placement = avatar_placement_from_settings(&desktop_data_root(&self.root));
+        desktop_avatar::detach(app);
         self.stop_avatar_locked();
         let _ = self.start_avatar_locked(app, placement)?;
         self.avatar_host_status()
@@ -1246,12 +1255,12 @@ fn set_interface_locale(app: AppHandle, locale: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn toggle_avatar(app: AppHandle) -> Result<bool, String> {
+async fn toggle_avatar(app: AppHandle) -> Result<bool, String> {
     app.state::<DesktopState>().toggle_avatar(&app)
 }
 
 #[tauri::command]
-fn configure_avatar_placement(
+async fn configure_avatar_placement(
     app: AppHandle,
     placement: AvatarPlacement,
 ) -> Result<AvatarHostStatus, String> {
@@ -1265,7 +1274,7 @@ fn get_avatar_host_status(app: AppHandle) -> Result<AvatarHostStatus, String> {
 }
 
 #[tauri::command]
-fn restart_avatar(app: AppHandle) -> Result<AvatarHostStatus, String> {
+async fn restart_avatar(app: AppHandle) -> Result<AvatarHostStatus, String> {
     app.state::<DesktopState>().restart_avatar(&app)
 }
 
@@ -1548,6 +1557,7 @@ fn main() {
         .setup(|app| {
             let state = DesktopState::new();
             app.manage(state);
+            app.manage(DesktopAvatarState::default());
             app.manage(WindowPreferences::load(
                 app.path().app_config_dir()?.join("window-preferences.json"),
             ));
@@ -1618,7 +1628,10 @@ fn main() {
             remove_search_api_key,
             open_qa_studio,
             close_qa_studio,
-            is_qa_studio_open
+            is_qa_studio_open,
+            get_desktop_avatar_monitors, configure_desktop_avatar, set_desktop_avatar_regions,
+            begin_desktop_avatar_transform, desktop_avatar_command, desktop_avatar_snapshot,
+            open_main_from_avatar
         ])
         .build(tauri::generate_context!())
         .expect("error while building Iris desktop shell");
@@ -1674,7 +1687,8 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => show_main_window(app),
             "avatar" => {
-                let _ = app.state::<DesktopState>().toggle_avatar(app);
+                let handle=app.clone();
+                thread::spawn(move || {let _=handle.state::<DesktopState>().toggle_avatar(&handle);});
             }
             "safe-mode" => restart_in_safe_mode(app),
             "quit" => {
@@ -1711,6 +1725,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
 
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
     }
@@ -1800,6 +1815,23 @@ fn avatar_placement_from_json(json: &str) -> AvatarPlacement {
     }
 }
 
+fn avatar_quality_from_settings(data_root: &PathBuf, placement: AvatarPlacement) -> String {
+    let json = std::fs::read_to_string(data_root.join("settings.json")).unwrap_or_default();
+    avatar_quality_from_json(&json, placement).to_owned()
+}
+
+fn avatar_quality_from_json(json: &str, placement: AvatarPlacement) -> &'static str {
+    let field = if placement == AvatarPlacement::InApp { "avatar_in_app_quality" } else { "avatar_desktop_quality" };
+    let payload = serde_json::from_str::<serde_json::Value>(json).unwrap_or_default();
+    match payload.get("settings").and_then(|s| s.get(field)).and_then(|v| v.as_str()) {
+        Some("low") => "low",
+        Some("medium") => "medium",
+        Some("high") => "high",
+        _ if placement == AvatarPlacement::InApp => "high",
+        _ => "medium",
+    }
+}
+
 fn avatar_overlay_visible_from_settings(data_root: &PathBuf) -> bool {
     std::fs::read_to_string(data_root.join("settings.json"))
         .map(|json| avatar_overlay_visible_from_json(&json))
@@ -1881,8 +1913,13 @@ fn prepare_avatar_warmup_window(window: usize) -> Result<(), String> {
 
 #[cfg(windows)]
 fn attach_embedded_avatar_window(app: &AppHandle, window: usize) -> Result<(), String> {
+    attach_native_avatar_window(app, window, "main")
+}
+
+#[cfg(windows)]
+fn attach_native_avatar_window(app: &AppHandle, window: usize, owner: &str) -> Result<(), String> {
     let parent = app
-        .get_webview_window("main")
+        .get_webview_window(owner)
         .ok_or("Could not find Iris main window")?
         .hwnd()
         .map_err(|error| format!("Could not get Iris native window handle: {error}"))?;
@@ -2196,6 +2233,17 @@ mod tests {
             keyring::default::default_credential_builder().persistence(),
             keyring::credential::CredentialPersistence::UntilDelete
         ));
+    }
+
+    #[test]
+    fn avatar_quality_is_independent_per_placement_and_defaults_safely() {
+        let json = r#"{"settings":{"avatar_in_app_quality":"low","avatar_desktop_quality":"high"}}"#;
+        assert_eq!(avatar_quality_from_json(json, AvatarPlacement::InApp), "low");
+        assert_eq!(avatar_quality_from_json(json, AvatarPlacement::DesktopOverlay), "high");
+        for invalid in ["{}", "invalid", r#"{"settings":{"avatar_in_app_quality":null,"avatar_desktop_quality":"ultra"}}"#] {
+            assert_eq!(avatar_quality_from_json(invalid, AvatarPlacement::InApp), "high");
+            assert_eq!(avatar_quality_from_json(invalid, AvatarPlacement::DesktopOverlay), "medium");
+        }
     }
 
     #[test]
