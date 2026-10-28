@@ -47,7 +47,7 @@ from apps.backend.app.events.bus import EventBus
 from apps.backend.app.avatar.connection_manager import AvatarConnectionManager
 from apps.backend.app.avatar.service import AvatarService
 from apps.backend.app.avatar.emotion_engine import EmotionEngine
-from apps.backend.app.avatar.schemas import OverlayPayload
+from apps.backend.app.avatar.schemas import OverlayPayload, RenderQualityPayload
 from apps.backend.app.runtime.settings import RuntimeSettings, RuntimeSettingsStore
 from apps.backend.app.model_manager.service import ModelManager
 from apps.backend.app.model_manager.location import model_root
@@ -401,6 +401,10 @@ def create_app() -> FastAPI:
             visible=runtime_settings.avatar_overlay_visible,
             always_on_top=runtime_settings.avatar_overlay_always_on_top,
             locked=runtime_settings.avatar_overlay_locked,
+            desktop_mode=runtime_settings.avatar_overlay_desktop_mode,
+            layouts=runtime_settings.avatar_overlay_layouts,
+            subtitles_enabled=runtime_settings.avatar_overlay_subtitles_enabled,
+            subtitle_position=runtime_settings.avatar_overlay_subtitle_position,
             scale=runtime_settings.avatar_overlay_scale,
             monitor=runtime_settings.avatar_overlay_monitor,
             x=runtime_settings.avatar_overlay_x,
@@ -409,6 +413,10 @@ def create_app() -> FastAPI:
             height=runtime_settings.avatar_overlay_height,
         ),
         audio_muted=bool(runtime_settings.voice_output_device_id),
+        render_quality=RenderQualityPayload(
+            in_app_quality=runtime_settings.avatar_in_app_quality,
+            desktop_quality=runtime_settings.avatar_desktop_quality,
+        ),
         on_overlay_bounds_changed=persist_avatar_overlay_bounds,
     )
     voice_session_manager.bind_avatar_service(avatar_service)

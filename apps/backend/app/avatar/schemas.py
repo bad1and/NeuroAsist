@@ -123,10 +123,29 @@ class AudioMutePayload(ProtocolModel):
     muted: bool = False
 
 
+AvatarQuality = Literal["low", "medium", "high"]
+
+
+class RenderQualityPayload(ProtocolModel):
+    in_app_quality: AvatarQuality = "high"
+    desktop_quality: AvatarQuality = "medium"
+
+
+class DesktopAvatarLayout(ProtocolModel):
+    monitor: str = Field(min_length=1, max_length=256)
+    x_ratio: float = Field(default=0.8, ge=0, le=1, allow_inf_nan=False)
+    y_ratio: float = Field(default=1, ge=0, le=1, allow_inf_nan=False)
+    height_dip: float = Field(ge=160, le=2160, allow_inf_nan=False)
+
+
 class OverlayPayload(ProtocolModel):
     visible: bool = True
     always_on_top: bool = True
     locked: bool = True
+    desktop_mode: Literal["waist", "full_body"] = "waist"
+    layouts: dict[Literal["waist", "full_body"], DesktopAvatarLayout] = Field(default_factory=dict)
+    subtitles_enabled: bool = True
+    subtitle_position: Literal["above", "below", "left", "right"] = "above"
     scale: float = Field(default=1.0, ge=0.5, le=2.0)
     monitor: str = Field(default="primary", min_length=1, max_length=256)
     x: float = 80.0
@@ -300,6 +319,10 @@ class AvatarOverlayPatch(ProtocolModel):
     visible: bool | None = None
     always_on_top: bool | None = None
     locked: bool | None = None
+    desktop_mode: Literal["waist", "full_body"] | None = None
+    layouts: dict[Literal["waist", "full_body"], DesktopAvatarLayout] | None = None
+    subtitles_enabled: bool | None = None
+    subtitle_position: Literal["above", "below", "left", "right"] | None = None
     scale: float | None = Field(default=None, ge=0.5, le=2.0)
     monitor: str | None = Field(default=None, min_length=1, max_length=256)
     x: float | None = None

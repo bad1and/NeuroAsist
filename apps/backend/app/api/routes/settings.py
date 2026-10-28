@@ -15,6 +15,7 @@ from apps.backend.app.schemas.settings import (
 )
 from apps.backend.app.llm.models import SUPPORTED_DEEPSEEK_MODELS
 from apps.backend.app.environment.news_service import NEWS_CATEGORIES
+from apps.backend.app.avatar.schemas import RenderQualityPayload
 
 router = APIRouter()
 
@@ -104,6 +105,8 @@ def get_public_settings(request: Request) -> PublicSettingsResponse:
         avatar_enabled=settings.avatar_enabled,
         avatar_placement=runtime_settings.avatar_placement,
         avatar_in_app_visible=runtime_settings.avatar_in_app_visible,
+        avatar_in_app_quality=runtime_settings.avatar_in_app_quality,
+        avatar_desktop_quality=runtime_settings.avatar_desktop_quality,
         voice_tts_voice=runtime_settings.voice_tts_voice or settings.voice_tts_default_voice,
         voice_tts_style=runtime_settings.voice_tts_style,
         voice_tts_expression_level=runtime_settings.voice_tts_expression_level,
@@ -288,6 +291,11 @@ async def patch_runtime_settings(
     if payload.avatar_in_app_visible is not None:
         runtime_settings.avatar_in_app_visible = payload.avatar_in_app_visible
 
+    for quality_key in ("avatar_in_app_quality", "avatar_desktop_quality"):
+        quality = getattr(payload, quality_key)
+        if quality is not None:
+            setattr(runtime_settings, quality_key, quality)
+
     if payload.coding_agent_enabled is not None:
         runtime_settings.coding_agent_enabled = payload.coding_agent_enabled
 
@@ -374,6 +382,11 @@ async def patch_runtime_settings(
             detail="Could not persist settings",
         ) from error
     runtime_settings = committed_settings
+    if payload.avatar_in_app_quality is not None or payload.avatar_desktop_quality is not None:
+        await request.app.state.avatar_service.configure_render_quality(RenderQualityPayload(
+            in_app_quality=live_runtime_settings.avatar_in_app_quality,
+            desktop_quality=live_runtime_settings.avatar_desktop_quality,
+        ))
     if payload.voice_tts_style is not None:
         request.app.state.voice_tts_style = live_runtime_settings.voice_tts_style
     if payload.voice_tts_expression_level is not None:
@@ -413,6 +426,8 @@ async def patch_runtime_settings(
             "live_conversation_enabled": runtime_settings.live_conversation_enabled,
             "avatar_placement": runtime_settings.avatar_placement,
             "avatar_in_app_visible": runtime_settings.avatar_in_app_visible,
+            "avatar_in_app_quality": runtime_settings.avatar_in_app_quality,
+            "avatar_desktop_quality": runtime_settings.avatar_desktop_quality,
             "coding_agent_enabled": runtime_settings.coding_agent_enabled,
             "coding_model": runtime_settings.coding_model,
             "coding_project_root": _resolved_coding_project_root(settings, runtime_settings),

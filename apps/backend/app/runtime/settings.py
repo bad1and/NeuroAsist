@@ -89,9 +89,15 @@ class RuntimeSettings:
     # desktop-overlay flag: a hidden desktop popup must not make the avatar
     # disappear after switching it into Iris.
     avatar_in_app_visible: bool = True
+    avatar_in_app_quality: str = "high"
+    avatar_desktop_quality: str = "medium"
     avatar_overlay_visible: bool = True
     avatar_overlay_always_on_top: bool = True
     avatar_overlay_locked: bool = True
+    avatar_overlay_desktop_mode: str = "waist"
+    avatar_overlay_layouts: dict = field(default_factory=dict)
+    avatar_overlay_subtitles_enabled: bool = True
+    avatar_overlay_subtitle_position: str = "above"
     avatar_overlay_scale: float = 1.0
     avatar_overlay_monitor: str = "primary"
     avatar_overlay_x: float = 80.0
@@ -172,6 +178,20 @@ class RuntimeSettingsStore:
                 values["web_search_provider"] = "free"
             if values.get("avatar_placement") not in {None, "desktop_overlay", "in_app"}:
                 values["avatar_placement"] = defaults.avatar_placement
+            for quality_key in ("avatar_in_app_quality", "avatar_desktop_quality"):
+                if quality_key in values and values[quality_key] not in ("low", "medium", "high"):
+                    values[quality_key] = getattr(defaults, quality_key)
+            # Validate nested placement data before it reaches either native host.
+            from apps.backend.app.avatar.schemas import OverlayPayload
+            from pydantic import ValidationError
+            for key in ("desktop_mode", "layouts", "subtitle_position"):
+                setting = f"avatar_overlay_{key}"
+                if setting in values:
+                    try:
+                        validated = OverlayPayload(**{key: values[setting]})
+                        values[setting] = validated.model_dump(mode="json")[key]
+                    except (ValidationError, TypeError):
+                        values[setting] = defaults_dict[setting]
             persisted_coding_model = values.get("coding_model")
             if persisted_coding_model is not None:
                 values["coding_model"] = canonical_deepseek_model(values["coding_model"])

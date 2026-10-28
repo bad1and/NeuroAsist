@@ -6,6 +6,7 @@ from apps.backend.app.api.routes.settings import _commit_runtime_settings_patch
 from apps.backend.app.avatar.schemas import (
     AvatarStatusResponse,
     AvatarOverlayPatch,
+    AudioMutePayload,
     OverlayPayload,
     AvatarSleepRequest,
     AvatarPresentationRequest,
@@ -29,6 +30,10 @@ def _overlay_from_runtime(runtime_settings) -> OverlayPayload:
         visible=runtime_settings.avatar_overlay_visible,
         always_on_top=runtime_settings.avatar_overlay_always_on_top,
         locked=runtime_settings.avatar_overlay_locked,
+        desktop_mode=runtime_settings.avatar_overlay_desktop_mode,
+        layouts=runtime_settings.avatar_overlay_layouts,
+        subtitles_enabled=runtime_settings.avatar_overlay_subtitles_enabled,
+        subtitle_position=runtime_settings.avatar_overlay_subtitle_position,
         scale=runtime_settings.avatar_overlay_scale,
         monitor=runtime_settings.avatar_overlay_monitor,
         x=runtime_settings.avatar_overlay_x,
@@ -50,13 +55,18 @@ async def update_avatar_overlay(payload: AvatarOverlayPatch, request: Request) -
         f"avatar_overlay_{field}": value
         for field, value in payload.model_dump(exclude_none=True).items()
     }
+    def commit():
+        store = request.app.state.runtime_settings_store
+        with store.transaction():
+            if "avatar_overlay_layouts" in changes:
+                changes["avatar_overlay_layouts"] = {
+                    **runtime_settings.avatar_overlay_layouts,
+                    **changes["avatar_overlay_layouts"],
+                }
+            return _commit_runtime_settings_patch(store, runtime_settings, changes)
+
     try:
-        await asyncio.to_thread(
-            _commit_runtime_settings_patch,
-            request.app.state.runtime_settings_store,
-            runtime_settings,
-            changes,
-        )
+        await asyncio.to_thread(commit)
     except OSError as error:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Could not persist avatar overlay settings") from error
     overlay = _overlay_from_runtime(runtime_settings)
@@ -69,6 +79,14 @@ async def update_avatar_overlay(payload: AvatarOverlayPatch, request: Request) -
 async def avatar_sleep(payload: AvatarSleepRequest, request: Request) -> dict[str, object]:
     result = await request.app.state.avatar_service.set_sleep(payload.sleep, session_id=payload.session_id)
     return {"sent": result.sent, "skipped": result.skipped, "sleep": payload.sleep}
+
+
+@router.post("/audio/mute")
+async def avatar_audio_mute(payload: AudioMutePayload, request: Request) -> dict[str, object]:
+    # Device routing must keep Unity inaudible even when the user unmutes Iris.
+    muted = payload.muted or bool(request.app.state.runtime_settings.voice_output_device_id)
+    result = await request.app.state.avatar_service.set_audio_muted(muted)
+    return {"muted": muted, "sent": result.sent}
 
 
 @router.post("/presentation")

@@ -1,4 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field
+from apps.backend.app.avatar.schemas import AvatarQuality
 
 
 class PublicSettingsResponse(BaseModel):
@@ -22,6 +23,8 @@ class PublicSettingsResponse(BaseModel):
     avatar_enabled: bool
     avatar_placement: str
     avatar_in_app_visible: bool
+    avatar_in_app_quality: AvatarQuality = "high"
+    avatar_desktop_quality: AvatarQuality = "medium"
     voice_tts_voice: str
     voice_tts_style: str
     voice_tts_expression_level: str
@@ -111,6 +114,8 @@ class RuntimeSettingsPatch(BaseModel):
     live_conversation_echo_mode: str | None = None
     avatar_placement: str | None = None
     avatar_in_app_visible: bool | None = None
+    avatar_in_app_quality: AvatarQuality | None = None
+    avatar_desktop_quality: AvatarQuality | None = None
     coding_agent_enabled: bool | None = None
     coding_model: str | None = None
     coding_project_root: str | None = Field(default=None, max_length=4096)

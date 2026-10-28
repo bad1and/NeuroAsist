@@ -12,6 +12,7 @@ from .emotion_engine import EmotionEngine
 from .schemas import (
     AvatarStatusResponse,
     AudioMutePayload,
+    RenderQualityPayload,
     EmotionPayload,
     ErrorPayload,
     GesturePayload,
@@ -48,6 +49,7 @@ class AvatarService:
         emotion_engine: EmotionEngine | None = None,
         overlay: OverlayPayload | None = None,
         audio_muted: bool = False,
+        render_quality: RenderQualityPayload | None = None,
         on_overlay_bounds_changed: Callable[[OverlayPayload], Awaitable[None] | None] | None = None,
     ) -> None:
         self.manager = manager
@@ -58,6 +60,7 @@ class AvatarService:
         self.emotion_engine = emotion_engine or EmotionEngine()
         self.overlay = overlay or OverlayPayload()
         self.audio_muted = audio_muted
+        self.render_quality = render_quality or RenderQualityPayload()
         self.on_overlay_bounds_changed = on_overlay_bounds_changed
         self._heartbeat_task: asyncio.Task[None] | None = None
         self._playback_finished_handler: PlaybackFinishedHandler | None = None
@@ -299,6 +302,13 @@ class AvatarService:
             "avatar.overlay.configure", session_id, overlay.model_dump(mode="json"), protocol_version=2, min_protocol_version=2,
         )
 
+    async def configure_render_quality(self, quality: RenderQualityPayload) -> BroadcastResult:
+        self.render_quality = quality
+        return await self._broadcast(
+            "avatar.render.quality", "default", quality.model_dump(mode="json"),
+            protocol_version=2, min_protocol_version=2,
+        )
+
     async def set_presentation(self, mode: str, revision: int) -> BroadcastResult:
         # Layout changes can race when a new dialog replaces its welcome screen.
         # A late request from the previous host must never restore the seated pose.
@@ -350,6 +360,12 @@ class AvatarService:
                 payload=self.overlay.model_dump(mode="json"),
             )
             await self.manager.send_to(client_id, frame.model_dump(mode="json"))
+            if envelope.protocol_version >= 2:
+                quality_frame = OutgoingMessage(
+                    protocol_version=2, type="avatar.render.quality",
+                    payload=self.render_quality.model_dump(mode="json"),
+                )
+                await self.manager.send_to(client_id, quality_frame.model_dump(mode="json"))
             audio_frame = OutgoingMessage(
                 protocol_version=2,
                 type="avatar.audio.mute",

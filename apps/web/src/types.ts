@@ -182,10 +182,17 @@ export type AvatarStatusResponse = {
   };
 };
 
+export type DesktopAvatarMode = "waist" | "full_body";
+export type DesktopSubtitlePosition = "above" | "below" | "left" | "right";
+export type DesktopAvatarLayout = { monitor: string; x_ratio: number; y_ratio: number; height_dip: number };
 export type AvatarOverlaySettings = {
   visible: boolean;
   always_on_top: boolean;
   locked: boolean;
+  desktop_mode?: DesktopAvatarMode;
+  layouts?: Partial<Record<DesktopAvatarMode, DesktopAvatarLayout>>;
+  subtitles_enabled?: boolean;
+  subtitle_position?: DesktopSubtitlePosition;
   scale: number;
   monitor: string;
   x: number;
@@ -195,6 +202,7 @@ export type AvatarOverlaySettings = {
 };
 
 export type AvatarPlacement = "desktop_overlay" | "in_app";
+export type AvatarQuality = "low" | "medium" | "high";
 export type InterfaceLocale = "ru" | "en";
 
 export type PublicSettings = {
@@ -228,6 +236,8 @@ export type PublicSettings = {
   avatar_enabled: boolean;
   avatar_placement: AvatarPlacement;
   avatar_in_app_visible: boolean;
+  avatar_in_app_quality: AvatarQuality;
+  avatar_desktop_quality: AvatarQuality;
   voice_tts_voice: string;
   voice_tts_style: string;
   voice_tts_expression_level: string;

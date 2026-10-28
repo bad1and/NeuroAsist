@@ -209,6 +209,8 @@ export function updateRuntimeSettings(payload: {
   live_conversation_echo_mode?: PublicSettings["live_conversation_echo_mode"];
   avatar_placement?: AvatarPlacement;
   avatar_in_app_visible?: boolean;
+  avatar_in_app_quality?: PublicSettings["avatar_in_app_quality"];
+  avatar_desktop_quality?: PublicSettings["avatar_desktop_quality"];
   coding_agent_enabled?: boolean;
   coding_model?: PublicSettings["coding_model"];
   coding_project_root?: string;
