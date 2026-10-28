@@ -46,16 +46,22 @@ discovers `apps/avatar-unity/Builds/NeuroAsistAvatar/NeuroAsistAvatar.exe`;
 the release build script maps the verified Player to the `avatar` resource.
 `NEUROASIST_AVATAR_EXECUTABLE` remains an override for a custom renderer.
 
-The shell gives Unity `NEUROASIST_BACKEND_URL` and `NEUROASIST_BACKEND_TOKEN`, enabling it to connect to the randomly selected, authenticated backend port. The tray **Show / hide avatar** action controls the active avatar presentation without restarting the renderer. In **Separate overlay** mode, hold `Ctrl+Alt` to temporarily make the click-through overlay interactive for drag/repositioning; `Ctrl+Alt+A` shows or hides it.
+The shell gives Unity `NEUROASIST_BACKEND_URL` and `NEUROASIST_BACKEND_TOKEN`, enabling it to connect to the randomly selected, authenticated backend port. The tray **Show / hide avatar** action controls the active presentation; `Ctrl+Alt+A` also shows or hides it. Desktop movement and resizing use the avatar's hover controls and their shared lock.
 
 ## Avatar placement
 
-In **Settings → System → Avatar**, choose where the renderer appears:
+In **Settings → Conversation → Avatar**, choose where the renderer appears:
 
 - **Inside Iris** presents the Unity player as an Iris-owned, transparent, borderless native surface in the lower-left column of the **Dialog** screen. It is hidden outside the chat, scales with the available chat area, follows DPI changes, and has no second visible application window or Alt+Tab entry. Its **Show in dialog** switch is independent from the external-overlay visibility setting.
-- **Separate overlay** preserves the desktop companion behaviour: a borderless, click-through Unity window that can stay above other applications.
+- **On the desktop** offers **Waist up**, anchored to the bottom of the monitor work area above the taskbar, and **Full body**, a standing figure that can move freely between monitors. Each mode remembers its own monitor, size and position. The monitor selector moves the active mode to a chosen display; unavailable displays fall back to the primary monitor.
 
-The choice is stored with the other non-secret runtime settings. On Windows, in-app mode starts Unity as a tiny hidden player, then converts its ready render window into a transparent popup owned by Iris. React supplies the exact DPI-aware chat-slot bounds with frame-coalesced updates; the owned popup follows normal window movement without fighting the Windows drag loop. The embedded profile caps Unity at 60 FPS, disables VSync, HDR, shadows, reflection probes and anisotropic filtering, and uses lightweight 2× MSAA to clean avatar edges without competing with the WebView. Its neutral Iris-matched colour key replaces the former saturated blue matte, greatly reducing coloured fringe around anti-aliased hair and clothing; the separate overlay keeps its own higher-quality presentation unchanged. Unity still runs as a supervised child process in both modes, so speech, lip sync, gestures and the authenticated WebSocket v2 protocol remain unchanged.
+Image quality is saved independently for **Inside Iris** and **On the desktop** and applies immediately. Low uses 2x MSAA at 30 FPS; Medium uses 4x MSAA at 60 FPS inside Iris or 30 FPS on the desktop; High uses 8x MSAA at 60 FPS. Shadow-map resolution follows the preset, while soft shadows remain enabled to preserve the character's original skin and clothing tones. Defaults are High inside Iris and Medium on the desktop. The GPU can fall back to its supported MSAA sample count.
+
+The choice is stored with the other non-secret runtime settings. Windows hosts Unity as a supervised transparent native popup, using D3D11 BitBlt and DWM coverage alpha. In-app ownership belongs to the main window; desktop ownership belongs to an independent transparent Tauri window, so minimizing Iris does not hide the desktop figure. Tauri alone controls desktop bounds and monitor/DPI conversion; the managed Unity host does not write its own bounds or scale its model root.
+
+Hover over the desktop figure to show microphone, Iris audio, text, tools, open-app and lock buttons. Unlocking reveals an upper-corner resize handle. The common lock prevents both moving and resizing while keeping the buttons usable; the locked figure passes clicks through to the desktop. Text and document attachments use the main window's existing conversation and audio owner. Attachments currently support TXT, MD and text PDF up to 10 MB.
+
+Desktop subtitles are independent from hover, appear during Iris speech, and disappear two seconds after playback ends. Idle snapshots and historical messages do not bring the last line back. They use at most two rendered lines and can be placed above, below, left or right. The host fits them inside the work area when the preferred side is unavailable. Audio mute keeps the speech clock and subtitles running and also mutes Unity's subsequent replies. New preference fields extend `/avatar/overlay`; legacy preferences migrate to the waist-up layout on first desktop-host initialization.
 
 ## Safe Mode and recovery
 

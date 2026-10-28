@@ -31,6 +31,14 @@ $env:NEUROASIST_UNITY_EDITOR = 'C:\Program Files\Unity\Hub\Editor\2022.3.62f3\Ed
 
 The output is `apps\avatar-unity\Builds\NeuroAsistAvatar\NeuroAsistAvatar.exe`. It is intentionally ignored by Git. Tauri discovers this local build and passes the loopback backend URL and short-lived authentication token at launch; starting the player from the Unity editor continues to use the settings asset's local fallback.
 
+Tauri passes the saved placement's quality as `NEUROASIST_AVATAR_QUALITY`
+(`low`, `medium`, `high`) before the first frame. The backend replays both
+preferences in `avatar.render.quality` on WebSocket hello and sends the same
+command after settings changes: `{ "in_app_quality": "high", "desktop_quality": "medium" }`.
+The renderer selects the field for its native host, retains it across sleep/wake,
+and uses the built-in Forward path for MSAA. The presets and defaults are listed
+in the [desktop guide](../desktop/README.md#avatar-placement).
+
 The code license does not grant redistribution rights for `IRIS.vrm` or the
 included animations. Their origin and unresolved release conditions are in
 [third-party assets](../../THIRD_PARTY_ASSETS.md).
