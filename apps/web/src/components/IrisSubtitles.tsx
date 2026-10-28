@@ -115,6 +115,9 @@ export interface IrisSubtitlesProps {
   onOpenMemory?: () => void;
   containerRef?: React.RefObject<HTMLDivElement | null>;
   compact?: boolean;
+  cueMaxChars?: number;
+  silentPlayback?: boolean;
+  onCueChange?: (text: string) => void;
 }
 
 export function IrisSubtitles({
@@ -127,6 +130,9 @@ export function IrisSubtitles({
   livePlaybackRevision = 0,
   containerRef,
   compact = false,
+  cueMaxChars = 45,
+  silentPlayback = false,
+  onCueChange,
 }: IrisSubtitlesProps) {
   const thinkingRef = useRef<HTMLDivElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -146,18 +152,34 @@ export function IrisSubtitles({
 
   // Split the latest message into subtitle cues
   const cues = useMemo(
-    () => splitIntoSubtitleCues(messageContent),
-    [messageContent],
+    () => splitIntoSubtitleCues(messageContent, cueMaxChars).flatMap(cue => {
+      if (cue.length <= cueMaxChars) return [cue];
+      return cue.match(new RegExp(`[\\s\\S]{1,${cueMaxChars}}`, "g")) ?? [];
+    }),
+    [messageContent, cueMaxChars],
   );
 
   // Core synchronization state
   const isInitialMountRef = useRef(true);
   const [activeCueIndex, setActiveCueIndex] = useState(() => (
-    voiceState === "speaking" ? 0 : (cues.length > 0 ? cues.length - 1 : 0)
+    voiceState === "speaking" || silentPlayback ? 0 : (cues.length > 0 ? cues.length - 1 : 0)
   ));
   const [speechCompleted, setSpeechCompleted] = useState(false);
   const lastMessageIdRef = useRef<string>(messageId);
   const wasSpeakingRef = useRef(false);
+  const cueCallback = useRef(onCueChange);
+  cueCallback.current = onCueChange;
+
+  useEffect(() => {
+    if (!silentPlayback || loading || voiceState === "speaking" || !messageId || !cues.length) return;
+    setActiveCueIndex(0); setSpeechCompleted(false);
+    let elapsed = 0;
+    const timers = cues.slice(0, -1).map((cue, index) => {
+      elapsed += Math.max(1400, cue.length / 14 * 1000);
+      return window.setTimeout(() => setActiveCueIndex(index+1), elapsed);
+    });
+    return () => timers.forEach(timer => clearTimeout(timer));
+  }, [silentPlayback, loading, voiceState, messageId, cues]);
 
   // Thinking wave animation
   useEffect(() => {
@@ -175,7 +197,7 @@ export function IrisSubtitles({
     if (isInitialMountRef.current) {
       isInitialMountRef.current = false;
       lastMessageIdRef.current = messageId;
-      setActiveCueIndex(voiceState === "speaking" ? 0 : (cues.length > 0 ? cues.length - 1 : 0));
+      setActiveCueIndex(voiceState === "speaking" || silentPlayback ? 0 : (cues.length > 0 ? cues.length - 1 : 0));
       return;
     }
 
@@ -239,6 +261,7 @@ export function IrisSubtitles({
   // Once playback ends, keep only the final cue as the muted previous line.
   // A newly generated but not-yet-spoken message remains current.
   useEffect(() => {
+    if (silentPlayback) { wasSpeakingRef.current = false; return; }
     if (voiceState === "speaking" || activeAudio) {
       wasSpeakingRef.current = true;
       setSpeechCompleted(false);
@@ -249,7 +272,7 @@ export function IrisSubtitles({
       setActiveCueIndex(cues.length > 0 ? cues.length - 1 : 0);
       setSpeechCompleted(true);
     }
-  }, [voiceState, activeAudio, loading, hasVoicePending, cues.length]);
+  }, [voiceState, activeAudio, loading, hasVoicePending, cues.length, silentPlayback]);
 
   // HTML5 Audio Sync (REST Mode)
   useEffect(() => {
@@ -312,6 +335,9 @@ export function IrisSubtitles({
   // Build the visible cue stack
   const MAX_VISIBLE_CUES = 2;
   const effectiveIndex = Math.min(Math.max(0, activeCueIndex), Math.max(0, cues.length - 1));
+  useEffect(() => {
+    cueCallback.current?.(cues[effectiveIndex] ?? "");
+  }, [cues, effectiveIndex]);
 
   const visibleCues: { text: string; index: number; key: string; age: number }[] = [];
 

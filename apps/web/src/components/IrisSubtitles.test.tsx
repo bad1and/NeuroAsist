@@ -61,6 +61,17 @@ describe("splitIntoSubtitleCues", () => {
 });
 
 describe("IrisSubtitles Component", () => {
+  it("advances short desktop cues without audio and publishes every fragment", () => {
+    vi.useFakeTimers();
+    const onCueChange=vi.fn();
+    render(<IrisSubtitles messages={[{id:"silent",role:"assistant",content:"Первый фрагмент. Второй фрагмент. Третий фрагмент."}]}
+      loading={false} voiceState="idle" cueMaxChars={20} silentPlayback onCueChange={onCueChange}/>);
+    act(()=>vi.advanceTimersByTime(10_000));
+    const calls=onCueChange.mock.calls.map(([text])=>text);
+    expect(calls[0]).toContain("Первый");expect(calls[calls.length-1]).toContain("Третий");
+    expect(calls.every(text=>text.length<=20)).toBe(true);
+    vi.useRealTimers();
+  });
   it("отображает статус размышления, когда loading=true", () => {
     render(
       <IrisSubtitles
