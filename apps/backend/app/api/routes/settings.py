@@ -382,6 +382,10 @@ async def patch_runtime_settings(
             detail="Could not persist settings",
         ) from error
     runtime_settings = committed_settings
+    if "memory_incognito" in changes:
+        usage = getattr(request.app.state, "conversation_usage", None)
+        if usage is not None:
+            usage.set_paused(live_runtime_settings.memory_incognito)
     if payload.avatar_in_app_quality is not None or payload.avatar_desktop_quality is not None:
         await request.app.state.avatar_service.configure_render_quality(RenderQualityPayload(
             in_app_quality=live_runtime_settings.avatar_in_app_quality,

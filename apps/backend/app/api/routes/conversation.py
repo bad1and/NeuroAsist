@@ -18,6 +18,22 @@ class SessionResetRequest(BaseModel):
     boundary_reason: str = Field(default="new_dialog", pattern="^(new_dialog|manual_reset)$")
 
 
+class ConversationUsageResponse(BaseModel):
+    active_seconds: int = Field(ge=0)
+    tracking_started_at: str
+
+
+@router.get("/usage", response_model=ConversationUsageResponse)
+def conversation_usage(request: Request) -> dict[str, object]:
+    tracker = getattr(request.app.state, "conversation_usage", None)
+    if tracker is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Conversation usage unavailable")
+    try:
+        return tracker.snapshot()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+
 def _state_view(request: Request) -> dict[str, object]:
     service = getattr(request.app.state, "character_state_service", None)
     if service is None:

@@ -12,6 +12,9 @@ class FailingTTSPreloadVoiceService:
     def __init__(self, settings: Settings) -> None:
         self.tts_provider = SimpleNamespace(name=settings.voice_tts_provider)
 
+    def set_tts_expression_level(self, _level: str) -> None:
+        pass
+
     def available_tts_voices(self) -> list[str]:
         return ["ru_f1"]
 
@@ -80,6 +83,7 @@ def test_startup_continues_when_tts_preload_fails(
 ) -> None:
     settings = Settings(
         deepseek_api_key="test-key",
+        app_data_dir=str(tmp_path / "app-data"),
         sqlite_path=str(tmp_path / "startup.sqlite3"),
         log_to_file=False,
         voice_preload_stt_model=False,
@@ -94,6 +98,7 @@ def test_startup_continues_when_tts_preload_fails(
 
     with TestClient(app) as client:
         response = client.get("/health")
+        usage = client.get("/conversation/usage")
         # Voice preloading runs in the background after HTTP readiness.
         deadline = time.monotonic() + 5
         while True:
@@ -105,6 +110,8 @@ def test_startup_continues_when_tts_preload_fails(
             time.sleep(0.01)
 
     assert response.status_code == 200
+    assert usage.status_code == 200
+    assert usage.json()["active_seconds"] == 0
     assert any(event["type"] == "voice.tts_preload_failed" for event in events)
     assert any(event["type"] == "backend.status" for event in events)
 

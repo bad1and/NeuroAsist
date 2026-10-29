@@ -15,6 +15,7 @@ import type {
   MemoryTopic,
   MemoryCommitment,
   ConversationDebug,
+  ConversationUsage,
   CharacterStateView,
   CharacterStateEvent,
   CodingStatus,
@@ -382,6 +383,10 @@ export function getTimelineMessages(
 
 export function getTimelineJournal(): Promise<{ items: TimelineJournalItem[] }> {
   return requestJson("/timeline/journal");
+}
+
+export function getConversationUsage(): Promise<ConversationUsage> {
+  return requestJson("/conversation/usage");
 }
 
 export function searchTimeline(query: string): Promise<{ items: TimelineMessage[] }> {

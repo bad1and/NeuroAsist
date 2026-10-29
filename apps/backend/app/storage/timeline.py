@@ -20,7 +20,7 @@ from apps.backend.app.memory.evidence import digest, fingerprint, matches_finger
 
 PRIMARY_RELATIONSHIP_ID = "primary"
 PRIMARY_TIMELINE_ID = "primary-timeline"
-LATEST_SCHEMA_VERSION = 21
+LATEST_SCHEMA_VERSION = 22
 MEMORY_CONSOLIDATION_DEBOUNCE_SECONDS = 75
 
 _MEMORY_IMMEDIATE_CUE = re.compile(
@@ -216,6 +216,14 @@ class TimelineStore:
                 ).fetchall():
                     self._suppress_memory_conn(connection, self._memory_row(row))
                 connection.execute("INSERT INTO schema_migrations (version, applied_at) VALUES (21, ?)", (self._now(),))
+            if 22 not in applied:
+                connection.execute(
+                    "CREATE TABLE IF NOT EXISTS conversation_usage ("
+                    "id INTEGER PRIMARY KEY CHECK (id = 1), active_seconds REAL NOT NULL DEFAULT 0 CHECK (active_seconds >= 0), "
+                    "tracking_started_at TEXT NOT NULL)"
+                )
+                connection.execute("INSERT OR IGNORE INTO conversation_usage (id, tracking_started_at) VALUES (1, ?)", (self._now(),))
+                connection.execute("INSERT INTO schema_migrations (version, applied_at) VALUES (22, ?)", (self._now(),))
             # v12 reached some development databases before all of its
             # additive objects existed.  Keep this repair idempotent and run
             # it even when the migration marker is already present.
@@ -756,6 +764,14 @@ class TimelineStore:
                 if exists is None:
                     connection.execute("UPDATE conversation_timelines SET current_episode_id = NULL WHERE id = ?", (PRIMARY_TIMELINE_ID,))
             return cursor.rowcount
+
+    def conversation_usage(self) -> dict[str, object]:
+        with self._connect() as connection:
+            return dict(connection.execute("SELECT active_seconds, tracking_started_at FROM conversation_usage WHERE id = 1").fetchone())
+
+    def save_conversation_usage(self, active_seconds: float) -> None:
+        with self._connect() as connection:
+            connection.execute("UPDATE conversation_usage SET active_seconds = ? WHERE id = 1", (max(0.0, active_seconds),))
 
     def journal(self) -> list[dict[str, object]]:
         with self._connect() as connection:

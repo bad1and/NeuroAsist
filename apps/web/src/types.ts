@@ -547,6 +547,11 @@ export type TimelineJournalItem = {
   token_estimate?: number;
 };
 
+export type ConversationUsage = {
+  active_seconds: number;
+  tracking_started_at: string;
+};
+
 export type MemoryStatus = "active" | "superseded" | "rejected" | "deleted" | "expired";
 
 export type MemoryItem = {

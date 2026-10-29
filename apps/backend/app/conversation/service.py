@@ -138,6 +138,7 @@ class LiveConversationService:
         state_service: CharacterStateService | None = None,
         dialogue_style_service: DialogueStyleService | None = None,
         parallel_appraisal: bool = False,
+        activity_recorder: Callable[[str], None] | None = None,
     ) -> None:
         self._store = store
         self._runtime = runtime_settings
@@ -151,6 +152,7 @@ class LiveConversationService:
         self._state_service = state_service
         self._dialogue_style_service = dialogue_style_service
         self._parallel_appraisal = parallel_appraisal
+        self._record_activity = activity_recorder
         self._turn_detector = None
         self._turn_coordinator = None
         self._stt_semaphore = asyncio.Semaphore(2)
@@ -741,6 +743,12 @@ class LiveConversationService:
             session.last_human_activity_at = time.monotonic()
 
         if message is not None and not stale:
+            if (
+                self._record_activity is not None and not self._runtime.memory_incognito
+                and not echo and decision.reason not in ambient_reasons
+                and decision.action in {ConversationAction.RESPOND, ConversationAction.BACKCHANNEL}
+            ):
+                self._record_activity("user:" + message.id)
             await asyncio.to_thread(
                 self._store.set_observation_decision,
                 message.id,
@@ -1453,7 +1461,7 @@ class LiveConversationService:
         if self._runtime.memory_incognito or not content:
             return
         source = self._store.message_for_utterance(utterance_id)
-        assistant, _ = self._store.append_message(
+        assistant, created = self._store.append_message(
             role="assistant",
             content=content,
             input_mode="voice",
@@ -1465,6 +1473,8 @@ class LiveConversationService:
             metadata={"playback_acknowledged": True, **(metadata or {})},
         )
         tokens = (metadata or {}).get("tokens")
+        if created and self._record_activity is not None and status == "completed":
+            self._record_activity("assistant:" + assistant.id)
         if source is not None and isinstance(tokens, dict):
             self._store.merge_message_metadata(
                 source.id,

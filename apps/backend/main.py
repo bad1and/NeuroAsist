@@ -81,6 +81,7 @@ from apps.backend.app.conversation.schemas import ConversationAction, Conversati
 from apps.backend.app.conversation.service import LiveConversationService
 from apps.backend.app.conversation.state_service import CharacterStateService
 from apps.backend.app.conversation.turn_coordinator import ConversationTurnCoordinator
+from apps.backend.app.conversation.usage import ConversationUsageTracker
 from apps.backend.app.conversation.turn import SmartTurnDetector
 from apps.backend.app.llm.providers.deepseek import DeepSeekProvider, close_shared_clients
 from apps.backend.app.llm.telemetry import llm_telemetry
@@ -211,6 +212,12 @@ def create_app() -> FastAPI:
     )
     runtime_settings_store = RuntimeSettingsStore(settings.app_data_path / "settings.json")
     runtime_settings = runtime_settings_store.load(runtime_defaults)
+    conversation_usage = ConversationUsageTracker(timeline_store, paused=runtime_settings.memory_incognito) if timeline_store is not None else None
+
+    def record_conversation_activity(event_id: str) -> None:
+        if conversation_usage is not None and not runtime_settings.memory_incognito:
+            conversation_usage.record_activity(event_id)
+
     coding_agent_service = CodingAgentService(settings, runtime_settings, timeline_store, event_bus.publish)
     from apps.backend.app.coding.setup import CodingImagePreparation
     coding_image_preparation = CodingImagePreparation(settings)
@@ -345,8 +352,9 @@ def create_app() -> FastAPI:
         state_service=character_state_service,
         dialogue_style_service=dialogue_style_service,
         parallel_appraisal=settings.voice_live_parallel_appraisal,
+        activity_recorder=record_conversation_activity,
     ) if timeline_store is not None else None
-    turn_coordinator = ConversationTurnCoordinator(timeline_store, event_bus.publish) if timeline_store is not None else None
+    turn_coordinator = ConversationTurnCoordinator(timeline_store, event_bus.publish, record_conversation_activity) if timeline_store is not None else None
     if conversation_service is not None:
         conversation_service.bind_turn_coordinator(turn_coordinator)
     voice_service = VoiceService(settings)
@@ -882,6 +890,12 @@ def create_app() -> FastAPI:
     semantic_sync_worker_task: asyncio.Task[None] | None = None
     memory_extraction_worker_task: asyncio.Task[None] | None = None
     coding_worker_task: asyncio.Task[None] | None = None
+    conversation_usage_task: asyncio.Task[None] | None = None
+
+    async def checkpoint_conversation_usage() -> None:
+        while conversation_usage is not None:
+            await asyncio.sleep(ConversationUsageTracker.CHECKPOINT_SECONDS)
+            await asyncio.to_thread(conversation_usage.checkpoint)
 
     async def cleanup_tts_audio_forever() -> None:
         try:
@@ -1295,6 +1309,7 @@ def create_app() -> FastAPI:
     async def startup() -> None:
         nonlocal tts_audio_cleanup_task, storage_maintenance_task, voice_preload_task, avatar_start_task
         nonlocal summary_worker_task, semantic_sync_worker_task, memory_extraction_worker_task, reflection_worker_task, coding_worker_task
+        nonlocal conversation_usage_task
 
         try:
             if timeline_store is not None and settings.database_path.exists():
@@ -1332,6 +1347,8 @@ def create_app() -> FastAPI:
                         },
                     )
             await asyncio.to_thread(run_storage_migrations)
+            if conversation_usage is not None:
+                await asyncio.to_thread(conversation_usage.start)
         except Exception:
             logger.critical("Storage initialization failed", exc_info=True)
             event_bus.publish(
@@ -1343,6 +1360,11 @@ def create_app() -> FastAPI:
             raise
 
         update_readiness("text_chat", "ready")
+        if conversation_usage is not None:
+            conversation_usage_task = asyncio.create_task(
+                _supervise_worker("conversation_usage", checkpoint_conversation_usage, event_bus.publish),
+                name="worker:conversation-usage",
+            )
 
         event_bus.publish(
             "backend.status",
@@ -1414,6 +1436,7 @@ def create_app() -> FastAPI:
                 summary_worker_task,
                 semantic_sync_worker_task,
                 memory_extraction_worker_task,
+                conversation_usage_task,
             )
             if task is not None
         )
@@ -1437,6 +1460,8 @@ def create_app() -> FastAPI:
         await voice_input_session_manager.close()
         if conversation_service is not None:
             await conversation_service.close()
+        if conversation_usage is not None:
+            await asyncio.to_thread(conversation_usage.close)
         if timeline_store is not None:
             await asyncio.to_thread(timeline_store.close_current_episode, "application_shutdown")
         if summary_worker is not None:
@@ -1506,6 +1531,7 @@ def create_app() -> FastAPI:
     app.state.context_manager = context_manager
     app.state.memory_service = memory_service
     app.state.conversation_service = conversation_service
+    app.state.conversation_usage = conversation_usage
     app.state.character_state_service = character_state_service
     app.state.dialogue_style_service = dialogue_style_service
     app.state.meme_library = meme_library

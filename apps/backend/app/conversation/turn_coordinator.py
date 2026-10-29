@@ -60,9 +60,11 @@ class ConversationTurnCoordinator:
         self,
         store: TimelineStore,
         event_publisher: Callable[[str, str, str, dict[str, object]], None] | None = None,
+        activity_recorder: Callable[[str], None] | None = None,
     ) -> None:
         self._store = store
         self._publish = event_publisher
+        self._record_activity = activity_recorder
         self._locks: dict[str, asyncio.Lock] = {}
         self._tasks: dict[tuple[str, int], _GenerationTask] = {}
         self._generations: dict[str, int | None] = {}
@@ -109,6 +111,8 @@ class ConversationTurnCoordinator:
                 self._emit("turn.deduplicated", session_id, result)
                 return result
             self._generations[session_id] = result.generation
+            if self._record_activity is not None and input_mode in {"text", "voice"}:
+                self._record_activity("user:" + result.user_message_id)
             # The durable commit above is deliberately before this cancellation.
             await asyncio.to_thread(
                 self._store.interrupt_stale_assistant_leases,
@@ -182,6 +186,8 @@ class ConversationTurnCoordinator:
         if message.status != "completed" or not self.is_current(lease):
             raise asyncio.CancelledError
         self._tasks.pop((session_id, lease.generation), None)
+        if self._record_activity is not None and message.input_mode in {"text", "voice"}:
+            self._record_activity("assistant:" + message.id)
         return message
 
     async def interrupt_assistant(self, session_id: str, lease: AssistantLease, prefix: str = "") -> StoredTimelineMessage:

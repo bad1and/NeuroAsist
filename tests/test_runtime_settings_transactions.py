@@ -45,6 +45,23 @@ def test_invalid_voice_preference_does_not_apply_other_fields(monkeypatch, tmp_p
     assert store.path.read_bytes() == before
 
 
+def test_incognito_pauses_usage_only_after_settings_are_persisted(monkeypatch, tmp_path):
+    runtime = RuntimeSettings()
+    store = RuntimeSettingsStore(tmp_path / "settings.json")
+    request = _request(runtime, store, tmp_path)
+    applied = []
+    request.app.state.conversation_usage = SimpleNamespace(set_paused=applied.append)
+    monkeypatch.setattr(settings_route, "get_public_settings", lambda _request: {})
+    asyncio.run(settings_route.patch_runtime_settings(RuntimeSettingsPatch(memory_incognito=True), request))
+    assert applied == [True]
+    assert store.load(RuntimeSettings()).memory_incognito is True
+    monkeypatch.setattr(store, "save", lambda _settings: (_ for _ in ()).throw(OSError("disk full")))
+    with pytest.raises(HTTPException):
+        asyncio.run(settings_route.patch_runtime_settings(RuntimeSettingsPatch(memory_incognito=False), request))
+    assert applied == [True]
+    assert runtime.memory_incognito is True
+
+
 def test_old_settings_keep_data_and_default_voice_preferences(tmp_path):
     path = tmp_path / "settings.json"
     path.write_text(json.dumps({"schema_version": 1, "settings": {"location_city": "Москва", "memory_incognito": True}}), encoding="utf-8")
