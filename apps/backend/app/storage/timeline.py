@@ -14,7 +14,7 @@ from typing import Any, Callable, Iterator
 from uuid import uuid4
 
 from apps.backend.app.llm.base import ChatMessage
-from apps.backend.app.memory.signals import MEMORY_CORRECTION_CUE, personal_event
+from apps.backend.app.memory.signals import ACTIVITY_COMPLETION_CUE, MEMORY_CORRECTION_CUE, personal_event
 from apps.backend.app.memory.evidence import digest, fingerprint, matches_fingerprint, terms
 
 
@@ -1959,6 +1959,8 @@ class TimelineStore:
             direct_body = " | ".join(user_texts)
         else:
             def significance(text):
+                if ACTIVITY_COMPLETION_CUE.search(text):
+                    return 4
                 if personal_event(text):
                     return 3
                 if re.search(r"(?iu)\b(?:у\s+меня|мой|моя|мо[её]|я\s+(?:изучаю|работаю|люблю|живу))\b", text):
@@ -2086,6 +2088,53 @@ class TimelineStore:
                 (PRIMARY_TIMELINE_ID, *unique_ids),
             ).fetchall()
         return {str(row["id"]): str(row["occurred_at"]) for row in rows}
+
+    def temporal_memory_candidates(self, *, before_at: str, before_sequence: int | None = None, limit: int = 128) -> list[dict[str, object]]:
+        """Bounded recall ordered by user evidence, independent of extraction time."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT mi.* FROM memory_items mi
+                   JOIN json_each(mi.source_message_ids_json) source
+                   JOIN conversation_messages m ON m.id = source.value
+                   WHERE mi.relationship_id = ? AND mi.status = 'active'
+                     AND m.timeline_id = ? AND m.role = 'user' AND m.status = 'completed'
+                     AND julianday(m.created_at) <= julianday(?)
+                     AND (? IS NULL OR m.sequence_no < ?)
+                   GROUP BY mi.id
+                   ORDER BY MAX(julianday(m.created_at)) DESC LIMIT ?""",
+                (PRIMARY_RELATIONSHIP_ID, PRIMARY_TIMELINE_ID, before_at, before_sequence, before_sequence, limit),
+            ).fetchall()
+        return [self._memory_row(row) for row in rows]
+
+    def source_messages(self, message_ids: list[str]) -> dict[str, StoredTimelineMessage]:
+        ids = list(dict.fromkeys(message_ids))[:2560]
+        if not ids:
+            return {}
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM conversation_messages WHERE timeline_id = ? AND id IN ({','.join('?' for _ in ids)})",
+                (PRIMARY_TIMELINE_ID, *ids),
+            ).fetchall()
+        return {row["id"]: self._row_to_message(row) for row in rows}
+
+    def recall_source_messages(
+        self, *, before_at: str, before_sequence: int | None = None, limit: int = 80,
+        since_at: str | None = None, until_at: str | None = None,
+    ) -> list[StoredTimelineMessage]:
+        """Read original user evidence across session breaks, never future turns."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT * FROM conversation_messages
+                   WHERE timeline_id = ? AND role = 'user' AND status = 'completed'
+                     AND julianday(created_at) <= julianday(?)
+                     AND (? IS NULL OR sequence_no < ?)
+                     AND (? IS NULL OR julianday(created_at) >= julianday(?))
+                     AND (? IS NULL OR julianday(created_at) < julianday(?))
+                   ORDER BY sequence_no DESC LIMIT ?""",
+                (PRIMARY_TIMELINE_ID, before_at, before_sequence, before_sequence,
+                 since_at, since_at, until_at, until_at, limit),
+            ).fetchall()
+        return [self._row_to_message(row) for row in rows]
 
     def merge_message_metadata(
         self,

@@ -10,6 +10,11 @@ MEMORY_CORRECTION_CUE = re.compile(
     r")"
 )
 
+ACTIVITY_COMPLETION_CUE = re.compile(
+    r"(?iu)\b(?:уже\s+(?:вс[её]\s+)?(?:исправ\w*|пофикс\w*|сделал\w*|закончил\w*)|"
+    r"убрал\w*\b.{0,35}\bконфликт\w*)\b"
+)
+
 
 PERSONAL_EVENT_CUE = re.compile(
     r"(?iu)^\s*(?:(?:я|мы|сегодня|вчера|недавно|наконец|теперь)\s+)*"

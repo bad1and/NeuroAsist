@@ -14,9 +14,10 @@ from typing import Any, Literal
 
 from apps.backend.app.runtime.settings import RuntimeSettings
 from apps.backend.app.memory.consolidation import CommitmentProposal, ConsolidationResult, FactProposal, TopicProposal
-from apps.backend.app.memory.signals import MEMORY_CORRECTION_CUE, personal_event
+from apps.backend.app.memory.signals import ACTIVITY_COMPLETION_CUE, MEMORY_CORRECTION_CUE, personal_event
 from apps.backend.app.memory.evidence import matching_units, normalize as evidence_normalize, terms as evidence_terms
 from apps.backend.app.memory.lifecycle import condition_matches, freshness, is_style_memory, local_style_only, parse_time, scope_correction, style_request, style_requests
+from apps.backend.app.memory.temporal import TEMPORAL_CUE, TemporalRecall, is_temporal_followup, parse_timestamp, recall_subject, subject_matches, temporal_recall
 from apps.backend.app.memory.slots import (
     KNOWN_MEMORY_SLOTS,
     MEMORY_SLOT_POLICIES,
@@ -634,7 +635,122 @@ class MemoryService:
 
     def retrieve(self, query: str, limit: int = 6) -> list[dict[str, object]]:
         with query_embedding_scope():
+            recall = temporal_recall(query)
+            if recall is not None:
+                return self.recall_temporal(query, recall, limit=limit)[0]
             return self._retrieve(query, limit)
+
+    def recall_temporal(
+        self, query: str, recall: TemporalRecall, *, before_sequence: int | None = None, limit: int = 6,
+    ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+        """Select by source/event dates before ranking; do not refresh or create memory."""
+        if not self._enabled or self.incognito or self._runtime.memory_mode == "off":
+            return [], []
+        subject = recall_subject(query)
+        candidates = self._store.temporal_memory_candidates(
+            before_at=recall.reference.isoformat(), before_sequence=before_sequence,
+        )
+        sources = self._store.source_messages([
+            str(source_id) for memory in candidates for source_id in memory.get("source_message_ids", [])
+        ])
+        ranked = []
+        for memory in candidates:
+            evidence = [sources[source_id] for source_id in memory.get("source_message_ids", []) if source_id in sources]
+            # A consolidated record with later evidence cannot leak into an earlier turn.
+            if any(
+                (before_sequence is not None and source.sequence_no >= before_sequence)
+                or parse_timestamp(source.created_at) is None
+                or parse_timestamp(source.created_at) > recall.reference
+                for source in evidence
+            ):
+                continue
+            evidence = [source for source in evidence if source.role == "user" and self.is_eligible_automatic_source(source)]
+            if not evidence or not self._applicable_memory(memory, query):
+                continue
+            if not subject_matches(subject, str(memory["value_text"])):
+                continue
+            evidence.sort(key=lambda source: parse_timestamp(source.created_at))
+            last = evidence[-1]
+            event_day, basis = recall.event_day(str(memory["value_text"]), last.created_at)
+            if basis == "report":
+                event_day, basis = recall.event_day(last.effective_content, last.created_at)
+            if recall.day is not None and event_day != recall.day:
+                continue
+            if self._store.memory_is_suppressed(memory):
+                continue
+            ranked.append({
+                **memory, "namespace": "factual_memory", "recall_source_at": last.created_at,
+                "recall_day": event_day.isoformat() if event_day else None, "recall_time_basis": basis,
+                "retrieval": {"score": 1.0, "reasons": ["source_time", "temporal_recall"]},
+            })
+        ranked.sort(key=lambda item: parse_timestamp(item["recall_source_at"]), reverse=True)
+        for position, memory in enumerate(ranked):
+            # Context trimming sorts by score too; equal scores would replace
+            # chronological priority with random memory-ID order.
+            memory["retrieval"]["score"] = 1.0 / (position + 1)
+
+        history = self._store.recall_source_messages(
+            before_at=recall.reference.isoformat(), before_sequence=before_sequence,
+        )
+        if recall.day is not None:
+            midnight = datetime.combine(recall.day, datetime.min.time(), tzinfo=recall.reference.tzinfo)
+            day_sources = self._store.recall_source_messages(
+                before_at=recall.reference.isoformat(), before_sequence=before_sequence,
+                since_at=midnight.isoformat(), until_at=(midnight + timedelta(days=1)).isoformat(),
+            )
+            history = sorted({source.id: source for source in [*history, *day_sources]}.values(), key=lambda source: source.sequence_no, reverse=True)
+        eligible = []
+        for source in history:
+            text = source.effective_content.strip()
+            if not self.is_eligible_automatic_source(source) or temporal_recall(text) is not None or is_temporal_followup(text):
+                continue
+            if self._contains_secret(text.casefold()):
+                continue
+            if (
+                len(text.split()) < 3 and not ACTIVITY_COMPLETION_CUE.search(text)
+                or re.fullmatch(r"(?iu)(?:привет\w*|здравствуй\w*|здорово|ирис|сегодня|вчера)[\s,!.?]*", text)
+            ):
+                continue
+            event_day, basis = recall.event_day(text, source.created_at)
+            if recall.day is not None and event_day != recall.day:
+                continue
+            eligible.append((source, event_day, basis))
+        # Match the subject at episode level so short outcome/correction turns
+        # are retained even when they do not repeat the original nouns.
+        episode_ids = list(dict.fromkeys(
+            source.episode_id for source, _, _ in eligible
+            if subject_matches(subject, source.effective_content)
+        ))[:1 if recall.latest else 2]
+        chosen = [item for item in eligible if item[0].episode_id in episode_ids][:40]
+        chosen.reverse()
+        excerpts = []
+        for episode_id in episode_ids:
+            group = [item for item in chosen if item[0].episode_id == episode_id]
+            # Keep the initial subject and the latest result inside a small prompt.
+            selected = group if len(group) <= 8 else [group[0], *group[-7:]]
+            for source, event_day, basis in selected:
+                # Raw history has not passed the canonical fact classifier.
+                # Apply consent explicitly, including common diagnostic wording
+                # that does not contain the noun "диагноз" verbatim.
+                sensitive = self._contains_sensitive(source.effective_content.casefold()) or bool(re.search(
+                    r"(?iu)\b(?:диагност\w*|диабет\w*|инсулин\w*)\b", source.effective_content,
+                ))
+                if not self._derived_allowed(
+                    source.effective_content, [source.id], reading=True,
+                    sensitivity="sensitive" if sensitive else "normal",
+                ):
+                    continue
+                local_at = parse_timestamp(source.created_at).astimezone(recall.reference.tzinfo)
+                excerpts.append({
+                    "message_id": source.id, "episode_id": source.episode_id,
+                    "reported_at": local_at.isoformat(timespec="minutes"),
+                    "reported_day": recall.relative_label(source.created_at),
+                    "event_date": event_day.isoformat() if basis == "event" and event_day else None,
+                    "time_basis": basis,
+                    "text": source.effective_content[:280 if source is group[0][0] else 180],
+                })
+        excerpts.sort(key=lambda item: parse_timestamp(item["reported_at"]))
+        return ranked[:limit], excerpts
 
     def _retrieve(self, query: str, limit: int) -> list[dict[str, object]]:
         if not self._enabled or self.incognito or self._runtime.memory_mode == "off":
@@ -2835,8 +2951,7 @@ class MemoryService:
 
     @staticmethod
     def _is_temporal_query(query: str) -> bool:
-        normalized = query.lower()
-        return any(marker in normalized for marker in ("раньше", "вчера", "сегодня", "в прошлый раз", "когда мы", "до этого", "потом", "previously", "yesterday", "last time"))
+        return TEMPORAL_CUE.search(query) is not None
 
     @staticmethod
     def _temporal_score(created_at: str) -> float:
