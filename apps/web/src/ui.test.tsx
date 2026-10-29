@@ -10,7 +10,7 @@ const api = vi.hoisted(() => ({
   getVoicePreview: vi.fn(),
   getStatus: vi.fn(), getSettings: vi.fn(), getAvatarStatus: vi.fn(), getEvents: vi.fn(),
   getReadiness: vi.fn(),
-  getTimelineMessages: vi.fn(), getModels: vi.fn(), getBackups: vi.fn(), getAvatarOverlay: vi.fn(),
+  getTimelineMessages: vi.fn(), getConversationUsage: vi.fn(), getModels: vi.fn(), getBackups: vi.fn(), getAvatarOverlay: vi.fn(),
   getMemories: vi.fn(), createMemory: vi.fn(), getMemoryAudit: vi.fn(),
   getMemoryTopics: vi.fn(), getMemoryCommitments: vi.fn(),
   getPronunciations: vi.fn(), updatePronunciations: vi.fn(), updateVoiceExpression: vi.fn(), updateVoiceStyle: vi.fn(),
@@ -100,6 +100,7 @@ beforeEach(() => {
   api.getAvatarStatus.mockResolvedValue({ enabled: false, protocol_version: 1, broadcast_policy: "", client_count: 0, clients: [], emotion_engine: { mapping_valid: true, current_emotion: "neutral", target_emotion: "neutral", intensity: 0, gesture: "", motion_profile: "", attack_ms: 0, minimum_hold_ms: 0, release_ms: 0, generation: 0, speaking: false } });
   api.getEvents.mockResolvedValue({ events: [] });
   api.getTimelineMessages.mockResolvedValue({ items: [], next_offset: null });
+  api.getConversationUsage.mockResolvedValue({ active_seconds: 0, tracking_started_at: "2026-10-29T00:00:00Z" });
   api.interruptVoiceSession.mockResolvedValue(undefined);
   api.resetConversationSession.mockResolvedValue({ session_id: "test-session", messages: 0, episodes: 0 });
   api.getConversationSession.mockResolvedValue({ session_id: "test-session", created: false });
@@ -719,9 +720,10 @@ describe("русский интерфейс", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "О чём поговорим?" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Iris", level: 1 })).toBeInTheDocument();
     expect(await screen.findByText("Идеи интерфейса")).toBeInTheDocument();
-    expect(screen.getByText("Проверьте, что Iris запомнила, и исправьте неточности.")).toBeInTheDocument();
+    expect(screen.getByTestId("overview-stat-conversations-value")).toHaveTextContent("1");
+    expect(screen.getByRole("region", { name: "Статистика общения" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Начать диалог/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Начать" }));
     expect(await screen.findByPlaceholderText("Ввод сообщения...")).toBeInTheDocument();

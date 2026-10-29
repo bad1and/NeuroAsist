@@ -1,30 +1,41 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  IconInterfaceArrowUpRight as ArrowUpRight, IconInterfaceArrowRight as ArrowRight,
+  IconInterfaceRefresh as RotateCw, IconMailChatBubbleTextSquare as MessageCircle,
+  IconInterfaceTimeStopWatchCircle, IconInterfaceLayers,
+} from "./CustomIcons";
 import { MaterialButton } from "./components/MaterialButton";
 import { OverviewTips } from "./components/OverviewTips";
+import { ArtworkImage, OverviewGallery } from "./components/OverviewGallery";
 import type { SettingsSection } from "./settings/registry";
-import {
-  IconComputerRobotCyborg1, IconMailChatBubbleTextSquare,
-  IconInterfaceCursorArrow2, IconInterfaceCalendarMark, IconInterfaceArrowUpRight,
-} from "./CustomIcons";
-import { getMemories, getTimelineJournal, getTimelineMessages } from "./api";
-import type { MemoryItem, TimelineJournalItem, TimelineMessage } from "./types";
-import { getReminders, type Reminder } from "./product-api";
-import { LoadingRing } from "./components/LoadingRing";
+import { getConversationUsage, getLlmTokenStats, getTimelineJournal, getTimelineMessages } from "./api";
+import type { ConversationUsage, TimelineJournalItem, TimelineMessage } from "./types";
 import { interfaceIntlLocale } from "./i18n";
 import { animateStaggerCards } from "./animations";
+import { OVERVIEW_HERO_ART } from "./overview-art";
 
-function formatDate(value: string): string {
+function formatDate(value: string, short = false): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat(interfaceIntlLocale(), {
-    day: "numeric", month: "long", hour: "2-digit", minute: "2-digit",
+    day: "numeric", month: "long", ...(!short ? { hour: "2-digit", minute: "2-digit" } as const : {}),
     year: date.getFullYear() !== new Date().getFullYear() ? "numeric" : undefined,
   }).format(date);
 }
 
-export function OverviewPage({
-  isActive = true, onOpenChat, onOpenHistory, onOpenMemory, onOpenPlans, onOpenSettings,
-}: {
+export function formatConversationTime(seconds: number): string {
+  const english = interfaceIntlLocale() === "en-US";
+  const min = english ? "min" : "мин";
+  const hour = english ? "h" : "ч";
+  const minutes = Math.floor(Math.max(0, seconds) / 60);
+  if (!minutes) return `${seconds > 0 ? "< 1" : "0"} ${min}`;
+  const hours = Math.floor(minutes / 60);
+  return hours ? `${hours.toLocaleString(interfaceIntlLocale())} ${hour}${minutes % 60 ? ` ${minutes % 60} ${min}` : ""}` : `${minutes} ${min}`;
+}
+
+type SourceErrors = { history: boolean; usage: boolean; tokens: boolean };
+
+export function OverviewPage({ isActive = true, onOpenChat, onOpenHistory, onOpenMemory, onOpenSettings }: {
   isActive?: boolean;
   onOpenChat: () => void;
   onOpenHistory: (episode?: TimelineJournalItem) => void;
@@ -33,178 +44,107 @@ export function OverviewPage({
   onOpenSettings?: (section: SettingsSection, focusId?: string) => void;
 }) {
   const [journal, setJournal] = useState<TimelineJournalItem[] | null>(null);
-  const [memories, setMemories] = useState<MemoryItem[] | null>(null);
-  const [hasMoreMemories, setHasMoreMemories] = useState(false);
-  const [reminder, setReminder] = useState<Reminder | null>(null);
+  const [usage, setUsage] = useState<ConversationUsage | null>(null);
+  const [tokens, setTokens] = useState<number | null>(null);
   const [lastMessage, setLastMessage] = useState<TimelineMessage | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [historyError, setHistoryError] = useState(false);
-  const [memoryError, setMemoryError] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState<SourceErrors>({ history: false, usage: false, tokens: false });
   const revision = useRef(0);
+  const inFlight = useRef<number | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
 
   const refresh = useCallback(async () => {
+    if (inFlight.current !== null) return;
     const request = ++revision.current;
+    inFlight.current = request;
     setLoading(true);
-    const [history, memory, scheduled] = await Promise.allSettled([
-      getTimelineJournal(), getMemories("active"), getReminders(),
-    ]);
+    const [history, time, expenses] = await Promise.allSettled([getTimelineJournal(), getConversationUsage(), getLlmTokenStats("all")]);
     if (request !== revision.current) return;
-    const historyItems = history.status === "fulfilled" && Array.isArray(history.value?.items) ? history.value.items : null;
-    const memoryItems = memory.status === "fulfilled" && Array.isArray(memory.value?.items) ? memory.value.items : null;
-    setHistoryError(historyItems === null);
-    setMemoryError(memoryItems === null);
-    if (historyItems !== null) setJournal(historyItems);
-    if (memory.status === "fulfilled" && memoryItems !== null) {
-      setMemories(memoryItems);
-      setHasMoreMemories(memory.value.next_offset != null);
-    }
-    // Older cores may not expose reminders. Do not retain a stale reminder.
-    const openReminders = scheduled.status === "fulfilled" && Array.isArray(scheduled.value?.items)
-      ? scheduled.value.items.filter(item => item.status === "open" && Number.isFinite(Date.parse(item.due_at)))
-      : [];
-    setReminder(openReminders.sort((a, b) => Date.parse(a.due_at) - Date.parse(b.due_at))[0] ?? null);
+    const historyOk = history.status === "fulfilled" && Array.isArray(history.value?.items);
+    const usageOk = time.status === "fulfilled" && Number.isFinite(time.value?.active_seconds) && time.value.active_seconds >= 0 && Number.isFinite(Date.parse(time.value.tracking_started_at));
+    const tokensOk = expenses.status === "fulfilled" && Number.isFinite(expenses.value?.total_tokens) && expenses.value.total_tokens >= 0;
+    if (historyOk) setJournal(history.value.items);
+    if (usageOk) setUsage(time.value);
+    if (tokensOk) setTokens(expenses.value.total_tokens);
+    setErrors({ history: !historyOk, usage: !usageOk, tokens: !tokensOk });
     setLoading(false);
+    inFlight.current = null;
   }, []);
 
   useEffect(() => {
-    if (isActive) void refresh();
-    return () => { revision.current++; };
+    if (!isActive) return;
+    void refresh();
+    const timer = window.setInterval(() => { if (!document.hidden) void refresh(); }, 30_000);
+    return () => { window.clearInterval(timer); revision.current++; inFlight.current = null; };
   }, [isActive, refresh]);
 
   useEffect(() => {
-    if (loading || !gridRef.current) return;
-    const motion = animateStaggerCards(gridRef.current, ".overview-reveal", 16);
+    if (!isActive || !gridRef.current) return;
+    const motion = animateStaggerCards(gridRef.current, ".overview-reveal", 24);
     return () => { motion?.revert(); };
-  }, [loading]);
+  }, [isActive]);
 
-  const recentConversations = useMemo(() => [...(journal ?? [])]
-    .filter(item => item.message_count > 0)
-    .sort((a, b) => b.last_activity_at.localeCompare(a.last_activity_at)).slice(0, 3), [journal]);
-  const latest = recentConversations[0];
-  const canOpenLatest = Boolean(latest?.id || latest?.session_id);
+  const conversations = useMemo(() => [...(journal ?? [])].filter(item => item.message_count > 0)
+    .sort((a, b) => b.last_activity_at.localeCompare(a.last_activity_at)), [journal]);
+  const latest = conversations[0];
+  const latestId = latest?.id;
+  const latestSession = latest?.session_id;
+  const latestActivity = latest?.last_activity_at;
+  const canOpenLatest = Boolean(latestId || latestSession);
   useEffect(() => {
     let current = true;
     setLastMessage(null);
-    if (isActive && latest && (latest.id || latest.session_id)) {
-      void getTimelineMessages(4, latest.session_id, latest.id).then(response => {
-        if (!current) return;
-        const message = [...(response?.items ?? [])].reverse()
-          .find(item => (item.role === "user" || item.role === "assistant") && item.content.trim());
-        setLastMessage(message ?? null);
-      }).catch(() => { /* The conversation remains accessible without a preview. */ });
+    if (isActive && canOpenLatest) {
+      void getTimelineMessages(4, latestSession, latestId).then(response => {
+        if (current) setLastMessage([...(response?.items ?? [])].reverse().find(item => (item.role === "user" || item.role === "assistant") && item.content.trim()) ?? null);
+      }).catch(() => { /* History remains accessible without a preview. */ });
     }
     return () => { current = false; };
-  }, [isActive, latest]);
-  const activeMemories = useMemo(() => (memories ?? []).filter(item => item.status === "active"), [memories]);
-  const recentMemories = useMemo(() => {
-    const seen = new Set<string>();
-    return [...activeMemories]
-      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-      .filter(item => {
-        if (item.sensitivity !== "normal") return false;
-        const key = item.value_text.trim().replace(/\s+/g, " ").toLocaleLowerCase();
-        if (!key || seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      }).slice(0, 3);
-  }, [activeMemories]);
-  const historyPending = journal === null && loading;
-  const memoryPending = memories === null && loading;
-  const conversationAction = latest ? canOpenLatest ? "Открыть разговор" : "Открыть историю" : historyError ? "Открыть историю" : "Начать разговор";
+  }, [isActive, canOpenLatest, latestId, latestSession, latestActivity]);
 
-  return (
-    <section className="overview-page overview-home" aria-label="Обзор">
-      {(historyError || memoryError) && <div className="notice overview-notice" role="alert">
-        <span>Не удалось обновить часть обзора.</span>
-        <MaterialButton materialKey="overview.button-2" className="text-button" disabled={loading} onClick={() => void refresh()}>Повторить</MaterialButton>
-      </div>}
+  const number = (value: number) => value.toLocaleString(interfaceIntlLocale());
+  const stats = [
+    { id: "time", label: "Время общения", icon: IconInterfaceTimeStopWatchCircle, value: !errors.usage && usage ? formatConversationTime(usage.active_seconds) : "—", error: errors.usage,
+      hint: interfaceIntlLocale() === "en-US"
+        ? `Text and voice, including pauses of up to five minutes.${usage ? ` Tracking since ${formatDate(usage.tracking_started_at, true)}.` : ""}`
+        : `Текст и голос, включая паузы до пяти минут.${usage ? ` Начало учёта: ${formatDate(usage.tracking_started_at, true)}.` : ""}` },
+    { id: "conversations", label: "Разговоры", icon: MessageCircle, value: !errors.history && journal ? number(conversations.length) : "—", error: errors.history },
+    { id: "tokens", label: "Токены", icon: IconInterfaceLayers, value: !errors.tokens && tokens !== null ? number(tokens) : "—", error: errors.tokens, hint: "По сохранённой статистике расходов" },
+  ];
 
-      <div className="overview-layout" ref={gridRef} aria-busy={loading}>
-        <div className="overview-banner overview-reveal">
-          <div className="overview-banner-copy">
-            <h2>О чём поговорим?</h2>
-            <MaterialButton materialKey="overview.button-1" className="primary-button" aria-label="Начать диалог" onClick={onOpenChat}>
-              <span className="overview-action-label">Начать диалог</span><IconInterfaceCursorArrow2 size={18} aria-hidden="true" />
-            </MaterialButton>
-          </div>
+  return <section className="overview-page overview-home" aria-label="Обзор">
+    <div className="overview-layout" ref={gridRef}>
+      <section className="overview-profile overview-reveal" aria-labelledby="overview-iris-heading">
+        <div className="overview-hero-surface" aria-hidden="true" />
+        <div className="overview-hero-copy">
+          <h1 id="overview-iris-heading">Iris</h1>
+          <p>Рядом, чтобы поговорить<br />и подумать вместе</p>
+          <MaterialButton materialKey="overview.start" type="button" className="primary-button" onClick={onOpenChat}><span>Начать диалог</span><ArrowRight size={18} aria-hidden="true" /></MaterialButton>
         </div>
+        <div className={`overview-hero-art is-${OVERVIEW_HERO_ART.kind}`} aria-hidden="true"><ArtworkImage src={OVERVIEW_HERO_ART.src} alt="" /></div>
+      </section>
 
-        <div className="overview-recap">
-          <section className="settings-card overview-recent overview-reveal" aria-labelledby="overview-recent-heading">
-            <header className="overview-section-heading">
-              <h2 id="overview-recent-heading">Разговоры</h2>
-              <MaterialButton materialKey="overview.history-all" className="icon-button" appearance="quiet" aria-label="Открыть историю" title="Открыть историю" onClick={() => onOpenHistory()}>
-                <IconInterfaceArrowUpRight size={18} aria-hidden="true" />
-              </MaterialButton>
-            </header>
+      <section className="overview-stats" aria-label="Статистика общения" aria-busy={loading}>
+        {stats.map(({ id, label, icon: Icon, value, error, hint }) => <article key={id} className={`overview-stat overview-stat-${id} overview-surface overview-reveal`} aria-labelledby={`overview-stat-${id}`} title={error ? "Не удалось обновить" : hint}>
+          <div className="overview-stat-copy"><h2 id={`overview-stat-${id}`}>{label}</h2><strong data-testid={`overview-stat-${id}-value`} data-i18n-skip>{value}</strong></div>
+          {error ? <MaterialButton materialKey={`overview.retry.${id}`} type="button" className="icon-button overview-stat-retry" aria-label={`Повторить загрузку: ${label}`} disabled={loading} onClick={() => void refresh()}><RotateCw size={20} aria-hidden="true" /></MaterialButton>
+            : <span className="overview-stat-icon" aria-hidden="true"><Icon size={24} /></span>}
+        </article>)}
+      </section>
 
-            <article className="overview-last-conversation" aria-labelledby="overview-conversation-title">
-              <div className="overview-conversation-copy">
-                <h3 id="overview-conversation-title" data-i18n-skip={latest?.title && latest.title !== "Разговор с Iris" ? "" : undefined}>
-                  {historyPending ? "Загружаю разговор…" : latest?.title || (latest ? "Разговор с Iris" : historyError ? "История недоступна" : "Первый разговор — впереди")}
-                </h3>
-                {latest ? <p className="overview-conversation-meta">
-                  <time dateTime={latest.last_activity_at}>{formatDate(latest.last_activity_at)}</time>
-                  <span aria-hidden="true">·</span><span>{latest.message_count} сообщ.</span>
-                </p> : <p className="overview-description">{historyPending ? "" : historyError ? "Попробуйте обновить обзор ещё раз." : "Обсудите идею, задайте вопрос или расскажите, как прошёл день. К беседе можно будет вернуться здесь."}</p>}
-                {lastMessage && <p className="overview-last-message">
-                  <span data-i18n-skip>{lastMessage.content.replace(/\s+/g, " ").trim()}</span>
-                </p>}
-              </div>
-              <MaterialButton materialKey="overview.button-3" className="secondary-button overview-open-conversation" aria-label={conversationAction} disabled={historyPending} onClick={() => latest ? onOpenHistory(canOpenLatest ? latest : undefined) : historyError ? onOpenHistory() : onOpenChat()}>
-                <span className="overview-action-label">{conversationAction}</span><IconInterfaceArrowUpRight size={16} aria-hidden="true" />
-              </MaterialButton>
-            </article>
+      <OverviewGallery isActive={isActive} />
 
-            {recentConversations.length > 1 && <div className="overview-earlier">
-              {recentConversations.slice(1).map((item, index) => <MaterialButton
-                key={item.id ?? item.session_id ?? index}
-                materialKey={`journal.episode.${item.id ?? item.day}`}
-                className="history-item-minimal"
-                onClick={() => onOpenHistory(item.id || item.session_id ? item : undefined)}
-              >
-                <span className="history-item-minimal-icon" aria-hidden="true"><IconMailChatBubbleTextSquare size={18} /></span>
-                <span className="history-item-minimal-content">
-                  <span className="history-item-minimal-header"><strong data-i18n-skip={item.title && item.title !== "Разговор с Iris" ? "" : undefined}>{item.title && item.title !== "Разговор с Iris" ? item.title : <time dateTime={item.last_activity_at}>{formatDate(item.last_activity_at)}</time>}</strong></span>
-                  <span className="history-item-minimal-meta">{item.message_count} сообщ.</span>
-                </span>
-              </MaterialButton>)}
-            </div>}
-          </section>
-
-          <section className="settings-card overview-memory-card overview-reveal" aria-labelledby="overview-memory-heading">
-            <header className="overview-section-heading">
-              <h2 id="overview-memory-heading"><IconComputerRobotCyborg1 size={20} aria-hidden="true" />Память</h2>
-              <div className="overview-memory-actions">
-                {memories !== null && <span className="memory-status">{activeMemories.length}{hasMoreMemories ? "+" : ""} сохранено</span>}
-                <MaterialButton materialKey="overview.button-4" className="icon-button" appearance="quiet" aria-label="Открыть память" title="Открыть память" onClick={onOpenMemory}>
-                  <IconInterfaceArrowUpRight size={18} aria-hidden="true" />
-                </MaterialButton>
-              </div>
-            </header>
-            {recentMemories.length ? <ul className="overview-memory-list">
-              {recentMemories.map(item => <li key={item.id}><p className="memory-fact-value overview-memory-preview" data-i18n-skip>{item.value_text}</p></li>)}
-            </ul> : <div className="overview-memory-content">
-              <h3>{memoryPending ? "Загружаю память…" : memories === null && memoryError ? "Память недоступна" : activeMemories.length ? "Воспоминания под вашим контролем" : "Давайте знакомиться"}</h3>
-              {!memoryPending && <p className="overview-description">{memories === null && memoryError ? "Попробуйте обновить обзор ещё раз." : activeMemories.length ? "Проверьте, что Iris запомнила, и исправьте неточности." : "Здесь появится то, что Iris запомнит из ваших разговоров."}</p>}
-            </div>}
-            {reminder && <div className="overview-next-plan" aria-label="Ближайшее напоминание">
-              <div className="overview-plan-label"><IconInterfaceCalendarMark size={16} aria-hidden="true" /><span>{Date.parse(reminder.due_at) <= Date.now() ? "Пора вспомнить" : "Ближайшее напоминание"}</span></div>
-              <h3 data-i18n-skip>{reminder.title}</h3>
-              <time dateTime={reminder.due_at}>{formatDate(reminder.due_at)}</time>
-              <MaterialButton materialKey="overview.open-reminders" className="icon-button" appearance="quiet" aria-label="Планы и обещания" title="Планы и обещания" onClick={onOpenPlans || onOpenMemory}>
-                <IconInterfaceArrowUpRight size={16} aria-hidden="true" />
-              </MaterialButton>
-            </div>}
-          </section>
+      <section className="overview-last overview-surface overview-reveal" aria-labelledby="overview-last-heading">
+        <span className="overview-conversation-icon" aria-hidden="true"><MessageCircle size={24} /></span>
+        <div className="overview-last-copy">
+          <h2 id="overview-last-heading" data-i18n-skip={latest?.title ? "" : undefined}>{latest?.title || (latest ? "Разговор с Iris" : errors.history ? "История недоступна" : journal === null ? "Загружаю разговор…" : "Первый разговор — впереди")}</h2>
+          {latest ? <p className="overview-last-meta"><time dateTime={latest.last_activity_at}>{formatDate(latest.last_activity_at)}</time><span> · {latest.message_count} сообщ.</span></p> : <p className="overview-last-meta">{errors.history ? "Попробуйте обновить данные." : journal !== null ? "Расскажите, как прошёл день, или поделитесь идеей." : ""}</p>}
+          {lastMessage && <p className="overview-last-message" data-i18n-skip>{lastMessage.content.replace(/\s+/g, " ").trim()}</p>}
         </div>
-        <OverviewTips onOpenSettings={onOpenSettings} onOpenMemory={onOpenMemory} />
-      </div>
-
-      {loading && <span className="overview-loading" role="status">
-        <LoadingRing className="is-inline" label="Обновляю обзор…" /><span>Обновляю данные…</span>
-      </span>}
-    </section>
-  );
+        <MaterialButton materialKey="overview.last.open" type="button" className="icon-button overview-last-open" appearance="quiet" aria-label={latest ? "Открыть разговор" : errors.history ? "Открыть историю" : "Начать разговор"} disabled={journal === null && loading} onClick={() => latest ? onOpenHistory(canOpenLatest ? latest : undefined) : errors.history ? onOpenHistory() : onOpenChat()}><ArrowUpRight size={22} aria-hidden="true" /></MaterialButton>
+      </section>
+      <OverviewTips onOpenSettings={onOpenSettings} onOpenMemory={onOpenMemory} />
+    </div>
+    <span className="overview-loading" role="status">{loading ? "Обновляю обзор…" : ""}</span>
+  </section>;
 }

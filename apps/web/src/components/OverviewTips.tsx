@@ -60,8 +60,8 @@ const tips: OverviewTip[] = [
   },
   {
     id: "team",
-    title: "Большие планы. Полтора разработчика.",
-    description: "Один пишет код. Оставшаяся половина: «А давай ещё вот это».",
+    title: "Интересный факт",
+    description: "Данный проект разрабатывает полтора разработчика.",
   },
 ];
 
@@ -96,20 +96,9 @@ export function OverviewTips({ onOpenSettings, onOpenMemory }: {
     return () => { motion.revert(); };
   }, [index]);
 
-  return <section className="settings-card overview-tips overview-reveal" aria-label="Больше об Iris" aria-roledescription="карусель">
-    <div id="overview-tip-content" className="overview-tip" ref={contentRef}>
-      <div className="overview-tip-copy" aria-live="polite" aria-atomic="true">
-        <h2>{tip.title}</h2>
-        <p className="overview-tip-description">{tip.description}</p>
-        <span className="overview-tip-position">Совет {index + 1} из {tips.length}</span>
-      </div>
-      {canOpen && <MaterialButton key={tip.id} materialKey={`overview.tips.${tip.id}`} type="button" className="text-button overview-tip-action" onClick={() => {
-        if (action.view === "memory") onOpenMemory();
-        else onOpenSettings?.(action.section, action.focusId);
-      }}>
-        {action.label}<IconInterfaceArrowUpRight size={13} aria-hidden="true" />
-      </MaterialButton>}
-    </div>
+  return <section className="overview-surface overview-tips overview-reveal" aria-label="Больше об Iris" aria-roledescription="карусель">
+    <header className="overview-tips-header">
+      <h2 className="overview-tips-heading">Больше об Iris</h2>
       <div className="overview-tips-controls" role="group" aria-label="Перелистывание советов" onKeyDown={event => {
         if (event.altKey || event.ctrlKey || event.metaKey) return;
         if (event.key === "ArrowLeft") { event.preventDefault(); select(index - 1); }
@@ -117,12 +106,27 @@ export function OverviewTips({ onOpenSettings, onOpenMemory }: {
         else if (event.key === "Home") { event.preventDefault(); select(0); }
         else if (event.key === "End") { event.preventDefault(); select(tips.length - 1); }
       }}>
-        <MaterialButton materialKey="overview.tips.previous" type="button" className="icon-button" appearance="quiet" aria-label="Предыдущий совет" aria-controls="overview-tip-content" onClick={() => select(index - 1)}>
-          <IconInterfaceChevronLeft size={16} aria-hidden="true" />
+        <MaterialButton materialKey="overview.tips.previous" type="button" className="icon-button" aria-label="Предыдущий совет" aria-controls="overview-tip-content" onClick={() => select(index - 1)}>
+          <IconInterfaceChevronLeft size={19} aria-hidden="true" />
         </MaterialButton>
-        <MaterialButton materialKey="overview.tips.next" type="button" className="icon-button" appearance="quiet" aria-label="Следующий совет" aria-controls="overview-tip-content" onClick={() => select(index + 1)}>
-          <IconInterfaceChevronRight size={16} aria-hidden="true" />
+        <MaterialButton materialKey="overview.tips.next" type="button" className="icon-button" aria-label="Следующий совет" aria-controls="overview-tip-content" onClick={() => select(index + 1)}>
+          <IconInterfaceChevronRight size={19} aria-hidden="true" />
         </MaterialButton>
       </div>
+    </header>
+    <div className="overview-tip-illustration" aria-hidden="true"><img src="/brand/iris-mark-dark.svg" alt="" draggable={false} /></div>
+    <div id="overview-tip-content" className="overview-tip" ref={contentRef}>
+      <div className="overview-tip-copy" aria-live="polite" aria-atomic="true">
+        <h3>{tip.title}</h3>
+        <p className="overview-tip-description">{tip.description}</p>
+        <span className="overview-tip-position">Совет {index + 1} из {tips.length}</span>
+      </div>
+      {canOpen && <MaterialButton key={tip.id} materialKey={`overview.tips.${tip.id}`} type="button" className="secondary-button overview-tip-action" onClick={() => {
+        if (action.view === "memory") onOpenMemory();
+        else onOpenSettings?.(action.section, action.focusId);
+      }}>
+        <span>{action.label}</span><IconInterfaceArrowUpRight size={17} aria-hidden="true" />
+      </MaterialButton>}
+    </div>
   </section>;
 }
