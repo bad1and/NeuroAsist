@@ -84,7 +84,7 @@ it("shows subtitles without hover and reveals the toolbar only over the avatar",
   await screen.findByRole("region",{name:"Субтитры Iris"});
   expect(screen.getByRole("region",{name:"Субтитры Iris"}).querySelector(".confirmation-rim")).toBeNull();
   expect(screen.queryByRole("toolbar")).not.toBeInTheDocument();
-  fireEvent.pointerEnter(screen.getByLabelText("Переместить Iris"));
+  act(()=>emit("desktop-avatar-hover",true));
   await waitFor(()=>expect(screen.getByRole("toolbar")).toBeVisible());
   expect(screen.queryByRole("button",{name:"Изменить размер Iris"})).not.toBeInTheDocument();
   expect(screen.queryByRole("button",{name:/положение и размер|Открыть приложение Iris/})).not.toBeInTheDocument();
@@ -96,12 +96,58 @@ it("shows subtitles without hover and reveals the toolbar only over the avatar",
 it("keeps resize available when placement is unlocked in settings",async()=>{
   mock.overlay.mockResolvedValue({...overlay,locked:false});
   render(<DesktopAvatar/>); await screen.findByLabelText("Переместить Iris");
-  fireEvent.pointerEnter(screen.getByLabelText("Переместить Iris"));
+  act(()=>emit("desktop-avatar-hover",true));
   expect(await screen.findByRole("button",{name:"Изменить размер Iris"})).toBeVisible();
+});
+it.each([true,false])("keeps controls usable across native avatar gaps and buttons (locked=%s)",async locked=>{
+  mock.overlay.mockResolvedValue({...overlay,locked});
+  render(<DesktopAvatar/>);
+  await screen.findByRole("region",{name:"Субтитры Iris"});
+  vi.useFakeTimers();
+  act(()=>emit("desktop-avatar-hover",true));
+  const avatar=screen.getByLabelText("Переместить Iris");
+  const toolbar=screen.getByRole("toolbar");
+  // Crossing Unity/WebView or click-through gaps can send DOM leave without
+  // leaving the shared native hover area. The native value stays true.
+  fireEvent.pointerEnter(avatar);
+  fireEvent.pointerLeave(avatar);
+  act(()=>vi.advanceTimersByTime(700));
+  expect(toolbar).toBeVisible();
+  const microphone=screen.getByRole("button",{name:"Включить микрофон"});
+  fireEvent.pointerEnter(microphone);
+  fireEvent.click(microphone);
+  fireEvent.pointerLeave(toolbar);
+  fireEvent.blur(window);
+  act(()=>vi.advanceTimersByTime(700));
+  expect(toolbar).toBeVisible();
+  const sound=screen.getByRole("button",{name:"Выключить звук Iris"});
+  fireEvent.pointerEnter(sound);
+  fireEvent.click(sound);
+  await act(async()=>{});
+  for(const type of ["microphone","sound"]) {
+    expect(mock.invoke).toHaveBeenCalledWith("desktop_avatar_command",{command:expect.objectContaining({type,session_id:"session"})});
+  }
+});
+it("hides controls after leaving the native area and cancels hiding on reentry",async()=>{
+  render(<DesktopAvatar/>);
+  await screen.findByLabelText("Переместить Iris");
+  vi.useFakeTimers();
+  act(()=>emit("desktop-avatar-hover",true));
+  act(()=>emit("desktop-avatar-hover",false));
+  act(()=>vi.advanceTimersByTime(349));
+  expect(screen.getByRole("toolbar")).toBeVisible();
+  act(()=>emit("desktop-avatar-hover",true));
+  act(()=>vi.advanceTimersByTime(700));
+  expect(screen.getByRole("toolbar")).toBeVisible();
+  act(()=>emit("desktop-avatar-hover",false));
+  act(()=>vi.advanceTimersByTime(350));
+  expect(screen.queryByRole("toolbar")).not.toBeInTheDocument();
+  act(()=>emit("desktop-avatar-hover",true));
+  expect(screen.getByRole("toolbar")).toBeVisible();
 });
 it("switches left panels, retains the draft and returns focus on Escape",async()=>{
   render(<DesktopAvatar/>); await screen.findByLabelText("Переместить Iris");
-  fireEvent.pointerEnter(screen.getByLabelText("Переместить Iris"));
+  act(()=>emit("desktop-avatar-hover",true));
   const chat=screen.getByRole("button",{name:"Написать Iris"});
   const tools=screen.getByRole("button",{name:"Инструменты"});
   fireEvent.click(chat);
@@ -125,7 +171,7 @@ it("switches left panels, retains the draft and returns focus on Escape",async()
 it("sends to the existing session, preserves failed text and clears accepted text",async()=>{
   render(<DesktopAvatar/>); await screen.findByLabelText("Переместить Iris");
   await waitFor(()=>expect(mock.invoke).toHaveBeenCalledWith("desktop_avatar_command",expect.anything()));
-  fireEvent.pointerEnter(screen.getByLabelText("Переместить Iris"));
+  act(()=>emit("desktop-avatar-hover",true));
   fireEvent.click(screen.getByRole("button",{name:"Написать Iris"}));
   const input=screen.getByRole("textbox",{name:"Сообщение Iris"});
   fireEvent.change(input,{target:{value:"Привет"}});mock.failSend=true;

@@ -113,6 +113,9 @@ export function DesktopAvatar() {
     };
     const listeners=[
       listen<boolean>("desktop-avatar-hover", ({payload:over}) => {
+        if(disposed) return;
+        // Native polling covers Unity, the avatar bounds and all control regions.
+        // DOM leave/blur can occur between those windows while still inside them.
         clearTimeout(leaveTimer.current);
         if(over) setHover(true);
         else leaveTimer.current=setTimeout(()=>setHover(false),350);
@@ -141,7 +144,7 @@ export function DesktopAvatar() {
     return () => {
       document.documentElement.classList.remove("desktop-avatar-root");
       document.body.classList.remove("desktop-avatar-body");
-      disposed=true; clearTimeout(retry); clearInterval(heartbeat); socket?.close();
+      disposed=true; clearTimeout(retry); clearTimeout(leaveTimer.current); clearInterval(heartbeat); socket?.close();
       for(const stop of listeners) void stop.then(unlisten => unlisten());
       for(const entry of pending.current.values()) { clearTimeout(entry.timer); entry.reject(new Error("Панель закрыта")); }
       pending.current.clear();
@@ -172,8 +175,6 @@ export function DesktopAvatar() {
     height:geometry.monitor.area.height/geometry.monitor.scale} : {x:0,y:0,width:innerWidth,height:innerHeight};
   const position=placePanel(rect,Math.min(296,work.width-24),panelHeight,work);
   const controls=desktopAvatarControls(rect,work);
-  const enter=() => { clearTimeout(leaveTimer.current); setHover(true); };
-  const leave=() => { clearTimeout(leaveTimer.current); leaveTimer.current=setTimeout(() => setHover(false),350); };
   const startTransform=(kind: "move" | "resize") => {
     if(overlay?.locked) return;
     setToolsOpen(false);
@@ -215,7 +216,7 @@ export function DesktopAvatar() {
     return () => { motion.cancel(); };
   },[textOpen,toolsOpen,popover.present]);
   useEffect(() => {
-    const blur=() => { setFocused(false); if(!pickerActive.current && !fileBusyRef.current) { setTextOpen(false); setToolsOpen(false); setHover(false); } };
+    const blur=() => { setFocused(false); if(!pickerActive.current && !fileBusyRef.current) { setTextOpen(false); setToolsOpen(false); } };
     window.addEventListener("blur",blur); return () => window.removeEventListener("blur",blur);
   },[]);
   const onPickerInteraction=useCallback((value:boolean) => {pickerActive.current=value;setPicking(value);},[]);
@@ -253,15 +254,15 @@ export function DesktopAvatar() {
     if(!event.currentTarget.contains(event.relatedTarget as Node)) setFocused(false);
   }}>
     <div data-avatar-interactive={overlay.locked?undefined:true} className={`desktop-avatar-hit${overlay.locked?" is-locked":""}`}
-      style={{...style(rect),height:rect.height}} onPointerEnter={enter} onPointerLeave={leave}
+      style={{...style(rect),height:rect.height}}
       onPointerDown={event => {if(event.button===0) startTransform("move");}} aria-label="Переместить Iris" />
     {visible && !overlay.locked && <button data-avatar-interactive type="button" className="desktop-avatar-resize"
       style={{left:rect.x+rect.width-16,top:rect.y+4}} aria-label="Изменить размер Iris"
-      onPointerEnter={enter} onPointerLeave={leave} onPointerDown={event => {event.preventDefault(); if(event.button===0) startTransform("resize");}}><IconInterfaceArrowUpRight size={18} aria-hidden="true"/></button>}
+      onPointerDown={event => {event.preventDefault(); if(event.button===0) startTransform("resize");}}><IconInterfaceArrowUpRight size={18} aria-hidden="true"/></button>}
     {captions && <div ref={captionElement} className="desktop-avatar-captions desktop-avatar-glass" style={style(caption)} role="region" aria-label="Субтитры Iris" data-i18n-skip>
       <p>{subtitleCue}</p></div>}
     <div ref={presence.ref} hidden={!presence.present} inert={!visible || undefined} className="desktop-avatar-controls"
-      role="toolbar" aria-label="Управление Iris" onPointerEnter={enter} onPointerLeave={leave}>
+      role="toolbar" aria-label="Управление Iris">
       <div className="desktop-avatar-left" style={style(controls.left)}>
         <AvatarControl><MaterialButton materialKey="desktop.text" ref={textTrigger} type="button" className={`desktop-avatar-icon${textOpen?" is-active":""}`}
           tone={textOpen?"accent":"graphite"} aria-label="Написать Iris" aria-haspopup="dialog" aria-expanded={textOpen} aria-controls="desktop-avatar-popover"
@@ -285,8 +286,7 @@ export function DesktopAvatar() {
     </div>
     <div ref={panel} id="desktop-avatar-popover" hidden={!popover.present} inert={!(textOpen || toolsOpen) || undefined}
       data-avatar-interactive={textOpen || toolsOpen?true:undefined} className={`desktop-avatar-popover desktop-avatar-glass${textOpen?" is-chat":" is-tools"}`}
-      style={{...style(position),maxHeight:work.height-24}} role="dialog" aria-modal="false" aria-label={textOpen?"Написать Iris":"Инструменты Iris"}
-      onPointerEnter={enter} onPointerLeave={leave}>
+      style={{...style(position),maxHeight:work.height-24}} role="dialog" aria-modal="false" aria-label={textOpen?"Написать Iris":"Инструменты Iris"}>
       <div className="desktop-avatar-popover-body">
       <form hidden={!textOpen} className="desktop-avatar-composer" onSubmit={event => {event.preventDefault();void send();}}>
         <textarea ref={textarea} aria-label="Сообщение Iris" rows={4} value={draft} onChange={event=>setDraft(event.target.value)}
@@ -297,8 +297,7 @@ export function DesktopAvatar() {
       </div>
       <ConfirmationRim cardRef={panel} seed={buttonSeed("desktop.panel")} active={textOpen || toolsOpen} />
     </div>
-    {visible && (!ready || error || conversation.error) && <div data-avatar-interactive className="desktop-avatar-error desktop-avatar-glass" style={{...style(position),top:(textOpen || toolsOpen)?Math.min(position.y+panelHeight+8,work.height-80):position.y}} role="status"
-      onPointerEnter={enter} onPointerLeave={leave}>{error || conversation.error || "Подключаюсь к Iris…"}
+    {visible && (!ready || error || conversation.error) && <div data-avatar-interactive className="desktop-avatar-error desktop-avatar-glass" style={{...style(position),top:(textOpen || toolsOpen)?Math.min(position.y+panelHeight+8,work.height-80):position.y}} role="status">{error || conversation.error || "Подключаюсь к Iris…"}
         {error && <button type="button" aria-label="Закрыть сообщение" onClick={()=>setError("")}><IconInterfaceCross size={12}/></button>}</div>}
   </main>;
 }
