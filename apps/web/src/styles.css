@@ -1129,7 +1129,9 @@ select { appearance: auto; }
 }
 
 .chat-idle-stage {
+  --welcome-portrait-height: min(560px, calc(var(--panel-height, 650px) - 100px), calc((100cqw - 32px) * 1.12));
   position: relative;
+  container-type: inline-size;
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
@@ -1140,23 +1142,34 @@ select { appearance: auto; }
   min-height: 0;
 }
 
-.chat-idle-stage .in-app-avatar-stage {
+.chat-welcome-portrait {
   position: absolute;
-  /* Offset the folded legs past the label; the seat stays above the CTA. */
-  left: calc(50% + 20px * var(--dock-scale, 1));
-  transform: translateX(-50%);
-  /* Leave a small overlap above the CTA without covering its label. */
-  bottom: calc((var(--dock-base-toolbar-height, 121px) - 81px + 24px) * var(--dock-scale, 1));
-  width: min(100%, calc(var(--avatar-base-width, 500px) * var(--dock-scale, 1)));
-  height: calc(100% - calc(var(--dock-base-toolbar-height, 121px) * var(--dock-scale, 1) + 20px));
-  max-height: calc(var(--avatar-base-height, 520px) * var(--dock-scale, 1));
-  min-height: 240px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
+  /* The original illustration's seat is at y=940/1536. Anchor it to the
+     button top; offset the legs to its left so the label stays readable. */
+  top: calc(var(--welcome-portrait-height) * -.612);
+  left: calc(50% - var(--welcome-portrait-height) * .5 + 28px * var(--dock-scale, 1));
+  width: calc(var(--welcome-portrait-height) * 2 / 3);
+  height: var(--welcome-portrait-height);
+  max-width: none;
+  object-fit: contain;
+  filter: brightness(.82) saturate(.8);
   pointer-events: none;
-  z-index: 1;
+  user-select: none;
+  z-index: 3;
 }
+
+.chat-welcome-portrait img,
+.chat-welcome-portrait canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.chat-welcome-portrait canvas { visibility: hidden; }
+.chat-welcome-portrait[data-animated="true"] img { visibility: hidden; }
+.chat-welcome-portrait[data-animated="true"] canvas { visibility: visible; }
 
 .chat-panel.is-active {
   position: relative;
@@ -1170,7 +1183,8 @@ select { appearance: auto; }
   padding-bottom: 24px;
 }
 
-.chat-panel.is-active.has-in-app-avatar .in-app-avatar-stage {
+.chat-panel.is-active.has-in-app-avatar .in-app-avatar-stage,
+.chat-panel.is-active .chat-avatar-away {
   position: absolute;
   /* Unity is a native popup; CSS overflow cannot clip it at the sidebar.
      Keep its measured slot inside the chat without changing its vertical fit. */
@@ -1190,6 +1204,19 @@ select { appearance: auto; }
   justify-content: center;
   pointer-events: none;
   z-index: 1;
+}
+
+.chat-avatar-away {
+  user-select: none;
+}
+
+.chat-avatar-away img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+  transform: translateX(calc(-24px * var(--dock-scale, 1)));
 }
 
 .in-app-avatar-loader-fallback {
@@ -1267,6 +1294,8 @@ select { appearance: auto; }
   align-items: center;
   justify-content: center;
   margin-inline: auto;
+  /* Reserve room below the seat for the hanging legs, including short windows. */
+  margin-bottom: max(0px, calc(var(--welcome-portrait-height) * .388 - var(--dock-base-toolbar-height, 121px) * var(--dock-scale, 1) + 12px));
   flex: 0 0 auto;
   pointer-events: none;
 }

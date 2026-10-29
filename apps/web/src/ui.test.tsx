@@ -476,18 +476,42 @@ describe("русский интерфейс", () => {
     await waitFor(() => expect(menuButton).toHaveAttribute("aria-expanded", "false"));
   });
 
-  it("закрепляет встроенный аватар слева от чата и даёт переключить размещение", async () => {
+  it("показывает картинку до начала и возвращает встроенный аватар в разговоре", async () => {
     api.getSettings.mockResolvedValue({ ...settings, avatar_placement: "in_app" });
     const { container } = render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
+    expect(container.querySelector(".chat-welcome-portrait img")).toHaveAttribute("src", "/brand/iris-welcome-seated.png");
+    expect(container.querySelector(".in-app-avatar-stage")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Начать" }));
+    expect(container.querySelector(".chat-welcome-portrait")).not.toBeInTheDocument();
     expect(container.querySelector(".chat-panel.has-in-app-avatar .in-app-avatar-stage")).toBeInTheDocument();
+    expect(container.querySelector(".chat-avatar-away")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
     fireEvent.click(await screen.findByRole("button", { name: "Аватар" }));
     expect(screen.getByText("Где показывать аватар")).toBeInTheDocument();
     expect(screen.getByLabelText("Внутри Iris")).toBeChecked();
     expect(screen.getByLabelText("На рабочем столе")).not.toBeChecked();
+  });
+
+  it("заменяет знак на встроенный аватар при смене размещения в активном диалоге", async () => {
+    const { container } = render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
+    expect(container.querySelector(".chat-avatar-away")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Начать" }));
+    expect(screen.getByRole("img", { name: "Ирис в другом месте — аватар на рабочем столе" })).toBeInTheDocument();
+    expect(container.querySelector(".in-app-avatar-stage")).not.toBeInTheDocument();
+
+    api.updateRuntimeSettings.mockResolvedValue({ ...settings, avatar_placement: "in_app" });
+    api.getSettings.mockResolvedValue({ ...settings, avatar_placement: "in_app" });
+    fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Аватар" }));
+    fireEvent.click(screen.getByLabelText("Внутри Iris"));
+    await waitFor(() => expect(api.updateRuntimeSettings).toHaveBeenCalledWith({ avatar_placement: "in_app" }));
+    fireEvent.click(screen.getByRole("button", { name: "Диалог" }));
+    expect(container.querySelector(".chat-avatar-away")).not.toBeInTheDocument();
+    expect(container.querySelector(".in-app-avatar-stage")).toBeInTheDocument();
   });
 
   it("сохраняет качество аватара отдельно для приложения и рабочего стола", async () => {
@@ -520,6 +544,7 @@ describe("русский интерфейс", () => {
     const { container } = render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
+    fireEvent.click(screen.getByRole("button", { name: "Начать" }));
     expect(container.querySelector(".chat-panel.has-in-app-avatar .in-app-avatar-stage")).toBeInTheDocument();
   });
 
@@ -527,6 +552,7 @@ describe("русский интерфейс", () => {
     api.getSettings.mockResolvedValue({ ...settings, avatar_placement: "in_app", avatar_in_app_visible: true });
     const { container } = render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Диалог" }));
+    fireEvent.click(screen.getByRole("button", { name: "Начать" }));
     const avatar = container.querySelector(".in-app-avatar-stage");
     expect(avatar).not.toHaveStyle({ visibility: "hidden" });
     fireEvent.keyDown(window, { key: "л", code: "KeyK", ctrlKey: true });

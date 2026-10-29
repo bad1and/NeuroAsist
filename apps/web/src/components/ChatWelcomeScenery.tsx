@@ -7,7 +7,7 @@ const floraAssets = Promise.all([
   import("../../../../assets/startup-flora-right.webp"),
 ]);
 
-/** Transparent scenery stays behind the separately hosted Unity portrait. */
+/** Transparent scenery stays behind the seated welcome illustration. */
 export function ChatWelcomeScenery({ active }: { active: boolean }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [flora, setFlora] = useState<string[] | null>(null);

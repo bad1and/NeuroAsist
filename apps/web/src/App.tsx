@@ -10,6 +10,7 @@ import { BackgroundConversationControls, BackgroundConversationExpandButton } fr
 import { CorpusSurface } from "./components/CorpusSurface";
 import { useDockScale } from "./components/useDockScale";
 import { ChatWelcomeScenery } from "./components/ChatWelcomeScenery";
+import { ChatWelcomePortrait } from "./components/ChatWelcomePortrait";
 import { useAvatarPresentation } from "./components/useAvatarPresentation";
 import { useDesktopConversationBridge, DOCUMENT_CHANGED } from "./desktop-avatar-bridge";
 import { requestJson } from "./api";
@@ -2681,7 +2682,7 @@ export function ChatPage({
     return (
       <section
         ref={chatPanelRef}
-        className={`panel chat-panel is-idle${showInAppAvatar && isActive ? " has-in-app-avatar" : ""}`}
+        className="panel chat-panel is-idle"
         style={{ "--dock-scale": dockScale } as React.CSSProperties}
       >
         <IrisPortalBackground
@@ -2690,15 +2691,13 @@ export function ChatPage({
           voiceState={voiceState}
           loading={loading}
           isDialogActive={false}
-          showInAppAvatar={showInAppAvatar && isActive}
+          showInAppAvatar={false}
           isActive={isActive}
         />
         <div className="chat-idle-stage">
           <ChatWelcomeScenery active={isActive} />
-          {showInAppAvatar && isActive && (
-            <InAppAvatarHost status={avatarHostStatus} onRetry={onRetryAvatar} suspended={avatarSuspended} />
-          )}
           <div className="chat-start-banner">
+            <ChatWelcomePortrait active={isActive} />
             <div className="chat-start-banner-inner">
               <MaterialButton materialKey={"App.button-4"}
                 className="chat-start-button"
@@ -2761,6 +2760,17 @@ export function ChatPage({
       />
       {showInAppAvatar && isActive && (
         <InAppAvatarHost status={avatarHostStatus} onRetry={onRetryAvatar} suspended={avatarSuspended} />
+      )}
+      {settings?.avatar_placement === "desktop_overlay" && isActive && (
+        <div className="chat-avatar-away">
+          <img
+            src="/brand/iris-avatar-away.png"
+            alt="Ирис в другом месте — аватар на рабочем столе"
+            draggable={false}
+            width={941}
+            height={1672}
+          />
+        </div>
       )}
       <div className="chat-content">
         {memoryNotice && (
