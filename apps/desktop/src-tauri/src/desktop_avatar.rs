@@ -99,6 +99,7 @@ struct Inner {
     hovered: Option<bool>,
     topology: Vec<Monitor>,
     last_topology_check: Option<Instant>,
+    last_foreground: Option<usize>,
 }
 #[derive(Default)]
 pub struct DesktopAvatarState {
@@ -307,6 +308,7 @@ pub fn detach(app: &AppHandle) {
     inner.regions.clear();
     inner.click_through = None;
     inner.hovered = None;
+    inner.last_foreground = None;
     if let Some(host) = app.get_webview_window("desktop_avatar") {
         let _ = host.hide();
     }
@@ -320,6 +322,83 @@ pub fn attach(app: &AppHandle, window: usize) -> Result<(), String> {
         .unwrap()
         .window = Some(window);
     apply(app)
+}
+
+#[cfg(windows)]
+fn maintain_native_z_order(
+    host: windows::Win32::Foundation::HWND,
+    avatar: windows::Win32::Foundation::HWND,
+    always_on_top: bool,
+    foreground_changed: bool,
+) -> Result<bool, String> {
+    use windows::Win32::UI::WindowsAndMessaging::*;
+    unsafe {
+        if !IsWindow(Some(host)).as_bool() || !IsWindow(Some(avatar)).as_bool() {
+            return Ok(false);
+        }
+        // Tauri's is_always_on_top() reads cached window flags. Windows can
+        // demote an owned popup and its owner without updating that cache.
+        let is_topmost =
+            |window| GetWindowLongPtrW(window, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST.0 != 0;
+        let repair = is_topmost(host) != always_on_top || is_topmost(avatar) != always_on_top;
+        if !repair && !(always_on_top && foreground_changed) {
+            return Ok(false);
+        }
+        // Restore the owner first, then Unity above it. Reassert on app
+        // switches too: another topmost app can cover a still-topmost avatar.
+        // Never activate, move, resize, or show either window here.
+        for window in [host, avatar] {
+            SetWindowPos(
+                window,
+                Some(if always_on_top {
+                    HWND_TOPMOST
+                } else {
+                    HWND_NOTOPMOST
+                }),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER,
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        Ok(true)
+    }
+}
+
+#[cfg(windows)]
+fn maintain_z_order(app: &AppHandle) {
+    use windows::Win32::{Foundation::HWND, UI::WindowsAndMessaging::GetForegroundWindow};
+    let foreground = unsafe { GetForegroundWindow() }.0 as usize;
+    let state = app.state::<DesktopAvatarState>();
+    let (window, always_on_top, foreground_changed) = {
+        let inner = state.inner.lock().unwrap();
+        if !inner.active || !inner.config.visible {
+            return;
+        }
+        let Some(window) = inner.window else { return };
+        (
+            window,
+            inner.config.always_on_top,
+            inner.last_foreground != Some(foreground),
+        )
+    };
+    let Some(host) = app.get_webview_window("desktop_avatar") else {
+        return;
+    };
+    let Ok(host) = host.hwnd() else { return };
+    // Release the controller mutex before cross-thread native window calls.
+    if maintain_native_z_order(
+        host,
+        HWND(window as *mut _),
+        always_on_top,
+        foreground_changed,
+    )
+    .is_ok()
+    {
+        state.inner.lock().unwrap().last_foreground = Some(foreground);
+    }
 }
 
 fn apply(app: &AppHandle) -> Result<(), String> {
@@ -422,6 +501,8 @@ fn tick(app: &AppHandle) {
         if !active {
             return;
         }
+        // Z-order maintenance must run even when geometry and cursor stay still.
+        maintain_z_order(app);
         let mut point = POINT::default();
         if unsafe { GetCursorPos(&mut point) }.is_err() {
             return;
@@ -671,6 +752,123 @@ pub fn open_main_from_avatar(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    mod z_order {
+        use super::*;
+        use windows::{
+            core::w,
+            Win32::{
+                Foundation::{HWND, RECT},
+                UI::WindowsAndMessaging::*,
+            },
+        };
+
+        struct TestWindow(HWND);
+        impl TestWindow {
+            fn new(owner: Option<HWND>) -> Self {
+                Self(unsafe {
+                    CreateWindowExW(
+                        WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                        w!("STATIC"),
+                        w!("Iris z-order regression"),
+                        WS_POPUP,
+                        -32000,
+                        -32000,
+                        64,
+                        64,
+                        owner,
+                        None,
+                        None,
+                        None,
+                    )
+                    .unwrap()
+                })
+            }
+            fn topmost(&self) -> bool {
+                unsafe { GetWindowLongPtrW(self.0, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST.0 != 0 }
+            }
+            fn bounds(&self) -> (i32, i32, i32, i32) {
+                let mut rect = RECT::default();
+                unsafe { GetWindowRect(self.0, &mut rect).unwrap() };
+                (rect.left, rect.top, rect.right, rect.bottom)
+            }
+        }
+        impl Drop for TestWindow {
+            fn drop(&mut self) {
+                unsafe {
+                    let _ = DestroyWindow(self.0);
+                }
+            }
+        }
+
+        #[test]
+        fn repairs_native_demotion_without_geometry_visibility_or_focus_changes() {
+            let host = TestWindow::new(None);
+            let avatar = TestWindow::new(Some(host.0));
+            let foreground = unsafe { GetForegroundWindow() };
+            let bounds = (host.bounds(), avatar.bounds());
+            assert!(maintain_native_z_order(host.0, avatar.0, true, false).unwrap());
+            unsafe {
+                SetWindowPos(
+                    avatar.0,
+                    Some(HWND_NOTOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+                )
+                .unwrap();
+            }
+            assert!(!avatar.topmost());
+            assert!(maintain_native_z_order(host.0, avatar.0, true, false).unwrap());
+            assert!(host.topmost() && avatar.topmost());
+            assert!(!maintain_native_z_order(host.0, avatar.0, true, false).unwrap());
+            assert_eq!((host.bounds(), avatar.bounds()), bounds);
+            assert_eq!(unsafe { GetForegroundWindow() }, foreground);
+            assert!(!unsafe { IsWindowVisible(host.0) }.as_bool());
+            assert!(!unsafe { IsWindowVisible(avatar.0) }.as_bool());
+        }
+
+        #[test]
+        fn app_switch_restores_order_above_another_topmost_window() {
+            let host = TestWindow::new(None);
+            let avatar = TestWindow::new(Some(host.0));
+            let other = TestWindow::new(None);
+            maintain_native_z_order(host.0, avatar.0, true, false).unwrap();
+            unsafe {
+                SetWindowPos(
+                    other.0,
+                    Some(HWND_TOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+                )
+                .unwrap();
+            }
+            assert!(host.topmost() && avatar.topmost());
+            assert!(maintain_native_z_order(host.0, avatar.0, true, true).unwrap());
+            // EnumWindows follows native Z-order, including these hidden fixtures.
+            let mut next = unsafe { GetWindow(avatar.0, GW_HWNDNEXT) }.ok();
+            while next.is_some_and(|window| window != other.0) {
+                next = unsafe { GetWindow(next.unwrap(), GW_HWNDNEXT) }.ok();
+            }
+            assert_eq!(next, Some(other.0));
+        }
+
+        #[test]
+        fn disabled_preference_demotes_both_windows_and_does_not_raise_on_app_switch() {
+            let host = TestWindow::new(None);
+            let avatar = TestWindow::new(Some(host.0));
+            maintain_native_z_order(host.0, avatar.0, true, false).unwrap();
+            assert!(maintain_native_z_order(host.0, avatar.0, false, false).unwrap());
+            assert!(!host.topmost() && !avatar.topmost());
+            assert!(!maintain_native_z_order(host.0, avatar.0, false, true).unwrap());
+        }
+    }
+
     fn display() -> Monitor {
         Monitor {
             id: "left".into(),
