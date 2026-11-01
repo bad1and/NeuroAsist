@@ -7,7 +7,7 @@ const api = vi.hoisted(() => ({ getCharacterState: vi.fn(), getCharacterStateEve
 vi.mock("./api", () => api);
 import { StatePage } from "./state";
 import { eventEmotion, groupMoodCauses, relationshipLevel, stateEventLabel, timelineEmotion } from "./state-presentation";
-import { timelineScrollFade } from "./state-timeline-scroll";
+import { scrollEdgeFade } from "./components/useScrollEdgeFade";
 
 function mockCauses(causes: Array<{ label: string; status: string }>) {
   api.getCharacterState.mockResolvedValue({ mood: { primary_emotion: "playfulness", expression_strength: "moderate", secondary_emotions: [] }, relationship: { familiarity_label: "начальное", trust_label: "умеренный", current_dynamic: "спокойная" }, causes, incognito: false, updated_at: "2026-01-01T00:00:00Z" });
@@ -26,14 +26,14 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe("StatePage", () => {
   it("fades both scroll edges without hiding the beginning, end, or short content", () => {
-    expect(timelineScrollFade(0, 400, 1200)).toEqual({ top: 0, bottom: 72 });
-    expect(timelineScrollFade(200, 400, 1200)).toEqual({ top: 48, bottom: 72 });
-    expect(timelineScrollFade(780, 400, 1200)).toEqual({ top: 48, bottom: 20 });
-    expect(timelineScrollFade(900, 400, 1200)).toEqual({ top: 48, bottom: 0 });
-    expect(timelineScrollFade(-20, 400, 1200)).toEqual({ top: 0, bottom: 72 });
-    expect(timelineScrollFade(0, 400, 200)).toEqual({ top: 0, bottom: 0 });
-    expect(timelineScrollFade(0, 0, 1200)).toEqual({ top: 0, bottom: 0 });
-    const small = timelineScrollFade(100, 60, 400);
+    expect(scrollEdgeFade(0, 400, 1200)).toEqual({ top: 0, bottom: 64 });
+    expect(scrollEdgeFade(200, 400, 1200)).toEqual({ top: 48, bottom: 64 });
+    expect(scrollEdgeFade(780, 400, 1200)).toEqual({ top: 48, bottom: 20 });
+    expect(scrollEdgeFade(900, 400, 1200)).toEqual({ top: 48, bottom: 0 });
+    expect(scrollEdgeFade(-20, 400, 1200)).toEqual({ top: 0, bottom: 64 });
+    expect(scrollEdgeFade(0, 400, 200)).toEqual({ top: 0, bottom: 0 });
+    expect(scrollEdgeFade(0, 0, 1200)).toEqual({ top: 0, bottom: 0 });
+    const small = scrollEdgeFade(100, 60, 400);
     expect(small.top + small.bottom).toBeLessThan(60);
   });
 

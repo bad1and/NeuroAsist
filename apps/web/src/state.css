@@ -53,8 +53,6 @@
 .state-dashboard .state-timeline-header { position: static; flex-shrink: 0; padding: 2px 8px 16px 14px; }
 .state-dashboard .state-timeline-scroll-shell { flex: 1 1 auto; min-height: 0; overflow: hidden; }
 .state-dashboard .state-timeline-scroll {
-  --timeline-fade-top: 0px;
-  --timeline-fade-bottom: 0px;
   height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
@@ -63,15 +61,6 @@
   scroll-padding-block: 48px 72px;
   scrollbar-width: thin;
   scrollbar-color: var(--color-rule) transparent;
-  mask-image: linear-gradient(to bottom,
-    transparent 0,
-    rgb(0 0 0 / .12) calc(var(--timeline-fade-top) * .25),
-    rgb(0 0 0 / .55) calc(var(--timeline-fade-top) * .6),
-    #000 var(--timeline-fade-top),
-    #000 calc(100% - var(--timeline-fade-bottom)),
-    rgb(0 0 0 / .55) calc(100% - var(--timeline-fade-bottom) * .6),
-    rgb(0 0 0 / .12) calc(100% - var(--timeline-fade-bottom) * .25),
-    transparent 100%);
 }
 .state-dashboard .state-timeline-scroll:focus-visible { outline: 2px solid var(--color-focus); outline-offset: -3px; }
 

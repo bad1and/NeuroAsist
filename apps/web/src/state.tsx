@@ -26,7 +26,7 @@ import {
   type CustomIconComponent,
 } from "./CustomIcons";
 import { eventEmotion, groupMoodCauses, relationshipLevel, relationshipValue, stateEventKind, stateEventLabel, timelineEmotion } from "./state-presentation";
-import { useTimelineScrollFade } from "./state-timeline-scroll";
+import { useScrollEdgeFade } from "./components/useScrollEdgeFade";
 import "./state.css";
 import { AppDialog } from "./components/AppDialog";
 import { notify } from "./notifications";
@@ -108,8 +108,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
 
   const [filterOnlyImportant, setFilterOnlyImportant] = useState(true);
   const timelineRef = useRef<HTMLDivElement | null>(null);
-  const timelineContentRef = useRef<HTMLDivElement | null>(null);
-  useTimelineScrollFade(timelineRef, timelineContentRef);
+  useScrollEdgeFade(timelineRef);
 
   const timelineItems = useMemo(() => {
     const rawItems: Array<
@@ -343,7 +342,7 @@ export function StatePage({ events: liveEvents = [] }: { events?: Array<{ type: 
 
           <div className="state-timeline-scroll-shell">
           <div className="state-timeline-scroll" ref={timelineRef} tabIndex={0} aria-label="Лента событий">
-          <div className="state-timeline" ref={timelineContentRef}>
+          <div className="state-timeline">
             {timelineItems.length === 0 ? (
               <div className="empty-state">
                 <IconInterfaceCalendarMark size={28} />

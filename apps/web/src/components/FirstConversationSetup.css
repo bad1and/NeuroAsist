@@ -37,7 +37,7 @@
 .setup-stage:not([aria-current="step"]):hover .setup-stage-short { color: var(--color-text); }
 .first-conversation-dialog .first-conversation-setup { display: flex; flex: 1; width: 100%; max-width: 100%; min-height: 0; max-height: none; padding: 0; overflow: hidden; }
 .first-conversation-dialog .setup-workspace { display: flex; flex-direction: column; width: 100%; min-width: 0; min-height: 0; }
-.setup-page { flex: 1; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; outline-offset: -5px; mask-image: linear-gradient(to bottom, transparent, #000 var(--scroll-fade-top, 0px), #000 calc(100% - var(--scroll-fade-bottom, 0px)), transparent); }
+.setup-page { flex: 1; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; outline-offset: -5px; }
 .setup-page-inner { width: 100%; max-width: 1240px; margin-inline: auto; padding: clamp(32px, 5vh, 56px) clamp(28px, 4vw, 56px) 32px; }
 .setup-page-heading { margin-bottom: 32px; }
 .setup-eyebrow { color: var(--color-text-muted); font: 450 11px/1.6 var(--font-ui); font-variant-numeric: tabular-nums; }

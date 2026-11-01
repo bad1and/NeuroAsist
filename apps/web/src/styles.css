@@ -12358,6 +12358,12 @@ button.journal-header-tokens:hover {
 .model-download-actions > .model-download-cancel { grid-column: 1 / -1; }
 
 /* Keep section navigation reachable while a long settings page scrolls. */
+.workspace.workspace-settings,
+.workspace.workspace-journal {
+  /* Match pages that fade at the window edge; reclaim the outer bottom gap. */
+  padding-bottom: 4px;
+}
+
 .workspace.workspace-settings {
   display: flex;
   overflow: hidden;
@@ -12398,21 +12404,6 @@ button.journal-header-tokens:hover {
   flex-shrink: 0;
 }
 
-.settings-navigation-scroll,
-.workspace-settings .settings-panel > .settings-content {
-  --scroll-fade-top: 0px;
-  --scroll-fade-bottom: 0px;
-  mask-image: linear-gradient(to bottom,
-    transparent 0,
-    rgb(0 0 0 / .12) calc(var(--scroll-fade-top) * .25),
-    rgb(0 0 0 / .55) calc(var(--scroll-fade-top) * .6),
-    #000 var(--scroll-fade-top),
-    #000 calc(100% - var(--scroll-fade-bottom)),
-    rgb(0 0 0 / .55) calc(100% - var(--scroll-fade-bottom) * .6),
-    rgb(0 0 0 / .12) calc(100% - var(--scroll-fade-bottom) * .25),
-    transparent 100%);
-}
-
 .workspace-settings .settings-panel > .settings-content {
   grid-row: 1;
   min-height: 0;
@@ -12422,7 +12413,7 @@ button.journal-header-tokens:hover {
   overscroll-behavior: contain;
   scroll-padding-block: 40px;
   /* Leave room for the existing card shadows inside the scroll viewport. */
-  padding: 12px 20px 32px !important;
+  padding: 12px 20px 16px !important;
   border-radius: 0 !important;
 }
 

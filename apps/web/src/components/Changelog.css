@@ -17,7 +17,7 @@
 .changelog-version-list .changelog-version-button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; flex-shrink: 0; min-height: 40px; padding: 10px 17px; border-radius: 17px; corner-shape: var(--corner-shape); font: 550 12px/1.4 var(--font-ui); font-variant-numeric: tabular-nums; }
 .changelog-version-button > svg { opacity: .75; }
 .changelog-mobile-select { display: none; }
-.changelog-article { flex: 1; min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; outline-offset: -5px; mask-image: linear-gradient(to bottom, transparent, #000 var(--scroll-fade-top, 0px), #000 calc(100% - var(--scroll-fade-bottom, 0px)), transparent); }
+.changelog-article { flex: 1; min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; outline-offset: -5px; }
 .changelog-article-inner { max-width: 800px; margin: 0 auto; padding: 14px 32px 28px; }
 .changelog-release-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; color: var(--color-text-muted); font: 400 11px/1.6 var(--font-ui); font-variant-numeric: tabular-nums; }
 .changelog-version { color: var(--color-text-soft); }

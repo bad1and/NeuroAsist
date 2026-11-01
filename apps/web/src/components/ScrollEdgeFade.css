@@ -1,0 +1,27 @@
+/* Smoothstep opacity has flat tangents at both ends, avoiding a visible seam.
+   The mask stays inside its viewport and never covers neighbouring controls. */
+[data-scroll-edge-fade] {
+  mask-image: linear-gradient(to bottom,
+    transparent 0,
+    rgb(0 0 0 / .0112) calc(var(--scroll-fade-top, 0px) * .0625),
+    rgb(0 0 0 / .043) calc(var(--scroll-fade-top, 0px) * .125),
+    rgb(0 0 0 / .1563) calc(var(--scroll-fade-top, 0px) * .25),
+    rgb(0 0 0 / .3164) calc(var(--scroll-fade-top, 0px) * .375),
+    rgb(0 0 0 / .5) calc(var(--scroll-fade-top, 0px) * .5),
+    rgb(0 0 0 / .6836) calc(var(--scroll-fade-top, 0px) * .625),
+    rgb(0 0 0 / .8438) calc(var(--scroll-fade-top, 0px) * .75),
+    rgb(0 0 0 / .957) calc(var(--scroll-fade-top, 0px) * .875),
+    rgb(0 0 0 / .9888) calc(var(--scroll-fade-top, 0px) * .9375),
+    #000 var(--scroll-fade-top, 0px),
+    #000 calc(100% - var(--scroll-fade-bottom, 0px)),
+    rgb(0 0 0 / .9888) calc(100% - var(--scroll-fade-bottom, 0px) * .9375),
+    rgb(0 0 0 / .957) calc(100% - var(--scroll-fade-bottom, 0px) * .875),
+    rgb(0 0 0 / .8438) calc(100% - var(--scroll-fade-bottom, 0px) * .75),
+    rgb(0 0 0 / .6836) calc(100% - var(--scroll-fade-bottom, 0px) * .625),
+    rgb(0 0 0 / .5) calc(100% - var(--scroll-fade-bottom, 0px) * .5),
+    rgb(0 0 0 / .3164) calc(100% - var(--scroll-fade-bottom, 0px) * .375),
+    rgb(0 0 0 / .1563) calc(100% - var(--scroll-fade-bottom, 0px) * .25),
+    rgb(0 0 0 / .043) calc(100% - var(--scroll-fade-bottom, 0px) * .125),
+    rgb(0 0 0 / .0112) calc(100% - var(--scroll-fade-bottom, 0px) * .0625),
+    transparent 100%);
+}

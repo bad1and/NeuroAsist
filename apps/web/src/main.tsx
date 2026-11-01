@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 
 import App from "./App";
 import { MaterialButtonContours } from "./components/MaterialButtonContours";
+import { ScrollEdgeFades } from "./components/ScrollEdgeFades";
 import "./tokens.css";
 import "./styles.css";
 import "./components/StartupScreen.css";
@@ -17,6 +18,7 @@ import "./settings/settings.css";
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <MaterialButtonContours />
+    <ScrollEdgeFades />
     <App />
   </React.StrictMode>,
 );
