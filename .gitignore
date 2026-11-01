@@ -229,6 +229,7 @@ apps/avatar-unity/.vsconfig
 
 # Promotional materials and renders
 promo/
+/promo-materials/
 
 from iris/
 output/
