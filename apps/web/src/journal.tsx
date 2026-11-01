@@ -2,7 +2,8 @@ import { requestJson } from "./api";
 import type { SearchFocus } from "./search-navigation";
 import { MemoryContextDetails, DocumentSources } from "./components/MemoryContextDetails";
 import { LoadingRing } from "./components/LoadingRing";
-import { MaterialButton } from "./components/MaterialButton";
+import { ButtonMaterialLayers, MaterialButton } from "./components/MaterialButton";
+import { buttonSeed, materialStyle } from "./components/buttonMaterial";
 import { DisclosureTrigger } from "./components/Disclosure";
 import {
   IconInterfaceTimeStopWatchCircle,
@@ -12,7 +13,6 @@ import {
   IconMailChatBubbleTextSquare,
   IconInterfaceCursorArrow2,
   IconInterfaceCalendarMark,
-  IconComputerRobotCyborg1,
   IconMailSmileyHappyFace,
   IconInterfaceFaceNeutral,
   IconInterfaceFaceSad,
@@ -196,6 +196,16 @@ function formatCost(usd: number): string {
   return `$${usd.toFixed(4)}`;
 }
 
+function JournalMessageHeader({ message }: { message: TimelineMessage }) {
+  const roleLabel = message.role === "user" ? "Вы" : message.role === "assistant" ? "Iris" : "Событие";
+  const date = message.created_at ? new Date(message.created_at) : null;
+
+  return <header className="journal-message-heading">
+    <span className="message-role">{roleLabel}</span>
+    {message.created_at && <time className="message-time" dateTime={message.created_at} title={date && !Number.isNaN(date.getTime()) ? date.toLocaleString(interfaceIntlLocale()) : undefined} data-i18n-skip>{formatTime(message.created_at)}</time>}
+  </header>;
+}
+
 function JournalMessageFooter({ message, expanded, showToggle, detailsId, onToggle, onOpenTokens }: {
   message: TimelineMessage;
   expanded: boolean;
@@ -211,14 +221,12 @@ function JournalMessageFooter({ message, expanded, showToggle, detailsId, onTogg
   const emotion = message.metadata?.companion?.emotion;
   const memoryCount = message.metadata?.memory_updates?.length ?? 0;
   const hasDetails = Boolean(tokens || message.metadata?.companion || message.metadata?.web_search || message.metadata?.news || memoryCount);
-  const date = message.created_at ? new Date(message.created_at) : null;
 
   return <footer className="journal-message-footer">
-    <div className="journal-message-meta">
-      {message.created_at && <time className="message-time" dateTime={message.created_at} title={date && !Number.isNaN(date.getTime()) ? date.toLocaleString(interfaceIntlLocale()) : undefined} data-i18n-skip>{formatTime(message.created_at)}</time>}
+    {(emotion || memoryCount > 0) && <div className="journal-message-meta">
       {emotion && <span className="journal-emotion-micro-pill" title={`Эмоция: ${EMOTION_META[emotion]?.label || emotion}`}><Sparkles size={13} aria-hidden="true" />{EMOTION_META[emotion]?.label || emotion}</span>}
       {memoryCount > 0 && <span className="journal-memory-micro-pill"><Brain size={13} aria-hidden="true" /><span>Память: {memoryCount}</span></span>}
-    </div>
+    </div>}
     {(hasTokens || (showToggle && hasDetails)) && <div className="journal-message-actions">
       {hasTokens && tokens && <MaterialButton materialKey={`journal.tokens.${message.id}`} type="button" className="secondary journal-message-action journal-token-button" appearance="lens"
         aria-label={tokenLabel} title={`${tokenLabel}: ${tokenCount.toLocaleString(interfaceIntlLocale())}`} onClick={() => onOpenTokens(tokens)}>
@@ -804,25 +812,19 @@ export function JournalPage({
                 results.map((message) => {
                   const isUser = message.role === "user";
                   const isAssistant = message.role === "assistant";
-                  const roleLabel = isUser ? "Вы" : isAssistant ? "Iris" : "Событие";
                   const roleClass = isUser ? "user" : isAssistant ? "assistant" : "system";
                   const isExpanded = detailMode === "detailed" || expandedMessageIds.has(message.id);
 
 
                   return (
                     <article
-                      className={`journal-message ${roleClass}${isExpanded ? " is-expanded" : ""}`}
+                      className={`journal-message ${roleClass}${isAssistant ? " dp-lens" : ""}${isExpanded ? " is-expanded" : ""}`}
+                      style={isAssistant ? materialStyle(buttonSeed(`journal.message.${message.id}`), .35) : undefined}
                       key={message.id}
                       id={`history-message-${message.id}`}
                     >
-                      <div className="message-role">
-                        {isAssistant && (
-                          <span className="message-role-avatar assistant" aria-hidden="true">
-                            <IconComputerRobotCyborg1 size={11} />
-                          </span>
-                        )}
-                        <span>{roleLabel}</span>
-                      </div>
+                      {isAssistant && <ButtonMaterialLayers />}
+                      <JournalMessageHeader message={message} />
                       <p data-i18n-skip>{message.content || message.corrected_content || message.original_content || ""}</p>
                       {developerMode && memoryContextCount(message.metadata?.context_memories) > 0 && <MemoryContextDetails messageId={message.id} count={memoryContextCount(message.metadata?.context_memories)} sessionId={currentSessionId} />}
                       <DocumentSources value={message.metadata?.document_context} />
@@ -857,7 +859,7 @@ export function JournalPage({
           )}
         </aside>
 
-        <main className="journal-content settings-content memory-content" ref={contentRef} aria-label="Сообщения выбранного диалога">
+        <main className="journal-content" ref={contentRef} aria-label="Сообщения выбранного диалога">
           {selectedEpisode ? (
             <>
               <header className="journal-content-header">
@@ -964,7 +966,6 @@ export function JournalPage({
                     {messages.map((message, idx) => {
                       const isUser = message.role === "user";
                       const isAssistant = message.role === "assistant";
-                      const roleLabel = isUser ? "Вы" : isAssistant ? "Iris" : "Событие";
                       const roleClass = isUser ? "user" : isAssistant ? "assistant" : "system";
                       const prevDate = idx > 0 ? messages[idx - 1].created_at : null;
                       const showDateSep = shouldShowDateSeparator(prevDate, message.created_at);
@@ -980,16 +981,11 @@ export function JournalPage({
                           )}
                           <article
                             id={`history-message-${message.id}`}
-                            className={`journal-message ${roleClass}${isExpanded ? " is-expanded" : ""}`}
+                            className={`journal-message ${roleClass}${isAssistant ? " dp-lens" : ""}${isExpanded ? " is-expanded" : ""}`}
+                            style={isAssistant ? materialStyle(buttonSeed(`journal.message.${message.id}`), .35) : undefined}
                           >
-                            <div className="message-role">
-                              {isAssistant && (
-                                <span className="message-role-avatar assistant" aria-hidden="true">
-                                  <IconComputerRobotCyborg1 size={11} />
-                                </span>
-                              )}
-                              <span>{roleLabel}</span>
-                            </div>
+                            {isAssistant && <ButtonMaterialLayers />}
+                            <JournalMessageHeader message={message} />
                             <p data-i18n-skip>{message.content || message.corrected_content || message.original_content || ""}</p>
                             {developerMode && memoryContextCount(message.metadata?.context_memories) > 0 && <MemoryContextDetails messageId={message.id} count={memoryContextCount(message.metadata?.context_memories)} sessionId={currentSessionId} />}
                             <DocumentSources value={message.metadata?.document_context} />
