@@ -15,9 +15,11 @@
   position: relative;
   z-index: 1;
   display: grid;
-  min-height: 100dvh;
-  padding: 0 24px;
-  place-content: center;
+  height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 64px 24px 100px;
+  align-content: safe center;
   justify-items: center;
   text-align: center;
 }
@@ -54,24 +56,11 @@
 }
 .startup-flora-top-right picture { opacity: 0.32; transform: rotate(180deg); }
 .startup-flora-top-right img { transform-origin: 10% 92%; }
-.startup-copy { max-width: 340px; min-height: 66px; }
+.startup-copy { width: min(380px, 100%); min-height: 66px; }
 .startup-copy h1 { margin: 0; font-size: 27px; font-weight: 600; letter-spacing: -0.035em; }
-.startup-copy p { margin: 10px 0 0; color: var(--color-text-soft); font-size: 13px; line-height: 1.5; }
+.startup-copy p { margin: 10px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-soft); font-size: 12px; line-height: 1.5; }
+.is-failed .startup-copy p, .is-crashed .startup-copy p { white-space: normal; overflow-wrap: anywhere; }
 .startup-content > .primary-button { margin-block-start: 28px; }
-.startup-stages {
-  display: flex;
-  gap: 24px;
-  padding: 0;
-  margin: 20px 0 0;
-  list-style: none;
-  color: var(--color-text-muted);
-  font-size: 12px;
-  line-height: 1.5;
-}
-.startup-stages li { display: grid; gap: 7px; justify-items: center; }
-.startup-stage-index { font-size: 10px; letter-spacing: 0.08em; }
-.startup-stages li[aria-current="step"] { color: var(--color-text); }
-.startup-stages li[data-state="formed"] .startup-stage-index { color: var(--color-text-soft); }
 .startup-game { position: absolute; z-index: 2; left: 50%; bottom: 28px; transform: translateX(-50%); }
 .startup-game-open { padding: 10px 20px; min-height: 36px; border: 0; border-radius: var(--radius-control); corner-shape: var(--corner-shape); background: transparent; box-shadow: none; color: var(--color-text-muted); font: inherit; font-size: 12px; cursor: pointer; }
 .startup-game-open:hover { color: var(--color-text-soft); }
@@ -79,7 +68,6 @@
   .startup-mark { width: 230px; margin-bottom: 10px; }
   .startup-copy h1 { font-size: 23px; }
   .startup-copy { min-height: 58px; }
-  .startup-stages { margin-top: 10px; }
   .startup-game { bottom: 20px; }
 }
 @media (max-height: 620px) {
@@ -89,7 +77,6 @@
   .startup-game .startup-snake { width: min(248px, max(100px, calc(77dvh - 225px)), calc(100vw - 48px)); }
 }
 @media (max-width: 520px) {
-  .startup-stages { gap: 16px; font-size: 11px; }
   .startup-content { padding-inline: 20px; }
   .startup-flora { width: min(44vw, 260px); }
   .startup-flora picture { opacity: 0.28; }

@@ -2,7 +2,8 @@ import { lazy, Suspense, useEffect, useRef, useState, type RefObject } from "rea
 import { MaterialButton } from "./MaterialButton";
 import { IconInterfaceSpirals } from "../CustomIcons";
 import type { CoreStatus } from "../desktop";
-import type { StartupStage } from "../startup";
+import { getStartupProgress, type StartupProgressState, type StartupStage } from "../startup";
+import { StartupProgress } from "./StartupProgress";
 import { IrisPetals } from "./IrisPetals";
 import petals from "../brand/iris-petals.json";
 import { shapePetal } from "../brand/irisPetalGeometry";
@@ -21,7 +22,6 @@ const floraAssetsPromise = Promise.all([
   import("../../../../assets/startup-flora-top-right.webp"),
 ]);
 
-const STAGES = ["Запуск Iris", "Подключение модели", "Запуск сервисов"];
 const STATUS_COPY: Record<CoreStatus, { title: string; detail: string }> = {
   starting: { title: "Запускаю Iris", detail: "Подключаю сервисы Iris" },
   ready: { title: "Рада тебя видеть", detail: "Всё готово к разговору" },
@@ -31,13 +31,14 @@ const STATUS_COPY: Record<CoreStatus, { title: string; detail: string }> = {
 };
 
 export function StartupScreen({ status, stage = status === "ready" || status === "closing" ? 3 : 1,
-  retrying = false, subdetail, customTitle, onRetry, onRestoreBackup, onReveal, onComplete, revealTarget, onClose,
+  retrying = false, subdetail, customTitle, progress, onRetry, onRestoreBackup, onReveal, onComplete, revealTarget, onClose,
 }: {
   status: CoreStatus;
   stage?: StartupStage;
   retrying?: boolean;
   subdetail?: string;
   customTitle?: string;
+  progress?: StartupProgressState;
   onRetry?: () => void;
   onRestoreBackup?: () => void;
   onReveal?: () => void;
@@ -61,6 +62,7 @@ export function StartupScreen({ status, stage = status === "ready" || status ===
   // Keep the game available through the final logo transition. The screen
   // itself unmounts when the app is ready to appear.
   const gameAvailable = !failed && status !== "closing";
+  const startupProgress = progress ?? getStartupProgress(status, null, status === "ready" && stage < 3, null, status === "ready" && stage === 3);
 
   useEffect(() => {
     if (!gameAvailable) setGameOpen(false);
@@ -279,7 +281,7 @@ export function StartupScreen({ status, stage = status === "ready" || status ===
       onComplete: () => { (copy as HTMLElement).style.filter = ""; },
     });
     return () => { animation.cancel(); };
-  }, [status, stage, subdetail, customTitle, canFinish, revealingInterface]);
+  }, [status, customTitle, canFinish, revealingInterface]);
 
   const copy = STATUS_COPY[status];
   const waiting = !failed && status !== "closing" && !canFinish;
@@ -299,19 +301,9 @@ export function StartupScreen({ status, stage = status === "ready" || status ===
         <div className="startup-mark"><IrisPetals unfolding withWordmark withSilhouettes={!failed} idlePetals={failed || canFinish ? 0 : revealed} settling={canFinish} /></div>
         <div className="startup-copy" role="status" aria-live="polite" aria-atomic="true">
           <h1>{customTitle || (waiting ? "Запускаю Iris" : copy.title)}</h1>
-          <p>{subdetail || (waiting ? STAGES[stage - 1] : copy.detail)}</p>
+          <p>{subdetail || (waiting ? startupProgress.detail : copy.detail)}</p>
         </div>
-        {!failed && status !== "closing" && (
-          <ol className="startup-stages" aria-label="Этапы запуска">
-            {STAGES.map((label, index) => (
-              <li key={label} data-state={revealed > index ? "formed" : "waiting"}
-                aria-current={waiting && stage === index + 1 ? "step" : undefined}>
-                <span className="startup-stage-index" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
-                {label}
-              </li>
-            ))}
-          </ol>
-        )}
+        {status !== "closing" && <StartupProgress progress={startupProgress} />}
         {failed && (<>
           <MaterialButton materialKey="StartupScreen.retry" className="primary-button" type="button" onClick={onRetry} disabled={retrying}>
             <IconInterfaceSpirals size={17} aria-hidden="true" />

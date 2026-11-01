@@ -21,6 +21,14 @@ function TranslationFixture({ locale }: { locale: InterfaceLocale }) {
 }
 
 describe("interface translations", () => {
+  it("localizes startup progress descriptions for assistive technology", () => {
+    function ProgressFixture() {
+      useInterfaceLocale("en");
+      return createElement("div", { role: "progressbar", "aria-label": "Подготовка Iris", "aria-valuetext": "Подготавливаю голос Iris" });
+    }
+    render(createElement(ProgressFixture));
+    expect(screen.getByRole("progressbar", { name: "Preparing Iris" })).toHaveAttribute("aria-valuetext", "Preparing Iris's voice");
+  });
   it("localizes portals beside the real root, including newly opened content, without touching user text", async () => {
     const root = document.createElement("div");
     root.id = "root"; document.body.append(root);

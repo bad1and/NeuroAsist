@@ -1077,7 +1077,7 @@ function isSkipped(node: Node): boolean {
   return Boolean(element?.closest("[data-i18n-skip], script, style, pre, code"));
 }
 
-const LOCALIZED_ATTRIBUTES = ["aria-label", "aria-roledescription", "title", "placeholder", "alt"];
+const LOCALIZED_ATTRIBUTES = ["aria-label", "aria-roledescription", "aria-valuetext", "title", "placeholder", "alt"];
 
 function localizeTextNode(node: Text, locale: InterfaceLocale): void {
   if (isSkipped(node)) return;

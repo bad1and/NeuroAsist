@@ -56,7 +56,7 @@ import { DocumentAttachment } from "./components/DocumentAttachment";
 import { configureAvatarPlacement, getAvatarHostStatus, getDesktopRuntime, initialCoreStatus, isDesktopApp, listenForAppCloseRequest, listenForAvatarStatus, listenForAvatarVisibility, listenForCoreStatus, restartDesktopCore, importDesktopBackup, restoreDesktopBackup, restartAvatar, setDesktopInterfaceLocale, shouldWaitForInAppAvatar, startGracefulShutdown, type CoreStatus, type AvatarHostStatus, openQaStudioWindow, closeQaStudioWindow, isQaStudioWindowOpen, listenForQaStudioState } from "./desktop";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { StartupScreen } from "./components/StartupScreen";
-import { getStartupStage } from "./startup";
+import { getStartupProgress, getStartupStage } from "./startup";
 import { useIndicatorAnimations } from "./animations/indicators";
 import { WindowChrome } from "./components/WindowChrome";
 
@@ -378,21 +378,24 @@ function MainApp() {
   const startupStage = getStartupStage(coreStatus, readiness, isWaitingForAvatar, readinessUnavailable);
   const startupReady = coreStatus === "ready" && startupStage === 3;
 
-  const startupSubdetail = useMemo(() => {
-    if (coreStatus === "failed" || coreStatus === "crashed") return undefined;
-    if (coreStatus !== "ready") {
-      return "Подключаю сервисы Iris";
-    }
-    if (startupStage === 1) return "Подготавливаю модель диалога";
-    if (startupStage === 2 && isWaitingForAvatar) {
-      return avatarHostStatus?.phase === "warming"
-        ? "Подготавливаю первый кадр аватара"
-        : "Запускаю 3D-аватар";
-    }
-    if (startupStage === 2) return "Подготавливаю голосовые сервисы";
-    if (readiness?.phase === "degraded") return "Iris готова · часть сервисов недоступна";
-    return "Всё готово к разговору";
-  }, [avatarHostStatus?.phase, coreStatus, isWaitingForAvatar, readiness?.phase, startupStage]);
+  const startupProgress = useMemo(() => getStartupProgress(coreStatus, readiness, isWaitingForAvatar,
+    avatarHostStatus, readinessUnavailable), [coreStatus, readiness, isWaitingForAvatar, avatarHostStatus, readinessUnavailable]);
+  const startupNoticeAttempt = useRef(-1);
+  useEffect(() => {
+    if (!desktopManaged || showStartup || !startupReady || startupNoticeAttempt.current === startupAttempt) return;
+    startupNoticeAttempt.current = startupAttempt;
+    const missingModels = readiness?.models?.some(model => !model.installed);
+    // Missing model downloads already have their own actionable notification.
+    const issues = startupProgress.components.filter(component => component.state === "failed"
+      && !(missingModels && ["stt", "tts"].includes(component.id)));
+    if (issues.length) notify.warning("Iris запущена с ограничениями", "Некоторые функции пока недоступны. Подробности — в диагностике.", {
+      id: "startup.readiness", duration: "persistent", details: issues.map(component => component.label).join(", "),
+      actions: [{ label: "Открыть диагностику", onClick: () => {
+        setSettingsNavigationRequest(current => ({ section: "system-overview", id: (current?.id ?? 0) + 1 }));
+        switchView("settings"); notify.dismiss("startup.readiness");
+      } }],
+    });
+  }, [desktopManaged, showStartup, startupReady, startupAttempt, readiness, startupProgress]);
 
   useEffect(() => {
     let stop: (() => void) | undefined;
@@ -878,7 +881,7 @@ function MainApp() {
     )}
     {showStartup && (
       <StartupScreen key={startupAttempt} status={startupReady ? "ready" : coreStatus}
-        stage={startupStage} subdetail={recoveryError || coreError || startupSubdetail} retrying={retryingCore || recoveryBusy}
+        stage={startupStage} progress={startupProgress} subdetail={recoveryError || coreError || startupProgress.detail} retrying={retryingCore || recoveryBusy}
         onRestoreBackup={desktopManaged ? () => { void (async () => {
           setRecoveryBusy(true); setRecoveryError(null);
           try { const backup = await importDesktopBackup(); if (backup) setRecoveryBackup(backup.name); }
